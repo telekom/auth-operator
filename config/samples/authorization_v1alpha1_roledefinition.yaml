@@ -1,0 +1,67 @@
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  labels:
+    app.kubernetes.io/name: t-caas-rbac-generator
+    app.kubernetes.io/managed-by: kustomize
+  name: rd-testing-cluster-reader
+spec:
+  targetRole: ClusterRole
+  targetName: t-caas-cluster-reader
+  scopeNamespaced: false
+  restrictedApis:
+    - name: velero.io
+      versions:
+        - groupVersion: velero.io/v1
+          version: v1
+        - groupVersion: velero.io/v2alpha1
+          version: v2alpha1
+  restrictedResources:
+    - name: networkpolicies
+      singularName: networkpolicy
+      namespaced: true
+      group: crd.projectcalico.org
+      kind: NetworkPolicy
+      verbs:
+        - all
+  restrictedVerbs:
+  - update
+  - create
+---
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  labels:
+    app.kubernetes.io/name: t-caas-rbac-generator
+    app.kubernetes.io/managed-by: kustomize
+  name: rd-testing-namespaced-reader
+spec:
+  targetRole: Role
+  targetNamespace: default
+  targetName: t-caas-namespaced-reader-role
+  scopeNamespaced: true 
+  restrictedApis:
+    - name: velero.io
+      versions:
+        - groupVersion: velero.io/v1
+          version: v1
+        - groupVersion: velero.io/v2alpha1
+          version: v2alpha1
+  restrictedResources:
+    - name: networkpolicies
+      singularName: networkpolicy
+      namespaced: true
+      group: crd.projectcalico.org
+      kind: NetworkPolicy
+      verbs:
+        - all
+    - name: pods
+      singularName: pod 
+      namespaced: true 
+      group: ""
+      kind: Pod 
+      verbs:
+        - all
+  restrictedVerbs:
+  - get
+  - delete

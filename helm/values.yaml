@@ -1,0 +1,177 @@
+# Actual configuration data for authn-authz operator
+oidcGroupPrefix: "s_"             # Prefix for OIDC group (TDI constraint)
+matchDelimiter: "-"               # Will match all delimiters in OIDC Group name
+swapDelimiter: "_"                # Will swap out all matched delimiters from previous variable and insert these (TDI constraint)
+enforceAutomation: "false"        # Will force Production clusters to use automation for non-read operations
+thirdPartyComponents: "false"     # Will create 3rd party bindings for TDG setup (e.g. monitoring not deployed by them)
+
+cluster:
+  name: controller                # The cluster name as application name
+  tenant: touchstone              # The cluster tenant (app team, product group, etc.)
+  location: ic-hrzagt5            # The cluster cloud location / site 
+  environment: test               # The cluster environment - dev, test, ref, stage, prod
+  authBackend: tdi-idp-internal   # Authentication backend to use
+  owners: {}                      # Owner/s of OIDC groups
+#  - t628545
+#  - q831050
+  members: {}
+#  - name: t628545
+#    groupNames: 
+#    - namespaced-reader
+#    - cluster-reader
+#  - name: q831050
+#    groupNames:
+#    - namespaced-admin
+  thirdParties: {}           # All third parties that provide additional services to tenants
+#    monitoring:
+#      owners:
+#      - t628545
+#      - q831050 
+#      members:
+#      - name: t628545
+#        groupNames: 
+#        - namespaced-reader
+#        - cluster-reader
+#    security:
+#      owners:
+#      - t628545
+#      - q831050 
+#      members:
+#      - name: q831050
+#        groupNames: 
+#        - namespaced-reader
+#        - cluster-reader
+
+# Define the default image pull secret for this Deployment
+imagePullSecrets:
+  - name: mcicd-docker
+
+# Define the necessary authorizations this Deployment needs
+rbac:
+  create: true
+  rules:
+  - apiGroups:
+    - authorization.t-caas.telekom.com
+    resources:
+    - roledefinitions
+    verbs:
+    - create
+    - delete
+    - get
+    - list
+    - patch
+    - update
+    - watch
+  - apiGroups:
+    - authorization.t-caas.telekom.com
+    resources:
+    - roledefinitions/status
+    verbs:
+    - get
+    - patch
+    - update
+  - apiGroups:
+    - rbac.authorization.k8s.io
+    resources:
+    - clusterroles
+    - roles
+    verbs:
+    - escalate
+    - create
+    - delete
+    - get
+    - list
+    - patch
+    - update
+    - watch
+  - apiGroups:
+    - rbac.authorization.k8s.io
+    resources:
+    - clusterroles/status
+    verbs:
+    - get
+    - patch
+    - update
+  - apiGroups:
+    - authentication.t-caas.telekom.com
+    resources:
+    - authproviders
+    verbs:
+    - create
+    - delete
+    - get
+    - list
+    - patch
+    - update
+    - watch
+  - apiGroups:
+    - authentication.t-caas.telekom.com
+    resources:
+    - authproviders/finalizers
+    verbs:
+    - update
+  - apiGroups:
+    - authentication.t-caas.telekom.com
+    resources:
+    - authproviders/status
+    verbs:
+    - get
+    - patch
+    - update
+
+# Specifies whether a ServiceAccount should be created
+# If name is not set and create is true, a name is generated using the fullname template
+serviceAccount:
+  create: true
+  name:
+
+networkPolicy:
+  enabled: true
+
+# Expose the Prometheus metrics scraping endpoint
+prometheus:
+  enabled: true
+
+# Annotations in the Deployment and Pod template
+annotations:
+  {}
+
+# Docker image and tag to deploy.
+image:
+  registry: "artifactory.devops.telekom.de"
+  repository: "tdi-caas-docker-images-local"
+  name: "t-caas-rbac-generator"
+  tag: "0.1.0"
+imagePullPolicy: IfNotPresent
+
+# Control the CPU and memory resource limits and requests for rbac-binder container
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 512Mi
+
+# Add any necessary tolerations this DaemonSet needs to run
+tolerations:
+  - effect: NoSchedule
+    key: node-role.kubernetes.io/master
+  - effect: NoSchedule
+    key: node-role.kubernetes.io/control-plane
+
+# Select on which nodes this DaemonSet should run
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: node-role.kubernetes.io/control-plane
+              operator: Exists
+        - matchExpressions:
+            - key: node-role.kubernetes.io/master
+              operator: Exists
+
+# This workload has high priority as it control RBAC 
+# We must associate it with a high priority class 
+priorityClassName: caas-high-priority-workload

@@ -27,7 +27,7 @@ AuthProvider is the Schema for the authproviders API
 | --- | --- | --- | --- |
 | `apiVersion` _string_ | `authentication.t-caas.telekom.com/v1alpha1` | | |
 | `kind` _string_ | `AuthProvider` | | |
-| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.29/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.3/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
 | `spec` _[AuthProviderSpec](#authproviderspec)_ |  |  |  |
 | `status` _[AuthProviderStatus](#authproviderstatus)_ |  |  |  |
 
@@ -65,7 +65,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `status` _string_ |  |  |  |
-| `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.29/#condition-v1-meta) array_ | Conditions defines current service state of the Auth provider<br />All conditions should evaluate to true to signify successful reconciliation |  | Optional: {} <br /> |
+| `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.3/#condition-v1-meta) array_ | Conditions defines current service state of the Auth provider<br />All conditions should evaluate to true to signify successful reconciliation |  | Optional: {} <br /> |
 
 
 #### BackendURL

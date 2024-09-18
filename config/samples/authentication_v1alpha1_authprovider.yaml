@@ -1,0 +1,47 @@
+apiVersion: authentication.t-caas.telekom.com/v1alpha1
+kind: AuthProvider
+metadata:
+  labels:
+    app.kubernetes.io/name: t-caas-rbac-generator
+    app.kubernetes.io/managed-by: kustomize
+  name: authprovider-sample
+spec:
+  authBackend:
+    host: portal.security.in.pan-net.eu
+    port: 443
+  refreshBackend:
+    host: token-refresh-service.t-caas.telekom.com
+    port: 443 
+    path: tdi-internal
+  tenant:
+    name: touchstone
+    owners:
+    - se8639730740
+    - t628545
+    - q831050
+    members:
+    - name: t628545 
+      groupNames:
+      - controller_touchstone_m2m_hrzagt5_test_cluster_collaborator
+    - name: q831050
+      groupNames: 
+      - controller_touchstone_m2m_hrzagt5_test_namespaced_reader
+    groups:
+    - groupType: group 
+      parentGroup: M - T_CaaS_Tenant
+      groupNames:
+      - controller_touchstone_hrzagt5_test_cluster_admin
+      - controller_touchstone_hrzagt5_test_cluster_collaborator
+      - controller_touchstone_hrzagt5_test_cluster_reader
+      - controller_touchstone_hrzagt5_test_namespaced_admin
+      - controller_touchstone_hrzagt5_test_namespaced_collaborator
+      - controller_touchstone_hrzagt5_test_namespaced_reader
+    - groupType: group 
+      parentGroup: M - T_CaaS_Tenant_Enforce_Automation
+      groupNames:
+      - controller_touchstone_hrzagt5_test_m2m_sa_cluster_admin
+      - controller_touchstone_hrzagt5_test_m2m_sa_cluster_collaborator
+      - controller_touchstone_hrzagt5_test_m2m_sa_cluster_reader
+      - controller_touchstone_hrzagt5_test_m2m_sa_namespaced_admin
+      - controller_touchstone_hrzagt5_test_m2m_sa_namespaced_collaborator
+      - controller_touchstone_hrzagt5_test_m2m_sa_namespaced_reader

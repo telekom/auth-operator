@@ -1,0 +1,26 @@
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: validating-webhook-configuration
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-authorization-t-caas-telekom-com-v1alpha1-roledefinition
+  failurePolicy: Fail
+  name: webhook.authn-authz.t-caas.telekom.de
+  rules:
+  - apiGroups:
+    - authorization.t-caas.telekom.com
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - roledefinitions
+  sideEffects: None

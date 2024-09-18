@@ -1,0 +1,27 @@
+# permissions for end users to edit binddefinitions.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: t-caas-rbac-generator
+    app.kubernetes.io/managed-by: kustomize
+  name: authorization-binddefinition-editor-role
+rules:
+- apiGroups:
+  - authorization.t-caas.telekom.com
+  resources:
+  - binddefinitions
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - authorization.t-caas.telekom.com
+  resources:
+  - binddefinitions/status
+  verbs:
+  - get
