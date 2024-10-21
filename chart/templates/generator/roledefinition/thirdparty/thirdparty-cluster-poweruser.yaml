@@ -1,0 +1,21 @@
+{{- if or (eq .Values.global.thirdPartyGlobal "true") (eq .Values.global.thirdPartyCluster "true") }}
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: rd-thirdparty-cluster-poweruser
+  labels:
+{{ include "authn-authz-operator.labels.generator" . | indent 4 }}
+spec:
+  targetRole: ClusterRole
+  targetName: t-caas-thirdparty-cluster-poweruser
+  scopeNamespaced: false 
+  restrictedVerbs:
+  - patch
+  - update
+  - get
+  - list
+  - watch
+  - bind
+  - escalate
+  - impersonate
+{{- end }}

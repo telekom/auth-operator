@@ -1,0 +1,28 @@
+{{- if or (eq .Values.global.firstLineGlobal "true") (eq .Values.global.firstLineCluster "true") }}
+{{- range $index, $authBackend := .Values.global.cluster.authBackends }}
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: {{ $authBackend.name }}-bd-firstline-cluster-reader
+spec:
+  targetName: {{ $authBackend.name }}-bd-firstline-cl-reader
+  subjects:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "%st_caas_firstline_cluster_reader" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "%st_caas_firstline_cluster_collaborator" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "%st_caas_firstline_cluster_poweruser" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - kind: ServiceAccount
+      namespace: kube-system
+      name: m2m-sa-t-caas-firstline
+  clusterRoleBindings:
+    clusterRoleRefs:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: ClusterRole 
+      name: t-caas-firstline-cluster-reader
+{{- end }}
+{{- end }}

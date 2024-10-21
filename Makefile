@@ -1,5 +1,6 @@
 # Image URL to use all building/pushing image targets
-IMG ?= controller:latest
+APP ?= authn-authz-operator
+IMG ?= (APP):latest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.30.0
 
@@ -25,17 +26,6 @@ SHELL = /usr/bin/env bash -o pipefail
 all: build
 
 ##@ General
-
-# The help target prints out all targets with their descriptions organized
-# beneath their categories. The categories are represented by '##@' and the
-# target descriptions by '##'. The awk command is responsible for reading the
-# entire set of makefiles included in this invocation, looking for lines of the
-# file as xyz: ## something, and then pretty-format the target and help. Then,
-# if there's a line with ##@ something, that gets pretty-printed as a category.
-# More info on the usage of ANSI control characters for terminal formatting:
-# https://en.wikipedia.org/wiki/ANSI_escape_code#SGR_parameters
-# More info on the awk command:
-# http://linuxcommand.org/lc3_adv_awk.php
 
 .PHONY: help
 help: ## Display this help.
@@ -69,11 +59,11 @@ test-e2e:
 	go test ./test/e2e/ -v -ginkgo.v
 
 .PHONY: lint
-lint: golangci-lint ## Run golangci-lint linter
+lint: golangci-lint ## Run golangci-lint linter.
 	$(GOLANGCI_LINT) run
 
 .PHONY: lint-fix
-lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
+lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes.
 	$(GOLANGCI_LINT) run --fix
 
 ##@ Build
@@ -82,9 +72,17 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 build: manifests generate fmt vet ## Build manager binary.
 	go build -o bin/manager cmd/main.go
 
-.PHONY: run
-run: manifests generate fmt vet ## Run a controller from your host.
-	go run ./cmd/main.go
+.PHONY: run-gen
+run-gen: manifests generate fmt vet ## Run Generator controllers and webhooks from your host.
+	go run ./cmd/main.go --function=generator
+
+.PHONY: run-bind
+run-bind: manifests generate fmt vet ## Run Binder controllers and webhooks from your host.
+	go run ./cmd/main.go --function=binder
+
+.PHONY: run-oidc
+run-oidc: manifests generate fmt vet ## Run OIDC controllers and webhooks from your host.
+	go run ./cmd/main.go --function=oidc
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
@@ -120,9 +118,17 @@ build-installer: manifests generate kustomize ## Generate a consolidated YAML wi
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/default > dist/install.yaml
 
+.PHONY: export-images
+export-images: drawio ## Export PNG images from a Draw.io diagram.
+	drawio --export docs/drawio/authn-authz-operator.drawio --output docs/images/overall-architecture.png --format png --page-index=0
+	drawio --export docs/drawio/authn-authz-operator.drawio --output docs/images/generator.png --format png --page-index=1
+	drawio --export docs/drawio/authn-authz-operator.drawio --output docs/images/binder.png --format png --page-index=2
+	drawio --export docs/drawio/authn-authz-operator.drawio --output docs/images/oidc-client.png --format png --page-index=3
+
 .PHONY: docs 
 docs: crd-ref-docs ## Generate markdown API reference into docs directory.
-	crd-ref-docs --source-path=api --config=docs/config.yaml --renderer=markdown --output-mode=group --output-path=docs/reference
+	crd-ref-docs --source-path=api --config=docs/config.yaml --renderer=markdown --output-mode=group --output-path=docs/api-reference
+
 
 ##@ Deployment
 
@@ -168,6 +174,7 @@ CONTROLLER_TOOLS_VERSION ?= v0.15.0
 ENVTEST_VERSION ?= release-0.18
 GOLANGCI_LINT_VERSION ?= v1.57.2
 CRD_REF_DOCS_VERSION ?= v0.1.0
+DRAWIO ?= 24.7.8
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
@@ -193,6 +200,10 @@ $(GOLANGCI_LINT): $(LOCALBIN)
 crd-ref-docs: $(CRD_REF_DOCS) ## Download crd-ref-docs locally if necessary.
 $(CRD_REF_DOCS): $(LOCALBIN)
 	$(call go-install-tool,$(CRD_REF_DOCS),github.com/elastic/crd-ref-docs,${CRD_REF_DOCS_VERSION})
+
+.PHONY: drawio 
+drawio: ## Download Draw.io locally if necessary.
+	echo "Can't check if you downloaded Draw.io. If not please install it manually."
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary (ideally with version)

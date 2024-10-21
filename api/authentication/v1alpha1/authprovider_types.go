@@ -5,7 +5,7 @@ import (
 )
 
 const (
-	AuthProviderFinalizer   = "authprovider.authentication.t-caas.telekom.com"
+	AuthProviderFinalizer   = "authprovider.authentication.t-caas.telekom.com/finalizer"
 	AuthProviderTDIInternal = "portal.security.in.pan-net.eu"
 	AuthProviderTDIPortal   = "TDIPortal"
 	AuthProviderZAM         = "ZAM"

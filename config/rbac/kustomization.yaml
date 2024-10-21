@@ -13,6 +13,8 @@ resources:
 # default, aiding admins in cluster management. Those roles are
 # not used by the Project itself. You can comment the following lines
 # if you do not want those helpers be installed with your Project.
+- authorization_webhookauthorizer_editor_role.yaml
+- authorization_webhookauthorizer_viewer_role.yaml
 - authorization_binddefinition_editor_role.yaml
 - authorization_binddefinition_viewer_role.yaml
 - authentication_authprovider_editor_role.yaml

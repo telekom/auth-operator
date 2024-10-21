@@ -1,0 +1,9 @@
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: WebhookAuthorizer
+metadata:
+  labels:
+    app.kubernetes.io/name: t-caas-rbac-generator
+    app.kubernetes.io/managed-by: kustomize
+  name: webhookauthorizer-sample
+spec:
+  # TODO(user): Add fields here
