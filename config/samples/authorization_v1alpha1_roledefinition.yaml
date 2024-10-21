@@ -38,7 +38,7 @@ metadata:
 spec:
   targetRole: Role
   targetNamespace: default
-  targetName: t-caas-namespaced-reader-role
+  targetName: t-caas-namespaced-reader
   scopeNamespaced: true 
   restrictedApis:
     - name: velero.io

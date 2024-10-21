@@ -5,7 +5,7 @@ import (
 )
 
 const (
-	RoleDefinitionFinalizer  = "roledefinition.authorization.t-caas.telekom.com"
+	RoleDefinitionFinalizer  = "roledefinition.authorization.t-caas.telekom.com/finalizer"
 	DefinitionClusterRole    = "ClusterRole"
 	DefinitionNamespacedRole = "Role"
 )
@@ -49,13 +49,11 @@ type RoleDefinitionSpec struct {
 
 // RoleDefinitionStatus defines the observed state of RoleDefinition
 type RoleDefinitionStatus struct {
-	// Not extremely important as most status updates are driven by Conditions
-	// We read the JSONPath from this status field to signify completed reconciliation
+	// Not extremely important as most status updates are driven by Conditions. We read the JSONPath from this status field to signify completed reconciliation.
 	// +kubebuilder:validation:Optional
 	RoleReconciled bool `json:"roleReconciled,omitempty"`
 
-	// Conditions defines current service state of the Role definition
-	// All conditions should evaluate to true to signify successful reconciliation
+	// Conditions defines current service state of the Role definition. All conditions should evaluate to true to signify successful reconciliation.
 	// +kubebuilder:validation:Optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }

@@ -1,0 +1,21 @@
+{{- if or (eq .Values.global.firstLineGlobal "true") (eq .Values.global.firstLineCluster "true") }}
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: rd-firstline-namespaced-poweruser
+  labels:
+{{ include "authn-authz-operator.labels.generator" . | indent 4 }}
+spec:
+  targetRole: ClusterRole
+  targetName: t-caas-firstline-namespaced-poweruser
+  scopeNamespaced: true 
+  restrictedVerbs:
+  - patch
+  - update
+  - get
+  - list
+  - watch
+  - bind
+  - escalate
+  - impersonate
+{{- end }}

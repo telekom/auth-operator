@@ -1,0 +1,240 @@
+global:
+### Configure Custom Resources (RBAC/OIDC) inside the cluster
+  enforceAutomationGlobal: "false"
+  enforceAutomationCluster: "false"
+  firstLineGlobal: "false"
+  firstLineCluster: "false"
+  onboardingGlobal: "false"
+  onboardingCluster: "false"
+  thirdPartyGlobal: "true"
+  thirdPartyCluster: "true"
+  thirdParties:
+  - istio
+  - monitoring
+  cluster:
+    name: tscontroller
+    tenant: touchstone
+    location: hrzagt5
+    environment: prod
+    authBackends:
+    - name: "tdi-infra-idp"
+      oidcGroupNamePrefix: "s_"
+      oidcGroupNameDelimiter: "_"
+    - name: "tdi-portal-idp"
+      oidcGroupNamePrefix: "d-"
+      oidcGroupNameDelimiter: "_"
+    owners:
+    - tdgZam: xesteve@zam.dt
+      tdiInfra: 12asd31
+      tdiPortal:
+    - tdgZam: karlito@zam.dt
+      tdiInfra: a08d1nas
+      tdiPortal:
+    machineAccounts:
+    - usernames:
+        tdgZam: machine1@zam.dt
+        tdiInfra: oadsd18902dn112d
+        tdiPortal: 
+      role: admin
+    - usernames:
+        tdgZam: machine2@zam.dt
+        tdiInfra: adsmasid12i12m12d
+        tdiPortal:
+      role: reader
+    thirdParties:
+    - security
+
+  # Define global setting that will apply to all components
+  serviceAccount:
+    create: true
+    name:
+  priorityClassName: caas-high-priority-workload
+  image:
+    registry: "artifactory.devops.telekom.de"
+    repository: "tdi-caas-docker-images-local"
+    name: "authn-authz-operator"
+    tag: "0.0.1"
+  imagePullSecrets:
+    - name: mcicd-docker
+  imagePullPolicy: IfNotPresent
+  tolerations:
+    - effect: NoSchedule
+      key: node-role.kubernetes.io/master
+    - effect: NoSchedule
+      key: node-role.kubernetes.io/control-plane
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: Exists
+          - matchExpressions:
+              - key: node-role.kubernetes.io/master
+                operator: Exists
+
+# Generator component specific config (RoleDefinition)
+generator:
+  rbac:
+    create: true
+    rules:
+    - apiGroups:
+      - authorization.t-caas.telekom.com
+      resources:
+      - roledefinitions
+      verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+    - apiGroups:
+      - authorization.t-caas.telekom.com
+      resources:
+      - roledefinitions/status
+      verbs:
+      - get
+      - patch
+      - update
+    - apiGroups:
+      - rbac.authorization.k8s.io
+      resources:
+      - clusterroles
+      - roles
+      verbs:
+      - escalate
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+    - apiGroups:
+      - rbac.authorization.k8s.io
+      resources:
+      - clusterroles/status
+      - roles/status
+      verbs:
+      - get
+      - list 
+      - watch
+      - patch
+      - update
+  networkPolicy:
+    enabled: true
+  prometheus:
+    enabled: true
+  annotations:
+    {}
+  resources:
+    requests:
+      cpu: 10m
+      memory: 20Mi
+    limits:
+      cpu: 50m
+      memory: 100Mi
+
+### Binder component specific config (BindDefinition)
+binder:
+  rbac:
+    create: true
+    rules:
+    - apiGroups:
+      - authorization.t-caas.telekom.com
+      resources:
+      - binddefinitions
+      verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+    - apiGroups:
+      - authorization.t-caas.telekom.com
+      resources:
+      - binddefinitions/status
+      verbs:
+      - get
+      - patch
+      - update
+    - apiGroups:
+      - rbac.authorization.k8s.io
+      resources:
+      - clusterrolebindings
+      - rolebindings
+      verbs:
+      - bind
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+    - apiGroups:
+      - rbac.authorization.k8s.io
+      resources:
+      - clusterrolebindings/status
+      - rolebindings/status
+      verbs:
+      - get
+      - patch
+      - update
+  networkPolicy:
+    enabled: true
+  prometheus:
+    enabled: true
+  annotations:
+    {}
+  resources:
+    requests:
+      cpu: 10m
+      memory: 20Mi
+    limits:
+      cpu: 50m
+      memory: 100Mi
+
+### OIDC component specific config (AuthProvider)
+oidc:
+  rbac:
+    create: true
+    rules:
+    - apiGroups:
+      - authentication.t-caas.telekom.com
+      resources:
+      - authproviders
+      verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+    - apiGroups:
+      - authentication.t-caas.telekom.com
+      resources:
+      - authproviders/status
+      verbs:
+      - get
+      - patch
+      - update
+  networkPolicy:
+    enabled: true
+  prometheus:
+    enabled: true
+  annotations:
+    {}
+  resources:
+    requests:
+      cpu: 10m
+      memory: 20Mi
+    limits:
+      cpu: 50m
+      memory: 100Mi
+

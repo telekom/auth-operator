@@ -1,0 +1,20 @@
+{{- range $index, $authBackend := .Values.global.cluster.authBackends }}
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: {{ $authBackend.name }}-bd-tenant-cluster-poweruser
+spec:
+  targetName: {{ $authBackend.name }}-bd-tenant-cl-poweruser
+  subjects:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "%st_caas_tenant_cluster_poweruser" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - kind: ServiceAccount
+      namespace: kube-system
+      name: m2m-sa-t-caas-tenant
+  clusterRoleBindings:
+    clusterRoleRefs:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: ClusterRole 
+      name: t-caas-tenant-cluster-poweruser
+{{- end }}

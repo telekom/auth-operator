@@ -28,6 +28,10 @@ resources:
   kind: BindDefinition
   path: gitlab.devops.telekom.de/cit/t-caas/operators/authn-authz-operator/api/authorization/v1alpha1
   version: v1alpha1
+  webhooks:
+    defaulting: true
+    validation: true
+    webhookVersion: v1
 - api:
     crdVersion: v1
   controller: true
@@ -35,5 +39,12 @@ resources:
   group: authentication
   kind: AuthProvider
   path: gitlab.devops.telekom.de/cit/t-caas/operators/authn-authz-operator/api/authentication/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+  domain: t-caas.telekom.com
+  group: authorization
+  kind: WebhookAuthorizer
+  path: gitlab.devops.telekom.de/cit/t-caas/operators/authn-authz-operator/api/authorization/v1alpha1
   version: v1alpha1
 version: "3"

@@ -1,0 +1,26 @@
+{{- range $index, $authBackend := .Values.global.cluster.authBackends }}
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: {{ $authBackend.name }}-bd-platform-cluster-reader
+spec:
+  targetName: {{ $authBackend.name }}-bd-platform-cl-reader
+  subjects:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "%st_caas_platform_cluster_reader" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "%st_caas_platform_cluster_collaborator" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "%st_caas_platform_cluster_poweruser" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - kind: ServiceAccount
+      namespace: kube-system
+      name: m2m-sa-t-caas-platform
+  clusterRoleBindings:
+    clusterRoleRefs:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: ClusterRole 
+      name: t-caas-platform-cluster-reader
+{{- end }}

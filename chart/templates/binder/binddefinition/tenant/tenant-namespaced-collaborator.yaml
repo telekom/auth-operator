@@ -1,0 +1,46 @@
+{{- range $index, $authBackend := .Values.global.cluster.authBackends }}
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: {{ $authBackend.name }}-bd-tenant-namespaced-collaborator
+spec:
+  targetName: {{ $authBackend.name }}-bd-tenant-ns-collaborator
+  subjects:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "%st_caas_tenant_namespaced_collaborator" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "%st_caas_tenant_namespaced_poweruser" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "%st_caas_tenant_cluster_collaborator" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "%st_caas_tenant_cluster_poweruser" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - kind: ServiceAccount
+      namespace: kube-system
+      name: m2m-sa-t-caas-tenant
+  roleBindings:
+    clusterRoleRefs:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: ClusterRole 
+      name: t-caas-tenant-namespaced-collaborator
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values:
+            - kube-system
+            - kube-public
+            - kube-node-lease
+        - key: t-caas.telekom.com/owner
+          operator: In
+          values:
+            - tenant
+        - key: t-caas.telekom.com/owner
+          operator: NotIn 
+          values:
+            - platform
+            - thirdparty
+{{- end }}

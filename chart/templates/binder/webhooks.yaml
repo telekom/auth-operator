@@ -1,0 +1,150 @@
+{{- $name := printf "%s" ( include "authn-authz-operator.fullname" . ) }}
+{{- $namespacedName := printf "%s.%s" ( include "authn-authz-operator.fullname" . ) .Release.Namespace }}
+{{- $cn := printf "binder-%s-webhook.%s.svc" ( include "authn-authz-operator.fullname" . ) .Release.Namespace }}
+{{- $ca := genCA "authn-authz-webhook-ca" 3650 -}}
+{{- $cert := genSignedCert $cn nil (list $name $namespacedName $cn ) 3650 $ca -}}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: binder-{{ template "authn-authz-operator.fullname" . }}-validating-webhook
+  labels:
+{{ include "authn-authz-operator.labels.binder" . | indent 4 }}
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    caBundle: {{ b64enc $ca.Cert }}
+    service:
+      name: binder-{{ template "authn-authz-operator.fullname" . }}-webhook
+      namespace: {{ .Release.Namespace }}
+      path: /validate-authorization-t-caas-telekom-com-v1alpha1-binddefinition
+      port: 443
+  failurePolicy: Fail
+  matchPolicy: Equivalent
+  name: validating.webhook.authn-authz.t-caas.telekom.de
+  namespaceSelector: {}
+  objectSelector: {}
+  rules:
+  - apiGroups:
+    - authorization.t-caas.telekom.com
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - binddefinitions
+    scope: '*'
+  sideEffects: None
+  timeoutSeconds: 10
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: binder-{{ template "authn-authz-operator.fullname" . }}-mutating-webhook
+  labels:
+{{ include "authn-authz-operator.labels.binder" . | indent 4 }}
+webhooks:
+- admissionReviewVersions:
+  - v1 
+  clientConfig:
+    caBundle: {{ b64enc $ca.Cert }}
+    service:
+      name: binder-{{ template "authn-authz-operator.fullname" . }}-webhook
+      namespace: {{ .Release.Namespace }}
+      path: /mutate-authorization-t-caas-telekom-com-v1alpha1-binddefinition
+      port: 443
+  failurePolicy: Fail 
+  matchPolicy: Equivalent
+  name: mutating.webhook.authn-authz.t-caas.telekom.de
+  rules:
+  - apiGroups:
+    - authorization.t-caas.telekom.com
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    resources:
+    - binddefinitions 
+    scope: '*'
+  sideEffects: None
+  timeoutSeconds: 10
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: namespace-{{ template "authn-authz-operator.fullname" . }}-validating-webhook
+  labels:
+{{ include "authn-authz-operator.labels.binder" . | indent 4 }}
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    caBundle: {{ b64enc $ca.Cert }}
+    service:
+      name: binder-{{ template "authn-authz-operator.fullname" . }}-webhook
+      namespace: {{ .Release.Namespace }}
+      path: /validate-v1-namespace
+      port: 443
+  failurePolicy: Fail
+  matchPolicy: Equivalent
+  name: validating.webhook.authn-authz.t-caas.telekom.de
+  namespaceSelector: {}
+  objectSelector: {}
+  rules:
+  - apiGroups:
+    - ""
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    - DELETE
+    resources:
+    - namespaces
+    scope: '*'
+  sideEffects: None
+  timeoutSeconds: 10
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: namespace-{{ template "authn-authz-operator.fullname" . }}-mutating-webhook
+  labels:
+{{ include "authn-authz-operator.labels.binder" . | indent 4 }}
+webhooks:
+- admissionReviewVersions:
+  - v1 
+  clientConfig:
+    caBundle: {{ b64enc $ca.Cert }}
+    service:
+      name: binder-{{ template "authn-authz-operator.fullname" . }}-webhook
+      namespace: {{ .Release.Namespace }}
+      path: /mutate-v1-namespace
+      port: 443
+  failurePolicy: Fail 
+  matchPolicy: Equivalent
+  name: mutating.webhook.authn-authz.t-caas.telekom.de
+  rules:
+  - apiGroups:
+    - ""
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    resources:
+    - namespaces
+    scope: '*'
+  sideEffects: None
+  timeoutSeconds: 10
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: binder-{{ template "authn-authz-operator.fullname" . }}-webhook-cert
+  labels:
+{{ include "authn-authz-operator.labels.binder" . | indent 4 }}
+type: Opaque
+data:
+  tls.crt: {{ b64enc $cert.Cert }}
+  tls.key: {{ b64enc $cert.Key }}

@@ -6,4 +6,38 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: binddefinition-sample
 spec:
-  # TODO(user): Add fields here
+  targetName: bd-onboarding-ns
+  subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User 
+    name: luka@tomislav.galic
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group 
+    name: onboarding-admin-test
+  - kind: ServiceAccount 
+    name: test-sa
+    namespace: kube-system
+  clusterRoleBindings:
+    clusterRoleRefs:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: ClusterRole
+      name: t-caas-cluster-reader
+  roleBindings:
+    clusterRoleRefs:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: ClusterRole
+      name: t-caas-cluster-reader
+    roleRefs:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Role
+      name: t-caas-namespaced-reader
+    namespaceSelector:
+      matchExpressions:
+      - key: t-caas.telekom.com/owner 
+        operator: In 
+        values:
+        - tenant
+      - key: t-caas.telekom.com/tenant
+        operator: In
+        values:
+        - karlo

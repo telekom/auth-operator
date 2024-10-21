@@ -1,0 +1,10 @@
+{{- if .Values.generator.rbac.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: generator-{{ template "authn-authz-operator.fullname" . }}
+  labels:
+{{ include "authn-authz-operator.labels.generator" . | indent 4 }}
+rules:
+{{ toYaml .Values.generator.rbac.rules | indent 2 }}
+{{- end -}}

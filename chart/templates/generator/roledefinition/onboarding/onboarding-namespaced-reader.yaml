@@ -1,0 +1,29 @@
+{{- if or (eq .Values.global.onboardingGlobal "true") (eq .Values.global.onboardingCluster "true") }}
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: rd-onboarding-namespaced-reader
+  labels:
+{{ include "authn-authz-operator.labels.generator" . | indent 4 }}
+spec:
+  targetRole: ClusterRole
+  targetName: t-caas-onboarding-namespaced-reader
+  scopeNamespaced: true
+  restrictedResources:
+    - name: secrets 
+      singularName: secret 
+      namespaced: true 
+      group: v1 
+      kind: Secret
+      verbs:
+        - all
+  restrictedVerbs:
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+  - bind
+  - escalate
+  - impersonate
+{{- end }}

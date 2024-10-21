@@ -1,0 +1,23 @@
+---
+apiVersion: v2
+name: authn-authz-operator
+version: 0.1.0
+appVersion: "0.1.0"
+#kubeVersion: ">=1.25.0-0"
+description: RBAC and OIDC abstraction
+type: application
+keywords:
+  - rbac
+  - policy
+  - authN
+  - authZ
+  - authentication
+  - authorization
+  - ClusterRoles
+  - Roles 
+  - OIDC
+home: https://gitlab.devops.telekom.de/cit/t-caas/operators/authn-authz-operator
+maintainers:
+  - name: T-CaaS Platform Team
+deprecated: False
+

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -38,35 +37,18 @@ type RoleDefinitionReconciler struct {
 	Recorder        record.EventRecorder
 }
 
-// crdToRoleDefinitionRequests() implements the MapFunc type and makes it possible to return an EventHandler
-// for any object implementing client.Object. Used it to fan-out updates to all RoleDefinitions on new CRD create
-// https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/handler#EnqueueRequestsFromMapFunc
-// https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/handler#MapFunc
-func (r *RoleDefinitionReconciler) crdToRoleDefinitionRequests(ctx context.Context, obj client.Object) []reconcile.Request {
-	// Type assertion to ensure obj is a CRD
-	_, ok := obj.(*apiextensionsv1.CustomResourceDefinition)
-	if !ok {
-		log.FromContext(ctx).Error(fmt.Errorf("unexpected type"), "Expected *CustomResourceDefinition", "got", obj)
-		return nil
-	}
-
-	// List all RoleDefinition resources
-	roleDefList := &authnv1alpha1.RoleDefinitionList{}
-	err := r.Client.List(ctx, roleDefList)
-	if err != nil {
-		log.FromContext(ctx).Error(err, "Failed to list RoleDefinition resources")
-		return nil
-	}
-	requests := make([]reconcile.Request, len(roleDefList.Items))
-	for i, roleDef := range roleDefList.Items {
-		requests[i] = reconcile.Request{
-			NamespacedName: types.NamespacedName{
-				Name:      roleDef.Name,
-				Namespace: roleDef.Namespace,
-			},
-		}
-	}
-	return requests
+// SetupWithManager sets up the controller with the Manager.
+// Used to watch for CRD creation events https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/handler#example-EnqueueRequestsFromMapFunc
+// Used a predicate to ignore deletes of CRD, as this can be done in a regular
+// reconcile requeue and does not require immediate action from controller
+func (r *RoleDefinitionReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&authnv1alpha1.RoleDefinition{}).
+		Watches(&apiextensionsv1.CustomResourceDefinition{},
+			handler.EnqueueRequestsFromMapFunc(r.crdToRoleDefinitionRequests),
+			builder.WithPredicates(predicate.Funcs{DeleteFunc: func(e event.DeleteEvent) bool { return false }})).
+		WithEventFilter(predicate.GenerationChangedPredicate{}).
+		Complete(r)
 }
 
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=roledefinitions,verbs=get;list;watch;create;update;patch;delete
@@ -397,19 +379,37 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		//}
 	}
 
-	return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
+	//return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
+	return ctrl.Result{}, nil
 }
 
-// SetupWithManager sets up the controller with the Manager.
-// Used to watch for CRD creation events https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/handler#example-EnqueueRequestsFromMapFunc
-// Used a predicate to ignore deletes of CRD, as this can be done in a regular
-// reconcile requeue and does not require immediate action from controller
-func (r *RoleDefinitionReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&authnv1alpha1.RoleDefinition{}).
-		Watches(&apiextensionsv1.CustomResourceDefinition{},
-			handler.EnqueueRequestsFromMapFunc(r.crdToRoleDefinitionRequests),
-			builder.WithPredicates(predicate.Funcs{DeleteFunc: func(e event.DeleteEvent) bool { return false }})).
-		WithEventFilter(predicate.GenerationChangedPredicate{}).
-		Complete(r)
+// crdToRoleDefinitionRequests() implements the MapFunc type and makes it possible to return an EventHandler
+// for any object implementing client.Object. Used it to fan-out updates to all RoleDefinitions on new CRD create
+// https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/handler#EnqueueRequestsFromMapFunc
+// https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/handler#MapFunc
+func (r *RoleDefinitionReconciler) crdToRoleDefinitionRequests(ctx context.Context, obj client.Object) []reconcile.Request {
+	// Type assertion to ensure obj is a CRD
+	_, ok := obj.(*apiextensionsv1.CustomResourceDefinition)
+	if !ok {
+		log.FromContext(ctx).Error(fmt.Errorf("unexpected type"), "Expected *CustomResourceDefinition", "got", obj)
+		return nil
+	}
+
+	// List all RoleDefinition resources
+	roleDefList := &authnv1alpha1.RoleDefinitionList{}
+	err := r.Client.List(ctx, roleDefList)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "Failed to list RoleDefinition resources")
+		return nil
+	}
+	requests := make([]reconcile.Request, len(roleDefList.Items))
+	for i, roleDef := range roleDefList.Items {
+		requests[i] = reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Name:      roleDef.Name,
+				Namespace: roleDef.Namespace,
+			},
+		}
+	}
+	return requests
 }

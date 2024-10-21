@@ -1,0 +1,28 @@
+{{- if or (eq .Values.global.onboardingGlobal "true") (eq .Values.global.onboardingCluster "true") }}
+{{- range $index, $authBackend := .Values.global.cluster.authBackends }}
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: {{ $authBackend.name }}-bd-onboarding-cluster-reader
+spec:
+  targetName: {{ $authBackend.name }}-bd-onboarding-cl-reader
+  subjects:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "%st_caas_onboarding_cluster_reader" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "%st_caas_onboarding_cluster_collaborator" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "%st_caas_onboarding_cluster_poweruser" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - kind: ServiceAccount
+      namespace: kube-system
+      name: m2m-sa-t-caas-onboarding
+  clusterRoleBindings:
+    clusterRoleRefs:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: ClusterRole 
+      name: t-caas-onboarding-cluster-reader
+{{- end }}
+{{- end }}

@@ -6,3 +6,7 @@ processor:
 
 render:
   kubernetesVersion: 1.30
+  knownTypes:
+    - name: Subject 
+      package: k8s.io/api/rbac/v1
+      link: https://pkg.go.dev/k8s.io/api/rbac/v1#Subject

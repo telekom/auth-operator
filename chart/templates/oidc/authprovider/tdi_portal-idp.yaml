@@ -1,0 +1,59 @@
+{{- range $index, $authBackend := .Values.global.cluster.authBackends }}
+{{- if eq $authBackend.name "tdi-portal-idp" }}
+apiVersion: authentication.t-caas.telekom.com/v1alpha1
+kind: AuthProvider
+metadata:
+  labels:
+  name: {{ $.Values.global.cluster.tenant }}-{{ $authBackend.name }}
+spec:
+  authBackend:
+    host: enter.correct.url
+    port: 443
+  refreshBackend:
+    host: token-refresh-service.t-caas.telekom.com
+    port: 443 
+    path: tdi-internal
+  tenant:
+    name: {{ $.Values.global.cluster.tenant }}
+    owners:
+    - se8639730740 (enter_base_sa)
+    {{- range $owner := $.Values.global.cluster.owners }}
+    - {{ $owner.tdiPortal }}
+    {{- end }}
+    {{- if or (eq $.Values.global.enforceAutomationGlobal "true") (eq $.Values.global.enforceAutomationCluster "true") }}
+    members:
+    {{- range $machineAccount := $.Values.global.cluster.machineAccounts }}
+    - name: {{ $machineAccount.usernames.tdiPortal }}
+      groupNames:
+      - {{ $machineAccount.role }}
+    {{- end }}
+    {{- end }}
+    groups:
+    {{- if or (eq $.Values.global.enforceAutomationGlobal "true") (eq $.Values.global.enforceAutomationCluster "true") }}
+    - groupType: group 
+      parentGroup: Enter - regular_tenant_parent_group 
+      groupNames: 
+      - {{ (printf "%s_%s_%s_%s_cluster_reader" $.Values.global.cluster.name $.Values.global.cluster.tenant $.Values.global.cluster.location $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      - {{ (printf "%s_%s_%s_%s_namespaced_reader" $.Values.global.cluster.name $.Values.global.cluster.tenant $.Values.global.cluster.location $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - groupType: group 
+      parentGroup: Enter - enforce_automation_tenant_parent_group
+      groupNames:
+      - {{ (printf "%s_%s_%s_%s_m2m_sa_cluster_poweruser" $.Values.global.cluster.name $.Values.global.cluster.tenant $.Values.global.cluster.location $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      - {{ (printf "%s_%s_%s_%s_m2m_sa_cluster_collaborator" $.Values.global.cluster.name $.Values.global.cluster.tenant $.Values.global.cluster.location $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      - {{ (printf "%s_%s_%s_%s_m2m_sa_cluster_reader" $.Values.global.cluster.name $.Values.global.cluster.tenant $.Values.global.cluster.location $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      - {{ (printf "%s_%s_%s_%s_m2m_sa_namespaced_poweruser" $.Values.global.cluster.name $.Values.global.cluster.tenant $.Values.global.cluster.location $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      - {{ (printf "%s_%s_%s_%s_m2m_sa_namespaced_collaborator" $.Values.global.cluster.name $.Values.global.cluster.tenant $.Values.global.cluster.location $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      - {{ (printf "%s_%s_%s_%s_m2m_sa_namespaced_reader" $.Values.global.cluster.name $.Values.global.cluster.tenant $.Values.global.cluster.location $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    {{- else }}
+    - groupType: group 
+      parentGroup: Enter - regular_tenant_parent_group
+      groupNames:
+      - {{ (printf "%s_%s_%s_%s_cluster_poweruser" $.Values.global.cluster.name $.Values.global.cluster.tenant $.Values.global.cluster.location $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      - {{ (printf "%s_%s_%s_%s_cluster_collaborator" $.Values.global.cluster.name $.Values.global.cluster.tenant $.Values.global.cluster.location $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      - {{ (printf "%s_%s_%s_%s_cluster_reader" $.Values.global.cluster.name $.Values.global.cluster.tenant $.Values.global.cluster.location $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      - {{ (printf "%s_%s_%s_%s_namespaced_poweruser" $.Values.global.cluster.name $.Values.global.cluster.tenant $.Values.global.cluster.location $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      - {{ (printf "%s_%s_%s_%s_namespaced_collaborator" $.Values.global.cluster.name $.Values.global.cluster.tenant $.Values.global.cluster.location $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      - {{ (printf "%s_%s_%s_%s_namespaced_reader" $.Values.global.cluster.name $.Values.global.cluster.tenant $.Values.global.cluster.location $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    {{- end }}
+{{- end }}
+{{- end }}
