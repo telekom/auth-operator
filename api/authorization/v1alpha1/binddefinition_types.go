@@ -7,6 +7,7 @@ import (
 
 const (
 	BindDefinitionFinalizer   = "binddefinition.authorization.t-caas.telekom.com/finalizer"
+	RoleBindingFinalizer      = "rolebinding.authorization.t-caas.telekom.com/finalizer"
 	BindClusterRoleBinding    = "ClusterRoleBinding"
 	BindRoleBinding           = "RoleBinding"
 	BindSubjectServiceAccount = "ServiceAccount"
@@ -14,8 +15,8 @@ const (
 
 type ClusterBinding struct {
 	// ClusterRole references adhering to the rbacv1.RoleRef schema.
-	// +kubebuilder:validation:Required
-	ClusterRoleRefs []rbacv1.RoleRef `json:"clusterRoleRefs"`
+	// +kubebuilder:validation:Optional
+	ClusterRoleRefs []rbacv1.RoleRef `json:"clusterRoleRefs,omitempty"`
 }
 
 type NamespaceBinding struct {
@@ -33,7 +34,7 @@ type NamespaceBinding struct {
 
 	// NamespaceSelector is a label selector which will match namespaces that should have the RoleBinding/s.
 	// +kubebuilder:validation:Required
-	NamespaceSelector metav1.LabelSelector `json:"namespaceSelector"`
+	NamespaceSelector metav1.LabelSelector `json:"namespaceSelector,omitempty"`
 }
 
 // BindDefinitionSpec defines the desired state of BindDefinition
@@ -74,7 +75,6 @@ type BindDefinitionStatus struct {
 // +kubebuilder:resource:path=binddefinitions,scope=Cluster,shortName=binddef
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Time duration since creation of this BindDefinition"
-// +kubebuilder:printcolumn:name="Subjects",type="string",JSONPath=".spec.subjects",description="The subject this BindDefinition is targeting"
 // +kubebuilder:printcolumn:name="Bind name",type="string",JSONPath=".spec.targetName",description="The name of the child object created by this BindDefinition"
 // +kubebuilder:printcolumn:name="Reconciled bind",type="string",JSONPath=".status.bindReconciled",description="The boolean value signifying if the target role has been reconciled or not"
 // BindDefinition is the Schema for the binddefinitions API

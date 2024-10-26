@@ -1,3 +1,4 @@
+---
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: RoleDefinition
 metadata:

@@ -1,10 +1,10 @@
-{{- if .Values.oidc.rbac.create }}
+{{- if .Values.idp.rbac.create }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: oidc-{{ template "authn-authz-operator.fullname" . }}-leader-election
+  name: idp-{{ template "authn-authz-operator.fullname" . }}-leader-election
   labels:
-{{ include "authn-authz-operator.labels.oidc" . | indent 4 }}
+{{ include "authn-authz-operator.labels.idp" . | indent 4 }}
 rules:
 - apiGroups:
   - ""

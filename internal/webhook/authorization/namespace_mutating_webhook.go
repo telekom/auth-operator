@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"reflect"
+	"strings" // Import strings package for parsing username
 
-	authorizationv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/authn-authz-operator/api/authorization/v1alpha1"
+	authzv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/authn-authz-operator/api/authorization/v1alpha1"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,17 +20,17 @@ type NamespaceMutator struct {
 	Decoder admission.Decoder
 }
 
-// InjectDecoder injects the decoder into the NamespaceDefaulter
+// InjectDecoder injects the decoder into the NamespaceMutator
 func (m *NamespaceMutator) InjectDecoder(d admission.Decoder) error {
 	m.Decoder = d
 	return nil
 }
 
-// Handle mutates the Namespace by adding a label based on user groups
+// Handle mutates the Namespace by adding a label based on user groups or ServiceAccount
 func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) admission.Response {
-	// Only handle CREATE operations
-	if req.Operation != admissionv1.Create {
-		return admission.Allowed("Operation is not CREATE")
+	// Handle both CREATE and UPDATE operations
+	if req.Operation != admissionv1.Create && req.Operation != admissionv1.Update {
+		return admission.Allowed("Operation is neither CREATE nor UPDATE")
 	}
 
 	ns := &corev1.Namespace{}
@@ -40,8 +42,18 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 	// Get the user's groups from the request
 	userGroups := req.UserInfo.Groups
 
+	// Check if the user is a ServiceAccount
+	var saNamespace, saName string
+	isServiceAccount := false
+	usernameParts := strings.Split(req.UserInfo.Username, ":")
+	if len(usernameParts) == 4 && usernameParts[0] == "system" && usernameParts[1] == "serviceaccount" {
+		isServiceAccount = true
+		saNamespace = usernameParts[2]
+		saName = usernameParts[3]
+	}
+
 	// Fetch all BindDefinition CRDs
-	bindDefinitions := &authorizationv1alpha1.BindDefinitionList{}
+	bindDefinitions := &authzv1alpha1.BindDefinitionList{}
 	if err := m.Client.List(ctx, bindDefinitions); err != nil {
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
@@ -51,22 +63,36 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 
 	// Iterate over each BindDefinition
 	for _, bindDef := range bindDefinitions.Items {
-		// Check if the BindDefinition has RoleBindings with NamespaceSelector
-		if bindDef.Spec.RoleBindings.NamespaceSelector.MatchLabels != nil || len(bindDef.Spec.RoleBindings.NamespaceSelector.MatchExpressions) > 0 {
-			// Iterate over the subjects in the BindDefinition
-			for _, subject := range bindDef.Spec.Subjects {
-				if subject.Kind == "Group" {
-					// Check if the subject group is in the user's groups
-					for _, userGroup := range userGroups {
-						if subject.Name == userGroup {
-							// Extract labels from the NamespaceSelector
-							labels := getLabelsFromNamespaceSelector(bindDef.Spec.RoleBindings.NamespaceSelector)
-							// Merge labels
-							for k, v := range labels {
-								labelsToAdd[k] = v
-							}
-						}
+		// Collect subjects from BindDefinition
+		subjects := bindDef.Spec.Subjects
+
+		// Check if the user's group is in the subjects or if the user is a matching ServiceAccount
+		userMatchFound := false
+		for _, subject := range subjects {
+			if subject.Kind == "Group" {
+				for _, userGroup := range userGroups {
+					if subject.Name == userGroup {
+						userMatchFound = true
+						break
 					}
+				}
+			} else if subject.Kind == "ServiceAccount" && isServiceAccount {
+				if subject.Namespace == saNamespace && subject.Name == saName {
+					userMatchFound = true
+					break
+				}
+			}
+			if userMatchFound {
+				break
+			}
+		}
+
+		if userMatchFound {
+			// Extract labels from namespaceSelector in RoleBindings
+			if !reflect.DeepEqual(bindDef.Spec.RoleBindings.NamespaceSelector, metav1.LabelSelector{}) {
+				labels := getLabelsFromNamespaceSelector(bindDef.Spec.RoleBindings.NamespaceSelector)
+				for k, v := range labels {
+					labelsToAdd[k] = v
 				}
 			}
 		}
@@ -93,16 +119,18 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 	return admission.Allowed("No labels to add")
 }
 
+// Extract labels from NamespaceSelector
 func getLabelsFromNamespaceSelector(selector metav1.LabelSelector) map[string]string {
 	labels := map[string]string{}
 	// Process matchLabels
 	for key, value := range selector.MatchLabels {
-		labels[key] = value
+		if key == "t-caas.telekom.com/owner" {
+			labels[key] = value
+		}
 	}
 	// Process matchExpressions
 	for _, expr := range selector.MatchExpressions {
-		if expr.Operator == metav1.LabelSelectorOpIn && len(expr.Values) > 0 {
-			// For simplicity, use the first value
+		if expr.Key == "t-caas.telekom.com/owner" && expr.Operator == metav1.LabelSelectorOpIn && len(expr.Values) == 1 {
 			labels[expr.Key] = expr.Values[0]
 		}
 	}

@@ -1,0 +1,22 @@
+{{- if .Values.idp.prometheus.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: idp-authn-authz-metrics
+  annotations:
+    caas.pan-net.eu/job: authn-authz
+    caas.pan-net.eu/scrape: "true"
+  labels:
+{{ include "authn-authz-operator.labels.idp" . | indent 4 }}
+spec:
+  type: ClusterIP
+  internalTrafficPolicy: Cluster
+  selector:
+{{ include "authn-authz-operator.labels.idp" . | indent 4 }}
+  ports:
+  - name: metrics
+    port: 8080
+    protocol: TCP
+    targetPort: 8080
+{{- end }}

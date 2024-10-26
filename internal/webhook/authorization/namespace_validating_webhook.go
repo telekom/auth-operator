@@ -3,12 +3,12 @@ package webhooks
 import (
 	"context"
 	"net/http"
+	"strings"
 
-	authorizationv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/authn-authz-operator/api/authorization/v1alpha1"
+	authzv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/authn-authz-operator/api/authorization/v1alpha1"
+	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
@@ -30,16 +30,39 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 	}
 
 	var ns corev1.Namespace
-	err := v.Decoder.Decode(req, &ns)
+	var err error
+
+	switch req.Operation {
+	case admissionv1.Create, admissionv1.Update:
+		// For create and update operations, decode the object
+		err = v.Decoder.Decode(req, &ns)
+	case admissionv1.Delete:
+		// For delete operations, decode the old object
+		err = v.Decoder.DecodeRaw(req.OldObject, &ns)
+	default:
+		return admission.Allowed("")
+	}
+
 	if err != nil {
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 
-	// Get the user's groups from the request
+	// Extract user information
 	userGroups := req.UserInfo.Groups
+	username := req.UserInfo.Username
+
+	// Check if the user is a ServiceAccount
+	var saNamespace, saName string
+	isServiceAccount := false
+	usernameParts := strings.Split(username, ":")
+	if len(usernameParts) == 4 && usernameParts[0] == "system" && usernameParts[1] == "serviceaccount" {
+		isServiceAccount = true
+		saNamespace = usernameParts[2]
+		saName = usernameParts[3]
+	}
 
 	// Fetch all BindDefinition CRDs
-	bindDefinitions := &authorizationv1alpha1.BindDefinitionList{}
+	bindDefinitions := &authzv1alpha1.BindDefinitionList{}
 	if err := v.Client.List(ctx, bindDefinitions); err != nil {
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
@@ -48,8 +71,29 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 	isAllowed := false
 
 	for _, bindDef := range bindDefinitions.Items {
-		// Check if the BindDefinition includes the user's group in its subjects
-		if !userInGroups(userGroups, bindDef.Spec.Subjects) {
+		userMatchFound := false
+
+		// Check if the user matches any subjects in the BindDefinition
+		for _, subject := range bindDef.Spec.Subjects {
+			if subject.Kind == "Group" {
+				for _, userGroup := range userGroups {
+					if subject.Name == userGroup {
+						userMatchFound = true
+						break
+					}
+				}
+			} else if subject.Kind == "ServiceAccount" && isServiceAccount {
+				if subject.Namespace == saNamespace && subject.Name == saName {
+					userMatchFound = true
+					break
+				}
+			}
+			if userMatchFound {
+				break
+			}
+		}
+
+		if !userMatchFound {
 			continue
 		}
 
@@ -72,28 +116,30 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 		return admission.Allowed("")
 	}
 
-	return admission.Denied("User is not allowed to perform the operation on this namespace")
-}
-
-func userInGroups(userGroups []string, subjects []rbacv1.Subject) bool {
-	for _, subject := range subjects {
-		if subject.Kind != "Group" {
-			continue
-		}
-		for _, userGroup := range userGroups {
-			if subject.Name == userGroup {
-				return true
-			}
-		}
-	}
-	return false
+	return admission.Denied("You are not the owner of this namespace")
 }
 
 func namespaceMatchesSelector(ns *corev1.Namespace, selector *metav1.LabelSelector) (bool, error) {
-	sel, err := metav1.LabelSelectorAsSelector(selector)
-	if err != nil {
-		return false, err
+	labels := ns.Labels
+
+	// Check matchLabels for key "t-caas.telekom.com/owner"
+	for key, value := range selector.MatchLabels {
+		if key == "t-caas.telekom.com/owner" {
+			if labels[key] != value {
+				return false, nil
+			}
+		}
 	}
-	labels := labels.Set(ns.Labels)
-	return sel.Matches(labels), nil
+
+	// Check matchExpressions for key "t-caas.telekom.com/owner" with operator "In" and len(values) == 1
+	for _, expr := range selector.MatchExpressions {
+		if expr.Key == "t-caas.telekom.com/owner" && expr.Operator == metav1.LabelSelectorOpIn && len(expr.Values) == 1 {
+			if labels[expr.Key] != expr.Values[0] {
+				return false, nil
+			}
+		}
+	}
+
+	// If none of the conditions fail, return true
+	return true, nil
 }

@@ -1,3 +1,4 @@
+---
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: RoleDefinition
 metadata:
@@ -8,6 +9,15 @@ spec:
   targetRole: ClusterRole
   targetName: t-caas-tenant-namespaced-poweruser
   scopeNamespaced: true 
+  restrictedApis:
+    - name: crd.projectcalico.org 
+      versions:
+        - groupVersion: crd.projectcalico.org/v1 
+          version: v1
+    - name: trident.netapp.io
+      versions:
+        - groupVersion: trident.netapp.io/v1 
+          version: v1
   restrictedVerbs:
   - patch
   - update

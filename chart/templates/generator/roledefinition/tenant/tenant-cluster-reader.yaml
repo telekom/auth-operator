@@ -1,3 +1,4 @@
+---
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: RoleDefinition
 metadata:
@@ -8,6 +9,14 @@ spec:
   targetRole: ClusterRole
   targetName: t-caas-tenant-cluster-reader
   scopeNamespaced: false
+  restrictedResources:
+    - name: nodes/proxy
+      singularName: node
+      namespaced: false 
+      group: v1 
+      kind: Node 
+      verbs:
+        - all
   restrictedVerbs:
   - create
   - update

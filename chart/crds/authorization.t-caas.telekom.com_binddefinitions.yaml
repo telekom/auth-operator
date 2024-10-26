@@ -21,10 +21,6 @@ spec:
       jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
-    - description: The subject this BindDefinition is targeting
-      jsonPath: .spec.subjects
-      name: Subjects
-      type: string
     - description: The name of the child object created by this BindDefinition
       jsonPath: .spec.targetName
       name: Bind name
@@ -88,8 +84,6 @@ spec:
                       type: object
                       x-kubernetes-map-type: atomic
                     type: array
-                required:
-                - clusterRoleRefs
                 type: object
               roleBindings:
                 description: List of ClusterRoles/Roles to which subjects will be
@@ -195,8 +189,6 @@ spec:
                       type: object
                       x-kubernetes-map-type: atomic
                     type: array
-                required:
-                - namespaceSelector
                 type: object
               subjects:
                 description: List of subjects that will be bound to a target ClusterRole/Role.

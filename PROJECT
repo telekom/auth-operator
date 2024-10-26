@@ -29,7 +29,6 @@ resources:
   path: gitlab.devops.telekom.de/cit/t-caas/operators/authn-authz-operator/api/authorization/v1alpha1
   version: v1alpha1
   webhooks:
-    defaulting: true
     validation: true
     webhookVersion: v1
 - api:

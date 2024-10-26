@@ -1,4 +1,5 @@
 {{- if or (eq .Values.global.firstLineGlobal "true") (eq .Values.global.firstLineCluster "true") }}
+---
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: RoleDefinition
 metadata:
@@ -9,6 +10,14 @@ spec:
   targetRole: ClusterRole
   targetName: t-caas-firstline-cluster-reader
   scopeNamespaced: false
+  restrictedResources:
+    - name: nodes/proxy
+      singularName: node/proxy
+      namespaced: false 
+      group: v1 
+      kind: Node 
+      verbs:
+        - all
   restrictedVerbs:
   - create
   - update

@@ -1,5 +1,6 @@
 {{- if or (eq .Values.global.onboardingGlobal "true") (eq .Values.global.onboardingCluster "true") }}
 {{- range $index, $authBackend := .Values.global.cluster.authBackends }}
+---
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: BindDefinition
 metadata:
@@ -18,7 +19,7 @@ spec:
       name: {{ (printf "%st_caas_platform_team_cluster_poweruser" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
     - kind: ServiceAccount
       namespace: kube-system
-      name: m2m-sa-t-caas-platform
+      name: m2m-sa-t-caas-onboarding
   roleBindings:
     clusterRoleRefs:
     - apiGroup: rbac.authorization.k8s.io

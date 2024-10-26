@@ -1,5 +1,6 @@
 {{- range $index, $authBackend := .Values.global.cluster.authBackends }}
 {{- if eq $authBackend.name "tdg-zam-idp" }}
+---
 apiVersion: authentication.t-caas.telekom.com/v1alpha1
 kind: AuthProvider
 metadata:

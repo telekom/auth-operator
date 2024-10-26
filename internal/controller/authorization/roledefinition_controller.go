@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -379,8 +380,7 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		//}
 	}
 
-	//return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
-	return ctrl.Result{}, nil
+	return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
 }
 
 // crdToRoleDefinitionRequests() implements the MapFunc type and makes it possible to return an EventHandler
