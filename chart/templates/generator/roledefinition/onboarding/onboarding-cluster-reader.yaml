@@ -1,4 +1,5 @@
 {{- if or (eq .Values.global.onboardingGlobal "true") (eq .Values.global.onboardingCluster "true") }}
+---
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: RoleDefinition
 metadata:
@@ -9,73 +10,9 @@ spec:
   targetRole: ClusterRole
   targetName: t-caas-onboarding-cluster-reader
   scopeNamespaced: false
-  restrictedApis:
-    - name: admissionregistration.k8s.io
-      versions:
-        - groupVersion: admissionregistration.k8s.io/v1
-          version: v1
-    - name: apiextensions.k8s.io
-      versions:
-        - groupVersion: apiextensions.k8s.io/v1
-          version: v1
-    - name: apiregistration.k8s.io
-      versions:
-        - groupVersion: apiregistration.k8s.io/v1
-          version: v1
-    - name: authentication.t-caas.telekom.com
-      versions:
-        - groupVersion: authentication.t-caas.telekom.com/v1alpha1
-          version: v1alpha1
-    - name: authorization.t-caas.telekom.com
-      versions:
-        - groupVersion: authorization.t-caas.telekom.com/v1alpha1
-          version: v1alpha1
-    - name: cert-manager.io
-      versions:
-        - groupVersion: cert-manager.io/v1
-          version: v1
-    - name: certificates.k8s.io
-      versions:
-        - groupVersion: certificates.k8s.io/v1
-          version: v1
-    - name: crd.projectcalico.org 
-      versions:
-        - groupVersion: crd.projectcalico.org/v1 
-          version: v1
-    - name: flowcontrol.apiserver.k8s.io
-      versions:
-        - groupVersion: flowcontrol.apiserver.k8s.io/v1 
-          version: v1
-    - name: node.k8s.io
-      versions:
-        - groupVersion: node.k8s.io/v1
-          version: v1
-    - name: rbac.authorization.k8s.io
-      versions:
-        - groupVersion: rbac.authorization.k8s.io/v1
-          version: v1
-    - name: snapshot.storage.k8s.io
-      versions:
-        - groupVersion: snapshot.storage.k8s.io/v1
-          version: v1
-    - name: storage.k8s.io
-      versions:
-        - groupVersion: storage.k8s.io/v1
-          version: v1
-    - name: trident.netapp.io
-      versions:
-        - groupVersion: trident.netapp.io/v1 
-          version: v1
   restrictedResources:
-    - name: nodes
-      singularName: node 
-      namespaced: false 
-      group: v1 
-      kind: Node 
-      verbs:
-        - all
     - name: nodes/proxy
-      singularName: node/proxy
+      singularName: node
       namespaced: false 
       group: v1 
       kind: Node 

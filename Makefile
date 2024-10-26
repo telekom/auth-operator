@@ -80,9 +80,9 @@ run-gen: manifests generate fmt vet ## Run Generator controllers and webhooks fr
 run-bind: manifests generate fmt vet ## Run Binder controllers and webhooks from your host.
 	go run ./cmd/main.go --function=binder
 
-.PHONY: run-oidc
-run-oidc: manifests generate fmt vet ## Run OIDC controllers and webhooks from your host.
-	go run ./cmd/main.go --function=oidc
+.PHONY: run-idp
+run-idp: manifests generate fmt vet ## Run OIDC controllers and webhooks from your host.
+	go run ./cmd/main.go --function=idp
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
@@ -123,7 +123,7 @@ export-images: drawio ## Export PNG images from a Draw.io diagram.
 	drawio --export docs/drawio/authn-authz-operator.drawio --output docs/images/overall-architecture.png --format png --page-index=0
 	drawio --export docs/drawio/authn-authz-operator.drawio --output docs/images/generator.png --format png --page-index=1
 	drawio --export docs/drawio/authn-authz-operator.drawio --output docs/images/binder.png --format png --page-index=2
-	drawio --export docs/drawio/authn-authz-operator.drawio --output docs/images/oidc-client.png --format png --page-index=3
+	drawio --export docs/drawio/authn-authz-operator.drawio --output docs/images/idp-client.png --format png --page-index=3
 
 .PHONY: docs 
 docs: crd-ref-docs ## Generate markdown API reference into docs directory.

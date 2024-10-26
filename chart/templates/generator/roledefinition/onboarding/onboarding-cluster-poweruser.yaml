@@ -1,4 +1,5 @@
 {{- if or (eq .Values.global.onboardingGlobal "true") (eq .Values.global.onboardingCluster "true") }}
+---
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: RoleDefinition
 metadata:
@@ -54,6 +55,10 @@ spec:
       versions:
         - groupVersion: rbac.authorization.k8s.io/v1
           version: v1
+    - name: scheduling.k8s.io
+      versions:
+        - groupVersion: scheduling.k8s.io/v1
+          version: v1
     - name: snapshot.storage.k8s.io
       versions:
         - groupVersion: snapshot.storage.k8s.io/v1
@@ -67,6 +72,20 @@ spec:
         - groupVersion: trident.netapp.io/v1 
           version: v1
   restrictedResources:
+    - name: namespaces
+      singularName: namespace 
+      namespaced: false 
+      group: v1 
+      kind: Namespace 
+      verbs:
+        - all
+    - name: namespaces/finalize
+      singularName: namespace 
+      namespaced: false 
+      group: v1 
+      kind: Namespace 
+      verbs:
+        - all
     - name: nodes
       singularName: node 
       namespaced: false 
@@ -75,7 +94,7 @@ spec:
       verbs:
         - all
     - name: nodes/proxy
-      singularName: node/proxy
+      singularName: node
       namespaced: false 
       group: v1 
       kind: Node 

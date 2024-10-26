@@ -1,3 +1,4 @@
+---
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: RoleDefinition
 metadata:
@@ -14,6 +15,34 @@ spec:
       namespaced: true 
       group: v1 
       kind: Secret
+      verbs:
+        - all
+    - name: pods/exec
+      singularName: pod 
+      namespaced: true 
+      group: v1 
+      kind: Pod
+      verbs:
+        - all
+    - name: pods/proxy
+      singularName: pod 
+      namespaced: true 
+      group: v1 
+      kind: Pod
+      verbs:
+        - all
+    - name: pods/attach
+      singularName: pod 
+      namespaced: true 
+      group: v1 
+      kind: Pod
+      verbs:
+        - all
+    - name: pods/portforward
+      singularName: pod 
+      namespaced: true 
+      group: v1 
+      kind: Pod
       verbs:
         - all
   restrictedVerbs:

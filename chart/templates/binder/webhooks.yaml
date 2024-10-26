@@ -1,6 +1,6 @@
-{{- $name := printf "%s" ( include "authn-authz-operator.fullname" . ) }}
-{{- $namespacedName := printf "%s.%s" ( include "authn-authz-operator.fullname" . ) .Release.Namespace }}
-{{- $cn := printf "binder-%s-webhook.%s.svc" ( include "authn-authz-operator.fullname" . ) .Release.Namespace }}
+{{- $name := printf "binder-authn-authz-webhook" }}
+{{- $namespacedName := printf "binder-authn-authz-webhook.%s" .Release.Namespace }}
+{{- $cn := printf "binder-authn-authz-webhook.%s.svc" .Release.Namespace }}
 {{- $ca := genCA "authn-authz-webhook-ca" 3650 -}}
 {{- $cert := genSignedCert $cn nil (list $name $namespacedName $cn ) 3650 $ca -}}
 apiVersion: admissionregistration.k8s.io/v1
@@ -9,13 +9,15 @@ metadata:
   name: binder-{{ template "authn-authz-operator.fullname" . }}-validating-webhook
   labels:
 {{ include "authn-authz-operator.labels.binder" . | indent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,pre-delete
 webhooks:
 - admissionReviewVersions:
   - v1
   clientConfig:
     caBundle: {{ b64enc $ca.Cert }}
     service:
-      name: binder-{{ template "authn-authz-operator.fullname" . }}-webhook
+      name: binder-authn-authz-webhook
       namespace: {{ .Release.Namespace }}
       path: /validate-authorization-t-caas-telekom-com-v1alpha1-binddefinition
       port: 443
@@ -39,43 +41,13 @@ webhooks:
   timeoutSeconds: 10
 ---
 apiVersion: admissionregistration.k8s.io/v1
-kind: MutatingWebhookConfiguration
-metadata:
-  name: binder-{{ template "authn-authz-operator.fullname" . }}-mutating-webhook
-  labels:
-{{ include "authn-authz-operator.labels.binder" . | indent 4 }}
-webhooks:
-- admissionReviewVersions:
-  - v1 
-  clientConfig:
-    caBundle: {{ b64enc $ca.Cert }}
-    service:
-      name: binder-{{ template "authn-authz-operator.fullname" . }}-webhook
-      namespace: {{ .Release.Namespace }}
-      path: /mutate-authorization-t-caas-telekom-com-v1alpha1-binddefinition
-      port: 443
-  failurePolicy: Fail 
-  matchPolicy: Equivalent
-  name: mutating.webhook.authn-authz.t-caas.telekom.de
-  rules:
-  - apiGroups:
-    - authorization.t-caas.telekom.com
-    apiVersions:
-    - v1alpha1
-    operations:
-    - CREATE
-    resources:
-    - binddefinitions 
-    scope: '*'
-  sideEffects: None
-  timeoutSeconds: 10
----
-apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:
   name: namespace-{{ template "authn-authz-operator.fullname" . }}-validating-webhook
   labels:
 {{ include "authn-authz-operator.labels.binder" . | indent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,pre-delete
 webhooks:
 - admissionReviewVersions:
   - v1
@@ -112,6 +84,8 @@ metadata:
   name: namespace-{{ template "authn-authz-operator.fullname" . }}-mutating-webhook
   labels:
 {{ include "authn-authz-operator.labels.binder" . | indent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,pre-delete
 webhooks:
 - admissionReviewVersions:
   - v1 

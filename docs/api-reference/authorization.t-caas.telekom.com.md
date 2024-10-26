@@ -11,6 +11,7 @@ Package v1alpha1 contains API Schema definitions for the authorization v1alpha1 
 ### Resource Types
 - [BindDefinition](#binddefinition)
 - [RoleDefinition](#roledefinition)
+- [WebhookAuthorizer](#webhookauthorizer)
 
 
 
@@ -111,6 +112,23 @@ _Appears in:_
 | `namespaceSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.3/#labelselector-v1-meta)_ | NamespaceSelector is a label selector which will match namespaces that should have the RoleBinding/s. |  | Required: {} <br /> |
 
 
+#### Principal
+
+
+
+
+
+
+
+_Appears in:_
+- [WebhookAuthorizerSpec](#webhookauthorizerspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `user` _string_ | User is the requesting user in SubjectAccessReview request. |  | Optional: {} <br /> |
+| `groups` _string array_ | Groups is the requesting user groups in SubjectAccessReview request. |  | Optional: {} <br /> |
+
+
 #### RoleDefinition
 
 
@@ -169,5 +187,61 @@ _Appears in:_
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.3/#condition-v1-meta) array_ | Conditions defines current service state of the Role definition. All conditions should evaluate to true to signify successful reconciliation. |  | Optional: {} <br /> |
 
 
+#### WebhookAuthorizer
+
+
+
+WebhookAuthorizer is the Schema for the webhookauthorizers API
+
+
+
+
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `apiVersion` _string_ | `authorization.t-caas.telekom.com/v1alpha1` | | |
+| `kind` _string_ | `WebhookAuthorizer` | | |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.3/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `spec` _[WebhookAuthorizerSpec](#webhookauthorizerspec)_ |  |  |  |
+| `status` _[WebhookAuthorizerStatus](#webhookauthorizerstatus)_ |  |  |  |
+
+
+#### WebhookAuthorizerSpec
+
+
+
+WebhookAuthorizerSpec defines the desired state of WebhookAuthorizer
+
+
+
+_Appears in:_
+- [WebhookAuthorizer](#webhookauthorizer)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `apiGroup` _string_ | APIGroup is the group of the API that should be allowed. |  | Required: {} <br /> |
+| `apiVersion` _string_ | APIVersion is the version of the API that should be allowed. |  | Required: {} <br /> |
+| `resource` _string_ | Resource is the resource of the API that should be allowed. Resource can be a RegEx pattern to match multiple resources. |  | Required: {} <br /> |
+| `verbs` _string array_ | Verbs is a list of verbs that should be allowed. |  | Required: {} <br /> |
+| `allowedPrincipals` _[Principal](#principal) array_ | AllowedPrincipals is a slice of principals this authorizer should allow. |  | Optional: {} <br /> |
+| `deniedPrincipals` _[Principal](#principal) array_ | DeniedPrincipals is a slice of principals this authorizer should deny. |  | Optional: {} <br /> |
+| `namespaceSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.3/#labelselector-v1-meta)_ | NamespaceSelector is a label selector to match namespaces that should allow the specified API calls. |  | Optional: {} <br /> |
+
+
+#### WebhookAuthorizerStatus
+
+
+
+WebhookAuthorizerStatus defines the observed state of WebhookAuthorizer
+
+
+
+_Appears in:_
+- [WebhookAuthorizer](#webhookauthorizer)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `authorizerConfigured` _boolean_ | Not extremely important as most status updates are driven by Conditions. We read the JSONPath from this status field to signify webhook authorizer as configured. |  | Optional: {} <br /> |
+| `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.3/#condition-v1-meta) array_ | Conditions defines current service state of the Webhook authorizer. All conditions should evaluate to true to signify successful configuration. |  | Optional: {} <br /> |
 
 

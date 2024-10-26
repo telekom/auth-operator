@@ -1,31 +1,26 @@
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: oidc-{{ template "authn-authz-operator.fullname" . }}
+  name: idp-{{ template "authn-authz-operator.fullname" . }}
   labels:
-{{ include "authn-authz-operator.labels.oidc" . | indent 4 }}
-{{- if .Values.oidc.annotations }}
+{{ include "authn-authz-operator.labels.idp" . | indent 4 }}
+{{- if .Values.idp.annotations }}
   annotations:
-{{ toYaml .Values.oidc.annotations | indent 4 }}
+{{ toYaml .Values.idp.annotations | indent 4 }}
 {{- end }}
 spec:
   selector:
     matchLabels:
-{{ include "authn-authz-operator.labels.oidc" . | indent 6 }}
+{{ include "authn-authz-operator.labels.idp" . | indent 6 }}
   template:
     metadata:
       labels:
-{{ include "authn-authz-operator.labels.oidc" . | indent 8 }}
-      {{- if .Values.oidc.annotations }}
+{{ include "authn-authz-operator.labels.idp" . | indent 8 }}
+      {{- if .Values.idp.annotations }}
       annotations:
-{{ toYaml .Values.oidc.annotations | indent 8 }}
+{{ toYaml .Values.idp.annotations | indent 8 }}
       {{- end }}
     spec:
-      volumes:
-      - name: cert
-        secret:
-          defaultMode: 420
-          secretName: oidc-{{ template "authn-authz-operator.fullname" . }}-webhook-cert
       affinity:
 {{- toYaml .Values.global.affinity | nindent 8 }}
       securityContext:
@@ -34,24 +29,23 @@ spec:
       imagePullSecrets:
 {{- toYaml .Values.global.imagePullSecrets | nindent 8 }}
       {{- if .Values.global.serviceAccount.create }}
-      serviceAccount: oidc-{{ template "authn-authz-operator.serviceAccountName" .}}
+      serviceAccount: idp-{{ template "authn-authz-operator.serviceAccountName" .}}
       {{- end }}
       tolerations:
 {{ toYaml .Values.global.tolerations | indent 6 }}
       containers:
-      - name: oidc
+      - name: idp
         command:
         - /manager
         args:
           - --leader-elect
           - --health-probe-bind-address=:8081
           - --metrics-bind-address=:8080
-          - --webhook-bind-port=9443
-          - --function=oidc 
+          - --function=idp 
         image: {{ include "caas-image-template" .Values.global.image }}
         imagePullPolicy: {{ .Values.global.imagePullPolicy }}
         resources:
-{{ toYaml .Values.oidc.resources | indent 12 }}
+{{ toYaml .Values.idp.resources | indent 12 }}
         securityContext:
           privileged: false
           allowPrivilegeEscalation: false
@@ -72,17 +66,10 @@ spec:
             port: 8081
           initialDelaySeconds: 5
           periodSeconds: 10
-        volumeMounts:
-        - mountPath: /webhook-server/cert
-          name: cert
-          readOnly: true
         ports:
           - name: health-probe
             containerPort: 8081
             protocol: TCP 
           - name: metrics 
             containerPort: 8080 
-            protocol: TCP
-          - name: webhook-server
-            containerPort: 9443
             protocol: TCP

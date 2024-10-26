@@ -1,4 +1,5 @@
 {{- if or (eq .Values.global.firstLineGlobal "true") (eq .Values.global.firstLineCluster "true") }}
+---
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: RoleDefinition
 metadata:
@@ -9,6 +10,84 @@ spec:
   targetRole: ClusterRole
   targetName: t-caas-firstline-namespaced-reader
   scopeNamespaced: true
+  restrictedResources
+    - name: secrets 
+      singularName: secret 
+      namespaced: true 
+      group: v1 
+      kind: Secret
+      verbs:
+        - all
+    - name: pods/attach 
+      singularName: pod
+      namespaced: true 
+      group: v1 
+      kind: Pod
+      verbs:
+        - all
+    - name: pods/binding
+      singularName: pod
+      namespaced: true 
+      group: v1 
+      kind: Pod
+      verbs:
+        - all
+    - name: pods/ephemeralcontainers 
+      singularName: pod
+      namespaced: true 
+      group: v1 
+      kind: Pod
+      verbs:
+        - all
+    - name: pods/eviction
+      singularName: pod
+      namespaced: true 
+      group: v1 
+      kind: Pod
+      verbs:
+        - all
+    - name: pods/exec
+      singularName: pod
+      namespaced: true 
+      group: v1 
+      kind: Pod
+      verbs:
+        - all
+    - name: pods/log
+      singularName: pod
+      namespaced: true 
+      group: v1 
+      kind: Pod
+      verbs:
+        - all
+    - name: pods/portforward
+      singularName: pod
+      namespaced: true 
+      group: v1 
+      kind: Pod
+      verbs:
+        - all
+    - name: pods/proxy
+      singularName: pod
+      namespaced: true 
+      group: v1 
+      kind: Pod
+      verbs:
+        - all
+    - name: serviceaccounts/token
+      singularName: serviceaccount
+      namespaced: true 
+      group: v1 
+      kind: ServiceAccount
+      verbs:
+        - all
+    - name: services/proxy
+      singularName: service
+      namespaced: true 
+      group: v1 
+      kind: Service
+      verbs:
+        - all
   restrictedVerbs:
   - create
   - update

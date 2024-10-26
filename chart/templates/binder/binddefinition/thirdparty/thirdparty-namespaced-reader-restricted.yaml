@@ -1,5 +1,6 @@
 {{- if or (eq .Values.global.thirdPartyGlobal "true") (eq .Values.global.thirdPartyCluster "true") }}
 {{- range $index, $authBackend := .Values.global.cluster.authBackends }}
+---
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: BindDefinition
 metadata:

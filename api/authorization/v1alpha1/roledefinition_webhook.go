@@ -15,18 +15,17 @@ import (
 
 // log is for logging in this package.
 var roledefinitionlog = logf.Log.WithName("roledefinition-resource")
-var C client.Client
+var rdWebhookClient client.Client
 
 // SetupWebhookWithManager will setup the manager to manage the webhooks
 func (r *RoleDefinition) SetupWebhookWithManager(mgr ctrl.Manager) error {
-	C = mgr.GetClient() // needed to initialize the client somewhere
+	rdWebhookClient = mgr.GetClient() // needed to initialize the client somewhere
 	return ctrl.NewWebhookManagedBy(mgr).
 		For(r).
 		Complete()
 }
 
 // +kubebuilder:webhook:path=/validate-authorization-t-caas-telekom-com-v1alpha1-roledefinition,mutating=false,failurePolicy=fail,sideEffects=None,groups=authorization.t-caas.telekom.com,resources=roledefinitions,verbs=create;update,versions=v1alpha1,name=webhook.authn-authz.t-caas.telekom.de,admissionReviewVersions=v1
-
 var _ webhook.Validator = &RoleDefinition{}
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type
@@ -35,7 +34,7 @@ func (r *RoleDefinition) ValidateCreate() (admission.Warnings, error) {
 	ctx := context.Background()
 
 	roleDefinitionList := &RoleDefinitionList{}
-	if err := C.List(ctx, roleDefinitionList); err != nil {
+	if err := rdWebhookClient.List(ctx, roleDefinitionList); err != nil {
 		return nil, apierrors.NewInternalError(fmt.Errorf("Unable to list RoleDefinitions: %v", err))
 	}
 
@@ -54,7 +53,7 @@ func (r *RoleDefinition) ValidateUpdate(old runtime.Object) (admission.Warnings,
 	ctx := context.Background()
 
 	roleDefinitionList := &RoleDefinitionList{}
-	if err := C.List(ctx, roleDefinitionList); err != nil {
+	if err := rdWebhookClient.List(ctx, roleDefinitionList); err != nil {
 		return nil, apierrors.NewInternalError(fmt.Errorf("Unable to list RoleDefinitions: %v", err))
 	}
 

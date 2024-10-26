@@ -52,10 +52,10 @@ heritage: "{{ .Release.Service }}"
 {{- end -}}
 
 {{/*
-Define oidc labels for frequently used metadata.
+Define idp labels for frequently used metadata.
 */}}
-{{- define "authn-authz-operator.labels.oidc" -}}
-app: oidc-{{ template "authn-authz-operator.name" . }}
+{{- define "authn-authz-operator.labels.idp" -}}
+app: idp-{{ template "authn-authz-operator.name" . }}
 chart: "{{ .Chart.Name }}-{{ .Chart.Version }}"
 release: "{{ .Release.Name }}"
 heritage: "{{ .Release.Service }}"

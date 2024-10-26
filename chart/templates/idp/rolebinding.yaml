@@ -1,0 +1,16 @@
+{{- if .Values.idp.rbac.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: idp-{{ template "authn-authz-operator.fullname" . }}-leader-election
+  labels:
+{{ include "authn-authz-operator.labels.idp" . | indent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: idp-{{ template "authn-authz-operator.fullname" . }}-leader-election
+subjects:
+- kind: ServiceAccount
+  name: idp-{{ template "authn-authz-operator.serviceAccountName" .}}
+  namespace: {{ .Release.Namespace }}
+{{- end -}}

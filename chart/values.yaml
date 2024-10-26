@@ -6,43 +6,29 @@ global:
   firstLineCluster: "false"
   onboardingGlobal: "false"
   onboardingCluster: "false"
-  thirdPartyGlobal: "true"
-  thirdPartyCluster: "true"
+  thirdPartyGlobal: "false"
+  thirdPartyCluster: "false"
   thirdParties:
   - istio
   - monitoring
   cluster:
-    name: tscontroller
-    tenant: touchstone
+    name: 5gc
+    tenant: sddata
     location: hrzagt5
     environment: prod
     authBackends:
     - name: "tdi-infra-idp"
       oidcGroupNamePrefix: "s_"
       oidcGroupNameDelimiter: "_"
-    - name: "tdi-portal-idp"
-      oidcGroupNamePrefix: "d-"
-      oidcGroupNameDelimiter: "_"
     owners:
-    - tdgZam: xesteve@zam.dt
-      tdiInfra: 12asd31
+    - tdgZam: 
+      tdiInfra: q831050
       tdiPortal:
     - tdgZam: karlito@zam.dt
-      tdiInfra: a08d1nas
+      tdiInfra: t628545
       tdiPortal:
-    machineAccounts:
-    - usernames:
-        tdgZam: machine1@zam.dt
-        tdiInfra: oadsd18902dn112d
-        tdiPortal: 
-      role: admin
-    - usernames:
-        tdgZam: machine2@zam.dt
-        tdiInfra: adsmasid12i12m12d
-        tdiPortal:
-      role: reader
-    thirdParties:
-    - security
+    machineAccounts: {}
+    thirdParties: []
 
   # Define global setting that will apply to all components
   serviceAccount:
@@ -53,7 +39,7 @@ global:
     registry: "artifactory.devops.telekom.de"
     repository: "tdi-caas-docker-images-local"
     name: "authn-authz-operator"
-    tag: "0.0.1"
+    tag: "v0.1.1-features-bugfix"
   imagePullSecrets:
     - name: mcicd-docker
   imagePullPolicy: IfNotPresent
@@ -199,8 +185,8 @@ binder:
       cpu: 50m
       memory: 100Mi
 
-### OIDC component specific config (AuthProvider)
-oidc:
+### IDP component specific config (AuthProvider)
+idp:
   rbac:
     create: true
     rules:
