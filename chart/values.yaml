@@ -1,32 +1,21 @@
 global:
 ### Configure Custom Resources (RBAC/OIDC) inside the cluster
-  enforceAutomationGlobal: "false"
-  enforceAutomationCluster: "false"
-  firstLineGlobal: "false"
-  firstLineCluster: "false"
-  onboardingGlobal: "false"
-  onboardingCluster: "false"
-  thirdPartyGlobal: "false"
-  thirdPartyCluster: "false"
-  thirdParties:
-  - istio
-  - monitoring
+  enforceAutomationGlobal: ""
+  enforceAutomationCluster: ""
+  firstLineGlobal: ""
+  firstLineCluster: ""
+  onboardingGlobal: ""
+  onboardingCluster: ""
+  thirdPartyGlobal: ""
+  thirdPartyCluster: ""
+  thirdParties: []
   cluster:
-    name: 5gc
-    tenant: sddata
-    location: hrzagt5
-    environment: prod
-    authBackends:
-    - name: "tdi-infra-idp"
-      oidcGroupNamePrefix: "s_"
-      oidcGroupNameDelimiter: "_"
-    owners:
-    - tdgZam: 
-      tdiInfra: q831050
-      tdiPortal:
-    - tdgZam: karlito@zam.dt
-      tdiInfra: t628545
-      tdiPortal:
+    name: ""
+    tenant: ""
+    location: ""
+    environment: ""
+    authBackends: {}
+    owners: {}
     machineAccounts: {}
     thirdParties: []
 
@@ -39,10 +28,10 @@ global:
     registry: "artifactory.devops.telekom.de"
     repository: "tdi-caas-docker-images-local"
     name: "authn-authz-operator"
-    tag: "v0.1.1-features-bugfix"
+    tag: "v0.2.0"
   imagePullSecrets:
     - name: mcicd-docker
-  imagePullPolicy: IfNotPresent
+  imagePullPolicy: Always
   tolerations:
     - effect: NoSchedule
       key: node-role.kubernetes.io/master
@@ -68,6 +57,7 @@ generator:
       - authorization.t-caas.telekom.com
       resources:
       - roledefinitions
+      - roledefinitions/finalizers
       verbs:
       - create
       - delete
@@ -89,6 +79,8 @@ generator:
       resources:
       - clusterroles
       - roles
+      - clusterroles/finalizers
+      - roles/finalizers
       verbs:
       - escalate
       - create
@@ -109,6 +101,38 @@ generator:
       - watch
       - patch
       - update
+    - apiGroups:
+      - apiextensions.k8s.io 
+      resources:
+      - customresourcedefinitions
+      verbs:
+      - get 
+      - list 
+      - watch
+    - apiGroups:
+      - "" 
+      resources:
+      - events
+      verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+    - apiGroups:
+      - events.k8s.io 
+      resources:
+      - events
+      verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
   networkPolicy:
     enabled: true
   prometheus:
@@ -132,6 +156,7 @@ binder:
       - authorization.t-caas.telekom.com
       resources:
       - binddefinitions
+      - binddefinitions/finalizers
       verbs:
       - create
       - delete
@@ -151,10 +176,17 @@ binder:
     - apiGroups:
       - rbac.authorization.k8s.io
       resources:
+      - clusterroles
+      - roles
+      - clusterroles/finalizers
+      - roles/finalizers
       - clusterrolebindings
       - rolebindings
+      - clusterrolebindings/finalizers
+      - rolebindings/finalizers
       verbs:
       - bind
+      - escalate
       - create
       - delete
       - get
@@ -171,6 +203,50 @@ binder:
       - get
       - patch
       - update
+    - apiGroups:
+      - ""
+      resources:
+      - namespaces
+      - pods
+      - services
+      verbs:
+      - get 
+      - list 
+      - watch
+    - apiGroups:
+      - "apps"
+      resources:
+      - deployments 
+      verbs:
+      - get 
+      - list 
+      - watch
+    - apiGroups:
+      - ""
+      resources:
+      - serviceaccounts
+      - serviceaccounts/finalizers
+      - events
+      verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+    - apiGroups:
+      - events.k8s.io 
+      resources:
+      - events
+      verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
   networkPolicy:
     enabled: true
   prometheus:

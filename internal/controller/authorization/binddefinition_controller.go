@@ -200,22 +200,30 @@ func (r *BindDefinitionReconciler) reconcileDelete(ctx context.Context, bindDefi
 	log := log.FromContext(ctx)
 
 	// Construct namespace list from BindDefinition namespace selectors
-	namespaceList := &corev1.NamespaceList{}
-	listOpts := []client.ListOption{}
-	if !reflect.DeepEqual(bindDefinition.Spec.RoleBindings.NamespaceSelector, metav1.LabelSelector{}) {
-		selector, err := metav1.LabelSelectorAsSelector(&bindDefinition.Spec.RoleBindings.NamespaceSelector)
-		if err != nil {
-			return ctrl.Result{}, err
+	namespaceSet := make(map[string]corev1.Namespace)
+
+	for _, nsSelector := range bindDefinition.Spec.RoleBindings.NamespaceSelector {
+		if !reflect.DeepEqual(nsSelector, metav1.LabelSelector{}) {
+			selector, err := metav1.LabelSelectorAsSelector(&nsSelector)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+			namespaceList := &corev1.NamespaceList{}
+			listOpts := []client.ListOption{
+				&client.ListOptions{LabelSelector: selector},
+			}
+			err = r.Client.List(ctx, namespaceList, listOpts...)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+			for _, ns := range namespaceList.Items {
+				namespaceSet[ns.Name] = ns
+			}
 		}
-		listOpts = append(listOpts, &client.ListOptions{LabelSelector: selector})
-	}
-	err := r.Client.List(ctx, namespaceList, listOpts...)
-	if err != nil {
-		return ctrl.Result{}, err
 	}
 
 	// Handle terminating namespaces and check if they have any resources
-	for _, ns := range namespaceList.Items {
+	for _, ns := range namespaceSet {
 		if ns.Status.Phase == corev1.NamespaceTerminating {
 			log.Info("Namespace is terminating", "Namespace", ns.Name)
 
@@ -272,7 +280,7 @@ func (r *BindDefinitionReconciler) reconcileDelete(ctx context.Context, bindDefi
 		// RoleDefinition is marked to be deleted
 		log.Info("Deleting generated ServiceAccounts, ClusterRoleBindings and RoleBindings for the BindDefinition, as it is marked for deletion")
 		conditions.MarkTrue(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
-		err = r.Status().Update(ctx, bindDefinition)
+		err := r.Status().Update(ctx, bindDefinition)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -355,7 +363,7 @@ func (r *BindDefinitionReconciler) reconcileDelete(ctx context.Context, bindDefi
 			}
 
 			// For each namespace
-			for _, ns := range namespaceList.Items {
+			for _, ns := range namespaceSet {
 				// Delete RoleBindings for ClusterRoleRefs
 				for _, clusterRoleRef := range bindDefinition.Spec.RoleBindings.ClusterRoleRefs {
 					roleBinding := &rbacv1.RoleBinding{}
@@ -437,37 +445,45 @@ func (r *BindDefinitionReconciler) reconcileDelete(ctx context.Context, bindDefi
 			}
 			return ctrl.Result{}, nil
 		}
-
 		return ctrl.Result{}, nil
 	}
-	return ctrl.Result{}, nil
+	return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
 }
 
 // Reconcile BindDefinition method
 func (r *BindDefinitionReconciler) reconcileCreate(ctx context.Context, bindDefinition *authnv1alpha1.BindDefinition) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 
-	// Construct namespace list from BindDefinition namespace selectors
-	namespaceList := &corev1.NamespaceList{}
-	listOpts := []client.ListOption{}
-	if !reflect.DeepEqual(bindDefinition.Spec.RoleBindings.NamespaceSelector, metav1.LabelSelector{}) {
-		selector, err := metav1.LabelSelectorAsSelector(&bindDefinition.Spec.RoleBindings.NamespaceSelector)
-		if err != nil {
-			return ctrl.Result{}, err
+	// Construct namespace set from BindDefinition namespace selectors
+	namespaceSet := make(map[string]corev1.Namespace)
+
+	for _, nsSelector := range bindDefinition.Spec.RoleBindings.NamespaceSelector {
+		if !reflect.DeepEqual(nsSelector, metav1.LabelSelector{}) {
+			selector, err := metav1.LabelSelectorAsSelector(&nsSelector)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+			namespaceList := &corev1.NamespaceList{}
+			listOpts := []client.ListOption{
+				&client.ListOptions{LabelSelector: selector},
+			}
+			err = r.Client.List(ctx, namespaceList, listOpts...)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+			// Add namespaces to the set
+			for _, ns := range namespaceList.Items {
+				namespaceSet[ns.Name] = ns
+			}
 		}
-		listOpts = append(listOpts, &client.ListOptions{LabelSelector: selector})
-	}
-	err := r.Client.List(ctx, namespaceList, listOpts...)
-	if err != nil {
-		return ctrl.Result{}, err
 	}
 
 	activeNamespaces := []corev1.Namespace{}
-	for _, ns := range namespaceList.Items {
+	for _, ns := range namespaceSet {
 		if ns.Status.Phase != corev1.NamespaceTerminating {
 			activeNamespaces = append(activeNamespaces, ns)
 		} else {
-			log.Info("Skipping creation in terminating namespace", "Namespace", ns.Name)
+			log.Info("Skipping update in terminating namespace", "Namespace", ns.Name)
 		}
 	}
 
@@ -673,34 +689,43 @@ func (r *BindDefinitionReconciler) reconcileCreate(ctx context.Context, bindDefi
 	}
 
 	conditions.MarkTrue(bindDefinition, authnv1alpha1.CreateCondition, bindDefinition.Generation, authnv1alpha1.CreateReason, authnv1alpha1.CreateMessage)
-	err = r.Status().Update(ctx, bindDefinition)
+	err := r.Status().Update(ctx, bindDefinition)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
 }
 
 func (r *BindDefinitionReconciler) reconcileUpdate(ctx context.Context, bindDefinition *authnv1alpha1.BindDefinition) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 
-	// Construct namespace list from BindDefinition namespace selectors
-	namespaceList := &corev1.NamespaceList{}
-	listOpts := []client.ListOption{}
-	if !reflect.DeepEqual(bindDefinition.Spec.RoleBindings.NamespaceSelector, metav1.LabelSelector{}) {
-		selector, err := metav1.LabelSelectorAsSelector(&bindDefinition.Spec.RoleBindings.NamespaceSelector)
-		if err != nil {
-			return ctrl.Result{}, err
+	// Construct namespace set from BindDefinition namespace selectors
+	namespaceSet := make(map[string]corev1.Namespace)
+
+	for _, nsSelector := range bindDefinition.Spec.RoleBindings.NamespaceSelector {
+		if !reflect.DeepEqual(nsSelector, metav1.LabelSelector{}) {
+			selector, err := metav1.LabelSelectorAsSelector(&nsSelector)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+			namespaceList := &corev1.NamespaceList{}
+			listOpts := []client.ListOption{
+				&client.ListOptions{LabelSelector: selector},
+			}
+			err = r.Client.List(ctx, namespaceList, listOpts...)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+			// Add namespaces to the set
+			for _, ns := range namespaceList.Items {
+				namespaceSet[ns.Name] = ns
+			}
 		}
-		listOpts = append(listOpts, &client.ListOptions{LabelSelector: selector})
-	}
-	err := r.Client.List(ctx, namespaceList, listOpts...)
-	if err != nil {
-		return ctrl.Result{}, err
 	}
 
 	activeNamespaces := []corev1.Namespace{}
-	for _, ns := range namespaceList.Items {
+	for _, ns := range namespaceSet {
 		if ns.Status.Phase != corev1.NamespaceTerminating {
 			activeNamespaces = append(activeNamespaces, ns)
 		} else {

@@ -38,14 +38,14 @@ spec:
     - name: nodes
       singularName: node 
       namespaced: false 
-      group: v1 
+      group: "" 
       kind: Node 
       verbs:
         - all
     - name: nodes/proxy
       singularName: node
       namespaced: false 
-      group: v1 
+      group: "" 
       kind: Node 
       verbs:
         - all

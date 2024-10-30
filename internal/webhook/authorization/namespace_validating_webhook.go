@@ -9,6 +9,7 @@ import (
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
@@ -71,8 +72,11 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 	isAllowed := false
 
 	for _, bindDef := range bindDefinitions.Items {
+		// Skip BindDefinitions whose name ends with "-namespaced-reader-restricted"
+		if strings.HasSuffix(bindDef.Name, "-namespaced-reader-restricted") {
+			continue
+		}
 		userMatchFound := false
-
 		// Check if the user matches any subjects in the BindDefinition
 		for _, subject := range bindDef.Spec.Subjects {
 			if subject.Kind == "Group" {
@@ -92,26 +96,28 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 				break
 			}
 		}
-
 		if !userMatchFound {
 			continue
 		}
 
-		// Get the NamespaceSelector from the BindDefinition
-		namespaceSelector := bindDef.Spec.RoleBindings.NamespaceSelector
-
-		// Check if the namespace matches the selector
-		matches, err := namespaceMatchesSelector(&ns, &namespaceSelector)
-		if err != nil {
-			return admission.Errored(http.StatusInternalServerError, err)
+		// Get the NamespaceSelectors from the BindDefinition
+		namespaceSelectors := bindDef.Spec.RoleBindings.NamespaceSelector
+		namespaceMatchFound := false
+		for _, namespaceSelector := range namespaceSelectors {
+			matches, err := namespaceMatchesSelector(&ns, &namespaceSelector)
+			if err != nil {
+				return admission.Errored(http.StatusInternalServerError, err)
+			}
+			if matches {
+				namespaceMatchFound = true
+				break
+			}
 		}
-		if matches {
-			// User is allowed to perform the operation
+		if namespaceMatchFound {
 			isAllowed = true
 			break
 		}
 	}
-
 	if isAllowed {
 		return admission.Allowed("")
 	}
@@ -120,26 +126,12 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 }
 
 func namespaceMatchesSelector(ns *corev1.Namespace, selector *metav1.LabelSelector) (bool, error) {
-	labels := ns.Labels
-
-	// Check matchLabels for key "t-caas.telekom.com/owner"
-	for key, value := range selector.MatchLabels {
-		if key == "t-caas.telekom.com/owner" {
-			if labels[key] != value {
-				return false, nil
-			}
-		}
+	// Convert the LabelSelector into a labels.Selector
+	labelSelector, err := metav1.LabelSelectorAsSelector(selector)
+	if err != nil {
+		return false, err
 	}
 
-	// Check matchExpressions for key "t-caas.telekom.com/owner" with operator "In" and len(values) == 1
-	for _, expr := range selector.MatchExpressions {
-		if expr.Key == "t-caas.telekom.com/owner" && expr.Operator == metav1.LabelSelectorOpIn && len(expr.Values) == 1 {
-			if labels[expr.Key] != expr.Values[0] {
-				return false, nil
-			}
-		}
-	}
-
-	// If none of the conditions fail, return true
-	return true, nil
+	// Check if the namespace's labels match the selector
+	return labelSelector.Matches(labels.Set(ns.Labels)), nil
 }

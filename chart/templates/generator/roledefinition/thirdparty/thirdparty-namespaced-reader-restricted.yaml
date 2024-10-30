@@ -1,90 +1,101 @@
-{{- if or (eq .Values.global.thirdPartyGlobal "true") (eq .Values.global.thirdPartyCluster "true") }}
+{{- $thirdPartyGlobal := default "false" $.Values.global.thirdPartyGlobal }}
+{{- $thirdPartyCluster := $.Values.global.thirdPartyCluster | default "" }}
+{{- $thirdParties := list }}
+{{- $thirdParty := $thirdPartyGlobal }}
+  {{- $globalThirdParties := default (list) $.Values.global.thirdParties }}
+  {{- $thirdParties = concat $thirdParties $globalThirdParties }}
+{{- if ne $thirdPartyCluster "" }}
+  {{- $thirdParty = $thirdPartyCluster }}
+    {{- $clusterThirdParties := default (list) $.Values.global.cluster.thirdParties }}
+    {{- $thirdParties = concat $thirdParties $clusterThirdParties }}
+{{- end }}
+{{- if eq $thirdParty "true" }}
+{{- if gt (len $thirdParties) 0 }}
+{{- range $item := $thirdParties }}
 ---
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: RoleDefinition
 metadata:
-  name: rd-thirdparty-namespaced-reader-restricted
-  labels:
-{{ include "authn-authz-operator.labels.generator" . | indent 4 }}
+  name: rd-thirdparty-{{ $item }}-namespaced-reader-restricted
 spec:
   targetRole: ClusterRole
-  targetName: t-caas-thirdparty-namespaced-reader-restricted
+  targetName: t-caas-thirdparty-{{ $item }}-namespaced-reader-restricted
   scopeNamespaced: true
   restrictedResources:
     - name: secrets 
       singularName: secret 
       namespaced: true 
-      group: v1 
+      group: "" 
       kind: Secret
       verbs:
         - all
     - name: pods/attach 
       singularName: pod
       namespaced: true 
-      group: v1 
+      group: "" 
       kind: Pod
       verbs:
         - all
     - name: pods/binding
       singularName: pod
       namespaced: true 
-      group: v1 
+      group: "" 
       kind: Pod
       verbs:
         - all
     - name: pods/ephemeralcontainers 
       singularName: pod
       namespaced: true 
-      group: v1 
+      group: "" 
       kind: Pod
       verbs:
         - all
     - name: pods/eviction
       singularName: pod
       namespaced: true 
-      group: v1 
+      group: "" 
       kind: Pod
       verbs:
         - all
     - name: pods/exec
       singularName: pod
       namespaced: true 
-      group: v1 
+      group: "" 
       kind: Pod
       verbs:
         - all
     - name: pods/log
       singularName: pod
       namespaced: true 
-      group: v1 
+      group: "" 
       kind: Pod
       verbs:
         - all
     - name: pods/portforward
       singularName: pod
       namespaced: true 
-      group: v1 
+      group: "" 
       kind: Pod
       verbs:
         - all
     - name: pods/proxy
       singularName: pod
       namespaced: true 
-      group: v1 
+      group: "" 
       kind: Pod
       verbs:
         - all
     - name: serviceaccounts/token
       singularName: serviceaccount
       namespaced: true 
-      group: v1 
+      group: "" 
       kind: ServiceAccount
       verbs:
         - all
     - name: services/proxy
       singularName: service
       namespaced: true 
-      group: v1 
+      group: "" 
       kind: Service
       verbs:
         - all
@@ -97,4 +108,6 @@ spec:
   - bind
   - escalate
   - impersonate
+{{- end }}
+{{- end }}
 {{- end }}

@@ -1,4 +1,10 @@
-{{- if or (eq .Values.global.onboardingGlobal "true") (eq .Values.global.onboardingCluster "true") }}
+{{- $onboardingGlobal := default "false" $.Values.global.onboardingGlobal }}
+{{- $onboardingCluster := $.Values.global.onboardingCluster | default "" }}
+{{- $onboarding := $onboardingGlobal }}
+{{- if ne $onboardingCluster "" }}
+  {{- $onboarding = $onboardingCluster }}
+{{- end }}
+{{- if eq $onboarding "true" }}
 {{- range $index, $authBackend := .Values.global.cluster.authBackends }}
 ---
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
@@ -10,22 +16,22 @@ spec:
   subjects:
     - apiGroup: rbac.authorization.k8s.io
       kind: Group 
-      name: {{ (printf "%st_caas_onboarding_namespaced_reader" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      name: {{ (printf "oidc:%sonboarding_namespaced_reader" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
     - apiGroup: rbac.authorization.k8s.io
       kind: Group 
-      name: {{ (printf "%st_caas_onboarding_namespaced_collaborator" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      name: {{ (printf "oidc:%sonboarding_namespaced_collaborator" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
     - apiGroup: rbac.authorization.k8s.io
       kind: Group 
-      name: {{ (printf "%st_caas_onboarding_namespaced_poweruser" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      name: {{ (printf "oidc:%sonboarding_namespaced_poweruser" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
     - apiGroup: rbac.authorization.k8s.io
       kind: Group 
-      name: {{ (printf "%st_caas_onboarding_cluster_reader" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      name: {{ (printf "oidc:%sonboarding_cluster_reader" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
     - apiGroup: rbac.authorization.k8s.io
       kind: Group 
-      name: {{ (printf "%st_caas_onboarding_cluster_collaborator" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      name: {{ (printf "oidc:%sonboarding_cluster_collaborator" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
     - apiGroup: rbac.authorization.k8s.io
       kind: Group 
-      name: {{ (printf "%st_caas_onboarding_cluster_poweruser" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      name: {{ (printf "oidc:%sonboarding_cluster_poweruser" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
     - kind: ServiceAccount
       namespace: kube-system
       name: m2m-sa-t-caas-onboarding
@@ -35,18 +41,27 @@ spec:
       kind: ClusterRole 
       name: t-caas-onboarding-namespaced-reader
     namespaceSelector:
-      matchExpressions:
-        - key: kubernetes.io/metadata.name
-          operator: In
-          values:
-            - kube-system
-            - kube-public
-            - kube-node-lease
-        - key: t-caas.telekom.com/owner
-          operator: In
-          values:
-            - platform
-            - tenant 
-            - thirdparty
+    - matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values:
+          - kube-system
+          - kube-public
+          - kube-node-lease
+    - matchExpressions:
+      - key: t-caas.telekom.com/owner
+        operator: In
+        values:
+          - platform
+    - matchExpressions:
+      - key: t-caas.telekom.com/owner
+        operator: In 
+        values:
+          - tenant 
+    - matchExpressions:
+      - key: t-caas.telekom.com/owner
+        operator: In 
+        values:
+          - thirdparty
 {{- end }}
 {{- end }}

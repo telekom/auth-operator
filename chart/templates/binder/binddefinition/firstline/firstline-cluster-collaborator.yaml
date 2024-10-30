@@ -1,4 +1,10 @@
-{{- if or (eq .Values.global.firstLineGlobal "true") (eq .Values.global.firstLineCluster "true") }}
+{{- $firstLineGlobal := default "false" $.Values.global.firstLineGlobal }}
+{{- $firstLineCluster := $.Values.global.firstLineCluster | default "" }}
+{{- $firstLine := $firstLineGlobal }}
+{{- if ne $firstLineCluster "" }}
+  {{- $firstLine = $firstLineCluster }}
+{{- end }}
+{{- if eq $firstLine "true" }}
 {{- range $index, $authBackend := .Values.global.cluster.authBackends }}
 ---
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
@@ -10,10 +16,10 @@ spec:
   subjects:
     - apiGroup: rbac.authorization.k8s.io
       kind: Group 
-      name: {{ (printf "%st_caas_firstline_cluster_collaborator" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      name: {{ (printf "oidc:%sfirstline_cluster_collaborator" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
     - apiGroup: rbac.authorization.k8s.io
       kind: Group 
-      name: {{ (printf "%st_caas_firstline_cluster_poweruser" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      name: {{ (printf "oidc:%sfirstline_cluster_poweruser" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
     - kind: ServiceAccount
       namespace: kube-system
       name: m2m-sa-t-caas-firstline

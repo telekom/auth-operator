@@ -1,3 +1,9 @@
+{{- $enforceAutomationGlobal := default "false" $.Values.global.enforceAutomationGlobal }}
+{{- $enforceAutomationCluster := $.Values.global.enforceAutomationCluster | default "" }}
+{{- $enforceAutomation := $enforceAutomationGlobal }}
+{{- if ne $enforceAutomationCluster "" }}
+  {{- $enforceAutomation = $enforceAutomationCluster }}
+{{- end }}
 {{- range $index, $authBackend := .Values.global.cluster.authBackends }}
 ---
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
@@ -9,45 +15,162 @@ spec:
   subjects:
     - apiGroup: rbac.authorization.k8s.io
       kind: Group 
-      name: {{ (printf "%st_caas_tenant_namespaced_reader" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      name: {{ (printf "oidc:%s%s_namespaced_reader" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.tenant) | replace "_" $authBackend.oidcGroupNameDelimiter }}
     - apiGroup: rbac.authorization.k8s.io
       kind: Group 
-      name: {{ (printf "%st_caas_tenant_namespaced_collaborator" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      name: {{ (printf "oidc:%s%s_%s_namespaced_reader" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.tenant $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
     - apiGroup: rbac.authorization.k8s.io
       kind: Group 
-      name: {{ (printf "%st_caas_tenant_namespaced_poweruser" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      name: {{ (printf "oidc:%s%s_%s_%s_%s_namespaced_reader" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.name $.Values.global.cluster.tenant $.Values.global.cluster.location $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    {{- if eq $enforceAutomation "false" }}
     - apiGroup: rbac.authorization.k8s.io
       kind: Group 
-      name: {{ (printf "%st_caas_tenant_cluster_reader" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      name: {{ (printf "oidc:%s%s_namespaced_collaborator" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.tenant) | replace "_" $authBackend.oidcGroupNameDelimiter }}
     - apiGroup: rbac.authorization.k8s.io
       kind: Group 
-      name: {{ (printf "%st_caas_tenant_cluster_collaborator" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      name: {{ (printf "oidc:%s%s_namespaced_poweruser" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.tenant) | replace "_" $authBackend.oidcGroupNameDelimiter }}
     - apiGroup: rbac.authorization.k8s.io
       kind: Group 
-      name: {{ (printf "%st_caas_tenant_cluster_poweruser" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      name: {{ (printf "oidc:%s%s_%s_namespaced_collaborator" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.tenant $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "oidc:%s%s_%s_namespaced_poweruser" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.tenant $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "oidc:%s%s_%s_%s_%s_namespaced_collaborator" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.name $.Values.global.cluster.tenant $.Values.global.cluster.location $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "oidc:%s%s_%s_%s_%s_namespaced_poweruser" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.name $.Values.global.cluster.tenant $.Values.global.cluster.location $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    {{- else }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "oidc:%s%s_m2m_namespaced_reader" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.tenant) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "oidc:%s%s_m2m_namespaced_collaborator" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.tenant) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "oidc:%s%s_m2m_namespaced_poweruser" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.tenant) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "oidc:%s%s_%s_m2m_namespaced_reader" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.tenant $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "oidc:%s%s_%s_m2m_namespaced_collaborator" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.tenant $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "oidc:%s%s_%s_m2m_namespaced_poweruser" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.tenant $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "oidc:%s%s_%s_%s_%s_m2m_namespaced_reader" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.name $.Values.global.cluster.tenant $.Values.global.cluster.location $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "oidc:%s%s_%s_%s_%s_m2m_namespaced_collaborator" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.name $.Values.global.cluster.tenant $.Values.global.cluster.location $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "oidc:%s%s_%s_%s_%s_m2m_namespaced_poweruser" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.name $.Values.global.cluster.tenant $.Values.global.cluster.location $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    {{- end }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "oidc:%s%s_cluster_reader" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.tenant) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "oidc:%s%s_%s_cluster_reader" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.tenant $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "oidc:%s%s_%s_%s_%s_cluster_reader" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.name $.Values.global.cluster.tenant $.Values.global.cluster.location $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    {{- if eq $enforceAutomation "false" }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "oidc:%s%s_cluster_collaborator" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.tenant) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "oidc:%s%s_cluster_poweruser" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.tenant) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "oidc:%s%s_%s_cluster_collaborator" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.tenant $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "oidc:%s%s_%s_cluster_poweruser" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.tenant $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "oidc:%s%s_%s_%s_%s_cluster_collaborator" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.name $.Values.global.cluster.tenant $.Values.global.cluster.location $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "oidc:%s%s_%s_%s_%s_cluster_poweruser" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.name $.Values.global.cluster.tenant $.Values.global.cluster.location $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    {{- else }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "oidc:%s%s_m2m_cluster_reader" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.tenant) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "oidc:%s%s_m2m_cluster_collaborator" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.tenant) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "oidc:%s%s_m2m_cluster_poweruser" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.tenant) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "oidc:%s%s_%s_m2m_cluster_reader" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.tenant $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "oidc:%s%s_%s_m2m_cluster_collaborator" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.tenant $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "oidc:%s%s_%s_m2m_cluster_poweruser" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.tenant $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "oidc:%s%s_%s_%s_%s_m2m_cluster_reader" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.name $.Values.global.cluster.tenant $.Values.global.cluster.location $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "oidc:%s%s_%s_%s_%s_m2m_cluster_collaborator" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.name $.Values.global.cluster.tenant $.Values.global.cluster.location $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group 
+      name: {{ (printf "oidc:%s%s_%s_%s_%s_m2m_cluster_poweruser" $authBackend.oidcGroupNamePrefix $.Values.global.cluster.name $.Values.global.cluster.tenant $.Values.global.cluster.location $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+    {{- end }}
     - kind: ServiceAccount
       namespace: kube-system
-      name: m2m-sa-t-caas-tenant
+      name: m2m-sa-t-caas-{{ $.Values.global.cluster.tenant }}
   roleBindings:
     clusterRoleRefs:
     - apiGroup: rbac.authorization.k8s.io
       kind: ClusterRole 
       name: t-caas-tenant-namespaced-reader
     namespaceSelector:
-      matchExpressions:
-        - key: kubernetes.io/metadata.name
-          operator: NotIn
-          values:
-            - kube-system
-            - kube-public
-            - kube-node-lease
-        - key: t-caas.telekom.com/owner
-          operator: In
-          values:
-            - tenant
-        - key: t-caas.telekom.com/owner
-          operator: NotIn 
-          values:
-            - platform
-            - thirdparty
+    - matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: NotIn
+        values:
+          - kube-system
+          - kube-public
+          - kube-node-lease
+      - key: t-caas.telekom.com/owner
+        operator: In
+        values:
+          - tenant
+      - key: t-caas.telekom.com/tenant 
+        operator: In 
+        values:
+          - {{ $.Values.global.cluster.tenant }}
+      - key: t-caas.telekom.com/owner
+        operator: NotIn 
+        values:
+          - platform
+          - thirdparty
+      {{- $thirdParties := list }}
+      {{- if eq $.Values.global.thirdPartyGlobal "true" }}
+        {{- $globalThirdParties := default (list) $.Values.global.thirdParties }}
+        {{- $thirdParties = concat $thirdParties $globalThirdParties }}
+      {{- end }}
+      {{- if eq $.Values.global.thirdPartyCluster "true" }}
+        {{- $clusterThirdParties := default (list) $.Values.global.cluster.thirdParties }}
+        {{- $thirdParties = concat $thirdParties $clusterThirdParties }}
+      {{- end }}
+      {{- if gt (len $thirdParties) 0 }}
+      - key: t-caas.telekom.com/thirdparty
+        operator: NotIn 
+        values:
+        {{- range $item := $thirdParties }}
+        - {{ $item }}
+        {{- end }}
+      {{- end }}
 {{- end }}

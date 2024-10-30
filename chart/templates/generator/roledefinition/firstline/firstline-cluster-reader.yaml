@@ -1,4 +1,10 @@
-{{- if or (eq .Values.global.firstLineGlobal "true") (eq .Values.global.firstLineCluster "true") }}
+{{- $firstLineGlobal := default "false" $.Values.global.firstLineGlobal }}
+{{- $firstLineCluster := $.Values.global.firstLineCluster | default "" }}
+{{- $firstLine := $firstLineGlobal }}
+{{- if ne $firstLineCluster "" }}
+  {{- $firstLine = $firstLineCluster }}
+{{- end }}
+{{- if eq $firstLine "true" }}
 ---
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: RoleDefinition
@@ -14,7 +20,7 @@ spec:
     - name: nodes/proxy
       singularName: node/proxy
       namespaced: false 
-      group: v1 
+      group: "" 
       kind: Node 
       verbs:
         - all

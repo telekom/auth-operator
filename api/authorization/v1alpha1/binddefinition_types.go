@@ -34,7 +34,7 @@ type NamespaceBinding struct {
 
 	// NamespaceSelector is a label selector which will match namespaces that should have the RoleBinding/s.
 	// +kubebuilder:validation:Required
-	NamespaceSelector metav1.LabelSelector `json:"namespaceSelector,omitempty"`
+	NamespaceSelector []metav1.LabelSelector `json:"namespaceSelector,omitempty"`
 }
 
 // BindDefinitionSpec defines the desired state of BindDefinition

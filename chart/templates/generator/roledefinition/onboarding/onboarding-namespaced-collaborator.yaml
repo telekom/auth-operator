@@ -1,4 +1,10 @@
-{{- if or (eq .Values.global.onboardingGlobal "true") (eq .Values.global.onboardingCluster "true") }}
+{{- $onboardingGlobal := default "false" $.Values.global.onboardingGlobal }}
+{{- $onboardingCluster := $.Values.global.onboardingCluster | default "" }}
+{{- $onboarding := $onboardingGlobal }}
+{{- if ne $onboardingCluster "" }}
+  {{- $onboarding = $onboardingCluster }}
+{{- end }}
+{{- if eq $onboarding "true" }}
 ---
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: RoleDefinition
@@ -69,42 +75,42 @@ spec:
     - name: secrets 
       singularName: secret 
       namespaced: true 
-      group: v1 
+      group: "" 
       kind: Secret
       verbs:
         - all
     - name: pods/attach 
       singularName: pod
       namespaced: true 
-      group: v1 
+      group: "" 
       kind: Pod
       verbs:
         - all
     - name: pods/ephemeralcontainers 
       singularName: pod
       namespaced: true 
-      group: v1 
+      group: "" 
       kind: Pod
       verbs:
         - all
     - name: pods/exec
       singularName: pod
       namespaced: true 
-      group: v1 
+      group: "" 
       kind: Pod
       verbs:
         - all
     - name: pods/portforward
       singularName: pod
       namespaced: true 
-      group: v1 
+      group: "" 
       kind: Pod
       verbs:
         - all
     - name: pods/proxy
       singularName: pod
       namespaced: true 
-      group: v1 
+      group: "" 
       kind: Pod
       verbs:
         - all
