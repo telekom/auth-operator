@@ -54,7 +54,7 @@ webhooks:
   clientConfig:
     caBundle: {{ b64enc $ca.Cert }}
     service:
-      name: binder-{{ template "authn-authz-operator.fullname" . }}-webhook
+      name: binder-authn-authz-webhook
       namespace: {{ .Release.Namespace }}
       path: /validate-v1-namespace
       port: 443
@@ -92,7 +92,7 @@ webhooks:
   clientConfig:
     caBundle: {{ b64enc $ca.Cert }}
     service:
-      name: binder-{{ template "authn-authz-operator.fullname" . }}-webhook
+      name: binder-authn-authz-webhook
       namespace: {{ .Release.Namespace }}
       path: /mutate-v1-namespace
       port: 443

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"reflect"
 	"strings" // Import strings package for parsing username
 
 	authzv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/authn-authz-operator/api/authorization/v1alpha1"
@@ -63,6 +62,11 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 
 	// Iterate over each BindDefinition
 	for _, bindDef := range bindDefinitions.Items {
+		// Skip BindDefinitions whose name ends with "-namespaced-reader-restricted"
+		if strings.HasSuffix(bindDef.Name, "-namespaced-reader-restricted") {
+			continue
+		}
+
 		// Collect subjects from BindDefinition
 		subjects := bindDef.Spec.Subjects
 
@@ -89,10 +93,12 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 
 		if userMatchFound {
 			// Extract labels from namespaceSelector in RoleBindings
-			if !reflect.DeepEqual(bindDef.Spec.RoleBindings.NamespaceSelector, metav1.LabelSelector{}) {
-				labels := getLabelsFromNamespaceSelector(bindDef.Spec.RoleBindings.NamespaceSelector)
-				for k, v := range labels {
-					labelsToAdd[k] = v
+			if len(bindDef.Spec.RoleBindings.NamespaceSelector) > 0 {
+				for _, nsSelector := range bindDef.Spec.RoleBindings.NamespaceSelector {
+					labels := getLabelsFromNamespaceSelector(nsSelector)
+					for k, v := range labels {
+						labelsToAdd[k] = v
+					}
 				}
 			}
 		}
@@ -127,10 +133,22 @@ func getLabelsFromNamespaceSelector(selector metav1.LabelSelector) map[string]st
 		if key == "t-caas.telekom.com/owner" {
 			labels[key] = value
 		}
+		if key == "t-caas.telekom.com/tenant" {
+			labels[key] = value
+		}
+		if key == "t-caas.telekom.com/thirdparty" {
+			labels[key] = value
+		}
 	}
 	// Process matchExpressions
 	for _, expr := range selector.MatchExpressions {
 		if expr.Key == "t-caas.telekom.com/owner" && expr.Operator == metav1.LabelSelectorOpIn && len(expr.Values) == 1 {
+			labels[expr.Key] = expr.Values[0]
+		}
+		if expr.Key == "t-caas.telekom.com/tenant" && expr.Operator == metav1.LabelSelectorOpIn && len(expr.Values) == 1 {
+			labels[expr.Key] = expr.Values[0]
+		}
+		if expr.Key == "t-caas.telekom.com/thirdparty" && expr.Operator == metav1.LabelSelectorOpIn && len(expr.Values) == 1 {
 			labels[expr.Key] = expr.Values[0]
 		}
 	}

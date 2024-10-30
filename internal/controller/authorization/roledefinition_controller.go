@@ -196,12 +196,12 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 			for _, resource := range discoveredApiResources.APIResources {
 				resource.Group = filteredApiGroup.Name
+				if resource.Namespaced != roleDefinition.Spec.ScopeNamespaced {
+					continue
+				}
 				restricted := false
 				for _, restrictedResource := range roleDefinition.Spec.RestrictedResources {
 					if resource.Name == restrictedResource.Name && resource.Group == restrictedResource.Group {
-						restricted = true
-						break
-					} else if resource.Namespaced != roleDefinition.Spec.ScopeNamespaced {
 						restricted = true
 						break
 					}

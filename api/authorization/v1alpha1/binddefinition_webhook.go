@@ -49,30 +49,34 @@ func (r *BindDefinition) ValidateCreate() (admission.Warnings, error) {
 		}
 	}
 
-	// Check if namespaceSelector is specified
-	if !reflect.DeepEqual(r.Spec.RoleBindings.NamespaceSelector, metav1.LabelSelector{}) {
-		// Convert namespaceSelector to a selector
-		namespaceSelector, err := metav1.LabelSelectorAsSelector(&r.Spec.RoleBindings.NamespaceSelector)
-		if err != nil {
-			return nil, apierrors.NewBadRequest(fmt.Sprintf("Invalid namespaceSelector: %v", err))
+	// Handle multiple NamespaceSelectors
+	if len(r.Spec.RoleBindings.NamespaceSelector) > 0 {
+		namespaceSet := make(map[string]corev1.Namespace)
+
+		for _, nsSelector := range r.Spec.RoleBindings.NamespaceSelector {
+			if !reflect.DeepEqual(nsSelector, metav1.LabelSelector{}) {
+				selector, err := metav1.LabelSelectorAsSelector(&nsSelector)
+				if err != nil {
+					return nil, apierrors.NewBadRequest(fmt.Sprintf("Invalid namespaceSelector: %v", err))
+				}
+				namespaceList := &corev1.NamespaceList{}
+				listOptions := &client.ListOptions{
+					LabelSelector: selector,
+				}
+				if err := bdWebhookClient.List(ctx, namespaceList, listOptions); err != nil {
+					return nil, apierrors.NewInternalError(fmt.Errorf("Unable to list namespaces: %v", err))
+				}
+				for _, ns := range namespaceList.Items {
+					namespaceSet[ns.Name] = ns
+				}
+			}
 		}
-		// List namespaces matching the selector
-		namespaceList := &corev1.NamespaceList{}
-		listOptions := &client.ListOptions{
-			LabelSelector: namespaceSelector,
-		}
-		if err := bdWebhookClient.List(ctx, namespaceList, listOptions); err != nil {
-			return nil, apierrors.NewInternalError(fmt.Errorf("Unable to list namespaces: %v", err))
-		}
-		// For each namespace
-		for _, ns := range namespaceList.Items {
-			// For each RoleRef in roleBindings.roleRefs
+
+		for _, ns := range namespaceSet {
 			for _, roleRef := range r.Spec.RoleBindings.RoleRefs {
 				if roleRef.Kind != "Role" || roleRef.APIGroup != "rbac.authorization.k8s.io" {
 					return nil, apierrors.NewBadRequest(fmt.Sprintf("Invalid RoleRef: expected Kind=Role, APIGroup=rbac.authorization.k8s.io, got Kind=%s, APIGroup=%s", roleRef.Kind, roleRef.APIGroup))
 				}
-
-				// Check if the Role exists in the namespace
 				role := &rbacv1.Role{}
 				key := client.ObjectKey{
 					Namespace: ns.Name,
@@ -108,30 +112,35 @@ func (r *BindDefinition) ValidateUpdate(old runtime.Object) (admission.Warnings,
 			return nil, apierrors.NewBadRequest(fmt.Sprintf("targetName %s already exists in BindDefinition %s", r.Spec.TargetName, bindDefinition.Name))
 		}
 	}
-	// Check if namespaceSelector is specified
-	if !reflect.DeepEqual(r.Spec.RoleBindings.NamespaceSelector, metav1.LabelSelector{}) {
-		// Convert namespaceSelector to a selector
-		namespaceSelector, err := metav1.LabelSelectorAsSelector(&r.Spec.RoleBindings.NamespaceSelector)
-		if err != nil {
-			return nil, apierrors.NewBadRequest(fmt.Sprintf("Invalid namespaceSelector: %v", err))
+	// Handle multiple NamespaceSelectors
+	if len(r.Spec.RoleBindings.NamespaceSelector) > 0 {
+		namespaceSet := make(map[string]corev1.Namespace)
+
+		for _, nsSelector := range r.Spec.RoleBindings.NamespaceSelector {
+			if !reflect.DeepEqual(nsSelector, metav1.LabelSelector{}) {
+				selector, err := metav1.LabelSelectorAsSelector(&nsSelector)
+				if err != nil {
+					return nil, apierrors.NewBadRequest(fmt.Sprintf("Invalid namespaceSelector: %v", err))
+				}
+				namespaceList := &corev1.NamespaceList{}
+				listOptions := &client.ListOptions{
+					LabelSelector: selector,
+				}
+				if err := bdWebhookClient.List(ctx, namespaceList, listOptions); err != nil {
+					return nil, apierrors.NewInternalError(fmt.Errorf("Unable to list namespaces: %v", err))
+				}
+				for _, ns := range namespaceList.Items {
+					namespaceSet[ns.Name] = ns
+				}
+			}
 		}
-		// List namespaces matching the selector
-		namespaceList := &corev1.NamespaceList{}
-		listOptions := &client.ListOptions{
-			LabelSelector: namespaceSelector,
-		}
-		if err := bdWebhookClient.List(ctx, namespaceList, listOptions); err != nil {
-			return nil, apierrors.NewInternalError(fmt.Errorf("Unable to list namespaces: %v", err))
-		}
-		// For each namespace
-		for _, ns := range namespaceList.Items {
-			// For each RoleRef in roleBindings.roleRefs
+
+		for _, ns := range namespaceSet {
 			for _, roleRef := range r.Spec.RoleBindings.RoleRefs {
 				if roleRef.Kind != "Role" || roleRef.APIGroup != "rbac.authorization.k8s.io" {
 					return nil, apierrors.NewBadRequest(fmt.Sprintf("Invalid RoleRef: expected Kind=Role, APIGroup=rbac.authorization.k8s.io, got Kind=%s, APIGroup=%s", roleRef.Kind, roleRef.APIGroup))
 				}
 
-				// Check if the Role exists in the namespace
 				role := &rbacv1.Role{}
 				key := client.ObjectKey{
 					Namespace: ns.Name,

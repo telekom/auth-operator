@@ -1,4 +1,10 @@
-{{- if or (eq .Values.global.onboardingGlobal "true") (eq .Values.global.onboardingCluster "true") }}
+{{- $onboardingGlobal := default "false" $.Values.global.onboardingGlobal }}
+{{- $onboardingCluster := $.Values.global.onboardingCluster | default "" }}
+{{- $onboarding := $onboardingGlobal }}
+{{- if ne $onboardingCluster "" }}
+  {{- $onboarding = $onboardingCluster }}
+{{- end }}
+{{- if eq $onboarding "true" }}
 {{- range $index, $authBackend := .Values.global.cluster.authBackends }}
 ---
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
@@ -10,7 +16,7 @@ spec:
   subjects:
     - apiGroup: rbac.authorization.k8s.io
       kind: Group 
-      name: {{ (printf "%st_caas_onboarding_cluster_poweruser" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      name: {{ (printf "oidc:%sonboarding_cluster_poweruser" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
     - kind: ServiceAccount
       namespace: kube-system
       name: m2m-sa-t-caas-onboarding

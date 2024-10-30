@@ -1,14 +1,25 @@
-{{- if or (eq .Values.global.thirdPartyGlobal "true") (eq .Values.global.thirdPartyCluster "true") }}
+{{- $thirdPartyGlobal := default "false" $.Values.global.thirdPartyGlobal }}
+{{- $thirdPartyCluster := $.Values.global.thirdPartyCluster | default "" }}
+{{- $thirdParties := list }}
+{{- $thirdParty := $thirdPartyGlobal }}
+  {{- $globalThirdParties := default (list) $.Values.global.thirdParties }}
+  {{- $thirdParties = concat $thirdParties $globalThirdParties }}
+{{- if ne $thirdPartyCluster "" }}
+  {{- $thirdParty = $thirdPartyCluster }}
+    {{- $clusterThirdParties := default (list) $.Values.global.cluster.thirdParties }}
+    {{- $thirdParties = concat $thirdParties $clusterThirdParties }}
+{{- end }}
+{{- if eq $thirdParty "true" }}
+{{- if gt (len $thirdParties) 0 }}
+{{- range $item := $thirdParties }}
 ---
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: RoleDefinition
 metadata:
-  name: rd-thirdparty-cluster-poweruser
-  labels:
-{{ include "authn-authz-operator.labels.generator" . | indent 4 }}
+  name: rd-thirdparty-{{ $item }}-cluster-poweruser
 spec:
   targetRole: ClusterRole
-  targetName: t-caas-thirdparty-cluster-poweruser
+  targetName: t-caas-thirdparty-{{ $item }}-cluster-poweruser
   scopeNamespaced: false 
   restrictedApis:
     - name: authentication.t-caas.telekom.com
@@ -39,14 +50,14 @@ spec:
     - name: nodes
       singularName: node 
       namespaced: false 
-      group: v1 
+      group: "" 
       kind: Node 
       verbs:
         - all
     - name: nodes/proxy
       singularName: node
       namespaced: false 
-      group: v1 
+      group: "" 
       kind: Node 
       verbs:
         - all
@@ -59,4 +70,6 @@ spec:
   - bind
   - escalate
   - impersonate
+{{- end }}
+{{- end }}
 {{- end }}

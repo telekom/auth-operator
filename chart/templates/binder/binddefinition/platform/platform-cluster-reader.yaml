@@ -9,13 +9,13 @@ spec:
   subjects:
     - apiGroup: rbac.authorization.k8s.io
       kind: Group 
-      name: {{ (printf "%st_caas_platform_cluster_reader" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      name: {{ (printf "oidc:%splatform_cluster_reader" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
     - apiGroup: rbac.authorization.k8s.io
       kind: Group 
-      name: {{ (printf "%st_caas_platform_cluster_collaborator" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      name: {{ (printf "oidc:%splatform_cluster_collaborator" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
     - apiGroup: rbac.authorization.k8s.io
       kind: Group 
-      name: {{ (printf "%st_caas_platform_cluster_poweruser" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      name: {{ (printf "oidc:%splatform_cluster_poweruser" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
     - kind: ServiceAccount
       namespace: kube-system
       name: m2m-sa-t-caas-platform
