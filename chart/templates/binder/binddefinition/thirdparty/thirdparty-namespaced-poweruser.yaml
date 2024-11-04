@@ -36,41 +36,41 @@ spec:
     {{- if eq $enforceAutomation "false" }}
     - apiGroup: rbac.authorization.k8s.io
       kind: Group 
-      name: {{ (printf "oidc:%sthirdparty_%s_namespaced_poweruser" $authBackend.oidcGroupNamePrefix $item) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      name: {{ regexReplaceAll "[-_]" (printf "oidc:%sthirdparty_%s_namespaced_poweruser" $authBackend.oidcGroupNamePrefix $item) $authBackend.oidcGroupNameDelimiter }}
     - apiGroup: rbac.authorization.k8s.io
       kind: Group 
-      name: {{ (printf "oidc:%sthirdparty_%s_cluster_collaborator" $authBackend.oidcGroupNamePrefix $item) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      name: {{ regexReplaceAll "[-_]" (printf "oidc:%sthirdparty_%s_cluster_collaborator" $authBackend.oidcGroupNamePrefix $item) $authBackend.oidcGroupNameDelimiter }}
     - apiGroup: rbac.authorization.k8s.io
       kind: Group 
-      name: {{ (printf "oidc:%sthirdparty_%s_cluster_poweruser" $authBackend.oidcGroupNamePrefix $item) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      name: {{ regexReplaceAll "[-_]" (printf "oidc:%sthirdparty_%s_cluster_poweruser" $authBackend.oidcGroupNamePrefix $item) $authBackend.oidcGroupNameDelimiter }}
     - apiGroup: rbac.authorization.k8s.io
       kind: Group 
-      name: {{ (printf "oidc:%sthirdparty_%s_%s_namespaced_poweruser" $authBackend.oidcGroupNamePrefix $item $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      name: {{ regexReplaceAll "[-_]" (printf "oidc:%sthirdparty_%s_%s_namespaced_poweruser" $authBackend.oidcGroupNamePrefix $item $.Values.global.cluster.environment) $authBackend.oidcGroupNameDelimiter }}
     - apiGroup: rbac.authorization.k8s.io
       kind: Group 
-      name: {{ (printf "oidc:%sthirdparty_%s_%s_cluster_collaborator" $authBackend.oidcGroupNamePrefix $item $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      name: {{ regexReplaceAll "[-_]" (printf "oidc:%sthirdparty_%s_%s_cluster_collaborator" $authBackend.oidcGroupNamePrefix $item $.Values.global.cluster.environment) $authBackend.oidcGroupNameDelimiter }}
     - apiGroup: rbac.authorization.k8s.io
       kind: Group 
-      name: {{ (printf "oidc:%sthirdparty_%s_%s_cluster_poweruser" $authBackend.oidcGroupNamePrefix $item $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      name: {{ regexReplaceAll "[-_]" (printf "oidc:%sthirdparty_%s_%s_cluster_poweruser" $authBackend.oidcGroupNamePrefix $item $.Values.global.cluster.environment) $authBackend.oidcGroupNameDelimiter }}
     {{- else }}
     - apiGroup: rbac.authorization.k8s.io
       kind: Group 
-      name: {{ (printf "oidc:%sthirdparty_%s_m2m_namespaced_poweruser" $authBackend.oidcGroupNamePrefix $item) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      name: {{ regexReplaceAll "[-_]" (printf "oidc:%sthirdparty_%s_m2m_namespaced_poweruser" $authBackend.oidcGroupNamePrefix $item) $authBackend.oidcGroupNameDelimiter }}
     - apiGroup: rbac.authorization.k8s.io
       kind: Group 
-      name: {{ (printf "oidc:%sthirdparty_%s_m2m_cluster_collaborator" $authBackend.oidcGroupNamePrefix $item) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      name: {{ regexReplaceAll "[-_]" (printf "oidc:%sthirdparty_%s_m2m_cluster_collaborator" $authBackend.oidcGroupNamePrefix $item) $authBackend.oidcGroupNameDelimiter }}
     - apiGroup: rbac.authorization.k8s.io
       kind: Group 
-      name: {{ (printf "oidc:%sthirdparty_%s_m2m_cluster_poweruser" $authBackend.oidcGroupNamePrefix $item) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      name: {{ regexReplaceAll "[-_]" (printf "oidc:%sthirdparty_%s_m2m_cluster_poweruser" $authBackend.oidcGroupNamePrefix $item) $authBackend.oidcGroupNameDelimiter }}
     - apiGroup: rbac.authorization.k8s.io
       kind: Group 
-      name: {{ (printf "oidc:%sthirdparty_%s_%s_m2m_namespaced_poweruser" $authBackend.oidcGroupNamePrefix $item $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      name: {{ regexReplaceAll "[-_]" (printf "oidc:%sthirdparty_%s_%s_m2m_namespaced_poweruser" $authBackend.oidcGroupNamePrefix $item $.Values.global.cluster.environment) $authBackend.oidcGroupNameDelimiter }}
     - apiGroup: rbac.authorization.k8s.io
       kind: Group 
-      name: {{ (printf "oidc:%sthirdparty_%s_%s_m2m_cluster_collaborator" $authBackend.oidcGroupNamePrefix $item $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      name: {{ regexReplaceAll "[-_]" (printf "oidc:%sthirdparty_%s_%s_m2m_cluster_collaborator" $authBackend.oidcGroupNamePrefix $item $.Values.global.cluster.environment) $authBackend.oidcGroupNameDelimiter }}
     - apiGroup: rbac.authorization.k8s.io
       kind: Group 
-      name: {{ (printf "oidc:%sthirdparty_%s_%s_m2m_cluster_poweruser" $authBackend.oidcGroupNamePrefix $item $.Values.global.cluster.environment) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      name: {{ regexReplaceAll "[-_]" (printf "oidc:%sthirdparty_%s_%s_m2m_cluster_poweruser" $authBackend.oidcGroupNamePrefix $item $.Values.global.cluster.environment) $authBackend.oidcGroupNameDelimiter }}
     {{- end }}
     - kind: ServiceAccount
       namespace: kube-system

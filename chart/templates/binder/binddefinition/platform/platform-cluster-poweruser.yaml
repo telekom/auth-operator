@@ -9,7 +9,7 @@ spec:
   subjects:
     - apiGroup: rbac.authorization.k8s.io
       kind: Group 
-      name: {{ (printf "oidc:%splatform_cluster_poweruser" $authBackend.oidcGroupNamePrefix) | replace "_" $authBackend.oidcGroupNameDelimiter }}
+      name: {{ regexReplaceAll "[-_]" (printf "oidc:%splatform_cluster_poweruser" $authBackend.oidcGroupNamePrefix) $authBackend.oidcGroupNameDelimiter }}
     - kind: ServiceAccount
       namespace: kube-system
       name: m2m-sa-t-caas-platform
