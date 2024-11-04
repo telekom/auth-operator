@@ -123,7 +123,9 @@ export-images: drawio ## Export PNG images from a Draw.io diagram.
 	drawio --export docs/drawio/authn-authz-operator.drawio --output docs/images/overall-architecture.png --format png --page-index=0
 	drawio --export docs/drawio/authn-authz-operator.drawio --output docs/images/generator.png --format png --page-index=1
 	drawio --export docs/drawio/authn-authz-operator.drawio --output docs/images/binder.png --format png --page-index=2
-	drawio --export docs/drawio/authn-authz-operator.drawio --output docs/images/idp-client.png --format png --page-index=3
+	drawio --export docs/drawio/authn-authz-operator.drawio --output docs/images/idp.png --format png --page-index=3 
+	drawio --export docs/drawio/authn-authz-operator.drawio --output docs/images/authorizer.png --format png --page-index=4
+	drawio --export docs/drawio/authn-authz-operator.drawio --output docs/images/advertiser.png --format png --page-index=5
 
 .PHONY: docs 
 docs: crd-ref-docs ## Generate markdown API reference into docs directory.

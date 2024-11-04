@@ -84,7 +84,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `clusterRoleRefs` _[RoleRef](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.3/#roleref-v1-rbac) array_ | ClusterRole references adhering to the rbacv1.RoleRef schema. |  | Required: {} <br /> |
+| `clusterRoleRefs` _[RoleRef](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.3/#roleref-v1-rbac) array_ | ClusterRole references adhering to the rbacv1.RoleRef schema. |  | Optional: {} <br /> |
 
 
 
@@ -109,7 +109,7 @@ _Appears in:_
 | `clusterRoleRefs` _[RoleRef](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.3/#roleref-v1-rbac) array_ | ClusterRole references adhering to the rbacv1.RoleRef schema. |  | Optional: {} <br /> |
 | `roleRefs` _[RoleRef](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.3/#roleref-v1-rbac) array_ | Role references adhering to the rbacv1.RoleRef schema. |  | Optional: {} <br /> |
 | `namespace` _string_ | Namespace of the the Role that should be bound to the subjects. |  | Optional: {} <br /> |
-| `namespaceSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.3/#labelselector-v1-meta)_ | NamespaceSelector is a label selector which will match namespaces that should have the RoleBinding/s. |  | Required: {} <br /> |
+| `namespaceSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.3/#labelselector-v1-meta) array_ | NamespaceSelector is a label selector which will match namespaces that should have the RoleBinding/s. |  | Required: {} <br /> |
 
 
 #### Principal

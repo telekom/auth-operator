@@ -28,7 +28,7 @@ global:
     registry: "artifactory.devops.telekom.de"
     repository: "tdi-caas-docker-images-local"
     name: "authn-authz-operator"
-    tag: "v0.2.0"
+    tag: "v0.2.1-0.2.0"
   imagePullSecrets:
     - name: mcicd-docker
   imagePullPolicy: Always
