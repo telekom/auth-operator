@@ -9,8 +9,6 @@ metadata:
   name: binder-{{ template "authn-authz-operator.fullname" . }}-validating-webhook
   labels:
 {{ include "authn-authz-operator.labels.binder" . | indent 4 }}
-  annotations:
-    "helm.sh/hook": post-install,pre-delete
 webhooks:
 - admissionReviewVersions:
   - v1
@@ -46,8 +44,6 @@ metadata:
   name: namespace-{{ template "authn-authz-operator.fullname" . }}-validating-webhook
   labels:
 {{ include "authn-authz-operator.labels.binder" . | indent 4 }}
-  annotations:
-    "helm.sh/hook": post-install,pre-delete
 webhooks:
 - admissionReviewVersions:
   - v1
@@ -84,8 +80,6 @@ metadata:
   name: namespace-{{ template "authn-authz-operator.fullname" . }}-mutating-webhook
   labels:
 {{ include "authn-authz-operator.labels.binder" . | indent 4 }}
-  annotations:
-    "helm.sh/hook": post-install,pre-delete
 webhooks:
 - admissionReviewVersions:
   - v1 

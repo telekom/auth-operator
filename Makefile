@@ -81,8 +81,12 @@ run-bind: manifests generate fmt vet ## Run Binder controllers and webhooks from
 	go run ./cmd/main.go --function=binder
 
 .PHONY: run-idp
-run-idp: manifests generate fmt vet ## Run OIDC controllers and webhooks from your host.
+run-idp: manifests generate fmt vet ## Run IDP controllers and webhooks from your host.
 	go run ./cmd/main.go --function=idp
+
+.PHONY: run-whauthz
+run-whauthz: manifests generate fmt vet ## Run Authorizer controllers and webhooks from your host.
+	go run ./cmd/main.go --function=authorizer
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.

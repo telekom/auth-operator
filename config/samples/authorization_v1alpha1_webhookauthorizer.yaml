@@ -1,9 +1,24 @@
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: WebhookAuthorizer
 metadata:
-  labels:
-    app.kubernetes.io/name: t-caas-rbac-generator
-    app.kubernetes.io/managed-by: kustomize
   name: webhookauthorizer-sample
 spec:
-  # TODO(user): Add fields here
+  resourceRules:
+  - apiGroups:
+    - crd.projectcalico.org
+    resources:
+    - networkpolicies
+    verbs:
+    - get
+  allowedPrincipals:
+    - user: xavi
+  deniedPrincipals:
+    - user: karlito
+      groups:
+      - somefancygroup
+  namespaceSelector:
+    matchExpressions:
+    - key: kubernetes.io/metadata.name
+      operator: In
+      values:
+        - kube-system

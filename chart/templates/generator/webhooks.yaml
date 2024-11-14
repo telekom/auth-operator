@@ -9,8 +9,6 @@ metadata:
   name: generator-{{ template "authn-authz-operator.fullname" . }}-validating-webhook
   labels:
 {{ include "authn-authz-operator.labels.generator" . | indent 4 }}
-  annotations:
-    "helm.sh/hook": post-install,pre-delete
 webhooks:
 - admissionReviewVersions:
   - v1

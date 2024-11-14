@@ -50,18 +50,16 @@ spec:
                       items:
                         type: string
                       type: array
+                    namespace:
+                      description: Namespace is the requesting user namespace in case
+                        the requesting user is a ServiceAccount.
+                      type: string
                     user:
                       description: User is the requesting user in SubjectAccessReview
                         request.
                       type: string
                   type: object
                 type: array
-              apiGroup:
-                description: APIGroup is the group of the API that should be allowed.
-                type: string
-              apiVersion:
-                description: APIVersion is the version of the API that should be allowed.
-                type: string
               deniedPrincipals:
                 description: DeniedPrincipals is a slice of principals this authorizer
                   should deny.
@@ -73,6 +71,10 @@ spec:
                       items:
                         type: string
                       type: array
+                    namespace:
+                      description: Namespace is the requesting user namespace in case
+                        the requesting user is a ServiceAccount.
+                      type: string
                     user:
                       description: User is the requesting user in SubjectAccessReview
                         request.
@@ -126,20 +128,75 @@ spec:
                     type: object
                 type: object
                 x-kubernetes-map-type: atomic
-              resource:
-                description: Resource is the resource of the API that should be allowed.
-                  Resource can be a RegEx pattern to match multiple resources.
-                type: string
-              verbs:
-                description: Verbs is a list of verbs that should be allowed.
+              nonResourceRules:
+                description: Resources which will be used to evaluate the SubjectAccessReviewSpec.NonResourceAttributes
                 items:
-                  type: string
+                  description: NonResourceRule holds information that describes a
+                    rule for the non-resource
+                  properties:
+                    nonResourceURLs:
+                      description: |-
+                        NonResourceURLs is a set of partial urls that a user should have access to.  *s are allowed, but only as the full,
+                        final step in the path.  "*" means all.
+                      items:
+                        type: string
+                      type: array
+                      x-kubernetes-list-type: atomic
+                    verbs:
+                      description: 'Verb is a list of kubernetes non-resource API
+                        verbs, like: get, post, put, delete, patch, head, options.  "*"
+                        means all.'
+                      items:
+                        type: string
+                      type: array
+                      x-kubernetes-list-type: atomic
+                  required:
+                  - verbs
+                  type: object
                 type: array
-            required:
-            - apiGroup
-            - apiVersion
-            - resource
-            - verbs
+              resourceRules:
+                description: Resources which will be used to evaluate the SubjectAccessReviewSpec.ResourceAttributes
+                items:
+                  description: |-
+                    ResourceRule is the list of actions the subject is allowed to perform on resources. The list ordering isn't significant,
+                    may contain duplicates, and possibly be incomplete.
+                  properties:
+                    apiGroups:
+                      description: |-
+                        APIGroups is the name of the APIGroup that contains the resources.  If multiple API groups are specified, any action requested against one of
+                        the enumerated resources in any API group will be allowed.  "*" means all.
+                      items:
+                        type: string
+                      type: array
+                      x-kubernetes-list-type: atomic
+                    resourceNames:
+                      description: ResourceNames is an optional white list of names
+                        that the rule applies to.  An empty set means that everything
+                        is allowed.  "*" means all.
+                      items:
+                        type: string
+                      type: array
+                      x-kubernetes-list-type: atomic
+                    resources:
+                      description: |-
+                        Resources is a list of resources this rule applies to.  "*" means all in the specified apiGroups.
+                         "*/foo" represents the subresource 'foo' for all resources in the specified apiGroups.
+                      items:
+                        type: string
+                      type: array
+                      x-kubernetes-list-type: atomic
+                    verbs:
+                      description: 'Verb is a list of kubernetes resource API verbs,
+                        like: get, list, watch, create, update, delete, proxy.  "*"
+                        means all.'
+                      items:
+                        type: string
+                      type: array
+                      x-kubernetes-list-type: atomic
+                  required:
+                  - verbs
+                  type: object
+                type: array
             type: object
           status:
             description: WebhookAuthorizerStatus defines the observed state of WebhookAuthorizer

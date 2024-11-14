@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	authzv1 "k8s.io/api/authorization/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -17,25 +18,21 @@ type Principal struct {
 	// Groups is the requesting user groups in SubjectAccessReview request.
 	// +kubebuilder:validation:Optional
 	Groups []string `json:"groups,omitempty"`
+
+	// Namespace is the requesting user namespace in case the requesting user is a ServiceAccount.
+	// +kubebuilder:validation:Optional
+	Namespace string `json:"namespace,omitempty"`
 }
 
 // WebhookAuthorizerSpec defines the desired state of WebhookAuthorizer
 type WebhookAuthorizerSpec struct {
-	// APIGroup is the group of the API that should be allowed.
-	// +kubebuilder:validation:Required
-	APIGroup string `json:"apiGroup"`
+	// Resources which will be used to evaluate the SubjectAccessReviewSpec.ResourceAttributes
+	// +kubebuilder:validation:Optional
+	ResourceRules []authzv1.ResourceRule `json:"resourceRules,omitempty"`
 
-	// APIVersion is the version of the API that should be allowed.
-	// +kubebuilder:validation:Required
-	APIVersion string `json:"apiVersion"`
-
-	// Resource is the resource of the API that should be allowed. Resource can be a RegEx pattern to match multiple resources.
-	// +kubebuilder:validation:Required
-	Resource string `json:"resource"`
-
-	// Verbs is a list of verbs that should be allowed.
-	// +kubebuilder:validation:Required
-	Verbs []string `json:"verbs"`
+	// Resources which will be used to evaluate the SubjectAccessReviewSpec.NonResourceAttributes
+	// +kubebuilder:validation:Optional
+	NonResourceRules []authzv1.NonResourceRule `json:"nonResourceRules,omitempty"`
 
 	// AllowedPrincipals is a slice of principals this authorizer should allow.
 	// +kubebuilder:validation:Optional
