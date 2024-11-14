@@ -30,10 +30,11 @@ import (
 )
 
 const (
-	GeneratorFunction = "generator"
-	BinderFunction    = "binder"
-	IDPFunction       = "idp"
-	EmptyFunction     = "empty"
+	GeneratorFunction  = "generator"
+	BinderFunction     = "binder"
+	AuthorizerFunction = "authorizer"
+	IDPFunction        = "idp"
+	EmptyFunction      = "empty"
 )
 
 var (
@@ -63,7 +64,7 @@ func main() {
 	// Initialize flags
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metric endpoint binds to. "+"If not set, it will be 0 in order to disable the metrics server.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", "0", "The address the probe endpoint binds to. "+"If not set, it will be 0 in order to disable the healthz/readyz probe.")
-	flag.StringVar(&function, "function", "empty", "The function this manager will be hooked up with. "+"The functions can be 'generator|binder|idp'.")
+	flag.StringVar(&function, "function", "empty", "The function this manager will be hooked up with. "+"The functions can be 'generator|binder|authorizer|idp'.")
 	flag.IntVar(&webhookPort, "webhook-bind-port", 9443, "The port the webhook server binds to. "+"If not set, it will be set to '9443' as a default.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false, "Enable leader election for controller manager. "+"Enabling this will ensure there is only one active controller manager.")
 	flag.BoolVar(&secureMetrics, "metrics-secure", false, "If set the metrics endpoint is served securely.")
@@ -169,6 +170,14 @@ func main() {
 			}
 			mgr.GetWebhookServer().Register("/validate-v1-namespace", &webhook.Admission{Handler: namespaceValidator})
 		}
+	}
+
+	if function == AuthorizerFunction {
+		authorizer := &authorizationwebhook.Authorizer{
+			Client: mgr.GetClient(),
+			Log:    ctrl.Log.WithName("Authorizer"),
+		}
+		mgr.GetWebhookServer().Register("/authorize", authorizer)
 	}
 
 	// Setup the AuthProvider controller and AuthProvider webhook/s
