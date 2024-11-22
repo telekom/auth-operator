@@ -11,8 +11,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
+
+var nsMutatorLog = logf.Log.WithName("namespace-mutator")
 
 type NamespaceMutator struct {
 	Client  client.Client
@@ -32,8 +35,26 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 		return admission.Allowed("Operation is neither CREATE nor UPDATE")
 	}
 
+	// Allow the default kubernetes-admin to CRUD namespaces without mutation (necessary for CAPI/Flux)
+	if req.UserInfo.Username == "kubernetes-admin" {
+		nsMutatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+		return admission.Allowed("")
+	}
+
 	ns := &corev1.Namespace{}
-	err := m.Decoder.Decode(req, ns)
+	var err error
+
+	switch req.Operation {
+	case admissionv1.Create:
+		// For create operations, decode the object
+		err = m.Decoder.Decode(req, ns)
+	case admissionv1.Update:
+		// For update operations, decode the old object
+		err = m.Decoder.DecodeRaw(req.OldObject, ns)
+	default:
+		return admission.Allowed("")
+	}
+
 	if err != nil {
 		return admission.Errored(http.StatusBadRequest, err)
 	}
@@ -110,6 +131,7 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 			ns.Labels = map[string]string{}
 		}
 		for k, v := range labelsToAdd {
+			nsMutatorLog.Info("OIDC match found - adding labels", "Namespace", ns.Name, "Labels", labelsToAdd)
 			ns.Labels[k] = v
 		}
 

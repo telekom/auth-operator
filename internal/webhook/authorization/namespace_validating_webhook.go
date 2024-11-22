@@ -2,6 +2,7 @@ package webhooks
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -11,8 +12,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
+
+var nsValidatorLog = logf.Log.WithName("namespace-validator")
 
 type NamespaceValidator struct {
 	Client  client.Client
@@ -30,32 +34,69 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 		return admission.Allowed("")
 	}
 
+	// Allow the default kubernetes-admin to CRUD namespaces (necessary for CAPI/Flux)
+	if req.UserInfo.Username == "kubernetes-admin" {
+		nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+		return admission.Allowed("")
+	}
+
 	var ns corev1.Namespace
+	var oldNs corev1.Namespace
 	var err error
+	var oldErr error
 
 	switch req.Operation {
-	case admissionv1.Create, admissionv1.Update:
-		// For create and update operations, decode the object
+	case admissionv1.Create:
+		// For create operations, decode the object
 		err = v.Decoder.Decode(req, &ns)
+	case admissionv1.Update:
+		// For update operations, decode both object and old object
+		err = v.Decoder.Decode(req, &ns)
+		oldErr = v.Decoder.DecodeRaw(req.OldObject, &oldNs)
 	case admissionv1.Delete:
-		// For delete operations, decode the old object
+		// For update and delete operations, decode the old object
 		err = v.Decoder.DecodeRaw(req.OldObject, &ns)
 	default:
 		return admission.Allowed("")
 	}
 
-	if err != nil {
+	if err != nil || oldErr != nil {
 		return admission.Errored(http.StatusBadRequest, err)
+	}
+
+	if req.Operation == admissionv1.Update {
+		// Ensure Labels maps are not nil to prevent nil pointer dereference
+		if ns.Labels == nil {
+			ns.Labels = map[string]string{}
+		}
+		if oldNs.Labels == nil {
+			oldNs.Labels = map[string]string{}
+		}
+
+		// Define the label keys of interest
+		labelKeys := []string{
+			"t-caas.telekom.com/owner",
+			"t-caas.telekom.com/tenant",
+			"t-caas.telekom.com/thirdparty",
+		}
+
+		// Compare the labels between old and new namespaces
+		for _, key := range labelKeys {
+			oldValue, oldExists := oldNs.Labels[key]
+			newValue, newExists := ns.Labels[key]
+			if oldExists != newExists || oldValue != newValue {
+				return admission.Denied(fmt.Sprintf("Modification of label '%s' is not allowed", key))
+			}
+		}
 	}
 
 	// Extract user information
 	userGroups := req.UserInfo.Groups
-	username := req.UserInfo.Username
 
 	// Check if the user is a ServiceAccount
 	var saNamespace, saName string
 	isServiceAccount := false
-	usernameParts := strings.Split(username, ":")
+	usernameParts := strings.Split(req.UserInfo.Username, ":")
 	if len(usernameParts) == 4 && usernameParts[0] == "system" && usernameParts[1] == "serviceaccount" {
 		isServiceAccount = true
 		saNamespace = usernameParts[2]
@@ -122,7 +163,7 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 		return admission.Allowed("")
 	}
 
-	return admission.Denied("You are not the owner of this namespace")
+	return admission.Denied(fmt.Sprintf("User %s is not the owner of namespace %s", req.UserInfo.Username, ns.Name))
 }
 
 func namespaceMatchesSelector(ns *corev1.Namespace, selector *metav1.LabelSelector) (bool, error) {
