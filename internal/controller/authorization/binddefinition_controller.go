@@ -331,7 +331,7 @@ func (r *BindDefinitionReconciler) reconcileDelete(ctx context.Context, bindDefi
 			// Delete generated ClusterRoleBindings
 			for _, clusterRoleRef := range bindDefinition.Spec.ClusterRoleBindings.ClusterRoleRefs {
 				clusterRoleBinding := &rbacv1.ClusterRoleBinding{}
-				clusterRoleBindingName := bindDefinition.Spec.TargetName + clusterRoleRef.Name + "-binding"
+				clusterRoleBindingName := bindDefinition.Spec.TargetName + clusterRoleRef + "-binding"
 				err := r.Client.Get(ctx, types.NamespacedName{Name: clusterRoleBindingName}, clusterRoleBinding)
 				if err != nil {
 					if apierrors.IsNotFound(err) {
@@ -367,7 +367,7 @@ func (r *BindDefinitionReconciler) reconcileDelete(ctx context.Context, bindDefi
 				// Delete RoleBindings for ClusterRoleRefs
 				for _, clusterRoleRef := range bindDefinition.Spec.RoleBindings.ClusterRoleRefs {
 					roleBinding := &rbacv1.RoleBinding{}
-					roleBindingName := bindDefinition.Spec.TargetName + clusterRoleRef.Name + "-binding"
+					roleBindingName := bindDefinition.Spec.TargetName + clusterRoleRef + "-binding"
 					err := r.Client.Get(ctx, types.NamespacedName{Name: roleBindingName, Namespace: ns.Name}, roleBinding)
 					if err != nil {
 						if apierrors.IsNotFound(err) {
@@ -400,7 +400,7 @@ func (r *BindDefinitionReconciler) reconcileDelete(ctx context.Context, bindDefi
 				// Delete RoleBindings for RoleRefs
 				for _, roleRef := range bindDefinition.Spec.RoleBindings.RoleRefs {
 					roleBinding := &rbacv1.RoleBinding{}
-					roleBindingName := bindDefinition.Spec.TargetName + roleRef.Name + "-binding"
+					roleBindingName := bindDefinition.Spec.TargetName + roleRef + "-binding"
 					err := r.Client.Get(ctx, types.NamespacedName{Name: roleBindingName, Namespace: ns.Name}, roleBinding)
 					if err != nil {
 						if apierrors.IsNotFound(err) {
@@ -562,7 +562,7 @@ func (r *BindDefinitionReconciler) reconcileCreate(ctx context.Context, bindDefi
 	// Create ClusterRoleBinding resources
 	for _, clusterRoleRef := range bindDefinition.Spec.ClusterRoleBindings.ClusterRoleRefs {
 		clusterRoleBinding := &rbacv1.ClusterRoleBinding{}
-		clusterRoleBindingName := bindDefinition.Spec.TargetName + "-" + clusterRoleRef.Name + "-binding"
+		clusterRoleBindingName := bindDefinition.Spec.TargetName + "-" + clusterRoleRef + "-binding"
 		err := r.Client.Get(ctx, types.NamespacedName{Name: clusterRoleBindingName}, clusterRoleBinding)
 		if err != nil {
 			if apierrors.IsNotFound(err) {
@@ -572,7 +572,11 @@ func (r *BindDefinitionReconciler) reconcileCreate(ctx context.Context, bindDefi
 						Labels: bindDefinition.ObjectMeta.Labels,
 					},
 					Subjects: bindDefinition.Spec.Subjects,
-					RoleRef:  clusterRoleRef,
+					RoleRef: rbacv1.RoleRef{
+						APIGroup: "rbac.authorization.k8s.io",
+						Kind:     "ClusterRole",
+						Name:     clusterRoleRef,
+					},
 				}
 				if err := controllerutil.SetControllerReference(bindDefinition, clusterRoleBinding, r.Scheme); err != nil {
 					conditions.MarkFalse(bindDefinition, authnv1alpha1.OwnerRefCondition, bindDefinition.Generation, authnv1alpha1.OwnerRefReason, authnv1alpha1.OwnerRefMessage)
@@ -604,7 +608,7 @@ func (r *BindDefinitionReconciler) reconcileCreate(ctx context.Context, bindDefi
 	for _, ns := range activeNamespaces {
 		for _, clusterRoleRef := range bindDefinition.Spec.RoleBindings.ClusterRoleRefs {
 			roleBinding := &rbacv1.RoleBinding{}
-			roleBindingName := bindDefinition.Spec.TargetName + "-" + clusterRoleRef.Name + "-binding"
+			roleBindingName := bindDefinition.Spec.TargetName + "-" + clusterRoleRef + "-binding"
 			err := r.Client.Get(ctx, types.NamespacedName{Name: roleBindingName, Namespace: ns.Name}, roleBinding)
 			if err != nil {
 				if apierrors.IsNotFound(err) {
@@ -615,7 +619,11 @@ func (r *BindDefinitionReconciler) reconcileCreate(ctx context.Context, bindDefi
 							Labels:    bindDefinition.ObjectMeta.Labels,
 						},
 						Subjects: bindDefinition.Spec.Subjects,
-						RoleRef:  clusterRoleRef,
+						RoleRef: rbacv1.RoleRef{
+							APIGroup: "rbac.authorization.k8s.io",
+							Kind:     "ClusterRole",
+							Name:     clusterRoleRef,
+						},
 					}
 					if err := controllerutil.SetControllerReference(bindDefinition, roleBinding, r.Scheme); err != nil {
 						conditions.MarkFalse(bindDefinition, authnv1alpha1.OwnerRefCondition, bindDefinition.Generation, authnv1alpha1.OwnerRefReason, authnv1alpha1.OwnerRefMessage)
@@ -646,7 +654,7 @@ func (r *BindDefinitionReconciler) reconcileCreate(ctx context.Context, bindDefi
 		}
 		for _, roleRef := range bindDefinition.Spec.RoleBindings.RoleRefs {
 			roleBinding := &rbacv1.RoleBinding{}
-			roleBindingName := bindDefinition.Spec.TargetName + "-" + roleRef.Name + "-binding"
+			roleBindingName := bindDefinition.Spec.TargetName + "-" + roleRef + "-binding"
 			err := r.Client.Get(ctx, types.NamespacedName{Name: roleBindingName, Namespace: ns.Name}, roleBinding)
 			if err != nil {
 				if apierrors.IsNotFound(err) {
@@ -657,7 +665,11 @@ func (r *BindDefinitionReconciler) reconcileCreate(ctx context.Context, bindDefi
 							Labels:    bindDefinition.ObjectMeta.Labels,
 						},
 						Subjects: bindDefinition.Spec.Subjects,
-						RoleRef:  roleRef,
+						RoleRef: rbacv1.RoleRef{
+							APIGroup: "rbac.authorization.k8s.io",
+							Kind:     "Role",
+							Name:     roleRef,
+						},
 					}
 					if err := controllerutil.SetControllerReference(bindDefinition, roleBinding, r.Scheme); err != nil {
 						conditions.MarkFalse(bindDefinition, authnv1alpha1.OwnerRefCondition, bindDefinition.Generation, authnv1alpha1.OwnerRefReason, authnv1alpha1.OwnerRefMessage)
@@ -800,7 +812,7 @@ func (r *BindDefinitionReconciler) reconcileUpdate(ctx context.Context, bindDefi
 
 	// Update ClusterRoleBinding resources
 	for _, clusterRoleRef := range bindDefinition.Spec.ClusterRoleBindings.ClusterRoleRefs {
-		clusterRoleBindingName := bindDefinition.Spec.TargetName + "-" + clusterRoleRef.Name + "-binding"
+		clusterRoleBindingName := bindDefinition.Spec.TargetName + "-" + clusterRoleRef + "-binding"
 		existingClusterRoleBinding := &rbacv1.ClusterRoleBinding{}
 		// Construct the ClusterRoleBinding we expect
 		expectedClusterRoleBinding := &rbacv1.ClusterRoleBinding{
@@ -809,7 +821,11 @@ func (r *BindDefinitionReconciler) reconcileUpdate(ctx context.Context, bindDefi
 				Labels: bindDefinition.ObjectMeta.Labels,
 			},
 			Subjects: bindDefinition.Spec.Subjects,
-			RoleRef:  clusterRoleRef,
+			RoleRef: rbacv1.RoleRef{
+				APIGroup: "rbac.authorization.k8s.io",
+				Kind:     "ClusterRole",
+				Name:     clusterRoleRef,
+			},
 		}
 		if err := controllerutil.SetControllerReference(bindDefinition, expectedClusterRoleBinding, r.Scheme); err != nil {
 			log.Error(err, "Unable to construct an Expected ClusterRoleBinding in reconcile Update function")
@@ -846,7 +862,7 @@ func (r *BindDefinitionReconciler) reconcileUpdate(ctx context.Context, bindDefi
 	// For each namespace
 	for _, ns := range activeNamespaces {
 		for _, clusterRoleRef := range bindDefinition.Spec.RoleBindings.ClusterRoleRefs {
-			roleBindingName := bindDefinition.Spec.TargetName + "-" + clusterRoleRef.Name + "-binding"
+			roleBindingName := bindDefinition.Spec.TargetName + "-" + clusterRoleRef + "-binding"
 			existingRoleBinding := &rbacv1.RoleBinding{}
 			// Construct the RoleBinding we expect
 			expectedRoleBinding := &rbacv1.RoleBinding{
@@ -856,7 +872,11 @@ func (r *BindDefinitionReconciler) reconcileUpdate(ctx context.Context, bindDefi
 					Labels:    bindDefinition.ObjectMeta.Labels,
 				},
 				Subjects: bindDefinition.Spec.Subjects,
-				RoleRef:  clusterRoleRef,
+				RoleRef: rbacv1.RoleRef{
+					APIGroup: "rbac.authorization.k8s.io",
+					Kind:     "ClusterRole",
+					Name:     clusterRoleRef,
+				},
 			}
 			if err := controllerutil.SetControllerReference(bindDefinition, expectedRoleBinding, r.Scheme); err != nil {
 				log.Error(err, "Unable to construct an Expected RoleBinding in reconcile Update function")
@@ -891,7 +911,7 @@ func (r *BindDefinitionReconciler) reconcileUpdate(ctx context.Context, bindDefi
 		}
 
 		for _, roleRef := range bindDefinition.Spec.RoleBindings.RoleRefs {
-			roleBindingName := bindDefinition.Spec.TargetName + "-" + roleRef.Name + "-binding"
+			roleBindingName := bindDefinition.Spec.TargetName + "-" + roleRef + "-binding"
 			existingRoleBinding := &rbacv1.RoleBinding{}
 			// Construct the RoleBinding we expect
 			expectedRoleBinding := &rbacv1.RoleBinding{
@@ -901,7 +921,11 @@ func (r *BindDefinitionReconciler) reconcileUpdate(ctx context.Context, bindDefi
 					Labels:    bindDefinition.ObjectMeta.Labels,
 				},
 				Subjects: bindDefinition.Spec.Subjects,
-				RoleRef:  roleRef,
+				RoleRef: rbacv1.RoleRef{
+					APIGroup: "rbac.authorization.k8s.io",
+					Kind:     "Role",
+					Name:     roleRef,
+				},
 			}
 			if err := controllerutil.SetControllerReference(bindDefinition, expectedRoleBinding, r.Scheme); err != nil {
 				log.Error(err, "Unable to construct an Expected RoleBinding in reconcile Update function")

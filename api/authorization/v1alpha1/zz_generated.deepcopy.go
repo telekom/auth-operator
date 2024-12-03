@@ -22,8 +22,8 @@ package v1alpha1
 
 import (
 	authorizationv1 "k8s.io/api/authorization/v1"
-	"k8s.io/api/rbac/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -91,7 +91,7 @@ func (in *BindDefinitionSpec) DeepCopyInto(out *BindDefinitionSpec) {
 	*out = *in
 	if in.Subjects != nil {
 		in, out := &in.Subjects, &out.Subjects
-		*out = make([]v1.Subject, len(*in))
+		*out = make([]rbacv1.Subject, len(*in))
 		copy(*out, *in)
 	}
 	in.ClusterRoleBindings.DeepCopyInto(&out.ClusterRoleBindings)
@@ -113,12 +113,12 @@ func (in *BindDefinitionStatus) DeepCopyInto(out *BindDefinitionStatus) {
 	*out = *in
 	if in.GeneratedServiceAccounts != nil {
 		in, out := &in.GeneratedServiceAccounts, &out.GeneratedServiceAccounts
-		*out = make([]v1.Subject, len(*in))
+		*out = make([]rbacv1.Subject, len(*in))
 		copy(*out, *in)
 	}
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
-		*out = make([]metav1.Condition, len(*in))
+		*out = make([]v1.Condition, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
@@ -140,7 +140,7 @@ func (in *ClusterBinding) DeepCopyInto(out *ClusterBinding) {
 	*out = *in
 	if in.ClusterRoleRefs != nil {
 		in, out := &in.ClusterRoleRefs, &out.ClusterRoleRefs
-		*out = make([]v1.RoleRef, len(*in))
+		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
 }
@@ -160,17 +160,17 @@ func (in *NamespaceBinding) DeepCopyInto(out *NamespaceBinding) {
 	*out = *in
 	if in.ClusterRoleRefs != nil {
 		in, out := &in.ClusterRoleRefs, &out.ClusterRoleRefs
-		*out = make([]v1.RoleRef, len(*in))
+		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
 	if in.RoleRefs != nil {
 		in, out := &in.RoleRefs, &out.RoleRefs
-		*out = make([]v1.RoleRef, len(*in))
+		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
 	if in.NamespaceSelector != nil {
 		in, out := &in.NamespaceSelector, &out.NamespaceSelector
-		*out = make([]metav1.LabelSelector, len(*in))
+		*out = make([]v1.LabelSelector, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
@@ -271,14 +271,14 @@ func (in *RoleDefinitionSpec) DeepCopyInto(out *RoleDefinitionSpec) {
 	*out = *in
 	if in.RestrictedAPIs != nil {
 		in, out := &in.RestrictedAPIs, &out.RestrictedAPIs
-		*out = make([]metav1.APIGroup, len(*in))
+		*out = make([]v1.APIGroup, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
 	if in.RestrictedResources != nil {
 		in, out := &in.RestrictedResources, &out.RestrictedResources
-		*out = make([]metav1.APIResource, len(*in))
+		*out = make([]v1.APIResource, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
@@ -305,7 +305,7 @@ func (in *RoleDefinitionStatus) DeepCopyInto(out *RoleDefinitionStatus) {
 	*out = *in
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
-		*out = make([]metav1.Condition, len(*in))
+		*out = make([]v1.Condition, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
@@ -430,7 +430,7 @@ func (in *WebhookAuthorizerStatus) DeepCopyInto(out *WebhookAuthorizerStatus) {
 	*out = *in
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
-		*out = make([]metav1.Condition, len(*in))
+		*out = make([]v1.Condition, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
