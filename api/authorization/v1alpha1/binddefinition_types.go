@@ -14,19 +14,18 @@ const (
 )
 
 type ClusterBinding struct {
-	// ClusterRole references adhering to the rbacv1.RoleRef schema.
+	// ClusterRoleRefs references an existing ClusterRole
 	// +kubebuilder:validation:Optional
-	ClusterRoleRefs []rbacv1.RoleRef `json:"clusterRoleRefs,omitempty"`
+	ClusterRoleRefs []string `json:"clusterRoleRefs,omitempty"`
 }
-
 type NamespaceBinding struct {
-	// ClusterRole references adhering to the rbacv1.RoleRef schema.
+	// ClusterRoleRefs references an existing ClusterRole
 	// +kubebuilder:validation:Optional
-	ClusterRoleRefs []rbacv1.RoleRef `json:"clusterRoleRefs,omitempty"`
+	ClusterRoleRefs []string `json:"clusterRoleRefs,omitempty"`
 
-	// Role references adhering to the rbacv1.RoleRef schema.
+	// Role references an specific Role that has ro exist in the target namespaces
 	// +kubebuilder:validation:Optional
-	RoleRefs []rbacv1.RoleRef `json:"roleRefs,omitempty"`
+	RoleRefs []string `json:"roleRefs,omitempty"`
 
 	// Namespace of the the Role that should be bound to the subjects.
 	// +kubebuilder:validation:Optional

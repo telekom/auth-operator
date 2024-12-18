@@ -74,19 +74,16 @@ func (r *BindDefinition) ValidateCreate() (admission.Warnings, error) {
 
 		for _, ns := range namespaceSet {
 			for _, roleRef := range r.Spec.RoleBindings.RoleRefs {
-				if roleRef.Kind != "Role" || roleRef.APIGroup != "rbac.authorization.k8s.io" {
-					return nil, apierrors.NewBadRequest(fmt.Sprintf("Invalid RoleRef: expected Kind=Role, APIGroup=rbac.authorization.k8s.io, got Kind=%s, APIGroup=%s", roleRef.Kind, roleRef.APIGroup))
-				}
 				role := &rbacv1.Role{}
 				key := client.ObjectKey{
 					Namespace: ns.Name,
-					Name:      roleRef.Name,
+					Name:      roleRef,
 				}
 				if err := bdWebhookClient.Get(ctx, key, role); err != nil {
 					if apierrors.IsNotFound(err) {
-						return nil, apierrors.NewBadRequest(fmt.Sprintf("Role '%s' not found in namespace '%s'", roleRef.Name, ns.Name))
+						return nil, apierrors.NewBadRequest(fmt.Sprintf("Role '%s' not found in namespace '%s'", roleRef, ns.Name))
 					} else {
-						return nil, apierrors.NewInternalError(fmt.Errorf("Error fetching Role '%s' in namespace '%s': %v", roleRef.Name, ns.Name, err))
+						return nil, apierrors.NewInternalError(fmt.Errorf("Error fetching Role '%s' in namespace '%s': %v", roleRef, ns.Name, err))
 					}
 				}
 			}
@@ -137,20 +134,16 @@ func (r *BindDefinition) ValidateUpdate(old runtime.Object) (admission.Warnings,
 
 		for _, ns := range namespaceSet {
 			for _, roleRef := range r.Spec.RoleBindings.RoleRefs {
-				if roleRef.Kind != "Role" || roleRef.APIGroup != "rbac.authorization.k8s.io" {
-					return nil, apierrors.NewBadRequest(fmt.Sprintf("Invalid RoleRef: expected Kind=Role, APIGroup=rbac.authorization.k8s.io, got Kind=%s, APIGroup=%s", roleRef.Kind, roleRef.APIGroup))
-				}
-
 				role := &rbacv1.Role{}
 				key := client.ObjectKey{
 					Namespace: ns.Name,
-					Name:      roleRef.Name,
+					Name:      roleRef,
 				}
 				if err := bdWebhookClient.Get(ctx, key, role); err != nil {
 					if apierrors.IsNotFound(err) {
-						return nil, apierrors.NewBadRequest(fmt.Sprintf("Role '%s' not found in namespace '%s'", roleRef.Name, ns.Name))
+						return nil, apierrors.NewBadRequest(fmt.Sprintf("Role '%s' not found in namespace '%s'", roleRef, ns.Name))
 					} else {
-						return nil, apierrors.NewInternalError(fmt.Errorf("Error fetching Role '%s' in namespace '%s': %v", roleRef.Name, ns.Name, err))
+						return nil, apierrors.NewInternalError(fmt.Errorf("Error fetching Role '%s' in namespace '%s': %v", roleRef, ns.Name, err))
 					}
 				}
 			}
