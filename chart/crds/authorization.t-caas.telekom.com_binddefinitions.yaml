@@ -61,28 +61,9 @@ spec:
                   rbacv1.RoleRef schema. The result of specifying this field are ClusterRoleBindings.
                 properties:
                   clusterRoleRefs:
-                    description: ClusterRole references adhering to the rbacv1.RoleRef
-                      schema.
+                    description: ClusterRoleRefs references an existing ClusterRole
                     items:
-                      description: RoleRef contains information that points to the
-                        role being used
-                      properties:
-                        apiGroup:
-                          description: APIGroup is the group for the resource being
-                            referenced
-                          type: string
-                        kind:
-                          description: Kind is the type of resource being referenced
-                          type: string
-                        name:
-                          description: Name is the name of resource being referenced
-                          type: string
-                      required:
-                      - apiGroup
-                      - kind
-                      - name
-                      type: object
-                      x-kubernetes-map-type: atomic
+                      type: string
                     type: array
                 type: object
               roleBindings:
@@ -92,28 +73,9 @@ spec:
                   are RoleBindings.
                 properties:
                   clusterRoleRefs:
-                    description: ClusterRole references adhering to the rbacv1.RoleRef
-                      schema.
+                    description: ClusterRoleRefs references an existing ClusterRole
                     items:
-                      description: RoleRef contains information that points to the
-                        role being used
-                      properties:
-                        apiGroup:
-                          description: APIGroup is the group for the resource being
-                            referenced
-                          type: string
-                        kind:
-                          description: Kind is the type of resource being referenced
-                          type: string
-                        name:
-                          description: Name is the name of resource being referenced
-                          type: string
-                      required:
-                      - apiGroup
-                      - kind
-                      - name
-                      type: object
-                      x-kubernetes-map-type: atomic
+                      type: string
                     type: array
                   namespace:
                     description: Namespace of the the Role that should be bound to
@@ -173,27 +135,10 @@ spec:
                       x-kubernetes-map-type: atomic
                     type: array
                   roleRefs:
-                    description: Role references adhering to the rbacv1.RoleRef schema.
+                    description: Role references an specific Role that has ro exist
+                      in the target namespaces
                     items:
-                      description: RoleRef contains information that points to the
-                        role being used
-                      properties:
-                        apiGroup:
-                          description: APIGroup is the group for the resource being
-                            referenced
-                          type: string
-                        kind:
-                          description: Kind is the type of resource being referenced
-                          type: string
-                        name:
-                          description: Name is the name of resource being referenced
-                          type: string
-                      required:
-                      - apiGroup
-                      - kind
-                      - name
-                      type: object
-                      x-kubernetes-map-type: atomic
+                      type: string
                     type: array
                 type: object
               subjects:
