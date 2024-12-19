@@ -439,7 +439,7 @@ func (r *BindDefinitionReconciler) reconcileDelete(ctx context.Context, bindDefi
 				return ctrl.Result{}, err
 			}
 
-			controllerutil.RemoveFinalizer(bindDefinition, authnv1alpha1.RoleDefinitionFinalizer)
+			controllerutil.RemoveFinalizer(bindDefinition, authnv1alpha1.BindDefinitionFinalizer)
 			if err := r.Update(ctx, bindDefinition); err != nil {
 				return ctrl.Result{}, err
 			}
