@@ -284,17 +284,35 @@ func (r *BindDefinitionReconciler) reconcileDelete(ctx context.Context, bindDefi
 		if err != nil {
 			return ctrl.Result{}, err
 		}
-		if controllerutil.ContainsFinalizer(bindDefinition, authnv1alpha1.BindDefinitionFinalizer) {
-			// Delete ServiceAccounts specified in Subjects if we have an OwnerRef for them
-			for _, subject := range bindDefinition.Spec.Subjects {
-				if subject.Kind == authnv1alpha1.BindSubjectServiceAccount {
-					sa := &corev1.ServiceAccount{}
-					err := r.Client.Get(ctx, types.NamespacedName{Name: subject.Name, Namespace: subject.Namespace}, sa)
-					if err != nil {
-						if apierrors.IsNotFound(err) {
-							continue
-						} else {
-							log.Error(err, "Unable to fetch ServiceAccount from Kubernetes API")
+		// Delete ServiceAccounts specified in Subjects if we have an OwnerRef for them
+		for _, subject := range bindDefinition.Spec.Subjects {
+			if subject.Kind == authnv1alpha1.BindSubjectServiceAccount {
+				sa := &corev1.ServiceAccount{}
+				err := r.Client.Get(ctx, types.NamespacedName{Name: subject.Name, Namespace: subject.Namespace}, sa)
+				if err != nil {
+					if apierrors.IsNotFound(err) {
+						continue
+					} else {
+						log.Error(err, "Unable to fetch ServiceAccount from Kubernetes API")
+						conditions.MarkFalse(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
+						err = r.Status().Update(ctx, bindDefinition)
+						if err != nil {
+							return ctrl.Result{}, err
+						}
+						return ctrl.Result{}, err
+					}
+				}
+
+				isReferenced, err := r.isSAReferencedByOtherBindDefs(ctx, bindDefinition.Name, sa.Name, sa.Namespace)
+				if err != nil {
+					return ctrl.Result{}, err
+				}
+
+				if !isReferenced {
+					if controllerutil.HasControllerReference(sa) {
+						r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Deletion", "Deleting target resource %s/%s in namespace %s", subject.Kind, subject.Name, subject.Namespace)
+						err = r.Client.Delete(ctx, sa)
+						if err != nil {
 							conditions.MarkFalse(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
 							err = r.Status().Update(ctx, bindDefinition)
 							if err != nil {
@@ -302,28 +320,8 @@ func (r *BindDefinitionReconciler) reconcileDelete(ctx context.Context, bindDefi
 							}
 							return ctrl.Result{}, err
 						}
-					}
-
-					isReferenced, err := r.isSAReferencedByOtherBindDefs(ctx, bindDefinition.Name, sa.Name, sa.Namespace)
-					if err != nil {
-						return ctrl.Result{}, err
-					}
-
-					if !isReferenced {
-						if controllerutil.HasControllerReference(sa) {
-							r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Deletion", "Deleting target resource %s/%s in namespace %s", subject.Kind, subject.Name, subject.Namespace)
-							err = r.Client.Delete(ctx, sa)
-							if err != nil {
-								conditions.MarkFalse(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
-								err = r.Status().Update(ctx, bindDefinition)
-								if err != nil {
-									return ctrl.Result{}, err
-								}
-								return ctrl.Result{}, err
-							}
-						} else {
-							r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Deletion", "Not deleting target resource %s/%s in namespace %s because we do not have OwnerRef set for it", subject.Kind, subject.Name, subject.Namespace)
-						}
+					} else {
+						r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Deletion", "Not deleting target resource %s/%s in namespace %s because we do not have OwnerRef set for it", subject.Kind, subject.Name, subject.Namespace)
 					}
 				}
 			}
@@ -431,19 +429,17 @@ func (r *BindDefinitionReconciler) reconcileDelete(ctx context.Context, bindDefi
 					}
 				}
 			}
+		}
+		conditions.MarkTrue(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
+		conditions.MarkFalse(bindDefinition, authnv1alpha1.FinalizerCondition, bindDefinition.Generation, authnv1alpha1.FinalizerReason, authnv1alpha1.FinalizerMessage)
+		err = r.Status().Update(ctx, bindDefinition)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
 
-			conditions.MarkTrue(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
-			conditions.MarkFalse(bindDefinition, authnv1alpha1.FinalizerCondition, bindDefinition.Generation, authnv1alpha1.FinalizerReason, authnv1alpha1.FinalizerMessage)
-			err = r.Status().Update(ctx, bindDefinition)
-			if err != nil {
-				return ctrl.Result{}, err
-			}
-
-			controllerutil.RemoveFinalizer(bindDefinition, authnv1alpha1.BindDefinitionFinalizer)
-			if err := r.Update(ctx, bindDefinition); err != nil {
-				return ctrl.Result{}, err
-			}
-			return ctrl.Result{}, nil
+		controllerutil.RemoveFinalizer(bindDefinition, authnv1alpha1.BindDefinitionFinalizer)
+		if err := r.Update(ctx, bindDefinition); err != nil {
+			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil
 	}

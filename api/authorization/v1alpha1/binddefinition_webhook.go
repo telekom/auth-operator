@@ -98,6 +98,14 @@ func (r *BindDefinition) ValidateUpdate(old runtime.Object) (admission.Warnings,
 	binddefinitionlog.Info("validate create", "name", r.Name)
 	ctx := context.Background()
 
+	oldBindDefinition, ok := old.(*BindDefinition)
+	if !ok {
+		return nil, apierrors.NewBadRequest(fmt.Sprintf("expected a BindDefinition but got a %T", old))
+	}
+	if oldBindDefinition.Generation == r.Generation {
+		return nil, nil
+	}
+
 	bindDefinitionList := &BindDefinitionList{}
 	if err := bdWebhookClient.List(ctx, bindDefinitionList); err != nil {
 		return nil, apierrors.NewInternalError(fmt.Errorf("Unable to list BindDefinitions: %v", err))
