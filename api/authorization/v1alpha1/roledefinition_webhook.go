@@ -52,6 +52,14 @@ func (r *RoleDefinition) ValidateUpdate(old runtime.Object) (admission.Warnings,
 	roledefinitionlog.Info("validate update", "name", r.Name)
 	ctx := context.Background()
 
+	oldRoleDefinition, ok := old.(*RoleDefinition)
+	if !ok {
+		return nil, apierrors.NewBadRequest(fmt.Sprintf("expected a RoleDefinition but got a %T", old))
+	}
+	if oldRoleDefinition.Generation == r.Generation {
+		return nil, nil
+	}
+
 	roleDefinitionList := &RoleDefinitionList{}
 	if err := rdWebhookClient.List(ctx, roleDefinitionList); err != nil {
 		return nil, apierrors.NewInternalError(fmt.Errorf("Unable to list RoleDefinitions: %v", err))

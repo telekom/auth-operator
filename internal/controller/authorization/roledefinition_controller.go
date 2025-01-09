@@ -115,44 +115,26 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			return ctrl.Result{}, err
 		}
 		r.Recorder.Eventf(roleDefinition, corev1.EventTypeWarning, "Deletion", "Deleting target resource %s %s", roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetName)
-		if controllerutil.ContainsFinalizer(roleDefinition, authnv1alpha1.RoleDefinitionFinalizer) {
-			if err := r.Client.Get(ctx, types.NamespacedName{Name: roleDefinition.Spec.TargetName, Namespace: roleDefinition.Spec.TargetNamespace}, role); err != nil {
-				if apierrors.IsNotFound(err) {
-					conditions.MarkUnknown(roleDefinition, authnv1alpha1.DeleteCondition, roleDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
-					err = r.Status().Update(ctx, roleDefinition)
-					if err != nil {
-						return ctrl.Result{}, err
-					}
-					return ctrl.Result{}, nil
-				}
-				conditions.MarkFalse(roleDefinition, authnv1alpha1.DeleteCondition, roleDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
-				err = r.Status().Update(ctx, roleDefinition)
-				if err != nil {
-					return ctrl.Result{}, err
-				}
-				return ctrl.Result{}, err
-			}
-			err := r.Client.Delete(ctx, role)
-			if err != nil {
-				conditions.MarkTrue(roleDefinition, authnv1alpha1.DeleteCondition, roleDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
-				err = r.Status().Update(ctx, roleDefinition)
-				if err != nil {
-					return ctrl.Result{}, err
-				}
-				return ctrl.Result{}, err
-			}
+		role.SetName(roleDefinition.Spec.TargetName)
+		role.SetNamespace(roleDefinition.Spec.TargetNamespace)
+
+		if err := r.Client.Delete(ctx, role); apierrors.IsNotFound(err) {
+			// If the resource is not found, we can safely remove the finalizer
 			controllerutil.RemoveFinalizer(roleDefinition, authnv1alpha1.RoleDefinitionFinalizer)
 			if err := r.Update(ctx, roleDefinition); err != nil {
 				return ctrl.Result{}, err
 			}
 			return ctrl.Result{}, nil
-		}
-		conditions.MarkFalse(roleDefinition, authnv1alpha1.FinalizerCondition, roleDefinition.Generation, authnv1alpha1.FinalizerReason, authnv1alpha1.FinalizerMessage)
-		err = r.Status().Update(ctx, roleDefinition)
-		if err != nil {
+		} else if err != nil {
+			// If there is an error deleting the resource, requeue the request
+			conditions.MarkFalse(roleDefinition, authnv1alpha1.DeleteCondition, roleDefinition.Generation, authnv1alpha1.DeleteReason, "error deleting resource: %s", err.Error())
+			if updateErr := r.Status().Update(ctx, roleDefinition); updateErr != nil {
+				return ctrl.Result{}, fmt.Errorf("deletion failed with error %s and a second error was found during update of role definition status: %w", err.Error(), updateErr)
+			}
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{}, nil
+		// requeue as the object is being deleted
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	// Fetch all existing API Groups and filter them against RestrictedAPIs
