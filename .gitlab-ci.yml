@@ -6,7 +6,7 @@ include:
   - 'execution/golang/tdi-op-extension.yaml'
 image-push:
   tags:
-    - otc_run_docker_k8s_m
+    - aws_run_k8s_intel_m
 variables:
   GO_VERSION: "1.22"
 

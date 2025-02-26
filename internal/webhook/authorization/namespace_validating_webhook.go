@@ -39,6 +39,12 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 		nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
 		return admission.Allowed("")
 	}
+	// ToDo: Trident patches its own namespace and that cant be disabled.
+	// https://github.com/NetApp/trident/blob/6b4cdf074578ade04ca0f1a5c59bb72c019391da/operator/controllers/orchestrator/installer/installer.go#L938
+	if req.UserInfo.Username == "system:serviceaccount:t-caas-storage:trident-operator" && req.Operation == admissionv1.Update && req.Name == "t-caas-storage" {
+		nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+		return admission.Allowed("")
+	}
 
 	var ns corev1.Namespace
 	var oldNs corev1.Namespace
