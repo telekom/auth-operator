@@ -26,11 +26,11 @@ global:
   priorityClassName: caas-high-priority-workload
   image:
     registry: "artifactory.devops.telekom.de"
-    repository: "tdi-caas-docker-images-local"
+    repository: "cit-t-caas-oci/images/t-caas"
     name: "authn-authz-operator"
-    tag: "v0.2.1-0.2.0"
-  imagePullSecrets:
-    - name: mcicd-docker
+    tag: "v0.2.4"
+  imagePullSecrets: {}
+    # - name: mcicd-docker
   imagePullPolicy: Always
   tolerations:
     - effect: NoSchedule

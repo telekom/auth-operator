@@ -26,8 +26,10 @@ spec:
       securityContext:
         runAsNonRoot: true
       priorityClassName: {{ .Values.global.priorityClassName }}
+      {{- if .Values.global.imagePullSecrets }}
       imagePullSecrets:
 {{- toYaml .Values.global.imagePullSecrets | nindent 8 }}
+      {{- end }}
       {{- if .Values.global.serviceAccount.create }}
       serviceAccount: idp-{{ template "authn-authz-operator.serviceAccountName" .}}
       {{- end }}
