@@ -36,7 +36,7 @@ Define binder labels for frequently used metadata.
 */}}
 {{- define "authn-authz-operator.labels.binder" -}}
 app: binder-{{ template "authn-authz-operator.name" . }}
-chart: "{{ .Chart.Name }}-{{ .Chart.Version }}"
+chart: "{{ .Chart.Name }}"
 release: "{{ .Release.Name }}"
 heritage: "{{ .Release.Service }}"
 {{- end -}}
@@ -46,7 +46,7 @@ Define generator labels for frequently used metadata.
 */}}
 {{- define "authn-authz-operator.labels.generator" -}}
 app: generator-{{ template "authn-authz-operator.name" . }}
-chart: "{{ .Chart.Name }}-{{ .Chart.Version }}"
+chart: "{{ .Chart.Name }}"
 release: "{{ .Release.Name }}"
 heritage: "{{ .Release.Service }}"
 {{- end -}}
@@ -56,7 +56,7 @@ Define idp labels for frequently used metadata.
 */}}
 {{- define "authn-authz-operator.labels.idp" -}}
 app: idp-{{ template "authn-authz-operator.name" . }}
-chart: "{{ .Chart.Name }}-{{ .Chart.Version }}"
+chart: "{{ .Chart.Name }}"
 release: "{{ .Release.Name }}"
 heritage: "{{ .Release.Service }}"
 {{- end -}}
