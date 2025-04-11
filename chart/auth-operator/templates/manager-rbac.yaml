@@ -1,0 +1,48 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "auth-operator.fullname" . }}-manager-role
+  labels:
+  {{- include "auth-operator.labels" . | nindent 4 }}
+rules:
+- apiGroups:
+  - authorization.t-caas.telekom.com
+  resources:
+  - binddefinitions
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - authorization.t-caas.telekom.com
+  resources:
+  - binddefinitions/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - authorization.t-caas.telekom.com
+  resources:
+  - binddefinitions/status
+  verbs:
+  - get
+  - patch
+  - update
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "auth-operator.fullname" . }}-manager-rolebinding
+  labels:
+  {{- include "auth-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: '{{ include "auth-operator.fullname" . }}-manager-role'
+subjects:
+- kind: ServiceAccount
+  name: '{{ include "auth-operator.fullname" . }}-controller-manager'
+  namespace: '{{ .Release.Namespace }}'

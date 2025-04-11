@@ -1,6 +1,7 @@
 # Image URL to use all building/pushing image targets
-APP ?= authn-authz-operator
+APP ?= auth-operator
 IMG ?= (APP):latest
+NAMESPACE ?= kube-system
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.30.0
 
@@ -35,7 +36,9 @@ help: ## Display this help.
 
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	$(CONTROLLER_GEN) crd paths="./api/..." output:crd:artifacts:config=config/crd/bases
+	$(CONTROLLER_GEN) rbac:roleName=manager-role paths="./internal/controller/..." output:rbac:artifacts:config=config/rbac
+	$(CONTROLLER_GEN) rbac:roleName=webhook-server-role paths="./internal/webhook/..." output:rbac:artifacts:config=config/webhook
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
@@ -70,23 +73,16 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes.
 
 .PHONY: build
 build: manifests generate fmt vet ## Build manager binary.
-	go build -o bin/manager cmd/main.go
+	go build -o bin/manager main.go
 
-.PHONY: run-gen
-run-gen: manifests generate fmt vet ## Run Generator controllers and webhooks from your host.
-	go run ./cmd/main.go --function=generator
+.PHONY: run-ctrl
+run-ctrl: manifests generate fmt vet ## Run controllers from your host.
+	go run ./main.go controller --namespace $(NAMESPACE) 
 
-.PHONY: run-bind
-run-bind: manifests generate fmt vet ## Run Binder controllers and webhooks from your host.
-	go run ./cmd/main.go --function=binder
+.PHONY: run-wh
+run-wh: manifests generate fmt vet ## Run webhooks from your host.
+	go run ./main.go webhook --namespace $(NAMESPACE)
 
-.PHONY: run-idp
-run-idp: manifests generate fmt vet ## Run IDP controllers and webhooks from your host.
-	go run ./cmd/main.go --function=idp
-
-.PHONY: run-whauthz
-run-whauthz: manifests generate fmt vet ## Run Authorizer controllers and webhooks from your host.
-	go run ./cmd/main.go --function=authorizer
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
@@ -99,6 +95,29 @@ docker-build: ## Build docker image with the manager.
 docker-push: ## Push docker image with the manager.
 	$(CONTAINER_TOOL) push ${IMG}
 
+.PHONY: helm-crds
+helm-crds: manifests kustomize ## Generate Helm chart Custom Resource Definitions (CRDs)
+	rm -f chart/auth-operator/crds/*
+	$(KUSTOMIZE) build config/crd -o chart/auth-operator/crds
+	
+	pushd "chart/auth-operator" && \
+	for file in crds/apiextensions.k8s.io_v1_customresourcedefinition_*; do \
+		mv "$$file" "crds/$${file#crds/apiextensions.k8s.io_v1_customresourcedefinition_}"; \
+	done && \
+	popd
+
+.PHONY: helm
+helm: manifests kustomize helmify ## Generate the complete Helm chart
+	$(KUSTOMIZE) build config/default | $(HELMIFY) -v -crd-dir -generate-defaults -image-pull-secrets chart/auth-operator
+	pushd "chart/auth-operator/" && \
+	find ./crds/ -type f  ! -name "*-crd.yaml" -delete && \
+	$(KUSTOMIZE) build . -o crds/ && \
+	find ./crds/ -type f -name "*-crd.yaml" -delete && \
+	for file in crds/apiextensions.k8s.io_v1_customresourcedefinition_*; do \
+		mv "$$file" "crds/$${file#crds/apiextensions.k8s.io_v1_customresourcedefinition_}"; \
+	done && \
+	popd
+
 # PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
 # architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:0.0.1). To use this option you need to:
 # - be able to use docker buildx. More info: https://docs.docker.com/build/buildx/
@@ -110,10 +129,10 @@ PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
 docker-buildx: ## Build and push docker image for the manager for cross-platform support
 	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile
 	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
-	- $(CONTAINER_TOOL) buildx create --name t-caas-rbac-generator-builder
-	$(CONTAINER_TOOL) buildx use t-caas-rbac-generator-builder
+	- $(CONTAINER_TOOL) buildx create --name auth-operator-builder
+	$(CONTAINER_TOOL) buildx use auth-operator-builder
 	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross .
-	- $(CONTAINER_TOOL) buildx rm t-caas-rbac-generator-builder
+	- $(CONTAINER_TOOL) buildx rm auth-operator-builder
 	rm Dockerfile.cross
 
 .PHONY: build-installer
@@ -173,15 +192,22 @@ CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen-$(CONTROLLER_TOOLS_VERSION)
 ENVTEST ?= $(LOCALBIN)/setup-envtest-$(ENVTEST_VERSION)
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint-$(GOLANGCI_LINT_VERSION)
 CRD_REF_DOCS = $(LOCALBIN)/crd-ref-docs-$(CRD_REF_DOCS_VERSION)
+HELMIFY ?= $(LOCALBIN)/helmify-$(HELMIFY_VERSION)
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.4.1
-CONTROLLER_TOOLS_VERSION ?= v0.15.0
+CONTROLLER_TOOLS_VERSION ?= v0.17.3
 ENVTEST_VERSION ?= release-0.18
 GOLANGCI_LINT_VERSION ?= v1.57.2
 CRD_REF_DOCS_VERSION ?= v0.1.0
+HELMIFY_VERSION ?= v0.4.17
 DRAWIO ?= 24.7.8
 
+.PHONY: helmify
+helmify: $(HELMIFY) ## Download helmify locally if necessary.
+$(HELMIFY): $(LOCALBIN)
+	$(call go-install-tool,$(HELMIFY),github.com/arttor/helmify/cmd/helmify,$(HELMIFY_VERSION))
+	
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
 $(KUSTOMIZE): $(LOCALBIN)

@@ -4,15 +4,18 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -32,8 +35,10 @@ import (
 // BindDefinitionReconciler defines the reconciler for BindDefinition and reconciles a BindDefinition object.
 type BindDefinitionReconciler struct {
 	client.Client
-	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Scheme          *runtime.Scheme
+	DiscoveryClient discovery.DiscoveryInterface
+	DynamicClient   dynamic.Interface
+	Recorder        record.EventRecorder
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -55,7 +60,7 @@ func (r *BindDefinitionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/handler#EnqueueRequestsFromMapFunc
 // https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/handler#MapFunc
 func (r *BindDefinitionReconciler) namespaceToBindDefinitionRequests(ctx context.Context, obj client.Object) []reconcile.Request {
-	// Type assertion to ensure obj is a CRD
+	// Type assertion to ensure obj is a Namespace
 	_, ok := obj.(*corev1.Namespace)
 	if !ok {
 		log.FromContext(ctx).Error(fmt.Errorf("unexpected type"), "Expected *Namespace", "got", obj)
@@ -84,41 +89,66 @@ func (r *BindDefinitionReconciler) namespaceToBindDefinitionRequests(ctx context
 // For checking if terminating namespace has deleting resources
 // Needed for RoleBinding finalizer removal
 func (r *BindDefinitionReconciler) namespaceHasResources(ctx context.Context, namespace string) (bool, error) {
-	// List all resource types you want to check
-	// Currently: Pods, Deployments, Services
-
-	// Check for Pods
-	podList := &corev1.PodList{}
-	err := r.Client.List(ctx, podList, client.InNamespace(namespace))
+	log := log.FromContext(ctx)
+	// Get all namespaced api resources
+	apiResourceLists, err := r.DiscoveryClient.ServerPreferredNamespacedResources()
 	if err != nil {
-		return false, err
-	}
-	if len(podList.Items) > 0 {
-		return true, nil
-	}
-	// Check for Deployments
-	deploymentList := &appsv1.DeploymentList{}
-	err = r.Client.List(ctx, deploymentList, client.InNamespace(namespace))
-	if err != nil {
-		return false, err
-	}
-	if len(deploymentList.Items) > 0 {
-		return true, nil
-	}
-	// Check for Services
-	serviceList := &corev1.ServiceList{}
-	err = r.Client.List(ctx, serviceList, client.InNamespace(namespace))
-	if err != nil {
-		return false, err
-	}
-	if len(serviceList.Items) > 0 {
-		return true, nil
+		if discovery.IsGroupDiscoveryFailedError(err) {
+			log.Info("Warning: partial discovery failure. Some APIs may be skipped", "error", err)
+		} else {
+			return false, fmt.Errorf("unrecoverable discovery error: %w", err)
+		}
 	}
 
-	// Add checks for other resource types as needed
+	for _, resourceList := range apiResourceLists {
+		gv, parseErr := schema.ParseGroupVersion(resourceList.GroupVersion)
+		if parseErr != nil {
+			// skip malformed group/version
+			continue
+		}
 
-	// No resources found
+		for _, resource := range resourceList.APIResources {
+			if strings.Contains(resource.Name, "/") || strings.Contains(resource.Name, "rolebindings") {
+				// ignore subresources and rolebinding resources
+				continue
+			}
+
+			if !supportsList(resource.Verbs) {
+				// if resource does not support "list", skip it
+				continue
+			}
+
+			gvr := schema.GroupVersionResource{
+				Group:    gv.Group,
+				Version:  gv.Version,
+				Resource: resource.Name,
+			}
+
+			// using dynamic client to not instantiate all typed clients
+			list, err := r.DynamicClient.Resource(gvr).Namespace(namespace).List(ctx, metav1.ListOptions{})
+			if err != nil {
+				log.Info("Skipping resource due to list error", "resource", gvr.String(), "error", err)
+				continue
+			}
+
+			if len(list.Items) > 0 {
+				return true, nil
+			}
+		}
+
+	}
+
+	// no resources found
 	return false, nil
+}
+
+func supportsList(verbs []string) bool {
+	for _, verb := range verbs {
+		if verb == "list" {
+			return true
+		}
+	}
+	return false
 }
 
 // For checking if terminating BindDefinition refers a ServiceAccount

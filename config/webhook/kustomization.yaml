@@ -1,6 +1,10 @@
 resources:
 - manifests.yaml
 - service.yaml
+- service_account.yaml
+- role_binding.yaml
+- secret.yaml
+- deployment.yaml
 
 configurations:
 - kustomizeconfig.yaml

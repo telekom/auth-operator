@@ -1,27 +1,18 @@
-# Build the manager binary
-FROM golang:1.22 AS builder
-ARG TARGETOS
-ARG TARGETARCH
+# execution image
+# Use distroless as minimal base image to package the caas-operator binary
+# Refer to https://github.com/GoogleContainerTools/distroless for more details
+# Stage 2: Create the final distroless image
+FROM gcr.io/distroless/base-debian11:debug
 
-WORKDIR /workspace
-
-COPY go.mod go.mod
-COPY go.sum go.sum
-
-RUN go mod download
-
-COPY cmd/main.go cmd/main.go
-COPY api/ api/
-COPY internal/controller/ internal/controller/
-COPY internal/webhook/ internal/webhook/
-COPY pkg/ pkg/
-
-
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager cmd/main.go
-
-FROM gcr.io/distroless/static:nonroot
 WORKDIR /
-COPY --from=builder /workspace/manager .
+
+# source path of the binary to put into the image
+ARG BINARY_SOURCE_PATH
+
+# copy binary into the image
+COPY ${BINARY_SOURCE_PATH} ./authn-authz-operator
+
 USER 65532:65532
 
-ENTRYPOINT ["/manager"]
+# exec binary in image
+ENTRYPOINT ["/authn-authz-operator"]

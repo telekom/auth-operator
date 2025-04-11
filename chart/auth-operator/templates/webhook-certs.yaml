@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "auth-operator.fullname" . }}-webhook-certs
+  labels:
+    authorization.t-caas.telekom.com/component: webhook
+  {{- include "auth-operator.labels" . | nindent 4 }}

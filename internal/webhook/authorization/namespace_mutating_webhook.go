@@ -17,6 +17,8 @@ import (
 
 var nsMutatorLog = logf.Log.WithName("namespace-mutator")
 
+// +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions,verbs=get;list;watch
+// +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions/status,verbs=get;update;patch
 type NamespaceMutator struct {
 	Client  client.Client
 	Decoder admission.Decoder
@@ -49,17 +51,11 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 	ns := &corev1.Namespace{}
 	var err error
 
-	switch req.Operation {
-	case admissionv1.Create:
-		// For create operations, decode the object
-		err = m.Decoder.Decode(req, ns)
-	case admissionv1.Update:
-		// For update operations, decode the old object
-		err = m.Decoder.DecodeRaw(req.OldObject, ns)
-	default:
-		return admission.Allowed("")
-	}
-
+	// Label key-value validation is done in the Validating Webhook, there we don't
+	// care about req.OldObject - i.e. there is no difference in decoding between
+	// CREATE and UPDATE verbs. This stems from advisory on Mutating Webhook authoring
+	// https://kubernetes.io/docs/reference/access-authn-authz/admission-controllers/#use-caution-when-authoring-and-installing-mutating-webhooks
+	err = m.Decoder.Decode(req, ns)
 	if err != nil {
 		return admission.Errored(http.StatusBadRequest, err)
 	}
@@ -77,7 +73,7 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 		saName = usernameParts[3]
 	}
 
-	// Fetch all BindDefinition CRDs
+	// Fetch all BindDefinition CRDs - this has to be faster
 	bindDefinitions := &authzv1alpha1.BindDefinitionList{}
 	if err := m.Client.List(ctx, bindDefinitions); err != nil {
 		return admission.Errored(http.StatusInternalServerError, err)
@@ -136,8 +132,10 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 			ns.Labels = map[string]string{}
 		}
 		for k, v := range labelsToAdd {
-			nsMutatorLog.Info("OIDC match found - adding labels", "Namespace", ns.Name, "Labels", labelsToAdd)
-			ns.Labels[k] = v
+			if _, exists := ns.Labels[k]; !exists {
+				nsMutatorLog.Info("OIDC group attribute match found - adding labels", "Namespace", ns.Name, "Label key", k, "Label value", v)
+				ns.Labels[k] = v
+			}
 		}
 
 		// Marshal the mutated namespace object
@@ -148,8 +146,8 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 		return admission.PatchResponseFromRaw(req.Object.Raw, marshalledNS)
 	}
 
-	// If no labels to add, allow the request without changes
-	return admission.Allowed("No labels to add")
+	// If no labels to add, deny the request with a warning
+	return admission.Denied("The user does not have any OIDC attributes assigned to this cluster and the user is not a Kubernetes admin. Namespace creation is not allowed.")
 }
 
 // Extract labels from NamespaceSelector

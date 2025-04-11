@@ -26,3 +26,8 @@ vendor/
 *.swp
 *.swo
 *~
+test/webhook/certs/ca.crt
+test/webhook/certs/tls.crt
+test/webhook/certs/tls.key
+.env
+out/

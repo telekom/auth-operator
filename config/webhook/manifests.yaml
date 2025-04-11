@@ -2,7 +2,7 @@
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:
-  name: validating-webhook-configuration
+  name: binder-validating-webhook-configuration
 webhooks:
 - admissionReviewVersions:
   - v1
@@ -10,9 +10,9 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /validate-authorization-t-caas-telekom-com-v1alpha1-roledefinition
+      path: /validate-authorization-t-caas-telekom-com-v1alpha1-binddefinition
   failurePolicy: Fail
-  name: webhook.authn-authz.t-caas.telekom.de
+  name: binder.validating.webhook.authn-authz.t-caas.telekom.de
   rules:
   - apiGroups:
     - authorization.t-caas.telekom.com
@@ -22,5 +22,66 @@ webhooks:
     - CREATE
     - UPDATE
     resources:
-    - roledefinitions
+    - binddefinitions
   sideEffects: None
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: namespace-validating-webhook-configuration
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-v1-namespace
+  failurePolicy: Fail
+  matchPolicy: Equivalent
+  name: namespace.validating.webhook.authn-authz.t-caas.telekom.de
+  namespaceSelector: {}
+  objectSelector: {}
+  rules:
+  - apiGroups:
+    - ""
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    - DELETE
+    resources:
+    - namespaces
+    scope: '*'
+  sideEffects: None
+  timeoutSeconds: 10
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: namespace-mutating-webhook-configuration
+webhooks:
+- admissionReviewVersions:
+  - v1 
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /mutate-v1-namespace
+      port: 443
+  failurePolicy: Fail 
+  matchPolicy: Equivalent
+  name: namespace.mutating.webhook.authn-authz.t-caas.telekom.de
+  rules:
+  - apiGroups:
+    - ""
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    resources:
+    - namespaces
+    scope: '*'
+  sideEffects: None
+  timeoutSeconds: 10

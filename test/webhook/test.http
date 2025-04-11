@@ -1,0 +1,12 @@
+############################### NetboxInfrastructureConfig ###############################
+### namespace mutator
+POST https://localhost:9443/mutate-v1-namespace
+Content-Type: application/json
+
+< ./create-namespace.json
+
+### namespace validator
+POST https://localhost:9443/validate-v1-namespace
+Content-Type: application/json
+
+< ./create-namespace.json

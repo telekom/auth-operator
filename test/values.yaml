@@ -1,0 +1,13 @@
+controllerManager:
+  manager:
+    image:
+      repository: artifactory.devops.telekom.de/tdi-caas-docker-images-local/authn-authz-operator
+      tag:
+webhookServer:
+  webhook:
+    image:
+      repository: artifactory.devops.telekom.de/tdi-caas-docker-images-local/authn-authz-operator
+      tag:
+
+imagePullSecrets:
+  - name: mcicd-artifactory-prod

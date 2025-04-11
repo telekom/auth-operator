@@ -1,0 +1,21 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "auth-operator.fullname" . }}-roledefinition-viewer-role
+  labels:
+  {{- include "auth-operator.labels" . | nindent 4 }}
+rules:
+- apiGroups:
+  - authorization.t-caas.telekom.com
+  resources:
+  - roledefinitions
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - authorization.t-caas.telekom.com
+  resources:
+  - roledefinitions/status
+  verbs:
+  - get

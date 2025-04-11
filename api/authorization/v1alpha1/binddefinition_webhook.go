@@ -13,7 +13,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -30,7 +29,8 @@ func (r *BindDefinition) SetupWebhookWithManager(mgr ctrl.Manager) error {
 }
 
 // +kubebuilder:webhook:path=/validate-authorization-t-caas-telekom-com-v1alpha1-binddefinition,mutating=false,failurePolicy=fail,sideEffects=None,groups=authorization.t-caas.telekom.com,resources=binddefinitions,verbs=create;update,versions=v1alpha1,name=webhook.authn-authz.t-caas.telekom.de,admissionReviewVersions=v1
-var _ webhook.Validator = &BindDefinition{}
+
+//var _ webhook.Validator = &BindDefinition{}
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type
 func (r *BindDefinition) ValidateCreate() (admission.Warnings, error) {

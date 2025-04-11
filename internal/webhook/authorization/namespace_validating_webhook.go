@@ -18,6 +18,8 @@ import (
 
 var nsValidatorLog = logf.Log.WithName("namespace-validator")
 
+// +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions,verbs=get;list;watch
+// +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions/status,verbs=get;update;patch
 type NamespaceValidator struct {
 	Client  client.Client
 	Decoder admission.Decoder

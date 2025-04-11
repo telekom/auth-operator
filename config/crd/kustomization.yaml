@@ -8,15 +8,9 @@ resources:
 - bases/authorization.t-caas.telekom.com_webhookauthorizers.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
-patches:
+# patches:
 # [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix.
 # patches here are for enabling the conversion webhook for each CRD
-- path: patches/webhook_in_roledefinitions.yaml
-- path: patches/webhook_in_roledefinitions.yaml
-- path: patches/webhook_in_authorization_binddefinitions.yaml
-- path: patches/webhook_in_authorization_binddefinitions.yaml
-- path: patches/webhook_in_authorization_binddefinitions.yaml
-- path: patches/webhook_in_authorization_binddefinitions.yaml
 # +kubebuilder:scaffold:crdkustomizewebhookpatch
 
 # [CERTMANAGER] To enable cert-manager, uncomment all the sections with [CERTMANAGER] prefix.

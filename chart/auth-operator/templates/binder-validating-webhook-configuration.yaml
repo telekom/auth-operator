@@ -1,0 +1,29 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ include "auth-operator.fullname" . }}-binder-validating-webhook-configuration
+  annotations:
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include "auth-operator.fullname" . }}-
+  labels:
+  {{- include "auth-operator.labels" . | nindent 4 }}
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: '{{ include "auth-operator.fullname" . }}-webhook-service'
+      namespace: '{{ .Release.Namespace }}'
+      path: /validate-authorization-t-caas-telekom-com-v1alpha1-binddefinition
+  failurePolicy: Fail
+  name: binder.validating.webhook.authn-authz.t-caas.telekom.de
+  rules:
+  - apiGroups:
+    - authorization.t-caas.telekom.com
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - binddefinitions
+  sideEffects: None

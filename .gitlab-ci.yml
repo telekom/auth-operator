@@ -1,26 +1,37 @@
 ---
 include:
-- project: "cit/t-caas/ci/pipelines"
-  ref: "${SHARED_PIPELINE_VERSION}"
-  file:
-  - 'execution/golang/tdi-op-extension.yaml'
-image-push:
-  tags:
-    - aws_run_k8s_intel_m
+  - project: "cit/t-caas/ci/pipelines"
+    ref: "${SHARED_PIPELINE_VERSION}"
+    file:
+      - "execution/golang/tdi-op-extension.yaml"
+
+
 variables:
-  GO_VERSION: "1.22"
+  APP_NAME: "auth-operator"
+  GO_VERSION: "1.23"
+  GO_MAIN: "main.go"
+  GO_BIN_NAME: "${APP_NAME}"
+  HELM_CHART_SOURCE: chart/auth-operator
+  GIT_DEPTH: 1
 
 # use specific go flags
 go-build:
   variables:
     GO_LDFLAGS: >-
       -s -w
-      -X gitlab.devops.telekom.de/cit/t-caas/dns-operator.git/internal/system.Name=${CI_PROJECT_TITLE}
-      -X gitlab.devops.telekom.de/cit/t-caas/dns-operator.git/internal/system.Version=${GO_APP_VERSION}
-      -X gitlab.devops.telekom.de/cit/t-caas/dns-operator.git/internal/system.Commit=${CI_COMMIT_SHA}
-      -X gitlab.devops.telekom.de/cit/t-caas/dns-operator.git/internal/system.Repository=${CI_PROJECT_URL}
+      -X gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/system.Name=${CI_PROJECT_TITLE}
+      -X gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/system.Version=${GO_APP_VERSION}
+      -X gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/system.Commit=${CI_COMMIT_SHA}
+      -X gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/system.Repository=${CI_PROJECT_URL}
+
+assert-controller-gen:
+  variables:
+    K8S_OP_CONTROLLER_GEN_VERSION: "v0.17.3"
+
+.helm-base:
+  variables:
+    HELM_CHART_SOURCE: chart/auth-operator
 
 # TODO: remove once test-cases are fixed and working
 go-test:
   allow_failure: true
-

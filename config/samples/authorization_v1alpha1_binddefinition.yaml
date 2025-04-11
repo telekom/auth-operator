@@ -2,7 +2,7 @@ apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: BindDefinition
 metadata:
   labels:
-    app.kubernetes.io/name: t-caas-rbac-generator
+    app.kubernetes.io/name: authn-authz-operator
     app.kubernetes.io/managed-by: kustomize
   name: binddefinition-sample
 spec:

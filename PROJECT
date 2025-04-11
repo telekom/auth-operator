@@ -6,7 +6,7 @@ domain: t-caas.telekom.com
 layout:
 - go.kubebuilder.io/v4
 multigroup: true
-projectName: t-caas-rbac-generator
+projectName: authn-authz-operator
 repo: gitlab.devops.telekom.de/cit/t-caas/operators/authn-authz-operator
 resources:
 - api:
