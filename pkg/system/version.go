@@ -16,7 +16,7 @@ limitations under the License.
 
 package system
 
-var Name = "authn-authz-operator"
+var Name = "auth-operator"
 var Version = "v0.0.0-undefined"
 var Commit = "<unset>"
-var Repository = "https://gitlab.devops.telekom.de/cit/t-caas/operators/authn-authz-operator"
+var Repository = "https://gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator"

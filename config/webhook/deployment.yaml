@@ -6,7 +6,7 @@ metadata:
   namespace: system
   labels:
     control-plane: webhook-server
-    app.kubernetes.io/name: authn-authz-operator
+    app.kubernetes.io/name: auth-operator
     app.kubernetes.io/managed-by: kustomize
 spec:
   selector:
@@ -51,7 +51,7 @@ spec:
         #   type: RuntimeDefault
       containers:
         - command:
-            - /authn-authz-operator
+            - /auth-operator
           args:
             - webhook
             - --health-probe-bind-address=:8081
@@ -59,8 +59,15 @@ spec:
             - --certs-dir=/tmp/k8s-webhook-server/serving-certs
             - --cert-rotation-secret-label-selector=authorization.t-caas.telekom.com/component=webhook
             - --cert-rotation-service-label-selector=authorization.t-caas.telekom.com/component=webhook
+            - --cert-rotation-validating-webhooks-label-selector=authorization.t-caas.telekom.com/component=webhook
+            - --cert-rotation-mutating-webhooks-label-selector=authorization.t-caas.telekom.com/component=webhook
           image: controller:latest
           name: webhook
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

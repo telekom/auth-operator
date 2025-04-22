@@ -10,10 +10,10 @@ import (
 	"github.com/spf13/cobra"
 	"k8s.io/client-go/discovery"
 
-	idpclient "gitlab.devops.telekom.de/cit/t-caas/operators/authn-authz-operator/pkg/client"
+	idpclient "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/client"
 
-	authenticationcontroller "gitlab.devops.telekom.de/cit/t-caas/operators/authn-authz-operator/internal/controller/authentication"
-	authorizationcontroller "gitlab.devops.telekom.de/cit/t-caas/operators/authn-authz-operator/internal/controller/authorization"
+	authenticationcontroller "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/internal/controller/authentication"
+	authorizationcontroller "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/internal/controller/authorization"
 
 	"k8s.io/client-go/dynamic"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -40,7 +40,7 @@ to quickly create a Cobra application.`,
 			Scheme: scheme,
 
 			LeaderElection:         enableLeaderElection,
-			LeaderElectionID:       "authn-authz.t-caas.telekom.com",
+			LeaderElectionID:       "auth.t-caas.telekom.com",
 			HealthProbeBindAddress: probeAddr,
 		})
 		if err != nil {

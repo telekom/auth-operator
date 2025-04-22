@@ -2,7 +2,7 @@ apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: RoleDefinition
 metadata:
   labels:
-    app.kubernetes.io/name: authn-authz-operator
+    app.kubernetes.io/name: auth-operator
     app.kubernetes.io/managed-by: kustomize
   name: rd-testing-cluster-reader
 spec:
@@ -32,7 +32,7 @@ apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: RoleDefinition
 metadata:
   labels:
-    app.kubernetes.io/name: authn-authz-operator
+    app.kubernetes.io/name: auth-operator
     app.kubernetes.io/managed-by: kustomize
   name: rd-testing-namespaced-reader
 spec:

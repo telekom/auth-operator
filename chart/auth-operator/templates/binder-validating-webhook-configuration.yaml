@@ -5,6 +5,7 @@ metadata:
   annotations:
     cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include "auth-operator.fullname" . }}-
   labels:
+    authorization.t-caas.telekom.com/component: "webhook"
   {{- include "auth-operator.labels" . | nindent 4 }}
 webhooks:
 - admissionReviewVersions:
@@ -15,7 +16,7 @@ webhooks:
       namespace: '{{ .Release.Namespace }}'
       path: /validate-authorization-t-caas-telekom-com-v1alpha1-binddefinition
   failurePolicy: Fail
-  name: binder.validating.webhook.authn-authz.t-caas.telekom.de
+  name: binder.validating.webhook.auth.t-caas.telekom.de
   rules:
   - apiGroups:
     - authorization.t-caas.telekom.com

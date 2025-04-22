@@ -22,7 +22,7 @@ spec:
       containers:
       - args: {{- toYaml .Values.controllerManager.manager.args | nindent 8 }}
         command:
-        - /authn-authz-operator
+        - /auth-operator
         env:
         - name: KUBERNETES_CLUSTER_DOMAIN
           value: {{ quote .Values.kubernetesClusterDomain }}
@@ -69,8 +69,12 @@ spec:
       containers:
       - args: {{- toYaml .Values.webhookServer.webhook.args | nindent 8 }}
         command:
-        - /authn-authz-operator
+        - /auth-operator
         env:
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
         - name: KUBERNETES_CLUSTER_DOMAIN
           value: {{ quote .Values.kubernetesClusterDomain }}
         image: {{ .Values.webhookServer.webhook.image.repository }}:{{ .Values.webhookServer.webhook.image.tag

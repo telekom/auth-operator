@@ -10,13 +10,14 @@ import (
 	"fmt"
 	"net/http"
 
-	authorizationv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/authn-authz-operator/api/authorization/v1alpha1"
-	authorizationwebhook "gitlab.devops.telekom.de/cit/t-caas/operators/authn-authz-operator/internal/webhook/authorization"
+	authorizationv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1"
+	authorizationwebhook "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/internal/webhook/authorization"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/open-policy-agent/cert-controller/pkg/rotator"
 	"github.com/spf13/cobra"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -27,15 +28,14 @@ import (
 )
 
 var (
-	webhookPort                                      int
-	webhookCertsDir                                  string
-	enableHTTP2                                      bool
-	disableCertRotation                              bool
-	certRotationServiceLabelSelector                 string
-	certRotationSecretLabelSelector                  string
-	bindDefinitionValidatingWebhookConfigurationName string
-	namespaceValidatingWebhookConfigurationName      string
-	namespaceMutatingWebhookConfigurationName        string
+	webhookPort                                 int
+	webhookCertsDir                             string
+	enableHTTP2                                 bool
+	disableCertRotation                         bool
+	certRotationServiceLabelSelector            string
+	certRotationSecretLabelSelector             string
+	certRotationValidatingWebhooksLabelSelector string
+	certRotationMutatingWebhooksLabelSelector   string
 )
 
 const (
@@ -159,6 +159,45 @@ func configureWebhooks(mgr manager.Manager) error {
 
 	return nil
 }
+
+func getValidatingWebhookNames(mgr manager.Manager) ([]string, error) {
+	apiReader := mgr.GetAPIReader()
+
+	validatingWebhooksList := &admissionregistrationv1.ValidatingWebhookConfigurationList{}
+	selector, err := labels.Parse(certRotationValidatingWebhooksLabelSelector)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse label selector %q: %w", certRotationValidatingWebhooksLabelSelector, err)
+	}
+
+	if err := apiReader.List(context.Background(), validatingWebhooksList, client.MatchingLabelsSelector{Selector: selector}); err != nil {
+		return nil, fmt.Errorf("failed to list validating webhooks in namespace %q with labels %v: %w", namespace, selector, err)
+	}
+	result := make([]string, 0, len(validatingWebhooksList.Items))
+	for _, webhook := range validatingWebhooksList.Items {
+		result = append(result, webhook.Name)
+	}
+	return result, nil
+}
+
+func getMutatingWebhookNames(mgr manager.Manager) ([]string, error) {
+	apiReader := mgr.GetAPIReader()
+
+	mutatingWebhooksList := &admissionregistrationv1.MutatingWebhookConfigurationList{}
+	selector, err := labels.Parse(certRotationMutatingWebhooksLabelSelector)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse label selector %q: %w", certRotationMutatingWebhooksLabelSelector, err)
+	}
+
+	if err := apiReader.List(context.Background(), mutatingWebhooksList, client.MatchingLabelsSelector{Selector: selector}); err != nil {
+		return nil, fmt.Errorf("failed to list mutating webhooks in namespace %q with labels %v: %w", namespace, selector, err)
+	}
+	result := make([]string, 0, len(mutatingWebhooksList.Items))
+	for _, webhook := range mutatingWebhooksList.Items {
+		result = append(result, webhook.Name)
+	}
+	return result, nil
+}
+
 func getCertificateSecretKey(mgr manager.Manager) (types.NamespacedName, error) {
 	// list secrets in operator namespace with label selector and ensure only one is returned
 	//c := mgr.GetClient()
@@ -214,33 +253,33 @@ func enableCertRotation(mgr manager.Manager, notifyFinished chan struct{}) error
 	if webhookCertsDir == "" {
 		return errors.New("certs-dir is undefined. can't enable cert rotator")
 	}
-	if bindDefinitionValidatingWebhookConfigurationName == "" {
-		return errors.New("bindDefinitionValidatingWebhookConfigurationName is undefined. can't enable cert rotator")
-	}
-	if namespaceValidatingWebhookConfigurationName == "" {
-		return errors.New("namespaceValidatingWebhookConfigurationName is undefined. can't enable cert rotator")
-	}
-	if namespaceMutatingWebhookConfigurationName == "" {
-		return errors.New("namespaceMutatingWebhookConfigurationName is undefined. can't enable cert rotator")
-	}
 	if caName == "" {
 		return errors.New("caName is undefined. can't enable cert rotator")
 	}
 
-	webhooks := []rotator.WebhookInfo{
-		{
-			Name: bindDefinitionValidatingWebhookConfigurationName,
-			Type: rotator.Validating,
-		},
-		{
-			Name: namespaceValidatingWebhookConfigurationName,
-			Type: rotator.Validating,
-		},
-		{
-			Name: namespaceMutatingWebhookConfigurationName,
-			Type: rotator.Mutating,
-		},
+	webhooks := []rotator.WebhookInfo{}
+	validatingWebhooks, err := getValidatingWebhookNames(mgr)
+	if err != nil {
+		return fmt.Errorf("unable to get validating webhooks. err: %s", err)
 	}
+	for _, validatingWebhook := range validatingWebhooks {
+		webhooks = append(webhooks, rotator.WebhookInfo{
+			Name: validatingWebhook,
+			Type: rotator.Validating,
+		})
+	}
+
+	mutatingWebhooks, err := getMutatingWebhookNames(mgr)
+	if err != nil {
+		return fmt.Errorf("unable to get mutating webhooks. err: %s", err)
+	}
+	for _, mutatingWebhook := range mutatingWebhooks {
+		webhooks = append(webhooks, rotator.WebhookInfo{
+			Name: mutatingWebhook,
+			Type: rotator.Mutating,
+		})
+	}
+
 	secretKey, err := getCertificateSecretKey(mgr)
 	if err != nil {
 		return fmt.Errorf("unable to get secret. err: %s", err)
@@ -278,8 +317,6 @@ func init() {
 	webhookCmd.Flags().BoolVar(&disableCertRotation, "disable-cert-rotation", false, "disable automatic generation and rotation of webhook TLS certificates/keys")
 	webhookCmd.Flags().StringVar(&certRotationServiceLabelSelector, "cert-rotation-service-label-selector", "", "The label selector for the webhook service")
 	webhookCmd.Flags().StringVar(&certRotationSecretLabelSelector, "cert-rotation-secret-label-selector", "", "The label selector for the webhook secret")
-	webhookCmd.Flags().StringVar(&bindDefinitionValidatingWebhookConfigurationName, "bind-definition-validating-webhook-configuration-name", "", "The name of the BindDefinition validating webhook configuration")
-	webhookCmd.Flags().StringVar(&namespaceValidatingWebhookConfigurationName, "namespace-validating-webhook-configuration-name", "", "The name of the Namespace validating webhook configuration")
-	webhookCmd.Flags().StringVar(&namespaceMutatingWebhookConfigurationName, "namespace-mutating-webhook-configuration-name", "", "The name of the Namespace mutating webhook configuration")
-
+	webhookCmd.Flags().StringVar(&certRotationValidatingWebhooksLabelSelector, "cert-rotation-validating-webhooks-label-selector", "", "The label selector for the validating webhooks")
+	webhookCmd.Flags().StringVar(&certRotationMutatingWebhooksLabelSelector, "cert-rotation-mutating-webhooks-label-selector", "", "The label selector for the mutating webhooks")
 }

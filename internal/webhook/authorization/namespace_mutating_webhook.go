@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings" // Import strings package for parsing username
 
-	authzv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/authn-authz-operator/api/authorization/v1alpha1"
+	authzv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -54,7 +54,7 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 	// Label key-value validation is done in the Validating Webhook, there we don't
 	// care about req.OldObject - i.e. there is no difference in decoding between
 	// CREATE and UPDATE verbs. This stems from advisory on Mutating Webhook authoring
-	// https://kubernetes.io/docs/reference/access-authn-authz/admission-controllers/#use-caution-when-authoring-and-installing-mutating-webhooks
+	// https://kubernetes.io/docs/reference/access-auth/admission-controllers/#use-caution-when-authoring-and-installing-mutating-webhooks
 	err = m.Decoder.Decode(req, ns)
 	if err != nil {
 		return admission.Errored(http.StatusBadRequest, err)

@@ -24,7 +24,7 @@ func (r *RoleDefinition) SetupWebhookWithManager(mgr ctrl.Manager) error {
 		Complete()
 }
 
-// +kubebuilder:webhook:path=/validate-authorization-t-caas-telekom-com-v1alpha1-roledefinition,mutating=false,failurePolicy=fail,sideEffects=None,groups=authorization.t-caas.telekom.com,resources=roledefinitions,verbs=create;update,versions=v1alpha1,name=webhook.authn-authz.t-caas.telekom.de,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/validate-authorization-t-caas-telekom-com-v1alpha1-roledefinition,mutating=false,failurePolicy=fail,sideEffects=None,groups=authorization.t-caas.telekom.com,resources=roledefinitions,verbs=create;update,versions=v1alpha1,name=webhook.auth.t-caas.telekom.de,admissionReviewVersions=v1
 
 //var _ webhook.Validator = &RoleDefinition{}
 

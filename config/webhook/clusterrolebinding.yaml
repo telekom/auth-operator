@@ -2,14 +2,14 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   labels:
-    app.kubernetes.io/name: authn-authz-operator
+    app.kubernetes.io/name: auth-operator
     app.kubernetes.io/managed-by: kustomize
-  name: manager-rolebinding
+  name: webhook-server-clusterrolebinding
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: manager-role
+  name: webhook-server-clusterrole
 subjects:
 - kind: ServiceAccount
-  name: controller-manager
+  name: webhook-server
   namespace: system

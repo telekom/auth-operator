@@ -1,6 +1,6 @@
 package v1alpha1
 
-import "gitlab.devops.telekom.de/cit/t-caas/operators/authn-authz-operator/pkg/conditions"
+import "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/conditions"
 
 // AuthNConditionType represents authentication-related condition types.
 type AuthNConditionType = conditions.ConditionType

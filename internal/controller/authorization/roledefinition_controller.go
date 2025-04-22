@@ -25,9 +25,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	authnv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/authn-authz-operator/api/authorization/v1alpha1"
-	conditions "gitlab.devops.telekom.de/cit/t-caas/operators/authn-authz-operator/pkg/conditions"
-	helpers "gitlab.devops.telekom.de/cit/t-caas/operators/authn-authz-operator/pkg/helpers"
+	authnv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1"
+	conditions "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/conditions"
+	helpers "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/helpers"
 )
 
 // RoleDefinitionReconciler reconciles a RoleDefinition object

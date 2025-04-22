@@ -3,7 +3,7 @@ kind: Namespace
 metadata:
   labels:
     control-plane: controller-manager
-    app.kubernetes.io/name: authn-authz-operator
+    app.kubernetes.io/name: auth-operator
     app.kubernetes.io/managed-by: kustomize
   name: system
 ---
@@ -14,7 +14,7 @@ metadata:
   namespace: system
   labels:
     control-plane: controller-manager
-    app.kubernetes.io/name: authn-authz-operator
+    app.kubernetes.io/name: auth-operator
     app.kubernetes.io/managed-by: kustomize
 spec:
   selector:
@@ -59,7 +59,7 @@ spec:
         #   type: RuntimeDefault
       containers:
       - command:
-        - /authn-authz-operator
+        - /auth-operator
         args:
           - controller
           - --leader-elect

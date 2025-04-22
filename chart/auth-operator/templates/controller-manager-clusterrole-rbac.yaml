@@ -1,0 +1,73 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "auth-operator.fullname" . }}-controller-manager-clusterrole
+  labels:
+  {{- include "auth-operator.labels" . | nindent 4 }}
+rules:
+- apiGroups:
+  - authorization.t-caas.telekom.com
+  resources:
+  - roledefinitions
+  - roledefinitions/finalizers
+  - roledefinitions/status
+  - binddefinitions
+  - binddefinitions/finalizers
+  - binddefinitions/status
+  verbs:
+  - '*'
+- apiGroups:
+  - authentication.t-caas.telekom.com
+  resources:
+  - authproviders
+  - authproviders/finalizers
+  - authproviders/status
+  verbs:
+  - '*'
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - clusterroles
+  - roles
+  - clusterroles/finalizers
+  - roles/finalizers
+  - clusterroles/status
+  - roles/status
+  - clusterrolebindings
+  - rolebindings
+  - clusterrolebindings/finalizers
+  - rolebindings/finalizers
+  - clusterrolebindings/status
+  - rolebindings/status
+  verbs:
+  - bind
+  - escalate
+  - '*'
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts
+  - serviceaccounts/finalizers
+  - events
+  verbs:
+  - '*'
+- apiGroups:
+  - events.k8s.io
+  resources:
+  - events
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - '*'
+  resources:
+  - '*'
+  verbs:
+  - get
+  - list
+  - watch

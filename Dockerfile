@@ -10,9 +10,9 @@ WORKDIR /
 ARG BINARY_SOURCE_PATH
 
 # copy binary into the image
-COPY ${BINARY_SOURCE_PATH} ./authn-authz-operator
+COPY ${BINARY_SOURCE_PATH} ./auth-operator
 
 USER 65532:65532
 
 # exec binary in image
-ENTRYPOINT ["/authn-authz-operator"]
+ENTRYPOINT ["/auth-operator"]

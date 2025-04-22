@@ -37,7 +37,7 @@ help: ## Display this help.
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	$(CONTROLLER_GEN) crd paths="./api/..." output:crd:artifacts:config=config/crd/bases
-	$(CONTROLLER_GEN) rbac:roleName=manager-role paths="./internal/controller/..." output:rbac:artifacts:config=config/rbac
+	$(CONTROLLER_GEN) rbac:roleName=controller-manager-clusterrole paths="./internal/controller/..." output:rbac:artifacts:config=config/rbac
 	$(CONTROLLER_GEN) rbac:roleName=webhook-server-role paths="./internal/webhook/..." output:rbac:artifacts:config=config/webhook
 
 .PHONY: generate
@@ -117,6 +117,13 @@ helm: manifests kustomize helmify ## Generate the complete Helm chart
 		mv "$$file" "crds/$${file#crds/apiextensions.k8s.io_v1_customresourcedefinition_}"; \
 	done && \
 	popd
+	@echo "Running webhook post-processing..."
+	@for file in chart/auth-operator/templates/*webhook-configuration.yaml; do \
+		if [ -f "$$file" ]; then \
+			echo "Patching label in $$file"; \
+			sed -i '/^[[:space:]]*labels:[[:space:]]*$$/a\    authorization.t-caas.telekom.com\/component: "webhook"' "$$file"; \
+		fi; \
+	done
 
 # PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
 # architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:0.0.1). To use this option you need to:
@@ -143,12 +150,12 @@ build-installer: manifests generate kustomize ## Generate a consolidated YAML wi
 
 .PHONY: export-images
 export-images: drawio ## Export PNG images from a Draw.io diagram.
-	drawio --export docs/drawio/authn-authz-operator.drawio --output docs/images/overall-architecture.png --format png --page-index=0
-	drawio --export docs/drawio/authn-authz-operator.drawio --output docs/images/generator.png --format png --page-index=1
-	drawio --export docs/drawio/authn-authz-operator.drawio --output docs/images/binder.png --format png --page-index=2
-	drawio --export docs/drawio/authn-authz-operator.drawio --output docs/images/idp.png --format png --page-index=3 
-	drawio --export docs/drawio/authn-authz-operator.drawio --output docs/images/authorizer.png --format png --page-index=4
-	drawio --export docs/drawio/authn-authz-operator.drawio --output docs/images/advertiser.png --format png --page-index=5
+	drawio --export docs/drawio/auth-operator.drawio --output docs/images/overall-architecture.png --format png --page-index=0
+	drawio --export docs/drawio/auth-operator.drawio --output docs/images/generator.png --format png --page-index=1
+	drawio --export docs/drawio/auth-operator.drawio --output docs/images/binder.png --format png --page-index=2
+	drawio --export docs/drawio/auth-operator.drawio --output docs/images/idp.png --format png --page-index=3 
+	drawio --export docs/drawio/auth-operator.drawio --output docs/images/authorizer.png --format png --page-index=4
+	drawio --export docs/drawio/auth-operator.drawio --output docs/images/advertiser.png --format png --page-index=5
 
 .PHONY: docs 
 docs: crd-ref-docs ## Generate markdown API reference into docs directory.

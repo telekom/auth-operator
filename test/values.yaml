@@ -1,12 +1,12 @@
 controllerManager:
   manager:
     image:
-      repository: artifactory.devops.telekom.de/tdi-caas-docker-images-local/authn-authz-operator
+      repository: artifactory.devops.telekom.de/tdi-caas-docker-images-local/auth-operator
       tag:
 webhookServer:
   webhook:
     image:
-      repository: artifactory.devops.telekom.de/tdi-caas-docker-images-local/authn-authz-operator
+      repository: artifactory.devops.telekom.de/tdi-caas-docker-images-local/auth-operator
       tag:
 
 imagePullSecrets:

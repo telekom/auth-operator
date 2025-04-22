@@ -6,8 +6,8 @@ domain: t-caas.telekom.com
 layout:
 - go.kubebuilder.io/v4
 multigroup: true
-projectName: authn-authz-operator
-repo: gitlab.devops.telekom.de/cit/t-caas/operators/authn-authz-operator
+projectName: auth-operator
+repo: gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator
 resources:
 - api:
     crdVersion: v1
@@ -15,7 +15,7 @@ resources:
   domain: t-caas.telekom.com
   group: authorization
   kind: RoleDefinition
-  path: gitlab.devops.telekom.de/cit/t-caas/operators/authn-authz-operator/api/authorization/v1alpha1
+  path: gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1
   version: v1alpha1
   webhooks:
     validation: true
@@ -26,7 +26,7 @@ resources:
   domain: t-caas.telekom.com
   group: authorization
   kind: BindDefinition
-  path: gitlab.devops.telekom.de/cit/t-caas/operators/authn-authz-operator/api/authorization/v1alpha1
+  path: gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1
   version: v1alpha1
   webhooks:
     validation: true
@@ -37,13 +37,13 @@ resources:
   domain: t-caas.telekom.com
   group: authentication
   kind: AuthProvider
-  path: gitlab.devops.telekom.de/cit/t-caas/operators/authn-authz-operator/api/authentication/v1alpha1
+  path: gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authentication/v1alpha1
   version: v1alpha1
 - api:
     crdVersion: v1
   domain: t-caas.telekom.com
   group: authorization
   kind: WebhookAuthorizer
-  path: gitlab.devops.telekom.de/cit/t-caas/operators/authn-authz-operator/api/authorization/v1alpha1
+  path: gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1
   version: v1alpha1
 version: "3"

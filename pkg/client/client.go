@@ -73,7 +73,7 @@ func (c *IDPClient) RefreshAccessToken(path string) error {
 
 	request.Header.Add("X-Pannet-API-Key", c.APIToken)
 	request.Header.Add("Content-Type", "application/json") // or "accept" instead of content-type
-	request.Header.Add("User-Agent", "authn-authz.t-caas.telekom.com")
+	request.Header.Add("User-Agent", "auth.t-caas.telekom.com")
 
 	c.Log.Info(fmt.Sprintf("Executing %s request on URL: %s", http.MethodPost, request.URL.String()))
 	response, err := c.HTTPClient.Do(request)
@@ -128,7 +128,7 @@ func (c *IDPClient) RequestResponse(method string, path string, requestData inte
 	}
 	request.Header.Add("Authorization", "Bearer "+c.BearerToken)
 	request.Header.Add("Content-Type", "application/json")
-	request.Header.Add("User-Agent", "authn-authz.t-caas.telekom.com")
+	request.Header.Add("User-Agent", "auth.t-caas.telekom.com")
 
 	c.Log.Info(fmt.Sprintf("Executing %s request on URL: %s", method, request.URL.String()))
 	response, err := c.HTTPClient.Do(request)

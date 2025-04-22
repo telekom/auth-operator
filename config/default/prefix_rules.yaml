@@ -1,0 +1,16 @@
+namePrefix:
+- path: metadata/name
+  apiVersion: v1
+  kind: Secret
+- path: metadata/name
+  apiVersion: v1
+  kind: ServiceAccount
+- path: metadata/name
+  apiVersion: v1
+  kind: ClusterRole
+- path: metadata/name
+  apiVersion: v1
+  kind: ClusterRoleBinding
+- path: metadata/name
+  apiVersion: apps/v1
+  kind: Deployment
