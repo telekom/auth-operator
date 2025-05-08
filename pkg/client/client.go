@@ -17,6 +17,7 @@ import (
 type IDPClient struct {
 	HTTPClient        *http.Client
 	APIToken          string
+	APITokenRefresh   bool
 	BearerToken       string
 	IDPServiceURL     url.URL
 	RefreshServiceURL url.URL
@@ -24,11 +25,12 @@ type IDPClient struct {
 }
 
 type Config struct {
-	IDPBasePath     string
-	RefreshBasePath string
-	APIToken        string
-	Timeout         time.Duration
-	HTTPClient      *http.Client
+	IDPURL             string
+	APIToken           string
+	APITokenRefresh    bool
+	APITokenRefreshURL string
+	Timeout            time.Duration
+	HTTPClient         *http.Client
 }
 
 type Options struct {
@@ -40,24 +42,32 @@ func NewIDPClient(config Config, options Options) (*IDPClient, error) {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: config.Timeout}
 	}
-	urlbasepath := url.URL{
+
+	idpUrl := url.URL{
 		Scheme: "https",
-		Host:   config.IDPBasePath,
+		Host:   config.IDPURL,
 	}
-	urlrefreshpath := url.URL{
-		Scheme: "https",
-		Host:   config.RefreshBasePath,
+
+	var apiTokenRefreshUrl url.URL
+	if config.APITokenRefresh == true {
+		apiTokenRefreshUrl = url.URL{
+			Scheme: "https",
+			Host:   config.APITokenRefreshURL,
+		}
 	}
+
 	if options.TLSClientConfig != nil {
 		httpClient.Transport = &http.Transport{
 			TLSClientConfig: options.TLSClientConfig,
 		}
 	}
+
 	client := &IDPClient{
 		HTTPClient:        httpClient,
+		IDPServiceURL:     idpUrl,
 		APIToken:          config.APIToken,
-		IDPServiceURL:     urlbasepath,
-		RefreshServiceURL: urlrefreshpath,
+		APITokenRefresh:   config.APITokenRefresh,
+		RefreshServiceURL: apiTokenRefreshUrl,
 	}
 	return client, nil
 }

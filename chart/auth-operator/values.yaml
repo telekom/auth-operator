@@ -1,3 +1,8 @@
+authproviderSecrets:
+  apiToken: ""
+  apiTokenRefresh: ""
+  apiTokenRefreshUrl: ""
+  idpUrl: ""
 controllerManager:
   manager:
     args:

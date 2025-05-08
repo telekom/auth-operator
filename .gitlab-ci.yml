@@ -13,6 +13,11 @@ variables:
   GO_BIN_NAME: "${APP_NAME}"
   HELM_CHART_SOURCE: chart/auth-operator
   GIT_DEPTH: 1
+  HELM_TEMPLATE_ARGS: >-
+    --set authproviderSecrets.apiToken=forCI
+    --set authproviderSecrets.apiTokenRefresh=forCI
+    --set authproviderSecrets.apiTokenRefreshUrl=forCI
+    --set authproviderSecrets.idpUrl=forCI
 
 # use specific go flags
 go-build:

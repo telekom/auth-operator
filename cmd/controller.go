@@ -6,6 +6,8 @@ package cmd
 import (
 	"crypto/tls"
 	"fmt"
+	"os"
+	"strconv"
 
 	"github.com/spf13/cobra"
 	"k8s.io/client-go/discovery"
@@ -81,12 +83,31 @@ to quickly create a Cobra application.`,
 		// Setup an IDP client for AuthProviderReconciler
 		// Needs refactoring -> transition to interface and define method group which
 		// must be satisfied by all IDP clients to make this as generic as possible
+
+		idpUrl := os.Getenv("IDP_URL")
+		if idpUrl == "" {
+			return fmt.Errorf("IDP_URL environment variable must be set")
+		}
+
+		apiToken := os.Getenv("API_TOKEN")
+		if apiToken == "" {
+			return fmt.Errorf("API_TOKEN environment variable must be set")
+		}
+
+		apiTokenRefresh, _ := strconv.ParseBool(os.Getenv("API_TOKEN_REFRESH"))
+		var apiTokenRefreshUrl string
+		if apiTokenRefresh {
+			apiTokenRefreshUrl = os.Getenv("API_TOKEN_REFRESH_URL")
+			if apiTokenRefreshUrl == "" {
+				return fmt.Errorf("API_TOKEN_REFRESH is set to 'true', therefore API_TOKEN_REFRESH_URL is required")
+			}
+		}
+
 		idpClient, err := idpclient.NewIDPClient(idpclient.Config{
-			// TODO: make it configurable
-			IDPBasePath:     "portal.security.in.pan-net.eu:443",
-			RefreshBasePath: "portal.security.in.pan-net.eu:443", // this is currently the same but can change
-			// TODO: remove token from here
-			APIToken: "3Y_F0D5SIwfsEwegxYjY8gCwHM_znXjzkgk-8N0EDcgDAcQYB5nTzngPlpX9hHbQ4VuGGjjl9k_PqC7gF_G_dfO608wZn5ekkJuLUk3dxekicJex8-j2ywCBHyvaitvXR1lGUruucMtNMJydXJf4gR0hIfreVR_8WKh5jRMYIeQr3Yd8NCm351aspPFq9qIwL3uljjO0lIEMjcZEdiWFikBia5q3eZBC2vTK3NT9Obaj4enJ8RlfN9Woo1FOx1WjoOw10MczUyVp_r4iytEoq-0QnovLNwbJmmdOigjzhyY1IrpPtplr3Qmc0T181t8sPRN58K_mA05lRkfs9lwtJTY4Iznbtm-oLaIwoIfolRsXLf-Z1W5HPBlCjD4iGYcxVCovLwdITnvyU3EZEFt83ng6lqY-CCULryX2BE0NOozkT7314kn0dA0DKNAJwb8hJCqGJh_i3Wc9MTnNoJxgexCzZPljpNxXtWJLGKiWYGVsUhiXMu4F_V3EC4ecV8PfNS0IXdq6HZBYR4Iv7j4lJw",
+			IDPURL:             idpUrl,
+			APIToken:           apiToken,
+			APITokenRefresh:    apiTokenRefresh,
+			APITokenRefreshURL: apiTokenRefreshUrl,
 		}, idpclient.Options{
 			TLSClientConfig: &tls.Config{
 				InsecureSkipVerify: true,
