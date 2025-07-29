@@ -19,25 +19,19 @@ spec:
     namespace: kube-system
   clusterRoleBindings:
     clusterRoleRefs:
-    - apiGroup: rbac.authorization.k8s.io
-      kind: ClusterRole
-      name: t-caas-cluster-reader
+    - t-caas-cluster-reader
   roleBindings:
     clusterRoleRefs:
-    - apiGroup: rbac.authorization.k8s.io
-      kind: ClusterRole
-      name: t-caas-cluster-reader
+    - t-caas-cluster-reader
     roleRefs:
-    - apiGroup: rbac.authorization.k8s.io
-      kind: Role
-      name: t-caas-namespaced-reader
+    - t-caas-namespaced-reader
     namespaceSelector:
-      matchExpressions:
-      - key: t-caas.telekom.com/owner 
-        operator: In 
-        values:
-        - tenant
-      - key: t-caas.telekom.com/tenant
-        operator: In
-        values:
-        - karlo
+      - matchExpressions:
+        - key: t-caas.telekom.com/owner
+          operator: In
+          values:
+          - tenant
+        - key: t-caas.telekom.com/tenant
+          operator: In
+          values:
+          - karlo

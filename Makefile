@@ -1,3 +1,8 @@
+#!make
+
+## Export tool versions
+include versions.env
+
 # Image URL to use all building/pushing image targets
 APP ?= auth-operator
 IMG ?= (APP):latest
@@ -201,15 +206,6 @@ GOLANGCI_LINT = $(LOCALBIN)/golangci-lint-$(GOLANGCI_LINT_VERSION)
 CRD_REF_DOCS = $(LOCALBIN)/crd-ref-docs-$(CRD_REF_DOCS_VERSION)
 HELMIFY ?= $(LOCALBIN)/helmify-$(HELMIFY_VERSION)
 
-## Tool Versions
-KUSTOMIZE_VERSION ?= v5.4.1
-CONTROLLER_TOOLS_VERSION ?= v0.17.3
-ENVTEST_VERSION ?= release-0.18
-GOLANGCI_LINT_VERSION ?= v1.57.2
-CRD_REF_DOCS_VERSION ?= v0.1.0
-HELMIFY_VERSION ?= v0.4.17
-DRAWIO ?= 24.7.8
-
 .PHONY: helmify
 helmify: $(HELMIFY) ## Download helmify locally if necessary.
 $(HELMIFY): $(LOCALBIN)
@@ -233,7 +229,7 @@ $(ENVTEST): $(LOCALBIN)
 .PHONY: golangci-lint
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
 $(GOLANGCI_LINT): $(LOCALBIN)
-	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/cmd/golangci-lint,${GOLANGCI_LINT_VERSION})
+	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,${GOLANGCI_LINT_VERSION})
 
 .PHONY: crd-ref-docs 
 crd-ref-docs: $(CRD_REF_DOCS) ## Download crd-ref-docs locally if necessary.
