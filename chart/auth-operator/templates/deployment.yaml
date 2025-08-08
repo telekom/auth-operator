@@ -88,6 +88,9 @@ spec:
     spec:
       containers:
       - args: {{- toYaml .Values.webhookServer.webhook.args | nindent 8 }}
+        {{- if .Values.tdgMigration.enabled }}
+        - --tdg-migration=true
+        {{- end }}
         command:
         - /auth-operator
         env:

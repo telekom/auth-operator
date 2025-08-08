@@ -36,6 +36,7 @@ var (
 	certRotationSecretLabelSelector             string
 	certRotationValidatingWebhooksLabelSelector string
 	certRotationMutatingWebhooksLabelSelector   string
+	enableTDGMigration                          bool
 )
 
 const (
@@ -141,7 +142,8 @@ func configureWebhooks(mgr manager.Manager) error {
 	}
 	// Setup Namespace mutator
 	namespaceMutator := &authorizationwebhook.NamespaceMutator{
-		Client: mgr.GetClient(),
+		Client:       mgr.GetClient(),
+		TDGMigration: enableTDGMigration,
 	}
 	if err := namespaceMutator.InjectDecoder(admission.NewDecoder(mgr.GetScheme())); err != nil {
 		return fmt.Errorf("unable to inject decoder for NamespaceMutator: %w", err)
@@ -150,7 +152,8 @@ func configureWebhooks(mgr manager.Manager) error {
 
 	// Setup Namespace validator
 	namespaceValidator := &authorizationwebhook.NamespaceValidator{
-		Client: mgr.GetClient(),
+		Client:       mgr.GetClient(),
+		TDGMigration: enableTDGMigration,
 	}
 	if err := namespaceValidator.InjectDecoder(admission.NewDecoder(mgr.GetScheme())); err != nil {
 		return fmt.Errorf("unable to inject decoder for NamespaceValidator: %w", err)
@@ -319,4 +322,5 @@ func init() {
 	webhookCmd.Flags().StringVar(&certRotationSecretLabelSelector, "cert-rotation-secret-label-selector", "", "The label selector for the webhook secret")
 	webhookCmd.Flags().StringVar(&certRotationValidatingWebhooksLabelSelector, "cert-rotation-validating-webhooks-label-selector", "", "The label selector for the validating webhooks")
 	webhookCmd.Flags().StringVar(&certRotationMutatingWebhooksLabelSelector, "cert-rotation-mutating-webhooks-label-selector", "", "The label selector for the mutating webhooks")
+	webhookCmd.Flags().BoolVar(&enableTDGMigration, "tdg-migration", false, "If set, the legacy lablels and behavior for TDG migration will be enabled. ")
 }

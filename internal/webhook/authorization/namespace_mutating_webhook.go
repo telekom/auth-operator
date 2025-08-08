@@ -20,8 +20,9 @@ var nsMutatorLog = logf.Log.WithName("namespace-mutator")
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions,verbs=get;list;watch
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions/status,verbs=get;update;patch
 type NamespaceMutator struct {
-	Client  client.Client
-	Decoder admission.Decoder
+	Client       client.Client
+	Decoder      admission.Decoder
+	TDGMigration bool
 }
 
 // InjectDecoder injects the decoder into the NamespaceMutator
@@ -47,6 +48,25 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 	if req.UserInfo.Username == "system:serviceaccount:t-caas-storage:trident-operator" && req.Operation == admissionv1.Update && req.Name == "t-caas-storage" {
 		nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
 		return admission.Allowed("")
+	}
+	// If tdgMigration is enabled, allow the helm and kustomize controller to update namespaces
+	if m.TDGMigration {
+		if req.UserInfo.Username == "system:serviceaccount:flux-system:helm-controller" {
+			nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+			return admission.Allowed("")
+		}
+		if req.UserInfo.Username == "system:serviceaccount:flux-system:kustomize-controller" {
+			nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+			return admission.Allowed("")
+		}
+		if req.UserInfo.Username == "system:serviceaccount:schiff-tenant:m2m-sa" {
+			nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+			return admission.Allowed("")
+		}
+		if req.UserInfo.Username == "system:serviceaccount:schiff-system:m2m-sa" {
+			nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+			return admission.Allowed("")
+		}
 	}
 	ns := &corev1.Namespace{}
 	var err error

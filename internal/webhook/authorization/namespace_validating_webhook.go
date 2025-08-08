@@ -21,8 +21,9 @@ var nsValidatorLog = logf.Log.WithName("namespace-validator")
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions,verbs=get;list;watch
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions/status,verbs=get;update;patch
 type NamespaceValidator struct {
-	Client  client.Client
-	Decoder admission.Decoder
+	Client       client.Client
+	Decoder      admission.Decoder
+	TDGMigration bool
 }
 
 func (v *NamespaceValidator) InjectDecoder(d admission.Decoder) error {
@@ -40,6 +41,25 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 	if req.UserInfo.Username == "kubernetes-admin" {
 		nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
 		return admission.Allowed("")
+	}
+	// If tdgMigration is enabled, allow the helm and kustomize controller to update namespaces
+	if v.TDGMigration {
+		if req.UserInfo.Username == "system:serviceaccount:flux-system:helm-controller" {
+			nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+			return admission.Allowed("")
+		}
+		if req.UserInfo.Username == "system:serviceaccount:flux-system:kustomize-controller" {
+			nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+			return admission.Allowed("")
+		}
+		if req.UserInfo.Username == "system:serviceaccount:schiff-tenant:m2m-sa" {
+			nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+			return admission.Allowed("")
+		}
+		if req.UserInfo.Username == "system:serviceaccount:schiff-system:m2m-sa" {
+			nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+			return admission.Allowed("")
+		}
 	}
 	// ToDo: Trident patches its own namespace and that cant be disabled.
 	// https://github.com/NetApp/trident/blob/6b4cdf074578ade04ca0f1a5c59bb72c019391da/operator/controllers/orchestrator/installer/installer.go#L938
@@ -88,6 +108,10 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 			"t-caas.telekom.com/thirdparty",
 		}
 
+		// If TDGMigration is enabled, add the additional label key
+		if v.TDGMigration {
+			labelKeys = append(labelKeys, "schiff.telekom.de/owner")
+		}
 		// Compare the labels between old and new namespaces
 		for _, key := range labelKeys {
 			oldValue, oldExists := oldNs.Labels[key]

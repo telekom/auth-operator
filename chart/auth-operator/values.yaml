@@ -3,6 +3,8 @@ authproviderSecrets:
   apiTokenRefresh: ""
   apiTokenRefreshUrl: ""
   idpUrl: ""
+tdgMigration:
+  enabled: false
 controllerManager:
   manager:
     args:
