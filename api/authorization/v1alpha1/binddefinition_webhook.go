@@ -48,42 +48,43 @@ func (r *BindDefinition) ValidateCreate() (admission.Warnings, error) {
 			return nil, apierrors.NewBadRequest(fmt.Sprintf("targetName %s already exists in BindDefinition %s", r.Spec.TargetName, bindDefinition.Name))
 		}
 	}
+	for _, RoleBinding := range r.Spec.RoleBindings {
+		// Handle multiple NamespaceSelectors
+		if len(RoleBinding.NamespaceSelector) > 0 {
+			namespaceSet := make(map[string]corev1.Namespace)
 
-	// Handle multiple NamespaceSelectors
-	if len(r.Spec.RoleBindings.NamespaceSelector) > 0 {
-		namespaceSet := make(map[string]corev1.Namespace)
-
-		for _, nsSelector := range r.Spec.RoleBindings.NamespaceSelector {
-			if !reflect.DeepEqual(nsSelector, metav1.LabelSelector{}) {
-				selector, err := metav1.LabelSelectorAsSelector(&nsSelector)
-				if err != nil {
-					return nil, apierrors.NewBadRequest(fmt.Sprintf("Invalid namespaceSelector: %v", err))
-				}
-				namespaceList := &corev1.NamespaceList{}
-				listOptions := &client.ListOptions{
-					LabelSelector: selector,
-				}
-				if err := bdWebhookClient.List(ctx, namespaceList, listOptions); err != nil {
-					return nil, apierrors.NewInternalError(fmt.Errorf("Unable to list namespaces: %v", err))
-				}
-				for _, ns := range namespaceList.Items {
-					namespaceSet[ns.Name] = ns
+			for _, nsSelector := range RoleBinding.NamespaceSelector {
+				if !reflect.DeepEqual(nsSelector, metav1.LabelSelector{}) {
+					selector, err := metav1.LabelSelectorAsSelector(&nsSelector)
+					if err != nil {
+						return nil, apierrors.NewBadRequest(fmt.Sprintf("Invalid namespaceSelector: %v", err))
+					}
+					namespaceList := &corev1.NamespaceList{}
+					listOptions := &client.ListOptions{
+						LabelSelector: selector,
+					}
+					if err := bdWebhookClient.List(ctx, namespaceList, listOptions); err != nil {
+						return nil, apierrors.NewInternalError(fmt.Errorf("Unable to list namespaces: %v", err))
+					}
+					for _, ns := range namespaceList.Items {
+						namespaceSet[ns.Name] = ns
+					}
 				}
 			}
-		}
 
-		for _, ns := range namespaceSet {
-			for _, roleRef := range r.Spec.RoleBindings.RoleRefs {
-				role := &rbacv1.Role{}
-				key := client.ObjectKey{
-					Namespace: ns.Name,
-					Name:      roleRef,
-				}
-				if err := bdWebhookClient.Get(ctx, key, role); err != nil {
-					if apierrors.IsNotFound(err) {
-						return nil, apierrors.NewBadRequest(fmt.Sprintf("Role '%s' not found in namespace '%s'", roleRef, ns.Name))
-					} else {
-						return nil, apierrors.NewInternalError(fmt.Errorf("Error fetching Role '%s' in namespace '%s': %v", roleRef, ns.Name, err))
+			for _, ns := range namespaceSet {
+				for _, roleRef := range RoleBinding.RoleRefs {
+					role := &rbacv1.Role{}
+					key := client.ObjectKey{
+						Namespace: ns.Name,
+						Name:      roleRef,
+					}
+					if err := bdWebhookClient.Get(ctx, key, role); err != nil {
+						if apierrors.IsNotFound(err) {
+							return nil, apierrors.NewBadRequest(fmt.Sprintf("Role '%s' not found in namespace '%s'", roleRef, ns.Name))
+						} else {
+							return nil, apierrors.NewInternalError(fmt.Errorf("Error fetching Role '%s' in namespace '%s': %v", roleRef, ns.Name, err))
+						}
 					}
 				}
 			}
@@ -117,41 +118,44 @@ func (r *BindDefinition) ValidateUpdate(old runtime.Object) (admission.Warnings,
 			return nil, apierrors.NewBadRequest(fmt.Sprintf("targetName %s already exists in BindDefinition %s", r.Spec.TargetName, bindDefinition.Name))
 		}
 	}
-	// Handle multiple NamespaceSelectors
-	if len(r.Spec.RoleBindings.NamespaceSelector) > 0 {
-		namespaceSet := make(map[string]corev1.Namespace)
+	for _, RoleBinding := range r.Spec.RoleBindings {
 
-		for _, nsSelector := range r.Spec.RoleBindings.NamespaceSelector {
-			if !reflect.DeepEqual(nsSelector, metav1.LabelSelector{}) {
-				selector, err := metav1.LabelSelectorAsSelector(&nsSelector)
-				if err != nil {
-					return nil, apierrors.NewBadRequest(fmt.Sprintf("Invalid namespaceSelector: %v", err))
-				}
-				namespaceList := &corev1.NamespaceList{}
-				listOptions := &client.ListOptions{
-					LabelSelector: selector,
-				}
-				if err := bdWebhookClient.List(ctx, namespaceList, listOptions); err != nil {
-					return nil, apierrors.NewInternalError(fmt.Errorf("Unable to list namespaces: %v", err))
-				}
-				for _, ns := range namespaceList.Items {
-					namespaceSet[ns.Name] = ns
+		// Handle multiple NamespaceSelectors
+		if len(RoleBinding.NamespaceSelector) > 0 {
+			namespaceSet := make(map[string]corev1.Namespace)
+
+			for _, nsSelector := range RoleBinding.NamespaceSelector {
+				if !reflect.DeepEqual(nsSelector, metav1.LabelSelector{}) {
+					selector, err := metav1.LabelSelectorAsSelector(&nsSelector)
+					if err != nil {
+						return nil, apierrors.NewBadRequest(fmt.Sprintf("Invalid namespaceSelector: %v", err))
+					}
+					namespaceList := &corev1.NamespaceList{}
+					listOptions := &client.ListOptions{
+						LabelSelector: selector,
+					}
+					if err := bdWebhookClient.List(ctx, namespaceList, listOptions); err != nil {
+						return nil, apierrors.NewInternalError(fmt.Errorf("Unable to list namespaces: %v", err))
+					}
+					for _, ns := range namespaceList.Items {
+						namespaceSet[ns.Name] = ns
+					}
 				}
 			}
-		}
 
-		for _, ns := range namespaceSet {
-			for _, roleRef := range r.Spec.RoleBindings.RoleRefs {
-				role := &rbacv1.Role{}
-				key := client.ObjectKey{
-					Namespace: ns.Name,
-					Name:      roleRef,
-				}
-				if err := bdWebhookClient.Get(ctx, key, role); err != nil {
-					if apierrors.IsNotFound(err) {
-						return nil, apierrors.NewBadRequest(fmt.Sprintf("Role '%s' not found in namespace '%s'", roleRef, ns.Name))
-					} else {
-						return nil, apierrors.NewInternalError(fmt.Errorf("Error fetching Role '%s' in namespace '%s': %v", roleRef, ns.Name, err))
+			for _, ns := range namespaceSet {
+				for _, roleRef := range RoleBinding.RoleRefs {
+					role := &rbacv1.Role{}
+					key := client.ObjectKey{
+						Namespace: ns.Name,
+						Name:      roleRef,
+					}
+					if err := bdWebhookClient.Get(ctx, key, role); err != nil {
+						if apierrors.IsNotFound(err) {
+							return nil, apierrors.NewBadRequest(fmt.Sprintf("Role '%s' not found in namespace '%s'", roleRef, ns.Name))
+						} else {
+							return nil, apierrors.NewInternalError(fmt.Errorf("Error fetching Role '%s' in namespace '%s': %v", roleRef, ns.Name, err))
+						}
 					}
 				}
 			}

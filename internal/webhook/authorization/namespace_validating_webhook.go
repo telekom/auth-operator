@@ -148,23 +148,24 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 		if !userMatchFound {
 			continue
 		}
-
-		// Get the NamespaceSelectors from the BindDefinition
-		namespaceSelectors := bindDef.Spec.RoleBindings.NamespaceSelector
-		namespaceMatchFound := false
-		for _, namespaceSelector := range namespaceSelectors {
-			matches, err := namespaceMatchesSelector(&ns, &namespaceSelector)
-			if err != nil {
-				return admission.Errored(http.StatusInternalServerError, err)
+		for _, roleBinding := range bindDef.Spec.RoleBindings {
+			// Get the NamespaceSelectors from the BindDefinition
+			namespaceSelectors := roleBinding.NamespaceSelector
+			namespaceMatchFound := false
+			for _, namespaceSelector := range namespaceSelectors {
+				matches, err := namespaceMatchesSelector(&ns, &namespaceSelector)
+				if err != nil {
+					return admission.Errored(http.StatusInternalServerError, err)
+				}
+				if matches {
+					namespaceMatchFound = true
+					break
+				}
 			}
-			if matches {
-				namespaceMatchFound = true
+			if namespaceMatchFound {
+				isAllowed = true
 				break
 			}
-		}
-		if namespaceMatchFound {
-			isAllowed = true
-			break
 		}
 	}
 	if isAllowed {

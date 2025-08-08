@@ -52,7 +52,7 @@ type BindDefinitionSpec struct {
 
 	// List of ClusterRoles/Roles to which subjects will be bound to. The list is a RoleRef which means we have to specify t he full rbacv1.RoleRef schema. The result of specifying the field are RoleBindings.
 	// +kubebuilder:validation:Optional
-	RoleBindings NamespaceBinding `json:"roleBindings,omitempty"`
+	RoleBindings []NamespaceBinding `json:"roleBindings,omitempty"`
 }
 
 // BindDefinitionStatus defines the observed state of BindDefinition

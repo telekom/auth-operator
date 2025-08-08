@@ -231,62 +231,63 @@ func (r *BindDefinitionReconciler) reconcileDelete(ctx context.Context, bindDefi
 
 	// Construct namespace list from BindDefinition namespace selectors
 	namespaceSet := make(map[string]corev1.Namespace)
-
-	for _, nsSelector := range bindDefinition.Spec.RoleBindings.NamespaceSelector {
-		if !reflect.DeepEqual(nsSelector, metav1.LabelSelector{}) {
-			selector, err := metav1.LabelSelectorAsSelector(&nsSelector)
-			if err != nil {
-				return ctrl.Result{}, err
-			}
-			namespaceList := &corev1.NamespaceList{}
-			listOpts := []client.ListOption{
-				&client.ListOptions{LabelSelector: selector},
-			}
-			err = r.Client.List(ctx, namespaceList, listOpts...)
-			if err != nil {
-				return ctrl.Result{}, err
-			}
-			for _, ns := range namespaceList.Items {
-				namespaceSet[ns.Name] = ns
-			}
-		}
-	}
-
-	// Handle terminating namespaces and check if they have any resources
-	for _, ns := range namespaceSet {
-		if ns.Status.Phase == corev1.NamespaceTerminating {
-			log.Info("Namespace is terminating", "Namespace", ns.Name)
-
-			resourcesExist, err := r.namespaceHasResources(ctx, ns.Name)
-			if err != nil {
-				log.Error(err, "Failed to check if namespace has resources", "Namespace", ns.Name)
-				return ctrl.Result{}, err
-			}
-
-			// Handle RoleBinding finalizers for resources in namespace
-			if resourcesExist {
-				log.Info("Namespace still has resources, will not remove RoleBinding finalizers", "Namespace", ns.Name)
-				continue
-			} else {
-				log.Info("Namespace has no more resources, will remove RoleBinding finalizers", "Namespace", ns.Name)
-				roleBindingList := &rbacv1.RoleBindingList{}
-				listOpts := []client.ListOption{
-					client.InNamespace(ns.Name),
-					client.MatchingLabels(bindDefinition.ObjectMeta.Labels),
-				}
-				err := r.Client.List(ctx, roleBindingList, listOpts...)
+	for _, RoleBinding := range bindDefinition.Spec.RoleBindings {
+		for _, nsSelector := range RoleBinding.NamespaceSelector {
+			if !reflect.DeepEqual(nsSelector, metav1.LabelSelector{}) {
+				selector, err := metav1.LabelSelectorAsSelector(&nsSelector)
 				if err != nil {
-					log.Error(err, "Failed to list RoleBindings", "Namespace", ns.Name)
 					return ctrl.Result{}, err
 				}
-				for _, roleBinding := range roleBindingList.Items {
-					if controllerutil.ContainsFinalizer(&roleBinding, authnv1alpha1.RoleBindingFinalizer) {
-						controllerutil.RemoveFinalizer(&roleBinding, authnv1alpha1.RoleBindingFinalizer)
-						if err := r.Update(ctx, &roleBinding); err != nil {
-							log.Error(err, "Failed to remove finalizer from RoleBinding", "RoleBinding", roleBinding.Name, "Namespace", ns.Name)
-							return ctrl.Result{}, err
+				namespaceList := &corev1.NamespaceList{}
+				listOpts := []client.ListOption{
+					&client.ListOptions{LabelSelector: selector},
+				}
+				err = r.Client.List(ctx, namespaceList, listOpts...)
+				if err != nil {
+					return ctrl.Result{}, err
+				}
+				for _, ns := range namespaceList.Items {
+					namespaceSet[ns.Name] = ns
+				}
+			}
+		}
+
+		// Handle terminating namespaces and check if they have any resources
+		for _, ns := range namespaceSet {
+			if ns.Status.Phase == corev1.NamespaceTerminating {
+				log.Info("Namespace is terminating", "Namespace", ns.Name)
+
+				resourcesExist, err := r.namespaceHasResources(ctx, ns.Name)
+				if err != nil {
+					log.Error(err, "Failed to check if namespace has resources", "Namespace", ns.Name)
+					return ctrl.Result{}, err
+				}
+
+				// Handle RoleBinding finalizers for resources in namespace
+				if resourcesExist {
+					log.Info("Namespace still has resources, will not remove RoleBinding finalizers", "Namespace", ns.Name)
+					continue
+				} else {
+					log.Info("Namespace has no more resources, will remove RoleBinding finalizers", "Namespace", ns.Name)
+					roleBindingList := &rbacv1.RoleBindingList{}
+					listOpts := []client.ListOption{
+						client.InNamespace(ns.Name),
+						client.MatchingLabels(bindDefinition.ObjectMeta.Labels),
+					}
+					err := r.Client.List(ctx, roleBindingList, listOpts...)
+					if err != nil {
+						log.Error(err, "Failed to list RoleBindings", "Namespace", ns.Name)
+						return ctrl.Result{}, err
+					}
+					for _, roleBinding := range roleBindingList.Items {
+						if controllerutil.ContainsFinalizer(&roleBinding, authnv1alpha1.RoleBindingFinalizer) {
+							controllerutil.RemoveFinalizer(&roleBinding, authnv1alpha1.RoleBindingFinalizer)
+							if err := r.Update(ctx, &roleBinding); err != nil {
+								log.Error(err, "Failed to remove finalizer from RoleBinding", "RoleBinding", roleBinding.Name, "Namespace", ns.Name)
+								return ctrl.Result{}, err
+							}
+							r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "FinalizerRemoved", "Removed finalizer from RoleBinding %s in namespace %s", roleBinding.Name, ns.Name)
 						}
-						r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "FinalizerRemoved", "Removed finalizer from RoleBinding %s in namespace %s", roleBinding.Name, ns.Name)
 					}
 				}
 			}
@@ -392,70 +393,76 @@ func (r *BindDefinitionReconciler) reconcileDelete(ctx context.Context, bindDefi
 
 			// For each namespace
 			for _, ns := range namespaceSet {
-				// Delete RoleBindings for ClusterRoleRefs
-				for _, clusterRoleRef := range bindDefinition.Spec.RoleBindings.ClusterRoleRefs {
-					roleBinding := &rbacv1.RoleBinding{}
-					roleBindingName := bindDefinition.Spec.TargetName + clusterRoleRef + "-binding"
-					err := r.Client.Get(ctx, types.NamespacedName{Name: roleBindingName, Namespace: ns.Name}, roleBinding)
-					if err != nil {
-						if apierrors.IsNotFound(err) {
-							continue
-						} else {
-							log.Error(err, "Unable to fetch RoleBinding from Kubernetes API")
-							conditions.MarkFalse(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
-							err = r.Status().Update(ctx, bindDefinition)
-							if err != nil {
-								return ctrl.Result{}, err
-							}
-							return ctrl.Result{}, err
-						}
-					}
-					if controllerutil.HasControllerReference(roleBinding) {
-						r.Recorder.Eventf(bindDefinition, corev1.EventTypeWarning, "Deletion", "Deleting target resource %s/%s in namespace %s", roleBinding.Kind, roleBinding.Name, roleBinding.Namespace)
-						err = r.Client.Delete(ctx, roleBinding)
+				for _, RoleBinding := range bindDefinition.Spec.RoleBindings {
+
+					// Delete RoleBindings for ClusterRoleRefs
+					for _, clusterRoleRef := range RoleBinding.ClusterRoleRefs {
+						roleBinding := &rbacv1.RoleBinding{}
+						roleBindingName := bindDefinition.Spec.TargetName + clusterRoleRef + "-binding"
+						err := r.Client.Get(ctx, types.NamespacedName{Name: roleBindingName, Namespace: ns.Name}, roleBinding)
 						if err != nil {
-							conditions.MarkFalse(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
-							err = r.Status().Update(ctx, bindDefinition)
-							if err != nil {
+							if apierrors.IsNotFound(err) {
+								continue
+							} else {
+								log.Error(err, "Unable to fetch RoleBinding from Kubernetes API")
+								conditions.MarkFalse(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
+								err = r.Status().Update(ctx, bindDefinition)
+								if err != nil {
+									return ctrl.Result{}, err
+								}
 								return ctrl.Result{}, err
 							}
-							return ctrl.Result{}, err
 						}
-					} else {
-						r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Deletion", "Not deleting target resource %s/%s in namespace %s because we do not have OwnerRef set for it", roleBinding.Kind, roleBinding.Name, roleBinding.Namespace)
+						if controllerutil.HasControllerReference(roleBinding) {
+							r.Recorder.Eventf(bindDefinition, corev1.EventTypeWarning, "Deletion", "Deleting target resource %s/%s in namespace %s", roleBinding.Kind, roleBinding.Name, roleBinding.Namespace)
+							err = r.Client.Delete(ctx, roleBinding)
+							if err != nil {
+								conditions.MarkFalse(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
+								err = r.Status().Update(ctx, bindDefinition)
+								if err != nil {
+									return ctrl.Result{}, err
+								}
+								return ctrl.Result{}, err
+							}
+						} else {
+							r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Deletion", "Not deleting target resource %s/%s in namespace %s because we do not have OwnerRef set for it", roleBinding.Kind, roleBinding.Name, roleBinding.Namespace)
+						}
 					}
 				}
-				// Delete RoleBindings for RoleRefs
-				for _, roleRef := range bindDefinition.Spec.RoleBindings.RoleRefs {
-					roleBinding := &rbacv1.RoleBinding{}
-					roleBindingName := bindDefinition.Spec.TargetName + roleRef + "-binding"
-					err := r.Client.Get(ctx, types.NamespacedName{Name: roleBindingName, Namespace: ns.Name}, roleBinding)
-					if err != nil {
-						if apierrors.IsNotFound(err) {
-							continue
-						} else {
-							log.Error(err, "Unable to fetch RoleBinding from Kubernetes API")
-							conditions.MarkFalse(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
-							err = r.Status().Update(ctx, bindDefinition)
-							if err != nil {
-								return ctrl.Result{}, err
-							}
-							return ctrl.Result{}, err
-						}
-					}
-					if controllerutil.HasControllerReference(roleBinding) {
-						r.Recorder.Eventf(bindDefinition, corev1.EventTypeWarning, "Deletion", "Deleting target resource %s/%s in namespace %s", roleBinding.Kind, roleBinding.Name, roleBinding.Namespace)
-						err = r.Client.Delete(ctx, roleBinding)
+				for _, RoleBinding := range bindDefinition.Spec.RoleBindings {
+
+					// Delete RoleBindings for RoleRefs
+					for _, roleRef := range RoleBinding.RoleRefs {
+						roleBinding := &rbacv1.RoleBinding{}
+						roleBindingName := bindDefinition.Spec.TargetName + roleRef + "-binding"
+						err := r.Client.Get(ctx, types.NamespacedName{Name: roleBindingName, Namespace: ns.Name}, roleBinding)
 						if err != nil {
-							conditions.MarkFalse(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
-							err = r.Status().Update(ctx, bindDefinition)
-							if err != nil {
+							if apierrors.IsNotFound(err) {
+								continue
+							} else {
+								log.Error(err, "Unable to fetch RoleBinding from Kubernetes API")
+								conditions.MarkFalse(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
+								err = r.Status().Update(ctx, bindDefinition)
+								if err != nil {
+									return ctrl.Result{}, err
+								}
 								return ctrl.Result{}, err
 							}
-							return ctrl.Result{}, err
 						}
-					} else {
-						r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Deletion", "Not deleting target resource %s/%s in namespace %s because we do not have OwnerRef set for it", roleBinding.Kind, roleBinding.Name, roleBinding.Namespace)
+						if controllerutil.HasControllerReference(roleBinding) {
+							r.Recorder.Eventf(bindDefinition, corev1.EventTypeWarning, "Deletion", "Deleting target resource %s/%s in namespace %s", roleBinding.Kind, roleBinding.Name, roleBinding.Namespace)
+							err = r.Client.Delete(ctx, roleBinding)
+							if err != nil {
+								conditions.MarkFalse(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
+								err = r.Status().Update(ctx, bindDefinition)
+								if err != nil {
+									return ctrl.Result{}, err
+								}
+								return ctrl.Result{}, err
+							}
+						} else {
+							r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Deletion", "Not deleting target resource %s/%s in namespace %s because we do not have OwnerRef set for it", roleBinding.Kind, roleBinding.Name, roleBinding.Namespace)
+						}
 					}
 				}
 			}
@@ -482,24 +489,26 @@ func (r *BindDefinitionReconciler) reconcileCreate(ctx context.Context, bindDefi
 
 	// Construct namespace set from BindDefinition namespace selectors
 	namespaceSet := make(map[string]corev1.Namespace)
+	for _, RoleBinding := range bindDefinition.Spec.RoleBindings {
 
-	for _, nsSelector := range bindDefinition.Spec.RoleBindings.NamespaceSelector {
-		if !reflect.DeepEqual(nsSelector, metav1.LabelSelector{}) {
-			selector, err := metav1.LabelSelectorAsSelector(&nsSelector)
-			if err != nil {
-				return ctrl.Result{}, err
-			}
-			namespaceList := &corev1.NamespaceList{}
-			listOpts := []client.ListOption{
-				&client.ListOptions{LabelSelector: selector},
-			}
-			err = r.Client.List(ctx, namespaceList, listOpts...)
-			if err != nil {
-				return ctrl.Result{}, err
-			}
-			// Add namespaces to the set
-			for _, ns := range namespaceList.Items {
-				namespaceSet[ns.Name] = ns
+		for _, nsSelector := range RoleBinding.NamespaceSelector {
+			if !reflect.DeepEqual(nsSelector, metav1.LabelSelector{}) {
+				selector, err := metav1.LabelSelectorAsSelector(&nsSelector)
+				if err != nil {
+					return ctrl.Result{}, err
+				}
+				namespaceList := &corev1.NamespaceList{}
+				listOpts := []client.ListOption{
+					&client.ListOptions{LabelSelector: selector},
+				}
+				err = r.Client.List(ctx, namespaceList, listOpts...)
+				if err != nil {
+					return ctrl.Result{}, err
+				}
+				// Add namespaces to the set
+				for _, ns := range namespaceList.Items {
+					namespaceSet[ns.Name] = ns
+				}
 			}
 		}
 	}
@@ -629,98 +638,100 @@ func (r *BindDefinitionReconciler) reconcileCreate(ctx context.Context, bindDefi
 			}
 		}
 	}
+	for _, RoleBinding := range bindDefinition.Spec.RoleBindings {
 
-	// For each namespace create RoleBinding resources
-	for _, ns := range activeNamespaces {
-		for _, clusterRoleRef := range bindDefinition.Spec.RoleBindings.ClusterRoleRefs {
-			roleBinding := &rbacv1.RoleBinding{}
-			roleBindingName := bindDefinition.Spec.TargetName + "-" + clusterRoleRef + "-binding"
-			err := r.Client.Get(ctx, types.NamespacedName{Name: roleBindingName, Namespace: ns.Name}, roleBinding)
-			if err != nil {
-				if apierrors.IsNotFound(err) {
-					roleBinding := &rbacv1.RoleBinding{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      roleBindingName,
-							Namespace: ns.Name,
-							Labels:    bindDefinition.ObjectMeta.Labels,
-						},
-						Subjects: bindDefinition.Spec.Subjects,
-						RoleRef: rbacv1.RoleRef{
-							APIGroup: "rbac.authorization.k8s.io",
-							Kind:     "ClusterRole",
-							Name:     clusterRoleRef,
-						},
-					}
-					if err := controllerutil.SetControllerReference(bindDefinition, roleBinding, r.Scheme); err != nil {
-						conditions.MarkFalse(bindDefinition, authnv1alpha1.OwnerRefCondition, bindDefinition.Generation, authnv1alpha1.OwnerRefReason, authnv1alpha1.OwnerRefMessage)
+		// For each namespace create RoleBinding resources
+		for _, ns := range activeNamespaces {
+			for _, clusterRoleRef := range RoleBinding.ClusterRoleRefs {
+				roleBinding := &rbacv1.RoleBinding{}
+				roleBindingName := bindDefinition.Spec.TargetName + "-" + clusterRoleRef + "-binding"
+				err := r.Client.Get(ctx, types.NamespacedName{Name: roleBindingName, Namespace: ns.Name}, roleBinding)
+				if err != nil {
+					if apierrors.IsNotFound(err) {
+						roleBinding := &rbacv1.RoleBinding{
+							ObjectMeta: metav1.ObjectMeta{
+								Name:      roleBindingName,
+								Namespace: ns.Name,
+								Labels:    bindDefinition.ObjectMeta.Labels,
+							},
+							Subjects: bindDefinition.Spec.Subjects,
+							RoleRef: rbacv1.RoleRef{
+								APIGroup: "rbac.authorization.k8s.io",
+								Kind:     "ClusterRole",
+								Name:     clusterRoleRef,
+							},
+						}
+						if err := controllerutil.SetControllerReference(bindDefinition, roleBinding, r.Scheme); err != nil {
+							conditions.MarkFalse(bindDefinition, authnv1alpha1.OwnerRefCondition, bindDefinition.Generation, authnv1alpha1.OwnerRefReason, authnv1alpha1.OwnerRefMessage)
+							err = r.Status().Update(ctx, bindDefinition)
+							if err != nil {
+								return ctrl.Result{}, err
+							}
+							return ctrl.Result{}, err
+						}
+						if !controllerutil.AddFinalizer(roleBinding, authnv1alpha1.RoleBindingFinalizer) {
+							log.Info("Failed to initialize RoleBinding")
+						}
+						if err := r.Client.Create(ctx, roleBinding); err != nil {
+							return ctrl.Result{}, err
+						}
+						log.Info("Created", "RoleBinding", roleBinding.Name)
+						r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Create", "Created resource %s/%s in namespace %s", roleBinding.Kind, roleBinding.Name, roleBinding.Namespace)
+					} else {
+						log.Error(err, "Unable to fetch RoleBinding from Kubernetes API")
+						conditions.MarkFalse(bindDefinition, authnv1alpha1.CreateCondition, bindDefinition.Generation, authnv1alpha1.CreateReason, authnv1alpha1.CreateMessage)
 						err = r.Status().Update(ctx, bindDefinition)
 						if err != nil {
 							return ctrl.Result{}, err
 						}
 						return ctrl.Result{}, err
 					}
-					if !controllerutil.AddFinalizer(roleBinding, authnv1alpha1.RoleBindingFinalizer) {
-						log.Info("Failed to initialize RoleBinding")
-					}
-					if err := r.Client.Create(ctx, roleBinding); err != nil {
-						return ctrl.Result{}, err
-					}
-					log.Info("Created", "RoleBinding", roleBinding.Name)
-					r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Create", "Created resource %s/%s in namespace %s", roleBinding.Kind, roleBinding.Name, roleBinding.Namespace)
-				} else {
-					log.Error(err, "Unable to fetch RoleBinding from Kubernetes API")
-					conditions.MarkFalse(bindDefinition, authnv1alpha1.CreateCondition, bindDefinition.Generation, authnv1alpha1.CreateReason, authnv1alpha1.CreateMessage)
-					err = r.Status().Update(ctx, bindDefinition)
-					if err != nil {
-						return ctrl.Result{}, err
-					}
-					return ctrl.Result{}, err
 				}
 			}
-		}
-		for _, roleRef := range bindDefinition.Spec.RoleBindings.RoleRefs {
-			roleBinding := &rbacv1.RoleBinding{}
-			roleBindingName := bindDefinition.Spec.TargetName + "-" + roleRef + "-binding"
-			err := r.Client.Get(ctx, types.NamespacedName{Name: roleBindingName, Namespace: ns.Name}, roleBinding)
-			if err != nil {
-				if apierrors.IsNotFound(err) {
-					roleBinding := &rbacv1.RoleBinding{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      roleBindingName,
-							Namespace: ns.Name,
-							Labels:    bindDefinition.ObjectMeta.Labels,
-						},
-						Subjects: bindDefinition.Spec.Subjects,
-						RoleRef: rbacv1.RoleRef{
-							APIGroup: "rbac.authorization.k8s.io",
-							Kind:     "Role",
-							Name:     roleRef,
-						},
-					}
-					if err := controllerutil.SetControllerReference(bindDefinition, roleBinding, r.Scheme); err != nil {
-						conditions.MarkFalse(bindDefinition, authnv1alpha1.OwnerRefCondition, bindDefinition.Generation, authnv1alpha1.OwnerRefReason, authnv1alpha1.OwnerRefMessage)
+			for _, roleRef := range RoleBinding.RoleRefs {
+				roleBinding := &rbacv1.RoleBinding{}
+				roleBindingName := bindDefinition.Spec.TargetName + "-" + roleRef + "-binding"
+				err := r.Client.Get(ctx, types.NamespacedName{Name: roleBindingName, Namespace: ns.Name}, roleBinding)
+				if err != nil {
+					if apierrors.IsNotFound(err) {
+						roleBinding := &rbacv1.RoleBinding{
+							ObjectMeta: metav1.ObjectMeta{
+								Name:      roleBindingName,
+								Namespace: ns.Name,
+								Labels:    bindDefinition.ObjectMeta.Labels,
+							},
+							Subjects: bindDefinition.Spec.Subjects,
+							RoleRef: rbacv1.RoleRef{
+								APIGroup: "rbac.authorization.k8s.io",
+								Kind:     "Role",
+								Name:     roleRef,
+							},
+						}
+						if err := controllerutil.SetControllerReference(bindDefinition, roleBinding, r.Scheme); err != nil {
+							conditions.MarkFalse(bindDefinition, authnv1alpha1.OwnerRefCondition, bindDefinition.Generation, authnv1alpha1.OwnerRefReason, authnv1alpha1.OwnerRefMessage)
+							err = r.Status().Update(ctx, bindDefinition)
+							if err != nil {
+								return ctrl.Result{}, err
+							}
+							return ctrl.Result{}, err
+						}
+						if !controllerutil.AddFinalizer(roleBinding, authnv1alpha1.RoleBindingFinalizer) {
+							log.Info("Failed to initialize RoleBinding")
+						}
+						if err := r.Client.Create(ctx, roleBinding); err != nil {
+							return ctrl.Result{}, err
+						}
+						log.Info("Created", "RoleBinding", roleBinding.Name)
+						r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Create", "Created resource %s/%s in namespace %s", roleBinding.Kind, roleBinding.Name, roleBinding.Namespace)
+					} else {
+						log.Error(err, "Unable to fetch RoleBinding from Kubernetes API")
+						conditions.MarkFalse(bindDefinition, authnv1alpha1.CreateCondition, bindDefinition.Generation, authnv1alpha1.CreateReason, authnv1alpha1.CreateMessage)
 						err = r.Status().Update(ctx, bindDefinition)
 						if err != nil {
 							return ctrl.Result{}, err
 						}
 						return ctrl.Result{}, err
 					}
-					if !controllerutil.AddFinalizer(roleBinding, authnv1alpha1.RoleBindingFinalizer) {
-						log.Info("Failed to initialize RoleBinding")
-					}
-					if err := r.Client.Create(ctx, roleBinding); err != nil {
-						return ctrl.Result{}, err
-					}
-					log.Info("Created", "RoleBinding", roleBinding.Name)
-					r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Create", "Created resource %s/%s in namespace %s", roleBinding.Kind, roleBinding.Name, roleBinding.Namespace)
-				} else {
-					log.Error(err, "Unable to fetch RoleBinding from Kubernetes API")
-					conditions.MarkFalse(bindDefinition, authnv1alpha1.CreateCondition, bindDefinition.Generation, authnv1alpha1.CreateReason, authnv1alpha1.CreateMessage)
-					err = r.Status().Update(ctx, bindDefinition)
-					if err != nil {
-						return ctrl.Result{}, err
-					}
-					return ctrl.Result{}, err
 				}
 			}
 		}
@@ -740,24 +751,26 @@ func (r *BindDefinitionReconciler) reconcileUpdate(ctx context.Context, bindDefi
 
 	// Construct namespace set from BindDefinition namespace selectors
 	namespaceSet := make(map[string]corev1.Namespace)
+	for _, RoleBinding := range bindDefinition.Spec.RoleBindings {
 
-	for _, nsSelector := range bindDefinition.Spec.RoleBindings.NamespaceSelector {
-		if !reflect.DeepEqual(nsSelector, metav1.LabelSelector{}) {
-			selector, err := metav1.LabelSelectorAsSelector(&nsSelector)
-			if err != nil {
-				return ctrl.Result{}, err
-			}
-			namespaceList := &corev1.NamespaceList{}
-			listOpts := []client.ListOption{
-				&client.ListOptions{LabelSelector: selector},
-			}
-			err = r.Client.List(ctx, namespaceList, listOpts...)
-			if err != nil {
-				return ctrl.Result{}, err
-			}
-			// Add namespaces to the set
-			for _, ns := range namespaceList.Items {
-				namespaceSet[ns.Name] = ns
+		for _, nsSelector := range RoleBinding.NamespaceSelector {
+			if !reflect.DeepEqual(nsSelector, metav1.LabelSelector{}) {
+				selector, err := metav1.LabelSelectorAsSelector(&nsSelector)
+				if err != nil {
+					return ctrl.Result{}, err
+				}
+				namespaceList := &corev1.NamespaceList{}
+				listOpts := []client.ListOption{
+					&client.ListOptions{LabelSelector: selector},
+				}
+				err = r.Client.List(ctx, namespaceList, listOpts...)
+				if err != nil {
+					return ctrl.Result{}, err
+				}
+				// Add namespaces to the set
+				for _, ns := range namespaceList.Items {
+					namespaceSet[ns.Name] = ns
+				}
 			}
 		}
 	}
@@ -884,104 +897,106 @@ func (r *BindDefinitionReconciler) reconcileUpdate(ctx context.Context, bindDefi
 			log.Info("We are not owners of the existing ClusterRoleBinding. The targeted ClusterRoleBinding will not be updated")
 		}
 	}
+	for _, RoleBinding := range bindDefinition.Spec.RoleBindings {
 
-	// For each namespace
-	for _, ns := range activeNamespaces {
-		for _, clusterRoleRef := range bindDefinition.Spec.RoleBindings.ClusterRoleRefs {
-			roleBindingName := bindDefinition.Spec.TargetName + "-" + clusterRoleRef + "-binding"
-			existingRoleBinding := &rbacv1.RoleBinding{}
-			// Construct the RoleBinding we expect
-			expectedRoleBinding := &rbacv1.RoleBinding{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      roleBindingName,
-					Namespace: ns.Name,
-					Labels:    bindDefinition.ObjectMeta.Labels,
-				},
-				Subjects: bindDefinition.Spec.Subjects,
-				RoleRef: rbacv1.RoleRef{
-					APIGroup: "rbac.authorization.k8s.io",
-					Kind:     "ClusterRole",
-					Name:     clusterRoleRef,
-				},
-			}
-			if err := controllerutil.SetControllerReference(bindDefinition, expectedRoleBinding, r.Scheme); err != nil {
-				log.Error(err, "Unable to construct an Expected RoleBinding in reconcile Update function")
-			}
-			// Fetch the RoleBinding from the API
-			err := r.Client.Get(ctx, types.NamespacedName{Name: roleBindingName, Namespace: ns.Name}, existingRoleBinding)
-			if err != nil {
-				if apierrors.IsNotFound(err) {
-					log.Info("IsNotFound", "RoleBinding", roleBindingName)
-					return ctrl.Result{}, err
-				} else {
-					log.Error(err, "Unable to fetch RoleBinding from Kubernetes API")
-					return ctrl.Result{}, err
+		// For each namespace
+		for _, ns := range activeNamespaces {
+			for _, clusterRoleRef := range RoleBinding.ClusterRoleRefs {
+				roleBindingName := bindDefinition.Spec.TargetName + "-" + clusterRoleRef + "-binding"
+				existingRoleBinding := &rbacv1.RoleBinding{}
+				// Construct the RoleBinding we expect
+				expectedRoleBinding := &rbacv1.RoleBinding{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      roleBindingName,
+						Namespace: ns.Name,
+						Labels:    bindDefinition.ObjectMeta.Labels,
+					},
+					Subjects: bindDefinition.Spec.Subjects,
+					RoleRef: rbacv1.RoleRef{
+						APIGroup: "rbac.authorization.k8s.io",
+						Kind:     "ClusterRole",
+						Name:     clusterRoleRef,
+					},
 				}
-			}
-			// Check if we are owners of this RoleBinding
-			if controllerutil.HasControllerReference(existingRoleBinding) {
-				if !helpers.RoleBindsEqual(existingRoleBinding, expectedRoleBinding) {
-					existingRoleBinding.Labels = expectedRoleBinding.Labels
-					existingRoleBinding.Subjects = expectedRoleBinding.Subjects
-					existingRoleBinding.RoleRef = expectedRoleBinding.RoleRef
-					if err := r.Client.Update(ctx, existingRoleBinding); err != nil {
-						log.Error(err, "Could not update resource", "RoleBinding", existingRoleBinding.Name)
+				if err := controllerutil.SetControllerReference(bindDefinition, expectedRoleBinding, r.Scheme); err != nil {
+					log.Error(err, "Unable to construct an Expected RoleBinding in reconcile Update function")
+				}
+				// Fetch the RoleBinding from the API
+				err := r.Client.Get(ctx, types.NamespacedName{Name: roleBindingName, Namespace: ns.Name}, existingRoleBinding)
+				if err != nil {
+					if apierrors.IsNotFound(err) {
+						log.Info("IsNotFound", "RoleBinding", roleBindingName)
+						return ctrl.Result{}, err
+					} else {
+						log.Error(err, "Unable to fetch RoleBinding from Kubernetes API")
 						return ctrl.Result{}, err
 					}
-					log.Info("Updated", "RoleBinding", existingRoleBinding.Name)
-					r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Update", "Updated resource %s/%s in namespace %s", existingRoleBinding.Kind, existingRoleBinding.Name, existingRoleBinding.Namespace)
 				}
-			} else {
-				log.Info("We are not owners of the existing RoleBinding. The targeted RoleBinding will not be updated")
-			}
-		}
-
-		for _, roleRef := range bindDefinition.Spec.RoleBindings.RoleRefs {
-			roleBindingName := bindDefinition.Spec.TargetName + "-" + roleRef + "-binding"
-			existingRoleBinding := &rbacv1.RoleBinding{}
-			// Construct the RoleBinding we expect
-			expectedRoleBinding := &rbacv1.RoleBinding{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      roleBindingName,
-					Namespace: ns.Name,
-					Labels:    bindDefinition.ObjectMeta.Labels,
-				},
-				Subjects: bindDefinition.Spec.Subjects,
-				RoleRef: rbacv1.RoleRef{
-					APIGroup: "rbac.authorization.k8s.io",
-					Kind:     "Role",
-					Name:     roleRef,
-				},
-			}
-			if err := controllerutil.SetControllerReference(bindDefinition, expectedRoleBinding, r.Scheme); err != nil {
-				log.Error(err, "Unable to construct an Expected RoleBinding in reconcile Update function")
-			}
-			// Fetch the RoleBinding from the API
-			err := r.Client.Get(ctx, types.NamespacedName{Name: roleBindingName, Namespace: ns.Name}, existingRoleBinding)
-			if err != nil {
-				if apierrors.IsNotFound(err) {
-					log.Info("IsNotFound", "RoleBinding", roleBindingName)
-					return ctrl.Result{}, err
+				// Check if we are owners of this RoleBinding
+				if controllerutil.HasControllerReference(existingRoleBinding) {
+					if !helpers.RoleBindsEqual(existingRoleBinding, expectedRoleBinding) {
+						existingRoleBinding.Labels = expectedRoleBinding.Labels
+						existingRoleBinding.Subjects = expectedRoleBinding.Subjects
+						existingRoleBinding.RoleRef = expectedRoleBinding.RoleRef
+						if err := r.Client.Update(ctx, existingRoleBinding); err != nil {
+							log.Error(err, "Could not update resource", "RoleBinding", existingRoleBinding.Name)
+							return ctrl.Result{}, err
+						}
+						log.Info("Updated", "RoleBinding", existingRoleBinding.Name)
+						r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Update", "Updated resource %s/%s in namespace %s", existingRoleBinding.Kind, existingRoleBinding.Name, existingRoleBinding.Namespace)
+					}
 				} else {
-					log.Error(err, "Unable to fetch RoleBinding from Kubernetes API")
-					return ctrl.Result{}, err
+					log.Info("We are not owners of the existing RoleBinding. The targeted RoleBinding will not be updated")
 				}
 			}
-			// Check if we are owners of this RoleBinding
-			if controllerutil.HasControllerReference(existingRoleBinding) {
-				if !helpers.RoleBindsEqual(existingRoleBinding, expectedRoleBinding) {
-					existingRoleBinding.Labels = expectedRoleBinding.Labels
-					existingRoleBinding.Subjects = expectedRoleBinding.Subjects
-					existingRoleBinding.RoleRef = expectedRoleBinding.RoleRef
-					if err := r.Client.Update(ctx, existingRoleBinding); err != nil {
-						log.Error(err, "Could not update resource", "RoleBinding", existingRoleBinding.Name)
+
+			for _, roleRef := range RoleBinding.RoleRefs {
+				roleBindingName := bindDefinition.Spec.TargetName + "-" + roleRef + "-binding"
+				existingRoleBinding := &rbacv1.RoleBinding{}
+				// Construct the RoleBinding we expect
+				expectedRoleBinding := &rbacv1.RoleBinding{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      roleBindingName,
+						Namespace: ns.Name,
+						Labels:    bindDefinition.ObjectMeta.Labels,
+					},
+					Subjects: bindDefinition.Spec.Subjects,
+					RoleRef: rbacv1.RoleRef{
+						APIGroup: "rbac.authorization.k8s.io",
+						Kind:     "Role",
+						Name:     roleRef,
+					},
+				}
+				if err := controllerutil.SetControllerReference(bindDefinition, expectedRoleBinding, r.Scheme); err != nil {
+					log.Error(err, "Unable to construct an Expected RoleBinding in reconcile Update function")
+				}
+				// Fetch the RoleBinding from the API
+				err := r.Client.Get(ctx, types.NamespacedName{Name: roleBindingName, Namespace: ns.Name}, existingRoleBinding)
+				if err != nil {
+					if apierrors.IsNotFound(err) {
+						log.Info("IsNotFound", "RoleBinding", roleBindingName)
+						return ctrl.Result{}, err
+					} else {
+						log.Error(err, "Unable to fetch RoleBinding from Kubernetes API")
 						return ctrl.Result{}, err
 					}
-					log.Info("Updated", "RoleBinding", existingRoleBinding.Name)
-					r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Update", "Updated resource %s/%s in namespace %s", existingRoleBinding.Kind, existingRoleBinding.Name, existingRoleBinding.Namespace)
 				}
-			} else {
-				log.Info("We are not owners of the existing RoleBinding. The targeted RoleBinding will not be updated")
+				// Check if we are owners of this RoleBinding
+				if controllerutil.HasControllerReference(existingRoleBinding) {
+					if !helpers.RoleBindsEqual(existingRoleBinding, expectedRoleBinding) {
+						existingRoleBinding.Labels = expectedRoleBinding.Labels
+						existingRoleBinding.Subjects = expectedRoleBinding.Subjects
+						existingRoleBinding.RoleRef = expectedRoleBinding.RoleRef
+						if err := r.Client.Update(ctx, existingRoleBinding); err != nil {
+							log.Error(err, "Could not update resource", "RoleBinding", existingRoleBinding.Name)
+							return ctrl.Result{}, err
+						}
+						log.Info("Updated", "RoleBinding", existingRoleBinding.Name)
+						r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Update", "Updated resource %s/%s in namespace %s", existingRoleBinding.Kind, existingRoleBinding.Name, existingRoleBinding.Namespace)
+					}
+				} else {
+					log.Info("We are not owners of the existing RoleBinding. The targeted RoleBinding will not be updated")
+				}
 			}
 		}
 	}

@@ -114,12 +114,14 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 		}
 
 		if userMatchFound {
-			// Extract labels from namespaceSelector in RoleBindings
-			if len(bindDef.Spec.RoleBindings.NamespaceSelector) > 0 {
-				for _, nsSelector := range bindDef.Spec.RoleBindings.NamespaceSelector {
-					labels := getLabelsFromNamespaceSelector(nsSelector)
-					for k, v := range labels {
-						labelsToAdd[k] = v
+			for _, roleBinding := range bindDef.Spec.RoleBindings {
+				// Extract labels from namespaceSelector in RoleBindings
+				if len(roleBinding.NamespaceSelector) > 0 {
+					for _, nsSelector := range roleBinding.NamespaceSelector {
+						labels := getLabelsFromNamespaceSelector(nsSelector)
+						for k, v := range labels {
+							labelsToAdd[k] = v
+						}
 					}
 				}
 			}

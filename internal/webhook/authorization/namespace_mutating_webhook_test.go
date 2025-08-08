@@ -75,7 +75,7 @@ func TestNamespaceMutatorHandle(t *testing.T) {
 					Namespace: "kube-system",
 				},
 			},
-			RoleBindings: authzv1alpha1.NamespaceBinding{
+			RoleBindings: []authzv1alpha1.NamespaceBinding{{
 				ClusterRoleRefs: []string{"t-caas-platform-namespaced-poweruser"},
 				NamespaceSelector: []metav1.LabelSelector{
 					{
@@ -100,8 +100,8 @@ func TestNamespaceMutatorHandle(t *testing.T) {
 								Values:   []string{"tenant", "thirdparty"},
 							},
 						},
-					},
-				},
+					}},
+			},
 			},
 		},
 	}
@@ -481,7 +481,7 @@ func TestNamespaceMutatorPerformance(t *testing.T) {
 					Namespace: "kube-system",
 				},
 			},
-			RoleBindings: authzv1alpha1.NamespaceBinding{
+			RoleBindings: []authzv1alpha1.NamespaceBinding{{
 				ClusterRoleRefs: []string{"t-caas-platform-namespaced-poweruser"},
 				NamespaceSelector: []metav1.LabelSelector{
 					{
@@ -508,7 +508,7 @@ func TestNamespaceMutatorPerformance(t *testing.T) {
 						},
 					},
 				},
-			},
+			}},
 		},
 	}
 
