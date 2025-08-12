@@ -3,7 +3,9 @@ package authorization
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -175,11 +177,61 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			if err != nil {
 				return ctrl.Result{}, err
 			}
+			switch {
+			// There are certain resources that are not know to the APIServer (and thus the DiscoveryClient) but are important to end up in the RoleDefinition.
+			// These are added here manually.
+			// nodes/metrics in the core group are not filtered by the RestrictedResources, as they are not part of the API discovery.
+			case filteredApiGroup.Name == "" && filteredApiGroupVersion.Version == "v1":
+				discoveredApiResources.APIResources = append(discoveredApiResources.APIResources, metav1.APIResource{
+					Name:         "nodes/metrics",
+					Namespaced:   false,
+					Kind:         "node/metrics",
+					Group:        "",
+					Verbs:        []string{"get", "list", "watch"},
+					ShortNames:   []string{"no"},
+					SingularName: "node/metrics",
+				})
+			case filteredApiGroup.Name == "metrics.k8s.io" && filteredApiGroupVersion.Version == "v1":
+				discoveredApiResources.APIResources = append(discoveredApiResources.APIResources, metav1.APIResource{
+					Name:         "pods",
+					Namespaced:   false,
+					Kind:         "PodMetrics",
+					Group:        "metrics.k8s.io",
+					Verbs:        []string{"get", "list", "watch"},
+					ShortNames:   []string{"po"},
+					SingularName: "pod",
+				})
+				// there are also some verbs that are not part of the API discovery, but are important to end up in the RoleDefinition.
+				// namely the "bind" and"escalate" verbs for roles and rolebindings
+			case filteredApiGroup.Name == "rbac.authorization.k8s.io" && filteredApiGroupVersion.Version == "v1":
+				discoveredApiResources.APIResources = append(discoveredApiResources.APIResources, metav1.APIResource{
+					Name:         "roles",
+					Namespaced:   true,
+					Kind:         "Role",
+					Group:        "rbac.authorization.k8s.io",
+					Verbs:        []string{"get", "list", "watch", "create", "update", "patch", "delete", "bind", "escalate"},
+					ShortNames:   []string{"role"},
+					SingularName: "role",
+				})
+				discoveredApiResources.APIResources = append(discoveredApiResources.APIResources, metav1.APIResource{
+					Name:         "rolebindings",
+					Namespaced:   true,
+					Kind:         "RoleBinding",
+					Group:        "rbac.authorization.k8s.io",
+					Verbs:        []string{"get", "list", "watch", "create", "update", "patch", "delete", "bind"},
+					ShortNames:   []string{"rb"},
+					SingularName: "rolebinding",
+				})
+			}
 
 			for _, resource := range discoveredApiResources.APIResources {
 				resource.Group = filteredApiGroup.Name
 				if resource.Namespaced != roleDefinition.Spec.ScopeNamespaced {
 					continue
+				}
+				// For things that end in /status or /finalizer, we append list and watch verbs for convenience, the verbs are not part of the API discovery and the apiserver has no behavior for them
+				if strings.HasSuffix(resource.Name, "/status") || strings.HasSuffix(resource.Name, "/finalizer") {
+					resource.Verbs = append(resource.Verbs, "list", "watch")
 				}
 				restricted := false
 				for _, restrictedResource := range roleDefinition.Spec.RestrictedResources {
@@ -237,7 +289,11 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		// Check if there is already a PolicyRule with the same API groups and verbs
 		if existingRule, exists := groupedRules[key]; exists {
 			// If exists, append the resources to the existing rule
-			existingRule.Resources = append(existingRule.Resources, rule.Resources...)
+			for _, resource := range rule.Resources {
+				if !slices.Contains(existingRule.Resources, resource) {
+					existingRule.Resources = append(existingRule.Resources, resource)
+				}
+			}
 		} else {
 			// If not, create a new entry in the map
 			groupedRules[key] = &rbacv1.PolicyRule{
@@ -251,6 +307,13 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	finalRules := make([]rbacv1.PolicyRule, 0, len(groupedRules))
 	for _, rule := range groupedRules {
 		finalRules = append(finalRules, *rule)
+	}
+	// if we have a namespaced role, we add the nonResourceURL rule for metrics
+	if roleDefinition.Spec.ScopeNamespaced && !slices.Contains(roleDefinition.Spec.RestrictedVerbs, "get") {
+		finalRules = append(finalRules, rbacv1.PolicyRule{
+			NonResourceURLs: []string{"/metrics"},
+			Verbs:           []string{"get"},
+		})
 	}
 	// Sort the resources within each PolicyRule
 	for i := range finalRules {
