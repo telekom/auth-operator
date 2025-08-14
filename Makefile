@@ -129,6 +129,21 @@ helm: manifests kustomize helmify ## Generate the complete Helm chart
 			sed -i '/^[[:space:]]*labels:[[:space:]]*$$/a\    authorization.t-caas.telekom.com\/component: "webhook"' "$$file"; \
 		fi; \
 	done
+	# Patch in the tdg migration flags
+	@if [ -f chart/auth-operator/values.yaml ]; then \
+        echo "Patching tdgMigration field into values.yaml"; \
+        sed -i '/idpUrl: ""/a\
+tdgMigration:\
+  enabled: false' chart/auth-operator/values.yaml; \
+    fi
+	@if [ -f chart/auth-operator/templates/deployment.yaml ]; then \
+        echo "Patching tdgMigration field into templates/deployment.yaml"; \
+        sed -i '/      - args: {{- toYaml .Values.webhookServer.webhook.args | nindent 8 }}/a\
+        {{- if .Values.tdgMigration.enabled }}\
+        - --tdg-migration=true\
+        {{- end }}' chart/auth-operator/templates/deployment.yaml; \
+    fi
+
 
 # PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
 # architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:0.0.1). To use this option you need to:
@@ -205,6 +220,7 @@ ENVTEST ?= $(LOCALBIN)/setup-envtest-$(ENVTEST_VERSION)
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint-$(GOLANGCI_LINT_VERSION)
 CRD_REF_DOCS = $(LOCALBIN)/crd-ref-docs-$(CRD_REF_DOCS_VERSION)
 HELMIFY ?= $(LOCALBIN)/helmify-$(HELMIFY_VERSION)
+MOCKGEN ?= $(LOCALBIN)/mockgen
 
 .PHONY: helmify
 helmify: $(HELMIFY) ## Download helmify locally if necessary.
@@ -239,6 +255,11 @@ $(CRD_REF_DOCS): $(LOCALBIN)
 .PHONY: drawio 
 drawio: ## Download Draw.io locally if necessary.
 	echo "Can't check if you downloaded Draw.io. If not please install it manually."
+
+.PHONY: mockgen
+mockgen: $(MOCKGEN) ## Download mockgen locally if necessary.
+$(MOCKGEN): $(LOCALBIN)
+	$(call go-install-tool,$(MOCKGEN),go.uber.org/mock/mockgen,$(MOCKGEN_VERSION))
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary (ideally with version)

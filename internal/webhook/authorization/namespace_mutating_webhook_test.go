@@ -3,11 +3,13 @@ package webhooks_test
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"sync"
 	"testing"
 	"time"
 
 	jsonpatch "github.com/evanphx/json-patch"
+
 	authzv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1"
 	webhooks "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/internal/webhook/authorization"
 
@@ -443,6 +445,10 @@ func TestNamespaceMutatorHandle(t *testing.T) {
 
 // Performance test
 func TestNamespaceMutatorPerformance(t *testing.T) {
+	isCI := os.Getenv("CI")
+	if isCI == "true" {
+		t.Skip("Skipping performance tests in CI")
+	}
 	// ----------------------------------------------------------------------
 	// 1. Setup the scheme for our fake client
 	// ----------------------------------------------------------------------

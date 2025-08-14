@@ -33,10 +33,17 @@ assert-controller-gen:
   variables:
     K8S_OP_CONTROLLER_GEN_VERSION: "v0.17.3"
 
+assert-helmify:
+  script:
+  - |
+    set -xeuo pipefail
+    make helm
+    # Diff check
+    if ! git diff --exit-code; then
+      echo "ERROR: found diff after regenerating helmify resources - run the make generate tooling update generated resources."
+      exit 3
+    fi
+
 .helm-base:
   variables:
     HELM_CHART_SOURCE: chart/auth-operator
-
-# TODO: remove once test-cases are fixed and working
-go-test:
-  allow_failure: true

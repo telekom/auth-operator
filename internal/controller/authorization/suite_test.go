@@ -22,11 +22,14 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -41,6 +44,9 @@ import (
 
 var cfg *rest.Config
 var k8sClient client.Client
+var discoveryClient discovery.DiscoveryInterface
+var recorder *record.FakeRecorder
+var logger logr.Logger
 var testEnv *envtest.Environment
 
 func TestControllers(t *testing.T) {
@@ -50,7 +56,11 @@ func TestControllers(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
+	logger = zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true))
+	logf.SetLogger(logger)
+
+	recorder = record.NewFakeRecorder(0)
+	discoveryClient = fake.NewClientset().Discovery()
 
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{

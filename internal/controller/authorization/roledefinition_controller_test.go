@@ -7,6 +7,7 @@ import (
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,6 +37,10 @@ var _ = Describe("RoleDefinition Controller", func() {
 						Namespace: "default",
 					},
 					// TODO(user): Specify other spec details if needed.
+					Spec: authorizationv1alpha1.RoleDefinitionSpec{
+						TargetName: "lorem",
+						TargetRole: "ClusterRole",
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
@@ -52,11 +57,18 @@ var _ = Describe("RoleDefinition Controller", func() {
 		})
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
+			ctx := log.IntoContext(context.Background(), logger)
 			controllerReconciler := &RoleDefinitionReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:          k8sClient,
+				DiscoveryClient: discoveryClient,
+				Scheme:          k8sClient.Scheme(),
+				Recorder:        recorder,
 			}
-
+			go func() {
+				for event := range recorder.Events {
+					logger.Info("Received event", "event", event)
+				}
+			}()
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
 			})

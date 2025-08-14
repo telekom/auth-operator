@@ -14,9 +14,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+
 	authenticationv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authentication/v1alpha1"
 	idpclient "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 // Helper function to extract usernames from Owners and Members
@@ -44,7 +45,7 @@ func slicesMatch(authprovider, idp []string) (bool, bool) {
 type AuthProviderReconciler struct {
 	client.Client
 	Scheme    *runtime.Scheme
-	IDPClient idpclient.IDPClient
+	IDPClient idpclient.Client
 	Recorder  record.EventRecorder
 }
 
@@ -52,7 +53,7 @@ func (r *AuthProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	log := log.FromContext(ctx)
 
 	// Pass the same Logger into IDPClient
-	r.IDPClient.Log = &log
+	r.IDPClient.SetLogger(log)
 
 	// Declare some static vars for IDP interaction
 	// Tenant IDP variables
@@ -249,7 +250,7 @@ func (r *AuthProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		if idpgroup.Parent == "M - T_CaaS_Tenant" {
 			idpgroup.Name = "S - " + idpgroup.Name
 			// Get owners, extract usernames and check if there is a match
-			idpOwnersResponse, err := r.IDPClient.GetGroupOwners(idpgroup, idpTenantOwners.IDPOwners)
+			idpOwnersResponse, err := r.IDPClient.GetGroupOwners(idpgroup)
 			if err != nil {
 				log.Info("Unforseen error occured", "ERROR", err)
 				return ctrl.Result{}, err
@@ -288,7 +289,7 @@ func (r *AuthProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request
 								var idpFilteredTenantMembers idpclient.Members
 								idpFilteredTenantMembers.IDPMembers = append(idpFilteredTenantMembers.IDPMembers, idpMember)
 								// Get members, extract usernames and check if there is a match
-								idpMembersResponse, err := r.IDPClient.GetGroupMembers(idpMemberGroup, idpFilteredTenantMembers.IDPMembers)
+								idpMembersResponse, err := r.IDPClient.GetGroupMembers(idpMemberGroup)
 								if err != nil {
 									log.Info("Unforseen error occured", "ERROR", err)
 									return ctrl.Result{}, err
@@ -328,7 +329,7 @@ func (r *AuthProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		if idpgroup.Parent == "M - T_CaaS_Third_Party" {
 			idpgroup.Name = "S - " + idpgroup.Name
 			// Get owners, extract usernames and check if there is a match
-			idpOwnersResponse, err := r.IDPClient.GetGroupOwners(idpgroup, idpThirdPartyOwners.IDPOwners)
+			idpOwnersResponse, err := r.IDPClient.GetGroupOwners(idpgroup)
 			if err != nil {
 				log.Info("Unforseen error occured", "ERROR", err)
 				return ctrl.Result{}, err
@@ -375,7 +376,7 @@ func (r *AuthProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request
 									var idpFilteredThirdPartyMembers idpclient.Members
 									idpFilteredThirdPartyMembers.IDPMembers = append(idpFilteredThirdPartyMembers.IDPMembers, idpMember)
 									// Get members, extract usernames and check if there is a match
-									idpMembersResponse, err := r.IDPClient.GetGroupMembers(idpMemberGroup, idpFilteredThirdPartyMembers.IDPMembers)
+									idpMembersResponse, err := r.IDPClient.GetGroupMembers(idpMemberGroup)
 									if err != nil {
 										log.Info("Unforseen error occured", "ERROR", err)
 										return ctrl.Result{}, err

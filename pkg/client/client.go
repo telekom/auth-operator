@@ -14,6 +14,20 @@ import (
 	"github.com/go-logr/logr"
 )
 
+type Client interface {
+	RefreshAccessToken(path string) error
+	GetGroup(group Group) ([]Group, error)
+	CreateGroup(group Group) ([]Response, error)
+	DeleteGroup(group Group) ([]Response, error)
+	GetGroupOwners(group Group) ([]User, error)
+	CreateGroupOwners(group Group, owners []User) ([]Response, error)
+	DeleteGroupOwners(group Group, owners []User) ([]Response, error)
+	GetGroupMembers(group Group) ([]User, error)
+	CreateGroupMembers(group Group, members []User) ([]Response, error)
+	DeleteGroupMembers(group Group, members []User) ([]Response, error)
+	SetLogger(logger logr.Logger)
+}
+
 type IDPClient struct {
 	HTTPClient        *http.Client
 	APIToken          string
@@ -70,6 +84,10 @@ func NewIDPClient(config Config, options Options) (*IDPClient, error) {
 		RefreshServiceURL: apiTokenRefreshUrl,
 	}
 	return client, nil
+}
+
+func (c *IDPClient) SetLogger(logger logr.Logger) {
+	c.Log = &logger
 }
 
 func (c *IDPClient) RefreshAccessToken(path string) error {

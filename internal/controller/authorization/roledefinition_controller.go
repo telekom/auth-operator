@@ -362,7 +362,7 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			if err := r.Client.Create(ctx, role); err != nil {
 				return ctrl.Result{}, err
 			}
-			log.Info("Created ClusterRole/Role", "ClusterRole/Role")
+			log.Info("Created", "ClusterRole/Role", role.GetName())
 			conditions.MarkTrue(roleDefinition, authnv1alpha1.OwnerRefCondition, roleDefinition.Generation, authnv1alpha1.OwnerRefReason, authnv1alpha1.OwnerRefMessage)
 			conditions.MarkTrue(roleDefinition, authnv1alpha1.CreateCondition, roleDefinition.Generation, authnv1alpha1.CreateReason, authnv1alpha1.CreateMessage)
 			err = r.Status().Update(ctx, roleDefinition)

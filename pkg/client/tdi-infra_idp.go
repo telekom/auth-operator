@@ -77,7 +77,7 @@ func (c *IDPClient) DeleteGroup(group Group) ([]Response, error) {
 }
 
 // Group Owner operations
-func (c *IDPClient) GetGroupOwners(group Group, owners []User) ([]User, error) {
+func (c *IDPClient) GetGroupOwners(group Group) ([]User, error) {
 	existingOwners := Owners{}
 	_, err := c.RequestResponse(http.MethodGet, fmt.Sprintf("/api/idm-portal/v2/group/%s/owner", group.Name), nil, &existingOwners)
 	return existingOwners.IDPOwners, err
@@ -104,7 +104,7 @@ func (c *IDPClient) DeleteGroupOwners(group Group, owners []User) ([]Response, e
 }
 
 // Group Member operations
-func (c *IDPClient) GetGroupMembers(group Group, members []User) ([]User, error) {
+func (c *IDPClient) GetGroupMembers(group Group) ([]User, error) {
 	existingMembers := Members{}
 	_, err := c.RequestResponse(http.MethodGet, fmt.Sprintf("/api/idm-portal/v2/group/%s/member", group.Name), nil, &existingMembers)
 	return existingMembers.IDPMembers, err

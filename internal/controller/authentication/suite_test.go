@@ -8,6 +8,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"k8s.io/client-go/tools/record"
 
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -25,6 +26,7 @@ import (
 
 var cfg *rest.Config
 var k8sClient client.Client
+var recorder *record.FakeRecorder
 var testEnv *envtest.Environment
 
 func TestControllers(t *testing.T) {
@@ -35,6 +37,8 @@ func TestControllers(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
+
+	recorder = record.NewFakeRecorder(0)
 
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{

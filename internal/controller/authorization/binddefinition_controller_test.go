@@ -5,6 +5,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -36,6 +37,9 @@ var _ = Describe("BindDefinition Controller", func() {
 						Namespace: "default",
 					},
 					// TODO(user): Specify other spec details if needed.
+					Spec: authorizationv1alpha1.BindDefinitionSpec{
+						Subjects: []rbacv1.Subject{},
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
@@ -53,9 +57,15 @@ var _ = Describe("BindDefinition Controller", func() {
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
 			controllerReconciler := &BindDefinitionReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: recorder,
 			}
+			go func() {
+				for event := range recorder.Events {
+					logger.Info("Received event", "event", event)
+				}
+			}()
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,

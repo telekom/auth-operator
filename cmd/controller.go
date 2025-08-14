@@ -120,7 +120,7 @@ to quickly create a Cobra application.`,
 		if err = (&authenticationcontroller.AuthProviderReconciler{
 			Client:    mgr.GetClient(),
 			Scheme:    mgr.GetScheme(),
-			IDPClient: *idpClient,
+			IDPClient: idpClient,
 			Recorder:  mgr.GetEventRecorderFor("AuthProviderReconciler"),
 		}).SetupWithManager(mgr); err != nil {
 			return fmt.Errorf("unable to create controller AuthProvider: %w", err)
