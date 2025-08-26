@@ -4,6 +4,7 @@
 include versions.env
 
 # Image URL to use all building/pushing image targets
+PROJECT_NAME = "auth-operator"
 APP ?= auth-operator
 IMG ?= (APP):latest
 NAMESPACE ?= kube-system
@@ -204,6 +205,10 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 .PHONY: undeploy
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	$(KUSTOMIZE) build config/default | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
+
+.PHONY tilt:
+tilt:
+	CONTROLLERGEN_BIN=$(CONTROLLER_GEN) CLUSTER_NAME=kind-$(PROJECT_NAME) tilt up
 
 ##@ Dependencies
 

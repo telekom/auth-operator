@@ -1,0 +1,29 @@
+registry: "localhost:5000"
+allowed_contexts:
+- kind-auth-operator
+component_paths:
+- .
+enabled_components:
+- auth-operator
+components:
+  auth-operator:
+    debug:
+      enabled: true
+      port: 30002
+      continue: true
+    namespace: "auth-operator-system"
+env:
+- name: HTTP_PROXY
+  value: http://172.17.0.1:8118 # docker on Windows WSL and prob. linux
+  # value: http://host.docker.internal:8118 # docker on MAC
+- name: HTTPS_PROXY
+  value: http://172.17.0.1:8118 # docker on Windows WSL and prob. linux
+  # value: http://host.docker.internal:8118 # docker on MAC
+- name: NO_PROXY
+  value: "127.0.0.0/8,localhost,172.16.0.0/12,10.96.0.0/12,10.244.0.0/16" # docker on Windows WSL and prob. linux
+  # value: "127.0.0.0/8,10.96.0.0/12,10.244.0.0/16,localhost,*.internal" # docker on MAC
+build:
+  proxy: "http://172.17.0.1:8118" # docker on Windows WSL and prob. linux
+  # proxy: http://host.docker.internal:8118 # docker on MAC
+  no_proxy: "172.17.0.0/16,localhost,127.0.0.0/8" # docker on Windows WSL and prob. linux
+# no_proxy: "127.0.0.0/8,localhost,*.internal" # docker on MAC

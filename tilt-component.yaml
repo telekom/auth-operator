@@ -1,0 +1,12 @@
+name: auth-operator
+helm: true
+chart_path: chart/auth-operator
+main_path: ./main.go
+deployment_name_controller_manager: auth-operator-controller-manager
+deployment_name_webhook_server: auth-operator-webhook-server
+live_update_deps:
+- /api
+- /cmd
+- /internal
+- /pkg
+- go.mod

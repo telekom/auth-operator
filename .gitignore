@@ -34,3 +34,8 @@ test/webhook/certs/tls.crt
 test/webhook/certs/tls.key
 .env
 out/
+
+# Tilt
+.tiltbuild/
+tilt-settings.yaml
+.kindcontext
