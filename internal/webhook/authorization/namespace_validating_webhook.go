@@ -44,26 +44,31 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 	}
 	// If tdgMigration is enabled, allow the helm and kustomize controller to update namespaces
 	if v.TDGMigration {
-		if req.UserInfo.Username == "system:serviceaccount:flux-system:helm-controller" {
+		switch req.UserInfo.Username {
+		case "system:serviceaccount:flux-system:helm-controller":
 			nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
 			return admission.Allowed("")
-		}
-		if req.UserInfo.Username == "system:serviceaccount:flux-system:kustomize-controller" {
+		case "system:serviceaccount:flux-system:kustomize-controller":
 			nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
 			return admission.Allowed("")
-		}
-		if req.UserInfo.Username == "system:serviceaccount:schiff-tenant:m2m-sa" {
+		case "system:serviceaccount:schiff-tenant:m2m-sa":
 			nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
 			return admission.Allowed("")
-		}
-		if req.UserInfo.Username == "system:serviceaccount:schiff-system:m2m-sa" {
+		case "system:serviceaccount:schiff-system:m2m-sa":
 			nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+			return admission.Allowed("")
+		case "system:serviceaccount:capi-operator-system:capi-operator-manager":
+			nsMutatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
 			return admission.Allowed("")
 		}
 	}
 	// ToDo: Trident patches its own namespace and that cant be disabled.
 	// https://github.com/NetApp/trident/blob/6b4cdf074578ade04ca0f1a5c59bb72c019391da/operator/controllers/orchestrator/installer/installer.go#L938
 	if req.UserInfo.Username == "system:serviceaccount:t-caas-storage:trident-operator" && req.Operation == admissionv1.Update && req.Name == "t-caas-storage" {
+		nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+		return admission.Allowed("")
+	}
+	if req.UserInfo.Username == "system:serviceaccount:capi-operator-system:capi-operator-manager" && req.Operation == admissionv1.Update {
 		nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
 		return admission.Allowed("")
 	}

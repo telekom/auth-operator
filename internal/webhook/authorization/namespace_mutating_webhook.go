@@ -49,22 +49,27 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 		nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
 		return admission.Allowed("")
 	}
+	if req.UserInfo.Username == "system:serviceaccount:capi-operator-system:capi-operator-manager" && req.Operation == admissionv1.Update {
+		nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+		return admission.Allowed("")
+	}
 	// If tdgMigration is enabled, allow the helm and kustomize controller to update namespaces
 	if m.TDGMigration {
-		if req.UserInfo.Username == "system:serviceaccount:flux-system:helm-controller" {
+		switch req.UserInfo.Username {
+		case "system:serviceaccount:flux-system:helm-controller":
 			nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
 			return admission.Allowed("")
-		}
-		if req.UserInfo.Username == "system:serviceaccount:flux-system:kustomize-controller" {
+		case "system:serviceaccount:flux-system:kustomize-controller":
 			nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
 			return admission.Allowed("")
-		}
-		if req.UserInfo.Username == "system:serviceaccount:schiff-tenant:m2m-sa" {
+		case "system:serviceaccount:schiff-tenant:m2m-sa":
 			nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
 			return admission.Allowed("")
-		}
-		if req.UserInfo.Username == "system:serviceaccount:schiff-system:m2m-sa" {
+		case "system:serviceaccount:schiff-system:m2m-sa":
 			nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+			return admission.Allowed("")
+		case "system:serviceaccount:capi-operator-system:capi-operator-manager":
+			nsMutatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
 			return admission.Allowed("")
 		}
 	}
