@@ -8,6 +8,10 @@ controllerManager:
     args:
     - controller
     - --leader-elect
+    - --enable-authprovider-reconciler=true
+    - --enable-binddefinition-reconciler=true
+    - --enable-roledefinition-reconciler=true
+    - --auth-provider-requeue-interval=5m
     containerSecurityContext:
       allowPrivilegeEscalation: false
       capabilities:

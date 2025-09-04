@@ -63,6 +63,10 @@ spec:
         args:
           - controller
           - --leader-elect
+          - --enable-authprovider-reconciler=true
+          - --enable-binddefinition-reconciler=true
+          - --enable-roledefinition-reconciler=true
+          - --auth-provider-requeue-interval=5m
         image: controller:latest
         name: manager
         env:
