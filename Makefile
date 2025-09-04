@@ -9,7 +9,7 @@ APP ?= auth-operator
 IMG ?= (APP):latest
 NAMESPACE ?= kube-system
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-ENVTEST_K8S_VERSION = 1.30.0
+ENVTEST_K8S_VERSION = 1.33.0
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -83,7 +83,7 @@ build: manifests generate fmt vet ## Build manager binary.
 
 .PHONY: run-ctrl
 run-ctrl: manifests generate fmt vet ## Run controllers from your host.
-	go run ./main.go controller --namespace $(NAMESPACE) 
+	go run ./main.go controller --namespace $(NAMESPACE)
 
 .PHONY: run-wh
 run-wh: manifests generate fmt vet ## Run webhooks from your host.
@@ -105,7 +105,7 @@ docker-push: ## Push docker image with the manager.
 helm-crds: manifests kustomize ## Generate Helm chart Custom Resource Definitions (CRDs)
 	rm -f chart/auth-operator/crds/*
 	$(KUSTOMIZE) build config/crd -o chart/auth-operator/crds
-	
+
 	pushd "chart/auth-operator" && \
 	for file in crds/apiextensions.k8s.io_v1_customresourcedefinition_*; do \
 		mv "$$file" "crds/$${file#crds/apiextensions.k8s.io_v1_customresourcedefinition_}"; \
@@ -174,11 +174,11 @@ export-images: drawio ## Export PNG images from a Draw.io diagram.
 	drawio --export docs/drawio/auth-operator.drawio --output docs/images/overall-architecture.png --format png --page-index=0
 	drawio --export docs/drawio/auth-operator.drawio --output docs/images/generator.png --format png --page-index=1
 	drawio --export docs/drawio/auth-operator.drawio --output docs/images/binder.png --format png --page-index=2
-	drawio --export docs/drawio/auth-operator.drawio --output docs/images/idp.png --format png --page-index=3 
+	drawio --export docs/drawio/auth-operator.drawio --output docs/images/idp.png --format png --page-index=3
 	drawio --export docs/drawio/auth-operator.drawio --output docs/images/authorizer.png --format png --page-index=4
 	drawio --export docs/drawio/auth-operator.drawio --output docs/images/advertiser.png --format png --page-index=5
 
-.PHONY: docs 
+.PHONY: docs
 docs: crd-ref-docs ## Generate markdown API reference into docs directory.
 	crd-ref-docs --source-path=api --config=docs/config.yaml --renderer=markdown --output-mode=group --output-path=docs/api-reference
 
@@ -231,7 +231,7 @@ MOCKGEN ?= $(LOCALBIN)/mockgen
 helmify: $(HELMIFY) ## Download helmify locally if necessary.
 $(HELMIFY): $(LOCALBIN)
 	$(call go-install-tool,$(HELMIFY),github.com/arttor/helmify/cmd/helmify,$(HELMIFY_VERSION))
-	
+
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
 $(KUSTOMIZE): $(LOCALBIN)
@@ -252,12 +252,12 @@ golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
 $(GOLANGCI_LINT): $(LOCALBIN)
 	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,${GOLANGCI_LINT_VERSION})
 
-.PHONY: crd-ref-docs 
+.PHONY: crd-ref-docs
 crd-ref-docs: $(CRD_REF_DOCS) ## Download crd-ref-docs locally if necessary.
 $(CRD_REF_DOCS): $(LOCALBIN)
 	$(call go-install-tool,$(CRD_REF_DOCS),github.com/elastic/crd-ref-docs,${CRD_REF_DOCS_VERSION})
 
-.PHONY: drawio 
+.PHONY: drawio
 drawio: ## Download Draw.io locally if necessary.
 	echo "Can't check if you downloaded Draw.io. If not please install it manually."
 

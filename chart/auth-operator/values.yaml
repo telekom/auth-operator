@@ -1,7 +1,5 @@
 authproviderSecrets:
   apiToken: ""
-  apiTokenRefresh: ""
-  apiTokenRefreshUrl: ""
   idpUrl: ""
 tdgMigration:
   enabled: false

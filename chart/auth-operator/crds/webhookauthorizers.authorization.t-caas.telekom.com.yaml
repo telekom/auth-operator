@@ -3,7 +3,7 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     argocd.argoproj.io/sync-options: Delete=false
-    controller-gen.kubebuilder.io/version: v0.17.3
+    controller-gen.kubebuilder.io/version: v0.19.0
     helm.sh/resource-policy: keep
   name: webhookauthorizers.authorization.t-caas.telekom.com
 spec:

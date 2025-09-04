@@ -2,12 +2,13 @@ package authentication
 
 import (
 	"context"
-	"sort"
-	"strings"
+	"fmt"
+	"slices"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -20,53 +21,38 @@ import (
 	idpclient "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/client"
 )
 
-// Helper function to extract usernames from Owners and Members
-func extractUsernames(users []idpclient.User) []string {
-	usernames := make([]string, len(users))
-	for i, user := range users {
-		usernames[i] = user.Username
-	}
-	return usernames
-}
+const (
+	TenantGroupParent     = "M - T_CaaS_Tenant"
+	ThirdPartyGroupParent = "M - T_CaaS_Third_Party"
+)
 
-// Function to check if two slices of strings match after sorting
-func slicesMatch(authprovider, idp []string) (bool, bool) {
-	sort.Strings(authprovider)
-	sort.Strings(idp)
-	for i, v := range authprovider {
-		if i >= len(idp) || v != idp[i] {
-			return false, len(authprovider) <= len(idp)
+// diffUsersSlice returns the elements in 'a' that are not in 'b' based on idpclient.User Username
+func diffUsersSlice(a, b []idpclient.User) []idpclient.User {
+	diff := []idpclient.User{}
+	for _, item := range a {
+		found := slices.ContainsFunc(b, func(u idpclient.User) bool {
+			return item.Username == u.Username
+		})
+
+		if !found {
+			diff = append(diff, item)
 		}
 	}
-	return true, len(authprovider) <= len(idp)
+	return diff
 }
 
 // AuthProviderReconciler reconciles a AuthProvider object
 type AuthProviderReconciler struct {
 	client.Client
-	Scheme    *runtime.Scheme
-	IDPClient idpclient.Client
-	Recorder  record.EventRecorder
+	Scheme          *runtime.Scheme
+	IDPClient       idpclient.Client
+	Recorder        record.EventRecorder
+	RequeueInterval time.Duration
 }
 
 func (r *AuthProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
-
-	// Pass the same Logger into IDPClient
 	r.IDPClient.SetLogger(log)
-
-	// Declare some static vars for IDP interaction
-	// Tenant IDP variables
-	var idpTenantGroups idpclient.Groups
-	var idpTenantOwners idpclient.Owners
-	var idpTenantMembers idpclient.Members
-	var idpTenantMemberGroups idpclient.Groups
-
-	// Third party IDP variables
-	var idpThirdPartyGroups idpclient.Groups
-	var idpThirdPartyOwners idpclient.Owners
-	var idpThirdPartyMembers idpclient.Members
-	var idpThirdPartyMemberGroups idpclient.Groups
 
 	// Fetching the AuthProvider custom resource from Kubernetes API
 	authProvider := &authenticationv1alpha1.AuthProvider{}
@@ -81,338 +67,216 @@ func (r *AuthProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// Access token has to be refreshed every 5 minutes
-	if err := r.IDPClient.RefreshAccessToken("/api/token-issuer/v1/apikey/refresh"); err != nil {
+	if err := r.IDPClient.RefreshAccessToken(); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	// Assign values from K8s API to OIDC client for tenants and third parties
-	for _, group := range authProvider.Spec.Tenant.Groups {
-		for _, groupName := range group.GroupNames {
-			idpTenantGroups.IDPGroups = append(idpTenantGroups.IDPGroups, idpclient.Group{
-				Name:   groupName,
-				Type:   group.GroupType,
-				Parent: group.ParentGroup,
-			})
-		}
+	if authProvider.GetDeletionTimestamp() != nil {
+		return r.reconcileDeletion(ctx, authProvider)
 	}
-
-	for _, thirdparty := range authProvider.Spec.ThirdParty {
-		for _, group := range thirdparty.Groups {
-			for _, groupName := range group.GroupNames {
-				idpThirdPartyGroups.IDPGroups = append(idpThirdPartyGroups.IDPGroups, idpclient.Group{
-					Name:   groupName,
-					Type:   group.GroupType,
-					Parent: group.ParentGroup,
-				})
-			}
-		}
-	}
-
-	// Check if AuthProvider is marked to be deleted
-	if authProvider.ObjectMeta.DeletionTimestamp.IsZero() {
-		if !controllerutil.ContainsFinalizer(authProvider, authenticationv1alpha1.AuthProviderFinalizer) {
-			log.Info("Adding Finalizer for the AuthProvider")
-			controllerutil.AddFinalizer(authProvider, authenticationv1alpha1.AuthProviderFinalizer)
-			if err := r.Update(ctx, authProvider); err != nil {
-				return ctrl.Result{}, err
-			}
-		}
-	} else {
-		// AuthProvider is marked to be deleted
-		log.Info("Deleting generated IDP Groups for the AuthProvider, as it is marked for deletion")
-		if controllerutil.ContainsFinalizer(authProvider, authenticationv1alpha1.AuthProviderFinalizer) {
-			for _, idpgroup := range idpTenantGroups.IDPGroups {
-				idpgroup.Name = "S - " + idpgroup.Name
-				idpGroupsResponse, err := r.IDPClient.GetGroup(idpgroup)
-				if len(idpGroupsResponse) == 0 { // implement a idpclient.IsNotFound(err) method
-					log.Info("IDP Groups not found or already deleted", "Group", idpgroup.Name)
-				}
-				if err != nil {
-					log.Info("Unforseen error occured", "ERROR", err)
-					return ctrl.Result{}, err
-				}
-				idpResponse := []idpclient.Response{}
-				idpResponse, err = r.IDPClient.DeleteGroup(idpgroup)
-				if err != nil {
-					log.Info("Failed to delete IDP Group", "IDPGROUP", idpgroup.Name)
-					return ctrl.Result{}, err
-				}
-				log.Info("Group deletion status", "STATUS", idpResponse)
-			}
-
-			for _, idpgroup := range idpThirdPartyGroups.IDPGroups {
-				idpgroup.Name = "S - " + idpgroup.Name
-				idpGroupsResponse, err := r.IDPClient.GetGroup(idpgroup)
-				if len(idpGroupsResponse) == 0 { // implement a idpclient.IsNotFound(err) method
-					log.Info("IDP Groups not found or already deleted", "Group", idpgroup.Name)
-				}
-				if err != nil {
-					log.Info("Unforseen error occured", "ERROR", err)
-					return ctrl.Result{}, err
-				}
-				idpResponse := []idpclient.Response{}
-				idpResponse, err = r.IDPClient.DeleteGroup(idpgroup)
-				if err != nil {
-					log.Info("Failed to delete IDP Group", "IDPGROUP", idpgroup.Name)
-					return ctrl.Result{}, err
-				}
-				log.Info("Group deletion status", "STATUS", idpResponse)
-			}
-
-			log.Info("Removing Finalizer for the AuthProvider")
-			controllerutil.RemoveFinalizer(authProvider, authenticationv1alpha1.AuthProviderFinalizer)
-			if err := r.Update(ctx, authProvider); err != nil {
-				return ctrl.Result{}, err
-			}
-			return ctrl.Result{}, nil
-		}
-		log.Info("AuthProvider is marked to be deleted, but has no finalizer")
-		return ctrl.Result{}, nil
-	}
-
-	// Otherwise create groups
-	for _, idpgroup := range idpTenantGroups.IDPGroups {
-		idpgroup.Name = "S - " + idpgroup.Name
-		idpGroupsResponse, err := r.IDPClient.GetGroup(idpgroup)
-		if len(idpGroupsResponse) == 0 { // implement a idpclient.IsNotFound(err) method
-			log.Info("IDP Group not found in TDI IDP", "Group", idpgroup.Name)
-			idpResponse := []idpclient.Response{}
-			idpgroup.Name = strings.TrimPrefix(idpgroup.Name, "S - ")
-			idpResponse, err = r.IDPClient.CreateGroup(idpgroup)
-			if err != nil {
-				log.Info("Failed to create IDP Group", "IDPGROUP", idpgroup.Name)
-				return ctrl.Result{}, err
-			}
-			log.Info("Group creation status", "STATUS", idpResponse)
-		}
-		if err != nil {
-			log.Info("Unforseen error occured", "ERROR", err)
+	if controllerutil.AddFinalizer(authProvider, authenticationv1alpha1.AuthProviderFinalizer) {
+		if err := r.Update(ctx, authProvider); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
-	for _, idpgroup := range idpThirdPartyGroups.IDPGroups {
-		idpgroup.Name = "S - " + idpgroup.Name
-		idpGroupsResponse, err := r.IDPClient.GetGroup(idpgroup)
-		if len(idpGroupsResponse) == 0 { // implement a idpclient.IsNotFound(err) method
-			log.Info("IDP Group not found in TDI IDP", "Group", idpgroup.Name)
-			idpResponse := []idpclient.Response{}
-			idpgroup.Name = strings.TrimPrefix(idpgroup.Name, "S - ")
-			idpResponse, err = r.IDPClient.CreateGroup(idpgroup)
+	return r.reconcile(ctx, authProvider)
+}
+
+// reconcile handles the main reconciliation of the AuthProvider
+func (r *AuthProviderReconciler) reconcile(ctx context.Context, authProvider *authenticationv1alpha1.AuthProvider) (ctrl.Result, error) {
+	err := r.validate(ctx, authProvider)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	aggregatedErrors := []error{}
+	// Create IDP groups
+	for _, tenantIDPGroup := range authProvider.Spec.Tenant.Groups {
+		for _, groupName := range tenantIDPGroup.GroupNames {
+			err = r.reconcileGroup(ctx, groupName, tenantIDPGroup.GroupType, tenantIDPGroup.ParentGroup, authProvider.Spec.Tenant.Owners, authProvider.Spec.Tenant.Members)
 			if err != nil {
-				log.Info("Failed to create IDP Group", "IDPGROUP", idpgroup.Name)
-				return ctrl.Result{}, err
+				aggregatedErrors = append(aggregatedErrors, err)
 			}
-			log.Info("Group creation status", "STATUS", idpResponse)
 		}
-		if err != nil {
-			log.Info("Unforseen error occured", "ERROR", err)
+	}
+	for _, thirdPartyIDP := range authProvider.Spec.ThirdParty {
+		for _, thirdPartyIDPGroup := range thirdPartyIDP.Groups {
+			for _, groupName := range thirdPartyIDPGroup.GroupNames {
+				err = r.reconcileGroup(ctx, groupName, thirdPartyIDPGroup.GroupType, thirdPartyIDPGroup.ParentGroup, thirdPartyIDP.Owners, thirdPartyIDP.Members)
+				if err != nil {
+					aggregatedErrors = append(aggregatedErrors, err)
+				}
+			}
+		}
+	}
+
+	return ctrl.Result{RequeueAfter: r.RequeueInterval}, kerrors.NewAggregate(aggregatedErrors)
+}
+
+func (r *AuthProviderReconciler) reconcileGroup(ctx context.Context, groupName, groupType, parentGroup string, owners []string, members []authenticationv1alpha1.OIDCMember) error {
+	err := r.createIDPGroup(ctx, groupName, groupType, parentGroup)
+	if err != nil {
+		return err
+	}
+	err = r.ensureGroupOwnerAssignment(ctx, groupName, groupType, parentGroup, owners)
+	if err != nil {
+		return err
+	}
+	err = r.ensureGroupMemberAssignment(ctx, groupName, groupType, parentGroup, members)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// reconcileDeletion handles the deletion of the AuthProvider resource
+func (r *AuthProviderReconciler) reconcileDeletion(ctx context.Context, authProvider *authenticationv1alpha1.AuthProvider) (ctrl.Result, error) {
+	log := ctrl.LoggerFrom(ctx)
+	if controllerutil.RemoveFinalizer(authProvider, authenticationv1alpha1.AuthProviderFinalizer) {
+		log.Info("Removing Finalizer for the AuthProvider")
+		if err := r.Update(ctx, authProvider); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
+	return ctrl.Result{}, nil
+}
 
-	// Assign values from K8s API to OIDC client for tenants and third parties
-	for _, ownerName := range authProvider.Spec.Tenant.Owners {
-		idpTenantOwners.IDPOwners = append(idpTenantOwners.IDPOwners, idpclient.User{
-			Username: ownerName,
-		})
-	}
-	for _, memberName := range authProvider.Spec.Tenant.Members {
-		idpTenantMembers.IDPMembers = append(idpTenantMembers.IDPMembers, idpclient.User{
-			Username: memberName.Name,
-		})
-		for _, memberGroup := range memberName.GroupNames {
-			idpTenantMemberGroups.IDPGroups = append(idpTenantMemberGroups.IDPGroups, idpclient.Group{
-				Name: memberGroup,
-			})
-		}
-	}
-	// Process third parties
-	for _, thirdparty := range authProvider.Spec.ThirdParty {
-		for _, ownerName := range thirdparty.Owners {
-			idpThirdPartyOwners.IDPOwners = append(idpThirdPartyOwners.IDPOwners, idpclient.User{
-				Username: ownerName,
-			})
-		}
-		for _, memberName := range thirdparty.Members {
-			idpThirdPartyMembers.IDPMembers = append(idpThirdPartyMembers.IDPMembers, idpclient.User{
-				Username: memberName.Name,
-			})
-			for _, memberGroup := range memberName.GroupNames {
-				idpThirdPartyMemberGroups.IDPGroups = append(idpThirdPartyMemberGroups.IDPGroups, idpclient.Group{
-					Name: memberGroup,
-				})
+// validate validates all resources required to reconcile authProvider
+func (r *AuthProviderReconciler) validate(ctx context.Context, authProvider *authenticationv1alpha1.AuthProvider) error {
+	for _, tenantIDPGroup := range authProvider.Spec.Tenant.Groups {
+		for _, groupName := range tenantIDPGroup.GroupNames {
+			if tenantIDPGroup.ParentGroup != TenantGroupParent {
+				return fmt.Errorf("only groups with parent \"%s\" are allowed for the tenant (see tenant \"%s\" and idp group \"%s\")", TenantGroupParent, authProvider.Spec.Tenant.Name, groupName)
 			}
 		}
 	}
-
-	// For each group check Owners
-	for _, idpgroup := range idpTenantGroups.IDPGroups {
-		if idpgroup.Parent == "M - T_CaaS_Tenant" {
-			idpgroup.Name = "S - " + idpgroup.Name
-			// Get owners, extract usernames and check if there is a match
-			idpOwnersResponse, err := r.IDPClient.GetGroupOwners(idpgroup)
-			if err != nil {
-				log.Info("Unforseen error occured", "ERROR", err)
-				return ctrl.Result{}, err
-			}
-			idpOwnersUsernames := extractUsernames(idpOwnersResponse)
-			matchOwner, delOwner := slicesMatch(authProvider.Spec.Tenant.Owners, idpOwnersUsernames)
-			if !matchOwner {
-				log.Info("AuthProvider group owners mismatch with TDI IDP", "Group", idpgroup.Name, "Owners", idpTenantOwners.IDPOwners)
-				if delOwner {
-					idpResponse, err := r.IDPClient.DeleteGroupOwners(idpgroup, idpTenantOwners.IDPOwners)
-					if err != nil {
-						log.Info("Failed to delete IDP Group owners", "IDPGROUPOWNERS", idpTenantOwners.IDPOwners)
-						return ctrl.Result{}, err
-					}
-					log.Info("Owner deletion status", "STATUS", idpResponse)
-				} else {
-					idpResponse, err := r.IDPClient.CreateGroupOwners(idpgroup, idpTenantOwners.IDPOwners)
-					if err != nil {
-						log.Info("Failed to create IDP Group owners", "IDPGROUPOWNERS", idpTenantOwners.IDPOwners)
-						return ctrl.Result{}, err
-					}
-					log.Info("Owner creation status", "STATUS", idpResponse)
+	for _, thirdPartyIDP := range authProvider.Spec.ThirdParty {
+		for _, thirdPartyIDPGroup := range thirdPartyIDP.Groups {
+			for _, groupName := range thirdPartyIDPGroup.GroupNames {
+				if thirdPartyIDPGroup.ParentGroup != ThirdPartyGroupParent {
+					return fmt.Errorf("only groups with parent \"%s\" are allowed for the thirdparty (see thirdparty \"%s\" and idp group \"%s\")", ThirdPartyGroupParent, thirdPartyIDP.Name, groupName)
 				}
 			}
 		}
 	}
+	return nil
+}
 
-	for _, idpMember := range idpTenantMembers.IDPMembers {
-		for _, authProviderMember := range authProvider.Spec.Tenant.Members {
-			if idpMember.Username == authProviderMember.Name {
-				for _, idpMemberGroup := range idpTenantMemberGroups.IDPGroups {
-					for _, authProviderMemberGroup := range authProviderMember.GroupNames {
-						if idpMemberGroup.Name == authProviderMemberGroup {
-							if strings.Contains(idpMemberGroup.Name, "m2m") {
-								idpMemberGroup.Name = "S - " + idpMemberGroup.Name
-								var idpFilteredTenantMembers idpclient.Members
-								idpFilteredTenantMembers.IDPMembers = append(idpFilteredTenantMembers.IDPMembers, idpMember)
-								// Get members, extract usernames and check if there is a match
-								idpMembersResponse, err := r.IDPClient.GetGroupMembers(idpMemberGroup)
-								if err != nil {
-									log.Info("Unforseen error occured", "ERROR", err)
-									return ctrl.Result{}, err
-								}
-								idpMembersUsernames := extractUsernames(idpMembersResponse)
-								apiSlice := []string{}
-								apiSlice = append(apiSlice, authProviderMember.Name)
-								matchMember, delMember := slicesMatch(apiSlice, idpMembersUsernames)
-								if !matchMember {
-									log.Info("AuthProvider group members mismatch with TDI IDP", "Group", idpMemberGroup.Name, "Members", idpFilteredTenantMembers.IDPMembers)
-									if delMember {
-										idpResponse, err := r.IDPClient.DeleteGroupMembers(idpMemberGroup, idpFilteredTenantMembers.IDPMembers)
-										if err != nil {
-											log.Info("Failed to delete IDP Group members", "IDPGROUPMEMBERS", idpFilteredTenantMembers.IDPMembers)
-											return ctrl.Result{}, err
-										}
-										log.Info("Member deletion status", "STATUS", idpResponse)
-									} else {
-										idpResponse, err := r.IDPClient.CreateGroupMembers(idpMemberGroup, idpFilteredTenantMembers.IDPMembers)
-										if err != nil {
-											log.Info("Failed to create IDP Group members", "IDPGROUPMEMBERS", idpFilteredTenantMembers.IDPMembers)
-											return ctrl.Result{}, err
-										}
-										log.Info("Member creation status", "STATUS", idpResponse)
-									}
-								}
-							}
-						}
-					}
-				}
-			}
+func (r *AuthProviderReconciler) createIDPGroup(ctx context.Context, groupName, groupType, groupParent string) error {
+	// TODO: Implement an idpclient.IsNotFound(err) method
+	log := ctrl.LoggerFrom(ctx)
+	group := idpclient.Group{
+		Name:   groupName,
+		Type:   groupType,
+		Parent: groupParent,
+	}
+	getGroupResp, err := r.IDPClient.GetGroup(group)
+	if err != nil {
+		return err
+	}
+	if len(getGroupResp) == 0 {
+		log.Info("IDP Group not found in TDI IDP", "group", group.Name)
+		createGroupResp, err := r.IDPClient.CreateGroup(group)
+		if err != nil {
+			log.Error(err, "failed to create IDP Group", "group", group.Name)
+			return err
 		}
+		log.Info("Group creation finished", "status", createGroupResp)
 	}
 
-	// For each group check Owners
-	for _, idpgroup := range idpThirdPartyGroups.IDPGroups {
-		if idpgroup.Parent == "M - T_CaaS_Third_Party" {
-			idpgroup.Name = "S - " + idpgroup.Name
-			// Get owners, extract usernames and check if there is a match
-			idpOwnersResponse, err := r.IDPClient.GetGroupOwners(idpgroup)
-			if err != nil {
-				log.Info("Unforseen error occured", "ERROR", err)
-				return ctrl.Result{}, err
-			}
-			idpOwnersUsernames := extractUsernames(idpOwnersResponse)
-			apiSlice := []string{}
-			for _, thirdparty := range authProvider.Spec.ThirdParty {
-				for _, owner := range thirdparty.Owners {
-					apiSlice = append(apiSlice, owner)
-				}
-			}
-			matchOwner, delOwner := slicesMatch(apiSlice, idpOwnersUsernames)
-			if !matchOwner {
-				log.Info("AuthProvider group owners mismatch with TDI IDP", "Group", idpgroup.Name, "Owners", idpThirdPartyOwners.IDPOwners)
-				if delOwner {
-					idpResponse, err := r.IDPClient.DeleteGroupOwners(idpgroup, idpThirdPartyOwners.IDPOwners)
-					if err != nil {
-						log.Info("Failed to delete IDP Group owners", "IDPGROUPOWNERS", idpThirdPartyOwners.IDPOwners)
-						return ctrl.Result{}, err
-					}
-					log.Info("Owner deletion status", "STATUS", idpResponse)
-				} else {
-					idpResponse, err := r.IDPClient.CreateGroupOwners(idpgroup, idpThirdPartyOwners.IDPOwners)
-					if err != nil {
-						log.Info("Failed to create IDP Group owners", "IDPGROUPOWNERS", idpThirdPartyOwners.IDPOwners)
-						return ctrl.Result{}, err
-					}
-					log.Info("Owner creation status", "STATUS", idpResponse)
-				}
-			}
-		}
+	return nil
+}
+
+func (r *AuthProviderReconciler) deleteIDPGroup(ctx context.Context, groupName, groupType, groupParent string) error {
+	// TODO: Implement an idpclient.IsNotFound(err) method
+	log := ctrl.LoggerFrom(ctx)
+	group := idpclient.Group{
+		Name:   groupName,
+		Type:   groupType,
+		Parent: groupParent,
+	}
+	resp, err := r.IDPClient.GetGroup(group)
+	if err != nil {
+		return err
+	}
+	if len(resp) == 0 {
+		log.Info("IDP group not found or already deleted in TDI IDP", "group", group.Name)
+		return nil
 	}
 
-	// For each member group check Members (only assigned for m2m)
-	for _, idpMember := range idpThirdPartyMembers.IDPMembers {
-		for _, thirdparty := range authProvider.Spec.ThirdParty {
-			for _, authProviderMember := range thirdparty.Members {
-				if idpMember.Username == authProviderMember.Name {
-					for _, idpMemberGroup := range idpThirdPartyMemberGroups.IDPGroups {
-						for _, authProviderMemberGroup := range authProviderMember.GroupNames {
-							if idpMemberGroup.Name == authProviderMemberGroup {
-								if strings.Contains(idpMemberGroup.Name, "m2m") {
-									idpMemberGroup.Name = "S - " + idpMemberGroup.Name
-									var idpFilteredThirdPartyMembers idpclient.Members
-									idpFilteredThirdPartyMembers.IDPMembers = append(idpFilteredThirdPartyMembers.IDPMembers, idpMember)
-									// Get members, extract usernames and check if there is a match
-									idpMembersResponse, err := r.IDPClient.GetGroupMembers(idpMemberGroup)
-									if err != nil {
-										log.Info("Unforseen error occured", "ERROR", err)
-										return ctrl.Result{}, err
-									}
-									idpMembersUsernames := extractUsernames(idpMembersResponse)
-									apiSlice := []string{}
-									apiSlice = append(apiSlice, authProviderMember.Name)
-									matchMember, delMember := slicesMatch(apiSlice, idpMembersUsernames)
-									if !matchMember {
-										log.Info("AuthProvider group members mismatch with TDI IDP", "Group", idpMemberGroup.Name, "Members", idpFilteredThirdPartyMembers.IDPMembers)
-										if delMember {
-											idpResponse, err := r.IDPClient.DeleteGroupMembers(idpMemberGroup, idpFilteredThirdPartyMembers.IDPMembers)
-											if err != nil {
-												log.Info("Failed to delete IDP Group members", "IDPGROUPMEMBERS", idpFilteredThirdPartyMembers.IDPMembers)
-												return ctrl.Result{}, err
-											}
-											log.Info("Member deletion status", "STATUS", idpResponse)
-										} else {
-											idpResponse, err := r.IDPClient.CreateGroupMembers(idpMemberGroup, idpFilteredThirdPartyMembers.IDPMembers)
-											if err != nil {
-												log.Info("Failed to create IDP Group members", "IDPGROUPMEMBERS", idpFilteredThirdPartyMembers.IDPMembers)
-												return ctrl.Result{}, err
-											}
-											log.Info("Member creation status", "STATUS", idpResponse)
-										}
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-		}
+	idpResponse, err := r.IDPClient.DeleteGroup(group)
+	if err != nil {
+		log.Error(err, "failed to delete IDP Group", "group", group.Name)
+		return err
+	}
+	log.Info("Group deletion finished", "status", idpResponse)
+
+	return nil
+}
+
+func (r *AuthProviderReconciler) ensureGroupOwnerAssignment(ctx context.Context, groupName, groupType, groupParent string, desiredOwnersNames []string) error {
+	// TODO: Implement an idpclient.IsNotFound(err) method
+	log := ctrl.LoggerFrom(ctx)
+	group := idpclient.Group{
+		Name:   groupName,
+		Type:   groupType,
+		Parent: groupParent,
+	}
+	groupOwnersInIDP, err := r.IDPClient.GetGroupOwners(group)
+	if err != nil {
+		return err
 	}
 
-	return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
+	var desiredOwners []idpclient.User
+	for _, owner := range desiredOwnersNames {
+		desiredOwners = append(desiredOwners, idpclient.User{Username: owner})
+	}
+
+	missingOwners := diffUsersSlice(desiredOwners, groupOwnersInIDP)
+	if len(missingOwners) > 0 {
+		log.Info("Adding missing owners into TDI IDP group", "group", group, "owners", missingOwners)
+		resp, err := r.IDPClient.CreateGroupOwners(group, missingOwners)
+		if err != nil {
+			log.Error(err, "failed to add IDP group owners", "currentOwners", groupOwnersInIDP, "newAdditionalOwners", missingOwners)
+			return err
+		}
+		log.Info("Owner creation finished", "group", group.Name, "status", resp)
+	}
+
+	return nil
+}
+
+func (r *AuthProviderReconciler) ensureGroupMemberAssignment(ctx context.Context, groupName, groupType, groupParent string, desiredOIDCMembers []authenticationv1alpha1.OIDCMember) error {
+	// TODO: Implement an idpclient.IsNotFound(err) method
+	log := ctrl.LoggerFrom(ctx)
+	group := idpclient.Group{
+		Name:   groupName,
+		Type:   groupType,
+		Parent: groupParent,
+	}
+	groupMembersInIDP, err := r.IDPClient.GetGroupMembers(group)
+	if err != nil {
+		return err
+	}
+
+	desiredMembers := []idpclient.User{}
+	for _, member := range desiredOIDCMembers {
+		desiredMembers = append(desiredMembers, idpclient.User{Username: member.Name})
+	}
+
+	missingMembers := diffUsersSlice(desiredMembers, groupMembersInIDP)
+	if len(missingMembers) > 0 {
+		log.Info("Adding missing members into TDI IDP group", "group", group, "members", missingMembers)
+		resp, err := r.IDPClient.CreateGroupMembers(group, missingMembers)
+		if err != nil {
+			log.Error(err, "failed to add IDP group members", "currentMembers", groupMembersInIDP, "newAdditionalMembers", missingMembers)
+			return err
+		}
+		log.Info("Member creation finished", "group", group.Name, "status", resp)
+	}
+
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

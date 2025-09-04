@@ -34,16 +34,6 @@ spec:
             secretKeyRef:
               key: API_TOKEN
               name: {{ include "auth-operator.fullname" . }}-authprovider-secrets
-        - name: API_TOKEN_REFRESH
-          valueFrom:
-            secretKeyRef:
-              key: API_TOKEN_REFRESH
-              name: {{ include "auth-operator.fullname" . }}-authprovider-secrets
-        - name: API_TOKEN_REFRESH_URL
-          valueFrom:
-            secretKeyRef:
-              key: API_TOKEN_REFRESH_URL
-              name: {{ include "auth-operator.fullname" . }}-authprovider-secrets
         - name: KUBERNETES_CLUSTER_DOMAIN
           value: {{ quote .Values.kubernetesClusterDomain }}
         image: {{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag

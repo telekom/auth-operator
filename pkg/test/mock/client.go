@@ -13,7 +13,7 @@ import (
 	reflect "reflect"
 
 	logr "github.com/go-logr/logr"
-	client "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/client"
+	idpclient "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/client"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -42,10 +42,10 @@ func (m *MockClient) EXPECT() *MockClientMockRecorder {
 }
 
 // CreateGroup mocks base method.
-func (m *MockClient) CreateGroup(group client.Group) ([]client.Response, error) {
+func (m *MockClient) CreateGroup(group idpclient.Group) ([]idpclient.Response, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CreateGroup", group)
-	ret0, _ := ret[0].([]client.Response)
+	ret0, _ := ret[0].([]idpclient.Response)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -57,10 +57,10 @@ func (mr *MockClientMockRecorder) CreateGroup(group any) *gomock.Call {
 }
 
 // CreateGroupMembers mocks base method.
-func (m *MockClient) CreateGroupMembers(group client.Group, members []client.User) ([]client.Response, error) {
+func (m *MockClient) CreateGroupMembers(group idpclient.Group, members []idpclient.User) ([]idpclient.Response, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CreateGroupMembers", group, members)
-	ret0, _ := ret[0].([]client.Response)
+	ret0, _ := ret[0].([]idpclient.Response)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -72,10 +72,10 @@ func (mr *MockClientMockRecorder) CreateGroupMembers(group, members any) *gomock
 }
 
 // CreateGroupOwners mocks base method.
-func (m *MockClient) CreateGroupOwners(group client.Group, owners []client.User) ([]client.Response, error) {
+func (m *MockClient) CreateGroupOwners(group idpclient.Group, owners []idpclient.User) ([]idpclient.Response, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CreateGroupOwners", group, owners)
-	ret0, _ := ret[0].([]client.Response)
+	ret0, _ := ret[0].([]idpclient.Response)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -87,10 +87,10 @@ func (mr *MockClientMockRecorder) CreateGroupOwners(group, owners any) *gomock.C
 }
 
 // DeleteGroup mocks base method.
-func (m *MockClient) DeleteGroup(group client.Group) ([]client.Response, error) {
+func (m *MockClient) DeleteGroup(group idpclient.Group) ([]idpclient.Response, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "DeleteGroup", group)
-	ret0, _ := ret[0].([]client.Response)
+	ret0, _ := ret[0].([]idpclient.Response)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -102,10 +102,10 @@ func (mr *MockClientMockRecorder) DeleteGroup(group any) *gomock.Call {
 }
 
 // DeleteGroupMembers mocks base method.
-func (m *MockClient) DeleteGroupMembers(group client.Group, members []client.User) ([]client.Response, error) {
+func (m *MockClient) DeleteGroupMembers(group idpclient.Group, members []idpclient.User) ([]idpclient.Response, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "DeleteGroupMembers", group, members)
-	ret0, _ := ret[0].([]client.Response)
+	ret0, _ := ret[0].([]idpclient.Response)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -117,10 +117,10 @@ func (mr *MockClientMockRecorder) DeleteGroupMembers(group, members any) *gomock
 }
 
 // DeleteGroupOwners mocks base method.
-func (m *MockClient) DeleteGroupOwners(group client.Group, owners []client.User) ([]client.Response, error) {
+func (m *MockClient) DeleteGroupOwners(group idpclient.Group, owners []idpclient.User) ([]idpclient.Response, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "DeleteGroupOwners", group, owners)
-	ret0, _ := ret[0].([]client.Response)
+	ret0, _ := ret[0].([]idpclient.Response)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -132,10 +132,10 @@ func (mr *MockClientMockRecorder) DeleteGroupOwners(group, owners any) *gomock.C
 }
 
 // GetGroup mocks base method.
-func (m *MockClient) GetGroup(group client.Group) ([]client.Group, error) {
+func (m *MockClient) GetGroup(group idpclient.Group) ([]idpclient.Group, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetGroup", group)
-	ret0, _ := ret[0].([]client.Group)
+	ret0, _ := ret[0].([]idpclient.Group)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -147,10 +147,10 @@ func (mr *MockClientMockRecorder) GetGroup(group any) *gomock.Call {
 }
 
 // GetGroupMembers mocks base method.
-func (m *MockClient) GetGroupMembers(group client.Group) ([]client.User, error) {
+func (m *MockClient) GetGroupMembers(group idpclient.Group) ([]idpclient.User, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetGroupMembers", group)
-	ret0, _ := ret[0].([]client.User)
+	ret0, _ := ret[0].([]idpclient.User)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -162,10 +162,10 @@ func (mr *MockClientMockRecorder) GetGroupMembers(group any) *gomock.Call {
 }
 
 // GetGroupOwners mocks base method.
-func (m *MockClient) GetGroupOwners(group client.Group) ([]client.User, error) {
+func (m *MockClient) GetGroupOwners(group idpclient.Group) ([]idpclient.User, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetGroupOwners", group)
-	ret0, _ := ret[0].([]client.User)
+	ret0, _ := ret[0].([]idpclient.User)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -177,17 +177,17 @@ func (mr *MockClientMockRecorder) GetGroupOwners(group any) *gomock.Call {
 }
 
 // RefreshAccessToken mocks base method.
-func (m *MockClient) RefreshAccessToken(path string) error {
+func (m *MockClient) RefreshAccessToken() error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "RefreshAccessToken", path)
+	ret := m.ctrl.Call(m, "RefreshAccessToken")
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // RefreshAccessToken indicates an expected call of RefreshAccessToken.
-func (mr *MockClientMockRecorder) RefreshAccessToken(path any) *gomock.Call {
+func (mr *MockClientMockRecorder) RefreshAccessToken() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RefreshAccessToken", reflect.TypeOf((*MockClient)(nil).RefreshAccessToken), path)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RefreshAccessToken", reflect.TypeOf((*MockClient)(nil).RefreshAccessToken))
 }
 
 // SetLogger mocks base method.

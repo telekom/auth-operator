@@ -15,7 +15,7 @@ import (
 )
 
 type Client interface {
-	RefreshAccessToken(path string) error
+	RefreshAccessToken() error
 	GetGroup(group Group) ([]Group, error)
 	CreateGroup(group Group) ([]Response, error)
 	DeleteGroup(group Group) ([]Response, error)
@@ -31,7 +31,6 @@ type Client interface {
 type IDPClient struct {
 	HTTPClient        *http.Client
 	APIToken          string
-	APITokenRefresh   bool
 	BearerToken       string
 	IDPServiceURL     url.URL
 	RefreshServiceURL url.URL
@@ -39,12 +38,10 @@ type IDPClient struct {
 }
 
 type Config struct {
-	IDPURL             string
-	APIToken           string
-	APITokenRefresh    bool
-	APITokenRefreshURL string
-	Timeout            time.Duration
-	HTTPClient         *http.Client
+	IDPURL     string
+	APIToken   string
+	Timeout    time.Duration
+	HTTPClient *http.Client
 }
 
 type Options struct {
@@ -62,12 +59,10 @@ func NewIDPClient(config Config, options Options) (*IDPClient, error) {
 		Host:   config.IDPURL,
 	}
 
-	var apiTokenRefreshUrl url.URL
-	if config.APITokenRefresh == true {
-		apiTokenRefreshUrl = url.URL{
-			Scheme: "https",
-			Host:   config.APITokenRefreshURL,
-		}
+	apiTokenRefreshUrl := url.URL{
+		Scheme: "https",
+		Host:   config.IDPURL,
+		Path:   "/api/token-issuer/v1/apikey/refresh",
 	}
 
 	if options.TLSClientConfig != nil {
@@ -80,7 +75,6 @@ func NewIDPClient(config Config, options Options) (*IDPClient, error) {
 		HTTPClient:        httpClient,
 		IDPServiceURL:     idpUrl,
 		APIToken:          config.APIToken,
-		APITokenRefresh:   config.APITokenRefresh,
 		RefreshServiceURL: apiTokenRefreshUrl,
 	}
 	return client, nil
@@ -90,9 +84,7 @@ func (c *IDPClient) SetLogger(logger logr.Logger) {
 	c.Log = &logger
 }
 
-func (c *IDPClient) RefreshAccessToken(path string) error {
-	c.RefreshServiceURL.Path = path
-
+func (c *IDPClient) RefreshAccessToken() error {
 	request, err := http.NewRequestWithContext(context.TODO(), http.MethodPost, c.RefreshServiceURL.String(), nil)
 	if err != nil {
 		c.Log.Info("Failed to create request for access token")

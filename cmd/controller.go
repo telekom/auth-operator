@@ -7,7 +7,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"os"
-	"strconv"
+	"time"
 
 	"github.com/spf13/cobra"
 	"k8s.io/client-go/discovery"
@@ -22,7 +22,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 )
 
-var enableLeaderElection bool
+var (
+	enableLeaderElection           bool
+	enableAuthProviderReconciler   bool
+	enableBindDefinitionReconciler bool
+	enableRoleDefinitionReconciler bool
+	authProviderRequeueInterval    time.Duration
+)
 
 // controllerCmd represents the controller command
 var controllerCmd = &cobra.Command{
@@ -61,70 +67,72 @@ to quickly create a Cobra application.`,
 			return fmt.Errorf("unable to initialize Dynamic client: %w", err)
 		}
 
-		if err = (&authorizationcontroller.RoleDefinitionReconciler{
-			Client:          mgr.GetClient(),
-			Scheme:          mgr.GetScheme(),
-			DiscoveryClient: discoveryClient,
-			Recorder:        mgr.GetEventRecorderFor("RoleDefinitionReconciler"),
-		}).SetupWithManager(mgr); err != nil {
-			return fmt.Errorf("unable to create controller RoleDefinition: %w", err)
+		if enableRoleDefinitionReconciler {
+			if err = (&authorizationcontroller.RoleDefinitionReconciler{
+				Client:          mgr.GetClient(),
+				Scheme:          mgr.GetScheme(),
+				DiscoveryClient: discoveryClient,
+				Recorder:        mgr.GetEventRecorderFor("RoleDefinitionReconciler"),
+			}).SetupWithManager(mgr); err != nil {
+				return fmt.Errorf("unable to create controller RoleDefinition: %w", err)
+			}
+		} else {
+			setupLog.Info("RoleDefinition reconciler is disabled")
 		}
 
-		if err = (&authorizationcontroller.BindDefinitionReconciler{
-			Client:          mgr.GetClient(),
-			Scheme:          mgr.GetScheme(),
-			DiscoveryClient: discoveryClient,
-			DynamicClient:   dynamicClient,
-			Recorder:        mgr.GetEventRecorderFor("BindDefinitionReconciler"),
-		}).SetupWithManager(mgr); err != nil {
-			return fmt.Errorf("unable to create controller BindDefinition: %w", err)
+		if enableBindDefinitionReconciler {
+			if err = (&authorizationcontroller.BindDefinitionReconciler{
+				Client:          mgr.GetClient(),
+				Scheme:          mgr.GetScheme(),
+				DiscoveryClient: discoveryClient,
+				DynamicClient:   dynamicClient,
+				Recorder:        mgr.GetEventRecorderFor("BindDefinitionReconciler"),
+			}).SetupWithManager(mgr); err != nil {
+				return fmt.Errorf("unable to create controller BindDefinition: %w", err)
+			}
+		} else {
+			setupLog.Info("BindDefinition reconciler is disabled")
 		}
 
 		// Setup an IDP client for AuthProviderReconciler
 		// Needs refactoring -> transition to interface and define method group which
 		// must be satisfied by all IDP clients to make this as generic as possible
-
-		idpUrl := os.Getenv("IDP_URL")
-		if idpUrl == "" {
-			return fmt.Errorf("IDP_URL environment variable must be set")
-		}
-
-		apiToken := os.Getenv("API_TOKEN")
-		if apiToken == "" {
-			return fmt.Errorf("API_TOKEN environment variable must be set")
-		}
-
-		apiTokenRefresh, _ := strconv.ParseBool(os.Getenv("API_TOKEN_REFRESH"))
-		var apiTokenRefreshUrl string
-		if apiTokenRefresh {
-			apiTokenRefreshUrl = os.Getenv("API_TOKEN_REFRESH_URL")
-			if apiTokenRefreshUrl == "" {
-				return fmt.Errorf("API_TOKEN_REFRESH is set to 'true', therefore API_TOKEN_REFRESH_URL is required")
+		if enableAuthProviderReconciler {
+			idpUrl := os.Getenv("IDP_URL")
+			if idpUrl == "" {
+				return fmt.Errorf("IDP_URL environment variable must be set")
 			}
+
+			apiToken := os.Getenv("API_TOKEN")
+			if apiToken == "" {
+				return fmt.Errorf("API_TOKEN environment variable must be set")
+			}
+
+			idpClient, err := idpclient.NewIDPClient(idpclient.Config{
+				IDPURL:   idpUrl,
+				APIToken: apiToken,
+			}, idpclient.Options{
+				TLSClientConfig: &tls.Config{
+					InsecureSkipVerify: true,
+				},
+			})
+			if err != nil {
+				return fmt.Errorf("unable to initialize IDP client: %w", err)
+			}
+
+			if err = (&authenticationcontroller.AuthProviderReconciler{
+				Client:          mgr.GetClient(),
+				Scheme:          mgr.GetScheme(),
+				IDPClient:       idpClient,
+				Recorder:        mgr.GetEventRecorderFor("AuthProviderReconciler"),
+				RequeueInterval: authProviderRequeueInterval,
+			}).SetupWithManager(mgr); err != nil {
+				return fmt.Errorf("unable to create controller AuthProvider: %w", err)
+			}
+		} else {
+			setupLog.Info("AuthProvider reconciler is disabled")
 		}
 
-		idpClient, err := idpclient.NewIDPClient(idpclient.Config{
-			IDPURL:             idpUrl,
-			APIToken:           apiToken,
-			APITokenRefresh:    apiTokenRefresh,
-			APITokenRefreshURL: apiTokenRefreshUrl,
-		}, idpclient.Options{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
-			},
-		})
-		if err != nil {
-			return fmt.Errorf("unable to initialize IDP client: %w", err)
-		}
-
-		if err = (&authenticationcontroller.AuthProviderReconciler{
-			Client:    mgr.GetClient(),
-			Scheme:    mgr.GetScheme(),
-			IDPClient: idpClient,
-			Recorder:  mgr.GetEventRecorderFor("AuthProviderReconciler"),
-		}).SetupWithManager(mgr); err != nil {
-			return fmt.Errorf("unable to create controller AuthProvider: %w", err)
-		}
 		if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 			return fmt.Errorf("unable to set up health check. err: %s", err)
 		}
@@ -139,4 +147,8 @@ func init() {
 	rootCmd.AddCommand(controllerCmd)
 
 	controllerCmd.Flags().BoolVar(&enableLeaderElection, "leader-elect", false, "Enable leader election for controller manager. "+"Enabling this will ensure there is only one active controller manager.")
+	controllerCmd.Flags().BoolVar(&enableAuthProviderReconciler, "enable-authprovider-reconciler", true, "Enable or disable AuthProvider reconciler. Enabled by default.")
+	controllerCmd.Flags().BoolVar(&enableBindDefinitionReconciler, "enable-binddefinition-reconciler", true, "Enable or disable BindDefinition reconciler. Enabled by default.")
+	controllerCmd.Flags().BoolVar(&enableRoleDefinitionReconciler, "enable-roledefinition-reconciler", true, "Enable or disable RoleDefinition reconciler. Enabled by default.")
+	controllerCmd.Flags().DurationVar(&authProviderRequeueInterval, "auth-provider-requeue-interval", time.Minute*5, "Interval in which the AuthProvider reconciler requeues AuthProviders for reconciliation. Default is 5 minutes.")
 }

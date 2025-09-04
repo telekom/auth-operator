@@ -10,9 +10,3 @@ type AuthNConditionReason = conditions.ConditionReason
 
 // AuthNConditionMessage represents authentication-related condition messages.
 type AuthNConditionMessage = conditions.ConditionMessage
-
-const (
-	PlaywrightReady   AuthNConditionType    = "PlaywrightReady"
-	PlaywrightReason  AuthNConditionReason  = "WrittenTo"
-	PlaywrightMessage AuthNConditionMessage = "Written to all files"
-)

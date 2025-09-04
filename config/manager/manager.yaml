@@ -76,16 +76,6 @@ spec:
               secretKeyRef:
                 name: authprovider-secrets
                 key: API_TOKEN
-          - name: API_TOKEN_REFRESH
-            valueFrom:
-              secretKeyRef:
-                name: authprovider-secrets
-                key: API_TOKEN_REFRESH
-          - name: API_TOKEN_REFRESH_URL
-            valueFrom:
-              secretKeyRef:
-                name: authprovider-secrets
-                key: API_TOKEN_REFRESH_URL
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:

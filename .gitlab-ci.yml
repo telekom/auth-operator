@@ -8,15 +8,13 @@ include:
 
 variables:
   APP_NAME: "auth-operator"
-  GO_VERSION: "1.23"
+  GO_VERSION: "1.24"
   GO_MAIN: "main.go"
   GO_BIN_NAME: "${APP_NAME}"
   HELM_CHART_SOURCE: chart/auth-operator
   GIT_DEPTH: 1
   HELM_TEMPLATE_ARGS: >-
     --set authproviderSecrets.apiToken=forCI
-    --set authproviderSecrets.apiTokenRefresh=forCI
-    --set authproviderSecrets.apiTokenRefreshUrl=forCI
     --set authproviderSecrets.idpUrl=forCI
 
 # use specific go flags
@@ -31,7 +29,7 @@ go-build:
 
 assert-controller-gen:
   variables:
-    K8S_OP_CONTROLLER_GEN_VERSION: "v0.17.3"
+    K8S_OP_CONTROLLER_GEN_VERSION: "v0.19.0"
 
 assert-helmify:
   script:
