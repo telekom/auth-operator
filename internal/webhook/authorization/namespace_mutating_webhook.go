@@ -71,7 +71,7 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 		case "system:serviceaccount:capi-operator-system:capi-operator-manager":
 			nsMutatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
 			return admission.Allowed("")
-		case "system:serviceaccount:t-caas-storage:trident-operator":
+		case "system:serviceaccount:trident-system:trident-operator":
 			if req.Operation == admissionv1.Update && req.Name == "trident-system" {
 				nsMutatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
 				return admission.Allowed("")
