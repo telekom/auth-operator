@@ -159,7 +159,7 @@ func (c *IDPClient) RequestResponse(method string, path string, requestData inte
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
-		c.Log.Info("Got bad HTTP status code for URL", "HTTP_STATUS_CODE", response.StatusCode, "URL", response.Request.URL)
+		return nil, fmt.Errorf("IDP client request non OK status code \"%d\" for URL \"%s\": \"%s\"", response.StatusCode, response.Request.URL, response.Status)
 	}
 
 	body, err := io.ReadAll(response.Body)

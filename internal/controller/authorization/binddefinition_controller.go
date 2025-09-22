@@ -203,24 +203,38 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// Check if controller should reconcile BindDefinition delete
-	resultDelete, err := r.reconcileDelete(ctx, bindDefinition)
-	if err != nil {
-		log.Error(err, "Error occurred in reconcileDelete function")
-		return resultDelete, err
-	}
+	if !bindDefinition.ObjectMeta.DeletionTimestamp.IsZero() {
+		resultDelete, err := r.reconcileDelete(ctx, bindDefinition)
+		if err != nil {
+			log.Error(err, "Error occurred in reconcileDelete function")
+			return resultDelete, err
+		}
+	} else {
+		if !controllerutil.ContainsFinalizer(bindDefinition, authnv1alpha1.BindDefinitionFinalizer) {
+			controllerutil.AddFinalizer(bindDefinition, authnv1alpha1.BindDefinitionFinalizer)
+			if err := r.Update(ctx, bindDefinition); err != nil {
+				return ctrl.Result{}, err
+			}
+			r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Finalizer", "Adding finalizer to BindDefinition %s", bindDefinition.Name)
+		}
+		conditions.MarkTrue(bindDefinition, authnv1alpha1.FinalizerCondition, bindDefinition.Generation, authnv1alpha1.FinalizerReason, authnv1alpha1.FinalizerMessage)
+		if err := r.Status().Update(ctx, bindDefinition); err != nil {
+			return ctrl.Result{}, err
+		}
 
-	// Check if controller should reconcile BindDefinition create
-	resultCreate, err := r.reconcileCreate(ctx, bindDefinition)
-	if err != nil {
-		log.Error(err, "Error occurred in reconcileCreate function")
-		return resultCreate, err
-	}
+		// Check if controller should reconcile BindDefinition create
+		resultCreate, err := r.reconcileCreate(ctx, bindDefinition)
+		if err != nil {
+			log.Error(err, "Error occurred in reconcileCreate function")
+			return resultCreate, err
+		}
 
-	// Check if controller should reconcile BindDefinition update
-	resultUpdate, err := r.reconcileUpdate(ctx, bindDefinition)
-	if err != nil {
-		log.Error(err, "Error occurred in reconcileUpdate function")
-		return resultUpdate, err
+		// Check if controller should reconcile BindDefinition update
+		resultUpdate, err := r.reconcileUpdate(ctx, bindDefinition)
+		if err != nil {
+			log.Error(err, "Error occurred in reconcileUpdate function")
+			return resultUpdate, err
+		}
 	}
 
 	return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
@@ -283,7 +297,7 @@ func (r *BindDefinitionReconciler) reconcileDelete(ctx context.Context, bindDefi
 						if controllerutil.ContainsFinalizer(&roleBinding, authnv1alpha1.RoleBindingFinalizer) {
 							controllerutil.RemoveFinalizer(&roleBinding, authnv1alpha1.RoleBindingFinalizer)
 							if err := r.Update(ctx, &roleBinding); err != nil {
-								log.Error(err, "Failed to remove finalizer from RoleBinding", "RoleBinding", roleBinding.Name, "Namespace", ns.Name)
+								log.Error(err, "Failed to remove finalizer from RoleBinding (terminating namespace cleanup)", "RoleBinding", roleBinding.Name, "Namespace", ns.Name)
 								return ctrl.Result{}, err
 							}
 							r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "FinalizerRemoved", "Removed finalizer from RoleBinding %s in namespace %s", roleBinding.Name, ns.Name)
@@ -294,192 +308,185 @@ func (r *BindDefinitionReconciler) reconcileDelete(ctx context.Context, bindDefi
 		}
 	}
 
-	// Check if BindDefinition is marked to be deleted
-	if bindDefinition.ObjectMeta.DeletionTimestamp.IsZero() {
-		if !controllerutil.ContainsFinalizer(bindDefinition, authnv1alpha1.BindDefinitionFinalizer) {
-			controllerutil.AddFinalizer(bindDefinition, authnv1alpha1.BindDefinitionFinalizer)
-			if err := r.Update(ctx, bindDefinition); err != nil {
-				return ctrl.Result{}, err
-			}
-			r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Finalizer", "Adding finalizer to BindDefinition %s", bindDefinition.Name)
-		}
-		conditions.MarkTrue(bindDefinition, authnv1alpha1.FinalizerCondition, bindDefinition.Generation, authnv1alpha1.FinalizerReason, authnv1alpha1.FinalizerMessage)
-		if err := r.Status().Update(ctx, bindDefinition); err != nil {
-			return ctrl.Result{}, err
-		}
-	} else {
-		// RoleDefinition is marked to be deleted
-		log.Info("Deleting generated ServiceAccounts, ClusterRoleBindings and RoleBindings for the BindDefinition, as it is marked for deletion")
-		conditions.MarkTrue(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
-		err := r.Status().Update(ctx, bindDefinition)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-		// Delete ServiceAccounts specified in Subjects if we have an OwnerRef for them
-		for _, subject := range bindDefinition.Spec.Subjects {
-			if subject.Kind == authnv1alpha1.BindSubjectServiceAccount {
-				sa := &corev1.ServiceAccount{}
-				err := r.Client.Get(ctx, types.NamespacedName{Name: subject.Name, Namespace: subject.Namespace}, sa)
-				if err != nil {
-					if apierrors.IsNotFound(err) {
-						continue
-					} else {
-						log.Error(err, "Unable to fetch ServiceAccount from Kubernetes API")
-						conditions.MarkFalse(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
-						err = r.Status().Update(ctx, bindDefinition)
-						if err != nil {
-							return ctrl.Result{}, err
-						}
-						return ctrl.Result{}, err
-					}
-				}
-
-				isReferenced, err := r.isSAReferencedByOtherBindDefs(ctx, bindDefinition.Name, sa.Name, sa.Namespace)
-				if err != nil {
+	// RoleDefinition is marked to be deleted
+	log.Info("Deleting generated ServiceAccounts, ClusterRoleBindings and RoleBindings for the BindDefinition, as it is marked for deletion")
+	conditions.MarkTrue(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
+	err := r.Status().Update(ctx, bindDefinition)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	// Delete ServiceAccounts specified in Subjects if we have an OwnerRef for them
+	for _, subject := range bindDefinition.Spec.Subjects {
+		if subject.Kind == authnv1alpha1.BindSubjectServiceAccount {
+			sa := &corev1.ServiceAccount{}
+			err := r.Client.Get(ctx, types.NamespacedName{Name: subject.Name, Namespace: subject.Namespace}, sa)
+			if err != nil {
+				if apierrors.IsNotFound(err) {
+					continue
+				} else {
+					log.Error(err, "Unable to fetch ServiceAccount from Kubernetes API")
 					return ctrl.Result{}, err
 				}
-
-				if !isReferenced {
-					if controllerutil.HasControllerReference(sa) {
-						r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Deletion", "Deleting target resource %s/%s in namespace %s", subject.Kind, subject.Name, subject.Namespace)
-						err = r.Client.Delete(ctx, sa)
-						if err != nil {
-							conditions.MarkFalse(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
-							err = r.Status().Update(ctx, bindDefinition)
-							if err != nil {
-								return ctrl.Result{}, err
-							}
-							return ctrl.Result{}, err
-						}
-					} else {
-						r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Deletion", "Not deleting target resource %s/%s in namespace %s because we do not have OwnerRef set for it", subject.Kind, subject.Name, subject.Namespace)
-					}
-				}
 			}
 
-			// Delete generated ClusterRoleBindings
-			for _, clusterRoleRef := range bindDefinition.Spec.ClusterRoleBindings.ClusterRoleRefs {
-				clusterRoleBinding := &rbacv1.ClusterRoleBinding{}
-				clusterRoleBindingName := bindDefinition.Spec.TargetName + clusterRoleRef + "-binding"
-				err := r.Client.Get(ctx, types.NamespacedName{Name: clusterRoleBindingName}, clusterRoleBinding)
-				if err != nil {
-					if apierrors.IsNotFound(err) {
-						continue
-					} else {
-						log.Error(err, "Unable to fetch ClusterRoleBinding from Kubernetes API")
-						conditions.MarkFalse(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
-						err = r.Status().Update(ctx, bindDefinition)
-						if err != nil {
-							return ctrl.Result{}, err
-						}
-						return ctrl.Result{}, err
-					}
-				}
-				if controllerutil.HasControllerReference(clusterRoleBinding) {
-					r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Deletion", "Deleting target resource %s %s", clusterRoleBinding.Kind, clusterRoleBinding.Name)
-					err = r.Client.Delete(ctx, clusterRoleBinding)
+			isReferenced, err := r.isSAReferencedByOtherBindDefs(ctx, bindDefinition.Name, sa.Name, sa.Namespace)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+
+			if !isReferenced {
+				if controllerutil.HasControllerReference(sa) {
+					r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Deletion", "Deleting target resource %s/%s in namespace %s", subject.Kind, subject.Name, subject.Namespace)
+					log.Info("Cleanup ServiceAccount", "name", subject.Name, "namespace", subject.Namespace)
+					// Generated service account doesn't have auth-operator finalizer
+					err = r.Client.Delete(ctx, sa)
 					if err != nil {
-						conditions.MarkFalse(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
-						err = r.Status().Update(ctx, bindDefinition)
-						if err != nil {
-							return ctrl.Result{}, err
+						if apierrors.IsNotFound(err) {
+							continue
 						}
 						return ctrl.Result{}, err
 					}
 				} else {
-					r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Deletion", "Not deleting target resource %s/%s because we do not have OwnerRef set for it", clusterRoleBinding.Kind, clusterRoleBinding.Name)
-				}
-			}
-
-			// For each namespace
-			for _, ns := range namespaceSet {
-				for _, RoleBinding := range bindDefinition.Spec.RoleBindings {
-
-					// Delete RoleBindings for ClusterRoleRefs
-					for _, clusterRoleRef := range RoleBinding.ClusterRoleRefs {
-						roleBinding := &rbacv1.RoleBinding{}
-						roleBindingName := bindDefinition.Spec.TargetName + clusterRoleRef + "-binding"
-						err := r.Client.Get(ctx, types.NamespacedName{Name: roleBindingName, Namespace: ns.Name}, roleBinding)
-						if err != nil {
-							if apierrors.IsNotFound(err) {
-								continue
-							} else {
-								log.Error(err, "Unable to fetch RoleBinding from Kubernetes API")
-								conditions.MarkFalse(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
-								err = r.Status().Update(ctx, bindDefinition)
-								if err != nil {
-									return ctrl.Result{}, err
-								}
-								return ctrl.Result{}, err
-							}
-						}
-						if controllerutil.HasControllerReference(roleBinding) {
-							r.Recorder.Eventf(bindDefinition, corev1.EventTypeWarning, "Deletion", "Deleting target resource %s/%s in namespace %s", roleBinding.Kind, roleBinding.Name, roleBinding.Namespace)
-							err = r.Client.Delete(ctx, roleBinding)
-							if err != nil {
-								conditions.MarkFalse(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
-								err = r.Status().Update(ctx, bindDefinition)
-								if err != nil {
-									return ctrl.Result{}, err
-								}
-								return ctrl.Result{}, err
-							}
-						} else {
-							r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Deletion", "Not deleting target resource %s/%s in namespace %s because we do not have OwnerRef set for it", roleBinding.Kind, roleBinding.Name, roleBinding.Namespace)
-						}
-					}
-				}
-				for _, RoleBinding := range bindDefinition.Spec.RoleBindings {
-
-					// Delete RoleBindings for RoleRefs
-					for _, roleRef := range RoleBinding.RoleRefs {
-						roleBinding := &rbacv1.RoleBinding{}
-						roleBindingName := bindDefinition.Spec.TargetName + roleRef + "-binding"
-						err := r.Client.Get(ctx, types.NamespacedName{Name: roleBindingName, Namespace: ns.Name}, roleBinding)
-						if err != nil {
-							if apierrors.IsNotFound(err) {
-								continue
-							} else {
-								log.Error(err, "Unable to fetch RoleBinding from Kubernetes API")
-								conditions.MarkFalse(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
-								err = r.Status().Update(ctx, bindDefinition)
-								if err != nil {
-									return ctrl.Result{}, err
-								}
-								return ctrl.Result{}, err
-							}
-						}
-						if controllerutil.HasControllerReference(roleBinding) {
-							r.Recorder.Eventf(bindDefinition, corev1.EventTypeWarning, "Deletion", "Deleting target resource %s/%s in namespace %s", roleBinding.Kind, roleBinding.Name, roleBinding.Namespace)
-							err = r.Client.Delete(ctx, roleBinding)
-							if err != nil {
-								conditions.MarkFalse(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
-								err = r.Status().Update(ctx, bindDefinition)
-								if err != nil {
-									return ctrl.Result{}, err
-								}
-								return ctrl.Result{}, err
-							}
-						} else {
-							r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Deletion", "Not deleting target resource %s/%s in namespace %s because we do not have OwnerRef set for it", roleBinding.Kind, roleBinding.Name, roleBinding.Namespace)
-						}
-					}
+					r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Deletion", "Not deleting target resource %s/%s in namespace %s because we do not have OwnerRef set for it", subject.Kind, subject.Name, subject.Namespace)
 				}
 			}
 		}
-		conditions.MarkTrue(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
-		conditions.MarkFalse(bindDefinition, authnv1alpha1.FinalizerCondition, bindDefinition.Generation, authnv1alpha1.FinalizerReason, authnv1alpha1.FinalizerMessage)
-		err = r.Status().Update(ctx, bindDefinition)
-		if err != nil {
-			return ctrl.Result{}, err
+
+		// Delete generated ClusterRoleBindings
+		for _, clusterRoleRef := range bindDefinition.Spec.ClusterRoleBindings.ClusterRoleRefs {
+			clusterRoleBinding := &rbacv1.ClusterRoleBinding{}
+			clusterRoleBindingName := fmt.Sprintf("%s-%s-%s", bindDefinition.Spec.TargetName, clusterRoleRef, "binding")
+			err := r.Client.Get(ctx, types.NamespacedName{Name: clusterRoleBindingName}, clusterRoleBinding)
+			if err != nil {
+				if apierrors.IsNotFound(err) {
+					continue
+				} else {
+					log.Error(err, "Unable to fetch ClusterRoleBinding from Kubernetes API")
+					conditions.MarkFalse(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
+					errStatus := r.Status().Update(ctx, bindDefinition)
+					if errStatus != nil {
+						return ctrl.Result{}, errStatus
+					}
+					return ctrl.Result{}, err
+				}
+			}
+			if controllerutil.HasControllerReference(clusterRoleBinding) {
+				r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Deletion", "Deleting target resource %s %s", clusterRoleBinding.Kind, clusterRoleBinding.Name)
+				log.Info("Cleanup ClusterRoleBinding", "name", clusterRoleBinding.Name, "BindDefinition", bindDefinition.Name)
+				// Generated ClusterRoleBinding doesn't have finalizer, delete is enough
+				err = r.Client.Delete(ctx, clusterRoleBinding)
+				if err != nil {
+					if apierrors.IsNotFound(err) {
+						continue
+					}
+					return ctrl.Result{}, err
+				}
+			} else {
+				r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Deletion", "Not deleting target resource %s/%s because we do not have OwnerRef set for it", clusterRoleBinding.Kind, clusterRoleBinding.Name)
+			}
 		}
 
-		controllerutil.RemoveFinalizer(bindDefinition, authnv1alpha1.BindDefinitionFinalizer)
-		if err := r.Update(ctx, bindDefinition); err != nil {
-			return ctrl.Result{}, err
+		// For each namespace cleanup rolebindings referenced in the BindDefinition
+		for _, ns := range namespaceSet {
+			for _, RoleBinding := range bindDefinition.Spec.RoleBindings {
+				// Delete RoleBindings for ClusterRoleRefs
+				for _, clusterRoleRef := range RoleBinding.ClusterRoleRefs {
+					roleBinding := &rbacv1.RoleBinding{}
+					roleBindingName := fmt.Sprintf("%s-%s-%s", bindDefinition.Spec.TargetName, clusterRoleRef, "binding")
+					err := r.Client.Get(ctx, types.NamespacedName{Name: roleBindingName, Namespace: ns.Name}, roleBinding)
+					if err != nil {
+						if apierrors.IsNotFound(err) {
+							continue
+						} else {
+							log.Error(err, "Unable to fetch RoleBinding from Kubernetes API")
+							conditions.MarkFalse(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
+							errStatus := r.Status().Update(ctx, bindDefinition)
+							if errStatus != nil {
+								return ctrl.Result{}, errStatus
+							}
+							return ctrl.Result{}, err
+						}
+					}
+					if controllerutil.HasControllerReference(roleBinding) {
+						r.Recorder.Eventf(bindDefinition, corev1.EventTypeWarning, "Deletion", "Deleting target resource %s/%s in namespace %s", roleBinding.Kind, roleBinding.Name, roleBinding.Namespace)
+						log.Info("Cleanup RoleBinding based on ClusterRoleRefs", "name", roleBinding.Name, "namespace", roleBinding.Namespace, "BindDefinition", bindDefinition.Name)
+
+						controllerutil.RemoveFinalizer(roleBinding, authnv1alpha1.RoleBindingFinalizer)
+						if err = r.Update(ctx, roleBinding); err != nil {
+							r.Recorder.Eventf(bindDefinition, corev1.EventTypeWarning, "FinalizerDeletion", "Failed to remove finalizer from resource %s/%s in namespace %s", roleBinding.Kind, roleBinding.Name, roleBinding.Namespace)
+							log.Error(err, "failed to remove finalizer from RoleBinding (ClusterRoleRefs cleanup)", "RoleBinding", roleBinding.Name, "namespace", ns.Name)
+							return ctrl.Result{}, err
+						}
+
+						err = r.Client.Delete(ctx, roleBinding)
+						if err != nil {
+							if apierrors.IsNotFound(err) {
+								continue
+							}
+							return ctrl.Result{}, err
+						}
+					} else {
+						r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Deletion", "Not deleting target resource %s/%s in namespace %s because we do not have OwnerRef set for it", roleBinding.Kind, roleBinding.Name, roleBinding.Namespace)
+					}
+				}
+			}
+
+			for _, RoleBinding := range bindDefinition.Spec.RoleBindings {
+				// Delete RoleBindings for RoleRefs
+				for _, roleRef := range RoleBinding.RoleRefs {
+					roleBinding := &rbacv1.RoleBinding{}
+					roleBindingName := fmt.Sprintf("%s-%s-%s", bindDefinition.Spec.TargetName, roleRef, "binding")
+					err := r.Client.Get(ctx, types.NamespacedName{Name: roleBindingName, Namespace: ns.Name}, roleBinding)
+					if err != nil {
+						if apierrors.IsNotFound(err) {
+							continue
+						} else {
+							log.Error(err, "Unable to fetch RoleBinding from Kubernetes API")
+							conditions.MarkFalse(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
+							errStatus := r.Status().Update(ctx, bindDefinition)
+							if errStatus != nil {
+								return ctrl.Result{}, errStatus
+							}
+							return ctrl.Result{}, err
+						}
+					}
+					if controllerutil.HasControllerReference(roleBinding) {
+						r.Recorder.Eventf(bindDefinition, corev1.EventTypeWarning, "Deletion", "Deleting target resource %s/%s in namespace %s", roleBinding.Kind, roleBinding.Name, roleBinding.Namespace)
+						log.Info("Cleanup RoleBinding based on RoleRefs", "name", roleBinding.Name, "namespace", roleBinding.Namespace, "BindDefinition", bindDefinition.Name)
+
+						controllerutil.RemoveFinalizer(roleBinding, authnv1alpha1.RoleBindingFinalizer)
+						if err = r.Update(ctx, roleBinding); err != nil {
+							r.Recorder.Eventf(bindDefinition, corev1.EventTypeWarning, "FinalizerDeletion", "Failed to remove finalizer from resource %s/%s in namespace %s", roleBinding.Kind, roleBinding.Name, roleBinding.Namespace)
+							log.Error(err, "failed to remove finalizer from RoleBinding (RoleRefs cleanup)", "RoleBinding", roleBinding.Name, "namespace", ns.Name)
+							return ctrl.Result{}, err
+						}
+
+						err = r.Client.Delete(ctx, roleBinding)
+						if err != nil {
+							if apierrors.IsNotFound(err) {
+								continue
+							}
+							return ctrl.Result{}, err
+						}
+					} else {
+						r.Recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Deletion", "Not deleting target resource %s/%s in namespace %s because we do not have OwnerRef set for it", roleBinding.Kind, roleBinding.Name, roleBinding.Namespace)
+					}
+				}
+			}
 		}
-		return ctrl.Result{}, nil
 	}
+	conditions.MarkTrue(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
+	conditions.MarkFalse(bindDefinition, authnv1alpha1.FinalizerCondition, bindDefinition.Generation, authnv1alpha1.FinalizerReason, authnv1alpha1.FinalizerMessage)
+	err = r.Status().Update(ctx, bindDefinition)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	controllerutil.RemoveFinalizer(bindDefinition, authnv1alpha1.BindDefinitionFinalizer)
+	if err := r.Update(ctx, bindDefinition); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
 }
 
@@ -597,7 +604,7 @@ func (r *BindDefinitionReconciler) reconcileCreate(ctx context.Context, bindDefi
 	// Create ClusterRoleBinding resources
 	for _, clusterRoleRef := range bindDefinition.Spec.ClusterRoleBindings.ClusterRoleRefs {
 		clusterRoleBinding := &rbacv1.ClusterRoleBinding{}
-		clusterRoleBindingName := bindDefinition.Spec.TargetName + "-" + clusterRoleRef + "-binding"
+		clusterRoleBindingName := fmt.Sprintf("%s-%s-%s", bindDefinition.Spec.TargetName, clusterRoleRef, "binding")
 		err := r.Client.Get(ctx, types.NamespacedName{Name: clusterRoleBindingName}, clusterRoleBinding)
 		if err != nil {
 			if apierrors.IsNotFound(err) {
@@ -644,7 +651,7 @@ func (r *BindDefinitionReconciler) reconcileCreate(ctx context.Context, bindDefi
 		for _, ns := range activeNamespaces {
 			for _, clusterRoleRef := range RoleBinding.ClusterRoleRefs {
 				roleBinding := &rbacv1.RoleBinding{}
-				roleBindingName := bindDefinition.Spec.TargetName + "-" + clusterRoleRef + "-binding"
+				roleBindingName := fmt.Sprintf("%s-%s-%s", bindDefinition.Spec.TargetName, clusterRoleRef, "binding")
 				err := r.Client.Get(ctx, types.NamespacedName{Name: roleBindingName, Namespace: ns.Name}, roleBinding)
 				if err != nil {
 					if apierrors.IsNotFound(err) {
@@ -690,7 +697,7 @@ func (r *BindDefinitionReconciler) reconcileCreate(ctx context.Context, bindDefi
 			}
 			for _, roleRef := range RoleBinding.RoleRefs {
 				roleBinding := &rbacv1.RoleBinding{}
-				roleBindingName := bindDefinition.Spec.TargetName + "-" + roleRef + "-binding"
+				roleBindingName := fmt.Sprintf("%s-%s-%s", bindDefinition.Spec.TargetName, roleRef, "binding")
 				err := r.Client.Get(ctx, types.NamespacedName{Name: roleBindingName, Namespace: ns.Name}, roleBinding)
 				if err != nil {
 					if apierrors.IsNotFound(err) {
@@ -851,7 +858,7 @@ func (r *BindDefinitionReconciler) reconcileUpdate(ctx context.Context, bindDefi
 
 	// Update ClusterRoleBinding resources
 	for _, clusterRoleRef := range bindDefinition.Spec.ClusterRoleBindings.ClusterRoleRefs {
-		clusterRoleBindingName := bindDefinition.Spec.TargetName + "-" + clusterRoleRef + "-binding"
+		clusterRoleBindingName := fmt.Sprintf("%s-%s-%s", bindDefinition.Spec.TargetName, clusterRoleRef, "binding")
 		existingClusterRoleBinding := &rbacv1.ClusterRoleBinding{}
 		// Construct the ClusterRoleBinding we expect
 		expectedClusterRoleBinding := &rbacv1.ClusterRoleBinding{
@@ -902,7 +909,7 @@ func (r *BindDefinitionReconciler) reconcileUpdate(ctx context.Context, bindDefi
 		// For each namespace
 		for _, ns := range activeNamespaces {
 			for _, clusterRoleRef := range RoleBinding.ClusterRoleRefs {
-				roleBindingName := bindDefinition.Spec.TargetName + "-" + clusterRoleRef + "-binding"
+				roleBindingName := fmt.Sprintf("%s-%s-%s", bindDefinition.Spec.TargetName, clusterRoleRef, "binding")
 				existingRoleBinding := &rbacv1.RoleBinding{}
 				// Construct the RoleBinding we expect
 				expectedRoleBinding := &rbacv1.RoleBinding{
@@ -951,7 +958,7 @@ func (r *BindDefinitionReconciler) reconcileUpdate(ctx context.Context, bindDefi
 			}
 
 			for _, roleRef := range RoleBinding.RoleRefs {
-				roleBindingName := bindDefinition.Spec.TargetName + "-" + roleRef + "-binding"
+				roleBindingName := fmt.Sprintf("%s-%s-%s", bindDefinition.Spec.TargetName, roleRef, "binding")
 				existingRoleBinding := &rbacv1.RoleBinding{}
 				// Construct the RoleBinding we expect
 				expectedRoleBinding := &rbacv1.RoleBinding{

@@ -110,6 +110,7 @@ func (r *AuthProviderReconciler) reconcile(ctx context.Context, authProvider *au
 		}
 	}
 
+	log.Log.Info("Reconciliation finished")
 	return ctrl.Result{RequeueAfter: r.RequeueInterval}, kerrors.NewAggregate(aggregatedErrors)
 }
 
