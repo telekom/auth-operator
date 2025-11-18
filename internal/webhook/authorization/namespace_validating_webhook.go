@@ -34,35 +34,38 @@ func (v *NamespaceValidator) InjectDecoder(d admission.Decoder) error {
 func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) admission.Response {
 	// Only handle namespace CREATE, UPDATE, DELETE operations
 	if req.Kind.Kind != "Namespace" {
+		nsValidatorLog.V(4).Info("DEBUG: Webhook request for non-Namespace resource - ignoring", "kind", req.Kind.Kind)
 		return admission.Allowed("")
 	}
 
+	nsValidatorLog.V(2).Info("DEBUG: Namespace validator webhook triggered", "namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username)
+
 	// Allow the default kubernetes-admin to CRUD namespaces (necessary for CAPI/Flux)
 	if req.UserInfo.Username == "kubernetes-admin" {
-		nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+		nsValidatorLog.V(3).Info("DEBUG: Allowing kubernetes-admin request", "namespace", req.Name, "operation", req.Operation)
 		return admission.Allowed("")
 	}
 	// If tdgMigration is enabled, allow the helm and kustomize controller to update namespaces
 	if v.TDGMigration {
 		switch req.UserInfo.Username {
 		case "system:serviceaccount:flux-system:helm-controller":
-			nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+			nsValidatorLog.V(3).Info("DEBUG: Allowing helm-controller", "namespace", req.Name)
 			return admission.Allowed("")
 		case "system:serviceaccount:flux-system:kustomize-controller":
-			nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+			nsValidatorLog.V(3).Info("DEBUG: Allowing kustomize-controller", "namespace", req.Name)
 			return admission.Allowed("")
 		case "system:serviceaccount:schiff-tenant:m2m-sa":
-			nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+			nsValidatorLog.V(3).Info("DEBUG: Allowing schiff-tenant m2m-sa", "namespace", req.Name)
 			return admission.Allowed("")
 		case "system:serviceaccount:schiff-system:m2m-sa":
-			nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+			nsValidatorLog.V(3).Info("DEBUG: Allowing schiff-system m2m-sa", "namespace", req.Name)
 			return admission.Allowed("")
 		case "system:serviceaccount:capi-operator-system:capi-operator-manager":
-			nsMutatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+			nsValidatorLog.V(3).Info("DEBUG: Allowing capi-operator-manager", "namespace", req.Name)
 			return admission.Allowed("")
 		case "system:serviceaccount:trident-system:trident-operator":
 			if req.Operation == admissionv1.Update && req.Name == "trident-system" {
-				nsMutatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+				nsValidatorLog.V(3).Info("DEBUG: Allowing trident-operator for trident-system namespace", "namespace", req.Name)
 				return admission.Allowed("")
 			}
 		}
@@ -70,11 +73,11 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 	// ToDo: Trident patches its own namespace and that cant be disabled.
 	// https://github.com/NetApp/trident/blob/6b4cdf074578ade04ca0f1a5c59bb72c019391da/operator/controllers/orchestrator/installer/installer.go#L938
 	if req.UserInfo.Username == "system:serviceaccount:t-caas-storage:trident-operator" && req.Operation == admissionv1.Update && req.Name == "t-caas-storage" {
-		nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+		nsValidatorLog.V(3).Info("DEBUG: Allowing trident-operator for t-caas-storage namespace", "namespace", req.Name)
 		return admission.Allowed("")
 	}
 	if req.UserInfo.Username == "system:serviceaccount:capi-operator-system:capi-operator-manager" && req.Operation == admissionv1.Update {
-		nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+		nsValidatorLog.V(3).Info("DEBUG: Allowing capi-operator-manager for update", "namespace", req.Name)
 		return admission.Allowed("")
 	}
 
@@ -95,14 +98,18 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 		// For update and delete operations, decode the old object
 		err = v.Decoder.DecodeRaw(req.OldObject, &ns)
 	default:
+		nsValidatorLog.V(3).Info("DEBUG: Unknown operation type - allowing", "namespace", req.Name, "operation", req.Operation)
 		return admission.Allowed("")
 	}
 
 	if err != nil || oldErr != nil {
+		nsValidatorLog.Error(err, "ERROR: Failed to decode namespace object", "namespace", req.Name, "operation", req.Operation)
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 
 	if req.Operation == admissionv1.Update {
+		nsValidatorLog.V(2).Info("DEBUG: Validating namespace update", "namespace", req.Name)
+
 		// Ensure Labels maps are not nil to prevent nil pointer dereference
 		if ns.Labels == nil {
 			ns.Labels = map[string]string{}
@@ -127,9 +134,11 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 			oldValue, oldExists := oldNs.Labels[key]
 			newValue, newExists := ns.Labels[key]
 			if oldExists != newExists || oldValue != newValue {
+				nsValidatorLog.V(2).Info("DEBUG: Label modification denied", "namespace", req.Name, "label", key, "oldValue", oldValue, "newValue", newValue)
 				return admission.Denied(fmt.Sprintf("Modification of label '%s' is not allowed", key))
 			}
 		}
+		nsValidatorLog.V(3).Info("DEBUG: Namespace labels validated - no changes detected", "namespace", req.Name)
 	}
 
 	// Extract user information
@@ -143,35 +152,46 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 		isServiceAccount = true
 		saNamespace = usernameParts[2]
 		saName = usernameParts[3]
+		nsValidatorLog.V(3).Info("DEBUG: User is a ServiceAccount", "namespace", req.Name, "saNamespace", saNamespace, "saName", saName)
+	} else {
+		nsValidatorLog.V(3).Info("DEBUG: User is not a ServiceAccount", "namespace", req.Name, "username", req.UserInfo.Username, "groupCount", len(userGroups))
 	}
 
 	// Fetch all BindDefinition CRDs
 	bindDefinitions := &authzv1alpha1.BindDefinitionList{}
 	if err := v.Client.List(ctx, bindDefinitions); err != nil {
+		nsValidatorLog.Error(err, "ERROR: Failed to list BindDefinitions", "namespace", req.Name)
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
+
+	nsValidatorLog.V(2).Info("DEBUG: Checking authorization against BindDefinitions", "namespace", req.Name, "bindDefinitionCount", len(bindDefinitions.Items))
 
 	// Check if any BindDefinition allows the user to perform the operation
 	isAllowed := false
 
-	for _, bindDef := range bindDefinitions.Items {
+	for bdIdx, bindDef := range bindDefinitions.Items {
 		// Skip BindDefinitions whose name ends with "-namespaced-reader-restricted"
 		if strings.HasSuffix(bindDef.Name, "-namespaced-reader-restricted") {
+			nsValidatorLog.V(4).Info("DEBUG: Skipping restricted BindDefinition", "bindDefinitionName", bindDef.Name)
 			continue
 		}
+		nsValidatorLog.V(3).Info("DEBUG: Checking BindDefinition", "namespace", req.Name, "bindDefinitionName", bindDef.Name, "bdIndex", bdIdx, "subjectCount", len(bindDef.Spec.Subjects))
+
 		userMatchFound := false
 		// Check if the user matches any subjects in the BindDefinition
-		for _, subject := range bindDef.Spec.Subjects {
+		for sidx, subject := range bindDef.Spec.Subjects {
 			if subject.Kind == "Group" {
 				for _, userGroup := range userGroups {
 					if subject.Name == userGroup {
 						userMatchFound = true
+						nsValidatorLog.V(3).Info("DEBUG: User matched via group", "namespace", req.Name, "bindDefinition", bindDef.Name, "group", userGroup, "subjectIndex", sidx)
 						break
 					}
 				}
 			} else if subject.Kind == "ServiceAccount" && isServiceAccount {
 				if subject.Namespace == saNamespace && subject.Name == saName {
 					userMatchFound = true
+					nsValidatorLog.V(3).Info("DEBUG: User matched via ServiceAccount", "namespace", req.Name, "bindDefinition", bindDef.Name, "sa", fmt.Sprintf("%s/%s", saNamespace, saName), "subjectIndex", sidx)
 					break
 				}
 			}
@@ -180,33 +200,45 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 			}
 		}
 		if !userMatchFound {
+			nsValidatorLog.V(4).Info("DEBUG: User not found in BindDefinition subjects", "namespace", req.Name, "bindDefinitionName", bindDef.Name)
 			continue
 		}
-		for _, roleBinding := range bindDef.Spec.RoleBindings {
+
+		for rbIdx, roleBinding := range bindDef.Spec.RoleBindings {
 			// Get the NamespaceSelectors from the BindDefinition
 			namespaceSelectors := roleBinding.NamespaceSelector
 			namespaceMatchFound := false
-			for _, namespaceSelector := range namespaceSelectors {
+			for nsIdx, namespaceSelector := range namespaceSelectors {
 				matches, err := namespaceMatchesSelector(&ns, &namespaceSelector)
 				if err != nil {
+					nsValidatorLog.Error(err, "ERROR: Failed to match namespace selector", "namespace", req.Name, "bindDefinition", bindDef.Name)
 					return admission.Errored(http.StatusInternalServerError, err)
 				}
 				if matches {
 					namespaceMatchFound = true
+					nsValidatorLog.V(3).Info("DEBUG: Namespace matched selector", "namespace", req.Name, "bindDefinition", bindDef.Name, "roleBindingIndex", rbIdx, "selectorIndex", nsIdx)
 					break
 				}
 			}
 			if namespaceMatchFound {
 				isAllowed = true
+				nsValidatorLog.V(2).Info("DEBUG: User authorized for namespace operation", "namespace", req.Name, "bindDefinition", bindDef.Name, "username", req.UserInfo.Username)
 				break
 			}
 		}
+		if isAllowed {
+			break
+		}
 	}
+
 	if isAllowed {
+		nsValidatorLog.V(1).Info("DEBUG: Namespace operation allowed", "namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username)
 		return admission.Allowed("")
 	}
 
-	return admission.Denied(fmt.Sprintf("User %s is not the owner of namespace %s", req.UserInfo.Username, ns.Name))
+	denialMsg := fmt.Sprintf("User %s is not the owner of namespace %s", req.UserInfo.Username, ns.Name)
+	nsValidatorLog.V(1).Info("DEBUG: Namespace operation denied", "namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username, "reason", denialMsg)
+	return admission.Denied(denialMsg)
 }
 
 func namespaceMatchesSelector(ns *corev1.Namespace, selector *metav1.LabelSelector) (bool, error) {

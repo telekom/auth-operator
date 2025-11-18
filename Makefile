@@ -180,7 +180,7 @@ export-images: drawio ## Export PNG images from a Draw.io diagram.
 
 .PHONY: docs
 docs: crd-ref-docs ## Generate markdown API reference into docs directory.
-	crd-ref-docs --source-path=api --config=docs/config.yaml --renderer=markdown --output-mode=group --output-path=docs/api-reference
+	crd-ref-docs --source-path=api --config=docs/crd-ref-docs-config.yaml --renderer=markdown --output-mode=single --output-path=docs/generated/api-reference.md
 
 
 ##@ Deployment

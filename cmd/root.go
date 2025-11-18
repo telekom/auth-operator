@@ -4,7 +4,10 @@ Copyright © 2025 NAME HERE <EMAIL ADDRESS>
 package cmd
 
 import (
+	"flag"
+	"fmt"
 	"os"
+	"strings"
 
 	authenticationv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authentication/v1alpha1"
 	authorizationv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1"
@@ -28,6 +31,48 @@ var (
 	namespace string
 )
 
+// redactSensitiveFlags returns a map of flags with sensitive values redacted
+func redactSensitiveFlags() map[string]string {
+	flagValues := make(map[string]string)
+	sensitiveFlags := map[string]bool{
+		"api-token":     true,
+		"API_TOKEN":     true,
+		"idp-url":       false, // IDP URL itself is not sensitive
+		"IDP_URL":       false,
+		"password":      true,
+		"secret":        true,
+		"token":         true,
+		"key":           true,
+		"auth":          true,
+		"client-secret": true,
+		"client_secret": true,
+		"private-key":   true,
+		"private_key":   true,
+	}
+
+	flag.VisitAll(func(f *flag.Flag) {
+		name := f.Name
+		value := f.Value.String()
+
+		// Check if this is a sensitive flag
+		isSensitive := false
+		for sensitiveKey := range sensitiveFlags {
+			if strings.Contains(strings.ToLower(name), strings.ToLower(sensitiveKey)) {
+				isSensitive = true
+				break
+			}
+		}
+
+		if isSensitive && value != "" {
+			flagValues[name] = "[REDACTED]"
+		} else {
+			flagValues[name] = value
+		}
+	})
+
+	return flagValues
+}
+
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "auth-operator",
@@ -39,9 +84,20 @@ Cobra is a CLI library for Go that empowers applications.
 This application is a tool to generate the needed files
 to quickly create a Cobra application.`,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		// Set the verbosity level for klog
+		flag.Set("v", fmt.Sprintf("%d", verbosity))
+
 		ctrl.SetLogger(klog.NewKlogr())
 		log := klog.NewKlogr()
+
 		log.Info("app info", "name", system.Name, "version", system.Version, "commit", system.Commit)
+		log.Info("startup flags", "verbosity", verbosity, "namespace", namespace, "health-probe-bind-address", probeAddr)
+
+		// Log all flags with redaction of sensitive values
+		redactedFlags := redactSensitiveFlags()
+		for flagName, flagValue := range redactedFlags {
+			log.V(3).Info("flag", "name", flagName, "value", flagValue)
+		}
 	},
 	// Uncomment the following line if your bare application
 	// has an action associated with it:

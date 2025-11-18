@@ -35,58 +35,56 @@ func (m *NamespaceMutator) InjectDecoder(d admission.Decoder) error {
 func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) admission.Response {
 	// Handle both CREATE and UPDATE operations
 	if req.Operation != admissionv1.Create && req.Operation != admissionv1.Update {
+		nsMutatorLog.V(4).Info("DEBUG: Operation not CREATE/UPDATE - allowing", "namespace", req.Name, "operation", req.Operation)
 		return admission.Allowed("Operation is neither CREATE nor UPDATE")
 	}
 
+	nsMutatorLog.V(2).Info("DEBUG: Namespace mutator webhook triggered", "namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username)
+
 	// Allow the default kubernetes-admin to CRUD namespaces without mutation (necessary for CAPI/Flux)
 	if req.UserInfo.Username == "kubernetes-admin" {
-		nsMutatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+		nsMutatorLog.V(3).Info("DEBUG: Allowing kubernetes-admin without mutation", "namespace", req.Name)
 		return admission.Allowed("")
 	}
 	// ToDo: Trident patches its own namespace and that cant be disabled.
 	// https://github.com/NetApp/trident/blob/6b4cdf074578ade04ca0f1a5c59bb72c019391da/operator/controllers/orchestrator/installer/installer.go#L938
 	if req.UserInfo.Username == "system:serviceaccount:t-caas-storage:trident-operator" && req.Operation == admissionv1.Update && req.Name == "t-caas-storage" {
-		nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+		nsMutatorLog.V(3).Info("DEBUG: Allowing trident-operator without mutation", "namespace", req.Name)
 		return admission.Allowed("")
 	}
 	if req.UserInfo.Username == "system:serviceaccount:capi-operator-system:capi-operator-manager" && req.Operation == admissionv1.Update {
-		nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+		nsMutatorLog.V(3).Info("DEBUG: Allowing capi-operator-manager without mutation", "namespace", req.Name)
 		return admission.Allowed("")
 	}
 	// If tdgMigration is enabled, allow the helm and kustomize controller to update namespaces
 	if m.TDGMigration {
 		switch req.UserInfo.Username {
 		case "system:serviceaccount:flux-system:helm-controller":
-			nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+			nsMutatorLog.V(3).Info("DEBUG: Allowing helm-controller without mutation", "namespace", req.Name)
 			return admission.Allowed("")
 		case "system:serviceaccount:flux-system:kustomize-controller":
-			nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+			nsMutatorLog.V(3).Info("DEBUG: Allowing kustomize-controller without mutation", "namespace", req.Name)
 			return admission.Allowed("")
 		case "system:serviceaccount:schiff-tenant:m2m-sa":
-			nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+			nsMutatorLog.V(3).Info("DEBUG: Allowing schiff-tenant m2m-sa without mutation", "namespace", req.Name)
 			return admission.Allowed("")
 		case "system:serviceaccount:schiff-system:m2m-sa":
-			nsValidatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+			nsMutatorLog.V(3).Info("DEBUG: Allowing schiff-system m2m-sa without mutation", "namespace", req.Name)
 			return admission.Allowed("")
 		case "system:serviceaccount:capi-operator-system:capi-operator-manager":
-			nsMutatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+			nsMutatorLog.V(3).Info("DEBUG: Allowing capi-operator-manager without mutation (tdgMigration)", "namespace", req.Name)
 			return admission.Allowed("")
 		case "system:serviceaccount:trident-system:trident-operator":
 			if req.Operation == admissionv1.Update && req.Name == "trident-system" {
-				nsMutatorLog.Info("Accepted request", "Username", req.UserInfo.Username)
+				nsMutatorLog.V(3).Info("DEBUG: Allowing trident-operator without mutation (tdgMigration)", "namespace", req.Name)
 				return admission.Allowed("")
 			}
 		}
 	}
 	ns := &corev1.Namespace{}
-	var err error
-
-	// Label key-value validation is done in the Validating Webhook, there we don't
-	// care about req.OldObject - i.e. there is no difference in decoding between
-	// CREATE and UPDATE verbs. This stems from advisory on Mutating Webhook authoring
-	// https://kubernetes.io/docs/reference/access-auth/admission-controllers/#use-caution-when-authoring-and-installing-mutating-webhooks
-	err = m.Decoder.Decode(req, ns)
+	var err = m.Decoder.Decode(req, ns)
 	if err != nil {
+		nsMutatorLog.Error(err, "ERROR: Failed to decode namespace", "namespace", req.Name)
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 
@@ -101,40 +99,51 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 		isServiceAccount = true
 		saNamespace = usernameParts[2]
 		saName = usernameParts[3]
+		nsMutatorLog.V(3).Info("DEBUG: User is ServiceAccount", "namespace", req.Name, "saNamespace", saNamespace, "saName", saName)
+	} else {
+		nsMutatorLog.V(3).Info("DEBUG: User is not ServiceAccount", "namespace", req.Name, "username", req.UserInfo.Username, "groupCount", len(userGroups))
 	}
 
 	// Fetch all BindDefinition CRDs - this has to be faster
 	bindDefinitions := &authzv1alpha1.BindDefinitionList{}
 	if err := m.Client.List(ctx, bindDefinitions); err != nil {
+		nsMutatorLog.Error(err, "ERROR: Failed to list BindDefinitions", "namespace", req.Name)
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
+
+	nsMutatorLog.V(2).Info("DEBUG: Checking BindDefinitions for label mutations", "namespace", req.Name, "bindDefinitionCount", len(bindDefinitions.Items))
 
 	// Prepare a map to hold labels to be added
 	labelsToAdd := map[string]string{}
 
 	// Iterate over each BindDefinition
-	for _, bindDef := range bindDefinitions.Items {
+	for bdIdx, bindDef := range bindDefinitions.Items {
 		// Skip BindDefinitions whose name ends with "-namespaced-reader-restricted"
 		if strings.HasSuffix(bindDef.Name, "-namespaced-reader-restricted") {
+			nsMutatorLog.V(4).Info("DEBUG: Skipping restricted BindDefinition", "bindDefinitionName", bindDef.Name)
 			continue
 		}
+
+		nsMutatorLog.V(3).Info("DEBUG: Checking BindDefinition for user match", "namespace", req.Name, "bindDefinitionName", bindDef.Name, "bdIndex", bdIdx)
 
 		// Collect subjects from BindDefinition
 		subjects := bindDef.Spec.Subjects
 
 		// Check if the user's group is in the subjects or if the user is a matching ServiceAccount
 		userMatchFound := false
-		for _, subject := range subjects {
+		for sidx, subject := range subjects {
 			if subject.Kind == "Group" {
 				for _, userGroup := range userGroups {
 					if subject.Name == userGroup {
 						userMatchFound = true
+						nsMutatorLog.V(3).Info("DEBUG: User matched group in BindDefinition", "namespace", req.Name, "bindDefinition", bindDef.Name, "group", userGroup, "subjectIndex", sidx)
 						break
 					}
 				}
 			} else if subject.Kind == "ServiceAccount" && isServiceAccount {
 				if subject.Namespace == saNamespace && subject.Name == saName {
 					userMatchFound = true
+					nsMutatorLog.V(3).Info("DEBUG: User matched ServiceAccount in BindDefinition", "namespace", req.Name, "bindDefinition", bindDef.Name, "sa", saNamespace+"/"+saName, "subjectIndex", sidx)
 					break
 				}
 			}
@@ -144,42 +153,58 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 		}
 
 		if userMatchFound {
-			for _, roleBinding := range bindDef.Spec.RoleBindings {
+			nsMutatorLog.V(3).Info("DEBUG: User matched - extracting labels from RoleBindings", "namespace", req.Name, "bindDefinition", bindDef.Name)
+
+			for rbIdx, roleBinding := range bindDef.Spec.RoleBindings {
 				// Extract labels from namespaceSelector in RoleBindings
 				if len(roleBinding.NamespaceSelector) > 0 {
-					for _, nsSelector := range roleBinding.NamespaceSelector {
+					nsMutatorLog.V(3).Info("DEBUG: Processing RoleBinding namespace selectors", "namespace", req.Name, "roleBindingIndex", rbIdx, "selectorCount", len(roleBinding.NamespaceSelector))
+
+					for nsIdx, nsSelector := range roleBinding.NamespaceSelector {
 						labels := getLabelsFromNamespaceSelector(nsSelector)
+						nsMutatorLog.V(3).Info("DEBUG: Extracted labels from selector", "namespace", req.Name, "rbIndex", rbIdx, "selectorIndex", nsIdx, "labelCount", len(labels))
+
 						for k, v := range labels {
 							labelsToAdd[k] = v
 						}
 					}
 				}
 			}
+		} else {
+			nsMutatorLog.V(4).Info("DEBUG: User not matched in BindDefinition", "namespace", req.Name, "bindDefinitionName", bindDef.Name)
 		}
 	}
 
 	// If there are labels to add, mutate the namespace
 	if len(labelsToAdd) > 0 {
+		nsMutatorLog.V(2).Info("DEBUG: Mutating namespace with labels", "namespace", req.Name, "labelCount", len(labelsToAdd))
+
 		if ns.Labels == nil {
 			ns.Labels = map[string]string{}
 		}
 		for k, v := range labelsToAdd {
 			if _, exists := ns.Labels[k]; !exists {
-				nsMutatorLog.Info("OIDC group attribute match found - adding labels", "Namespace", ns.Name, "Label key", k, "Label value", v)
+				nsMutatorLog.V(2).Info("DEBUG: Adding label to namespace", "namespace", req.Name, "label", k, "value", v)
 				ns.Labels[k] = v
+			} else {
+				nsMutatorLog.V(3).Info("DEBUG: Label already exists - skipping", "namespace", req.Name, "label", k)
 			}
 		}
 
 		// Marshal the mutated namespace object
 		marshalledNS, err := json.Marshal(ns)
 		if err != nil {
+			nsMutatorLog.Error(err, "ERROR: Failed to marshal mutated namespace", "namespace", req.Name)
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
+		nsMutatorLog.V(1).Info("DEBUG: Namespace mutation successful", "namespace", req.Name, "labelCount", len(labelsToAdd))
 		return admission.PatchResponseFromRaw(req.Object.Raw, marshalledNS)
 	}
 
 	// If no labels to add, deny the request with a warning
-	return admission.Denied("The user does not have any OIDC attributes assigned to this cluster and the user is not a Kubernetes admin. Namespace creation is not allowed.")
+	denialMsg := "The user does not have any OIDC attributes assigned to this cluster and the user is not a Kubernetes admin. Namespace creation is not allowed."
+	nsMutatorLog.V(1).Info("DEBUG: Namespace mutation denied - no labels matched", "namespace", req.Name, "username", req.UserInfo.Username)
+	return admission.Denied(denialMsg)
 }
 
 // Extract labels from NamespaceSelector

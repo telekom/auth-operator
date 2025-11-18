@@ -63,109 +63,141 @@ func (r *RoleDefinitionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list;watch
 func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
+	log.V(1).Info("DEBUG: Starting RoleDefinition reconciliation", "roleDefinitionName", req.Name, "namespace", req.Namespace)
 
 	// Fetching the RoleDefinition custom resource from Kubernetes API
 	roleDefinition := &authnv1alpha1.RoleDefinition{}
 	err := r.Get(ctx, req.NamespacedName, roleDefinition)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
+			log.V(2).Info("DEBUG: RoleDefinition not found - already deleted", "roleDefinitionName", req.Name, "namespace", req.Namespace)
 			return ctrl.Result{}, nil
 		}
-		log.Error(err, "Unable to fetch RoleDefinition resource from Kubernetes API")
+		log.Error(err, "ERROR: Unable to fetch RoleDefinition resource from Kubernetes API", "roleDefinitionName", req.Name, "namespace", req.Namespace)
 		return ctrl.Result{}, err
 	}
+
+	log.V(2).Info("DEBUG: RoleDefinition retrieved", "roleDefinitionName", roleDefinition.Name, "targetRole", roleDefinition.Spec.TargetRole, "targetName", roleDefinition.Spec.TargetName)
 
 	// Declare the role early so we can work with it later
 	var role client.Object
 	var existingRole client.Object
-	if roleDefinition.Spec.TargetRole == authnv1alpha1.DefinitionClusterRole {
+	switch roleDefinition.Spec.TargetRole {
+	case authnv1alpha1.DefinitionClusterRole:
 		role = &rbacv1.ClusterRole{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:   roleDefinition.Spec.TargetName,
-				Labels: roleDefinition.ObjectMeta.Labels,
+				Labels: roleDefinition.Labels,
 			},
 		}
-	} else if roleDefinition.Spec.TargetRole == authnv1alpha1.DefinitionNamespacedRole {
+	case authnv1alpha1.DefinitionNamespacedRole:
 		role = &rbacv1.Role{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      roleDefinition.Spec.TargetName,
 				Namespace: roleDefinition.Spec.TargetNamespace,
-				Labels:    roleDefinition.ObjectMeta.Labels,
+				Labels:    roleDefinition.Labels,
 			},
 		}
 	}
 
 	// Check if RoleDefinition is marked to be deleted
-	if roleDefinition.ObjectMeta.DeletionTimestamp.IsZero() {
+	if roleDefinition.DeletionTimestamp.IsZero() {
+		log.V(2).Info("DEBUG: RoleDefinition not marked for deletion - checking finalizer", "roleDefinitionName", roleDefinition.Name)
+
 		if !controllerutil.ContainsFinalizer(roleDefinition, authnv1alpha1.RoleDefinitionFinalizer) {
+			log.V(2).Info("DEBUG: Adding finalizer to RoleDefinition", "roleDefinitionName", roleDefinition.Name)
 			controllerutil.AddFinalizer(roleDefinition, authnv1alpha1.RoleDefinitionFinalizer)
 			if err := r.Update(ctx, roleDefinition); err != nil {
+				log.Error(err, "ERROR: Failed to add finalizer", "roleDefinitionName", roleDefinition.Name)
 				return ctrl.Result{}, err
 			}
 			r.Recorder.Eventf(roleDefinition, corev1.EventTypeNormal, "Finalizer", "Adding finalizer to RoleDefinition %s", roleDefinition.Name)
 		}
 		conditions.MarkTrue(roleDefinition, authnv1alpha1.FinalizerCondition, roleDefinition.Generation, authnv1alpha1.FinalizerReason, authnv1alpha1.FinalizerMessage)
 		if err := r.Status().Update(ctx, roleDefinition); err != nil {
+			log.Error(err, "ERROR: Failed to update FinalizerCondition status", "roleDefinitionName", roleDefinition.Name)
 			return ctrl.Result{}, err
 		}
 	} else {
 		// RoleDefinition is marked to be deleted
-		log.Info("Deleting generated ClusterRole/Role for the RoleDefinition, as it is marked for deletion")
+		log.V(1).Info("DEBUG: RoleDefinition marked for deletion - cleaning up resources", "roleDefinitionName", roleDefinition.Name, "targetRole", roleDefinition.Spec.TargetRole, "targetName", roleDefinition.Spec.TargetName)
 		conditions.MarkTrue(roleDefinition, authnv1alpha1.DeleteCondition, roleDefinition.Generation, authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
 		err = r.Status().Update(ctx, roleDefinition)
 		if err != nil {
+			log.Error(err, "ERROR: Failed to update DeleteCondition status", "roleDefinitionName", roleDefinition.Name)
 			return ctrl.Result{}, err
 		}
 		r.Recorder.Eventf(roleDefinition, corev1.EventTypeWarning, "Deletion", "Deleting target resource %s %s", roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetName)
 		role.SetName(roleDefinition.Spec.TargetName)
 		role.SetNamespace(roleDefinition.Spec.TargetNamespace)
 
-		if err := r.Client.Delete(ctx, role); apierrors.IsNotFound(err) {
+		log.V(2).Info("DEBUG: Attempting to delete role", "roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName, "roleType", roleDefinition.Spec.TargetRole)
+		if err := r.Delete(ctx, role); apierrors.IsNotFound(err) {
 			// If the resource is not found, we can safely remove the finalizer
+			log.V(2).Info("DEBUG: Role not found - removing finalizer", "roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
 			controllerutil.RemoveFinalizer(roleDefinition, authnv1alpha1.RoleDefinitionFinalizer)
 			if err := r.Update(ctx, roleDefinition); err != nil {
+				log.Error(err, "ERROR: Failed to remove finalizer", "roleDefinitionName", roleDefinition.Name)
 				return ctrl.Result{}, err
 			}
+			log.V(1).Info("DEBUG: RoleDefinition deletion completed successfully", "roleDefinitionName", roleDefinition.Name)
 			return ctrl.Result{}, nil
 		} else if err != nil {
 			// If there is an error deleting the resource, requeue the request
+			log.Error(err, "ERROR: Failed to delete role", "roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
 			conditions.MarkFalse(roleDefinition, authnv1alpha1.DeleteCondition, roleDefinition.Generation, authnv1alpha1.DeleteReason, "error deleting resource: %s", err.Error())
 			if updateErr := r.Status().Update(ctx, roleDefinition); updateErr != nil {
+				log.Error(updateErr, "ERROR: Failed to update status after deletion error", "roleDefinitionName", roleDefinition.Name)
 				return ctrl.Result{}, fmt.Errorf("deletion failed with error %s and a second error was found during update of role definition status: %w", err.Error(), updateErr)
 			}
 			return ctrl.Result{}, err
 		}
 		// requeue as the object is being deleted
+		log.V(2).Info("DEBUG: Requeuing RoleDefinition deletion", "roleDefinitionName", roleDefinition.Name)
 		return ctrl.Result{Requeue: true}, nil
 	}
 
 	// Fetch all existing API Groups and filter them against RestrictedAPIs
+	log.V(2).Info("DEBUG: Starting API discovery", "roleDefinitionName", roleDefinition.Name)
+
 	discoveredApiGroups, err := r.DiscoveryClient.ServerGroups()
 	if err != nil {
+		log.Error(err, "ERROR: Failed to discover API groups", "roleDefinitionName", roleDefinition.Name)
 		return ctrl.Result{}, err
 	}
+	log.V(2).Info("DEBUG: Discovered API groups", "roleDefinitionName", roleDefinition.Name, "groupCount", len(discoveredApiGroups.Groups))
+
 	conditions.MarkTrue(roleDefinition, authnv1alpha1.APIDiscoveryCondition, roleDefinition.Generation, authnv1alpha1.APIDiscoveryReason, authnv1alpha1.APIDiscoveryMessage)
 	err = r.Status().Update(ctx, roleDefinition)
 	if err != nil {
+		log.Error(err, "ERROR: Failed to update APIDiscoveryCondition status", "roleDefinitionName", roleDefinition.Name)
 		return ctrl.Result{}, err
 	}
 
 	var filteredApiGroups []metav1.APIGroup
+	restrictedCount := 0
 	for _, group := range discoveredApiGroups.Groups {
 		restricted := false
 		for _, restrictedAPI := range roleDefinition.Spec.RestrictedAPIs {
 			if group.Name == restrictedAPI.Name {
 				restricted = true
+				restrictedCount++
 				break
 			}
 		}
 		if !restricted {
+			log.V(3).Info("DEBUG: Including API group", "roleDefinitionName", roleDefinition.Name, "apiGroup", group.Name)
 			filteredApiGroups = append(filteredApiGroups, group)
+		} else {
+			log.V(3).Info("DEBUG: Filtering out restricted API group", "roleDefinitionName", roleDefinition.Name, "apiGroup", group.Name)
 		}
 	}
+	log.V(2).Info("DEBUG: API groups filtered", "roleDefinitionName", roleDefinition.Name, "includedCount", len(filteredApiGroups), "restrictedCount", restrictedCount)
+
 	conditions.MarkTrue(roleDefinition, authnv1alpha1.APIFilteredCondition, roleDefinition.Generation, authnv1alpha1.APIFilteredReason, authnv1alpha1.APIFilteredMessage)
 	err = r.Status().Update(ctx, roleDefinition)
 	if err != nil {
+		log.Error(err, "ERROR: Failed to update APIFilteredCondition status", "roleDefinitionName", roleDefinition.Name)
 		return ctrl.Result{}, err
 	}
 
@@ -266,12 +298,18 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 	conditions.MarkTrue(roleDefinition, authnv1alpha1.ResourceDiscoveryCondition, roleDefinition.Generation, authnv1alpha1.ResourceDiscoveryReason, authnv1alpha1.ResourceDiscoveryMessage)
 	conditions.MarkTrue(roleDefinition, authnv1alpha1.ResourceFilteredCondition, roleDefinition.Generation, authnv1alpha1.ResourceFilteredReason, authnv1alpha1.ResourceFilteredMessage)
+
+	log.V(2).Info("DEBUG: Resource discovery and filtering completed", "roleDefinitionName", roleDefinition.Name, "filteredResourceCount", len(filteredApiResources), "scopeNamespaced", roleDefinition.Spec.ScopeNamespaced)
+
 	err = r.Status().Update(ctx, roleDefinition)
 	if err != nil {
+		log.Error(err, "ERROR: Failed to update status after resource discovery", "roleDefinitionName", roleDefinition.Name)
 		return ctrl.Result{}, err
 	}
 
 	// Create a slice of PolicyRules
+	log.V(3).Info("DEBUG: Creating policy rules from filtered resources", "roleDefinitionName", roleDefinition.Name, "resourceCount", len(filteredApiResources))
+
 	rules := []rbacv1.PolicyRule{}
 	for _, resource := range filteredApiResources {
 		rules = append(rules, rbacv1.PolicyRule{
@@ -320,21 +358,22 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		sort.Strings(finalRules[i].Resources)
 	}
 
-	if roleDefinition.Spec.TargetRole == authnv1alpha1.DefinitionClusterRole {
+	switch roleDefinition.Spec.TargetRole {
+	case authnv1alpha1.DefinitionClusterRole:
 		role = &rbacv1.ClusterRole{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:   roleDefinition.Spec.TargetName,
-				Labels: roleDefinition.ObjectMeta.Labels,
+				Labels: roleDefinition.Labels,
 			},
 			Rules: finalRules,
 		}
 		existingRole = &rbacv1.ClusterRole{}
-	} else if roleDefinition.Spec.TargetRole == authnv1alpha1.DefinitionNamespacedRole {
+	case authnv1alpha1.DefinitionNamespacedRole:
 		role = &rbacv1.Role{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      roleDefinition.Spec.TargetName,
 				Namespace: roleDefinition.Spec.TargetNamespace,
-				Labels:    roleDefinition.ObjectMeta.Labels,
+				Labels:    roleDefinition.Labels,
 			},
 			Rules: finalRules,
 		}
@@ -342,31 +381,42 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// Create ClusterRole or Role
-	err = r.Client.Get(ctx, types.NamespacedName{Name: roleDefinition.Spec.TargetName, Namespace: roleDefinition.Spec.TargetNamespace}, existingRole)
+	log.V(2).Info("DEBUG: Checking if role exists", "roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName, "roleType", roleDefinition.Spec.TargetRole, "policyRuleCount", len(finalRules))
+
+	err = r.Get(ctx, types.NamespacedName{Name: roleDefinition.Spec.TargetName, Namespace: roleDefinition.Spec.TargetNamespace}, existingRole)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
+			log.V(2).Info("DEBUG: Role does not exist - creating new role", "roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName, "roleType", roleDefinition.Spec.TargetRole)
+
 			conditions.MarkUnknown(roleDefinition, authnv1alpha1.CreateCondition, roleDefinition.Generation, authnv1alpha1.CreateReason, authnv1alpha1.CreateMessage)
 			err = r.Status().Update(ctx, roleDefinition)
 			if err != nil {
+				log.Error(err, "ERROR: Failed to update CreateCondition status", "roleDefinitionName", roleDefinition.Name)
 				return ctrl.Result{}, err
 			}
 			if err := controllerutil.SetControllerReference(roleDefinition, role, r.Scheme); err != nil {
+				log.Error(err, "ERROR: Failed to set controller reference", "roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
 				conditions.MarkFalse(roleDefinition, authnv1alpha1.OwnerRefCondition, roleDefinition.Generation, authnv1alpha1.OwnerRefReason, authnv1alpha1.OwnerRefMessage)
 				err = r.Status().Update(ctx, roleDefinition)
 				if err != nil {
+					log.Error(err, "ERROR: Failed to update status after OwnerRef error", "roleDefinitionName", roleDefinition.Name)
 					return ctrl.Result{}, err
 				}
 				return ctrl.Result{}, err
 			}
 			r.Recorder.Eventf(roleDefinition, corev1.EventTypeNormal, "OwnerRef", "Setting Owner reference for %s %s", roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetName)
-			if err := r.Client.Create(ctx, role); err != nil {
+
+			if err := r.Create(ctx, role); err != nil {
+				log.Error(err, "ERROR: Failed to create role", "roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
 				return ctrl.Result{}, err
 			}
-			log.Info("Created", "ClusterRole/Role", role.GetName())
+			log.V(1).Info("DEBUG: Role created successfully", "roleDefinitionName", roleDefinition.Name, "roleName", role.GetName(), "roleType", roleDefinition.Spec.TargetRole)
+
 			conditions.MarkTrue(roleDefinition, authnv1alpha1.OwnerRefCondition, roleDefinition.Generation, authnv1alpha1.OwnerRefReason, authnv1alpha1.OwnerRefMessage)
 			conditions.MarkTrue(roleDefinition, authnv1alpha1.CreateCondition, roleDefinition.Generation, authnv1alpha1.CreateReason, authnv1alpha1.CreateMessage)
 			err = r.Status().Update(ctx, roleDefinition)
 			if err != nil {
+				log.Error(err, "ERROR: Failed to update status after role creation", "roleDefinitionName", roleDefinition.Name)
 				return ctrl.Result{}, err
 			}
 
@@ -386,6 +436,8 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	rulesEqual := helpers.PolicyRulesEqual(existingRules, finalRules)
 	if !rulesEqual {
+		log.V(2).Info("DEBUG: Role rules differ - updating role", "roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName, "existingRuleCount", len(existingRules), "newRuleCount", len(finalRules))
+
 		switch t := existingRole.(type) {
 		case *rbacv1.ClusterRole:
 			t.Rules = finalRules
@@ -394,9 +446,13 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 
 		if !controllerutil.HasControllerReference(existingRole) {
+			log.V(2).Info("DEBUG: Role missing controller reference - setting it", "roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
+
 			if err := controllerutil.SetControllerReference(roleDefinition, existingRole, r.Scheme); err != nil {
+				log.Error(err, "ERROR: Failed to set controller reference during update", "roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
 				err = r.Status().Update(ctx, roleDefinition)
 				if err != nil {
+					log.Error(err, "ERROR: Failed to update status after OwnerRef error during update", "roleDefinitionName", roleDefinition.Name)
 					return ctrl.Result{}, err
 				}
 				return ctrl.Result{}, err
@@ -404,27 +460,43 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			conditions.MarkTrue(roleDefinition, authnv1alpha1.OwnerRefCondition, roleDefinition.Generation, authnv1alpha1.OwnerRefReason, authnv1alpha1.OwnerRefMessage)
 			err = r.Status().Update(ctx, roleDefinition)
 			if err != nil {
+				log.Error(err, "ERROR: Failed to update status after OwnerRef set", "roleDefinitionName", roleDefinition.Name)
 				return ctrl.Result{}, err
 			}
 			r.Recorder.Eventf(roleDefinition, corev1.EventTypeNormal, "OwnerRef", "Setting Owner reference for %s %s", roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetName)
 		}
-		if err := r.Client.Update(ctx, existingRole); err != nil {
+		if err := r.Update(ctx, existingRole); err != nil {
+			log.Error(err, "ERROR: Failed to update role", "roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
 			return ctrl.Result{}, err
 		}
+		log.V(1).Info("DEBUG: Role updated successfully", "roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
+
 		conditions.MarkTrue(roleDefinition, authnv1alpha1.UpdateCondition, roleDefinition.Generation, authnv1alpha1.UpdateReason, authnv1alpha1.UpdateMessage)
 		conditions.Delete(roleDefinition, authnv1alpha1.CreateCondition)
 		err = r.Status().Update(ctx, roleDefinition)
 		if err != nil {
+			log.Error(err, "ERROR: Failed to update status after role update", "roleDefinitionName", roleDefinition.Name)
 			return ctrl.Result{}, err
 		}
-		log.Info("Updated ClusterRole/Role", "ClusterRole/Role", existingRole)
+		log.V(1).Info("DEBUG: Role updated successfully", "roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
+
+		conditions.MarkTrue(roleDefinition, authnv1alpha1.UpdateCondition, roleDefinition.Generation, authnv1alpha1.UpdateReason, authnv1alpha1.UpdateMessage)
+		conditions.Delete(roleDefinition, authnv1alpha1.CreateCondition)
+		err = r.Status().Update(ctx, roleDefinition)
+		if err != nil {
+			log.Error(err, "ERROR: Failed to update status after role update", "roleDefinitionName", roleDefinition.Name)
+			return ctrl.Result{}, err
+		}
 		r.Recorder.Eventf(roleDefinition, corev1.EventTypeNormal, "Update", "Updated target resource %s %s", roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetName)
 
 		//for _, change := range changes {
 		//	r.Recorder.Eventf(existingRole, corev1.EventTypeNormal, "RBACUpdate", "Updating RBAC rules for %s - %s", existingRole.GetName(), change)
 		//}
+	} else {
+		log.V(3).Info("DEBUG: Role rules already up-to-date - no update needed", "roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
 	}
 
+	log.V(1).Info("DEBUG: RoleDefinition reconciliation completed successfully", "roleDefinitionName", roleDefinition.Name)
 	return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
 }
 
@@ -433,22 +505,31 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 // https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/handler#EnqueueRequestsFromMapFunc
 // https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/handler#MapFunc
 func (r *RoleDefinitionReconciler) crdToRoleDefinitionRequests(ctx context.Context, obj client.Object) []reconcile.Request {
+	logger := log.FromContext(ctx)
+	logger.V(2).Info("DEBUG: crdToRoleDefinitionRequests triggered", "objectName", obj.GetName())
+
 	// Type assertion to ensure obj is a CRD
-	_, ok := obj.(*apiextensionsv1.CustomResourceDefinition)
+	crd, ok := obj.(*apiextensionsv1.CustomResourceDefinition)
 	if !ok {
-		log.FromContext(ctx).Error(fmt.Errorf("unexpected type"), "Expected *CustomResourceDefinition", "got", obj)
+		logger.Error(fmt.Errorf("unexpected type"), "ERROR: Expected *CustomResourceDefinition", "got", fmt.Sprintf("%T", obj))
 		return nil
 	}
 
+	logger.V(2).Info("DEBUG: Processing CRD event", "crdName", crd.Name)
+
 	// List all RoleDefinition resources
 	roleDefList := &authnv1alpha1.RoleDefinitionList{}
-	err := r.Client.List(ctx, roleDefList)
+	err := r.List(ctx, roleDefList)
 	if err != nil {
-		log.FromContext(ctx).Error(err, "Failed to list RoleDefinition resources")
+		logger.Error(err, "ERROR: Failed to list RoleDefinition resources", "crdName", crd.Name)
 		return nil
 	}
+
+	logger.V(3).Info("DEBUG: Found RoleDefinitions", "crdName", crd.Name, "roleDefinitionCount", len(roleDefList.Items))
+
 	requests := make([]reconcile.Request, len(roleDefList.Items))
 	for i, roleDef := range roleDefList.Items {
+		logger.V(3).Info("DEBUG: Enqueuing RoleDefinition reconciliation", "crdName", crd.Name, "roleDefinition", roleDef.Name, "index", i)
 		requests[i] = reconcile.Request{
 			NamespacedName: types.NamespacedName{
 				Name:      roleDef.Name,
@@ -456,5 +537,6 @@ func (r *RoleDefinitionReconciler) crdToRoleDefinitionRequests(ctx context.Conte
 			},
 		}
 	}
+	logger.V(2).Info("DEBUG: Returning reconciliation requests", "crdName", crd.Name, "requestCount", len(requests))
 	return requests
 }

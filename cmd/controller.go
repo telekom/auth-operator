@@ -42,6 +42,15 @@ This application is a tool to generate the needed files
 to quickly create a Cobra application.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		setupLog.Info("starting controller")
+		setupLog.Info("controller configuration",
+			"enableLeaderElection", enableLeaderElection,
+			"enableAuthProviderReconciler", enableAuthProviderReconciler,
+			"enableBindDefinitionReconciler", enableBindDefinitionReconciler,
+			"enableRoleDefinitionReconciler", enableRoleDefinitionReconciler,
+			"authProviderRequeueInterval", authProviderRequeueInterval,
+			"namespace", namespace,
+		)
+
 		ctx := ctrl.SetupSignalHandler()
 
 		mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
