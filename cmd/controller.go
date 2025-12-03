@@ -10,14 +10,12 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"k8s.io/client-go/discovery"
 
-	idpclient "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/client"
+	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/idpclient"
 
 	authenticationcontroller "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/internal/controller/authentication"
 	authorizationcontroller "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/internal/controller/authorization"
 
-	"k8s.io/client-go/dynamic"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 )
@@ -64,40 +62,26 @@ to quickly create a Cobra application.`,
 			return fmt.Errorf("unable to start manager. err: %s", err)
 		}
 
-		// Generate a new Discovery client for API group/resource discovery
-		discoveryClient, err := discovery.NewDiscoveryClientForConfig(mgr.GetConfig())
-		if err != nil {
-			return fmt.Errorf("unable to initialize Discovery client: %w", err)
-		}
-
-		// Generate a new Dynamic client for listing namespaced resources
-		dynamicClient, err := dynamic.NewForConfig(mgr.GetConfig())
-		if err != nil {
-			return fmt.Errorf("unable to initialize Dynamic client: %w", err)
-		}
-
 		if enableRoleDefinitionReconciler {
-			if err = (&authorizationcontroller.RoleDefinitionReconciler{
-				Client:          mgr.GetClient(),
-				Scheme:          mgr.GetScheme(),
-				DiscoveryClient: discoveryClient,
-				Recorder:        mgr.GetEventRecorderFor("RoleDefinitionReconciler"),
-			}).SetupWithManager(mgr); err != nil {
-				return fmt.Errorf("unable to create controller RoleDefinition: %w", err)
+			roleDefinitionController, err := authorizationcontroller.NewRoleDefinitionReconciler(mgr.GetConfig(), mgr.GetScheme(), mgr.GetEventRecorderFor("RoleDefinitionReconciler"))
+			if err != nil {
+				return fmt.Errorf("unable to create RoleDefinition reconciler: %w", err)
+			}
+
+			if err := roleDefinitionController.SetupWithManager(ctx, mgr); err != nil {
+				return fmt.Errorf("unable to setup controller RoleDefinition with manager: %w", err)
 			}
 		} else {
 			setupLog.Info("RoleDefinition reconciler is disabled")
 		}
 
 		if enableBindDefinitionReconciler {
-			if err = (&authorizationcontroller.BindDefinitionReconciler{
-				Client:          mgr.GetClient(),
-				Scheme:          mgr.GetScheme(),
-				DiscoveryClient: discoveryClient,
-				DynamicClient:   dynamicClient,
-				Recorder:        mgr.GetEventRecorderFor("BindDefinitionReconciler"),
-			}).SetupWithManager(mgr); err != nil {
-				return fmt.Errorf("unable to create controller BindDefinition: %w", err)
+			bindDefinitionController, err := authorizationcontroller.NewBindDefinitionReconciler(mgr.GetConfig(), mgr.GetScheme(), mgr.GetEventRecorderFor("BindDefinitionReconciler"))
+			if err != nil {
+				return fmt.Errorf("unable to create BindDefinition reconciler: %w", err)
+			}
+			if err := bindDefinitionController.SetupWithManager(mgr); err != nil {
+				return fmt.Errorf("unable to setup controller BindDefinition with manager: %w", err)
 			}
 		} else {
 			setupLog.Info("BindDefinition reconciler is disabled")

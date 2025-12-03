@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "auth-operator.fullname" . }}-webhook-server
+  labels:
+    control-plane: webhook-server
+  {{- include "auth-operator.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.webhookServer.replicas }}
+  selector:
+    matchLabels:
+      control-plane: webhook-server
+    {{- include "auth-operator.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        control-plane: webhook-server
+      {{- include "auth-operator.selectorLabels" . | nindent 8 }}
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
+    spec:
+      containers:
+      - args: 
+        - webhook
+        - --health-probe-bind-address=:8081
+        - --port=9443
+        - --certs-dir=/tmp/k8s-webhook-server/serving-certs
+        - --cert-rotation-dns-name={{ include "auth-operator.fullname" . }}-webhook-service.$(POD_NAMESPACE).svc.{{ .Values.kubernetesClusterDomain }}
+        - --cert-rotation-secret-name={{ include "auth-operator.fullname" . }}-webhook-certs
+        - --cert-rotation-mutating-webhook={{ include "auth-operator.fullname" . }}-namespace-mutating-webhook-configuration
+        - --cert-rotation-validating-webhook={{ include "auth-operator.fullname" . }}-namespace-validating-webhook-configuration
+        - --cert-rotation-validating-webhook={{ include "auth-operator.fullname" . }}-binder-validating-webhook-configuration
+        - --tdg-migration={{ .Values.webhookServer.tdgMigration }}
+        command:
+        - /auth-operator
+        env:
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        image: {{ include "auth-operator.image" . }}
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        name: webhook
+        ports:
+        - containerPort: 8081
+          name: health-probe
+          protocol: TCP
+        - containerPort: 9443
+          name: webhook-server
+          protocol: TCP
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources: {{- toYaml .Values.webhookServer.resources | nindent 10 }}
+        securityContext: 
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - mountPath: /tmp/k8s-webhook-server/serving-certs
+          name: cert
+          readOnly: true
+      imagePullSecrets: {{ .Values.imagePullSecrets | default list | toJson }}
+      securityContext: 
+          runAsNonRoot: true
+      serviceAccountName: {{ include "auth-operator.fullname" . }}-webhook-server
+      terminationGracePeriodSeconds: 10
+      volumes:
+      - name: cert
+        secret:
+          defaultMode: 420
+          secretName: {{ include "auth-operator.fullname" . }}-webhook-certs

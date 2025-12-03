@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -32,8 +33,8 @@ import (
 	helpers "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/helpers"
 )
 
-// BindDefinitionReconciler defines the reconciler for BindDefinition and reconciles a BindDefinition object.
-type BindDefinitionReconciler struct {
+// bindDefinitionReconciler defines the reconciler for BindDefinition and reconciles a BindDefinition object.
+type bindDefinitionReconciler struct {
 	client.Client
 	Scheme          *runtime.Scheme
 	DiscoveryClient discovery.DiscoveryInterface
@@ -41,11 +42,39 @@ type BindDefinitionReconciler struct {
 	Recorder        record.EventRecorder
 }
 
+func NewBindDefinitionReconciler(
+	config *rest.Config,
+	scheme *runtime.Scheme,
+	recorder record.EventRecorder,
+) (*bindDefinitionReconciler, error) {
+	discoveryClient, err := discovery.NewDiscoveryClientForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create discovery client: %w", err)
+	}
+	dynamicClient, err := dynamic.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create dynamic client: %w", err)
+	}
+
+	client, err := client.New(config, client.Options{Scheme: scheme})
+	if err != nil {
+		return nil, fmt.Errorf("unable to create client: %w", err)
+	}
+
+	return &bindDefinitionReconciler{
+		DiscoveryClient: discoveryClient,
+		Client:          client,
+		DynamicClient:   dynamicClient,
+		Scheme:          scheme,
+		Recorder:        recorder,
+	}, nil
+}
+
 // SetupWithManager sets up the controller with the Manager.
 // Used to watch for namespace creation events https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/handler#example-EnqueueRequestsFromMapFunc
 // Used a predicate to ignore deletes of namespace, as this can be done in a regular
 // reconcile requeue and does not require immediate action from controller
-func (r *BindDefinitionReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *bindDefinitionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&authnv1alpha1.BindDefinition{}).
 		Watches(&corev1.Namespace{},
@@ -59,7 +88,7 @@ func (r *BindDefinitionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // for any object implementing client.Object. Used it to fan-out updates to all RoleDefinitions on new CRD create
 // https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/handler#EnqueueRequestsFromMapFunc
 // https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/handler#MapFunc
-func (r *BindDefinitionReconciler) namespaceToBindDefinitionRequests(ctx context.Context, obj client.Object) []reconcile.Request {
+func (r *bindDefinitionReconciler) namespaceToBindDefinitionRequests(ctx context.Context, obj client.Object) []reconcile.Request {
 	logger := log.FromContext(ctx)
 	logger.V(2).Info("DEBUG: namespaceToBindDefinitionRequests triggered", "objectName", obj.GetName(), "objectNamespace", obj.GetNamespace())
 
@@ -107,7 +136,7 @@ type ResourceBlocking struct {
 // For checking if terminating namespace has deleting resources
 // Needed for RoleBinding finalizer removal
 // Returns: hasResources (bool), blockingResources ([]ResourceBlocking), error
-func (r *BindDefinitionReconciler) namespaceHasResources(ctx context.Context, namespace string) (bool, []ResourceBlocking, error) {
+func (r *bindDefinitionReconciler) namespaceHasResources(ctx context.Context, namespace string) (bool, []ResourceBlocking, error) {
 	log := log.FromContext(ctx)
 	log.V(2).Info("DEBUG: Starting namespace resource check", "namespace", namespace)
 
@@ -249,7 +278,7 @@ func formatBlockingResourcesMessage(blockingResources []ResourceBlocking) string
 
 // For checking if terminating BindDefinition refers a ServiceAccount
 // that other non-terminating BindDefinitions reference
-func (r *BindDefinitionReconciler) isSAReferencedByOtherBindDefs(ctx context.Context, currentBindDefName, saName, saNamespace string) (bool, error) {
+func (r *bindDefinitionReconciler) isSAReferencedByOtherBindDefs(ctx context.Context, currentBindDefName, saName, saNamespace string) (bool, error) {
 	// List all BindDefinitions
 	bindDefList := &authnv1alpha1.BindDefinitionList{}
 	err := r.List(ctx, bindDefList)
@@ -283,7 +312,7 @@ func (r *BindDefinitionReconciler) isSAReferencedByOtherBindDefs(ctx context.Con
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=create;delete;deletecollection;get;list;patch;update;watch
-func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *bindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 
 	// Fetching the RoleDefinition custom resource from Kubernetes API
@@ -340,13 +369,13 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	}
 
-	return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
+	return ctrl.Result{}, nil
 }
 
 // reconcileTerminatingNamespaces handles cleanup of RoleBindings when target namespaces are terminating
 // This is called when a BindDefinition is being reconciled due to a namespace event where the namespace
 // is in Terminating phase. We only remove finalizers if the namespace has no other remaining resources.
-func (r *BindDefinitionReconciler) reconcileTerminatingNamespaces(ctx context.Context, bindDefinition *authnv1alpha1.BindDefinition) (ctrl.Result, error) {
+func (r *bindDefinitionReconciler) reconcileTerminatingNamespaces(ctx context.Context, bindDefinition *authnv1alpha1.BindDefinition) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 	log.V(2).Info("DEBUG: Starting reconcileTerminatingNamespaces", "bindDefinitionName", bindDefinition.Name)
 
@@ -466,7 +495,7 @@ func (r *BindDefinitionReconciler) reconcileTerminatingNamespaces(ctx context.Co
 	return ctrl.Result{}, nil
 }
 
-func (r *BindDefinitionReconciler) reconcileDelete(ctx context.Context, bindDefinition *authnv1alpha1.BindDefinition) (ctrl.Result, error) {
+func (r *bindDefinitionReconciler) reconcileDelete(ctx context.Context, bindDefinition *authnv1alpha1.BindDefinition) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 	log.V(1).Info("DEBUG: Starting reconcileDelete", "bindDefinition", bindDefinition.Name, "namespace", bindDefinition.Namespace)
 
@@ -801,7 +830,7 @@ func (r *BindDefinitionReconciler) reconcileDelete(ctx context.Context, bindDefi
 }
 
 // Reconcile BindDefinition method
-func (r *BindDefinitionReconciler) reconcileCreate(ctx context.Context, bindDefinition *authnv1alpha1.BindDefinition) (ctrl.Result, error) {
+func (r *bindDefinitionReconciler) reconcileCreate(ctx context.Context, bindDefinition *authnv1alpha1.BindDefinition) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 	log.V(1).Info("DEBUG: Starting reconcileCreate", "bindDefinitionName", bindDefinition.Name, "namespace", bindDefinition.Namespace)
 
@@ -1106,7 +1135,7 @@ func (r *BindDefinitionReconciler) reconcileCreate(ctx context.Context, bindDefi
 	return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
 }
 
-func (r *BindDefinitionReconciler) reconcileUpdate(ctx context.Context, bindDefinition *authnv1alpha1.BindDefinition) (ctrl.Result, error) {
+func (r *bindDefinitionReconciler) reconcileUpdate(ctx context.Context, bindDefinition *authnv1alpha1.BindDefinition) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 
 	// Construct namespace set from BindDefinition namespace selectors

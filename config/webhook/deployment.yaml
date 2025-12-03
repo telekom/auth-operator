@@ -57,10 +57,12 @@ spec:
             - --health-probe-bind-address=:8081
             - --port=9443
             - --certs-dir=/tmp/k8s-webhook-server/serving-certs
-            - --cert-rotation-secret-label-selector=authorization.t-caas.telekom.com/component=webhook
-            - --cert-rotation-service-label-selector=authorization.t-caas.telekom.com/component=webhook
-            - --cert-rotation-validating-webhooks-label-selector=authorization.t-caas.telekom.com/component=webhook
-            - --cert-rotation-mutating-webhooks-label-selector=authorization.t-caas.telekom.com/component=webhook
+            - --cert-rotation-dns-name=webhook-service.$(POD_NAMESPACE).svc.cluster.local
+            - --cert-rotation-secret-name=webhook-certs
+            - --cert-rotation-mutating-webhook=namespace-mutating-webhook-configuration
+            - --cert-rotation-validating-webhook=namespace-validating-webhook-configuration
+            - --cert-rotation-validating-webhook=binder-validating-webhook-configuration
+            - --tdg-migration=$(TDG_MIGRATION)
           image: controller:latest
           name: webhook
           env:
@@ -68,6 +70,8 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            - name: TDG_MIGRATION
+              value: "false"
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

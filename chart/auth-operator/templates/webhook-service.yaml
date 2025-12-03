@@ -6,9 +6,12 @@ metadata:
     authorization.t-caas.telekom.com/component: webhook
   {{- include "auth-operator.labels" . | nindent 4 }}
 spec:
-  type: {{ .Values.webhookService.type }}
+  type: ClusterIP
   selector:
     control-plane: webhook-server
     {{- include "auth-operator.selectorLabels" . | nindent 4 }}
   ports:
-  {{- .Values.webhookService.ports | toYaml | nindent 2 }}
+    - port: {{ .Values.webhookServer.service.port }}
+      protocol: {{ .Values.webhookServer.service.protocol }}
+      targetPort: webhook-server
+

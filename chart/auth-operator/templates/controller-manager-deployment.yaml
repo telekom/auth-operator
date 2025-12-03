@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "auth-operator.fullname" . }}-controller-manager
+  labels:
+    control-plane: controller-manager
+  {{- include "auth-operator.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.controller.replicas }}
+  selector:
+    matchLabels:
+      control-plane: controller-manager
+    {{- include "auth-operator.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        control-plane: controller-manager
+      {{- include "auth-operator.selectorLabels" . | nindent 8 }}
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
+    spec:
+      containers:
+      - args: 
+        - controller
+        - --leader-elect
+        - --enable-authprovider-reconciler=true
+        - --enable-binddefinition-reconciler=true
+        - --enable-roledefinition-reconciler=true
+        - --auth-provider-requeue-interval=5m
+        command:
+        - /auth-operator
+        env:
+        - name: IDP_URL
+          valueFrom:
+            secretKeyRef:
+              key: IDP_URL
+              name: {{ include "auth-operator.fullname" . }}-authprovider-secrets
+        - name: API_TOKEN
+          valueFrom:
+            secretKeyRef:
+              key: API_TOKEN
+              name: {{ include "auth-operator.fullname" . }}-authprovider-secrets
+        image: {{ include "auth-operator.image" . }}
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        name: manager
+        resources: {{- toYaml .Values.controller.resources | nindent 10 }}
+        securityContext: 
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+      imagePullSecrets: {{ .Values.imagePullSecrets | default list | toJson }}
+      securityContext: 
+        runAsNonRoot: true
+      serviceAccountName: {{ include "auth-operator.fullname" . }}-controller-manager
+      terminationGracePeriodSeconds: 10

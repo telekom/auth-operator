@@ -1,73 +1,35 @@
 authproviderSecrets:
   apiToken: ""
   idpUrl: ""
-tdgMigration:
-  enabled: false
-controllerManager:
-  manager:
-    args:
-    - controller
-    - --leader-elect
-    - --enable-authprovider-reconciler=true
-    - --enable-binddefinition-reconciler=true
-    - --enable-roledefinition-reconciler=true
-    - --auth-provider-requeue-interval=5m
-    containerSecurityContext:
-      allowPrivilegeEscalation: false
-      capabilities:
-        drop:
-        - ALL
-    image:
-      repository: controller
-      tag: latest
-    resources:
-      limits:
-        cpu: 500m
-        memory: 128Mi
-      requests:
-        cpu: 10m
-        memory: 64Mi
-  podSecurityContext:
-    runAsNonRoot: true
-  replicas: 1
-  serviceAccount:
-    annotations: {}
+image:
+  repository: controller
+  tag: latest
 imagePullSecrets: []
 kubernetesClusterDomain: cluster.local
-webhookServer:
-  podSecurityContext:
-    runAsNonRoot: true
+controller:
+  resources:
+    limits:
+      cpu: 500m
+      memory: 128Mi
+    requests:
+      cpu: 10m
+      memory: 64Mi
   replicas: 1
   serviceAccount:
     annotations: {}
-  webhook:
-    args:
-    - webhook
-    - --health-probe-bind-address=:8081
-    - --port=9443
-    - --certs-dir=/tmp/k8s-webhook-server/serving-certs
-    - --cert-rotation-secret-label-selector=authorization.t-caas.telekom.com/component=webhook
-    - --cert-rotation-service-label-selector=authorization.t-caas.telekom.com/component=webhook
-    - --cert-rotation-validating-webhooks-label-selector=authorization.t-caas.telekom.com/component=webhook
-    - --cert-rotation-mutating-webhooks-label-selector=authorization.t-caas.telekom.com/component=webhook
-    containerSecurityContext:
-      allowPrivilegeEscalation: false
-      capabilities:
-        drop:
-        - ALL
-    image:
-      repository: controller
-      tag: latest
-    resources:
-      limits:
-        cpu: 150m
-        memory: 128Mi
-      requests:
-        cpu: 50m
-        memory: 64Mi
-webhookService:
-  ports:
-  - port: 443
+webhookServer:
+  replicas: 1
+  tdgMigration: "false"
+  serviceAccount:
+    annotations: {}
+  resources:
+    limits:
+      cpu: 150m
+      memory: 128Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+  service:
+    port: 443
     protocol: TCP
-    targetPort: 9443
-  type: ClusterIP
+    type: ClusterIP

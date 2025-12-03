@@ -1,30 +1,48 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
-    "version": "0.2.0",
-    "configurations": [
-        {
-            "name": "Launch Auth Operator for AuthProvider CR",
-            "type": "go",
-            "request": "launch",
-            "mode": "debug",
-            "program": "${workspaceFolder}/main.go",
-            "args": [
-                "controller",
-                "--leader-elect=false",
-                "--namespace=default",
-                "--verbosity=2",
-                "--enable-authprovider-reconciler=true",
-                "--enable-binddefinition-reconciler=false",
-                "--enable-roledefinition-reconciler=false",
-                "--auth-provider-requeue-interval=5m",
-            ],
-            "env": {
-                "KUBECONFIG": "",
-                "API_TOKEN": "",
-                "IDP_URL": "portal.security.in.pan-net.eu:443",
-            },
-            "cwd": "${workspaceFolder}"
-        }
-    ]
+  // Use IntelliSense to learn about possible attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "(AUTH OPERATOR) Launch Auth Operator controller",
+      "type": "go",
+      "request": "launch",
+      "mode": "debug",
+      "program": "${workspaceFolder}/main.go",
+      "args": [
+        "controller",
+        "--leader-elect=false",
+        "--verbosity=3",
+        "--enable-authprovider-reconciler=false",
+        "--enable-binddefinition-reconciler=false",
+        "--enable-roledefinition-reconciler=true",
+      ],
+      "env": {
+        "KUBECONFIG": "/path/to/kubeconfig",
+      },
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "(AUTH OPERATOR) Launch Auth Operator Webhook server",
+      "type": "go",
+      "request": "launch",
+      "mode": "debug",
+      "program": "${workspaceFolder}/main.go",
+      "args": [
+        "webhook",
+        "--verbosity=3",
+        "--certs-dir=${workspaceFolder}/test/webhook/certs",
+        "--cert-rotation-dns-name=auth-operator-webhook-service.t-caas-security.svc",
+        "--cert-rotation-secret-name=auth-operator-webhook-certs",
+        "--cert-rotation-mutating-webhook=auth-operator-namespace-mutating-webhook-configuration",
+        "--cert-rotation-validating-webhook=auth-operator-namespace-validating-webhook-configuration",
+        "--cert-rotation-validating-webhook=auth-operator-binder-validating-webhook-configuration",
+      ],
+      "env": {
+        "KUBECONFIG": "/path/to/kubeconfig",
+        "POD_NAMESPACE": "t-caas-security"
+      },
+      "cwd": "${workspaceFolder}"
+    }
+  ]
 }

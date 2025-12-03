@@ -7,6 +7,7 @@ import (
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -58,18 +59,14 @@ var _ = Describe("RoleDefinition Controller", func() {
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
 			ctx := log.IntoContext(context.Background(), logger)
-			controllerReconciler := &RoleDefinitionReconciler{
-				Client:          k8sClient,
-				DiscoveryClient: discoveryClient,
-				Scheme:          k8sClient.Scheme(),
-				Recorder:        recorder,
-			}
+			controllerReconciler, err := NewRoleDefinitionReconciler(cfg, scheme.Scheme, recorder)
+			Expect(err).NotTo(HaveOccurred())
 			go func() {
 				for event := range recorder.Events {
 					logger.Info("Received event", "event", event)
 				}
 			}()
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
 			})
 			Expect(err).NotTo(HaveOccurred())

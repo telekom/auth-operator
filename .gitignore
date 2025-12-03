@@ -7,9 +7,6 @@
 bin/*
 Dockerfile.cross
 
-# Go binary
-auth-operator
-
 # Test binary, built with `go test -c`
 *.test
 
@@ -38,3 +35,4 @@ out/
 .tiltbuild/
 tilt-settings.yaml
 .kindcontext
+__debug_*

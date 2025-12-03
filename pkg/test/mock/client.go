@@ -13,7 +13,7 @@ import (
 	reflect "reflect"
 
 	logr "github.com/go-logr/logr"
-	idpclient "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/client"
+	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/idpclient"
 	gomock "go.uber.org/mock/gomock"
 )
 

@@ -18,7 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	authenticationv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authentication/v1alpha1"
-	idpclient "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/client"
+	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/idpclient"
 )
 
 const (

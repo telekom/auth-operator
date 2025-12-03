@@ -51,13 +51,8 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
-Create the name of the service account to use
+Image
 */}}
-{{- define "auth-operator.serviceAccountName" -}}
-{{- if .Values.serviceAccount.create }}
-{{- default (include "auth-operator.fullname" .) .Values.serviceAccount.name }}
-{{- else }}
-{{- default "default" .Values.serviceAccount.name }}
+{{- define "auth-operator.image" -}}
+{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}
 {{- end }}
-{{- end }}
-

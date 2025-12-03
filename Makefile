@@ -101,49 +101,18 @@ docker-build: ## Build docker image with the manager.
 docker-push: ## Push docker image with the manager.
 	$(CONTAINER_TOOL) push ${IMG}
 
-.PHONY: helm-crds
-helm-crds: manifests kustomize ## Generate Helm chart Custom Resource Definitions (CRDs)
-	rm -f chart/auth-operator/crds/*
-	$(KUSTOMIZE) build config/crd -o chart/auth-operator/crds
-
-	pushd "chart/auth-operator" && \
-	for file in crds/apiextensions.k8s.io_v1_customresourcedefinition_*; do \
-		mv "$$file" "crds/$${file#crds/apiextensions.k8s.io_v1_customresourcedefinition_}"; \
-	done && \
-	popd
 
 .PHONY: helm
-helm: manifests kustomize helmify ## Generate the complete Helm chart
-	$(KUSTOMIZE) build config/default | $(HELMIFY) -v -crd-dir -generate-defaults -image-pull-secrets chart/auth-operator
-	pushd "chart/auth-operator/" && \
-	find ./crds/ -type f  ! -name "*-crd.yaml" -delete && \
-	$(KUSTOMIZE) build . -o crds/ && \
-	find ./crds/ -type f -name "*-crd.yaml" -delete && \
+helm: manifests kustomize ## Generate the complete Helm chart
+	rm -f chart/auth-operator/crds/*
+	$(KUSTOMIZE) build config/crd -o chart/auth-operator/crds
+	pushd "chart/auth-operator" && \
+	$(KUSTOMIZE) build . -o crds && \
 	for file in crds/apiextensions.k8s.io_v1_customresourcedefinition_*; do \
 		mv "$$file" "crds/$${file#crds/apiextensions.k8s.io_v1_customresourcedefinition_}"; \
 	done && \
 	popd
-	@echo "Running webhook post-processing..."
-	@for file in chart/auth-operator/templates/*webhook-configuration.yaml; do \
-		if [ -f "$$file" ]; then \
-			echo "Patching label in $$file"; \
-			sed -i '/^[[:space:]]*labels:[[:space:]]*$$/a\    authorization.t-caas.telekom.com\/component: "webhook"' "$$file"; \
-		fi; \
-	done
-	# Patch in the tdg migration flags
-	@if [ -f chart/auth-operator/values.yaml ]; then \
-        echo "Patching tdgMigration field into values.yaml"; \
-        sed -i '/idpUrl: ""/a\
-tdgMigration:\
-  enabled: false' chart/auth-operator/values.yaml; \
-    fi
-	@if [ -f chart/auth-operator/templates/deployment.yaml ]; then \
-        echo "Patching tdgMigration field into templates/deployment.yaml"; \
-        sed -i '/      - args: {{- toYaml .Values.webhookServer.webhook.args | nindent 8 }}/a\
-        {{- if .Values.tdgMigration.enabled }}\
-        - --tdg-migration=true\
-        {{- end }}' chart/auth-operator/templates/deployment.yaml; \
-    fi
+
 
 
 # PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
@@ -224,13 +193,7 @@ CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen-$(CONTROLLER_TOOLS_VERSION)
 ENVTEST ?= $(LOCALBIN)/setup-envtest-$(ENVTEST_VERSION)
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint-$(GOLANGCI_LINT_VERSION)
 CRD_REF_DOCS = $(LOCALBIN)/crd-ref-docs-$(CRD_REF_DOCS_VERSION)
-HELMIFY ?= $(LOCALBIN)/helmify-$(HELMIFY_VERSION)
 MOCKGEN ?= $(LOCALBIN)/mockgen
-
-.PHONY: helmify
-helmify: $(HELMIFY) ## Download helmify locally if necessary.
-$(HELMIFY): $(LOCALBIN)
-	$(call go-install-tool,$(HELMIFY),github.com/arttor/helmify/cmd/helmify,$(HELMIFY_VERSION))
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.

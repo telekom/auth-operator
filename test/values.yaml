@@ -1,4 +1,4 @@
-controllerManager:
+manager:
   manager:
     image:
       repository: artifactory.devops.telekom.de/tdi-caas-docker-images-local/auth-operator

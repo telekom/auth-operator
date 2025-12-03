@@ -12,15 +12,11 @@ import (
 
 	authorizationv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1"
 	authorizationwebhook "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/internal/webhook/authorization"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/open-policy-agent/cert-controller/pkg/rotator"
 	"github.com/spf13/cobra"
-	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
-	corev1 "k8s.io/api/core/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
@@ -28,15 +24,15 @@ import (
 )
 
 var (
-	webhookPort                                 int
-	webhookCertsDir                             string
-	enableHTTP2                                 bool
-	disableCertRotation                         bool
-	certRotationServiceLabelSelector            string
-	certRotationSecretLabelSelector             string
-	certRotationValidatingWebhooksLabelSelector string
-	certRotationMutatingWebhooksLabelSelector   string
-	enableTDGMigration                          bool
+	webhookPort                    int
+	webhookCertsDir                string
+	enableHTTP2                    bool
+	disableCertRotation            bool
+	certRotationDNSName            string
+	certRotationSecretName         string
+	certRotationValidatingWebhooks []string
+	certRotationMutatingWebhooks   []string
+	enableTDGMigration             bool
 )
 
 const (
@@ -163,92 +159,6 @@ func configureWebhooks(mgr manager.Manager) error {
 	return nil
 }
 
-func getValidatingWebhookNames(mgr manager.Manager) ([]string, error) {
-	apiReader := mgr.GetAPIReader()
-
-	validatingWebhooksList := &admissionregistrationv1.ValidatingWebhookConfigurationList{}
-	selector, err := labels.Parse(certRotationValidatingWebhooksLabelSelector)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse label selector %q: %w", certRotationValidatingWebhooksLabelSelector, err)
-	}
-
-	if err := apiReader.List(context.Background(), validatingWebhooksList, client.MatchingLabelsSelector{Selector: selector}); err != nil {
-		return nil, fmt.Errorf("failed to list validating webhooks in namespace %q with labels %v: %w", namespace, selector, err)
-	}
-	result := make([]string, 0, len(validatingWebhooksList.Items))
-	for _, webhook := range validatingWebhooksList.Items {
-		result = append(result, webhook.Name)
-	}
-	return result, nil
-}
-
-func getMutatingWebhookNames(mgr manager.Manager) ([]string, error) {
-	apiReader := mgr.GetAPIReader()
-
-	mutatingWebhooksList := &admissionregistrationv1.MutatingWebhookConfigurationList{}
-	selector, err := labels.Parse(certRotationMutatingWebhooksLabelSelector)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse label selector %q: %w", certRotationMutatingWebhooksLabelSelector, err)
-	}
-
-	if err := apiReader.List(context.Background(), mutatingWebhooksList, client.MatchingLabelsSelector{Selector: selector}); err != nil {
-		return nil, fmt.Errorf("failed to list mutating webhooks in namespace %q with labels %v: %w", namespace, selector, err)
-	}
-	result := make([]string, 0, len(mutatingWebhooksList.Items))
-	for _, webhook := range mutatingWebhooksList.Items {
-		result = append(result, webhook.Name)
-	}
-	return result, nil
-}
-
-func getCertificateSecretKey(mgr manager.Manager) (types.NamespacedName, error) {
-	// list secrets in operator namespace with label selector and ensure only one is returned
-	//c := mgr.GetClient()
-	apiReader := mgr.GetAPIReader()
-
-	secretList := &corev1.SecretList{}
-	selector, err := labels.Parse(certRotationSecretLabelSelector)
-	if err != nil {
-		return types.NamespacedName{}, fmt.Errorf("failed to parse label selector %q: %w", certRotationSecretLabelSelector, err)
-	}
-
-	if err := apiReader.List(context.Background(), secretList, client.InNamespace(namespace), client.MatchingLabelsSelector{Selector: selector}); err != nil {
-		return types.NamespacedName{}, fmt.Errorf("failed to list secrets in namespace %q with labels %v: %w", namespace, selector, err)
-	}
-
-	if len(secretList.Items) != 1 {
-		return types.NamespacedName{}, fmt.Errorf("expected exactly 1 Secret in namespace %q with labels %v, but found %d", namespace, selector, len(secretList.Items))
-	}
-
-	secret := secretList.Items[0]
-	return types.NamespacedName{
-		Namespace: secret.Namespace,
-		Name:      secret.Name,
-	}, nil
-}
-
-func getWebhookService(mgr manager.Manager) (*corev1.Service, error) {
-	// list services in operator namespace with label selector and ensure only one is returned
-	//c := mgr.GetClient()
-	apiReader := mgr.GetAPIReader()
-
-	selector, err := labels.Parse(certRotationServiceLabelSelector)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse label selector %q: %w", certRotationSecretLabelSelector, err)
-	}
-
-	serviceList := &corev1.ServiceList{}
-	if err := apiReader.List(context.Background(), serviceList, client.InNamespace(namespace), client.MatchingLabelsSelector{Selector: selector}); err != nil {
-		return nil, fmt.Errorf("failed to list services in namespace %q with labels %v: %w", namespace, selector, err)
-	}
-
-	if len(serviceList.Items) != 1 {
-		return nil, fmt.Errorf("expected exactly 1 Service in namespace %q with labels %v, but found %d", namespace, selector, len(serviceList.Items))
-	}
-
-	return &serviceList.Items[0], nil
-}
-
 func enableCertRotation(mgr manager.Manager, notifyFinished chan struct{}) error {
 	if namespace == "" {
 		return errors.New("namespace is undefined. can't enable cert rotator")
@@ -261,49 +171,30 @@ func enableCertRotation(mgr manager.Manager, notifyFinished chan struct{}) error
 	}
 
 	webhooks := []rotator.WebhookInfo{}
-	validatingWebhooks, err := getValidatingWebhookNames(mgr)
-	if err != nil {
-		return fmt.Errorf("unable to get validating webhooks. err: %s", err)
-	}
-	for _, validatingWebhook := range validatingWebhooks {
+	for _, validatingWebhook := range certRotationValidatingWebhooks {
 		webhooks = append(webhooks, rotator.WebhookInfo{
 			Name: validatingWebhook,
 			Type: rotator.Validating,
 		})
 	}
 
-	mutatingWebhooks, err := getMutatingWebhookNames(mgr)
-	if err != nil {
-		return fmt.Errorf("unable to get mutating webhooks. err: %s", err)
-	}
-	for _, mutatingWebhook := range mutatingWebhooks {
+	for _, mutatingWebhook := range certRotationMutatingWebhooks {
 		webhooks = append(webhooks, rotator.WebhookInfo{
 			Name: mutatingWebhook,
 			Type: rotator.Mutating,
 		})
 	}
 
-	secretKey, err := getCertificateSecretKey(mgr)
-	if err != nil {
-		return fmt.Errorf("unable to get secret. err: %s", err)
-	}
-
-	service, err := getWebhookService(mgr)
-	if err != nil {
-		return fmt.Errorf("unable to get service. err: %s", err)
-	}
-
-	certDNSName := fmt.Sprintf("%s.%s.svc", service.Name, service.Namespace)
-
-	err = rotator.AddRotator(mgr, &rotator.CertRotator{
-		SecretKey:             secretKey,
-		RequireLeaderElection: true,
-		CertDir:               webhookCertsDir,
-		CAName:                caName,
-		CAOrganization:        caOrganization,
-		DNSName:               certDNSName,
-		IsReady:               notifyFinished,
-		Webhooks:              webhooks,
+	err := rotator.AddRotator(mgr, &rotator.CertRotator{
+		SecretKey:              types.NamespacedName{Namespace: namespace, Name: certRotationSecretName},
+		RequireLeaderElection:  true,
+		RestartOnSecretRefresh: true,
+		CertDir:                webhookCertsDir,
+		CAName:                 caName,
+		CAOrganization:         caOrganization,
+		DNSName:                certRotationDNSName,
+		IsReady:                notifyFinished,
+		Webhooks:               webhooks,
 	})
 	if err != nil {
 		return err
@@ -318,9 +209,10 @@ func init() {
 	webhookCmd.Flags().BoolVar(&enableHTTP2, "enable-http2", false, "If set, HTTP/2 will be enabled for the webhook server.")
 	webhookCmd.Flags().StringVar(&webhookCertsDir, "certs-dir", "", "The directory for https certificates")
 	webhookCmd.Flags().BoolVar(&disableCertRotation, "disable-cert-rotation", false, "disable automatic generation and rotation of webhook TLS certificates/keys")
-	webhookCmd.Flags().StringVar(&certRotationServiceLabelSelector, "cert-rotation-service-label-selector", "", "The label selector for the webhook service")
-	webhookCmd.Flags().StringVar(&certRotationSecretLabelSelector, "cert-rotation-secret-label-selector", "", "The label selector for the webhook secret")
-	webhookCmd.Flags().StringVar(&certRotationValidatingWebhooksLabelSelector, "cert-rotation-validating-webhooks-label-selector", "", "The label selector for the validating webhooks")
-	webhookCmd.Flags().StringVar(&certRotationMutatingWebhooksLabelSelector, "cert-rotation-mutating-webhooks-label-selector", "", "The label selector for the mutating webhooks")
+	webhookCmd.Flags().StringVar(&certRotationDNSName, "cert-rotation-dns-name", "", "The DNS name for the webhook service")
+	webhookCmd.Flags().StringVar(&certRotationSecretName, "cert-rotation-secret-name", "", "The name for the webhook certs secret")
+	webhookCmd.Flags().StringSliceVar(&certRotationMutatingWebhooks, "cert-rotation-mutating-webhook", []string{}, "The mutating webhooks")
+	webhookCmd.Flags().StringSliceVar(&certRotationValidatingWebhooks, "cert-rotation-validating-webhook", []string{}, "The validating webhooks")
+
 	webhookCmd.Flags().BoolVar(&enableTDGMigration, "tdg-migration", false, "If set, the legacy lablels and behavior for TDG migration will be enabled. ")
 }
