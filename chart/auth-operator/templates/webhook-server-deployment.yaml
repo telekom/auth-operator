@@ -25,7 +25,7 @@ spec:
         - --health-probe-bind-address=:8081
         - --port=9443
         - --certs-dir=/tmp/k8s-webhook-server/serving-certs
-        - --cert-rotation-dns-name={{ include "auth-operator.fullname" . }}-webhook-service.$(POD_NAMESPACE).svc.{{ .Values.kubernetesClusterDomain }}
+        - --cert-rotation-dns-name={{ include "auth-operator.fullname" . }}-webhook-service.$(POD_NAMESPACE).svc
         - --cert-rotation-secret-name={{ include "auth-operator.fullname" . }}-webhook-certs
         - --cert-rotation-mutating-webhook={{ include "auth-operator.fullname" . }}-namespace-mutating-webhook-configuration
         - --cert-rotation-validating-webhook={{ include "auth-operator.fullname" . }}-namespace-validating-webhook-configuration
