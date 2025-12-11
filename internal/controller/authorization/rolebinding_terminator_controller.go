@@ -1,0 +1,449 @@
+package authorization
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/time/rate"
+	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/record"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	authnv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1"
+	conditions "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/conditions"
+	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/discovery"
+)
+
+// +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions,verbs=get;list
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete;escalate
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings/finalizers,verbs=update
+// +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=namespaces/status,verbs=get;update
+// +kubebuilder:rbac:groups="",resources=events,verbs=*
+// +kubebuilder:rbac:groups="events.k8s.io",resources=events,verbs=*
+
+const (
+	namespaceResourcesCalculationInterval = 10 * time.Second
+)
+
+// namespaceDeletionResourceBlocking represents a resource type and the specific instances blocking namespace deletion
+type namespaceDeletionResourceBlocking struct {
+	ResourceType string // e.g., "pods", "persistentvolumeclaims"
+	APIGroup     string // e.g., "", "apps"
+	Count        int
+	Names        []string // List of specific resource names
+}
+
+// namespaceTerminationStatus caches the blocking resources for a namespace and manages access with a mutex.
+// It also includes a rate limiter to control how often the resources are recalculated.
+type namespaceTerminationStatus struct {
+	blockingResources []namespaceDeletionResourceBlocking
+	mutex             sync.Mutex
+	lastError         error
+	rateLimiter       rate.Sometimes
+}
+
+func newNamespaceTerminationStatus() *namespaceTerminationStatus {
+	return &namespaceTerminationStatus{
+		blockingResources: []namespaceDeletionResourceBlocking{},
+		mutex:             sync.Mutex{},
+		rateLimiter:       rate.Sometimes{Interval: namespaceResourcesCalculationInterval},
+	}
+}
+
+// roleBindingTerminator is responsible for handling finalizers on RoleBindings owned by BindDefinitions.
+// during deletion, if the namespace is terminating it checks for remaining resources before removing finalizers; otherwise it removes them directly.
+type roleBindingTerminator struct {
+	client                             client.Client
+	scheme                             *runtime.Scheme
+	dynamicClient                      dynamic.Interface
+	resourceTracker                    *discovery.ResourceTracker
+	recorder                           record.EventRecorder
+	namespaceTerminationResourcesCache sync.Map // map[string]*namespaceTerminationStatus
+}
+
+func NewRoleBindingTerminator(
+	config *rest.Config,
+	scheme *runtime.Scheme,
+	recorder record.EventRecorder,
+	resourceTracker *discovery.ResourceTracker,
+) (*roleBindingTerminator, error) {
+	dynamicClient, err := dynamic.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create dynamic client: %w", err)
+	}
+
+	client, err := client.New(config, client.Options{Scheme: scheme})
+	if err != nil {
+		return nil, fmt.Errorf("unable to create client: %w", err)
+	}
+
+	return &roleBindingTerminator{
+		// DiscoveryClient: discoveryClient,
+		client:                             client,
+		dynamicClient:                      dynamicClient,
+		scheme:                             scheme,
+		recorder:                           recorder,
+		resourceTracker:                    resourceTracker,
+		namespaceTerminationResourcesCache: sync.Map{},
+	}, nil
+}
+
+// SetupWithManager sets up the controller with the Manager.
+// Used to watch for role bindings and handle their finalizers if they are managed by a BindDefinition.
+func (r *roleBindingTerminator) SetupWithManager(mgr ctrl.Manager, concurrency int) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&rbacv1.RoleBinding{}).
+		WithOptions(controller.TypedOptions[reconcile.Request]{
+			MaxConcurrentReconciles: concurrency,
+		}).
+		Complete(r)
+}
+
+// getNamespacedBlockingResources retrieves cached blocking resources for a namespace, recalculating them if the rate limiter allows it
+func (r *roleBindingTerminator) getNamespacedBlockingResources(ctx context.Context, namespace string) ([]namespaceDeletionResourceBlocking, error) {
+	v, _ := r.namespaceTerminationResourcesCache.LoadOrStore(namespace, newNamespaceTerminationStatus())
+
+	// Use rate limiter to avoid frequent checks
+	nsTermStatus := v.(*namespaceTerminationStatus)
+
+	nsTermStatus.rateLimiter.Do(func() {
+		nsTermStatus.mutex.Lock()
+		defer nsTermStatus.mutex.Unlock()
+
+		// Recalculate blocking resources
+		nsTermStatus.blockingResources, nsTermStatus.lastError = namespaceHasResources(ctx, r.resourceTracker, r.dynamicClient, namespace)
+	})
+	return nsTermStatus.blockingResources, nsTermStatus.lastError
+}
+
+// For checking if terminating namespace has deleting resources
+// Needed for RoleBinding finalizer removal
+// Returns: hasResources (bool), blockingResources ([]ResourceBlocking), error
+func namespaceHasResources(ctx context.Context, resourceTracker *discovery.ResourceTracker, dynamicClient dynamic.Interface, namespace string) ([]namespaceDeletionResourceBlocking, error) {
+	log := log.FromContext(ctx)
+	log.V(2).Info("DEBUG: Starting namespace resource check", "namespace", namespace)
+
+	var resourcesChecked, resourcesSkipped atomic.Int32
+
+	apiResources, err := resourceTracker.GetAPIResources()
+	if errors.Is(err, discovery.ResourceTrackerNotStartedError) {
+		log.V(1).Info("DEBUG: ResourceTracker not started yet - requeuing reconciliation", "roleDefinitionName")
+		return nil, nil
+	}
+	if err != nil {
+		log.Error(err, "ERROR: Failed to get API resources from ResourceTracker", "roleDefinitionName")
+		return nil, err
+	}
+
+	// collect resources concurrently
+	errGroup := errgroup.Group{}
+	errGroup.SetLimit(30) // limit concurrency to 30 goroutines to avoid overwhelming the API server
+
+	// list of blocking resources found
+	var blockingResources []namespaceDeletionResourceBlocking
+
+	// channel to collect blocking resources
+	blockingResourcesChannel := make(chan namespaceDeletionResourceBlocking)
+
+	// collect blocking resources from channel
+	go func() {
+		for br := range blockingResourcesChannel {
+			blockingResources = append(blockingResources, br)
+		}
+	}()
+
+	for groupVersion, resourceList := range apiResources {
+		gv, parseErr := schema.ParseGroupVersion(groupVersion)
+		if parseErr != nil {
+			// skip malformed group/version
+			log.V(4).Info("DEBUG: Skipping malformed GroupVersion", "namespace", namespace, "groupVersion", groupVersion, "error", parseErr)
+			resourcesSkipped.Add(1)
+			continue
+		}
+
+		for i := range resourceList {
+			resource := resourceList[i]
+
+			if strings.Contains(resource.Name, "/") || strings.Contains(resource.Name, "rolebindings") {
+				// ignore subresources and rolebinding resources
+				log.V(4).Info("DEBUG: Skipping subresource or rolebinding", "namespace", namespace, "resource", resource.Name, "groupVersion", groupVersion)
+				resourcesSkipped.Add(1)
+				continue
+			}
+
+			if !supportsList(resource.Verbs) {
+				// if resource does not support "list", skip it
+				log.V(4).Info("DEBUG: Skipping resource without list verb", "namespace", namespace, "resource", resource.Name, "groupVersion", groupVersion)
+				resourcesSkipped.Add(1)
+				continue
+			}
+
+			gvr := schema.GroupVersionResource{
+				Group:    gv.Group,
+				Version:  gv.Version,
+				Resource: resource.Name,
+			}
+
+			errGroup.Go(func() error {
+				log.V(3).Info("DEBUG: Listing resource in namespace", "namespace", namespace, "gvr", gvr.String())
+				// using dynamic client to not instantiate all typed clients
+				list, err := dynamicClient.Resource(gvr).Namespace(namespace).List(ctx, metav1.ListOptions{})
+				if err != nil {
+					log.V(2).Info("DEBUG: Skipping resource due to list error", "namespace", namespace, "resource", gvr.String(), "error", err)
+					resourcesSkipped.Add(1)
+					return nil
+				}
+
+				resourcesChecked.Add(1)
+				if len(list.Items) == 0 {
+					log.V(3).Info("DEBUG: No resources found", "namespace", namespace, "gvr", gvr.String())
+					return nil
+				}
+
+				log.V(2).Info("DEBUG: Found resources in namespace - will NOT remove finalizers", "namespace", namespace, "gvr", gvr.String(), "itemCount", len(list.Items))
+
+				// Collect names of blocking resources (limit to first 10)
+				var resourceNames []string
+				for i, item := range list.Items {
+					if i < 10 { // Collect up to 10 resource names for event
+						resourceNames = append(resourceNames, item.GetName())
+						log.V(3).Info("DEBUG: Found resource", "namespace", namespace, "gvr", gvr.String(), "name", item.GetName(), "index", i)
+					}
+				}
+				// Add to blocking resources list
+				blockingResourcesChannel <- namespaceDeletionResourceBlocking{
+					ResourceType: resource.Name,
+					APIGroup:     gv.Group,
+					Count:        len(list.Items),
+					Names:        resourceNames,
+				}
+				return nil
+			})
+		}
+	}
+	if err := errGroup.Wait(); err != nil {
+		return nil, fmt.Errorf("error listing resources in namespace %s: %w", namespace, err)
+	}
+	close(blockingResourcesChannel)
+
+	// If we found blocking resources, return them all
+	if len(blockingResources) > 0 {
+		log.V(2).Info("DEBUG: Found blocking resources in namespace", "namespace", namespace, "blockingResourceCount", len(blockingResources))
+		return blockingResources, nil
+	}
+
+	// no resources found
+	log.V(2).Info("DEBUG: Namespace has no resources - can remove finalizers", "namespace", namespace, "resourcesChecked", resourcesChecked.Load(), "resourcesSkipped", resourcesSkipped.Load())
+	return nil, nil
+}
+
+func supportsList(verbs []string) bool {
+	for _, verb := range verbs {
+		if verb == "list" {
+			return true
+		}
+	}
+	return false
+}
+
+// formatBlockingResourcesMessage creates a detailed event message about what resources are blocking namespace deletion
+func formatBlockingResourcesMessage(blockingResources []namespaceDeletionResourceBlocking) string {
+	resourceDetails := []string{}
+
+	for _, rb := range blockingResources {
+		var resourceType string
+		if rb.APIGroup == "" {
+			resourceType = rb.ResourceType
+		} else {
+			resourceType = fmt.Sprintf("%s (%s)", rb.ResourceType, rb.APIGroup)
+		}
+
+		if rb.Count == 1 && len(rb.Names) > 0 {
+			resourceDetails = append(resourceDetails, fmt.Sprintf("%s: %s", resourceType, rb.Names[0]))
+		} else if len(rb.Names) > 0 {
+			// Show first few names if multiple
+			if len(rb.Names) <= 3 {
+				resourceDetails = append(resourceDetails, fmt.Sprintf("%s (%d): %s", resourceType, rb.Count, strings.Join(rb.Names, ", ")))
+			} else {
+				resourceDetails = append(resourceDetails, fmt.Sprintf("%s (%d): %s, +%d more", resourceType, rb.Count, strings.Join(rb.Names[:3], ", "), rb.Count-3))
+			}
+		} else {
+			resourceDetails = append(resourceDetails, fmt.Sprintf("%s (%d)", resourceType, rb.Count))
+		}
+	}
+
+	return strings.Join(resourceDetails, "; ")
+}
+
+func isOwnedByBindDefinition(ownerReferences []metav1.OwnerReference) bool {
+	for _, ownerRef := range ownerReferences {
+		if ownerRef.Kind == "BindDefinition" && ownerRef.APIVersion == authnv1alpha1.GroupVersion.String() {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *roleBindingTerminator) getOwningBindDefinition(ctx context.Context, ownerReferences []metav1.OwnerReference) (*authnv1alpha1.BindDefinition, error) {
+	for _, ownerRef := range ownerReferences {
+		if !(ownerRef.Kind == "BindDefinition" && ownerRef.APIVersion == authnv1alpha1.GroupVersion.String()) {
+			continue
+		}
+		bindDefinition := &authnv1alpha1.BindDefinition{}
+		err := r.client.Get(ctx, types.NamespacedName{Name: ownerRef.Name}, bindDefinition)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get BindDefinition %s: %w", ownerRef.Name, err)
+		}
+		return bindDefinition, nil
+	}
+	return nil, fmt.Errorf("no BindDefinition owner reference found")
+}
+
+func (r *roleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	log := log.FromContext(ctx).WithValues("roleBinding", req.NamespacedName)
+
+	// Fetching the RoleBinding from Kubernetes API
+	roleBinding := rbacv1.RoleBinding{}
+	err := r.client.Get(ctx, req.NamespacedName, &roleBinding)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return ctrl.Result{}, nil
+		} else {
+			log.Error(err, "Unable to fetch RoleBinding resource from Kubernetes API")
+			return ctrl.Result{}, err
+		}
+	}
+	// we don't care about RoleBindings not owned by a BindDefinition
+	if !isOwnedByBindDefinition(roleBinding.GetOwnerReferences()) {
+		return ctrl.Result{}, nil
+	}
+
+	// ensure finalizer is there if RB is owned by a BindDefinition and the RoleBinding is not being deleted
+	if roleBinding.DeletionTimestamp.IsZero() {
+		if controllerutil.AddFinalizer(&roleBinding, authnv1alpha1.RoleBindingFinalizer) {
+			if err := r.client.Update(ctx, &roleBinding); err != nil {
+				log.Error(err, "ERROR: Failed to add finalizer to RoleBinding")
+				return ctrl.Result{}, err
+			}
+			log.V(1).Info("DEBUG: Added finalizer to RoleBinding")
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// role binding is being deleted; fetch the namespace to determine if it's terminating
+	var namespace corev1.Namespace
+	err = r.client.Get(ctx, types.NamespacedName{Name: roleBinding.Namespace}, &namespace)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			// namespace is already deleted, nothing to do
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, err
+	}
+
+	// If namespace is not terminating, we can safely remove the finalizer. it must mean the removal was triggered by another reason and it would get recreated if needed
+	namespaceIsTerminating := !namespace.GetDeletionTimestamp().IsZero() && namespace.Status.Phase == corev1.NamespaceTerminating
+	if !namespaceIsTerminating {
+		if controllerutil.RemoveFinalizer(&roleBinding, authnv1alpha1.RoleBindingFinalizer) {
+			if err := r.client.Update(ctx, &roleBinding); err != nil {
+				log.Error(err, "ERROR: Failed to remove finalizer from RoleBinding")
+				return ctrl.Result{}, err
+			}
+			log.V(1).Info("DEBUG: Removed finalizer from RoleBinding")
+			return ctrl.Result{}, nil
+		}
+	}
+
+	// if namespace is being terminated, we need to check if there are any remaining resources and make sure the last resources to get removed are the RoleBinings.
+	// this is to allow users to make changes (like removing finalizers on other things) that otherwise would prevent proper cleanup
+
+	// Check if namespace has any remaining resources before cleanup
+	blockingResources, err := r.getNamespacedBlockingResources(ctx, namespace.Name)
+	if err != nil {
+		log.Error(err, "ERROR: Failed to check if namespace has resources", "namespace", namespace.Name)
+		return ctrl.Result{}, err
+	}
+	terminationAllowed := len(blockingResources) == 0
+
+	if !terminationAllowed {
+		log.V(1).Info("DEBUG: Terminating namespace still has resources - NOT removing RoleBinding finalizer", "namespace", namespace.Name)
+		// Log detailed information about blocking resources
+		for _, br := range blockingResources {
+			resourceType := br.ResourceType
+			if br.APIGroup != "" {
+				resourceType = fmt.Sprintf("%s.%s", br.ResourceType, br.APIGroup)
+			}
+			log.V(1).Info("DEBUG: Blocking resource found", "namespace", namespace.Name, "resourceType", resourceType, "count", br.Count, "names", br.Names)
+		}
+
+		conditions.MarkTrue(
+			conditions.NewNamespaceWrapper(&namespace),
+			authnv1alpha1.NamespaceTerminationBlockedCondition,
+			0,
+			authnv1alpha1.NamespaceTerminationBlockedReason,
+			conditions.ConditionMessage(fmt.Sprintf("%s: %s", authnv1alpha1.NamespaceTerminationBlockedMessage, formatBlockingResourcesMessage(blockingResources))),
+		)
+		// try to update namespace status with blocking resources information. Log error but continue
+		if err := r.client.Status().Update(ctx, &namespace); err != nil {
+			log.Error(err, "ERROR: Failed to update Namespace status with blocking resources information", "namespace", namespace.Name)
+		}
+
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+	}
+
+	// No resources found - safe to remove finalizer from RoleBinding
+	bindDefinition, err := r.getOwningBindDefinition(ctx, roleBinding.OwnerReferences)
+	if err != nil {
+		log.Error(err, "ERROR: Failed to get owning BindDefinition for RoleBinding", "roleBindingName", roleBinding.Name, "namespace", namespace.Name)
+		return ctrl.Result{}, err
+	}
+	log = log.WithValues("bindDefinitionName", bindDefinition.Name)
+
+	log.V(1).Info("DEBUG: Terminating namespace has no more resources - proceeding to remove RoleBinding finalizers")
+	if controllerutil.RemoveFinalizer(&roleBinding, authnv1alpha1.RoleBindingFinalizer) {
+		log.V(2).Info("DEBUG: Removing finalizer from RoleBinding in terminating namespace")
+		if err := r.client.Update(ctx, &roleBinding); err != nil {
+			log.Error(err, "ERROR: Failed to remove finalizer from RoleBinding", "roleBindingName", roleBinding.Name, "roleBinding", roleBinding.Name, "namespace", namespace.Name)
+			return ctrl.Result{}, err
+		}
+		r.recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "FinalizerRemoved", "Removed finalizer from RoleBinding %s in terminating namespace %s", roleBinding.Name, namespace.Name)
+		log.V(1).Info("DEBUG: Successfully removed finalizer from RoleBinding in terminating namespace")
+	} else {
+		log.V(3).Info("DEBUG: RoleBinding does not have finalizer", "bindDefinitionName")
+	}
+
+	conditions.MarkFalse(
+		conditions.NewNamespaceWrapper(&namespace),
+		authnv1alpha1.NamespaceTerminationBlockedCondition,
+		0,
+		authnv1alpha1.NamespaceTerminationAllowedReason,
+		authnv1alpha1.NamespaceTerminationAllowedMessage,
+	)
+	// try to update namespace status with blocking resources information. Log error but continue
+	if err := r.client.Status().Update(ctx, &namespace); err != nil {
+		log.Error(err, "ERROR: Failed to update Namespace status with blocking resources information", "namespace", namespace.Name)
+	}
+
+	log.V(2).Info("DEBUG: reconcileTerminatingNamespaces completed")
+	return ctrl.Result{}, nil
+}

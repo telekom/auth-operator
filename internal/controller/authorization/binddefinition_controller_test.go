@@ -57,9 +57,9 @@ var _ = Describe("BindDefinition Controller", func() {
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
 			controllerReconciler := &bindDefinitionReconciler{
-				Client:   k8sClient,
-				Scheme:   k8sClient.Scheme(),
-				Recorder: recorder,
+				client:   k8sClient,
+				scheme:   k8sClient.Scheme(),
+				recorder: recorder,
 			}
 			go func() {
 				for event := range recorder.Events {
@@ -76,7 +76,7 @@ var _ = Describe("BindDefinition Controller", func() {
 
 	Context("Blocking resources detection and logging", func() {
 		It("should correctly format blocking resources message for single resource type", func() {
-			blockingResources := []ResourceBlocking{
+			blockingResources := []namespaceDeletionResourceBlocking{
 				{
 					ResourceType: "pods",
 					APIGroup:     "",
@@ -91,7 +91,7 @@ var _ = Describe("BindDefinition Controller", func() {
 		})
 
 		It("should correctly format blocking resources message for multiple resource types", func() {
-			blockingResources := []ResourceBlocking{
+			blockingResources := []namespaceDeletionResourceBlocking{
 				{
 					ResourceType: "pods",
 					APIGroup:     "",
@@ -114,7 +114,7 @@ var _ = Describe("BindDefinition Controller", func() {
 		})
 
 		It("should include API group in resource type when present", func() {
-			blockingResources := []ResourceBlocking{
+			blockingResources := []namespaceDeletionResourceBlocking{
 				{
 					ResourceType: "deployments",
 					APIGroup:     "apps",
@@ -130,7 +130,7 @@ var _ = Describe("BindDefinition Controller", func() {
 
 	Context("ResourceBlocking type", func() {
 		It("should create ResourceBlocking with correct fields", func() {
-			rb := ResourceBlocking{
+			rb := namespaceDeletionResourceBlocking{
 				ResourceType: "pods",
 				APIGroup:     "core",
 				Count:        3,
@@ -145,7 +145,7 @@ var _ = Describe("BindDefinition Controller", func() {
 		})
 
 		It("should handle empty Names slice", func() {
-			rb := ResourceBlocking{
+			rb := namespaceDeletionResourceBlocking{
 				ResourceType: "pods",
 				APIGroup:     "",
 				Count:        0,
@@ -157,7 +157,7 @@ var _ = Describe("BindDefinition Controller", func() {
 		})
 
 		It("should handle ResourceBlocking with empty APIGroup", func() {
-			rb := ResourceBlocking{
+			rb := namespaceDeletionResourceBlocking{
 				ResourceType: "pods",
 				APIGroup:     "",
 				Count:        1,
@@ -169,7 +169,7 @@ var _ = Describe("BindDefinition Controller", func() {
 		})
 
 		It("should handle ResourceBlocking with complex APIGroup", func() {
-			rb := ResourceBlocking{
+			rb := namespaceDeletionResourceBlocking{
 				ResourceType: "customresources",
 				APIGroup:     "custom.example.com",
 				Count:        2,
@@ -182,14 +182,8 @@ var _ = Describe("BindDefinition Controller", func() {
 	})
 
 	Context("Message formatting edge cases", func() {
-		It("should format empty blocking resources list", func() {
-			blockingResources := []ResourceBlocking{}
-			message := formatBlockingResourcesMessage(blockingResources)
-			Expect(message).NotTo(BeEmpty())
-		})
-
 		It("should handle large resource names", func() {
-			blockingResources := []ResourceBlocking{
+			blockingResources := []namespaceDeletionResourceBlocking{
 				{
 					ResourceType: "pods",
 					APIGroup:     "",
@@ -208,7 +202,7 @@ var _ = Describe("BindDefinition Controller", func() {
 				names = append(names, fmt.Sprintf("pod-%d", i))
 			}
 
-			blockingResources := []ResourceBlocking{
+			blockingResources := []namespaceDeletionResourceBlocking{
 				{
 					ResourceType: "pods",
 					APIGroup:     "",
@@ -223,7 +217,7 @@ var _ = Describe("BindDefinition Controller", func() {
 		})
 
 		It("should format many different resource types", func() {
-			blockingResources := []ResourceBlocking{
+			blockingResources := []namespaceDeletionResourceBlocking{
 				{
 					ResourceType: "pods",
 					APIGroup:     "",
@@ -258,7 +252,7 @@ var _ = Describe("BindDefinition Controller", func() {
 		})
 
 		It("should handle single resource in many types", func() {
-			blockingResources := []ResourceBlocking{
+			blockingResources := []namespaceDeletionResourceBlocking{
 				{
 					ResourceType: "pod",
 					APIGroup:     "",
@@ -279,7 +273,7 @@ var _ = Describe("BindDefinition Controller", func() {
 		})
 
 		It("should include count in message", func() {
-			blockingResources := []ResourceBlocking{
+			blockingResources := []namespaceDeletionResourceBlocking{
 				{
 					ResourceType: "pods",
 					APIGroup:     "",
@@ -293,7 +287,7 @@ var _ = Describe("BindDefinition Controller", func() {
 		})
 
 		It("should handle special characters in resource names", func() {
-			blockingResources := []ResourceBlocking{
+			blockingResources := []namespaceDeletionResourceBlocking{
 				{
 					ResourceType: "pods",
 					APIGroup:     "",
@@ -309,14 +303,14 @@ var _ = Describe("BindDefinition Controller", func() {
 
 	Context("ResourceBlocking comparison and validation", func() {
 		It("should compare two ResourceBlocking structs correctly", func() {
-			rb1 := ResourceBlocking{
+			rb1 := namespaceDeletionResourceBlocking{
 				ResourceType: "pods",
 				APIGroup:     "",
 				Count:        1,
 				Names:        []string{"test-pod"},
 			}
 
-			rb2 := ResourceBlocking{
+			rb2 := namespaceDeletionResourceBlocking{
 				ResourceType: "pods",
 				APIGroup:     "",
 				Count:        1,
@@ -329,14 +323,14 @@ var _ = Describe("BindDefinition Controller", func() {
 		})
 
 		It("should detect difference in ResourceType", func() {
-			rb1 := ResourceBlocking{
+			rb1 := namespaceDeletionResourceBlocking{
 				ResourceType: "pods",
 				APIGroup:     "",
 				Count:        1,
 				Names:        []string{"test"},
 			}
 
-			rb2 := ResourceBlocking{
+			rb2 := namespaceDeletionResourceBlocking{
 				ResourceType: "services",
 				APIGroup:     "",
 				Count:        1,
@@ -347,14 +341,14 @@ var _ = Describe("BindDefinition Controller", func() {
 		})
 
 		It("should detect difference in APIGroup", func() {
-			rb1 := ResourceBlocking{
+			rb1 := namespaceDeletionResourceBlocking{
 				ResourceType: "pods",
 				APIGroup:     "",
 				Count:        1,
 				Names:        []string{"test"},
 			}
 
-			rb2 := ResourceBlocking{
+			rb2 := namespaceDeletionResourceBlocking{
 				ResourceType: "pods",
 				APIGroup:     "apps",
 				Count:        1,
@@ -365,14 +359,14 @@ var _ = Describe("BindDefinition Controller", func() {
 		})
 
 		It("should detect difference in Count", func() {
-			rb1 := ResourceBlocking{
+			rb1 := namespaceDeletionResourceBlocking{
 				ResourceType: "pods",
 				APIGroup:     "",
 				Count:        1,
 				Names:        []string{"test"},
 			}
 
-			rb2 := ResourceBlocking{
+			rb2 := namespaceDeletionResourceBlocking{
 				ResourceType: "pods",
 				APIGroup:     "",
 				Count:        5,

@@ -1,9 +1,6 @@
 resources:
 - manifests.yaml
 - service.yaml
-- serviceaccount.yaml
-- clusterrolebinding.yaml
-- clusterrole.yaml
 - secret.yaml
 - deployment.yaml
 

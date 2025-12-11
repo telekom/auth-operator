@@ -14,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	authorizationv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1"
+	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/discovery"
 )
 
 var _ = Describe("RoleDefinition Controller", func() {
@@ -59,7 +60,7 @@ var _ = Describe("RoleDefinition Controller", func() {
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
 			ctx := log.IntoContext(context.Background(), logger)
-			controllerReconciler, err := NewRoleDefinitionReconciler(cfg, scheme.Scheme, recorder)
+			controllerReconciler, err := NewRoleDefinitionReconciler(cfg, scheme.Scheme, recorder, discovery.NewResourceTracker(scheme.Scheme, cfg))
 			Expect(err).NotTo(HaveOccurred())
 			go func() {
 				for event := range recorder.Events {

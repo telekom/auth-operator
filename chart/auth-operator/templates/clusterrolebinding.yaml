@@ -1,14 +1,14 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ include "auth-operator.fullname" . }}-webhook-server-clusterrolebinding
+  name: {{ include "auth-operator.fullname" . }}
   labels:
   {{- include "auth-operator.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: '{{ include "auth-operator.fullname" . }}-webhook-server-clusterrole'
+  name: '{{ include "auth-operator.fullname" . }}'
 subjects:
 - kind: ServiceAccount
-  name: '{{ include "auth-operator.fullname" . }}-webhook-server'
+  name: '{{ include "auth-operator.fullname" . }}'
   namespace: '{{ .Release.Namespace }}'

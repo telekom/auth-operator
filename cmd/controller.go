@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/discovery"
 	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/idpclient"
 
 	authenticationcontroller "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/internal/controller/authentication"
@@ -21,11 +22,11 @@ import (
 )
 
 var (
-	enableLeaderElection           bool
-	enableAuthProviderReconciler   bool
-	enableBindDefinitionReconciler bool
-	enableRoleDefinitionReconciler bool
-	authProviderRequeueInterval    time.Duration
+	enableLeaderElection        bool
+	authProviderConcurrency     int
+	bindDefinitionConcurrency   int
+	roleDefinitionConcurrency   int
+	authProviderRequeueInterval time.Duration
 )
 
 // controllerCmd represents the controller command
@@ -42,9 +43,9 @@ to quickly create a Cobra application.`,
 		setupLog.Info("starting controller")
 		setupLog.Info("controller configuration",
 			"enableLeaderElection", enableLeaderElection,
-			"enableAuthProviderReconciler", enableAuthProviderReconciler,
-			"enableBindDefinitionReconciler", enableBindDefinitionReconciler,
-			"enableRoleDefinitionReconciler", enableRoleDefinitionReconciler,
+			"authProviderConcurrency", authProviderConcurrency,
+			"bindDefinitionConcurrency", bindDefinitionConcurrency,
+			"roleDefinitionConcurrency", roleDefinitionConcurrency,
 			"authProviderRequeueInterval", authProviderRequeueInterval,
 			"namespace", namespace,
 		)
@@ -62,25 +63,38 @@ to quickly create a Cobra application.`,
 			return fmt.Errorf("unable to start manager. err: %s", err)
 		}
 
-		if enableRoleDefinitionReconciler {
-			roleDefinitionController, err := authorizationcontroller.NewRoleDefinitionReconciler(mgr.GetConfig(), mgr.GetScheme(), mgr.GetEventRecorderFor("RoleDefinitionReconciler"))
+		resourceTracker := discovery.NewResourceTracker(scheme, mgr.GetConfig())
+		if err := mgr.Add(resourceTracker); err != nil {
+			return err
+		}
+
+		if roleDefinitionConcurrency > 0 {
+			roleDefinitionController, err := authorizationcontroller.NewRoleDefinitionReconciler(
+				mgr.GetConfig(),
+				mgr.GetScheme(),
+				mgr.GetEventRecorderFor("RoleDefinitionReconciler"),
+				resourceTracker)
 			if err != nil {
 				return fmt.Errorf("unable to create RoleDefinition reconciler: %w", err)
 			}
 
-			if err := roleDefinitionController.SetupWithManager(ctx, mgr); err != nil {
+			if err := roleDefinitionController.SetupWithManager(ctx, mgr, roleDefinitionConcurrency); err != nil {
 				return fmt.Errorf("unable to setup controller RoleDefinition with manager: %w", err)
 			}
 		} else {
 			setupLog.Info("RoleDefinition reconciler is disabled")
 		}
 
-		if enableBindDefinitionReconciler {
-			bindDefinitionController, err := authorizationcontroller.NewBindDefinitionReconciler(mgr.GetConfig(), mgr.GetScheme(), mgr.GetEventRecorderFor("BindDefinitionReconciler"))
+		if bindDefinitionConcurrency > 0 {
+			bindDefinitionController, err := authorizationcontroller.NewBindDefinitionReconciler(
+				mgr.GetConfig(),
+				mgr.GetScheme(),
+				mgr.GetEventRecorderFor("BindDefinitionReconciler"),
+				resourceTracker)
 			if err != nil {
 				return fmt.Errorf("unable to create BindDefinition reconciler: %w", err)
 			}
-			if err := bindDefinitionController.SetupWithManager(mgr); err != nil {
+			if err := bindDefinitionController.SetupWithManager(mgr, bindDefinitionConcurrency); err != nil {
 				return fmt.Errorf("unable to setup controller BindDefinition with manager: %w", err)
 			}
 		} else {
@@ -90,7 +104,7 @@ to quickly create a Cobra application.`,
 		// Setup an IDP client for AuthProviderReconciler
 		// Needs refactoring -> transition to interface and define method group which
 		// must be satisfied by all IDP clients to make this as generic as possible
-		if enableAuthProviderReconciler {
+		if authProviderConcurrency > 0 {
 			idpUrl := os.Getenv("IDP_URL")
 			if idpUrl == "" {
 				return fmt.Errorf("IDP_URL environment variable must be set")
@@ -119,7 +133,7 @@ to quickly create a Cobra application.`,
 				IDPClient:       idpClient,
 				Recorder:        mgr.GetEventRecorderFor("AuthProviderReconciler"),
 				RequeueInterval: authProviderRequeueInterval,
-			}).SetupWithManager(mgr); err != nil {
+			}).SetupWithManager(mgr, authProviderConcurrency); err != nil {
 				return fmt.Errorf("unable to create controller AuthProvider: %w", err)
 			}
 		} else {
@@ -140,8 +154,8 @@ func init() {
 	rootCmd.AddCommand(controllerCmd)
 
 	controllerCmd.Flags().BoolVar(&enableLeaderElection, "leader-elect", false, "Enable leader election for controller manager. "+"Enabling this will ensure there is only one active controller manager.")
-	controllerCmd.Flags().BoolVar(&enableAuthProviderReconciler, "enable-authprovider-reconciler", true, "Enable or disable AuthProvider reconciler. Enabled by default.")
-	controllerCmd.Flags().BoolVar(&enableBindDefinitionReconciler, "enable-binddefinition-reconciler", true, "Enable or disable BindDefinition reconciler. Enabled by default.")
-	controllerCmd.Flags().BoolVar(&enableRoleDefinitionReconciler, "enable-roledefinition-reconciler", true, "Enable or disable RoleDefinition reconciler. Enabled by default.")
+	controllerCmd.Flags().IntVar(&authProviderConcurrency, "authprovider-concurrency", 5, "Number of concurrent workers for AuthProvider reconciler. Default is 5. Use 0 to disable the reconciler.")
+	controllerCmd.Flags().IntVar(&bindDefinitionConcurrency, "binddefinition-concurrency", 5, "Number of concurrent workers for BindDefinition reconciler. Default is 5. Use 0 to disable the reconciler.")
+	controllerCmd.Flags().IntVar(&roleDefinitionConcurrency, "roledefinition-concurrency", 5, "Number of concurrent workers for RoleDefinition reconciler. Default is 5. Use 0 to disable the reconciler.")
 	controllerCmd.Flags().DurationVar(&authProviderRequeueInterval, "auth-provider-requeue-interval", time.Minute*5, "Interval in which the AuthProvider reconciler requeues AuthProviders for reconciliation. Default is 5 minutes.")
 }

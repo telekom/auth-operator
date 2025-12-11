@@ -66,25 +66,27 @@ func (r APIResourcesByGroupVersion) Equals(other APIResourcesByGroupVersion) boo
 	return true
 }
 
+type signalFunc func() error
+
 // ResourceTracker tracks and caches the available API resources in the Kubernetes cluster.
 type ResourceTracker struct {
-	started    bool
-	rateLimit  rate.Sometimes
-	scheme     *runtime.Scheme
-	config     *rest.Config
-	mutex      sync.RWMutex
-	cache      APIResourcesByGroupVersion
-	signalFunc func() error
-	crdsUUIDs  map[string]struct{}
+	started     bool
+	rateLimit   rate.Sometimes
+	scheme      *runtime.Scheme
+	config      *rest.Config
+	mutex       sync.RWMutex
+	cache       APIResourcesByGroupVersion
+	signalFuncs []signalFunc
+	crdsUUIDs   map[string]struct{}
 }
 
 // NewResourceTracker creates a new ResourceTracker.
 // The signalFunc is called whenever the API resources are updated (no information about what triggers the update is provided).
-func NewResourceTracker(scheme *runtime.Scheme, config *rest.Config, signalFunc func() error) *ResourceTracker {
+func NewResourceTracker(scheme *runtime.Scheme, config *rest.Config) *ResourceTracker {
 	return &ResourceTracker{
-		config:     config,
-		scheme:     scheme,
-		signalFunc: signalFunc,
+		config:      config,
+		scheme:      scheme,
+		signalFuncs: []signalFunc{},
 
 		// known CRD UUIDs to filter ADDED events in the watch
 		crdsUUIDs: make(map[string]struct{}),
@@ -98,6 +100,11 @@ func NewResourceTracker(scheme *runtime.Scheme, config *rest.Config, signalFunc 
 		// RWMutex to protect access to the cache
 		mutex: sync.RWMutex{},
 	}
+}
+
+// AddSignalFunc adds a signal function to be called when API resources are updated.
+func (r *ResourceTracker) AddSignalFunc(f signalFunc) {
+	r.signalFuncs = append(r.signalFuncs, f)
 }
 
 // NeedLeaderElection implements LeaderElectionRunnable and indicates that it does not need leader election.
@@ -173,9 +180,12 @@ func (r *ResourceTracker) collectAndNotify(ctx context.Context) func() {
 		if !changed {
 			return
 		}
-		if err := r.signalFunc(); err != nil {
-			logger.Error(err, "ERROR: Failed to send signal after API resource collection")
-			return
+		for _, f := range r.signalFuncs {
+			err := f()
+			if err != nil {
+				logger.Error(err, "ERROR: Failed to send signal after API resource collection")
+				continue
+			}
 		}
 		logger.Info("DEBUG: Successfully sent signal after API resource collection")
 	}

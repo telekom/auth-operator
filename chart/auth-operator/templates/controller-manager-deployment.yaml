@@ -23,9 +23,9 @@ spec:
       - args: 
         - controller
         - --leader-elect
-        - --enable-authprovider-reconciler=true
-        - --enable-binddefinition-reconciler=true
-        - --enable-roledefinition-reconciler=true
+        - --binddefinition-concurrency=10
+        - --roledefinition-concurrency=10
+        - --authprovider-concurrency=2
         - --auth-provider-requeue-interval=5m
         command:
         - /auth-operator
@@ -57,5 +57,5 @@ spec:
       imagePullSecrets: {{ .Values.imagePullSecrets | default list | toJson }}
       securityContext: 
         runAsNonRoot: true
-      serviceAccountName: {{ include "auth-operator.fullname" . }}-controller-manager
+      serviceAccountName: {{ include "auth-operator.fullname" . }}
       terminationGracePeriodSeconds: 10

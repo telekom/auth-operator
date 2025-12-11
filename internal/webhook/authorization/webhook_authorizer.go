@@ -21,6 +21,8 @@ import (
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=webhookauthorizers,verbs=get;list;watch
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=webhookauthorizers/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
+
+// Authorizer implements an HTTP handler for SubjectAccessReview requests.
 type Authorizer struct {
 	Client client.Client
 	Log    logr.Logger

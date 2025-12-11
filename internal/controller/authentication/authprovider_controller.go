@@ -12,8 +12,10 @@ import (
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -354,9 +356,12 @@ func (r *AuthProviderReconciler) ensureGroupMemberAssignment(ctx context.Context
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *AuthProviderReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *AuthProviderReconciler) SetupWithManager(mgr ctrl.Manager, concurrency int) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&authenticationv1alpha1.AuthProvider{}).
+		WithOptions(controller.TypedOptions[reconcile.Request]{
+			MaxConcurrentReconciles: concurrency,
+		}).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		Complete(r)
 }

@@ -35,6 +35,16 @@ import (
 	helpers "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/helpers"
 )
 
+// +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=roledefinitions,verbs=get;list;watch;update;patch;delete
+// +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=roledefinitions/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,verbs=get;list;watch;create;update;patch;delete;escalate;bind
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch;create;update;patch;delete;escalate;bind
+// +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list;watch
+// +kubebuilder:rbac:groups=*,resources=*,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=events,verbs=*
+// +kubebuilder:rbac:groups="coordination.k8s.io",resources=leases,verbs=get;list;update;create;delete
+// +kubebuilder:rbac:groups="events.k8s.io",resources=events,verbs=*
+
 // roleDefinitionReconciler reconciles a RoleDefinition object
 type roleDefinitionReconciler struct {
 	client          client.WithWatch
@@ -44,10 +54,13 @@ type roleDefinitionReconciler struct {
 	trackerEvents   chan event.TypedGenericEvent[client.Object]
 }
 
-func NewRoleDefinitionReconciler(config *rest.Config, scheme *runtime.Scheme, recorder record.EventRecorder) (*roleDefinitionReconciler, error) {
+func NewRoleDefinitionReconciler(config *rest.Config, scheme *runtime.Scheme, recorder record.EventRecorder, resourceTracker *discovery.ResourceTracker) (*roleDefinitionReconciler, error) {
 	withWatch, err := client.NewWithWatch(config, client.Options{Scheme: scheme})
 	if err != nil {
 		return nil, fmt.Errorf("unable to create client with watch: %w", err)
+	}
+	if resourceTracker == nil {
+		return nil, fmt.Errorf("resourceTracker cannot be nil")
 	}
 	trackerEvents := make(chan event.TypedGenericEvent[client.Object], 100)
 	trackerCallback := func() error {
@@ -55,11 +68,13 @@ func NewRoleDefinitionReconciler(config *rest.Config, scheme *runtime.Scheme, re
 		trackerEvents <- event.TypedGenericEvent[client.Object]{}
 		return nil
 	}
+	resourceTracker.AddSignalFunc(trackerCallback)
+
 	return &roleDefinitionReconciler{
 		client:          withWatch,
 		scheme:          scheme,
 		recorder:        recorder,
-		resourceTracker: discovery.NewResourceTracker(scheme, config, trackerCallback),
+		resourceTracker: resourceTracker,
 		trackerEvents:   trackerEvents,
 	}, nil
 }
@@ -68,18 +83,14 @@ func NewRoleDefinitionReconciler(config *rest.Config, scheme *runtime.Scheme, re
 // Used to watch for CRD creation events https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/handler#example-EnqueueRequestsFromMapFunc
 // Used a predicate to ignore deletes of CRD, as this can be done in a regular
 // reconcile requeue and does not require immediate action from controller
-func (r *roleDefinitionReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager) error {
-	if err := mgr.Add(r.resourceTracker); err != nil {
-		return err
-	}
-
+func (r *roleDefinitionReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, concurrency int) error {
 	// Channel to watch for CRD events to trigger re-reconcile of all RoleDefinitions
 	crdTrackerChannel := source.Channel(r.trackerEvents, handler.EnqueueRequestsFromMapFunc(r.queueAll()))
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&authnv1alpha1.RoleDefinition{}).
 		WatchesRawSource(crdTrackerChannel).
-		WithOptions(controller.TypedOptions[reconcile.Request]{}).
+		WithOptions(controller.TypedOptions[reconcile.Request]{MaxConcurrentReconciles: concurrency}).
 		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		Complete(r)
 }
@@ -113,13 +124,6 @@ func (r *roleDefinitionReconciler) queueAll() handler.MapFunc {
 	}
 }
 
-// +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=roledefinitions,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=roledefinitions/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,verbs=get;list;watch;create;update;patch;delete;escalate
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch;create;update;patch;delete;escalate
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list;watch
 func (r *roleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 	log.V(1).Info("DEBUG: Starting RoleDefinition reconciliation", "roleDefinitionName", req.Name, "namespace", req.Namespace)

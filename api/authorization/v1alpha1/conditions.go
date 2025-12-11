@@ -18,6 +18,15 @@ const (
 )
 
 const (
+	NamespaceTerminationBlockedCondition AuthZConditionType    = "AuthOperatorNamespaceTerminationBlocked"
+	NamespaceTerminationBlockedReason    AuthZConditionReason  = "AuthOperatorPreventedTermination"
+	NamespaceTerminationBlockedMessage   AuthZConditionMessage = "Auth-operator blocked role bindings termination due to remaining resources"
+
+	NamespaceTerminationAllowedReason  AuthZConditionReason  = "AuthOperatorResourcesCleanedUp"
+	NamespaceTerminationAllowedMessage AuthZConditionMessage = "All role bindings created by auth-operator have been cleaned up"
+)
+
+const (
 	OwnerRefCondition AuthZConditionType    = "OwnerRef"
 	OwnerRefReason    AuthZConditionReason  = "ResourceOwnership"
 	OwnerRefMessage   AuthZConditionMessage = "Set owner reference to child resource"

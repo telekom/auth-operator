@@ -12,7 +12,7 @@ import (
 
 	authorizationv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1"
 	authorizationwebhook "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/internal/webhook/authorization"
-	"k8s.io/apimachinery/pkg/types"
+	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/internal/webhook/certrotator"
 
 	"github.com/open-policy-agent/cert-controller/pkg/rotator"
 	"github.com/spf13/cobra"
@@ -33,11 +33,6 @@ var (
 	certRotationValidatingWebhooks []string
 	certRotationMutatingWebhooks   []string
 	enableTDGMigration             bool
-)
-
-const (
-	caName         = "cert"
-	caOrganization = "t-caas"
 )
 
 // webhookCmd represents the webhook command
@@ -105,10 +100,32 @@ to quickly create a Cobra application.`,
 			ready = true
 		}()
 
+		webhooks := []rotator.WebhookInfo{}
+		for _, wh := range certRotationMutatingWebhooks {
+			webhooks = append(webhooks, rotator.WebhookInfo{
+				Type: rotator.Mutating,
+				Name: wh,
+			})
+		}
+		for _, wh := range certRotationValidatingWebhooks {
+			webhooks = append(webhooks, rotator.WebhookInfo{
+				Type: rotator.Validating,
+				Name: wh,
+			})
+		}
+
 		// The cert rotator will notify when we can start the webhook
 		// and the metric endpoint
 		if !disableCertRotation {
-			if err := enableCertRotation(mgr, startListeners); err != nil {
+			if err := certrotator.Enable(
+				mgr,
+				namespace,
+				webhookCertsDir,
+				certRotationDNSName,
+				certRotationSecretName,
+				webhooks,
+				startListeners,
+			); err != nil {
 				return fmt.Errorf("unable to set up cert rotation. err: %s", err)
 			}
 		} else {
@@ -156,49 +173,6 @@ func configureWebhooks(mgr manager.Manager) error {
 	}
 	mgr.GetWebhookServer().Register("/validate-v1-namespace", &webhook.Admission{Handler: namespaceValidator})
 
-	return nil
-}
-
-func enableCertRotation(mgr manager.Manager, notifyFinished chan struct{}) error {
-	if namespace == "" {
-		return errors.New("namespace is undefined. can't enable cert rotator")
-	}
-	if webhookCertsDir == "" {
-		return errors.New("certs-dir is undefined. can't enable cert rotator")
-	}
-	if caName == "" {
-		return errors.New("caName is undefined. can't enable cert rotator")
-	}
-
-	webhooks := []rotator.WebhookInfo{}
-	for _, validatingWebhook := range certRotationValidatingWebhooks {
-		webhooks = append(webhooks, rotator.WebhookInfo{
-			Name: validatingWebhook,
-			Type: rotator.Validating,
-		})
-	}
-
-	for _, mutatingWebhook := range certRotationMutatingWebhooks {
-		webhooks = append(webhooks, rotator.WebhookInfo{
-			Name: mutatingWebhook,
-			Type: rotator.Mutating,
-		})
-	}
-
-	err := rotator.AddRotator(mgr, &rotator.CertRotator{
-		SecretKey:              types.NamespacedName{Namespace: namespace, Name: certRotationSecretName},
-		RequireLeaderElection:  true,
-		RestartOnSecretRefresh: true,
-		CertDir:                webhookCertsDir,
-		CAName:                 caName,
-		CAOrganization:         caOrganization,
-		DNSName:                certRotationDNSName,
-		IsReady:                notifyFinished,
-		Webhooks:               webhooks,
-	})
-	if err != nil {
-		return err
-	}
 	return nil
 }
 

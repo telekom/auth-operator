@@ -72,7 +72,7 @@ spec:
       imagePullSecrets: {{ .Values.imagePullSecrets | default list | toJson }}
       securityContext: 
           runAsNonRoot: true
-      serviceAccountName: {{ include "auth-operator.fullname" . }}-webhook-server
+      serviceAccountName: {{ include "auth-operator.fullname" . }}
       terminationGracePeriodSeconds: 10
       volumes:
       - name: cert

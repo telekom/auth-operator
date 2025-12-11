@@ -6,6 +6,8 @@ image:
   tag: latest
 imagePullSecrets: []
 kubernetesClusterDomain: cluster.local
+serviceAccount:
+  annotations: {}
 controller:
   resources:
     limits:
@@ -15,13 +17,9 @@ controller:
       cpu: 10m
       memory: 64Mi
   replicas: 1
-  serviceAccount:
-    annotations: {}
 webhookServer:
   replicas: 1
   tdgMigration: "false"
-  serviceAccount:
-    annotations: {}
   resources:
     limits:
       cpu: 150m

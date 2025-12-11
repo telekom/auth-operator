@@ -15,10 +15,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
-var nsMutatorLog = logf.Log.WithName("namespace-mutator")
-
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions,verbs=get;list;watch
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions/status,verbs=get;update;patch
+
+var nsMutatorLog = logf.Log.WithName("namespace-mutator")
+
 type NamespaceMutator struct {
 	Client       client.Client
 	Decoder      admission.Decoder
