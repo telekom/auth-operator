@@ -78,9 +78,34 @@ rules:
   - list
   - watch
 - apiGroups:
+  - authentication.t-caas.telekom.com
+  resources:
+  - authproviders
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - authentication.t-caas.telekom.com
+  resources:
+  - authproviders/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - authentication.t-caas.telekom.com
+  resources:
+  - authproviders/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
   - authorization.t-caas.telekom.com
   resources:
   - binddefinitions
+  - roledefinitions
   verbs:
   - get
   - list
@@ -91,6 +116,7 @@ rules:
   - authorization.t-caas.telekom.com
   resources:
   - binddefinitions/finalizers
+  - roledefinitions/finalizers
   verbs:
   - update
 - apiGroups:
@@ -103,17 +129,6 @@ rules:
   - get
   - patch
   - update
-- apiGroups:
-  - authorization.t-caas.telekom.com
-  resources:
-  - roledefinitions
-  verbs:
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
 - apiGroups:
   - authorization.t-caas.telekom.com
   resources:

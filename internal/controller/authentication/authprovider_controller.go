@@ -23,6 +23,10 @@ import (
 	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/idpclient"
 )
 
+// +kubebuilder:rbac:groups=authentication.t-caas.telekom.com,resources=authproviders,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=authentication.t-caas.telekom.com,resources=authproviders/finalizers,verbs=update
+// +kubebuilder:rbac:groups=authentication.t-caas.telekom.com,resources=authproviders/status,verbs=get;update;patch
+
 const (
 	TenantGroupParent     = "M - T_CaaS_Tenant"
 	ThirdPartyGroupParent = "M - T_CaaS_Third_Party"
