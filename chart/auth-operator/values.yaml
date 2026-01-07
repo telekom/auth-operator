@@ -1,6 +1,3 @@
-authproviderSecrets:
-  apiToken: ""
-  idpUrl: ""
 image:
   repository: controller
   tag: latest

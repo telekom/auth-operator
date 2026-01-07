@@ -9,7 +9,6 @@ import (
 	"os"
 	"strings"
 
-	authenticationv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authentication/v1alpha1"
 	authorizationv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1"
 	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/system"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -37,8 +36,6 @@ func redactSensitiveFlags() map[string]string {
 	sensitiveFlags := map[string]bool{
 		"api-token":     true,
 		"API_TOKEN":     true,
-		"idp-url":       false, // IDP URL itself is not sensitive
-		"IDP_URL":       false,
 		"password":      true,
 		"secret":        true,
 		"token":         true,
@@ -129,6 +126,5 @@ func initScheme() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(authorizationv1alpha1.AddToScheme(scheme))
-	utilruntime.Must(authenticationv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(apiextensionsv1.AddToScheme(scheme))
 }

@@ -20,26 +20,13 @@ spec:
         kubectl.kubernetes.io/default-container: manager
     spec:
       containers:
-      - args: 
+      - args:
         - controller
         - --leader-elect
         - --binddefinition-concurrency=10
         - --roledefinition-concurrency=10
-        - --authprovider-concurrency=2
-        - --auth-provider-requeue-interval=5m
         command:
         - /auth-operator
-        env:
-        - name: IDP_URL
-          valueFrom:
-            secretKeyRef:
-              key: IDP_URL
-              name: {{ include "auth-operator.fullname" . }}-authprovider-secrets
-        - name: API_TOKEN
-          valueFrom:
-            secretKeyRef:
-              key: API_TOKEN
-              name: {{ include "auth-operator.fullname" . }}-authprovider-secrets
         image: {{ include "auth-operator.image" . }}
         livenessProbe:
           httpGet:
@@ -49,13 +36,13 @@ spec:
           periodSeconds: 20
         name: manager
         resources: {{- toYaml .Values.controller.resources | nindent 10 }}
-        securityContext: 
+        securityContext:
           allowPrivilegeEscalation: false
           capabilities:
             drop:
             - ALL
       imagePullSecrets: {{ .Values.imagePullSecrets | default list | toJson }}
-      securityContext: 
+      securityContext:
         runAsNonRoot: true
       serviceAccountName: {{ include "auth-operator.fullname" . }}
       terminationGracePeriodSeconds: 10

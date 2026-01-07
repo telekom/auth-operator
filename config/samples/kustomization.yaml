@@ -1,7 +1,6 @@
 ## Append samples of your project ##
 resources:
 - authorization_v1alpha1_roledefinition.yaml
-- authentication_v1alpha1_authprovider.yaml
 - authorization_v1alpha1_binddefinition.yaml
 - authorization_v1alpha1_webhookauthorizer.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

@@ -43,7 +43,7 @@ help: ## Display this help.
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	$(CONTROLLER_GEN) crd paths="./api/..." output:crd:artifacts:config=config/crd/bases
-	$(CONTROLLER_GEN) webhook paths=./internal/... rbac:roleName=manager-role	
+	$(CONTROLLER_GEN) webhook paths=./internal/... rbac:roleName=manager-role
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
@@ -148,7 +148,7 @@ export-images: drawio ## Export PNG images from a Draw.io diagram.
 
 .PHONY: docs
 docs: crd-ref-docs ## Generate markdown API reference into docs directory.
-	crd-ref-docs --source-path=api --config=docs/crd-ref-docs-config.yaml --renderer=markdown --output-mode=single --output-path=docs/generated/api-reference.md
+	${LOCALBIN}/crd-ref-docs --source-path=api --config=docs/crd-ref-docs-config.yaml --renderer=markdown --output-mode=single --output-path=docs/generated/api-reference.md
 
 
 ##@ Deployment
@@ -187,11 +187,11 @@ $(LOCALBIN):
 
 ## Tool Binaries
 KUBECTL ?= kubectl
-KUSTOMIZE ?= $(LOCALBIN)/kustomize-$(KUSTOMIZE_VERSION)
-CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen-$(CONTROLLER_TOOLS_VERSION)
-ENVTEST ?= $(LOCALBIN)/setup-envtest-$(ENVTEST_VERSION)
-GOLANGCI_LINT = $(LOCALBIN)/golangci-lint-$(GOLANGCI_LINT_VERSION)
-CRD_REF_DOCS = $(LOCALBIN)/crd-ref-docs-$(CRD_REF_DOCS_VERSION)
+KUSTOMIZE ?= $(LOCALBIN)/kustomize
+CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
+ENVTEST ?= $(LOCALBIN)/setup-envtest
+GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
+CRD_REF_DOCS = $(LOCALBIN)/crd-ref-docs
 MOCKGEN ?= $(LOCALBIN)/mockgen
 
 .PHONY: kustomize
@@ -238,6 +238,5 @@ set -e; \
 package=$(2)@$(3) ;\
 echo "Downloading $${package}" ;\
 GOBIN=$(LOCALBIN) go install $${package} ;\
-mv "$$(echo "$(1)" | sed "s/-$(3)$$//")" $(1) ;\
 }
 endef

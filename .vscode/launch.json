@@ -13,7 +13,6 @@
         "controller",
         "--leader-elect=false",
         "--verbosity=3",
-        "--enable-authprovider-reconciler=false",
         "--enable-binddefinition-reconciler=false",
         "--enable-roledefinition-reconciler=true",
       ],

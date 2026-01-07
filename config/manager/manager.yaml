@@ -65,21 +65,8 @@ spec:
             - --leader-elect
             - --binddefinition-concurrency=10
             - --roledefinition-concurrency=10
-            - --authprovider-concurrency=2
-            - --auth-provider-requeue-interval=5m
           image: controller:latest
           name: manager
-          env:
-            - name: IDP_URL
-              valueFrom:
-                secretKeyRef:
-                  name: authprovider-secrets
-                  key: IDP_URL
-            - name: API_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: authprovider-secrets
-                  key: API_TOKEN
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

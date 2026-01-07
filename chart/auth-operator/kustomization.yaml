@@ -1,7 +1,6 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-- crds/apiextensions.k8s.io_v1_customresourcedefinition_authproviders.authentication.t-caas.telekom.com.yaml
 - crds/apiextensions.k8s.io_v1_customresourcedefinition_binddefinitions.authorization.t-caas.telekom.com.yaml
 - crds/apiextensions.k8s.io_v1_customresourcedefinition_roledefinitions.authorization.t-caas.telekom.com.yaml
 - crds/apiextensions.k8s.io_v1_customresourcedefinition_webhookauthorizers.authorization.t-caas.telekom.com.yaml

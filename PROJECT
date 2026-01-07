@@ -33,14 +33,6 @@ resources:
     webhookVersion: v1
 - api:
     crdVersion: v1
-  controller: true
-  domain: t-caas.telekom.com
-  group: authentication
-  kind: AuthProvider
-  path: gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authentication/v1alpha1
-  version: v1alpha1
-- api:
-    crdVersion: v1
   domain: t-caas.telekom.com
   group: authorization
   kind: WebhookAuthorizer
