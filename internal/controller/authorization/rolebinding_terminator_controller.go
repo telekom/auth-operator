@@ -146,7 +146,7 @@ func namespaceHasResources(ctx context.Context, resourceTracker *discovery.Resou
 	var resourcesChecked, resourcesSkipped atomic.Int32
 
 	apiResources, err := resourceTracker.GetAPIResources()
-	if errors.Is(err, discovery.ResourceTrackerNotStartedError) {
+	if errors.Is(err, discovery.ErrResourceTrackerNotStarted) {
 		log.V(1).Info("DEBUG: ResourceTracker not started yet - requeuing reconciliation", "roleDefinitionName")
 		return nil, nil
 	}
@@ -306,7 +306,7 @@ func isOwnedByBindDefinition(ownerReferences []metav1.OwnerReference) bool {
 
 func (r *roleBindingTerminator) getOwningBindDefinition(ctx context.Context, ownerReferences []metav1.OwnerReference) (*authnv1alpha1.BindDefinition, error) {
 	for _, ownerRef := range ownerReferences {
-		if !(ownerRef.Kind == "BindDefinition" && ownerRef.APIVersion == authnv1alpha1.GroupVersion.String()) {
+		if ownerRef.Kind != "BindDefinition" || ownerRef.APIVersion != authnv1alpha1.GroupVersion.String() {
 			continue
 		}
 		bindDefinition := &authnv1alpha1.BindDefinition{}

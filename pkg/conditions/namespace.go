@@ -21,8 +21,8 @@ func (nw *namespaceWrapper) GetConditions() []metav1.Condition {
 		return nil
 	}
 
-	result := make([]metav1.Condition, len(nw.Namespace.Status.Conditions))
-	for i, c := range nw.Namespace.Status.Conditions {
+	result := make([]metav1.Condition, len(nw.Status.Conditions))
+	for i, c := range nw.Status.Conditions {
 		result[i] = metav1.Condition{
 			Type:               string(c.Type),
 			Status:             metav1.ConditionStatus(c.Status),

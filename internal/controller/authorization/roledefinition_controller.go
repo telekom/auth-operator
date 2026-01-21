@@ -228,7 +228,7 @@ func (r *roleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 	apiResources, err := r.resourceTracker.GetAPIResources()
-	if errors.Is(err, discovery.ResourceTrackerNotStartedError) {
+	if errors.Is(err, discovery.ErrResourceTrackerNotStarted) {
 		log.V(1).Info("DEBUG: ResourceTracker not started yet - requeuing reconciliation", "roleDefinitionName", roleDefinition.Name)
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
@@ -414,20 +414,7 @@ func (r *roleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			log.Error(err, "ERROR: Failed to update status after role update", "roleDefinitionName", roleDefinition.Name)
 			return ctrl.Result{}, err
 		}
-		log.V(1).Info("DEBUG: Role updated successfully", "roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
-
-		conditions.MarkTrue(roleDefinition, authnv1alpha1.UpdateCondition, roleDefinition.Generation, authnv1alpha1.UpdateReason, authnv1alpha1.UpdateMessage)
-		conditions.Delete(roleDefinition, authnv1alpha1.CreateCondition)
-		err = r.client.Status().Update(ctx, roleDefinition)
-		if err != nil {
-			log.Error(err, "ERROR: Failed to update status after role update", "roleDefinitionName", roleDefinition.Name)
-			return ctrl.Result{}, err
-		}
 		r.recorder.Eventf(roleDefinition, corev1.EventTypeNormal, "Update", "Updated target resource %s %s", roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetName)
-
-		//for _, change := range changes {
-		//	r.Recorder.Eventf(existingRole, corev1.EventTypeNormal, "RBACUpdate", "Updating RBAC rules for %s - %s", existingRole.GetName(), change)
-		//}
 	} else {
 		log.V(3).Info("DEBUG: Role rules already up-to-date - no update needed", "roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
 	}
@@ -437,20 +424,17 @@ func (r *roleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 }
 
 func (r *roleDefinitionReconciler) filterAPIResourcesForRoleDefinition(
-	ctx context.Context,
+	_ context.Context,
 	roleDefinition *authnv1alpha1.RoleDefinition,
 	apiResources discovery.APIResourcesByGroupVersion,
 ) (map[string]*rbacv1.PolicyRule, error) {
-	log := log.FromContext(ctx)
-
 	rulesByAPIGroupAndVerbs := make(map[string]*rbacv1.PolicyRule)
 
 	// Filter API Resources based on RoleDefinition spec
 	for gv, apiResources := range apiResources {
 		groupVersion, err := schema.ParseGroupVersion(gv)
 		if err != nil {
-			log.Error(err, "ERROR: Failed to parse GroupVersion", "groupVersion", gv)
-			continue
+			return nil, fmt.Errorf("failed to parse GroupVersion %q: %w", gv, err)
 		}
 
 		apiIsRestricted := slices.ContainsFunc(roleDefinition.Spec.RestrictedAPIs, func(ag metav1.APIGroup) bool { return ag.Name == groupVersion.Group })

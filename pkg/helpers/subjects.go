@@ -42,36 +42,15 @@ func MergeSubjects(existingSubjects []rbacv1.Subject, newSubjects []rbacv1.Subje
 		mergedSubjects = append(mergedSubjects, subject)
 	}
 
+	// Sort subjects for deterministic ordering
+	sort.Slice(mergedSubjects, func(i, j int) bool {
+		return subjectKey(mergedSubjects[i]) < subjectKey(mergedSubjects[j])
+	})
+
 	return mergedSubjects
 }
 
 // Helper function to generate a unique key for a subject
 func subjectKey(subject rbacv1.Subject) string {
 	return subject.Kind + "|" + subject.APIGroup + "|" + subject.Namespace + "|" + subject.Name
-}
-
-// BySubject implements sort.Interface for []rbacv1.Subject based on Kind, APIGroup, Namespace, Name.
-type BySubject []rbacv1.Subject
-
-func (a BySubject) Len() int      { return len(a) }
-func (a BySubject) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
-func (a BySubject) Less(i, j int) bool {
-	if a[i].Kind != a[j].Kind {
-		return a[i].Kind < a[j].Kind
-	}
-	if a[i].APIGroup != a[j].APIGroup {
-		return a[i].APIGroup < a[j].APIGroup
-	}
-	if a[i].Namespace != a[j].Namespace {
-		return a[i].Namespace < a[j].Namespace
-	}
-	return a[i].Name < a[j].Name
-}
-
-// sortSubjects returns a sorted copy of the subjects slice.
-func sortSubjects(subjects []rbacv1.Subject) []rbacv1.Subject {
-	sorted := make([]rbacv1.Subject, len(subjects))
-	copy(sorted, subjects)
-	sort.Sort(BySubject(sorted))
-	return sorted
 }

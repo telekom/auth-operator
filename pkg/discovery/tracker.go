@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
@@ -22,8 +23,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-// ResourceTrackerNotStartedError is returned when the ResourceTracker has not been started yet.
-var ResourceTrackerNotStartedError = fmt.Errorf("resource tracker not started")
+// ErrResourceTrackerNotStarted is returned when the ResourceTracker has not been started yet.
+var ErrResourceTrackerNotStarted = fmt.Errorf("resource tracker not started")
 
 const (
 	// Duration between periodic API resource collections
@@ -70,7 +71,7 @@ type signalFunc func() error
 
 // ResourceTracker tracks and caches the available API resources in the Kubernetes cluster.
 type ResourceTracker struct {
-	started     bool
+	started     atomic.Bool
 	rateLimit   rate.Sometimes
 	scheme      *runtime.Scheme
 	config      *rest.Config
@@ -81,7 +82,8 @@ type ResourceTracker struct {
 }
 
 // NewResourceTracker creates a new ResourceTracker.
-// The signalFunc is called whenever the API resources are updated (no information about what triggers the update is provided).
+// The signalFunc is called whenever the API resources are updated
+// (no information about what triggers the update is provided).
 func NewResourceTracker(scheme *runtime.Scheme, config *rest.Config) *ResourceTracker {
 	return &ResourceTracker{
 		config:      config,
@@ -130,13 +132,17 @@ func (r *ResourceTracker) Start(ctx context.Context) error {
 	// runnables concurrently, and the RoleDefinitionReconciler may
 	// call GetAPIResources() before the initial collection is done.
 	// By marking as started only after the initial collection, we ensure
-	// that the RoleDefinitionReconciler always gets a valid cache on first call (or ResourceTrackerNotStartedError).
+	// that the RoleDefinitionReconciler always gets a valid cache on first call (or ErrResourceTrackerNotStarted).
 	// Subsequent calls will be blocked until the first collection is done
 	// by the mutex in GetAPIResources().
-	r.started = true
+	r.started.Store(true)
 
 	// Start CRD watch with jitter and exponential backoff
-	go r.launchWatch(ctx)
+	go func() {
+		if err := r.launchWatch(ctx); err != nil {
+			log.FromContext(ctx).Error(err, "ERROR: Failed to launch CRD watch")
+		}
+	}()
 
 	// Start periodic collection
 	go r.periodicCollection(ctx)
@@ -192,8 +198,8 @@ func (r *ResourceTracker) collectAndNotify(ctx context.Context) func() {
 }
 
 func (r *ResourceTracker) GetAPIResources() (APIResourcesByGroupVersion, error) {
-	if !r.started {
-		return nil, ResourceTrackerNotStartedError
+	if !r.started.Load() {
+		return nil, ErrResourceTrackerNotStarted
 	}
 
 	r.mutex.RLock()
@@ -254,22 +260,23 @@ func (r *ResourceTracker) collectAPIResources(ctx context.Context) (bool, error)
 
 	for _, apiGroup := range discoveredApiGroups.Groups {
 		for _, apiGroupVersion := range apiGroup.Versions {
+			// Copy loop variables to avoid closure capture bug
+			apiGroupName := apiGroup.Name
+			apiVersionStr := apiGroupVersion.Version
 			gv := metav1.GroupVersion{
-				Group:   apiGroup.Name,
-				Version: apiGroupVersion.Version,
+				Group:   apiGroupName,
+				Version: apiVersionStr,
 			}
-			gvResources := make([]metav1.APIResource, 0)
 			errorGroup.Go(func() error {
-				resources, err := r.collectAPIResourcesForGroupVersion(discoveryClient, apiGroup.Name, apiGroupVersion.Version)
+				resources, err := r.collectAPIResourcesForGroupVersion(discoveryClient, apiGroupName, apiVersionStr)
 				if err != nil {
-					log.Error(err, "ERROR: Failed to discover API resources for group version", "group", apiGroup.Name, "version", apiGroupVersion.Version)
+					log.Error(err, "ERROR: Failed to discover API resources for group version",
+						"group", apiGroupName, "version", apiVersionStr)
 					return err
 				}
-				for _, resource := range resources {
-					gvResources = append(gvResources, resource)
-				}
+				// Append results into the shared map under mutex to avoid sharing per-goroutine slices
 				mutex.Lock()
-				apiResourcesByGroupVersion[gv.String()] = gvResources
+				apiResourcesByGroupVersion[gv.String()] = append(apiResourcesByGroupVersion[gv.String()], resources...)
 				mutex.Unlock()
 				return nil
 			})
@@ -398,19 +405,24 @@ func (r *ResourceTracker) collectAPIResourcesForGroupVersion(
 	for _, resource := range discoveredApiResources.APIResources {
 		isSubresource := strings.Contains(resource.Name, "/")
 
-		subResourceRequiresExplicitVerbs := isSubresource && (strings.HasSuffix(resource.Name, "/status") || strings.HasSuffix(resource.Name, "/finalizers"))
+		subResourceRequiresExplicitVerbs := isSubresource &&
+			(strings.HasSuffix(resource.Name, "/status") || strings.HasSuffix(resource.Name, "/finalizers"))
 		if subResourceRequiresExplicitVerbs {
 			resource.Verbs = append(resource.Verbs, "list", "watch")
 		}
 
-		// for roles and rolebindings in rbac.authorization.k8s.io/v1, we need to add the bind verb explicitly, as they are not part of the API discovery
-		requiresExplicitBind := group == "rbac.authorization.k8s.io" && version == "v1" && (resource.Name == "roles" || resource.Name == "rolebindings")
+		// for roles and rolebindings in rbac.authorization.k8s.io/v1,
+		// we need to add the bind verb explicitly, as they are not part of the API discovery
+		requiresExplicitBind := group == "rbac.authorization.k8s.io" && version == "v1" &&
+			(resource.Name == "roles" || resource.Name == "rolebindings")
 		if requiresExplicitBind {
 			resource.Verbs = append(resource.Verbs, "bind")
 		}
 
-		// for roles in rbac.authorization.k8s.io/v1, we need to add the escalate verb explicitly, as it is not part of the API discovery
-		requiresExplicitEscalate := group == "rbac.authorization.k8s.io" && version == "v1" && resource.Name == "roles"
+		// for roles in rbac.authorization.k8s.io/v1,
+		// we need to add the escalate verb explicitly, as it is not part of the API discovery
+		requiresExplicitEscalate := group == "rbac.authorization.k8s.io" && version == "v1" &&
+			resource.Name == "roles"
 		if requiresExplicitEscalate {
 			resource.Verbs = append(resource.Verbs, "escalate")
 		}
@@ -423,17 +435,19 @@ func (r *ResourceTracker) collectAPIResourcesForGroupVersion(
 			continue
 		}
 
-		// There are certain resources that are not know to the APIServer (and thus the DiscoveryClient) but are important to end up in the RoleDefinition.
-		// These are added here manually.
+		// There are certain resources that are not known to the APIServer (and thus the DiscoveryClient)
+		// but are important to end up in the RoleDefinition. These are added here manually.
 
-		// if the item is not a subresource (i.e. it does not contain slashes) we add the finalizer explicitly as its not part of discovery
+		// if the item is not a subresource (i.e. it does not contain slashes)
+		// we add the finalizer explicitly as it's not part of discovery
 		finalizersSubresourceResource := resource.DeepCopy()
 		finalizersSubresourceResource.Name = fmt.Sprintf("%s/%s", resource.Name, "finalizers")
 		finalizersSubresourceResource.Verbs = metav1.Verbs{"update", "list", "watch"}
 		result = append(result, *finalizersSubresourceResource)
 		switch {
 		case group == "" && version == "v1" && resource.Name == "nodes":
-			// nodes/metrics in the core group are not filtered by the RestrictedResources, as they are not part of the API discovery.
+			// nodes/metrics in the core group are not filtered by the RestrictedResources,
+			// as they are not part of the API discovery.
 			nodeMetricsSubresource := resource.DeepCopy()
 			nodeMetricsSubresource.Name = "nodes/metrics"
 			nodeMetricsSubresource.Verbs = metav1.Verbs{"get", "list", "watch"}

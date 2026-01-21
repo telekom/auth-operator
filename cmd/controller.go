@@ -1,5 +1,5 @@
 /*
-Copyright © 2025 NAME HERE <EMAIL ADDRESS>
+Copyright © 2025 Deutsche Telekom AG
 */
 package cmd
 
@@ -105,7 +105,11 @@ to quickly create a Cobra application.`,
 func init() {
 	rootCmd.AddCommand(controllerCmd)
 
-	controllerCmd.Flags().BoolVar(&enableLeaderElection, "leader-elect", false, "Enable leader election for controller manager. "+"Enabling this will ensure there is only one active controller manager.")
-	controllerCmd.Flags().IntVar(&bindDefinitionConcurrency, "binddefinition-concurrency", 5, "Number of concurrent workers for BindDefinition reconciler. Default is 5. Use 0 to disable the reconciler.")
-	controllerCmd.Flags().IntVar(&roleDefinitionConcurrency, "roledefinition-concurrency", 5, "Number of concurrent workers for RoleDefinition reconciler. Default is 5. Use 0 to disable the reconciler.")
+	controllerCmd.Flags().BoolVar(&enableLeaderElection, "leader-elect", false,
+		"Enable leader election for controller manager. "+
+			"Enabling this will ensure there is only one active controller manager.")
+	controllerCmd.Flags().IntVar(&bindDefinitionConcurrency, "binddefinition-concurrency", 5,
+		"Number of concurrent workers for BindDefinition reconciler. Default is 5. Use 0 to disable the reconciler.")
+	controllerCmd.Flags().IntVar(&roleDefinitionConcurrency, "roledefinition-concurrency", 5,
+		"Number of concurrent workers for RoleDefinition reconciler. Default is 5. Use 0 to disable the reconciler.")
 }

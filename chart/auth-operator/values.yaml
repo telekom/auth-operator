@@ -14,9 +14,25 @@ controller:
       cpu: 10m
       memory: 64Mi
   replicas: 1
+  podDisruptionBudget:
+    # Enable PodDisruptionBudget for high availability
+    enabled: false
+    # Minimum number of pods that must be available during disruption
+    minAvailable: 1
+    # Maximum number of pods that can be unavailable during disruption
+    # (mutually exclusive with minAvailable)
+    # maxUnavailable: 1
 webhookServer:
   replicas: 1
   tdgMigration: "false"
+  podDisruptionBudget:
+    # Enable PodDisruptionBudget for high availability
+    enabled: false
+    # Minimum number of pods that must be available during disruption
+    minAvailable: 1
+    # Maximum number of pods that can be unavailable during disruption
+    # (mutually exclusive with minAvailable)
+    # maxUnavailable: 1
   resources:
     limits:
       cpu: 150m

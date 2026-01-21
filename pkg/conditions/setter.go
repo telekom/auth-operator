@@ -43,7 +43,9 @@ func Set(to Setter, condition *metav1.Condition) {
 	to.SetConditions(conditions)
 }
 
-func TrueCondition(t ConditionType, gen int64, reason ConditionReason, message ConditionMessage, messageArgs ...interface{}) *metav1.Condition {
+func TrueCondition(
+	t ConditionType, gen int64, reason ConditionReason, message ConditionMessage, messageArgs ...interface{},
+) *metav1.Condition {
 	return &metav1.Condition{
 		Type:               string(t),
 		Status:             metav1.ConditionTrue,
@@ -53,7 +55,9 @@ func TrueCondition(t ConditionType, gen int64, reason ConditionReason, message C
 	}
 }
 
-func FalseCondition(t ConditionType, gen int64, reason ConditionReason, message ConditionMessage, messageArgs ...interface{}) *metav1.Condition {
+func FalseCondition(
+	t ConditionType, gen int64, reason ConditionReason, message ConditionMessage, messageArgs ...interface{},
+) *metav1.Condition {
 	return &metav1.Condition{
 		Type:               string(t),
 		Status:             metav1.ConditionFalse,
@@ -63,7 +67,9 @@ func FalseCondition(t ConditionType, gen int64, reason ConditionReason, message 
 	}
 }
 
-func UnknownCondition(t ConditionType, gen int64, reason ConditionReason, message ConditionMessage, messageArgs ...interface{}) *metav1.Condition {
+func UnknownCondition(
+	t ConditionType, gen int64, reason ConditionReason, message ConditionMessage, messageArgs ...interface{},
+) *metav1.Condition {
 	return &metav1.Condition{
 		Type:               string(t),
 		Status:             metav1.ConditionUnknown,
@@ -73,15 +79,21 @@ func UnknownCondition(t ConditionType, gen int64, reason ConditionReason, messag
 	}
 }
 
-func MarkTrue(to Setter, t ConditionType, gen int64, reason ConditionReason, message ConditionMessage, messageArgs ...interface{}) {
+func MarkTrue(
+	to Setter, t ConditionType, gen int64, reason ConditionReason, message ConditionMessage, messageArgs ...interface{},
+) {
 	Set(to, TrueCondition(t, gen, reason, message, messageArgs...))
 }
 
-func MarkFalse(to Setter, t ConditionType, gen int64, reason ConditionReason, message ConditionMessage, messageArgs ...interface{}) {
+func MarkFalse(
+	to Setter, t ConditionType, gen int64, reason ConditionReason, message ConditionMessage, messageArgs ...interface{},
+) {
 	Set(to, FalseCondition(t, gen, reason, message, messageArgs...))
 }
 
-func MarkUnknown(to Setter, t ConditionType, gen int64, reason ConditionReason, message ConditionMessage, messageArgs ...interface{}) {
+func MarkUnknown(
+	to Setter, t ConditionType, gen int64, reason ConditionReason, message ConditionMessage, messageArgs ...interface{},
+) {
 	Set(to, UnknownCondition(t, gen, reason, message, messageArgs...))
 }
 

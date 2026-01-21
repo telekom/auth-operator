@@ -28,6 +28,12 @@ import (
 	helpers "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/helpers"
 )
 
+const (
+	// DefaultRequeueInterval is the interval at which resources are requeued
+	// to ensure drift from manual modifications is corrected
+	DefaultRequeueInterval = 60 * time.Second
+)
+
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions/finalizers,verbs=update
@@ -75,6 +81,9 @@ func NewBindDefinitionReconciler(
 // Used a predicate to ignore deletes of namespace, as this can be done in a regular
 // reconcile requeue and does not require immediate action from controller
 func (r *bindDefinitionReconciler) SetupWithManager(mgr ctrl.Manager, concurrency int) error {
+	if r.roleBindingTerminator == nil {
+		return fmt.Errorf("roleBindingTerminator is nil - use NewBindDefinitionReconciler to create the reconciler")
+	}
 	if err := r.roleBindingTerminator.SetupWithManager(mgr, concurrency); err != nil {
 		return fmt.Errorf("unable to set up RoleBinding terminator: %w", err)
 	}
@@ -438,7 +447,7 @@ func (r *bindDefinitionReconciler) reconcileDelete(ctx context.Context, bindDefi
 	}
 	log.V(1).Info("DEBUG: reconcileDelete completed successfully", "bindDefinitionName", bindDefinition.Name)
 
-	return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
+	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
 }
 
 // Reconcile BindDefinition method
@@ -708,7 +717,7 @@ func (r *bindDefinitionReconciler) reconcileCreate(ctx context.Context, bindDefi
 		return ctrl.Result{}, err
 	}
 
-	return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
+	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
 }
 
 func (r *bindDefinitionReconciler) collectNamespaces(ctx context.Context, bindDefinition *authnv1alpha1.BindDefinition) (map[string]corev1.Namespace, error) {
@@ -975,5 +984,5 @@ func (r *bindDefinitionReconciler) reconcileUpdate(ctx context.Context, bindDefi
 		}
 	}
 
-	return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
+	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
 }

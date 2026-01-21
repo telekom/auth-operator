@@ -16,6 +16,6 @@ func TestE2E(t *testing.T) {
 		t.Skip("Skipping E2E tests in CI")
 	}
 	RegisterFailHandler(Fail)
-	fmt.Fprintf(GinkgoWriter, "Starting auth-operator suite\n")
+	_, _ = fmt.Fprintf(GinkgoWriter, "Starting auth-operator suite\n")
 	RunSpecs(t, "e2e suite")
 }

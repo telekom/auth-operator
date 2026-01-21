@@ -1,5 +1,5 @@
 /*
-Copyright © 2025 NAME HERE <EMAIL ADDRESS>
+Copyright © 2025 Deutsche Telekom AG
 */
 package cmd
 
@@ -82,7 +82,7 @@ This application is a tool to generate the needed files
 to quickly create a Cobra application.`,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		// Set the verbosity level for klog
-		flag.Set("v", fmt.Sprintf("%d", verbosity))
+		_ = flag.Set("v", fmt.Sprintf("%d", verbosity))
 
 		ctrl.SetLogger(klog.NewKlogr())
 		log := klog.NewKlogr()
@@ -115,10 +115,10 @@ func init() {
 	klog.InitFlags(nil)
 	cobra.OnInitialize(initScheme)
 
-	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 	rootCmd.PersistentFlags().StringVar(&namespace, "namespace", os.Getenv("POD_NAMESPACE"), "operator namespace")
 	rootCmd.PersistentFlags().IntVarP(&verbosity, "verbosity", "v", 2, "Log level (0-9)")
-	rootCmd.PersistentFlags().StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
+	rootCmd.PersistentFlags().StringVar(&probeAddr, "health-probe-bind-address", ":8081",
+		"The address the probe endpoint binds to.")
 }
 
 func initScheme() {

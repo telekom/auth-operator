@@ -35,7 +35,7 @@ func (r *RoleDefinition) ValidateCreate() (admission.Warnings, error) {
 
 	roleDefinitionList := &RoleDefinitionList{}
 	if err := rdWebhookClient.List(ctx, roleDefinitionList); err != nil {
-		return nil, apierrors.NewInternalError(fmt.Errorf("Unable to list RoleDefinitions: %v", err))
+		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RoleDefinitions: %v", err))
 	}
 
 	for _, roleDefinition := range roleDefinitionList.Items {
@@ -62,7 +62,7 @@ func (r *RoleDefinition) ValidateUpdate(old runtime.Object) (admission.Warnings,
 
 	roleDefinitionList := &RoleDefinitionList{}
 	if err := rdWebhookClient.List(ctx, roleDefinitionList); err != nil {
-		return nil, apierrors.NewInternalError(fmt.Errorf("Unable to list RoleDefinitions: %v", err))
+		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RoleDefinitions: %v", err))
 	}
 
 	for _, roleDefinition := range roleDefinitionList.Items {

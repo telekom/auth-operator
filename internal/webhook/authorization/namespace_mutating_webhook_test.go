@@ -403,7 +403,7 @@ func TestNamespaceMutatorHandle(t *testing.T) {
 			// If we expected a patch, verify that labels were updated
 			if tt.expectPatch {
 				// Check we got patch operations
-				if resp.Patches == nil || len(resp.Patches) == 0 {
+				if len(resp.Patches) == 0 {
 					t.Errorf("expected patches but got none")
 				} else {
 					// 1) Convert resp.Patches (a slice of operations) into raw JSON
@@ -533,7 +533,7 @@ func TestNamespaceMutatorPerformance(t *testing.T) {
 
 	// 2) Define concurrency and total requests
 	const concurrency = 100
-	const totalRequests = 1000000
+	const totalRequests = 10000 // Reduced from 1000000 to avoid exhausting local resources during test runs
 
 	// We'll store durations to compute average / percentiles
 	durations := make([]time.Duration, 0, totalRequests)
@@ -546,7 +546,7 @@ func TestNamespaceMutatorPerformance(t *testing.T) {
 
 	// 3) Generate a basic AdmissionRequest builder function
 	// We'll always do a "Create" operation for this example
-	buildRequest := func(i int) crAdmission.Request {
+	buildRequest := func(_ int) crAdmission.Request {
 		// Example: user in group => we do a request that should be allowed
 		ns := &corev1.Namespace{
 			TypeMeta: metav1.TypeMeta{

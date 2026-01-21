@@ -1,5 +1,5 @@
 /*
-Copyright © 2025 NAME HERE <EMAIL ADDRESS>
+Copyright © 2025 Deutsche Telekom AG
 */
 package cmd
 
@@ -95,7 +95,7 @@ to quickly create a Cobra application.`,
 		go func() {
 			<-startListeners
 			if err := configureWebhooks(mgr); err != nil {
-				cancel(fmt.Errorf("error confguring webhooks: %w", err))
+				cancel(fmt.Errorf("error configuring webhooks: %w", err))
 			}
 			ready = true
 		}()
@@ -179,14 +179,22 @@ func configureWebhooks(mgr manager.Manager) error {
 func init() {
 	rootCmd.AddCommand(webhookCmd)
 
-	webhookCmd.Flags().IntVar(&webhookPort, "port", 9443, "The port the webhook server binds to. "+"If not set, it will be set to '9443' as a default.")
-	webhookCmd.Flags().BoolVar(&enableHTTP2, "enable-http2", false, "If set, HTTP/2 will be enabled for the webhook server.")
+	webhookCmd.Flags().IntVar(&webhookPort, "port", 9443,
+		"The port the webhook server binds to. If not set, it will be set to '9443' as a default.")
+	webhookCmd.Flags().BoolVar(&enableHTTP2, "enable-http2", false,
+		"If set, HTTP/2 will be enabled for the webhook server.")
 	webhookCmd.Flags().StringVar(&webhookCertsDir, "certs-dir", "", "The directory for https certificates")
-	webhookCmd.Flags().BoolVar(&disableCertRotation, "disable-cert-rotation", false, "disable automatic generation and rotation of webhook TLS certificates/keys")
-	webhookCmd.Flags().StringVar(&certRotationDNSName, "cert-rotation-dns-name", "", "The DNS name for the webhook service")
-	webhookCmd.Flags().StringVar(&certRotationSecretName, "cert-rotation-secret-name", "", "The name for the webhook certs secret")
-	webhookCmd.Flags().StringSliceVar(&certRotationMutatingWebhooks, "cert-rotation-mutating-webhook", []string{}, "The mutating webhooks")
-	webhookCmd.Flags().StringSliceVar(&certRotationValidatingWebhooks, "cert-rotation-validating-webhook", []string{}, "The validating webhooks")
+	webhookCmd.Flags().BoolVar(&disableCertRotation, "disable-cert-rotation", false,
+		"disable automatic generation and rotation of webhook TLS certificates/keys")
+	webhookCmd.Flags().StringVar(&certRotationDNSName, "cert-rotation-dns-name", "",
+		"The DNS name for the webhook service")
+	webhookCmd.Flags().StringVar(&certRotationSecretName, "cert-rotation-secret-name", "",
+		"The name for the webhook certs secret")
+	webhookCmd.Flags().StringSliceVar(&certRotationMutatingWebhooks, "cert-rotation-mutating-webhook",
+		[]string{}, "The mutating webhooks")
+	webhookCmd.Flags().StringSliceVar(&certRotationValidatingWebhooks, "cert-rotation-validating-webhook",
+		[]string{}, "The validating webhooks")
 
-	webhookCmd.Flags().BoolVar(&enableTDGMigration, "tdg-migration", false, "If set, the legacy lablels and behavior for TDG migration will be enabled. ")
+	webhookCmd.Flags().BoolVar(&enableTDGMigration, "tdg-migration", false,
+		"If set, the legacy labels and behavior for TDG migration will be enabled.")
 }

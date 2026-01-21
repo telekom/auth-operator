@@ -20,6 +20,11 @@ import (
 
 var nsMutatorLog = logf.Log.WithName("namespace-mutator")
 
+// Service account constants for namespace mutation webhook
+const (
+	capiOperatorManagerSA = "system:serviceaccount:capi-operator-system:capi-operator-manager"
+)
+
 type NamespaceMutator struct {
 	Client       client.Client
 	Decoder      admission.Decoder
@@ -53,7 +58,7 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 		nsMutatorLog.V(3).Info("DEBUG: Allowing trident-operator without mutation", "namespace", req.Name)
 		return admission.Allowed("")
 	}
-	if req.UserInfo.Username == "system:serviceaccount:capi-operator-system:capi-operator-manager" && req.Operation == admissionv1.Update {
+	if req.UserInfo.Username == capiOperatorManagerSA && req.Operation == admissionv1.Update {
 		nsMutatorLog.V(3).Info("DEBUG: Allowing capi-operator-manager without mutation", "namespace", req.Name)
 		return admission.Allowed("")
 	}
@@ -72,7 +77,7 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 		case "system:serviceaccount:schiff-system:m2m-sa":
 			nsMutatorLog.V(3).Info("DEBUG: Allowing schiff-system m2m-sa without mutation", "namespace", req.Name)
 			return admission.Allowed("")
-		case "system:serviceaccount:capi-operator-system:capi-operator-manager":
+		case capiOperatorManagerSA:
 			nsMutatorLog.V(3).Info("DEBUG: Allowing capi-operator-manager without mutation (tdgMigration)", "namespace", req.Name)
 			return admission.Allowed("")
 		case "system:serviceaccount:trident-system:trident-operator":

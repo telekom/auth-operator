@@ -22,6 +22,12 @@ import (
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=webhookauthorizers/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
 
+// Constants for user identity parsing
+const (
+	systemPrefix       = "system"
+	serviceAccountKind = "serviceaccount"
+)
+
 // Authorizer implements an HTTP handler for SubjectAccessReview requests.
 type Authorizer struct {
 	Client client.Client
@@ -50,7 +56,7 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	response := authzv1.SubjectAccessReview{
 		TypeMeta: metav1.TypeMeta{
-			APIVersion: "authorization.k8s.io/v1beta1",
+			APIVersion: "authorization.k8s.io/v1",
 			Kind:       "SubjectAccessReview",
 		},
 		Status: authzv1.SubjectAccessReviewStatus{
@@ -181,5 +187,5 @@ func matchesRule(patterns []string, value string) bool {
 func isServiceAccountInNamespace(user, saUser, namespace string) bool {
 	// Format: system:serviceaccount:<namespace>:<serviceaccount>
 	parts := strings.Split(user, ":")
-	return len(parts) == 4 && parts[0] == "system" && parts[1] == "serviceaccount" && parts[2] == namespace && parts[3] == saUser
+	return len(parts) == 4 && parts[0] == systemPrefix && parts[1] == serviceAccountKind && parts[2] == namespace && parts[3] == saUser
 }
