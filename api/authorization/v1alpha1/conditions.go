@@ -73,3 +73,14 @@ const (
 	UpdateReason    AuthZConditionReason  = "TriggeredUpdate"
 	UpdateMessage   AuthZConditionMessage = "Reconciling update request"
 )
+
+const (
+	// RoleRefValidCondition indicates whether all referenced roles exist
+	RoleRefValidCondition AuthZConditionType    = "RoleRefsValid"
+	RoleRefValidReason    AuthZConditionReason  = "RoleRefValidation"
+	RoleRefValidMessage   AuthZConditionMessage = "All referenced roles exist"
+
+	// RoleRefInvalidReason is used when one or more referenced roles don't exist
+	RoleRefInvalidReason  AuthZConditionReason  = "RoleRefNotFound"
+	RoleRefInvalidMessage AuthZConditionMessage = "One or more referenced roles do not exist"
+)

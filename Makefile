@@ -6,8 +6,18 @@ include versions.env
 # Image URL to use all building/pushing image targets
 PROJECT_NAME = "auth-operator"
 APP ?= auth-operator
-IMG ?= (APP):latest
+IMG ?= $(APP):latest
 NAMESPACE ?= kube-system
+
+# E2E run identifier and deterministic kind cluster name
+RUN_ID ?= $(shell date +%s)
+KIND_CLUSTER_NAME ?= auth-operator-e2e
+SKIP_E2E_CLEANUP ?= false
+E2E_RECREATE_CLUSTER ?= true
+E2E_TEARDOWN ?= false
+export RUN_ID
+export KIND_CLUSTER_NAME
+export E2E_TEARDOWN
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.33.0
 
@@ -61,10 +71,211 @@ vet: ## Run go vet against code.
 test: manifests generate fmt vet envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
-# Utilize Kind or modify the e2e tests to load the image locally, enabling compatibility with other vendors.
-.PHONY: test-e2e  # Run the e2e tests against a Kind k8s instance that is spun up.
-test-e2e:
-	go test ./test/e2e/ -v -ginkgo.v
+##@ E2E Testing
+
+# Kind cluster configuration
+KIND_K8S_VERSION ?= v1.32.5
+E2E_IMG ?= auth-operator:e2e-test
+KIND_CONFIG_SINGLE ?= test/e2e/kind-config-single.yaml
+KIND_CONFIG_MULTI ?= test/e2e/kind-config-multi.yaml
+
+.PHONY: kind-create
+kind-create: ## Create a single-node kind cluster for e2e testing.
+	@if [ "$(E2E_RECREATE_CLUSTER)" = "true" ]; then \
+		kind delete cluster --name $(KIND_CLUSTER_NAME) 2>/dev/null || true; \
+	fi
+	@echo "Creating single-node kind cluster '$(KIND_CLUSTER_NAME)'..."; \
+	kind create cluster --name $(KIND_CLUSTER_NAME) --config $(KIND_CONFIG_SINGLE) --image kindest/node:$(KIND_K8S_VERSION) --wait 5m
+	@kubectl cluster-info --context kind-$(KIND_CLUSTER_NAME)
+
+.PHONY: kind-create-multi
+kind-create-multi: ## Create a multi-node kind cluster for HA testing.
+	@if [ "$(E2E_RECREATE_CLUSTER)" = "true" ]; then \
+		kind delete cluster --name $(KIND_CLUSTER_NAME)-multi 2>/dev/null || true; \
+	fi
+	@echo "Creating multi-node kind cluster '$(KIND_CLUSTER_NAME)-multi'..."; \
+	kind create cluster --name $(KIND_CLUSTER_NAME)-multi --config $(KIND_CONFIG_MULTI) --image kindest/node:$(KIND_K8S_VERSION) --wait 8m
+	@kubectl cluster-info --context kind-$(KIND_CLUSTER_NAME)-multi
+	@kubectl get nodes -o wide
+
+.PHONY: kind-delete
+kind-delete: ## Delete the kind cluster(s).
+	kind delete cluster --name $(KIND_CLUSTER_NAME) 2>/dev/null || true
+	kind delete cluster --name $(KIND_CLUSTER_NAME)-multi 2>/dev/null || true
+
+.PHONY: kind-delete-all
+kind-delete-all: ## Delete all deterministic e2e kind clusters.
+	@for c in auth-operator-e2e auth-operator-e2e-dev auth-operator-e2e-helm auth-operator-e2e-complex auth-operator-e2e-integration auth-operator-e2e-golden auth-operator-e2e-ha auth-operator-e2e-all; do \
+		kind delete cluster --name $$c 2>/dev/null || true; \
+		kind delete cluster --name $$c-multi 2>/dev/null || true; \
+	done
+
+.PHONY: kind-load-image
+kind-load-image: docker-build ## Build and load the operator image into kind cluster.
+	$(CONTAINER_TOOL) tag ${IMG} $(E2E_IMG)
+	kind load docker-image $(E2E_IMG) --name $(KIND_CLUSTER_NAME)
+
+.PHONY: kind-load-image-multi
+kind-load-image-multi: docker-build ## Build and load the operator image into multi-node kind cluster.
+	$(CONTAINER_TOOL) tag ${IMG} $(E2E_IMG)
+	kind load docker-image $(E2E_IMG) --name $(KIND_CLUSTER_NAME)-multi
+
+.PHONY: test-e2e-setup
+test-e2e-setup: kind-create kind-load-image install ## Set up the e2e test environment (create cluster, build, deploy with dev overlay).
+	$(MAKE) deploy OVERLAY=dev IMG=$(E2E_IMG)
+	@echo "E2E test environment ready!"
+	@echo "  Cluster: $(KIND_CLUSTER_NAME)"
+	@echo "  Image: $(E2E_IMG)"
+	@echo "  Overlay: dev (debug logging enabled)"
+
+.PHONY: test-e2e-setup-multi
+test-e2e-setup-multi: kind-create-multi kind-load-image-multi install ## Set up multi-node e2e test environment.
+	$(MAKE) deploy OVERLAY=dev IMG=$(E2E_IMG)
+	@echo "Multi-node E2E test environment ready!"
+	@echo "  Cluster: $(KIND_CLUSTER_NAME)-multi"
+	@echo "  Image: $(E2E_IMG)"
+	@echo "  Overlay: dev (debug logging enabled)"
+
+.PHONY: test-e2e
+test-e2e: ## Run base e2e tests against existing kind cluster.
+	KIND_CLUSTER=$(KIND_CLUSTER_NAME) IMG=$(E2E_IMG) go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="!helm && !complex && !integration && !golden && !ha && !leader-election && !dev" -timeout 30m
+
+.PHONY: test-e2e-full
+test-e2e-full: ## Run full e2e test suite (fresh cluster each run, configurable cleanup).
+	@set -e; \
+	if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e; fi; \
+	$(MAKE) test-e2e-setup KIND_CLUSTER_NAME=auth-operator-e2e; \
+	if $(MAKE) test-e2e KIND_CLUSTER_NAME=auth-operator-e2e; then \
+		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e; fi; \
+	else \
+		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e; fi; exit 1; \
+	fi
+
+.PHONY: test-e2e-quick
+test-e2e-quick: ## Run e2e tests with setup label only (prerequisites check).
+	KIND_CLUSTER=$(KIND_CLUSTER_NAME) go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="setup" -timeout 5m
+
+.PHONY: test-e2e-debug
+test-e2e-debug: ## Run e2e debug tests (prints cluster state).
+	KIND_CLUSTER=$(KIND_CLUSTER_NAME) go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="debug" -timeout 5m
+
+.PHONY: test-e2e-cleanup
+test-e2e-cleanup: ## Clean up e2e test resources.
+	kubectl delete -k test/e2e/fixtures --ignore-not-found=true || true
+	kubectl delete ns e2e-test-ns e2e-helm-test-ns e2e-ha-test-ns dev-e2e-test-ns auth-operator-golden-test auth-operator-integration-test integration-ns-alpha integration-ns-beta integration-ns-gamma --ignore-not-found=true || true
+	$(MAKE) kind-delete-all
+
+.PHONY: test-e2e-helm
+test-e2e-helm: kind-create kind-load-image ## Run Helm e2e tests (installs via Helm chart).
+	KIND_CLUSTER=$(KIND_CLUSTER_NAME) IMG=$(E2E_IMG) go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="helm" -timeout 30m
+
+.PHONY: test-e2e-dev
+test-e2e-dev: ## Run dev e2e tests (kustomize deploy) on a dedicated cluster.
+	@set -e; \
+	if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-dev; fi; \
+	$(MAKE) kind-create KIND_CLUSTER_NAME=auth-operator-e2e-dev; \
+	if KIND_CLUSTER=auth-operator-e2e-dev IMG=$(E2E_IMG) go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="dev" -timeout 45m; then \
+		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-dev; fi; \
+	else \
+		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-dev; fi; exit 1; \
+	fi
+
+.PHONY: test-e2e-integration
+test-e2e-integration: ## Run integration e2e tests on a dedicated cluster.
+	@set -e; \
+	if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-integration; fi; \
+	$(MAKE) kind-create KIND_CLUSTER_NAME=auth-operator-e2e-integration; \
+	if KIND_CLUSTER=auth-operator-e2e-integration IMG=$(E2E_IMG) go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="integration" -timeout 60m; then \
+		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-integration; fi; \
+	else \
+		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-integration; fi; exit 1; \
+	fi
+
+.PHONY: test-e2e-golden
+test-e2e-golden: ## Run golden e2e tests on a dedicated cluster.
+	@set -e; \
+	if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-golden; fi; \
+	$(MAKE) kind-create KIND_CLUSTER_NAME=auth-operator-e2e-golden; \
+	if KIND_CLUSTER=auth-operator-e2e-golden IMG=$(E2E_IMG) go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="golden" -timeout 60m; then \
+		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-golden; fi; \
+	else \
+		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-golden; fi; exit 1; \
+	fi
+
+.PHONY: test-e2e-helm-full
+test-e2e-helm-full: ## Run full Helm e2e test suite (fresh cluster each run, configurable cleanup).
+	@set -e; \
+	if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-helm; fi; \
+	$(MAKE) kind-create KIND_CLUSTER_NAME=auth-operator-e2e-helm; \
+	$(MAKE) kind-load-image KIND_CLUSTER_NAME=auth-operator-e2e-helm; \
+	if $(MAKE) test-e2e-helm KIND_CLUSTER_NAME=auth-operator-e2e-helm; then \
+		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-helm; fi; \
+	else \
+		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-helm; fi; exit 1; \
+	fi
+
+.PHONY: test-e2e-complex
+test-e2e-complex: ## Run complex e2e tests (Helm-based, isolated, fresh cluster each run, configurable cleanup).
+	@set -e; \
+	if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-complex; fi; \
+	$(MAKE) kind-create KIND_CLUSTER_NAME=auth-operator-e2e-complex; \
+	$(MAKE) kind-load-image KIND_CLUSTER_NAME=auth-operator-e2e-complex; \
+	if KIND_CLUSTER=auth-operator-e2e-complex IMG=$(E2E_IMG) go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="complex" -timeout 45m; then \
+		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-complex; fi; \
+	else \
+		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-complex; fi; exit 1; \
+	fi
+
+.PHONY: test-e2e-ha
+test-e2e-ha: ## Run HA and leader election e2e tests on multi-node cluster.
+	@set -e; \
+	if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-ha; fi; \
+	$(MAKE) test-e2e-setup-multi KIND_CLUSTER_NAME=auth-operator-e2e-ha; \
+	if KIND_CLUSTER=auth-operator-e2e-ha-multi IMG=$(E2E_IMG) go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="ha || leader-election" -timeout 45m; then \
+		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-ha; fi; \
+	else \
+		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-ha; fi; exit 1; \
+	fi
+
+.PHONY: test-e2e-all
+test-e2e-all: ## Run non-Helm/non-complex e2e tests on multi-node cluster.
+	@set -e; \
+	if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-all; fi; \
+	$(MAKE) test-e2e-setup-multi KIND_CLUSTER_NAME=auth-operator-e2e-all; \
+	if KIND_CLUSTER=auth-operator-e2e-all-multi IMG=$(E2E_IMG) go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="!helm && !complex" -timeout 60m; then \
+		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-all; fi; \
+	else \
+		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-all; fi; exit 1; \
+	fi
+
+.PHONY: test-e2e-output
+test-e2e-output: ## Show the e2e test output directory.
+	@echo "E2E test output directory: test/e2e/output"
+	@ls -la test/e2e/output 2>/dev/null || echo "No output files yet. Run e2e tests first."
+
+.PHONY: test-e2e-clean-output
+test-e2e-clean-output: ## Clean the e2e test output directory.
+	rm -rf test/e2e/output/*
+
+.PHONY: test-e2e-collect-artifacts
+test-e2e-collect-artifacts: ## Collect e2e test artifacts (logs, resources).
+	@mkdir -p test/e2e/output
+	@echo "Collecting cluster state..."
+	kubectl cluster-info dump --output-directory=test/e2e/output/cluster-dump || true
+	kubectl get all -A -o wide > test/e2e/output/all-resources.txt 2>&1 || true
+	kubectl get events -A --sort-by='.lastTimestamp' > test/e2e/output/events.txt 2>&1 || true
+	@echo "Collecting operator logs..."
+	@for ns in auth-operator-system auth-operator-helm auth-operator-ha; do \
+		if kubectl get ns "$$ns" >/dev/null 2>&1; then \
+			kubectl logs -n "$$ns" -l control-plane=controller-manager --tail=1000 > "test/e2e/output/$${ns}-controller-logs.txt" 2>&1 || true; \
+			kubectl logs -n "$$ns" -l app.kubernetes.io/component=webhook --tail=1000 > "test/e2e/output/$${ns}-webhook-logs.txt" 2>&1 || true; \
+		fi; \
+	done
+	@echo "Collecting CRDs..."
+	kubectl get roledefinitions,binddefinitions,webhookauthorizers -A -o yaml > test/e2e/output/crds.yaml 2>&1 || true
+	@echo "Artifacts collected in test/e2e/output/"
+
+##@ Linting
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter.
@@ -73,6 +284,36 @@ lint: golangci-lint ## Run golangci-lint linter.
 .PHONY: lint-fix
 lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes.
 	$(GOLANGCI_LINT) run --fix
+
+.PHONY: lint-strict
+lint-strict: golangci-lint ## Run golangci-lint with strict settings (as in CI).
+	$(GOLANGCI_LINT) run --timeout 10m --issues-exit-code 1
+
+.PHONY: vulncheck
+vulncheck: ## Run govulncheck to check for known vulnerabilities.
+	@command -v govulncheck >/dev/null 2>&1 || go install golang.org/x/vuln/cmd/govulncheck@latest
+	govulncheck ./...
+
+.PHONY: verify
+verify: lint-strict vet test vulncheck ## Run all verification checks (lint, vet, test, vulncheck).
+	@echo "All verification checks passed!"
+
+.PHONY: ci-checks
+ci-checks: verify helm-lint ## Run all CI checks locally before pushing.
+	@echo "Checking go.mod is tidy..."
+	@go mod tidy
+	@git diff --exit-code go.mod go.sum || (echo "ERROR: go.mod/go.sum not tidy" && exit 1)
+	@echo "Checking generated code is up to date..."
+	@$(MAKE) generate manifests
+	@git diff --exit-code || (echo "ERROR: Generated code out of date" && exit 1)
+	@echo "Linting YAML files..."
+	@command -v yamllint >/dev/null 2>&1 && yamllint -c .yamllint.yml . || echo "yamllint not installed, skipping"
+	@echo "All CI checks passed!"
+
+.PHONY: helm-lint
+helm-lint: ## Lint Helm chart.
+	@command -v helm >/dev/null 2>&1 || (echo "helm not installed, skipping helm-lint" && exit 0)
+	helm lint chart/auth-operator --strict
 
 ##@ Build
 
@@ -94,7 +335,9 @@ run-wh: manifests generate fmt vet ## Run webhooks from your host.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
-	$(CONTAINER_TOOL) build -t ${IMG} .
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(shell go env GOARCH) go build -o auth-operator main.go
+	$(CONTAINER_TOOL) build --build-arg BINARY_SOURCE_PATH=auth-operator -t ${IMG} --load .
+	rm -f auth-operator
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
@@ -157,6 +400,9 @@ ifndef ignore-not-found
   ignore-not-found = false
 endif
 
+# OVERLAY can be 'dev' or 'production' (default: dev)
+OVERLAY ?= dev
+
 .PHONY: install
 install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
 	$(KUSTOMIZE) build config/crd | $(KUBECTL) apply -f -
@@ -166,13 +412,21 @@ uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified 
 	$(KUSTOMIZE) build config/crd | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
 
 .PHONY: deploy
-deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
-	$(KUSTOMIZE) build config/default | $(KUBECTL) apply -f -
+deploy: manifests kustomize ## Deploy controller using overlay (OVERLAY=dev|production, default: dev).
+	cd config/overlays/$(OVERLAY) && $(KUSTOMIZE) edit set image controller=${IMG}
+	$(KUSTOMIZE) build config/overlays/$(OVERLAY) | $(KUBECTL) apply -f -
+
+.PHONY: deploy-dev
+deploy-dev: ## Deploy controller with dev overlay (debug logging enabled).
+	$(MAKE) deploy OVERLAY=dev
+
+.PHONY: deploy-production
+deploy-production: ## Deploy controller with production overlay (optimized for production).
+	$(MAKE) deploy OVERLAY=production
 
 .PHONY: undeploy
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
-	$(KUSTOMIZE) build config/default | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
+	$(KUSTOMIZE) build config/overlays/$(OVERLAY) | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
 
 .PHONY tilt:
 tilt:

@@ -57,11 +57,11 @@ spec:
             - --health-probe-bind-address=:8081
             - --port=9443
             - --certs-dir=/tmp/k8s-webhook-server/serving-certs
-            - --cert-rotation-dns-name=webhook-service.$(POD_NAMESPACE).svc
-            - --cert-rotation-secret-name=webhook-certs
-            - --cert-rotation-mutating-webhook=namespace-mutating-webhook-configuration
-            - --cert-rotation-validating-webhook=namespace-validating-webhook-configuration
-            - --cert-rotation-validating-webhook=binder-validating-webhook-configuration
+            - --cert-rotation-dns-name=$(WEBHOOK_SERVICE_NAME).$(POD_NAMESPACE).svc
+            - --cert-rotation-secret-name=$(WEBHOOK_SECRET_NAME)
+            - --cert-rotation-mutating-webhook=$(MUTATING_WEBHOOK_NAME)
+            - --cert-rotation-validating-webhook=$(VALIDATING_WEBHOOK_NS_NAME)
+            - --cert-rotation-validating-webhook=$(VALIDATING_WEBHOOK_BINDER_NAME)
             - --tdg-migration=$(TDG_MIGRATION)
           image: controller:latest
           name: webhook
@@ -72,6 +72,16 @@ spec:
                   fieldPath: metadata.namespace
             - name: TDG_MIGRATION
               value: "false"
+            - name: WEBHOOK_SERVICE_NAME
+              value: "webhook-service"
+            - name: WEBHOOK_SECRET_NAME
+              value: "webhook-certs"
+            - name: MUTATING_WEBHOOK_NAME
+              value: "namespace-mutating-webhook-configuration"
+            - name: VALIDATING_WEBHOOK_NS_NAME
+              value: "namespace-validating-webhook-configuration"
+            - name: VALIDATING_WEBHOOK_BINDER_NAME
+              value: "binder-validating-webhook-configuration"
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -109,7 +119,7 @@ spec:
             - name: cert
               mountPath: /tmp/k8s-webhook-server/serving-certs
               readOnly: true
-      serviceAccountName: webhook-server
+      serviceAccountName: manager
       terminationGracePeriodSeconds: 10
       volumes:
         - name: cert

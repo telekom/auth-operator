@@ -1,0 +1,28 @@
+# Golden test input: BindDefinition with mixed subject types
+# This BindDefinition includes User, Group, and ServiceAccount subjects
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: golden-mixed-subjects
+spec:
+  targetName: golden-mixed
+  subjects:
+    # User subject
+    - apiGroup: rbac.authorization.k8s.io
+      kind: User
+      name: admin-user@example.com
+    # Group subject
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group
+      name: platform-admins
+    # ServiceAccount subject (will be auto-created if missing)
+    - kind: ServiceAccount
+      name: golden-app-sa
+      namespace: auth-operator-golden-test
+    # Another ServiceAccount in different namespace
+    - kind: ServiceAccount
+      name: golden-worker-sa
+      namespace: auth-operator-golden-test
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - golden-cluster-reader

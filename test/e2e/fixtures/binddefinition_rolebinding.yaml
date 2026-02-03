@@ -1,0 +1,25 @@
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: e2e-test-namespace-binding
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/component: e2e-test
+    app.kubernetes.io/created-by: auth-operator
+spec:
+  targetName: e2e-namespace-binding
+  subjects:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: User
+      name: e2e-test-user@example.com
+    - kind: ServiceAccount
+      name: e2e-test-sa
+      namespace: e2e-test-ns
+  roleBindings:
+    - clusterRoleRefs:
+        - e2e-cluster-reader
+      roleRefs:
+        - e2e-namespaced-reader
+      namespaceSelector:
+        - matchLabels:
+            e2e-test: "true"

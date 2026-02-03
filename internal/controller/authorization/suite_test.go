@@ -59,7 +59,8 @@ var _ = BeforeSuite(func() {
 	logger = zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true))
 	logf.SetLogger(logger)
 
-	recorder = record.NewFakeRecorder(0)
+	// Use buffered recorder to prevent deadlock when events are not consumed
+	recorder = record.NewFakeRecorder(100)
 	discoveryClient = fake.NewClientset().Discovery()
 
 	By("bootstrapping test environment")

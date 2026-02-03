@@ -24,7 +24,7 @@ func ClusterRoleBindsEqual(existing, expected *rbacv1.ClusterRoleBinding) bool {
 	}
 
 	// Compare Subjects
-	if !subjectsEqual(existing.Subjects, expected.Subjects) {
+	if !SubjectsEqual(existing.Subjects, expected.Subjects) {
 		return false
 	}
 
@@ -48,7 +48,7 @@ func RoleBindsEqual(existing, expected *rbacv1.RoleBinding) bool {
 	}
 
 	// Compare Subjects
-	if !subjectsEqual(existing.Subjects, expected.Subjects) {
+	if !SubjectsEqual(existing.Subjects, expected.Subjects) {
 		return false
 	}
 
@@ -102,17 +102,25 @@ func roleRefEqual(a, b *rbacv1.RoleRef) bool {
 	return true
 }
 
-func subjectsEqual(a, b []rbacv1.Subject) bool {
+// SubjectsEqual compares two slices of subjects for equality.
+// The slices are sorted before comparison to ensure order-independent matching.
+func SubjectsEqual(a, b []rbacv1.Subject) bool {
 	if len(a) != len(b) {
 		return false
 	}
 
-	// Sort both slices before comparison
-	sorterSubjects(a)
-	sorterSubjects(b)
+	// Make copies to avoid modifying the original slices
+	aCopy := make([]rbacv1.Subject, len(a))
+	bCopy := make([]rbacv1.Subject, len(b))
+	copy(aCopy, a)
+	copy(bCopy, b)
 
-	for i := range a {
-		if !subjectEqual(&a[i], &b[i]) {
+	// Sort both slices before comparison
+	sorterSubjects(aCopy)
+	sorterSubjects(bCopy)
+
+	for i := range aCopy {
+		if !subjectEqual(&aCopy[i], &bCopy[i]) {
 			return false
 		}
 	}

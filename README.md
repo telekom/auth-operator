@@ -5,47 +5,52 @@ This operator serves as the T-CaaS specific authentication (`authN`) and authori
 This repository `README.md` contains several logically grouped chapters. The getting started briefly talks about the repository layout and common actions you would like to perform. The architecture chapter briefly shows the high-level architecture of the whole operator. Following the architecture chapter, each component is explained in great detail. Lastly, some informative data is given on cluster participants and the mappings of those participants to their respective roles.
 
 Please use the following table of contents to quickly navigate through the document:
-1. [Getting started](#getting-started)
-1. [Architecture](#architecture)
-1. [Generator](#generator-roledefinition)
-1. [Binder](#binder-binddefinition)
-1. [Authorizer](#authorizer-webhookauthorizer)
-1. [Advertiser](#advertiser-registration)
-1. [Cluster participants](#cluster-participants)
-1. [Group naming convention](#group-naming-convention)
-1. [Role mappings](#role-mappings)
+- [Auth Operator](#auth-operator)
+  - [Getting started](#getting-started)
+  - [Running E2E Tests Locally](#running-e2e-tests-locally)
+    - [Prerequisites](#prerequisites)
+    - [Quick Start](#quick-start)
+    - [Troubleshooting](#troubleshooting)
+  - [Architecture](#architecture)
+  - [Generator (RoleDefinition)](#generator-roledefinition)
+  - [Binder (BindDefinition)](#binder-binddefinition)
+  - [Authorizer (WebhookAuthorizer)](#authorizer-webhookauthorizer)
+  - [Advertiser (Registration)](#advertiser-registration)
+  - [Cluster participants](#cluster-participants)
+    - [Owners](#owners)
+    - [Non-owners](#non-owners)
+    - [Participants toggle](#participants-toggle)
+  - [Group naming convention](#group-naming-convention)
+  - [Role mappings](#role-mappings)
+    - [Platform team](#platform-team)
+    - [Tenant](#tenant)
+    - [Third parties](#third-parties)
+    - [Onboarding team](#onboarding-team)
+    - [First line support](#first-line-support)
 
 ## Getting started
 
 To contribute, clone the repository with `SSH` or `HTTPS`. Please make use of the `Makefile` as most common actions that you would like to repeat multiple times are encapsulated in it. The repository structure is the default kubebuilder scaffold for multi-group projects with few additions. Please refer to the snippet below to get acquainted with the `Makefile`:
-```bash
-$ make help
+# Install kind if not already installed
+go install sigs.k8s.io/kind@v0.31.0
 
-Usage:
-  make <target>
+# Run the default e2e suite (excludes Helm/complex tests)
+make test-e2e-full
 
-General
-  help             Display this help.
+# Run Helm e2e tests (uses Helm install)
+make test-e2e-helm-full
 
-Development
-  manifests        Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-  generate         Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
-  fmt              Run go fmt against code.
-  vet              Run go vet against code.
-  test             Run tests.
-  lint             Run golangci-lint linter.
-  lint-fix         Run golangci-lint linter and perform fixes.
+# Run complex e2e tests (Helm-based, should run in a clean cluster)
+make test-e2e-complex
 
-Build
-  build            Build manager binary.
-  run-gen          Run Generator controllers and webhooks from your host.
-  run-bind         Run Binder controllers and webhooks from your host.
-  run-idp          Run IDP controllers and webhooks from your host.
-  docker-build     Build docker image with the manager.
-  docker-push      Push docker image with the manager.
-  docker-buildx    Build and push docker image for the manager for cross-platform support
-  build-installer  Generate a consolidated YAML with CRDs and deployment.
+# Run HA/leader-election tests (multi-node cluster)
+make test-e2e-ha
+
+# Cleanup
+make kind-delete
   export-images    Export PNG images from a Draw.io diagram.
+
+> **Note:** The Helm/complex/HA suites install their own auth-operator instances and should be run on a clean cluster (or after cleanup) to avoid webhook and finalizer conflicts.
   docs             Generate markdown API reference into docs directory.
 
 Deployment
@@ -61,6 +66,81 @@ Dependencies
   golangci-lint    Download golangci-lint locally if necessary.
   crd-ref-docs     Download crd-ref-docs locally if necessary.
   drawio           Download Draw.io locally if necessary.
+```
+
+## Running E2E Tests Locally
+
+E2E tests require a local Kubernetes cluster. We use [kind](https://kind.sigs.k8s.io/) (Kubernetes in Docker) for local testing.
+
+### Prerequisites
+
+- Docker installed and running
+- Go 1.25+
+- kubectl
+- kind v0.31.0+
+- Helm v3.17.0+
+
+> **Note:** cert-manager is **NOT required**. The auth-operator webhook uses the [cert-controller](https://github.com/open-policy-agent/cert-controller) package to self-sign and automatically rotate TLS certificates.
+
+### Quick Start
+
+```bash
+# Install kind if not already installed
+go install sigs.k8s.io/kind@v0.31.0
+
+# Run the default e2e suite (rebuilds kind cluster per run, builds image, deploys dev overlay)
+# This suite excludes helm/complex tests because they install their own operator instances.
+make test-e2e-full
+
+# Run HA + leader-election tests (multi-node)
+make test-e2e-ha
+
+# Run the Helm suite (installs via Helm, fresh cluster per run)
+make test-e2e-helm-full
+
+# Run the complex suite (installs via Helm, fresh cluster per run)
+make test-e2e-complex
+
+# Cleanup (optional; skipped automatically when SKIP_E2E_CLEANUP=true)
+make kind-delete
+```
+
+> **Note:** The Helm and Complex suites install their own auth-operator instances. The make targets above recreate the kind cluster per run to avoid multiple instances.
+> 
+> **Debug tip:** Set `SKIP_E2E_CLEANUP=true` to keep the kind cluster around after a run. Each run uses a unique kind cluster name derived from `RUN_ID`.
+> 
+> **Artifacts:** E2E logs and resources are stored under `test/e2e/output/<RUN_ID>/<suite>/specs/<state>/<timestamp>-<spec>/`.
+> By default, only a short `summary.md` is written per spec; full dumps are collected only on failures.
+> Set `E2E_COLLECT_ALL_SPECS=true` to collect full dumps for every spec.
+> 
+> **Kind cluster names (deterministic):**
+> - Default: `auth-operator-e2e`
+> - Dev: `auth-operator-e2e-dev`
+> - Helm: `auth-operator-e2e-helm`
+> - Complex: `auth-operator-e2e-complex`
+> - Integration: `auth-operator-e2e-integration`
+> - Golden: `auth-operator-e2e-golden`
+> - HA: `auth-operator-e2e-ha` (multi-node cluster name: `auth-operator-e2e-ha-multi`)
+> - All (multi-node): `auth-operator-e2e-all` (multi-node cluster name: `auth-operator-e2e-all-multi`)
+> Set `E2E_TEARDOWN=true` if you want the test suites to undeploy the operator and uninstall CRDs during teardown; by default they keep the deployment so other specs can run in the same cluster.
+
+### Troubleshooting
+
+If the cluster fails to start, check:
+- Docker has enough resources (memory, CPU)
+- No port conflicts on 80, 443
+- Docker is running with sufficient permissions
+
+For debugging test failures:
+```bash
+# Get cluster logs
+kind export logs ./kind-logs --name auth-operator-e2e-single
+
+# Check pod status
+kubectl get pods -A
+
+# Check operator logs
+kubectl logs -n auth-operator-system -l control-plane=controller-manager
 ```
 
 ## Architecture

@@ -1,0 +1,16 @@
+# Golden test input: WebhookAuthorizer with non-resource rules
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: WebhookAuthorizer
+metadata:
+  name: golden-authorizer-nonresource
+spec:
+  nonResourceRules:
+    - verbs:
+        - get
+      nonResourceURLs:
+        - /healthz
+        - /livez
+        - /readyz
+        - /metrics
+  allowedPrincipals:
+    - user: golden-health-checker@example.com

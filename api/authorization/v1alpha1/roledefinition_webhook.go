@@ -5,77 +5,92 @@ import (
 	"fmt"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
-// log is for logging in this package.
-var roledefinitionlog = logf.Log.WithName("roledefinition-resource")
+// TargetNameField is the field index for efficient lookups by Spec.TargetName.
+// This index must be registered with the manager before use.
+const TargetNameField = ".spec.targetName"
+
+// rdWebhookClient is a cached client from the manager.
+// List operations use the informer cache with field indexes for efficient lookups.
 var rdWebhookClient client.Client
+
+// RoleDefinitionValidator implements admission.Validator for RoleDefinition.
+type RoleDefinitionValidator struct{}
+
+var _ admission.Validator[*RoleDefinition] = &RoleDefinitionValidator{}
 
 // SetupWebhookWithManager will setup the manager to manage the webhooks
 func (r *RoleDefinition) SetupWebhookWithManager(mgr ctrl.Manager) error {
 	rdWebhookClient = mgr.GetClient() // needed to initialize the client somewhere
-	return ctrl.NewWebhookManagedBy(mgr).
-		For(r).
+	return ctrl.NewWebhookManagedBy(mgr, r).
+		WithValidator(&RoleDefinitionValidator{}).
 		Complete()
 }
 
 // +kubebuilder:webhook:path=/validate-authorization-t-caas-telekom-com-v1alpha1-roledefinition,mutating=false,failurePolicy=fail,sideEffects=None,groups=authorization.t-caas.telekom.com,resources=roledefinitions,verbs=create;update,versions=v1alpha1,name=webhook.auth.t-caas.telekom.de,admissionReviewVersions=v1
 
-//var _ webhook.Validator = &RoleDefinition{}
+// ValidateCreate implements admission.Validator for RoleDefinition.
+func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleDefinition) (admission.Warnings, error) {
+	logger := log.FromContext(ctx).WithName("roledefinition-webhook")
+	logger.V(1).Info("validating create", "name", obj.Name)
 
-// ValidateCreate implements webhook.Validator so a webhook will be registered for the type
-func (r *RoleDefinition) ValidateCreate() (admission.Warnings, error) {
-	roledefinitionlog.Info("validate create", "name", r.Name)
-	ctx := context.Background()
-
+	// Use field index for efficient lookup by TargetName
 	roleDefinitionList := &RoleDefinitionList{}
-	if err := rdWebhookClient.List(ctx, roleDefinitionList); err != nil {
+	if err := rdWebhookClient.List(ctx, roleDefinitionList, client.MatchingFields{
+		TargetNameField: obj.Spec.TargetName,
+	}); err != nil {
+		logger.Error(err, "failed to list RoleDefinitions", "targetName", obj.Spec.TargetName)
 		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RoleDefinitions: %v", err))
 	}
 
 	for _, roleDefinition := range roleDefinitionList.Items {
-		if roleDefinition.Spec.TargetRole == r.Spec.TargetRole && roleDefinition.Spec.TargetName == r.Spec.TargetName && roleDefinition.Name != r.Name {
-			return nil, apierrors.NewBadRequest(fmt.Sprintf("targetName %s already exists in RoleDefinition %s", r.Spec.TargetName, roleDefinition.Name))
+		if roleDefinition.Spec.TargetRole == obj.Spec.TargetRole && roleDefinition.Name != obj.Name {
+			logger.Info("validation failed: duplicate targetName",
+				"name", obj.Name, "targetName", obj.Spec.TargetName, "conflictsWith", roleDefinition.Name)
+			return nil, apierrors.NewBadRequest(fmt.Sprintf("targetName %s already exists in RoleDefinition %s", obj.Spec.TargetName, roleDefinition.Name))
 		}
 	}
 
 	return nil, nil
 }
 
-// ValidateUpdate implements webhook.Validator so a webhook will be registered for the type
-func (r *RoleDefinition) ValidateUpdate(old runtime.Object) (admission.Warnings, error) {
-	roledefinitionlog.Info("validate update", "name", r.Name)
-	ctx := context.Background()
+// ValidateUpdate implements admission.Validator for RoleDefinition.
+func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *RoleDefinition) (admission.Warnings, error) {
+	logger := log.FromContext(ctx).WithName("roledefinition-webhook")
+	logger.V(1).Info("validating update", "name", newObj.Name)
 
-	oldRoleDefinition, ok := old.(*RoleDefinition)
-	if !ok {
-		return nil, apierrors.NewBadRequest(fmt.Sprintf("expected a RoleDefinition but got a %T", old))
-	}
-	if oldRoleDefinition.Generation == r.Generation {
+	if oldObj.Generation == newObj.Generation {
 		return nil, nil
 	}
 
+	// Use field index for efficient lookup by TargetName
 	roleDefinitionList := &RoleDefinitionList{}
-	if err := rdWebhookClient.List(ctx, roleDefinitionList); err != nil {
+	if err := rdWebhookClient.List(ctx, roleDefinitionList, client.MatchingFields{
+		TargetNameField: newObj.Spec.TargetName,
+	}); err != nil {
+		logger.Error(err, "failed to list RoleDefinitions", "targetName", newObj.Spec.TargetName)
 		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RoleDefinitions: %v", err))
 	}
 
 	for _, roleDefinition := range roleDefinitionList.Items {
-		if roleDefinition.Spec.TargetRole == r.Spec.TargetRole && roleDefinition.Spec.TargetName == r.Spec.TargetName && roleDefinition.Name != r.Name {
-			return nil, apierrors.NewBadRequest(fmt.Sprintf("targetName %s already exists in RoleDefinition %s", r.Spec.TargetName, roleDefinition.Name))
+		if roleDefinition.Spec.TargetRole == newObj.Spec.TargetRole && roleDefinition.Name != newObj.Name {
+			logger.Info("validation failed: duplicate targetName",
+				"name", newObj.Name, "targetName", newObj.Spec.TargetName, "conflictsWith", roleDefinition.Name)
+			return nil, apierrors.NewBadRequest(fmt.Sprintf("targetName %s already exists in RoleDefinition %s", newObj.Spec.TargetName, roleDefinition.Name))
 		}
 	}
 
 	return nil, nil
 }
 
-// ValidateDelete implements webhook.Validator so a webhook will be registered for the type
-func (r *RoleDefinition) ValidateDelete() (admission.Warnings, error) {
-	roledefinitionlog.Info("validate delete", "name", r.Name)
+// ValidateDelete implements admission.Validator for RoleDefinition.
+func (v *RoleDefinitionValidator) ValidateDelete(ctx context.Context, obj *RoleDefinition) (admission.Warnings, error) {
+	logger := log.FromContext(ctx).WithName("roledefinition-webhook")
+	logger.V(1).Info("validating delete", "name", obj.Name)
 	return nil, nil
 }

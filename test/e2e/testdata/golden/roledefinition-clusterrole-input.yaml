@@ -1,0 +1,16 @@
+# Golden test input: RoleDefinition that creates a ClusterRole
+# This RoleDefinition should generate a ClusterRole with read-only permissions
+# excluding the "update" and "create" verbs
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: golden-test-cluster-reader
+spec:
+  targetRole: ClusterRole
+  targetName: golden-cluster-reader
+  scopeNamespaced: false
+  restrictedVerbs:
+    - update
+    - create
+    - delete
+    - patch

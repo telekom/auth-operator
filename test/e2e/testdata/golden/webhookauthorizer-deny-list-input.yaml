@@ -1,0 +1,33 @@
+# Golden test input: WebhookAuthorizer with denied principals
+# This WebhookAuthorizer explicitly denies certain principals
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: WebhookAuthorizer
+metadata:
+  name: golden-deny-authorizer
+spec:
+  resourceRules:
+    - apiGroups:
+        - ""
+      resources:
+        - secrets
+      verbs:
+        - get
+        - list
+    - apiGroups:
+        - ""
+      resources:
+        - configmaps
+      verbs:
+        - "*"
+  # Allow authenticated users
+  allowedPrincipals:
+    - groups:
+        - system:authenticated
+  # But explicitly deny these users/groups
+  deniedPrincipals:
+    - user: untrusted-user@example.com
+    - groups:
+        - external-contractors
+        - temporary-access
+    - user: service-account-blocked
+      namespace: blocked-namespace

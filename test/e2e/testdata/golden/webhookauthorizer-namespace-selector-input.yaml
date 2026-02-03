@@ -1,0 +1,36 @@
+# Golden test input: WebhookAuthorizer with namespace selector
+# This WebhookAuthorizer restricts access to namespaces matching label selector
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: WebhookAuthorizer
+metadata:
+  name: golden-ns-scoped-authorizer
+spec:
+  resourceRules:
+    - apiGroups:
+        - ""
+      resources:
+        - pods
+        - pods/log
+        - pods/exec
+      verbs:
+        - "*"
+    - apiGroups:
+        - apps
+      resources:
+        - deployments
+      verbs:
+        - get
+        - list
+        - watch
+        - create
+        - update
+        - patch
+  allowedPrincipals:
+    - user: developer@example.com
+    - groups:
+        - developers
+  # Only allow in namespaces with this label
+  namespaceSelector:
+    matchLabels:
+      environment: development
+      allow-dev-access: "true"

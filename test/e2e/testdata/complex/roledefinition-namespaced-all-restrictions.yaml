@@ -1,0 +1,66 @@
+# Complex namespaced Role: Tests all restrictions for namespaced resources
+# scopeNamespaced: true means only namespaced resources are included
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: complex-ns-all-restrictions
+spec:
+  targetRole: Role
+  targetName: complex-ns-filtered-role
+  targetNamespace: complex-e2e-test-ns
+  scopeNamespaced: true
+  # Note: metav1.APIGroup requires name and versions fields
+  restrictedApis:
+    - name: apps
+      versions:
+        - groupVersion: apps/v1
+          version: v1
+    - name: batch
+      versions:
+        - groupVersion: batch/v1
+          version: v1
+  # Note: metav1.APIResource requires name, kind, namespaced, singularName, verbs fields
+  restrictedResources:
+    - name: secrets
+      kind: Secret
+      namespaced: true
+      singularName: secret
+      group: ""
+      verbs:
+        - get
+        - list
+        - create
+        - update
+        - delete
+        - watch
+    - name: configmaps
+      kind: ConfigMap
+      namespaced: true
+      singularName: configmap
+      group: ""
+      verbs:
+        - get
+        - list
+        - create
+        - update
+        - delete
+        - watch
+    - name: pods/exec
+      kind: PodExecOptions
+      namespaced: true
+      singularName: ""
+      group: ""
+      verbs:
+        - create
+    - name: pods/attach
+      kind: PodAttachOptions
+      namespaced: true
+      singularName: ""
+      group: ""
+      verbs:
+        - create
+  restrictedVerbs:
+    - create
+    - update
+    - patch
+    - delete

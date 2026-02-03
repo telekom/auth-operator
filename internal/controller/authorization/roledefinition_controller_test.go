@@ -60,7 +60,7 @@ var _ = Describe("RoleDefinition Controller", func() {
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
 			ctx := log.IntoContext(context.Background(), logger)
-			controllerReconciler, err := NewRoleDefinitionReconciler(cfg, scheme.Scheme, recorder, discovery.NewResourceTracker(scheme.Scheme, cfg))
+			controllerReconciler, err := NewRoleDefinitionReconciler(k8sClient, scheme.Scheme, recorder, discovery.NewResourceTracker(scheme.Scheme, cfg))
 			Expect(err).NotTo(HaveOccurred())
 			go func() {
 				for event := range recorder.Events {

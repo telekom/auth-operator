@@ -1,0 +1,95 @@
+# Complex WebhookAuthorizer: Tests all features combined
+# - ResourceRules with multiple apiGroups, resources, verbs
+# - NonResourceRules for URLs
+# - AllowedPrincipals with users and groups
+# - DeniedPrincipals (deny takes precedence)
+# - NamespaceSelector
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: WebhookAuthorizer
+metadata:
+  name: complex-full-authorizer
+spec:
+  # Resource-based rules
+  resourceRules:
+    # Core resources
+    - apiGroups:
+        - ""
+      resources:
+        - pods
+        - pods/log
+        - services
+        - configmaps
+      verbs:
+        - get
+        - list
+        - watch
+    # Apps resources
+    - apiGroups:
+        - apps
+      resources:
+        - deployments
+        - replicasets
+        - statefulsets
+        - daemonsets
+      verbs:
+        - get
+        - list
+        - watch
+        - create
+        - update
+        - patch
+    # Batch resources
+    - apiGroups:
+        - batch
+      resources:
+        - jobs
+        - cronjobs
+      verbs:
+        - "*"
+  # Non-resource URL rules
+  nonResourceRules:
+    - verbs:
+        - get
+      nonResourceURLs:
+        - /healthz
+        - /healthz/*
+        - /readyz
+        - /readyz/*
+        - /livez
+        - /livez/*
+    - verbs:
+        - get
+        - post
+      nonResourceURLs:
+        - /api
+        - /api/*
+        - /apis
+        - /apis/*
+  # Allow these principals
+  allowedPrincipals:
+    - user: admin@example.com
+    - user: operator@example.com
+    - groups:
+        - system:authenticated
+        - platform-operators
+    - groups:
+        - developers
+      namespace: dev-team
+  # Deny these principals (takes precedence over allow)
+  deniedPrincipals:
+    - user: blocked-user@example.com
+    - groups:
+        - external-contractors
+        - temporary-access
+    - user: restricted-sa
+      namespace: kube-system
+  # Only allow in matching namespaces
+  namespaceSelector:
+    matchLabels:
+      authorization.t-caas.telekom.com/managed: "true"
+    matchExpressions:
+      - key: environment
+        operator: In
+        values:
+          - development
+          - staging

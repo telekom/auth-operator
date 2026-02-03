@@ -1,0 +1,18 @@
+# Golden test input: BindDefinition that creates RoleBindings with namespace selector
+# This BindDefinition should generate RoleBindings in namespaces matching the selector
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: golden-test-ns-bind
+spec:
+  targetName: golden-ns-bind
+  subjects:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: User
+      name: golden-ns-user@example.com
+  roleBindings:
+    - clusterRoleRefs:
+        - golden-cluster-reader
+      namespaceSelector:
+        - matchLabels:
+            golden-test: "true"

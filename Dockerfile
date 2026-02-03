@@ -4,7 +4,7 @@ FROM gcr.io/distroless/static-debian12
 
 WORKDIR /
 
-ARG BINARY_SOURCE_PATH
+ARG BINARY_SOURCE_PATH=auth-operator
 COPY ${BINARY_SOURCE_PATH} ./auth-operator
 USER 65532:65532
 ENTRYPOINT ["/auth-operator"]

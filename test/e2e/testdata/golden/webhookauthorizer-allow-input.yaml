@@ -1,0 +1,23 @@
+# Golden test input: WebhookAuthorizer with allowed principals
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: WebhookAuthorizer
+metadata:
+  name: golden-authorizer-allow
+spec:
+  resourceRules:
+    - apiGroups:
+        - ""
+      resources:
+        - pods
+        - configmaps
+      verbs:
+        - get
+        - list
+        - watch
+  allowedPrincipals:
+    - user: golden-allowed-user@example.com
+    - groups:
+        - golden-allowed-group
+  namespaceSelector:
+    matchLabels:
+      golden-test: "true"

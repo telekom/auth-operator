@@ -25,8 +25,8 @@ spec:
       verbs:
         - all
   restrictedVerbs:
-  - update
-  - create
+    - update
+    - create
 ---
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: RoleDefinition
@@ -39,7 +39,7 @@ spec:
   targetRole: Role
   targetNamespace: default
   targetName: t-caas-namespaced-reader
-  scopeNamespaced: true 
+  scopeNamespaced: true
   restrictedApis:
     - name: velero.io
       versions:
@@ -56,12 +56,12 @@ spec:
       verbs:
         - all
     - name: pods
-      singularName: pod 
-      namespaced: true 
+      singularName: pod
+      namespaced: true
       group: ""
-      kind: Pod 
+      kind: Pod
       verbs:
         - all
   restrictedVerbs:
-  - get
-  - delete
+    - get
+    - delete

@@ -1,0 +1,51 @@
+# Complex BindDefinition: Multiple ClusterRoleRefs + Multiple NamespaceSelectors
+# Tests:
+# - Multiple clusterRoleRefs creating multiple ClusterRoleBindings
+# - Multiple roleBindings with different namespaceSelectors
+# - Mixed subject types (User, Group, ServiceAccount)
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: complex-multi-binding
+spec:
+  targetName: complex-multi
+  subjects:
+    # User subject
+    - apiGroup: rbac.authorization.k8s.io
+      kind: User
+      name: complex-user@example.com
+    # Group subject
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group
+      name: complex-developers
+    # ServiceAccount (should be auto-created)
+    - kind: ServiceAccount
+      name: complex-app-sa
+      namespace: complex-e2e-test-ns
+    # Another ServiceAccount in different namespace
+    - kind: ServiceAccount
+      name: complex-worker-sa
+      namespace: complex-e2e-ns-team-a
+  # Multiple ClusterRole bindings - creates 2 ClusterRoleBindings
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - complex-filtered-role
+      - view
+  # Multiple namespace-scoped bindings
+  roleBindings:
+    # Bind view ClusterRole in namespaces with team=alpha label
+    - clusterRoleRefs:
+        - view
+      namespaceSelector:
+        - matchLabels:
+            team: alpha
+    # Bind edit ClusterRole in namespaces with env=dev label
+    - clusterRoleRefs:
+        - edit
+      namespaceSelector:
+        - matchLabels:
+            env: dev
+    # Bind specific role in explicit namespace
+    - roleRefs:
+        - complex-ns-filtered-role
+      namespace: complex-e2e-test-ns

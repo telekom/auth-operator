@@ -1,0 +1,17 @@
+# Golden test input: WebhookAuthorizer with denied principals
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: WebhookAuthorizer
+metadata:
+  name: golden-authorizer-deny
+spec:
+  resourceRules:
+    - apiGroups:
+        - ""
+      resources:
+        - secrets
+      verbs:
+        - "*"
+  deniedPrincipals:
+    - user: golden-denied-user@example.com
+    - groups:
+        - golden-denied-group

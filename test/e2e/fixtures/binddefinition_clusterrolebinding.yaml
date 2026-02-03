@@ -1,0 +1,20 @@
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: e2e-test-cluster-binding
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/component: e2e-test
+    app.kubernetes.io/created-by: auth-operator
+spec:
+  targetName: e2e-cluster-binding
+  subjects:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: User
+      name: e2e-test-user@example.com
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group
+      name: e2e-test-group
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - e2e-cluster-reader

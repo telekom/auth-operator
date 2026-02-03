@@ -43,6 +43,10 @@ import (
 
 const (
 	namespaceResourcesCalculationInterval = 10 * time.Second
+	// maxConcurrentResourceChecks limits goroutines to avoid overwhelming the API server
+	maxConcurrentResourceChecks = 30
+	// terminatingNamespaceRequeueInterval is how often to recheck a terminating namespace
+	terminatingNamespaceRequeueInterval = 15 * time.Second
 )
 
 // namespaceDeletionResourceBlocking represents a resource type and the specific instances blocking namespace deletion
@@ -81,7 +85,10 @@ type roleBindingTerminator struct {
 	namespaceTerminationResourcesCache sync.Map // map[string]*namespaceTerminationStatus
 }
 
+// NewRoleBindingTerminator creates a new RoleBinding terminator.
+// Uses the manager's cached client for improved performance.
 func NewRoleBindingTerminator(
+	cachedClient client.Client,
 	config *rest.Config,
 	scheme *runtime.Scheme,
 	recorder record.EventRecorder,
@@ -92,14 +99,8 @@ func NewRoleBindingTerminator(
 		return nil, fmt.Errorf("unable to create dynamic client: %w", err)
 	}
 
-	client, err := client.New(config, client.Options{Scheme: scheme})
-	if err != nil {
-		return nil, fmt.Errorf("unable to create client: %w", err)
-	}
-
 	return &roleBindingTerminator{
-		// DiscoveryClient: discoveryClient,
-		client:                             client,
+		client:                             cachedClient,
 		dynamicClient:                      dynamicClient,
 		scheme:                             scheme,
 		recorder:                           recorder,
@@ -141,32 +142,40 @@ func (r *roleBindingTerminator) getNamespacedBlockingResources(ctx context.Conte
 // Returns: hasResources (bool), blockingResources ([]ResourceBlocking), error
 func namespaceHasResources(ctx context.Context, resourceTracker *discovery.ResourceTracker, dynamicClient dynamic.Interface, namespace string) ([]namespaceDeletionResourceBlocking, error) {
 	log := log.FromContext(ctx)
-	log.V(2).Info("DEBUG: Starting namespace resource check", "namespace", namespace)
+	log.V(2).Info("starting namespace resource check", "namespace", namespace)
 
 	var resourcesChecked, resourcesSkipped atomic.Int32
 
 	apiResources, err := resourceTracker.GetAPIResources()
 	if errors.Is(err, discovery.ErrResourceTrackerNotStarted) {
-		log.V(1).Info("DEBUG: ResourceTracker not started yet - requeuing reconciliation", "roleDefinitionName")
-		return nil, nil
+		log.V(1).Info("ResourceTracker not started yet - requeuing reconciliation", "namespace", namespace)
+		return nil, err
 	}
 	if err != nil {
-		log.Error(err, "ERROR: Failed to get API resources from ResourceTracker", "roleDefinitionName")
+		log.Error(err, "failed to get API resources from ResourceTracker", "namespace", namespace)
 		return nil, err
 	}
 
 	// collect resources concurrently
 	errGroup := errgroup.Group{}
-	errGroup.SetLimit(30) // limit concurrency to 30 goroutines to avoid overwhelming the API server
+	errGroup.SetLimit(maxConcurrentResourceChecks)
 
-	// list of blocking resources found
+	// list of blocking resources found - only accessed by collector goroutine
+	// until channel is closed and WaitGroup is done
 	var blockingResources []namespaceDeletionResourceBlocking
 
 	// channel to collect blocking resources
-	blockingResourcesChannel := make(chan namespaceDeletionResourceBlocking)
+	blockingResourcesChannel := make(chan namespaceDeletionResourceBlocking, 100)
+
+	// WaitGroup to ensure collector goroutine finishes
+	var collectorWg sync.WaitGroup
+	collectorWg.Add(1)
 
 	// collect blocking resources from channel
+	// No mutex needed: only this goroutine writes to blockingResources,
+	// and main goroutine waits for collectorWg before reading
 	go func() {
+		defer collectorWg.Done()
 		for br := range blockingResourcesChannel {
 			blockingResources = append(blockingResources, br)
 		}
@@ -176,7 +185,7 @@ func namespaceHasResources(ctx context.Context, resourceTracker *discovery.Resou
 		gv, parseErr := schema.ParseGroupVersion(groupVersion)
 		if parseErr != nil {
 			// skip malformed group/version
-			log.V(4).Info("DEBUG: Skipping malformed GroupVersion", "namespace", namespace, "groupVersion", groupVersion, "error", parseErr)
+			log.V(4).Info("skipping malformed GroupVersion", "namespace", namespace, "groupVersion", groupVersion, "error", parseErr)
 			resourcesSkipped.Add(1)
 			continue
 		}
@@ -186,14 +195,14 @@ func namespaceHasResources(ctx context.Context, resourceTracker *discovery.Resou
 
 			if strings.Contains(resource.Name, "/") || strings.Contains(resource.Name, "rolebindings") {
 				// ignore subresources and rolebinding resources
-				log.V(4).Info("DEBUG: Skipping subresource or rolebinding", "namespace", namespace, "resource", resource.Name, "groupVersion", groupVersion)
+				log.V(4).Info("skipping subresource or rolebinding", "namespace", namespace, "resource", resource.Name, "groupVersion", groupVersion)
 				resourcesSkipped.Add(1)
 				continue
 			}
 
 			if !supportsList(resource.Verbs) {
 				// if resource does not support "list", skip it
-				log.V(4).Info("DEBUG: Skipping resource without list verb", "namespace", namespace, "resource", resource.Name, "groupVersion", groupVersion)
+				log.V(4).Info("skipping resource without list verb", "namespace", namespace, "resource", resource.Name, "groupVersion", groupVersion)
 				resourcesSkipped.Add(1)
 				continue
 			}
@@ -205,29 +214,29 @@ func namespaceHasResources(ctx context.Context, resourceTracker *discovery.Resou
 			}
 
 			errGroup.Go(func() error {
-				log.V(3).Info("DEBUG: Listing resource in namespace", "namespace", namespace, "gvr", gvr.String())
+				log.V(3).Info("listing resource in namespace", "namespace", namespace, "gvr", gvr.String())
 				// using dynamic client to not instantiate all typed clients
 				list, err := dynamicClient.Resource(gvr).Namespace(namespace).List(ctx, metav1.ListOptions{})
 				if err != nil {
-					log.V(2).Info("DEBUG: Skipping resource due to list error", "namespace", namespace, "resource", gvr.String(), "error", err)
+					log.V(2).Info("skipping resource due to list error", "namespace", namespace, "resource", gvr.String(), "error", err)
 					resourcesSkipped.Add(1)
 					return nil
 				}
 
 				resourcesChecked.Add(1)
 				if len(list.Items) == 0 {
-					log.V(3).Info("DEBUG: No resources found", "namespace", namespace, "gvr", gvr.String())
+					log.V(3).Info("no resources found", "namespace", namespace, "gvr", gvr.String())
 					return nil
 				}
 
-				log.V(2).Info("DEBUG: Found resources in namespace - will NOT remove finalizers", "namespace", namespace, "gvr", gvr.String(), "itemCount", len(list.Items))
+				log.V(2).Info("found resources in namespace - will NOT remove finalizers", "namespace", namespace, "gvr", gvr.String(), "itemCount", len(list.Items))
 
 				// Collect names of blocking resources (limit to first 10)
 				var resourceNames []string
 				for i, item := range list.Items {
 					if i < 10 { // Collect up to 10 resource names for event
 						resourceNames = append(resourceNames, item.GetName())
-						log.V(3).Info("DEBUG: Found resource", "namespace", namespace, "gvr", gvr.String(), "name", item.GetName(), "index", i)
+						log.V(3).Info("found resource", "namespace", namespace, "gvr", gvr.String(), "name", item.GetName(), "index", i)
 					}
 				}
 				// Add to blocking resources list
@@ -245,15 +254,16 @@ func namespaceHasResources(ctx context.Context, resourceTracker *discovery.Resou
 		return nil, fmt.Errorf("error listing resources in namespace %s: %w", namespace, err)
 	}
 	close(blockingResourcesChannel)
+	collectorWg.Wait() // Wait for collector goroutine to finish processing all items
 
 	// If we found blocking resources, return them all
 	if len(blockingResources) > 0 {
-		log.V(2).Info("DEBUG: Found blocking resources in namespace", "namespace", namespace, "blockingResourceCount", len(blockingResources))
+		log.V(2).Info("found blocking resources in namespace", "namespace", namespace, "blockingResourceCount", len(blockingResources))
 		return blockingResources, nil
 	}
 
 	// no resources found
-	log.V(2).Info("DEBUG: Namespace has no resources - can remove finalizers", "namespace", namespace, "resourcesChecked", resourcesChecked.Load(), "resourcesSkipped", resourcesSkipped.Load())
+	log.V(2).Info("namespace has no resources - can remove finalizers", "namespace", namespace, "resourcesChecked", resourcesChecked.Load(), "resourcesSkipped", resourcesSkipped.Load())
 	return nil, nil
 }
 
@@ -342,10 +352,10 @@ func (r *roleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request)
 	if roleBinding.DeletionTimestamp.IsZero() {
 		if controllerutil.AddFinalizer(&roleBinding, authnv1alpha1.RoleBindingFinalizer) {
 			if err := r.client.Update(ctx, &roleBinding); err != nil {
-				log.Error(err, "ERROR: Failed to add finalizer to RoleBinding")
+				log.Error(err, "failed to add finalizer to RoleBinding")
 				return ctrl.Result{}, err
 			}
-			log.V(1).Info("DEBUG: Added finalizer to RoleBinding")
+			log.V(1).Info("added finalizer to RoleBinding")
 		}
 		return ctrl.Result{}, nil
 	}
@@ -366,10 +376,10 @@ func (r *roleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request)
 	if !namespaceIsTerminating {
 		if controllerutil.RemoveFinalizer(&roleBinding, authnv1alpha1.RoleBindingFinalizer) {
 			if err := r.client.Update(ctx, &roleBinding); err != nil {
-				log.Error(err, "ERROR: Failed to remove finalizer from RoleBinding")
+				log.Error(err, "failed to remove finalizer from RoleBinding")
 				return ctrl.Result{}, err
 			}
-			log.V(1).Info("DEBUG: Removed finalizer from RoleBinding")
+			log.V(1).Info("removed finalizer from RoleBinding")
 			return ctrl.Result{}, nil
 		}
 	}
@@ -380,20 +390,20 @@ func (r *roleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request)
 	// Check if namespace has any remaining resources before cleanup
 	blockingResources, err := r.getNamespacedBlockingResources(ctx, namespace.Name)
 	if err != nil {
-		log.Error(err, "ERROR: Failed to check if namespace has resources", "namespace", namespace.Name)
+		log.Error(err, "failed to check if namespace has resources", "namespace", namespace.Name)
 		return ctrl.Result{}, err
 	}
 	terminationAllowed := len(blockingResources) == 0
 
 	if !terminationAllowed {
-		log.V(1).Info("DEBUG: Terminating namespace still has resources - NOT removing RoleBinding finalizer", "namespace", namespace.Name)
+		log.V(1).Info("terminating namespace still has resources - NOT removing RoleBinding finalizer", "namespace", namespace.Name)
 		// Log detailed information about blocking resources
 		for _, br := range blockingResources {
 			resourceType := br.ResourceType
 			if br.APIGroup != "" {
 				resourceType = fmt.Sprintf("%s.%s", br.ResourceType, br.APIGroup)
 			}
-			log.V(1).Info("DEBUG: Blocking resource found", "namespace", namespace.Name, "resourceType", resourceType, "count", br.Count, "names", br.Names)
+			log.V(1).Info("blocking resource found", "namespace", namespace.Name, "resourceType", resourceType, "count", br.Count, "names", br.Names)
 		}
 
 		conditions.MarkTrue(
@@ -405,31 +415,31 @@ func (r *roleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request)
 		)
 		// try to update namespace status with blocking resources information. Log error but continue
 		if err := r.client.Status().Update(ctx, &namespace); err != nil {
-			log.Error(err, "ERROR: Failed to update Namespace status with blocking resources information", "namespace", namespace.Name)
+			log.Error(err, "Failed to update Namespace status with blocking resources information", "namespace", namespace.Name)
 		}
 
-		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: terminatingNamespaceRequeueInterval}, nil
 	}
 
 	// No resources found - safe to remove finalizer from RoleBinding
 	bindDefinition, err := r.getOwningBindDefinition(ctx, roleBinding.OwnerReferences)
 	if err != nil {
-		log.Error(err, "ERROR: Failed to get owning BindDefinition for RoleBinding", "roleBindingName", roleBinding.Name, "namespace", namespace.Name)
+		log.Error(err, "failed to get owning BindDefinition for RoleBinding", "roleBindingName", roleBinding.Name, "namespace", namespace.Name)
 		return ctrl.Result{}, err
 	}
 	log = log.WithValues("bindDefinitionName", bindDefinition.Name)
 
-	log.V(1).Info("DEBUG: Terminating namespace has no more resources - proceeding to remove RoleBinding finalizers")
+	log.V(1).Info("terminating namespace has no more resources - proceeding to remove RoleBinding finalizers")
 	if controllerutil.RemoveFinalizer(&roleBinding, authnv1alpha1.RoleBindingFinalizer) {
-		log.V(2).Info("DEBUG: Removing finalizer from RoleBinding in terminating namespace")
+		log.V(2).Info("removing finalizer from RoleBinding in terminating namespace")
 		if err := r.client.Update(ctx, &roleBinding); err != nil {
-			log.Error(err, "ERROR: Failed to remove finalizer from RoleBinding", "roleBindingName", roleBinding.Name, "roleBinding", roleBinding.Name, "namespace", namespace.Name)
+			log.Error(err, "failed to remove finalizer from RoleBinding", "roleBindingName", roleBinding.Name, "roleBinding", roleBinding.Name, "namespace", namespace.Name)
 			return ctrl.Result{}, err
 		}
 		r.recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "FinalizerRemoved", "Removed finalizer from RoleBinding %s in terminating namespace %s", roleBinding.Name, namespace.Name)
-		log.V(1).Info("DEBUG: Successfully removed finalizer from RoleBinding in terminating namespace")
+		log.V(1).Info("successfully removed finalizer from RoleBinding in terminating namespace")
 	} else {
-		log.V(3).Info("DEBUG: RoleBinding does not have finalizer", "bindDefinitionName")
+		log.V(3).Info("RoleBinding does not have finalizer", "bindDefinitionName")
 	}
 
 	conditions.MarkFalse(
@@ -441,9 +451,9 @@ func (r *roleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request)
 	)
 	// try to update namespace status with blocking resources information. Log error but continue
 	if err := r.client.Status().Update(ctx, &namespace); err != nil {
-		log.Error(err, "ERROR: Failed to update Namespace status with blocking resources information", "namespace", namespace.Name)
+		log.Error(err, "failed to update Namespace status with blocking resources information", "namespace", namespace.Name)
 	}
 
-	log.V(2).Info("DEBUG: reconcileTerminatingNamespaces completed")
+	log.V(2).Info("reconcileTerminatingNamespaces completed")
 	return ctrl.Result{}, nil
 }

@@ -1,0 +1,9 @@
+# Test namespace with team=alpha label
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: complex-e2e-ns-team-a
+  labels:
+    team: alpha
+    env: dev
+    managed-by: auth-operator

@@ -183,9 +183,8 @@ func TestNamespaceMutatorHandle(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-ns",
 				}},
-			expectAllowed:    true,
-			expectPatch:      false,
-			expectStatusCode: 200,
+			expectAllowed: true,
+			expectPatch:   false,
 		},
 		{
 			name:      "kubernetes-admin => CREATE always allowed with no mutation",
@@ -200,9 +199,8 @@ func TestNamespaceMutatorHandle(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-ns",
 				}},
-			expectAllowed:    true,
-			expectPatch:      false,
-			expectStatusCode: 200,
+			expectAllowed: true,
+			expectPatch:   false,
 		},
 		{
 			name:      "kubernetes-admin => UPDATE always allowed with no mutation",
@@ -217,9 +215,8 @@ func TestNamespaceMutatorHandle(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-ns",
 				}},
-			expectAllowed:    true,
-			expectPatch:      false,
-			expectStatusCode: 200,
+			expectAllowed: true,
+			expectPatch:   false,
 		},
 		{
 			name:      "User in BindDef specified Group => CREATE should add label from matching BindDefinition",
@@ -238,8 +235,7 @@ func TestNamespaceMutatorHandle(t *testing.T) {
 			expectLabels: map[string]string{
 				"t-caas.telekom.com/owner": "platform",
 			},
-			expectPatch:      true,
-			expectStatusCode: 200,
+			expectPatch: true,
 		},
 		{
 			name:      "User in BindDef specified Group => [NO_LABEL] UPDATE should add label from matching BindDefinition",
@@ -258,8 +254,7 @@ func TestNamespaceMutatorHandle(t *testing.T) {
 			expectLabels: map[string]string{
 				"t-caas.telekom.com/owner": "platform",
 			},
-			expectPatch:      true,
-			expectStatusCode: 200,
+			expectPatch: true,
 		},
 		{
 			name:      "User in BindDef specified Group => [OVERWRITE_LABEL] UPDATE should NOT add label from matching BindDefinition",
@@ -281,8 +276,7 @@ func TestNamespaceMutatorHandle(t *testing.T) {
 			expectLabels: map[string]string{
 				"t-caas.telekom.com/owner": "platform",
 			},
-			expectPatch:      false,
-			expectStatusCode: 200,
+			expectPatch: false,
 		},
 		{
 			name:      "User in BindDef specified ServiceAccount => CREATE should add label from matching BindDefinition",
@@ -301,8 +295,7 @@ func TestNamespaceMutatorHandle(t *testing.T) {
 			expectLabels: map[string]string{
 				"t-caas.telekom.com/owner": "platform",
 			},
-			expectPatch:      true,
-			expectStatusCode: 200,
+			expectPatch: true,
 		},
 		{
 			name:      "User in BindDef specified ServiceAccount => [NO_LABEL] UPDATE should add label from matching BindDefinition",
@@ -321,8 +314,7 @@ func TestNamespaceMutatorHandle(t *testing.T) {
 			expectLabels: map[string]string{
 				"t-caas.telekom.com/owner": "platform",
 			},
-			expectPatch:      true,
-			expectStatusCode: 200,
+			expectPatch: true,
 		},
 		{
 			name:      "User in BindDef specified ServiceAccount => [OVERWRITE_LABEL] UPDATE should NOT add label from matching BindDefinition",

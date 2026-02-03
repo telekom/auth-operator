@@ -140,7 +140,7 @@ func (r *ResourceTracker) Start(ctx context.Context) error {
 	// Start CRD watch with jitter and exponential backoff
 	go func() {
 		if err := r.launchWatch(ctx); err != nil {
-			log.FromContext(ctx).Error(err, "ERROR: Failed to launch CRD watch")
+			log.FromContext(ctx).Error(err, "failed to launch CRD watch")
 		}
 	}()
 
@@ -176,11 +176,11 @@ func (r *ResourceTracker) initUUIDMap(ctx context.Context) error {
 func (r *ResourceTracker) collectAndNotify(ctx context.Context) func() {
 	return func() {
 		logger := log.FromContext(ctx).WithName("ResourceTracker.collectAndNotify")
-		logger.V(2).Info("DEBUG: Triggering rate-limited API resource collection")
+		logger.V(2).Info("triggering rate-limited API resource collection")
 
 		changed, err := r.collectAPIResources(ctx)
 		if err != nil {
-			logger.Error(err, "ERROR: Failed to collect API resources")
+			logger.Error(err, "failed to collect API resources")
 			return
 		}
 		if !changed {
@@ -189,11 +189,11 @@ func (r *ResourceTracker) collectAndNotify(ctx context.Context) func() {
 		for _, f := range r.signalFuncs {
 			err := f()
 			if err != nil {
-				logger.Error(err, "ERROR: Failed to send signal after API resource collection")
+				logger.Error(err, "failed to send signal after API resource collection")
 				continue
 			}
 		}
-		logger.Info("DEBUG: Successfully sent signal after API resource collection")
+		logger.Info("successfully sent signal after API resource collection")
 	}
 }
 
@@ -228,7 +228,7 @@ func (r *ResourceTracker) collectAPIResources(ctx context.Context) (bool, error)
 	defer r.mutex.Unlock()
 
 	log := log.FromContext(ctx)
-	log.V(2).Info("DEBUG: Collecting API resources - locking mutex")
+	log.V(2).Info("collecting API resources - locking mutex")
 
 	// Create a Discovery client with higher QPS and Burst to speed up the discovery process
 	discoveryConfig := rest.CopyConfig(r.config)
@@ -237,19 +237,19 @@ func (r *ResourceTracker) collectAPIResources(ctx context.Context) (bool, error)
 
 	discoveryClient, err := discovery.NewDiscoveryClientForConfig(discoveryConfig)
 	if err != nil {
-		log.Error(err, "ERROR: Failed to create Discovery client")
+		log.Error(err, "failed to create Discovery client")
 		return false, err
 	}
 
 	// Fetch all existing API Groups and filter them against RestrictedAPIs
-	log.V(2).Info("DEBUG: Starting API discovery")
+	log.V(2).Info("starting API discovery")
 
 	discoveredApiGroups, err := discoveryClient.ServerGroups()
 	if err != nil {
-		log.Error(err, "ERROR: Failed to discover API groups")
+		log.Error(err, "failed to discover API groups")
 		return false, err
 	}
-	log.V(2).Info("DEBUG: Discovered API groups", "groupCount", len(discoveredApiGroups.Groups))
+	log.V(2).Info("discovered API groups", "groupCount", len(discoveredApiGroups.Groups))
 
 	// Fetch all existing API Resources and filter them against RestrictedResources
 	var errorGroup errgroup.Group
@@ -270,7 +270,7 @@ func (r *ResourceTracker) collectAPIResources(ctx context.Context) (bool, error)
 			errorGroup.Go(func() error {
 				resources, err := r.collectAPIResourcesForGroupVersion(discoveryClient, apiGroupName, apiVersionStr)
 				if err != nil {
-					log.Error(err, "ERROR: Failed to discover API resources for group version",
+					log.Error(err, "failed to discover API resources for group version",
 						"group", apiGroupName, "version", apiVersionStr)
 					return err
 				}
@@ -283,25 +283,25 @@ func (r *ResourceTracker) collectAPIResources(ctx context.Context) (bool, error)
 		}
 	}
 	if err := errorGroup.Wait(); err != nil {
-		log.Error(err, "ERROR: Failed to discover resources concurrently")
+		log.Error(err, "failed to discover resources concurrently")
 		return false, err
 	}
 
-	log.V(2).Info("DEBUG: Discovered API resources", "resourceCount", len(apiResourcesByGroupVersion))
+	log.V(2).Info("discovered API resources", "resourceCount", len(apiResourcesByGroupVersion))
 
 	if apiResourcesByGroupVersion.Equals(r.cache) {
-		log.V(2).Info("DEBUG: API resources cache unchanged")
+		log.V(2).Info("API resources cache unchanged")
 		return false, nil
 	}
 	r.cache = apiResourcesByGroupVersion
 
-	log.V(2).Info("DEBUG: API resources cache updated")
+	log.V(2).Info("API resources cache updated")
 	return true, nil
 }
 
 func (r *ResourceTracker) periodicCollection(ctx context.Context) {
 	logger := log.FromContext(ctx).WithName("ResourceTracker.periodicCollection")
-	logger.Info("DEBUG: Starting periodic API resource collection", "interval", periodicCollectionInterval)
+	logger.Info("starting periodic API resource collection", "interval", periodicCollectionInterval)
 
 	ticker := time.NewTicker(periodicCollectionInterval)
 	defer ticker.Stop()
@@ -311,7 +311,7 @@ func (r *ResourceTracker) periodicCollection(ctx context.Context) {
 			// Trigger rate-limited collection after ticker
 			r.rateLimit.Do(r.collectAndNotify(ctx))
 		case <-ctx.Done():
-			logger.Info("DEBUG: Stopping periodic API resource collection due to context done")
+			logger.Info("stopping periodic API resource collection due to context done")
 			return
 		}
 	}
@@ -330,23 +330,23 @@ func (r *ResourceTracker) watchAPIResources(ctx context.Context) {
 	log := log.FromContext(ctx)
 	cli, err := client.NewWithWatch(r.config, client.Options{Scheme: r.scheme})
 	if err != nil {
-		log.Error(err, "ERROR: Unable to create client for CRD watch")
+		log.Error(err, "unable to create client for CRD watch")
 		return
 	}
 
 	var crdList apiextensionsv1.CustomResourceDefinitionList
 	watcher, err := cli.Watch(ctx, &crdList)
 	if err != nil {
-		log.Error(err, "ERROR: Unable to start CRD watch")
+		log.Error(err, "unable to start CRD watch")
 		return
 	}
 
-	log.Info("DEBUG: Starting CRD watch for RoleDefinitionReconciler")
+	log.Info("starting CRD watch for RoleDefinitionReconciler")
 	for {
 		select {
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
-				log.Info("DEBUG: CRD watch channel closed")
+				log.Info("CRD watch channel closed")
 				return
 			}
 			if event.Type == watch.Error {
@@ -360,7 +360,7 @@ func (r *ResourceTracker) watchAPIResources(ctx context.Context) {
 			}
 			crd := event.Object.(*apiextensionsv1.CustomResourceDefinition)
 
-			log.V(2).Info("DEBUG: CRD watch event received", "eventType", event.Type, "name", crd.Name, "uid", crd.UID)
+			log.V(2).Info("CRD watch event received", "eventType", event.Type, "name", crd.Name, "uid", crd.UID)
 			if event.Type == watch.Added {
 				if _, exists := r.crdsUUIDs[string(crd.UID)]; exists {
 					// already exists, skip
@@ -380,7 +380,7 @@ func (r *ResourceTracker) watchAPIResources(ctx context.Context) {
 			r.rateLimit.Do(r.collectAndNotify(ctx))
 
 		case <-ctx.Done():
-			log.Info("DEBUG: Stopping CRD watch after context done")
+			log.Info("stopping CRD watch after context done")
 			return
 		}
 	}

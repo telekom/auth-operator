@@ -11,14 +11,14 @@ spec:
     verbs:
     - get
   allowedPrincipals:
-    - user: xavi
+  - user: xavi
   deniedPrincipals:
-    - user: karlito
-      groups:
-      - somefancygroup
+  - user: karlito
+    groups:
+    - somefancygroup
   namespaceSelector:
     matchExpressions:
     - key: kubernetes.io/metadata.name
       operator: In
       values:
-        - kube-system
+      - kube-system

@@ -1,0 +1,21 @@
+# Kind cluster configuration for multi-node e2e testing
+# Used for HA, leader election, and pod scheduling tests
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: auth-operator-e2e-multi
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration: {}
+      - |
+        kind: ClusterConfiguration
+        apiServer:
+          extraArgs:
+            authorization-mode: Node,RBAC
+  - role: worker
+  - role: worker
+networking:
+  podSubnet: "10.244.0.0/16"
+  serviceSubnet: "10.96.0.0/12"

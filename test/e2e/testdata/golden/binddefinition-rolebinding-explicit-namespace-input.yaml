@@ -1,0 +1,21 @@
+# Golden test input: BindDefinition with explicit namespace RoleBindings
+# This BindDefinition creates RoleBindings in specific namespaces
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: golden-explicit-ns-bind
+spec:
+  targetName: golden-explicit-ns
+  subjects:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: User
+      name: ns-admin@example.com
+  roleBindings:
+    # Bind to a ClusterRole within a specific namespace
+    - clusterRoleRefs:
+        - admin
+      namespace: auth-operator-golden-test
+    # Bind to multiple roles in another namespace
+    - roleRefs:
+        - golden-ns-reader
+      namespace: auth-operator-golden-test

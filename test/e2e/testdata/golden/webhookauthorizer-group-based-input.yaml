@@ -1,0 +1,34 @@
+# Golden test input: WebhookAuthorizer with group-based authorization
+# This WebhookAuthorizer allows access based on group membership
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: WebhookAuthorizer
+metadata:
+  name: golden-group-authorizer
+spec:
+  resourceRules:
+    - apiGroups:
+        - ""
+      resources:
+        - pods
+        - services
+        - configmaps
+      verbs:
+        - get
+        - list
+        - watch
+    - apiGroups:
+        - apps
+      resources:
+        - deployments
+        - replicasets
+      verbs:
+        - get
+        - list
+        - watch
+  allowedPrincipals:
+    # Allow by group membership
+    - groups:
+        - system:authenticated
+        - platform-operators
+    # Allow specific user
+    - user: cluster-admin@example.com

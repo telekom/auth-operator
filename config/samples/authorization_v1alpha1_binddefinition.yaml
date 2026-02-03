@@ -9,12 +9,12 @@ spec:
   targetName: bd-onboarding-ns
   subjects:
   - apiGroup: rbac.authorization.k8s.io
-    kind: User 
+    kind: User
     name: luka@tomislav.galic
   - apiGroup: rbac.authorization.k8s.io
-    kind: Group 
+    kind: Group
     name: onboarding-admin-test
-  - kind: ServiceAccount 
+  - kind: ServiceAccount
     name: test-sa
     namespace: kube-system
   clusterRoleBindings:
@@ -26,12 +26,12 @@ spec:
     roleRefs:
     - t-caas-namespaced-reader
     namespaceSelector:
-      - matchExpressions:
-        - key: t-caas.telekom.com/owner
-          operator: In
-          values:
-          - tenant
-        - key: t-caas.telekom.com/tenant
-          operator: In
-          values:
-          - karlo
+    - matchExpressions:
+      - key: t-caas.telekom.com/owner
+        operator: In
+        values:
+        - tenant
+      - key: t-caas.telekom.com/tenant
+        operator: In
+        values:
+        - karlo

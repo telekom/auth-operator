@@ -1,0 +1,10 @@
+# Test namespace with team=beta label
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: complex-e2e-ns-team-b
+  labels:
+    team: beta
+    env: staging
+    managed-by: auth-operator
+    environment: staging

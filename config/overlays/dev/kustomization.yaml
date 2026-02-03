@@ -1,0 +1,50 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Development/E2E overlay
+# - Debug logging enabled (verbosity level 5)
+# - Relaxed resource limits for debugging
+
+namespace: auth-operator-system
+namePrefix: auth-operator-
+
+resources:
+- ../../base
+
+# Image configuration - override with IMG env var via kustomize edit
+images:
+- name: controller
+  newName: auth-operator
+  newTag: e2e-test
+
+# Patches for dev/e2e configuration
+# Enable debug logging for controller-manager
+
+# Enable debug logging for webhook-server
+patches:
+- patch: |-
+    - op: add
+      path: /spec/template/spec/containers/0/args/-
+      value: "-v=5"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/memory
+      value: "256Mi"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/memory
+      value: "128Mi"
+  target:
+    kind: Deployment
+    name: controller-manager
+- patch: |-
+    - op: add
+      path: /spec/template/spec/containers/0/args/-
+      value: "-v=5"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/memory
+      value: "256Mi"
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/requests/memory
+      value: "128Mi"
+  target:
+    kind: Deployment
+    name: webhook-server

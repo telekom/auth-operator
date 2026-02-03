@@ -1,0 +1,16 @@
+# Kind cluster configuration for single-node e2e testing
+# Used for basic functionality tests
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: auth-operator-e2e-single
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+networking:
+  podSubnet: "10.244.0.0/16"
+  serviceSubnet: "10.96.0.0/12"

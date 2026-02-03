@@ -3,66 +3,113 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
-	"reflect"
 
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
-// log is for logging in this package.
-var binddefinitionlog = logf.Log.WithName("binddefinition-resource")
+// bdWebhookClient is a cached client from the manager.
+// List operations use the informer cache with field indexes for efficient lookups.
 var bdWebhookClient client.Client
+
+// BindDefinitionValidator implements admission.Validator for BindDefinition.
+type BindDefinitionValidator struct{}
+
+var _ admission.Validator[*BindDefinition] = &BindDefinitionValidator{}
 
 // SetupWebhookWithManager will setup the manager to manage the webhooks
 func (r *BindDefinition) SetupWebhookWithManager(mgr ctrl.Manager) error {
 	bdWebhookClient = mgr.GetClient() // needed to initialize the client somewhere
-	return ctrl.NewWebhookManagedBy(mgr).
-		For(r).
+	return ctrl.NewWebhookManagedBy(mgr, r).
+		WithValidator(&BindDefinitionValidator{}).
 		Complete()
 }
 
 // +kubebuilder:webhook:path=/validate-authorization-t-caas-telekom-com-v1alpha1-binddefinition,mutating=false,failurePolicy=fail,sideEffects=None,groups=authorization.t-caas.telekom.com,resources=binddefinitions,verbs=create;update,versions=v1alpha1,name=webhook.auth.t-caas.telekom.de,admissionReviewVersions=v1
 
-//var _ webhook.Validator = &BindDefinition{}
+// validateBindDefinitionSpec validates the BindDefinition spec for duplicate targetName.
+// Role existence is checked but only returns warnings (not errors) to allow applying
+// BindDefinitions before the referenced roles exist. The controller will handle
+// missing roles during reconciliation and set appropriate error conditions.
+func validateBindDefinitionSpec(ctx context.Context, r *BindDefinition) (admission.Warnings, error) {
+	logger := log.FromContext(ctx).WithName("binddefinition-webhook")
+	var warnings admission.Warnings
 
-// validateBindDefinitionSpec validates the BindDefinition spec for duplicate targetName and role existence
-func (r *BindDefinition) validateBindDefinitionSpec(ctx context.Context) error {
+	// Use field index for efficient lookup by TargetName
 	bindDefinitionList := &BindDefinitionList{}
-	if err := bdWebhookClient.List(ctx, bindDefinitionList); err != nil {
-		return apierrors.NewInternalError(fmt.Errorf("unable to list BindDefinitions: %v", err))
+	if err := bdWebhookClient.List(ctx, bindDefinitionList, client.MatchingFields{
+		TargetNameField: r.Spec.TargetName,
+	}); err != nil {
+		logger.Error(err, "failed to list BindDefinitions", "targetName", r.Spec.TargetName)
+		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list BindDefinitions: %v", err))
 	}
 
 	for _, bindDefinition := range bindDefinitionList.Items {
-		// Check if there is already a BindDefinition with same TargetName
-		if bindDefinition.Spec.TargetName == r.Spec.TargetName && bindDefinition.Name != r.Name {
-			return apierrors.NewBadRequest(fmt.Sprintf("targetName %s already exists in BindDefinition %s", r.Spec.TargetName, bindDefinition.Name))
+		// The field index already filters by TargetName, so we only need to check
+		// that this isn't the same BindDefinition being validated (by name)
+		if bindDefinition.Name != r.Name {
+			logger.Info("validation failed: duplicate targetName",
+				"name", r.Name, "targetName", r.Spec.TargetName, "conflictsWith", bindDefinition.Name)
+			return nil, apierrors.NewBadRequest(fmt.Sprintf("targetName %s already exists in BindDefinition %s", r.Spec.TargetName, bindDefinition.Name))
 		}
 	}
 
-	for _, RoleBinding := range r.Spec.RoleBindings {
+	// Validate ClusterRoleRefs in cluster-scoped bindings - warn if not found
+	for _, clusterRoleRef := range r.Spec.ClusterRoleBindings.ClusterRoleRefs {
+		clusterRole := &rbacv1.ClusterRole{}
+		if err := bdWebhookClient.Get(ctx, client.ObjectKey{Name: clusterRoleRef}, clusterRole); err != nil {
+			if apierrors.IsNotFound(err) {
+				logger.Info("warning: clusterrole not found (will be checked during reconciliation)",
+					"name", r.Name, "clusterRoleName", clusterRoleRef)
+				warnings = append(warnings, fmt.Sprintf("ClusterRole '%s' not found - binding will fail during reconciliation until the role exists", clusterRoleRef))
+			} else {
+				logger.Error(err, "failed to fetch clusterrole", "clusterRoleName", clusterRoleRef)
+				return warnings, apierrors.NewInternalError(fmt.Errorf("error fetching clusterrole '%s': %v", clusterRoleRef, err))
+			}
+		}
+	}
+
+	for _, roleBinding := range r.Spec.RoleBindings {
+		// Validate ClusterRoleRefs in namespaced bindings - warn if not found
+		for _, clusterRoleRef := range roleBinding.ClusterRoleRefs {
+			clusterRole := &rbacv1.ClusterRole{}
+			if err := bdWebhookClient.Get(ctx, client.ObjectKey{Name: clusterRoleRef}, clusterRole); err != nil {
+				if apierrors.IsNotFound(err) {
+					logger.Info("warning: clusterrole not found (will be checked during reconciliation)",
+						"name", r.Name, "clusterRoleName", clusterRoleRef)
+					warnings = append(warnings, fmt.Sprintf("ClusterRole '%s' not found - binding will fail during reconciliation until the role exists", clusterRoleRef))
+				} else {
+					logger.Error(err, "failed to fetch clusterrole", "clusterRoleName", clusterRoleRef)
+					return warnings, apierrors.NewInternalError(fmt.Errorf("error fetching clusterrole '%s': %v", clusterRoleRef, err))
+				}
+			}
+		}
+
 		// Handle multiple NamespaceSelectors
-		if len(RoleBinding.NamespaceSelector) > 0 {
+		if len(roleBinding.NamespaceSelector) > 0 {
 			namespaceSet := make(map[string]corev1.Namespace)
 
-			for _, nsSelector := range RoleBinding.NamespaceSelector {
-				if !reflect.DeepEqual(nsSelector, metav1.LabelSelector{}) {
+			for _, nsSelector := range roleBinding.NamespaceSelector {
+				if !isLabelSelectorEmpty(&nsSelector) {
 					selector, err := metav1.LabelSelectorAsSelector(&nsSelector)
 					if err != nil {
-						return apierrors.NewBadRequest(fmt.Sprintf("invalid namespaceSelector: %v", err))
+						logger.Info("validation failed: invalid namespaceSelector",
+							"name", r.Name, "error", err.Error())
+						return warnings, apierrors.NewBadRequest(fmt.Sprintf("invalid namespaceSelector: %v", err))
 					}
 					namespaceList := &corev1.NamespaceList{}
 					listOptions := &client.ListOptions{
 						LabelSelector: selector,
 					}
 					if err := bdWebhookClient.List(ctx, namespaceList, listOptions); err != nil {
-						return apierrors.NewInternalError(fmt.Errorf("unable to list namespaces: %v", err))
+						logger.Error(err, "failed to list namespaces", "selector", selector.String())
+						return warnings, apierrors.NewInternalError(fmt.Errorf("unable to list namespaces: %v", err))
 					}
 					for _, ns := range namespaceList.Items {
 						namespaceSet[ns.Name] = ns
@@ -71,7 +118,7 @@ func (r *BindDefinition) validateBindDefinitionSpec(ctx context.Context) error {
 			}
 
 			for _, ns := range namespaceSet {
-				for _, roleRef := range RoleBinding.RoleRefs {
+				for _, roleRef := range roleBinding.RoleRefs {
 					role := &rbacv1.Role{}
 					key := client.ObjectKey{
 						Namespace: ns.Name,
@@ -79,9 +126,12 @@ func (r *BindDefinition) validateBindDefinitionSpec(ctx context.Context) error {
 					}
 					if err := bdWebhookClient.Get(ctx, key, role); err != nil {
 						if apierrors.IsNotFound(err) {
-							return apierrors.NewBadRequest(fmt.Sprintf("role '%s' not found in namespace '%s'", roleRef, ns.Name))
+							logger.Info("warning: role not found (will be checked during reconciliation)",
+								"name", r.Name, "roleName", roleRef, "namespace", ns.Name)
+							warnings = append(warnings, fmt.Sprintf("Role '%s' not found in namespace '%s' - binding will fail during reconciliation until the role exists", roleRef, ns.Name))
 						} else {
-							return apierrors.NewInternalError(fmt.Errorf("error fetching role '%s' in namespace '%s': %v", roleRef, ns.Name, err))
+							logger.Error(err, "failed to fetch role", "roleName", roleRef, "namespace", ns.Name)
+							return warnings, apierrors.NewInternalError(fmt.Errorf("error fetching role '%s' in namespace '%s': %v", roleRef, ns.Name, err))
 						}
 					}
 				}
@@ -89,34 +139,37 @@ func (r *BindDefinition) validateBindDefinitionSpec(ctx context.Context) error {
 		}
 	}
 
-	return nil
+	return warnings, nil
 }
 
-// ValidateCreate implements webhook.Validator so a webhook will be registered for the type
-func (r *BindDefinition) ValidateCreate() (admission.Warnings, error) {
-	binddefinitionlog.Info("validate create", "name", r.Name)
-	return nil, r.validateBindDefinitionSpec(context.Background())
+// ValidateCreate implements admission.Validator for BindDefinition.
+func (v *BindDefinitionValidator) ValidateCreate(ctx context.Context, obj *BindDefinition) (admission.Warnings, error) {
+	logger := log.FromContext(ctx).WithName("binddefinition-webhook")
+	logger.V(1).Info("validating create", "name", obj.Name)
+	return validateBindDefinitionSpec(ctx, obj)
 }
 
-// ValidateUpdate implements webhook.Validator so a webhook will be registered for the type
-func (r *BindDefinition) ValidateUpdate(old runtime.Object) (admission.Warnings, error) {
-	binddefinitionlog.Info("validate update", "name", r.Name)
+// ValidateUpdate implements admission.Validator for BindDefinition.
+func (v *BindDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *BindDefinition) (admission.Warnings, error) {
+	logger := log.FromContext(ctx).WithName("binddefinition-webhook")
+	logger.V(1).Info("validating update", "name", newObj.Name)
 
-	oldBindDefinition, ok := old.(*BindDefinition)
-	if !ok {
-		return nil, apierrors.NewBadRequest(fmt.Sprintf("expected a BindDefinition but got a %T", old))
-	}
-	if oldBindDefinition.Generation == r.Generation {
+	if oldObj.Generation == newObj.Generation {
 		return nil, nil
 	}
 
-	return nil, r.validateBindDefinitionSpec(context.Background())
+	return validateBindDefinitionSpec(ctx, newObj)
 }
 
-// ValidateDelete implements webhook.Validator so a webhook will be registered for the type
-func (r *BindDefinition) ValidateDelete() (admission.Warnings, error) {
-	binddefinitionlog.Info("validate delete", "name", r.Name)
-
-	// TODO(user): fill in your validation logic upon object deletion.
+// ValidateDelete implements admission.Validator for BindDefinition.
+func (v *BindDefinitionValidator) ValidateDelete(ctx context.Context, obj *BindDefinition) (admission.Warnings, error) {
+	logger := log.FromContext(ctx).WithName("binddefinition-webhook")
+	logger.V(1).Info("validating delete", "name", obj.Name)
 	return nil, nil
+}
+
+// isLabelSelectorEmpty checks if a LabelSelector has no matching criteria.
+// More efficient than using reflect.DeepEqual.
+func isLabelSelectorEmpty(selector *metav1.LabelSelector) bool {
+	return selector == nil || (len(selector.MatchLabels) == 0 && len(selector.MatchExpressions) == 0)
 }

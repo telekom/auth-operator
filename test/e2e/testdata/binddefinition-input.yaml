@@ -1,0 +1,17 @@
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: golden-test-bind
+  namespace: auth-operator-golden-test
+spec:
+  targetName: golden-bind
+  subjects:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: User
+      name: golden-test-user@example.com
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group
+      name: golden-test-group
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - golden-cluster-reader

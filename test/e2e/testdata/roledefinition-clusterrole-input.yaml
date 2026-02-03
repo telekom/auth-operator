@@ -1,0 +1,12 @@
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: golden-test-cluster-reader
+  namespace: auth-operator-golden-test
+spec:
+  targetRole: ClusterRole
+  targetName: golden-cluster-reader
+  scopeNamespaced: false
+  restrictedVerbs:
+    - update
+    - create

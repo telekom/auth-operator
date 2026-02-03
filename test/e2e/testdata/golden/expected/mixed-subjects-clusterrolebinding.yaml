@@ -1,0 +1,26 @@
+# Expected output: ClusterRoleBinding with mixed subject types
+# The BindDefinition should auto-create ServiceAccounts if they don't exist
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: golden-mixed-golden-cluster-reader-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: golden-cluster-reader
+subjects:
+  # User subject
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: admin-user@example.com
+  # Group subject
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: platform-admins
+  # ServiceAccount subjects (auto-created)
+  - kind: ServiceAccount
+    name: golden-app-sa
+    namespace: auth-operator-golden-test
+  - kind: ServiceAccount
+    name: golden-worker-sa
+    namespace: auth-operator-golden-test

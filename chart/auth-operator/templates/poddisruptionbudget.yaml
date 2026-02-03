@@ -7,11 +7,14 @@ metadata:
     control-plane: controller-manager
   {{- include "auth-operator.labels" . | nindent 4 }}
 spec:
-  {{- if .Values.controller.podDisruptionBudget.minAvailable }}
+  {{- if and .Values.controller.podDisruptionBudget.minAvailable .Values.controller.podDisruptionBudget.maxUnavailable }}
+  {{- fail "podDisruptionBudget.minAvailable and podDisruptionBudget.maxUnavailable are mutually exclusive" }}
+  {{- else if .Values.controller.podDisruptionBudget.minAvailable }}
   minAvailable: {{ .Values.controller.podDisruptionBudget.minAvailable }}
-  {{- end }}
-  {{- if .Values.controller.podDisruptionBudget.maxUnavailable }}
+  {{- else if .Values.controller.podDisruptionBudget.maxUnavailable }}
   maxUnavailable: {{ .Values.controller.podDisruptionBudget.maxUnavailable }}
+  {{- else }}
+  minAvailable: 1
   {{- end }}
   selector:
     matchLabels:
@@ -28,11 +31,14 @@ metadata:
     control-plane: webhook-server
   {{- include "auth-operator.labels" . | nindent 4 }}
 spec:
-  {{- if .Values.webhookServer.podDisruptionBudget.minAvailable }}
+  {{- if and .Values.webhookServer.podDisruptionBudget.minAvailable .Values.webhookServer.podDisruptionBudget.maxUnavailable }}
+  {{- fail "podDisruptionBudget.minAvailable and podDisruptionBudget.maxUnavailable are mutually exclusive" }}
+  {{- else if .Values.webhookServer.podDisruptionBudget.minAvailable }}
   minAvailable: {{ .Values.webhookServer.podDisruptionBudget.minAvailable }}
-  {{- end }}
-  {{- if .Values.webhookServer.podDisruptionBudget.maxUnavailable }}
+  {{- else if .Values.webhookServer.podDisruptionBudget.maxUnavailable }}
   maxUnavailable: {{ .Values.webhookServer.podDisruptionBudget.maxUnavailable }}
+  {{- else }}
+  minAvailable: 1
   {{- end }}
   selector:
     matchLabels:

@@ -1,0 +1,30 @@
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: e2e-test-cluster-reader
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/component: e2e-test
+    app.kubernetes.io/created-by: auth-operator
+spec:
+  targetRole: ClusterRole
+  targetName: e2e-cluster-reader
+  scopeNamespaced: false
+  restrictedApis:
+    - name: velero.io
+      versions:
+        - groupVersion: velero.io/v1
+          version: v1
+  restrictedResources:
+    - name: networkpolicies
+      singularName: networkpolicy
+      namespaced: true
+      group: crd.projectcalico.org
+      kind: NetworkPolicy
+      verbs:
+        - all
+  restrictedVerbs:
+    - update
+    - create
+    - delete
+    - patch

@@ -13,6 +13,7 @@ import (
 	authorizationv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1"
 	authorizationwebhook "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/internal/webhook/authorization"
 	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/internal/webhook/certrotator"
+	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/indexer"
 
 	"github.com/open-policy-agent/cert-controller/pkg/rotator"
 	"github.com/spf13/cobra"
@@ -38,15 +39,21 @@ var (
 // webhookCmd represents the webhook command
 var webhookCmd = &cobra.Command{
 	Use:   "webhook",
-	Short: "A brief description of your command",
-	Long: `A longer description that spans multiple lines and likely contains examples
-and usage of using your command. For example:
+	Short: "Run the auth-operator webhook server",
+	Long: `Run the auth-operator webhook server which handles admission requests
+for RoleDefinition and BindDefinition custom resources, as well as namespace
+mutation and validation webhooks.
 
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
+The webhook server validates and mutates resources during admission,
+ensuring authorization policies are enforced at creation time.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		setupLog.Info("starting webhook server")
+		setupLog.Info("starting webhook server",
+			"port", webhookPort,
+			"certsDir", webhookCertsDir,
+			"enableHTTP2", enableHTTP2,
+			"disableCertRotation", disableCertRotation,
+			"namespace", namespace,
+		)
 		ctx, cancel := context.WithCancelCause(ctrl.SetupSignalHandler())
 		defer cancel(nil)
 
@@ -66,17 +73,28 @@ to quickly create a Cobra application.`,
 			TLSOpts: tlsOpts,
 		})
 
-		mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+		cfg, err := ctrl.GetConfig()
+		if err != nil {
+			return fmt.Errorf("unable to get kubeconfig: %w", err)
+		}
+
+		mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 			Scheme:                 scheme,
 			WebhookServer:          webhookServer,
 			HealthProbeBindAddress: probeAddr,
 		})
 		if err != nil {
-			return fmt.Errorf("unable to start manager. err: %s", err)
+			return fmt.Errorf("unable to start manager: %w", err)
 		}
 
+		// Setup field indexes for efficient lookups in webhook validation
+		if err := indexer.SetupIndexes(ctx, mgr); err != nil {
+			return fmt.Errorf("unable to setup field indexes: %w", err)
+		}
+		setupLog.Info("field indexes configured for cached client")
+
 		if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-			return fmt.Errorf("unable to set up health check. err: %s", err)
+			return fmt.Errorf("unable to set up health check: %w", err)
 		}
 
 		startListeners := make(chan struct{})
@@ -87,16 +105,21 @@ to quickly create a Cobra application.`,
 			if ready {
 				return nil
 			}
-			return errors.New("not ready")
+			return errors.New("webhook server not ready: waiting for certificate setup")
 		}); err != nil {
-			return fmt.Errorf("unable to start readiness check. err: %s", err)
+			return fmt.Errorf("unable to set up ready check: %w", err)
 		}
 
 		go func() {
+			setupLog.Info("waiting for certificate rotation to complete before configuring webhooks")
 			<-startListeners
+			setupLog.Info("certificate rotation complete, configuring webhooks")
 			if err := configureWebhooks(mgr); err != nil {
+				setupLog.Error(err, "failed to configure webhooks")
 				cancel(fmt.Errorf("error configuring webhooks: %w", err))
+				return
 			}
+			setupLog.Info("webhooks configured successfully, server is ready")
 			ready = true
 		}()
 
@@ -117,6 +140,12 @@ to quickly create a Cobra application.`,
 		// The cert rotator will notify when we can start the webhook
 		// and the metric endpoint
 		if !disableCertRotation {
+			setupLog.Info("enabling certificate rotation",
+				"dnsName", certRotationDNSName,
+				"secretName", certRotationSecretName,
+				"mutatingWebhooks", certRotationMutatingWebhooks,
+				"validatingWebhooks", certRotationValidatingWebhooks,
+			)
 			if err := certrotator.Enable(
 				mgr,
 				namespace,
@@ -126,34 +155,42 @@ to quickly create a Cobra application.`,
 				webhooks,
 				startListeners,
 			); err != nil {
-				return fmt.Errorf("unable to set up cert rotation. err: %s", err)
+				return fmt.Errorf("unable to set up cert rotation: %w", err)
 			}
 		} else {
+			setupLog.Info("certificate rotation disabled, using existing certificates")
 			close(startListeners)
 		}
 
+		setupLog.Info("starting manager")
 		if err := mgr.Start(ctx); err != nil {
-			return fmt.Errorf("problem running manager. err: %s", err)
+			return fmt.Errorf("problem running manager: %w", err)
 		}
 		return nil
 	},
 }
 
 func configureWebhooks(mgr manager.Manager) error {
+	log := ctrl.Log.WithName("webhook-setup")
+
+	log.Info("registering authorization webhook at /authorize")
 	authorizer := &authorizationwebhook.Authorizer{
 		Client: mgr.GetClient(),
 		Log:    ctrl.Log.WithName("Authorizer"),
 	}
 	mgr.GetWebhookServer().Register("/authorize", authorizer)
 
+	log.Info("setting up RoleDefinition webhook")
 	if err := (&authorizationv1alpha1.RoleDefinition{}).SetupWebhookWithManager(mgr); err != nil {
-		return fmt.Errorf("unable create webhook for RoleDefinition: %w", err)
+		return fmt.Errorf("unable to create webhook for RoleDefinition: %w", err)
 	}
 
+	log.Info("setting up BindDefinition webhook")
 	if err := (&authorizationv1alpha1.BindDefinition{}).SetupWebhookWithManager(mgr); err != nil {
 		return fmt.Errorf("unable to create webhook for BindDefinition: %w", err)
 	}
 	// Setup Namespace mutator
+	log.Info("setting up Namespace mutator webhook", "tdgMigration", enableTDGMigration)
 	namespaceMutator := &authorizationwebhook.NamespaceMutator{
 		Client:       mgr.GetClient(),
 		TDGMigration: enableTDGMigration,
@@ -164,6 +201,7 @@ func configureWebhooks(mgr manager.Manager) error {
 	mgr.GetWebhookServer().Register("/mutate-v1-namespace", &webhook.Admission{Handler: namespaceMutator})
 
 	// Setup Namespace validator
+	log.Info("setting up Namespace validator webhook", "tdgMigration", enableTDGMigration)
 	namespaceValidator := &authorizationwebhook.NamespaceValidator{
 		Client:       mgr.GetClient(),
 		TDGMigration: enableTDGMigration,
@@ -173,6 +211,7 @@ func configureWebhooks(mgr manager.Manager) error {
 	}
 	mgr.GetWebhookServer().Register("/validate-v1-namespace", &webhook.Admission{Handler: namespaceValidator})
 
+	log.Info("all webhooks configured successfully")
 	return nil
 }
 

@@ -1,0 +1,26 @@
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: WebhookAuthorizer
+metadata:
+  name: e2e-test-authorizer-deny
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/component: e2e-test
+    app.kubernetes.io/created-by: auth-operator
+spec:
+  resourceRules:
+    - apiGroups:
+        - ""
+      resources:
+        - secrets
+      verbs:
+        - "*"
+  deniedPrincipals:
+    - user: e2e-denied-user
+    - groups:
+        - e2e-denied-group
+  namespaceSelector:
+    matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values:
+          - e2e-test-ns

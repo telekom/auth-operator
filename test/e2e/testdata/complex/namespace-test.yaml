@@ -1,0 +1,11 @@
+# Main test namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: complex-e2e-test-ns
+  labels:
+    team: alpha
+    env: dev
+    managed-by: auth-operator
+    environment: development
+    authorization.t-caas.telekom.com/managed: "true"

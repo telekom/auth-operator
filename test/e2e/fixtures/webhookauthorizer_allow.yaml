@@ -1,0 +1,25 @@
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: WebhookAuthorizer
+metadata:
+  name: e2e-test-authorizer-allow
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/component: e2e-test
+    app.kubernetes.io/created-by: auth-operator
+spec:
+  resourceRules:
+    - apiGroups:
+        - ""
+      resources:
+        - configmaps
+      verbs:
+        - get
+        - list
+        - watch
+  allowedPrincipals:
+    - user: e2e-allowed-user
+    - groups:
+        - e2e-allowed-group
+  namespaceSelector:
+    matchLabels:
+      e2e-test: "true"

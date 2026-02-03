@@ -1,0 +1,14 @@
+# Golden test input: RoleDefinition that creates a namespaced Role
+# This RoleDefinition should generate a Role in the specified namespace
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: golden-test-ns-reader
+spec:
+  targetRole: Role
+  targetName: golden-ns-reader
+  targetNamespace: "{{NAMESPACE}}"
+  scopeNamespaced: true
+  restrictedVerbs:
+    - get
+    - delete

@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace_labeled.yaml
+  - roledefinition_clusterrole.yaml
+  - roledefinition_role.yaml
+  - binddefinition_clusterrolebinding.yaml
+  - binddefinition_rolebinding.yaml
+  - binddefinition_serviceaccount.yaml
+  - webhookauthorizer_allow.yaml
+  - webhookauthorizer_deny.yaml
+  - webhookauthorizer_nonresource.yaml

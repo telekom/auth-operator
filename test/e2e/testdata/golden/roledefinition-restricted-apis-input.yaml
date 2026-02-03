@@ -1,0 +1,30 @@
+# Golden test input: RoleDefinition with restrictedApis
+# This RoleDefinition excludes entire API groups from the generated ClusterRole
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: golden-restricted-apis
+spec:
+  targetRole: ClusterRole
+  targetName: golden-restricted-apis-role
+  scopeNamespaced: false
+  restrictedVerbs:
+    - create
+    - update
+    - delete
+    - patch
+  # Exclude these entire API groups from the generated role
+  # Note: metav1.APIGroup requires name and versions fields
+  restrictedApis:
+    - name: apps
+      versions:
+        - groupVersion: apps/v1
+          version: v1
+    - name: batch
+      versions:
+        - groupVersion: batch/v1
+          version: v1
+    - name: autoscaling
+      versions:
+        - groupVersion: autoscaling/v2
+          version: v2

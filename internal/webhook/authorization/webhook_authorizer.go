@@ -35,19 +35,41 @@ type Authorizer struct {
 }
 
 func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
+	// Use request context for proper cancellation and deadline propagation
+	ctx := r.Context()
 
 	var sar authzv1.SubjectAccessReview
 
 	if err := json.NewDecoder(r.Body).Decode(&sar); err != nil {
+		wa.Log.Error(err, "failed to decode SubjectAccessReview request")
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	wa.Log.Info("Received SubjectAccessReview", "Namespace", sar.Spec.ResourceAttributes.Namespace, "User", sar.Spec.User, "Groups", sar.Spec.Groups, "Verb", sar.Spec.ResourceAttributes.Verb, "API", sar.Spec.ResourceAttributes.Group, "Resource", sar.Spec.ResourceAttributes.Resource)
+	if sar.Spec.ResourceAttributes != nil {
+		wa.Log.Info("received SubjectAccessReview",
+			"namespace", sar.Spec.ResourceAttributes.Namespace,
+			"user", sar.Spec.User,
+			"groups", sar.Spec.Groups,
+			"verb", sar.Spec.ResourceAttributes.Verb,
+			"apiGroup", sar.Spec.ResourceAttributes.Group,
+			"resource", sar.Spec.ResourceAttributes.Resource)
+	} else if sar.Spec.NonResourceAttributes != nil {
+		wa.Log.Info("received SubjectAccessReview",
+			"user", sar.Spec.User,
+			"groups", sar.Spec.Groups,
+			"verb", sar.Spec.NonResourceAttributes.Verb,
+			"path", sar.Spec.NonResourceAttributes.Path)
+	} else {
+		wa.Log.Info("received SubjectAccessReview",
+			"user", sar.Spec.User,
+			"groups", sar.Spec.Groups,
+			"detail", "no resource or non-resource attributes")
+	}
 
 	var webhookAuthorizers authzv1alpha1.WebhookAuthorizerList
 	if err := wa.Client.List(ctx, &webhookAuthorizers); err != nil {
+		wa.Log.Error(err, "failed to list WebhookAuthorizers")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -65,15 +87,18 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
+	wa.Log.V(1).Info("SubjectAccessReview decision", "allowed", verdict, "reason", reason)
+
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
+		wa.Log.Error(err, "failed to encode SubjectAccessReview response")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
 
 func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAccessReview, waList *authzv1alpha1.WebhookAuthorizerList) (bool, string) {
 	for _, webhookAuthorizer := range waList.Items {
-		if !isLabelSelectorEmpty(&webhookAuthorizer.Spec.NamespaceSelector) && sar.Spec.ResourceAttributes.Namespace != "" {
+		if sar.Spec.ResourceAttributes != nil && !isLabelSelectorEmpty(&webhookAuthorizer.Spec.NamespaceSelector) && sar.Spec.ResourceAttributes.Namespace != "" {
 			if !wa.namespaceMatches(ctx, sar.Spec.ResourceAttributes.Namespace, &webhookAuthorizer.Spec.NamespaceSelector) {
 				continue
 			}

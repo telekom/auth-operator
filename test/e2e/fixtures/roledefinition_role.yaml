@@ -1,0 +1,22 @@
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: e2e-test-namespaced-reader
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/component: e2e-test
+    app.kubernetes.io/created-by: auth-operator
+spec:
+  targetRole: Role
+  targetName: e2e-namespaced-reader
+  targetNamespace: e2e-test-ns
+  scopeNamespaced: true
+  restrictedApis:
+    - name: velero.io
+      versions:
+        - groupVersion: velero.io/v1
+          version: v1
+  restrictedVerbs:
+    - create
+    - delete
+    - patch

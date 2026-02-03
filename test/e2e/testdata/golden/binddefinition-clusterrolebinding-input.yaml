@@ -1,0 +1,18 @@
+# Golden test input: BindDefinition that creates a ClusterRoleBinding
+# This BindDefinition should generate a ClusterRoleBinding with the specified subjects
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: golden-test-bind
+spec:
+  targetName: golden-bind
+  subjects:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: User
+      name: golden-test-user@example.com
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group
+      name: golden-test-group
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - golden-cluster-reader

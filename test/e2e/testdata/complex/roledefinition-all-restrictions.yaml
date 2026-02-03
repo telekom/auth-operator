@@ -1,0 +1,120 @@
+# Complex RoleDefinition: Tests ALL restriction types combined
+# - restrictedApis: excludes entire API groups
+# - restrictedResources: excludes specific resources
+# - restrictedVerbs: excludes specific verbs
+# Expected: ClusterRole with heavily filtered permissions
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: complex-all-restrictions
+spec:
+  targetRole: ClusterRole
+  targetName: complex-filtered-role
+  scopeNamespaced: false
+  # Exclude entire API groups
+  # Note: metav1.APIGroup requires name and versions fields
+  restrictedApis:
+    - name: apps
+      versions:
+        - groupVersion: apps/v1
+          version: v1
+    - name: batch
+      versions:
+        - groupVersion: batch/v1
+          version: v1
+    - name: autoscaling
+      versions:
+        - groupVersion: autoscaling/v2
+          version: v2
+    - name: networking.k8s.io
+      versions:
+        - groupVersion: networking.k8s.io/v1
+          version: v1
+    - name: policy
+      versions:
+        - groupVersion: policy/v1
+          version: v1
+  # Exclude specific resources even from allowed API groups
+  # Note: metav1.APIResource requires name, kind, namespaced, singularName, verbs fields
+  restrictedResources:
+    - name: secrets
+      kind: Secret
+      namespaced: true
+      singularName: secret
+      group: ""
+      verbs:
+        - get
+        - list
+        - create
+        - update
+        - delete
+        - watch
+    - name: configmaps
+      kind: ConfigMap
+      namespaced: true
+      singularName: configmap
+      group: ""
+      verbs:
+        - get
+        - list
+        - create
+        - update
+        - delete
+        - watch
+    - name: serviceaccounts
+      kind: ServiceAccount
+      namespaced: true
+      singularName: serviceaccount
+      group: ""
+      verbs:
+        - get
+        - list
+        - create
+        - update
+        - delete
+        - watch
+    - name: endpoints
+      kind: Endpoints
+      namespaced: true
+      singularName: endpoints
+      group: ""
+      verbs:
+        - get
+        - list
+        - create
+        - update
+        - delete
+        - watch
+    - name: persistentvolumeclaims
+      kind: PersistentVolumeClaim
+      namespaced: true
+      singularName: persistentvolumeclaim
+      group: ""
+      verbs:
+        - get
+        - list
+        - create
+        - update
+        - delete
+        - watch
+    - name: events
+      kind: Event
+      namespaced: true
+      singularName: event
+      group: ""
+      version: v1
+      verbs:
+        - get
+        - list
+        - create
+        - update
+        - delete
+        - watch
+  # Only allow read operations
+  restrictedVerbs:
+    - create
+    - update
+    - patch
+    - delete
+    - deletecollection
+    - watch

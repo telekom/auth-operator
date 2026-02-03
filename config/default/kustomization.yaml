@@ -1,3 +1,9 @@
+# DEPRECATED: Use overlays instead
+# - config/overlays/dev for development and e2e testing
+# - config/overlays/production for production deployments
+#
+# This file is kept for backwards compatibility with controller-runtime generators.
+
 # Adds namespace to all resources.
 namespace: auth-operator-system
 
@@ -9,10 +15,10 @@ namespace: auth-operator-system
 namePrefix: auth-operator-
 
 # Labels to add to all resources and selectors.
-#labels:
-#- includeSelectors: true
-#  pairs:
-#    someName: someValue
+# labels:
+# - includeSelectors: true
+#   pairs:
+#     someName: someValue
 
 resources:
 - ../crd
@@ -23,4 +29,3 @@ resources:
 # configurations:
 #   - prefix_rules.yaml
 patches: []
-

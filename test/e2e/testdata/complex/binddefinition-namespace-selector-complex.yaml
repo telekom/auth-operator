@@ -1,0 +1,32 @@
+# Complex BindDefinition: Tests advanced namespace selector with matchExpressions
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: complex-ns-selector
+spec:
+  targetName: complex-ns-select
+  subjects:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group
+      name: tenant-admins
+  roleBindings:
+    # Complex selector with matchExpressions
+    - clusterRoleRefs:
+        - admin
+      namespaceSelector:
+        - matchLabels:
+            managed-by: auth-operator
+          matchExpressions:
+            - key: environment
+              operator: In
+              values:
+                - production
+                - staging
+            - key: tenant
+              operator: NotIn
+              values:
+                - restricted
+                - legacy
+        # Second selector - OR with first
+        - matchLabels:
+            special-access: "true"

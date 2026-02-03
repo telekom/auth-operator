@@ -36,3 +36,11 @@ out/
 tilt-settings.yaml
 .kindcontext
 __debug_*
+
+# E2E test output (generated resource dumps)
+test/e2e/output/*.yaml
+test/e2e/output/*.txt
+test/e2e/output/*.md
+!test/e2e/output/.gitkeep
+
+test/e2e/output/

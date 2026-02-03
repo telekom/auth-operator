@@ -1,0 +1,21 @@
+# Golden test input: BindDefinition binding to multiple ClusterRoles
+# This BindDefinition creates multiple ClusterRoleBindings from a single resource
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: golden-multi-crb
+spec:
+  targetName: golden-multi
+  subjects:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: User
+      name: multi-role-user@example.com
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group
+      name: multi-role-group
+  # Bind to multiple ClusterRoles - creates separate ClusterRoleBinding for each
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - golden-cluster-reader
+      - view
+      - edit
