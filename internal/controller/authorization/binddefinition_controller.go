@@ -178,15 +178,14 @@ func (r *BindDefinitionReconciler) isSAReferencedByOtherBindDefs(ctx context.Con
 func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 
-	// Fetching the RoleDefinition custom resource from Kubernetes API
+	// Fetching the BindDefinition custom resource from Kubernetes API
 	bindDefinition := &authnv1alpha1.BindDefinition{}
 	err := r.client.Get(ctx, req.NamespacedName, bindDefinition)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return ctrl.Result{}, nil
 		}
-		log.Error(err, "Unable to fetch BindDefinition resource from Kubernetes API")
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("fetch BindDefinition %s: %w", req.NamespacedName, err)
 	}
 
 	// Check if controller should reconcile BindDefinition delete
@@ -197,13 +196,13 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if !controllerutil.ContainsFinalizer(bindDefinition, authnv1alpha1.BindDefinitionFinalizer) {
 		controllerutil.AddFinalizer(bindDefinition, authnv1alpha1.BindDefinitionFinalizer)
 		if err := r.client.Update(ctx, bindDefinition); err != nil {
-			return ctrl.Result{}, err
+			return ctrl.Result{}, fmt.Errorf("add finalizer to BindDefinition %s: %w", bindDefinition.Name, err)
 		}
 		r.recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Finalizer", "Adding finalizer to BindDefinition %s", bindDefinition.Name)
 	}
 	conditions.MarkTrue(bindDefinition, authnv1alpha1.FinalizerCondition, bindDefinition.Generation, authnv1alpha1.FinalizerReason, authnv1alpha1.FinalizerMessage)
 	if err := r.client.Status().Update(ctx, bindDefinition); err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("update finalizer condition for BindDefinition %s: %w", bindDefinition.Name, err)
 	}
 
 	// Reconcile create path
@@ -255,22 +254,22 @@ func (r *BindDefinitionReconciler) reconcileDelete(
 	conditions.MarkTrue(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation,
 		authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
 	if err := r.client.Status().Update(ctx, bindDefinition); err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("update delete condition for BindDefinition %s: %w", bindDefinition.Name, err)
 	}
 
 	// Delete ServiceAccounts
 	if err := r.deleteSubjectServiceAccounts(ctx, bindDefinition); err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("delete ServiceAccounts for BindDefinition %s: %w", bindDefinition.Name, err)
 	}
 
 	// Delete ClusterRoleBindings
 	if err := r.deleteAllClusterRoleBindings(ctx, bindDefinition); err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("delete ClusterRoleBindings for BindDefinition %s: %w", bindDefinition.Name, err)
 	}
 
 	// Delete RoleBindings
 	if err := r.deleteAllRoleBindings(ctx, bindDefinition); err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("delete RoleBindings for BindDefinition %s: %w", bindDefinition.Name, err)
 	}
 
 	conditions.MarkTrue(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation,
@@ -278,15 +277,13 @@ func (r *BindDefinitionReconciler) reconcileDelete(
 	conditions.MarkFalse(bindDefinition, authnv1alpha1.FinalizerCondition, bindDefinition.Generation,
 		authnv1alpha1.FinalizerReason, authnv1alpha1.FinalizerMessage)
 	if err := r.client.Status().Update(ctx, bindDefinition); err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("update status after cleanup for BindDefinition %s: %w", bindDefinition.Name, err)
 	}
 
 	log.V(2).Info("removing BindDefinition finalizer", "bindDefinitionName", bindDefinition.Name)
 	controllerutil.RemoveFinalizer(bindDefinition, authnv1alpha1.BindDefinitionFinalizer)
 	if err := r.client.Update(ctx, bindDefinition); err != nil {
-		log.Error(err, "Failed to remove BindDefinition finalizer",
-			"bindDefinitionName", bindDefinition.Name)
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("remove finalizer from BindDefinition %s: %w", bindDefinition.Name, err)
 	}
 	log.V(1).Info("reconcileDelete completed successfully", "bindDefinitionName", bindDefinition.Name)
 
