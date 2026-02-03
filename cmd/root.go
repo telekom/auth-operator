@@ -7,7 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strings"
+	"regexp"
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/pkg/system"
@@ -22,6 +22,10 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
+// sensitivePattern matches flag names that may contain sensitive data.
+// Matches common patterns like: token, secret, password, key, auth, credential, api-key, etc.
+var sensitivePattern = regexp.MustCompile(`(?i)(token|secret|password|passphrase|key|auth|credential|private|cert|bearer|api[_-]?key|client[_-]?id)`)
+
 var (
 	setupLog  logr.Logger
 	scheme    *runtime.Scheme
@@ -30,37 +34,17 @@ var (
 	namespace string
 )
 
-// redactSensitiveFlags returns a map of flags with sensitive values redacted
+// redactSensitiveFlags returns a map of flags with sensitive values redacted.
+// Uses regex pattern matching to identify flags that may contain sensitive data.
 func redactSensitiveFlags() map[string]string {
 	flagValues := make(map[string]string)
-	sensitiveFlags := map[string]bool{
-		"api-token":     true,
-		"API_TOKEN":     true,
-		"password":      true,
-		"secret":        true,
-		"token":         true,
-		"key":           true,
-		"auth":          true,
-		"client-secret": true,
-		"client_secret": true,
-		"private-key":   true,
-		"private_key":   true,
-	}
 
 	flag.VisitAll(func(f *flag.Flag) {
 		name := f.Name
 		value := f.Value.String()
 
-		// Check if this is a sensitive flag
-		isSensitive := false
-		for sensitiveKey := range sensitiveFlags {
-			if strings.Contains(strings.ToLower(name), strings.ToLower(sensitiveKey)) {
-				isSensitive = true
-				break
-			}
-		}
-
-		if isSensitive && value != "" {
+		// Use regex to check if this is a sensitive flag
+		if sensitivePattern.MatchString(name) && value != "" {
 			flagValues[name] = "[REDACTED]"
 		} else {
 			flagValues[name] = value
