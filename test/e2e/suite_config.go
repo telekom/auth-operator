@@ -8,9 +8,10 @@ import (
 	"strings"
 )
 
-// InstallMethod represents the operator installation method
+// InstallMethod represents the operator installation method.
 type InstallMethod string
 
+// Supported install methods.
 const (
 	InstallMethodHelm      InstallMethod = "helm"
 	InstallMethodKustomize InstallMethod = "kustomize"

@@ -16,7 +16,14 @@ limitations under the License.
 
 package system
 
-var Name = "auth-operator"
-var Version = "v0.0.0-undefined"
-var Commit = "<unset>"
-var Repository = "https://github.com/telekom/auth-operator"
+// Build-time variables set by ldflags.
+var (
+	// Name is the name of the application.
+	Name = "auth-operator"
+	// Version is the semantic version of the application.
+	Version = "v0.0.0-undefined"
+	// Commit is the git commit SHA of the build.
+	Commit = "<unset>"
+	// Repository is the source code repository URL.
+	Repository = "https://github.com/telekom/auth-operator"
+)

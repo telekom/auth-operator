@@ -4,9 +4,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// RoleDefinition-related constants for finalizers and role types.
 const (
-	RoleDefinitionFinalizer  = "roledefinition.authorization.t-caas.telekom.com/finalizer"
-	DefinitionClusterRole    = "ClusterRole"
+	// RoleDefinitionFinalizer is the finalizer used to prevent orphaned resources.
+	RoleDefinitionFinalizer = "roledefinition.authorization.t-caas.telekom.com/finalizer"
+	// DefinitionClusterRole indicates a ClusterRole type.
+	DefinitionClusterRole = "ClusterRole"
+	// DefinitionNamespacedRole indicates a namespaced Role type.
 	DefinitionNamespacedRole = "Role"
 )
 
@@ -61,6 +65,8 @@ type RoleDefinitionStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
+// RoleDefinition is the Schema for the roledefinitions API.
+//
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:path=roledefinitions,scope=Cluster,shortName=roledef
 // +kubebuilder:subresource:status
@@ -69,7 +75,6 @@ type RoleDefinitionStatus struct {
 // +kubebuilder:printcolumn:name="Role name",type="string",JSONPath=".spec.targetName",description="The name of the child object created by this RoleDefinition"
 // +kubebuilder:printcolumn:name="Namespaced scope",type="boolean",JSONPath=".spec.scopeNamespaced",description="The boolean value signifying whether this RoleDefinition is reconciling Cluster scoped resources or Namespace scoped resources"
 // +kubebuilder:printcolumn:name="Reconciled role",type="string",JSONPath=".status.roleReconciled",description="The boolean value signifying if the target role has been reconciled or not"
-// RoleDefinition is the Schema for the roledefinitions API
 type RoleDefinition struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -91,12 +96,12 @@ func init() {
 	SchemeBuilder.Register(&RoleDefinition{}, &RoleDefinitionList{})
 }
 
-// Satisfy the generic Getter interface
+// GetConditions returns the conditions of the RoleDefinition.
 func (rd *RoleDefinition) GetConditions() []metav1.Condition {
 	return rd.Status.Conditions
 }
 
-// Satisfy the generic Setter interface
+// SetConditions sets the conditions of the RoleDefinition.
 func (rd *RoleDefinition) SetConditions(conditions []metav1.Condition) {
 	rd.Status.Conditions = conditions
 }

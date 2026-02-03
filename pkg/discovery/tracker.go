@@ -197,6 +197,7 @@ func (r *ResourceTracker) collectAndNotify(ctx context.Context) func() {
 	}
 }
 
+// GetAPIResources returns a deep copy of the cached API resources by group version.
 func (r *ResourceTracker) GetAPIResources() (APIResourcesByGroupVersion, error) {
 	if !r.started.Load() {
 		return nil, ErrResourceTrackerNotStarted
@@ -244,12 +245,12 @@ func (r *ResourceTracker) collectAPIResources(ctx context.Context) (bool, error)
 	// Fetch all existing API Groups and filter them against RestrictedAPIs
 	log.V(2).Info("starting API discovery")
 
-	discoveredApiGroups, err := discoveryClient.ServerGroups()
+	discoveredAPIGroups, err := discoveryClient.ServerGroups()
 	if err != nil {
 		log.Error(err, "failed to discover API groups")
 		return false, err
 	}
-	log.V(2).Info("discovered API groups", "groupCount", len(discoveredApiGroups.Groups))
+	log.V(2).Info("discovered API groups", "groupCount", len(discoveredAPIGroups.Groups))
 
 	// Fetch all existing API Resources and filter them against RestrictedResources
 	var errorGroup errgroup.Group
@@ -258,7 +259,7 @@ func (r *ResourceTracker) collectAPIResources(ctx context.Context) (bool, error)
 	apiResourcesByGroupVersion := make(APIResourcesByGroupVersion)
 	mutex := sync.Mutex{}
 
-	for _, apiGroup := range discoveredApiGroups.Groups {
+	for _, apiGroup := range discoveredAPIGroups.Groups {
 		for _, apiGroupVersion := range apiGroup.Versions {
 			// Copy loop variables to avoid closure capture bug
 			apiGroupName := apiGroup.Name
@@ -398,11 +399,11 @@ func (r *ResourceTracker) collectAPIResourcesForGroupVersion(
 		Version: version,
 	}
 
-	discoveredApiResources, err := cli.ServerResourcesForGroupVersion(gv.String())
+	discoveredAPIResources, err := cli.ServerResourcesForGroupVersion(gv.String())
 	if err != nil {
 		return nil, err
 	}
-	for _, resource := range discoveredApiResources.APIResources {
+	for _, resource := range discoveredAPIResources.APIResources {
 		isSubresource := strings.Contains(resource.Name, "/")
 
 		subResourceRequiresExplicitVerbs := isSubresource &&

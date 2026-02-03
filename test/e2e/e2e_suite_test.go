@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -75,7 +76,7 @@ func specOutputDir(report SpecReport) string {
 	}
 	stamp := report.StartTime.UTC().Format("20060102-150405")
 	folder := fmt.Sprintf("%s-%s", stamp, sanitizeSpecName(name))
-	return filepath.Join(base, "specs", sanitizeSpecName(fmt.Sprintf("%s", report.State)), folder)
+	return filepath.Join(base, "specs", sanitizeSpecName(report.State.String()), folder)
 }
 
 // Run e2e tests using the Ginkgo runner.
@@ -98,14 +99,14 @@ var _ = BeforeSuite(func() {
 
 	By("Waiting for cluster to be fully ready")
 	Eventually(func() error {
-		cmd := exec.Command("kubectl", "cluster-info")
+		cmd := exec.CommandContext(context.Background(), "kubectl", "cluster-info")
 		_, err := utils.Run(cmd)
 		return err
 	}, 2*time.Minute, 5*time.Second).Should(Succeed(), "Kubernetes cluster not available")
 
 	By("Waiting for API server to be ready")
 	Eventually(func() error {
-		cmd := exec.Command("kubectl", "get", "nodes", "-o", "name")
+		cmd := exec.CommandContext(context.Background(), "kubectl", "get", "nodes", "-o", "name")
 		_, err := utils.Run(cmd)
 		return err
 	}, 2*time.Minute, 5*time.Second).Should(Succeed(), "Cannot connect to API server")
@@ -235,25 +236,25 @@ func printEnvironmentInfo() {
 	}
 
 	// Print Go version
-	cmd := exec.Command("go", "version")
+	cmd := exec.CommandContext(context.Background(), "go", "version")
 	if output, err := cmd.CombinedOutput(); err == nil {
 		_, _ = fmt.Fprintf(GinkgoWriter, "  Go: %s", string(output))
 	}
 
 	// Print kubectl version
-	cmd = exec.Command("kubectl", "version", "--client", "--short")
+	cmd = exec.CommandContext(context.Background(), "kubectl", "version", "--client", "--short")
 	if output, err := cmd.CombinedOutput(); err == nil {
 		_, _ = fmt.Fprintf(GinkgoWriter, "  kubectl: %s", string(output))
 	}
 
 	// Print kind version
-	cmd = exec.Command("kind", "version")
+	cmd = exec.CommandContext(context.Background(), "kind", "version")
 	if output, err := cmd.CombinedOutput(); err == nil {
 		_, _ = fmt.Fprintf(GinkgoWriter, "  kind: %s", string(output))
 	}
 
 	// Print docker version
-	cmd = exec.Command("docker", "version", "--format", "{{.Server.Version}}")
+	cmd = exec.CommandContext(context.Background(), "docker", "version", "--format", "{{.Server.Version}}")
 	if output, err := cmd.CombinedOutput(); err == nil {
 		_, _ = fmt.Fprintf(GinkgoWriter, "  docker: %s\n", string(output))
 	}
@@ -266,19 +267,19 @@ func printClusterState() {
 	_, _ = fmt.Fprintf(GinkgoWriter, "\n=== Initial Cluster State ===\n")
 
 	// Nodes
-	cmd := exec.Command("kubectl", "get", "nodes", "-o", "wide")
+	cmd := exec.CommandContext(context.Background(), "kubectl", "get", "nodes", "-o", "wide")
 	if output, err := cmd.CombinedOutput(); err == nil {
 		_, _ = fmt.Fprintf(GinkgoWriter, "Nodes:\n%s\n", string(output))
 	}
 
 	// Namespaces
-	cmd = exec.Command("kubectl", "get", "namespaces")
+	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "namespaces")
 	if output, err := cmd.CombinedOutput(); err == nil {
 		_, _ = fmt.Fprintf(GinkgoWriter, "Namespaces:\n%s\n", string(output))
 	}
 
 	// CRDs
-	cmd = exec.Command("kubectl", "get", "crds")
+	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "crds")
 	if output, err := cmd.CombinedOutput(); err == nil {
 		_, _ = fmt.Fprintf(GinkgoWriter, "CRDs:\n%s\n", string(output))
 	}
@@ -296,7 +297,7 @@ func cleanupPreExistingInstallations() {
 	utils.CleanupAllAuthOperatorWebhooks()
 
 	// Check for helm releases
-	cmd := exec.Command("helm", "list", "-A", "-o", "json")
+	cmd := exec.CommandContext(context.Background(), "helm", "list", "-A", "-o", "json")
 	if output, err := cmd.CombinedOutput(); err == nil {
 		outputStr := string(output)
 		// Simple check for auth-operator releases
@@ -311,7 +312,7 @@ func cleanupPreExistingInstallations() {
 				{"auth-operator-ha", "auth-operator-ha"},
 			}
 			for _, r := range releases {
-				uninstallCmd := exec.Command("helm", "uninstall", r.name, "-n", r.ns)
+				uninstallCmd := exec.CommandContext(context.Background(), "helm", "uninstall", r.name, "-n", r.ns)
 				_, _ = uninstallCmd.CombinedOutput() // Ignore errors
 			}
 		}
@@ -336,7 +337,7 @@ func cleanupPreExistingInstallations() {
 		"complex-team-beta",
 	}
 	for _, ns := range testNamespaces {
-		cmd := exec.Command("kubectl", "delete", "ns", ns, "--ignore-not-found=true", "--wait=false")
+		cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "ns", ns, "--ignore-not-found=true", "--wait=false")
 		_, _ = cmd.CombinedOutput()
 	}
 

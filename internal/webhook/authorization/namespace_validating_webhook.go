@@ -18,17 +18,20 @@ import (
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions,verbs=get;list;watch
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions/status,verbs=get;update;patch
 
+// NamespaceValidator is a validating webhook that validates namespace operations based on BindDefinitions.
 type NamespaceValidator struct {
 	Client       client.Client
 	Decoder      admission.Decoder
 	TDGMigration bool
 }
 
+// InjectDecoder injects the decoder into the NamespaceValidator.
 func (v *NamespaceValidator) InjectDecoder(d admission.Decoder) error {
 	v.Decoder = d
 	return nil
 }
 
+// Handle validates namespace operations based on BindDefinition configurations.
 func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) admission.Response {
 	logger := logf.FromContext(ctx).WithName("namespace-validator")
 

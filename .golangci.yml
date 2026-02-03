@@ -2,24 +2,84 @@ version: "2"
 run:
   go: "1.25"
   allow-parallel-runners: true
+  timeout: 10m
+  build-tags:
+    - e2e  # Include e2e tests in linting
 linters:
   default: none
   enable:
-    - dupl
-    - errcheck
-    - ginkgolinter
-    - goconst
-    - gocyclo
-    - govet
-    - ineffassign
-    - lll
-    - misspell
-    - nakedret
-    - prealloc
-    - staticcheck
-    - unconvert
-    - unparam
-    - unused
+    # Code Quality
+    - dupl            # Detect duplicate code
+    - errcheck        # Check for unchecked errors
+    - goconst         # Find repeated strings that could be constants
+    - gocyclo         # Check cyclomatic complexity
+    - govet           # Reports suspicious constructs
+    - ineffassign     # Detect ineffective assignments
+    - nakedret        # Find naked returns in long functions
+    - prealloc        # Find slice declarations that could be preallocated
+    - unconvert       # Remove unnecessary type conversions
+    - unparam         # Find unused function parameters
+    - unused          # Find unused code
+
+    # Static Analysis
+    - staticcheck     # Comprehensive static analysis (includes gosimple and stylecheck)
+
+    # Error Handling
+    - errorlint       # Proper error wrapping and comparison
+    - nilerr          # Check for nil error returns
+
+    # Security
+    - gosec           # Security-oriented linting
+
+    # Performance
+    - bodyclose       # Check HTTP response body is closed
+    - noctx           # Check for http requests without context
+
+    # Code Style
+    - lll             # Line length limit
+    - misspell        # Find misspelled words
+    - whitespace      # Check for unnecessary whitespace
+
+    # Testing
+    - ginkgolinter    # Ginkgo/Gomega best practices
+    - tparallel       # Detect improper t.Parallel() usage
+
+    # Naming
+    - revive          # Fast, configurable linter (replaces golint)
+
+  settings:
+    gocyclo:
+      min-complexity: 20
+    lll:
+      line-length: 180
+    revive:
+      rules:
+        - name: exported
+          arguments:
+            - checkPrivateReceivers
+            - disableStutteringCheck
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: increment-decrement
+        - name: var-naming
+        - name: package-comments
+          disabled: true  # Too noisy for existing codebase
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: errorf
+    gosec:
+      excludes:
+        - G104  # Unhandled errors (covered by errcheck)
+        - G304  # File path from variable (intentional in some cases)
+
   exclusions:
     generated: lax
     rules:
@@ -30,10 +90,36 @@ linters:
           - dupl
           - lll
         path: internal/*
+      - linters:
+          - errcheck
+        path: _test\.go$
+      - linters:
+          - gosec
+        path: _test\.go$
+      - linters:
+          - gosec
+        path: test/utils/
+      - linters:
+          - gosec
+        path: test/e2e/
+      - linters:
+          - revive
+        path: _test\.go$
+        text: "dot-imports"
+      - linters:
+          - gocyclo
+        path: api/authorization/v1alpha1/binddefinition_webhook\.go$
+      - linters:
+          - gocyclo
+        path: internal/controller/authorization/rolebinding_terminator_controller\.go$
+      - linters:
+          - gocyclo
+        path: internal/webhook/authorization/namespace_validating_webhook\.go$
     paths:
       - third_party$
       - builtin$
       - examples$
+
 formatters:
   enable:
     - gofmt

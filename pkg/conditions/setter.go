@@ -7,11 +7,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// Setter is an interface for objects that can have conditions set.
 type Setter interface {
 	Getter
 	SetConditions([]metav1.Condition)
 }
 
+// Set sets or updates a condition on the object.
 func Set(to Setter, condition *metav1.Condition) {
 	if to == nil || condition == nil {
 		return
@@ -43,6 +45,7 @@ func Set(to Setter, condition *metav1.Condition) {
 	to.SetConditions(conditions)
 }
 
+// TrueCondition creates a new condition with status True.
 func TrueCondition(
 	t ConditionType, gen int64, reason ConditionReason, message ConditionMessage, messageArgs ...interface{},
 ) *metav1.Condition {
@@ -55,6 +58,7 @@ func TrueCondition(
 	}
 }
 
+// FalseCondition creates a new condition with status False.
 func FalseCondition(
 	t ConditionType, gen int64, reason ConditionReason, message ConditionMessage, messageArgs ...interface{},
 ) *metav1.Condition {
@@ -67,6 +71,7 @@ func FalseCondition(
 	}
 }
 
+// UnknownCondition creates a new condition with status Unknown.
 func UnknownCondition(
 	t ConditionType, gen int64, reason ConditionReason, message ConditionMessage, messageArgs ...interface{},
 ) *metav1.Condition {
@@ -79,24 +84,28 @@ func UnknownCondition(
 	}
 }
 
+// MarkTrue sets a condition with status True on the object.
 func MarkTrue(
 	to Setter, t ConditionType, gen int64, reason ConditionReason, message ConditionMessage, messageArgs ...interface{},
 ) {
 	Set(to, TrueCondition(t, gen, reason, message, messageArgs...))
 }
 
+// MarkFalse sets a condition with status False on the object.
 func MarkFalse(
 	to Setter, t ConditionType, gen int64, reason ConditionReason, message ConditionMessage, messageArgs ...interface{},
 ) {
 	Set(to, FalseCondition(t, gen, reason, message, messageArgs...))
 }
 
+// MarkUnknown sets a condition with status Unknown on the object.
 func MarkUnknown(
 	to Setter, t ConditionType, gen int64, reason ConditionReason, message ConditionMessage, messageArgs ...interface{},
 ) {
 	Set(to, UnknownCondition(t, gen, reason, message, messageArgs...))
 }
 
+// Delete removes a condition with the given type from the object.
 func Delete(to Setter, t ConditionType) {
 	if to == nil {
 		return

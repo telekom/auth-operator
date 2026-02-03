@@ -46,11 +46,11 @@ const (
 // +kubebuilder:rbac:groups="coordination.k8s.io",resources=leases,verbs=get;list;update;create;delete
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=create;delete;deletecollection;get;list;patch;update;watch
 
-// bindDefinitionReconciler defines the reconciler for BindDefinition and reconciles a BindDefinition object.
-type bindDefinitionReconciler struct {
+// BindDefinitionReconciler defines the reconciler for BindDefinition and reconciles a BindDefinition object.
+type BindDefinitionReconciler struct {
 	client                client.Client
 	scheme                *runtime.Scheme
-	roleBindingTerminator *roleBindingTerminator
+	RoleBindingTerminator *RoleBindingTerminator
 	recorder              record.EventRecorder
 }
 
@@ -62,17 +62,17 @@ func NewBindDefinitionReconciler(
 	scheme *runtime.Scheme,
 	recorder record.EventRecorder,
 	resourceTracker *discovery.ResourceTracker,
-) (*bindDefinitionReconciler, error) {
+) (*BindDefinitionReconciler, error) {
 	rbTerminator, err := NewRoleBindingTerminator(cachedClient, config, scheme, recorder, resourceTracker)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create rolebinding terminator: %w", err)
 	}
 
-	return &bindDefinitionReconciler{
+	return &BindDefinitionReconciler{
 		client:                cachedClient,
 		scheme:                scheme,
 		recorder:              recorder,
-		roleBindingTerminator: rbTerminator,
+		RoleBindingTerminator: rbTerminator,
 	}, nil
 }
 
@@ -80,11 +80,11 @@ func NewBindDefinitionReconciler(
 // Used to watch for namespace creation events https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/handler#example-EnqueueRequestsFromMapFunc
 // Used a predicate to ignore deletes of namespace, as this can be done in a regular
 // reconcile requeue and does not require immediate action from controller
-func (r *bindDefinitionReconciler) SetupWithManager(mgr ctrl.Manager, concurrency int) error {
-	if r.roleBindingTerminator == nil {
-		return fmt.Errorf("roleBindingTerminator is nil - use NewBindDefinitionReconciler to create the reconciler")
+func (r *BindDefinitionReconciler) SetupWithManager(mgr ctrl.Manager, concurrency int) error {
+	if r.RoleBindingTerminator == nil {
+		return fmt.Errorf("RoleBindingTerminator is nil - use NewBindDefinitionReconciler to create the reconciler")
 	}
-	if err := r.roleBindingTerminator.SetupWithManager(mgr, concurrency); err != nil {
+	if err := r.RoleBindingTerminator.SetupWithManager(mgr, concurrency); err != nil {
 		return fmt.Errorf("unable to set up RoleBinding terminator: %w", err)
 	}
 	return ctrl.NewControllerManagedBy(mgr).
@@ -109,7 +109,7 @@ func (r *bindDefinitionReconciler) SetupWithManager(mgr ctrl.Manager, concurrenc
 // for any object implementing client.Object. Used it to fan-out updates to all RoleDefinitions on new CRD create
 // https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/handler#EnqueueRequestsFromMapFunc
 // https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/handler#MapFunc
-func (r *bindDefinitionReconciler) namespaceToBindDefinitionRequests(ctx context.Context, obj client.Object) []reconcile.Request {
+func (r *BindDefinitionReconciler) namespaceToBindDefinitionRequests(ctx context.Context, obj client.Object) []reconcile.Request {
 	logger := log.FromContext(ctx)
 	logger.V(2).Info("namespaceToBindDefinitionRequests triggered", "objectName", obj.GetName(), "objectNamespace", obj.GetNamespace())
 
@@ -148,7 +148,7 @@ func (r *bindDefinitionReconciler) namespaceToBindDefinitionRequests(ctx context
 
 // For checking if terminating BindDefinition refers a ServiceAccount
 // that other non-terminating BindDefinitions reference
-func (r *bindDefinitionReconciler) isSAReferencedByOtherBindDefs(ctx context.Context, currentBindDefName, saName, saNamespace string) (bool, error) {
+func (r *BindDefinitionReconciler) isSAReferencedByOtherBindDefs(ctx context.Context, currentBindDefName, saName, saNamespace string) (bool, error) {
 	// List all BindDefinitions
 	bindDefList := &authnv1alpha1.BindDefinitionList{}
 	err := r.client.List(ctx, bindDefList)
@@ -173,7 +173,9 @@ func (r *bindDefinitionReconciler) isSAReferencedByOtherBindDefs(ctx context.Con
 	return false, nil
 }
 
-func (r *bindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+// Reconcile handles the reconciliation loop for BindDefinition resources.
+// It manages the lifecycle of role bindings based on the BindDefinition spec.
+func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 
 	// Fetching the RoleDefinition custom resource from Kubernetes API
@@ -182,46 +184,44 @@ func (r *bindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return ctrl.Result{}, nil
-		} else {
-			log.Error(err, "Unable to fetch BindDefinition resource from Kubernetes API")
-			return ctrl.Result{}, err
 		}
+		log.Error(err, "Unable to fetch BindDefinition resource from Kubernetes API")
+		return ctrl.Result{}, err
 	}
 
 	// Check if controller should reconcile BindDefinition delete
 	if !bindDefinition.DeletionTimestamp.IsZero() {
 		return r.reconcileDelete(ctx, bindDefinition)
-	} else {
-		if !controllerutil.ContainsFinalizer(bindDefinition, authnv1alpha1.BindDefinitionFinalizer) {
-			controllerutil.AddFinalizer(bindDefinition, authnv1alpha1.BindDefinitionFinalizer)
-			if err := r.client.Update(ctx, bindDefinition); err != nil {
-				return ctrl.Result{}, err
-			}
-			r.recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Finalizer", "Adding finalizer to BindDefinition %s", bindDefinition.Name)
-		}
-		conditions.MarkTrue(bindDefinition, authnv1alpha1.FinalizerCondition, bindDefinition.Generation, authnv1alpha1.FinalizerReason, authnv1alpha1.FinalizerMessage)
-		if err := r.client.Status().Update(ctx, bindDefinition); err != nil {
-			return ctrl.Result{}, err
-		}
-
-		// Reconcile create path
-		resultCreate, err := r.reconcileCreate(ctx, bindDefinition)
-		if err != nil {
-			log.Error(err, "Error occurred in reconcileCreate function")
-			return resultCreate, err
-		}
-
-		// Reconcile update path
-		resultUpdate, err := r.reconcileUpdate(ctx, bindDefinition)
-		if err != nil {
-			log.Error(err, "Error occurred in reconcileUpdate function")
-			return resultUpdate, err
-		}
-
-		// Preserve requeue requests from sub-reconciles
-		return mergeReconcileResults(resultCreate, resultUpdate), nil
 	}
 
+	if !controllerutil.ContainsFinalizer(bindDefinition, authnv1alpha1.BindDefinitionFinalizer) {
+		controllerutil.AddFinalizer(bindDefinition, authnv1alpha1.BindDefinitionFinalizer)
+		if err := r.client.Update(ctx, bindDefinition); err != nil {
+			return ctrl.Result{}, err
+		}
+		r.recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Finalizer", "Adding finalizer to BindDefinition %s", bindDefinition.Name)
+	}
+	conditions.MarkTrue(bindDefinition, authnv1alpha1.FinalizerCondition, bindDefinition.Generation, authnv1alpha1.FinalizerReason, authnv1alpha1.FinalizerMessage)
+	if err := r.client.Status().Update(ctx, bindDefinition); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// Reconcile create path
+	resultCreate, err := r.reconcileCreate(ctx, bindDefinition)
+	if err != nil {
+		log.Error(err, "Error occurred in reconcileCreate function")
+		return resultCreate, err
+	}
+
+	// Reconcile update path
+	resultUpdate, err := r.reconcileUpdate(ctx, bindDefinition)
+	if err != nil {
+		log.Error(err, "Error occurred in reconcileUpdate function")
+		return resultUpdate, err
+	}
+
+	// Preserve requeue requests from sub-reconciles
+	return mergeReconcileResults(resultCreate, resultUpdate), nil
 }
 
 func mergeReconcileResults(results ...ctrl.Result) ctrl.Result {
@@ -241,7 +241,7 @@ func mergeReconcileResults(results ...ctrl.Result) ctrl.Result {
 	return merged
 }
 
-func (r *bindDefinitionReconciler) reconcileDelete(
+func (r *BindDefinitionReconciler) reconcileDelete(
 	ctx context.Context,
 	bindDefinition *authnv1alpha1.BindDefinition,
 ) (ctrl.Result, error) {
@@ -294,7 +294,7 @@ func (r *bindDefinitionReconciler) reconcileDelete(
 }
 
 // deleteSubjectServiceAccounts deletes service accounts specified in subjects.
-func (r *bindDefinitionReconciler) deleteSubjectServiceAccounts(
+func (r *BindDefinitionReconciler) deleteSubjectServiceAccounts(
 	ctx context.Context,
 	bindDef *authnv1alpha1.BindDefinition,
 ) error {
@@ -317,7 +317,7 @@ func (r *bindDefinitionReconciler) deleteSubjectServiceAccounts(
 }
 
 // deleteAllClusterRoleBindings deletes all ClusterRoleBindings for the BindDefinition.
-func (r *bindDefinitionReconciler) deleteAllClusterRoleBindings(
+func (r *BindDefinitionReconciler) deleteAllClusterRoleBindings(
 	ctx context.Context,
 	bindDef *authnv1alpha1.BindDefinition,
 ) error {
@@ -346,7 +346,7 @@ func (r *bindDefinitionReconciler) deleteAllClusterRoleBindings(
 }
 
 // deleteAllRoleBindings deletes all RoleBindings for the BindDefinition across all matching namespaces.
-func (r *bindDefinitionReconciler) deleteAllRoleBindings(
+func (r *BindDefinitionReconciler) deleteAllRoleBindings(
 	ctx context.Context,
 	bindDef *authnv1alpha1.BindDefinition,
 ) error {
@@ -389,7 +389,7 @@ func (r *bindDefinitionReconciler) deleteAllRoleBindings(
 }
 
 // deleteRoleBindingWithStatusUpdate deletes a RoleBinding and updates status on error.
-func (r *bindDefinitionReconciler) deleteRoleBindingWithStatusUpdate(
+func (r *BindDefinitionReconciler) deleteRoleBindingWithStatusUpdate(
 	ctx context.Context,
 	bindDef *authnv1alpha1.BindDefinition,
 	roleRef, namespace string,
@@ -407,7 +407,7 @@ func (r *bindDefinitionReconciler) deleteRoleBindingWithStatusUpdate(
 }
 
 // Reconcile BindDefinition method
-func (r *bindDefinitionReconciler) reconcileCreate(ctx context.Context, bindDefinition *authnv1alpha1.BindDefinition) (ctrl.Result, error) {
+func (r *BindDefinitionReconciler) reconcileCreate(ctx context.Context, bindDefinition *authnv1alpha1.BindDefinition) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 	log.V(1).Info("starting reconcileCreate", "bindDefinitionName", bindDefinition.Name, "namespace", bindDefinition.Namespace)
 
@@ -469,7 +469,7 @@ func (r *bindDefinitionReconciler) reconcileCreate(ctx context.Context, bindDefi
 
 // validateRoleReferences checks if all referenced ClusterRoles and Roles exist.
 // Returns a list of missing role names. Does not fail the reconciliation.
-func (r *bindDefinitionReconciler) validateRoleReferences(
+func (r *BindDefinitionReconciler) validateRoleReferences(
 	ctx context.Context,
 	bindDef *authnv1alpha1.BindDefinition,
 	namespaces []corev1.Namespace,
@@ -533,7 +533,7 @@ func containsString(slice []string, s string) bool {
 	return false
 }
 
-func (r *bindDefinitionReconciler) collectNamespaces(ctx context.Context, bindDefinition *authnv1alpha1.BindDefinition) (map[string]corev1.Namespace, error) {
+func (r *BindDefinitionReconciler) collectNamespaces(ctx context.Context, bindDefinition *authnv1alpha1.BindDefinition) (map[string]corev1.Namespace, error) {
 	// Construct namespace set from BindDefinition namespace selectors
 	namespaceSet := make(map[string]corev1.Namespace)
 	for _, RoleBinding := range bindDefinition.Spec.RoleBindings {
@@ -573,7 +573,7 @@ func (r *bindDefinitionReconciler) collectNamespaces(ctx context.Context, bindDe
 	return namespaceSet, nil
 }
 
-func (r *bindDefinitionReconciler) reconcileUpdate(ctx context.Context, bindDefinition *authnv1alpha1.BindDefinition) (ctrl.Result, error) {
+func (r *BindDefinitionReconciler) reconcileUpdate(ctx context.Context, bindDefinition *authnv1alpha1.BindDefinition) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 
 	namespaceSet, err := r.collectNamespaces(ctx, bindDefinition)

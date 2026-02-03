@@ -7,6 +7,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 )
 
+// PolicyRulesEqual compares two slices of PolicyRules for equality.
 func PolicyRulesEqual(a, b []rbacv1.PolicyRule) bool {
 	if len(a) != len(b) {
 		return false

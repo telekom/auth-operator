@@ -42,7 +42,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: RoleDefinition is the Schema for the roledefinitions API
+        description: RoleDefinition is the Schema for the roledefinitions API.
         properties:
           apiVersion:
             description: |-

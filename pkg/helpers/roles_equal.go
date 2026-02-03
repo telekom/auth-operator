@@ -7,6 +7,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 )
 
+// ClusterRoleBindsEqual compares two ClusterRoleBindings for equality.
 func ClusterRoleBindsEqual(existing, expected *rbacv1.ClusterRoleBinding) bool {
 	// Compare Names
 	if existing.Name != expected.Name {
@@ -31,6 +32,7 @@ func ClusterRoleBindsEqual(existing, expected *rbacv1.ClusterRoleBinding) bool {
 	return true
 }
 
+// RoleBindsEqual compares two RoleBindings for equality.
 func RoleBindsEqual(existing, expected *rbacv1.RoleBinding) bool {
 	// Compare Names and Namespaces
 	if existing.Name != expected.Name || existing.Namespace != expected.Namespace {
@@ -55,6 +57,7 @@ func RoleBindsEqual(existing, expected *rbacv1.RoleBinding) bool {
 	return true
 }
 
+// ServiceAccountsEqual compares two ServiceAccounts for equality.
 func ServiceAccountsEqual(existing, expected *corev1.ServiceAccount) bool {
 	// Compare Names and Namespaces
 	if existing.Name != expected.Name || existing.Namespace != expected.Namespace {

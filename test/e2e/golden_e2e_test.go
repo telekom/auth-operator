@@ -19,6 +19,7 @@ limitations under the License.
 package e2e
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -56,27 +57,27 @@ var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func(
 		Expect(testdataPath).To(BeADirectory(), "testdata directory must exist")
 
 		By("Creating test namespace")
-		cmd := exec.Command("kubectl", "create", "ns", goldenNamespace, "--dry-run=client", "-o", "yaml")
+		cmd := exec.CommandContext(context.Background(), "kubectl", "create", "ns", goldenNamespace, "--dry-run=client", "-o", "yaml")
 		output, err := utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred())
 
-		cmd = exec.Command("kubectl", "apply", "-f", "-")
+		cmd = exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
 		cmd.Stdin = strings.NewReader(string(output))
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred())
 
 		By("Installing auth-operator via Helm")
 		// Build the docker image first
-		cmd = exec.Command("make", "docker-build", "IMG=auth-operator:e2e-test")
+		cmd = exec.CommandContext(context.Background(), "make", "docker-build", "IMG=auth-operator:e2e-test")
 		cmd.Dir = filepath.Join(testdataPath, "../..")
 		_, _ = utils.Run(cmd) // Ignore if already built
 
 		// Load image to kind
-		cmd = exec.Command("kind", "load", "docker-image", "auth-operator:e2e-test", "--name", kindClusterName)
+		cmd = exec.CommandContext(context.Background(), "kind", "load", "docker-image", "auth-operator:e2e-test", "--name", kindClusterName)
 		_, _ = utils.Run(cmd)
 
 		// Install Helm chart
-		cmd = exec.Command("helm", "upgrade", "--install", goldenRelease, helmChartPath,
+		cmd = exec.CommandContext(context.Background(), "helm", "upgrade", "--install", goldenRelease, helmChartPath,
 			"-n", goldenNamespace,
 			"--set", "image.repository=auth-operator",
 			"--set", "image.tag=e2e-test",
@@ -129,7 +130,7 @@ var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func(
 		It("should generate ClusterRole with correct structure", func() {
 			By("Applying RoleDefinition input")
 			inputPath := filepath.Join(testdataPath, "roledefinition-clusterrole-input.yaml")
-			cmd := exec.Command("kubectl", "apply", "-f", inputPath, "-n", goldenNamespace)
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", inputPath, "-n", goldenNamespace)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -140,13 +141,13 @@ var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func(
 
 			By("Verifying ClusterRole was created")
 			Eventually(func() error {
-				cmd := exec.Command("kubectl", "get", "clusterrole", "golden-cluster-reader", "-o", "json")
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrole", "golden-cluster-reader", "-o", "json")
 				_, err := utils.Run(cmd)
 				return err
 			}, reconcileTimeout, pollingInterval).Should(Succeed())
 
 			By("Comparing generated ClusterRole structure")
-			cmd = exec.Command("kubectl", "get", "clusterrole", "golden-cluster-reader", "-o", "json")
+			cmd = exec.CommandContext(context.Background(), "kubectl", "get", "clusterrole", "golden-cluster-reader", "-o", "json")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -186,7 +187,7 @@ var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func(
 		It("should generate Role in target namespace", func() {
 			By("Applying namespaced RoleDefinition input")
 			inputPath := filepath.Join(testdataPath, "roledefinition-namespaced-role-input.yaml")
-			cmd := exec.Command("kubectl", "apply", "-f", inputPath, "-n", goldenNamespace)
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", inputPath, "-n", goldenNamespace)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -197,13 +198,13 @@ var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func(
 
 			By("Verifying Role was created in target namespace")
 			Eventually(func() error {
-				cmd := exec.Command("kubectl", "get", "role", "golden-ns-reader", "-n", goldenNamespace, "-o", "json")
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "role", "golden-ns-reader", "-n", goldenNamespace, "-o", "json")
 				_, err := utils.Run(cmd)
 				return err
 			}, reconcileTimeout, pollingInterval).Should(Succeed())
 
 			By("Comparing generated Role structure")
-			cmd = exec.Command("kubectl", "get", "role", "golden-ns-reader", "-n", goldenNamespace, "-o", "json")
+			cmd = exec.CommandContext(context.Background(), "kubectl", "get", "role", "golden-ns-reader", "-n", goldenNamespace, "-o", "json")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -244,7 +245,7 @@ var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func(
 		It("should generate ClusterRoleBinding with correct subjects", func() {
 			By("Applying BindDefinition input")
 			inputPath := filepath.Join(testdataPath, "binddefinition-input.yaml")
-			cmd := exec.Command("kubectl", "apply", "-f", inputPath, "-n", goldenNamespace)
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", inputPath, "-n", goldenNamespace)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -257,7 +258,7 @@ var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func(
 			// ClusterRoleBinding name format: {targetName}-{clusterRoleRef}-binding
 			crbName := "golden-bind-golden-cluster-reader-binding"
 			Eventually(func() error {
-				cmd := exec.Command("kubectl", "get", "clusterrolebinding", crbName, "-o", "json")
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrolebinding", crbName, "-o", "json")
 				_, err := utils.Run(cmd)
 				return err
 			}, reconcileTimeout, pollingInterval).Should(Succeed())
@@ -267,7 +268,7 @@ var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func(
 			expectedBytes, err := os.ReadFile(expectedPath)
 			Expect(err).NotTo(HaveOccurred())
 
-			cmd = exec.Command("kubectl", "get", "clusterrolebinding", crbName, "-o", "json")
+			cmd = exec.CommandContext(context.Background(), "kubectl", "get", "clusterrolebinding", crbName, "-o", "json")
 			actualOutput, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -305,7 +306,7 @@ var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func(
 		It("should exclude entire API groups from generated ClusterRole", func() {
 			By("Applying RoleDefinition with restrictedApis")
 			inputPath := filepath.Join(testdataPath, "golden/roledefinition-restricted-apis-input.yaml")
-			cmd := exec.Command("kubectl", "apply", "-f", inputPath)
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", inputPath)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -316,13 +317,13 @@ var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func(
 
 			By("Verifying ClusterRole was created")
 			Eventually(func() error {
-				cmd := exec.Command("kubectl", "get", "clusterrole", "golden-restricted-apis-role", "-o", "json")
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrole", "golden-restricted-apis-role", "-o", "json")
 				_, err := utils.Run(cmd)
 				return err
 			}, reconcileTimeout, pollingInterval).Should(Succeed())
 
 			By("Verifying excluded API groups are not present")
-			cmd = exec.Command("kubectl", "get", "clusterrole", "golden-restricted-apis-role", "-o", "json")
+			cmd = exec.CommandContext(context.Background(), "kubectl", "get", "clusterrole", "golden-restricted-apis-role", "-o", "json")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -349,7 +350,7 @@ var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func(
 		It("should exclude specific resources from generated Role", func() {
 			By("Applying RoleDefinition with restrictedResources")
 			inputPath := filepath.Join(testdataPath, "golden/roledefinition-restricted-resources-input.yaml")
-			cmd := exec.Command("kubectl", "apply", "-f", inputPath)
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", inputPath)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -360,14 +361,14 @@ var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func(
 
 			By("Verifying Role was created in namespace")
 			Eventually(func() error {
-				cmd := exec.Command("kubectl", "get", "role",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "role",
 					"golden-restricted-resources-role", "-n", goldenNamespace, "-o", "json")
 				_, err := utils.Run(cmd)
 				return err
 			}, reconcileTimeout, pollingInterval).Should(Succeed())
 
 			By("Verifying excluded resources are not present")
-			cmd = exec.Command("kubectl", "get", "role", "golden-restricted-resources-role", "-n", goldenNamespace, "-o", "json")
+			cmd = exec.CommandContext(context.Background(), "kubectl", "get", "role", "golden-restricted-resources-role", "-n", goldenNamespace, "-o", "json")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -394,7 +395,7 @@ var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func(
 		It("should create multiple ClusterRoleBindings", func() {
 			By("Applying BindDefinition with multiple clusterRoleRefs")
 			inputPath := filepath.Join(testdataPath, "golden/binddefinition-multi-clusterroles-input.yaml")
-			cmd := exec.Command("kubectl", "apply", "-f", inputPath)
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", inputPath)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -411,7 +412,7 @@ var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func(
 			}
 			for _, crbName := range expectedCRBs {
 				Eventually(func() error {
-					cmd := exec.Command("kubectl", "get", "clusterrolebinding", crbName, "-o", "name")
+					cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrolebinding", crbName, "-o", "name")
 					_, err := utils.Run(cmd)
 					return err
 				}, reconcileTimeout, pollingInterval).Should(Succeed(), fmt.Sprintf("ClusterRoleBinding %s should exist", crbName))
@@ -419,7 +420,7 @@ var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func(
 
 			By("Verifying subjects are consistent across all bindings")
 			for _, crbName := range expectedCRBs {
-				cmd = exec.Command("kubectl", "get", "clusterrolebinding", crbName, "-o", "json")
+				cmd = exec.CommandContext(context.Background(), "kubectl", "get", "clusterrolebinding", crbName, "-o", "json")
 				output, err := utils.Run(cmd)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -450,7 +451,7 @@ var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func(
 		It("should create ClusterRoleBinding with User, Group, and ServiceAccount subjects", func() {
 			By("Applying BindDefinition with mixed subjects")
 			inputPath := filepath.Join(testdataPath, "golden/binddefinition-mixed-subjects-input.yaml")
-			cmd := exec.Command("kubectl", "apply", "-f", inputPath)
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", inputPath)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -462,13 +463,13 @@ var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func(
 			By("Verifying ClusterRoleBinding was created")
 			crbName := "golden-mixed-golden-cluster-reader-binding"
 			Eventually(func() error {
-				cmd := exec.Command("kubectl", "get", "clusterrolebinding", crbName, "-o", "json")
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrolebinding", crbName, "-o", "json")
 				_, err := utils.Run(cmd)
 				return err
 			}, reconcileTimeout, pollingInterval).Should(Succeed())
 
 			By("Verifying all subject types are present")
-			cmd = exec.Command("kubectl", "get", "clusterrolebinding", crbName, "-o", "json")
+			cmd = exec.CommandContext(context.Background(), "kubectl", "get", "clusterrolebinding", crbName, "-o", "json")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -493,7 +494,7 @@ var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func(
 			serviceAccounts := []string{"golden-app-sa", "golden-worker-sa"}
 			for _, saName := range serviceAccounts {
 				Eventually(func() error {
-					cmd := exec.Command("kubectl", "get", "serviceaccount",
+					cmd := exec.CommandContext(context.Background(), "kubectl", "get", "serviceaccount",
 						saName, "-n", goldenNamespace, "-o", "name")
 					_, err := utils.Run(cmd)
 					return err
@@ -507,19 +508,19 @@ var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func(
 		It("should create WebhookAuthorizer with group principals", func() {
 			By("Applying WebhookAuthorizer with group-based rules")
 			inputPath := filepath.Join(testdataPath, "golden/webhookauthorizer-group-based-input.yaml")
-			cmd := exec.Command("kubectl", "apply", "-f", inputPath)
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", inputPath)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying WebhookAuthorizer was created")
 			Eventually(func() error {
-				cmd := exec.Command("kubectl", "get", "webhookauthorizer", "golden-group-authorizer", "-o", "json")
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "webhookauthorizer", "golden-group-authorizer", "-o", "json")
 				_, err := utils.Run(cmd)
 				return err
 			}, reconcileTimeout, pollingInterval).Should(Succeed())
 
 			By("Verifying spec has correct structure")
-			cmd = exec.Command("kubectl", "get", "webhookauthorizer", "golden-group-authorizer", "-o", "json")
+			cmd = exec.CommandContext(context.Background(), "kubectl", "get", "webhookauthorizer", "golden-group-authorizer", "-o", "json")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -550,19 +551,19 @@ var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func(
 		It("should create WebhookAuthorizer with deny list", func() {
 			By("Applying WebhookAuthorizer with deniedPrincipals")
 			inputPath := filepath.Join(testdataPath, "golden/webhookauthorizer-deny-list-input.yaml")
-			cmd := exec.Command("kubectl", "apply", "-f", inputPath)
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", inputPath)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying WebhookAuthorizer was created")
 			Eventually(func() error {
-				cmd := exec.Command("kubectl", "get", "webhookauthorizer", "golden-deny-authorizer", "-o", "json")
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "webhookauthorizer", "golden-deny-authorizer", "-o", "json")
 				_, err := utils.Run(cmd)
 				return err
 			}, reconcileTimeout, pollingInterval).Should(Succeed())
 
 			By("Verifying deniedPrincipals are set")
-			cmd = exec.Command("kubectl", "get", "webhookauthorizer", "golden-deny-authorizer", "-o", "json")
+			cmd = exec.CommandContext(context.Background(), "kubectl", "get", "webhookauthorizer", "golden-deny-authorizer", "-o", "json")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -580,19 +581,19 @@ var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func(
 		It("should create WebhookAuthorizer with namespaceSelector", func() {
 			By("Applying WebhookAuthorizer with namespaceSelector")
 			inputPath := filepath.Join(testdataPath, "golden/webhookauthorizer-namespace-selector-input.yaml")
-			cmd := exec.Command("kubectl", "apply", "-f", inputPath)
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", inputPath)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying WebhookAuthorizer was created")
 			Eventually(func() error {
-				cmd := exec.Command("kubectl", "get", "webhookauthorizer", "golden-ns-scoped-authorizer", "-o", "json")
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "webhookauthorizer", "golden-ns-scoped-authorizer", "-o", "json")
 				_, err := utils.Run(cmd)
 				return err
 			}, reconcileTimeout, pollingInterval).Should(Succeed())
 
 			By("Verifying namespaceSelector is set")
-			cmd = exec.Command("kubectl", "get", "webhookauthorizer", "golden-ns-scoped-authorizer", "-o", "json")
+			cmd = exec.CommandContext(context.Background(), "kubectl", "get", "webhookauthorizer", "golden-ns-scoped-authorizer", "-o", "json")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -612,7 +613,7 @@ var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func(
 // Helper functions
 
 func verifyGoldenControllerReady(namespace string) error {
-	cmd := exec.Command("kubectl", "get", "pods",
+	cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pods",
 		"-l", "control-plane=controller-manager",
 		"-n", namespace,
 		"-o", "jsonpath={.items[*].status.phase}")
@@ -627,7 +628,7 @@ func verifyGoldenControllerReady(namespace string) error {
 }
 
 func checkGoldenRoleDefinitionCreated(name, namespace string) bool {
-	cmd := exec.Command("kubectl", "get", "roledefinition", name,
+	cmd := exec.CommandContext(context.Background(), "kubectl", "get", "roledefinition", name,
 		"-n", namespace,
 		"-o", "jsonpath={.status.conditions[?(@.type=='Created')].status}")
 	output, err := utils.Run(cmd)
@@ -638,7 +639,7 @@ func checkGoldenRoleDefinitionCreated(name, namespace string) bool {
 }
 
 func checkGoldenBindDefinitionCreated(name, namespace string) bool {
-	cmd := exec.Command("kubectl", "get", "binddefinition", name,
+	cmd := exec.CommandContext(context.Background(), "kubectl", "get", "binddefinition", name,
 		"-n", namespace,
 		"-o", "jsonpath={.status.conditions[?(@.type=='Created')].status}")
 	output, err := utils.Run(cmd)
@@ -646,17 +647,6 @@ func checkGoldenBindDefinitionCreated(name, namespace string) bool {
 		return false
 	}
 	return strings.TrimSpace(string(output)) == goldenStatusTrue
-}
-
-func cleanupGoldenTestCRDs(namespace string) {
-	// Use centralized cleanup for all CRDs cluster-wide first
-	CleanupAllWebhookAuthorizersClusterWide()
-	CleanupAllCRDsInNamespace("") // cluster-scoped cleanup
-
-	// Also cleanup namespaced resources if namespace is provided
-	if namespace != "" {
-		CleanupAllCRDsInNamespace(namespace)
-	}
 }
 
 func containsGoldenVerb(verbs []string, verb string) bool {
