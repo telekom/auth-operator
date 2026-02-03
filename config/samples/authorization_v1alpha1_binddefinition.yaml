@@ -1,37 +1,311 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# =============================================================================
+# BindDefinition Samples - Comprehensive Feature Coverage
+# =============================================================================
+# These samples demonstrate all features of the BindDefinition CRD:
+# - Multiple subject types: User, Group, ServiceAccount
+# - ClusterRoleBindings (cluster-wide access)
+# - RoleBindings with namespace selectors (dynamic namespace targeting)
+# - RoleBindings with specific namespaces
+# - Multiple namespace selectors with complex label matching
+# - Cross-namespace service account bindings
+# =============================================================================
+
+---
+# -----------------------------------------------------------------------------
+# Platform Admins - Full administrative access
+# Binds platform admin group to cluster-wide and namespace-specific roles
+# -----------------------------------------------------------------------------
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: BindDefinition
 metadata:
+  name: bd-platform-admins
   labels:
     app.kubernetes.io/name: auth-operator
     app.kubernetes.io/managed-by: kustomize
-  name: binddefinition-sample
+    t-caas.telekom.com/privilege-level: admin
 spec:
-  targetName: bd-onboarding-ns
+  targetName: platform-admins
   subjects:
-  - apiGroup: rbac.authorization.k8s.io
-    kind: User
-    name: luka@tomislav.galic
-  - apiGroup: rbac.authorization.k8s.io
-    kind: Group
-    name: onboarding-admin-test
-  - kind: ServiceAccount
-    name: test-sa
-    namespace: kube-system
+    # Platform admin group from IdP
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group
+      name: platform-admins@example.com
+    # Individual admin users
+    - apiGroup: rbac.authorization.k8s.io
+      kind: User
+      name: admin1@example.com
+    - apiGroup: rbac.authorization.k8s.io
+      kind: User
+      name: admin2@example.com
+    # Platform automation service account
+    - kind: ServiceAccount
+      name: platform-controller
+      namespace: t-caas-system
+  # Cluster-wide admin access via ClusterRoleBindings
   clusterRoleBindings:
     clusterRoleRefs:
-    - t-caas-cluster-reader
+      - t-caas-platform-admin-reader
+      - t-caas-tenant-operator
+  # Namespace-specific admin access via RoleBindings
   roleBindings:
+    # Full access to all platform namespaces
+    - clusterRoleRefs:
+        - admin
+      namespaceSelector:
+        - matchLabels:
+            t-caas.telekom.com/owner: platform
+        - matchExpressions:
+            - key: kubernetes.io/metadata.name
+              operator: In
+              values:
+                - t-caas-system
+                - t-caas-monitoring
+                - t-caas-logging
+
+---
+# -----------------------------------------------------------------------------
+# Tenant Alpha Team - Multi-tier access for a specific tenant
+# Demonstrates complex namespace selection with multiple selectors
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: bd-tenant-alpha-team
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/tenant: alpha
+spec:
+  targetName: tenant-alpha
+  subjects:
+    # Tenant admin group
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group
+      name: tenant-alpha-admins@example.org
+    # Development team
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group
+      name: tenant-alpha-developers@example.org
+    # Individual power users
+    - apiGroup: rbac.authorization.k8s.io
+      kind: User
+      name: lead-developer@example.org
+    # CI/CD service accounts from different namespaces
+    - kind: ServiceAccount
+      name: ci-runner
+      namespace: tenant-alpha-cicd
+    - kind: ServiceAccount
+      name: argocd-application-controller
+      namespace: tenant-alpha-gitops
+  # Cluster-wide read access
+  clusterRoleBindings:
     clusterRoleRefs:
-    - t-caas-cluster-reader
-    roleRefs:
-    - t-caas-namespaced-reader
-    namespaceSelector:
-    - matchExpressions:
-      - key: t-caas.telekom.com/owner
-        operator: In
-        values:
-        - tenant
-      - key: t-caas.telekom.com/tenant
-        operator: In
-        values:
-        - karlo
+      - view
+      - t-caas-security-auditor
+  roleBindings:
+    # Developer access to dev/staging namespaces
+    - clusterRoleRefs:
+        - edit
+      roleRefs:
+        - t-caas-namespace-developer
+      namespaceSelector:
+        - matchLabels:
+            t-caas.telekom.com/tenant: alpha
+            t-caas.telekom.com/environment: development
+        - matchLabels:
+            t-caas.telekom.com/tenant: alpha
+            t-caas.telekom.com/environment: staging
+    # Read-only access to production namespaces
+    - clusterRoleRefs:
+        - view
+      roleRefs:
+        - t-caas-namespace-viewer
+      namespaceSelector:
+        - matchLabels:
+            t-caas.telekom.com/tenant: alpha
+            t-caas.telekom.com/environment: production
+    # Full access to CI/CD namespaces only
+    - clusterRoleRefs:
+        - admin
+      namespaceSelector:
+        - matchExpressions:
+            - key: t-caas.telekom.com/tenant
+              operator: In
+              values:
+                - alpha
+            - key: t-caas.telekom.com/purpose
+              operator: In
+              values:
+                - cicd
+                - gitops
+                - build
+
+---
+# -----------------------------------------------------------------------------
+# Cross-Tenant Auditors - Security team with cross-cutting access
+# Demonstrates Group-based access with exclusions via namespace selectors
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: bd-security-auditors
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/privilege-level: auditor
+spec:
+  targetName: security-auditors
+  subjects:
+    # Security team groups from multiple IdP sources
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group
+      name: security-team@example.com
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group
+      name: compliance-auditors@example.com
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group
+      name: soc-analysts@example.com
+    # External audit service account
+    - kind: ServiceAccount
+      name: external-auditor
+      namespace: audit-system
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - t-caas-security-auditor
+  roleBindings:
+    # Read access to all tenant namespaces
+    - clusterRoleRefs:
+        - view
+      namespaceSelector:
+        - matchExpressions:
+            - key: t-caas.telekom.com/owner
+              operator: In
+              values:
+                - tenant
+                - shared
+            - key: t-caas.telekom.com/tenant
+              operator: Exists
+    # Additional secret-viewing rights for compliance namespaces
+    - roleRefs:
+        - secret-reader
+      namespaceSelector:
+        - matchLabels:
+            t-caas.telekom.com/compliance-scope: pci-dss
+
+---
+# -----------------------------------------------------------------------------
+# Monitoring Stack - Service account bindings for observability
+# Demonstrates ServiceAccount-only bindings with specific namespace targeting
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: bd-monitoring-stack
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/component: monitoring
+spec:
+  targetName: monitoring-stack
+  subjects:
+    # Prometheus service account
+    - kind: ServiceAccount
+      name: prometheus
+      namespace: t-caas-monitoring
+    # Grafana service account
+    - kind: ServiceAccount
+      name: grafana
+      namespace: t-caas-monitoring
+    # Alertmanager service account
+    - kind: ServiceAccount
+      name: alertmanager
+      namespace: t-caas-monitoring
+    # Thanos components
+    - kind: ServiceAccount
+      name: thanos-query
+      namespace: t-caas-monitoring
+    - kind: ServiceAccount
+      name: thanos-store
+      namespace: t-caas-monitoring
+  # Cluster-wide metrics access
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - system:monitoring
+  roleBindings:
+    # Access to scrape endpoints in all application namespaces
+    - clusterRoleRefs:
+        - view
+      namespaceSelector:
+        - matchExpressions:
+            - key: t-caas.telekom.com/monitoring
+              operator: In
+              values:
+                - enabled
+                - required
+    # Special access to kube-system for cluster metrics
+    - clusterRoleRefs:
+        - view
+      namespace: kube-system
+
+---
+# -----------------------------------------------------------------------------
+# GitOps Controllers - ArgoCD/Flux access patterns
+# Demonstrates automation service account bindings
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: bd-gitops-controllers
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/component: gitops
+spec:
+  targetName: gitops-controllers
+  subjects:
+    # ArgoCD components
+    - kind: ServiceAccount
+      name: argocd-application-controller
+      namespace: argocd
+    - kind: ServiceAccount
+      name: argocd-server
+      namespace: argocd
+    - kind: ServiceAccount
+      name: argocd-repo-server
+      namespace: argocd
+    # Flux components
+    - kind: ServiceAccount
+      name: source-controller
+      namespace: flux-system
+    - kind: ServiceAccount
+      name: kustomize-controller
+      namespace: flux-system
+    - kind: ServiceAccount
+      name: helm-controller
+      namespace: flux-system
+  # Cluster-wide resource management
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - cluster-admin
+  roleBindings:
+    # Full control of managed namespaces
+    - clusterRoleRefs:
+        - admin
+      namespaceSelector:
+        - matchExpressions:
+            - key: argocd.argoproj.io/managed-by
+              operator: Exists
+        - matchExpressions:
+            - key: kustomize.toolkit.fluxcd.io/managed-by
+              operator: Exists
+    # Read access to source namespaces
+    - clusterRoleRefs:
+        - view
+      namespaceSelector:
+        - matchLabels:
+            t-caas.telekom.com/gitops-source: "true"

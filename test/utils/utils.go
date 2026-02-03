@@ -448,9 +448,96 @@ func WaitForWebhookConfigurations(labelSelector string, timeout time.Duration) e
 	return fmt.Errorf("timeout waiting for webhook configurations with label %s", labelSelector)
 }
 
-// ApplyManifest applies a YAML manifest from a string
+// WaitForWebhookCABundle waits for the caBundle to be populated in webhook configurations.
+// This ensures the cert-rotator has injected the CA certificate before attempting TLS validation.
+func WaitForWebhookCABundle(labelSelector string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		// Check if mutating webhook has caBundle populated
+		mutatingCmd := exec.Command("kubectl", "get", "mutatingwebhookconfiguration",
+			"-l", labelSelector,
+			"-o", "jsonpath={.items[*].webhooks[*].clientConfig.caBundle}")
+		mutatingOut, mutatingErr := Run(mutatingCmd)
+
+		// Check if validating webhook has caBundle populated
+		validatingCmd := exec.Command("kubectl", "get", "validatingwebhookconfiguration",
+			"-l", labelSelector,
+			"-o", "jsonpath={.items[*].webhooks[*].clientConfig.caBundle}")
+		validatingOut, validatingErr := Run(validatingCmd)
+
+		if mutatingErr == nil && validatingErr == nil {
+			mutatingBundle := strings.TrimSpace(string(mutatingOut))
+			validatingBundle := strings.TrimSpace(string(validatingOut))
+
+			// Both must have non-empty caBundle values
+			if mutatingBundle != "" && validatingBundle != "" {
+				if DebugLevel >= 1 {
+					_, _ = fmt.Fprintf(GinkgoWriter, "Webhook CA bundles populated (mutating: %d bytes, validating: %d bytes)\n",
+						len(mutatingBundle), len(validatingBundle))
+				}
+				return nil
+			}
+
+			if DebugLevel >= 2 {
+				_, _ = fmt.Fprintf(GinkgoWriter, "Waiting for CA bundle injection (mutating: %d bytes, validating: %d bytes)\n",
+					len(mutatingBundle), len(validatingBundle))
+			}
+		}
+
+		time.Sleep(2 * time.Second)
+	}
+	return fmt.Errorf("timeout waiting for webhook CA bundle to be injected (label: %s)", labelSelector)
+}
+
+// WaitForWebhookReady waits for the webhook to be fully operational by performing a dry-run
+// namespace create, which validates that the TLS certificate is properly configured and
+// the webhook is responding correctly. This is more reliable than just checking pod readiness.
+func WaitForWebhookReady(timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	testNS := "webhook-readiness-check"
+	var lastErr error
+
+	for time.Now().Before(deadline) {
+		// Perform a dry-run namespace create which will trigger the mutating webhook
+		// If the webhook is ready with valid TLS, this will succeed
+		cmd := exec.Command("kubectl", "create", "namespace", testNS,
+			"--dry-run=server", "-o", "yaml")
+		_, err := Run(cmd)
+		if err == nil {
+			if DebugLevel >= 1 {
+				_, _ = fmt.Fprintf(GinkgoWriter, "Webhook readiness check passed\n")
+			}
+			return nil
+		}
+		lastErr = err
+
+		// Check if it's a TLS error - we should keep retrying
+		errStr := err.Error()
+		if strings.Contains(errStr, "x509") ||
+			strings.Contains(errStr, "certificate") ||
+			strings.Contains(errStr, "tls") ||
+			strings.Contains(errStr, "connection refused") {
+			if DebugLevel >= 2 {
+				_, _ = fmt.Fprintf(GinkgoWriter, "Webhook not ready (TLS error), retrying: %v\n", err)
+			}
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
+		// If it's not a TLS error, we might have a different problem
+		// but let's still retry a few times in case of transient issues
+		if DebugLevel >= 2 {
+			_, _ = fmt.Fprintf(GinkgoWriter, "Webhook dry-run failed (non-TLS error), retrying: %v\n", err)
+		}
+		time.Sleep(2 * time.Second)
+	}
+
+	return fmt.Errorf("timeout waiting for webhook to be ready: %v", lastErr)
+}
+
+// ApplyManifest applies a YAML manifest from a string using server-side apply
 func ApplyManifest(manifest string) error {
-	cmd := exec.Command("kubectl", "apply", "-f", "-")
+	cmd := exec.Command("kubectl", "apply", "--server-side", "--force-conflicts", "-f", "-")
 	cmd.Stdin = strings.NewReader(manifest)
 	_, err := Run(cmd)
 	return err

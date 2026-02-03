@@ -1,7 +1,7 @@
 //go:build e2e
 
 /*
-Copyright 2025.
+Copyright 2026.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -29,7 +29,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/test/utils"
+	"github.com/telekom/auth-operator/test/utils"
 )
 
 // Constants for complex e2e tests

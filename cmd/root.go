@@ -1,5 +1,5 @@
 /*
-Copyright © 2025 Deutsche Telekom AG
+Copyright © 2026 Deutsche Telekom AG
 */
 package cmd
 
@@ -9,8 +9,8 @@ import (
 	"os"
 	"strings"
 
-	authorizationv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1"
-	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/system"
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	"github.com/telekom/auth-operator/pkg/system"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 

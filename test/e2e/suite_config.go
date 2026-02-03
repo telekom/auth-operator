@@ -177,7 +177,9 @@ func ValidateClusterIsolation(config TestSuiteConfig) error {
 		return nil
 	}
 
-	if !strings.Contains(currentCluster, config.SuiteName) {
+	// For base suite, the cluster is auth-operator-e2e which doesn't contain "base"
+	// So we check against ClusterName directly
+	if currentCluster != config.ClusterName {
 		return fmt.Errorf(
 			"cluster isolation violation: suite '%s' should run in cluster '%s' but running in '%s'",
 			config.SuiteName, config.ClusterName, currentCluster,

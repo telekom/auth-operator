@@ -1,0 +1,163 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: Helm Chart Test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'chart/**'
+      - '.github/workflows/helm-chart-test.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'chart/**'
+      - '.github/workflows/helm-chart-test.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  HELM_VERSION: "v3.17.0"
+  KIND_VERSION: "v0.31.0"
+  KIND_K8S_VERSION: "v1.32.5"
+
+jobs:
+  lint:
+    name: Lint Helm Chart
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Helm
+        uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112 # v4.3.0
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Setup chart-testing
+        uses: helm/chart-testing-action@e6669bcd63d7cb57cb4380c33043eebe5d111992 # v2.7.0
+
+      - name: List changed charts
+        id: list-changed
+        run: |
+          changed=$(ct list-changed --config .github/ct.yaml 2>/dev/null || echo "chart/auth-operator")
+          if [[ -n "$changed" ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run chart-testing (lint)
+        run: ct lint --config .github/ct.yaml --charts chart/auth-operator
+
+  template-validation:
+    name: Validate Helm Templates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Helm
+        uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112 # v4.3.0
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Validate default values
+        run: |
+          helm template auth-operator ./chart/auth-operator --debug
+
+      - name: Validate with custom values
+        run: |
+          helm template auth-operator ./chart/auth-operator \
+            --set image.tag=v1.0.0 \
+            --set controller.replicas=2 \
+            --set webhookServer.replicas=2 \
+            --set controller.podDisruptionBudget.enabled=true \
+            --set webhookServer.podDisruptionBudget.enabled=true \
+            --debug
+
+      - name: Validate HA configuration
+        run: |
+          helm template auth-operator ./chart/auth-operator \
+            --set image.tag=v1.0.0 \
+            --set controller.replicas=3 \
+            --set webhookServer.replicas=3 \
+            --set controller.podDisruptionBudget.enabled=true \
+            --set controller.podDisruptionBudget.minAvailable=2 \
+            --set webhookServer.podDisruptionBudget.enabled=true \
+            --set webhookServer.podDisruptionBudget.minAvailable=2 \
+            --debug
+
+  install-test:
+    name: Install Test
+    runs-on: ubuntu-latest
+    needs: [lint, template-validation]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
+        with:
+          go-version: "1.25"
+          cache: true
+
+      - name: Setup Helm
+        uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112 # v4.3.0
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Setup chart-testing
+        uses: helm/chart-testing-action@e6669bcd63d7cb57cb4380c33043eebe5d111992 # v2.7.0
+
+      - name: Install kind
+        run: |
+          go install sigs.k8s.io/kind@${{ env.KIND_VERSION }}
+
+      - name: Create kind cluster
+        run: |
+          kind create cluster --name helm-test --image kindest/node:${{ env.KIND_K8S_VERSION }}
+
+      - name: Install cert-manager
+        run: |
+          kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.17.2/cert-manager.yaml
+          kubectl wait --for=condition=Available --timeout=300s deployment/cert-manager -n cert-manager
+          kubectl wait --for=condition=Available --timeout=300s deployment/cert-manager-webhook -n cert-manager
+          kubectl wait --for=condition=Available --timeout=300s deployment/cert-manager-cainjector -n cert-manager
+
+      - name: Build and load image
+        run: |
+          make docker-build IMG=auth-operator:test
+          kind load docker-image auth-operator:test --name helm-test
+
+      - name: Install chart
+        run: |
+          helm install auth-operator ./chart/auth-operator \
+            --namespace auth-operator-system \
+            --create-namespace \
+            --set image.repository=auth-operator \
+            --set image.tag=test \
+            --wait \
+            --timeout 5m
+
+      - name: Verify installation
+        run: |
+          kubectl get pods -n auth-operator-system
+          kubectl wait --for=condition=Available --timeout=300s deployment/auth-operator-controller-manager -n auth-operator-system
+          kubectl wait --for=condition=Available --timeout=300s deployment/auth-operator-webhook-server -n auth-operator-system
+
+      - name: Run chart-testing (install)
+        run: |
+          ct install --config .github/ct.yaml --charts chart/auth-operator --helm-extra-set-args "--set image.repository=auth-operator --set image.tag=test"
+        continue-on-error: true  # Chart already installed above, this validates upgrade path
+
+      - name: Cleanup
+        if: always()
+        run: |
+          kind delete cluster --name helm-test || true

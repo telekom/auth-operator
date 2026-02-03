@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/onsi/ginkgo/v2"
-	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/test/utils"
+	"github.com/telekom/auth-operator/test/utils"
 )
 
 // ResourceSnapshot captures cluster state at a point in time

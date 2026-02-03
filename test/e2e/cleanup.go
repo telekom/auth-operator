@@ -4,7 +4,7 @@ import (
 	"os/exec"
 	"time"
 
-	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/test/utils"
+	"github.com/telekom/auth-operator/test/utils"
 )
 
 // CleanupOptions configures cleanup behavior for test resources

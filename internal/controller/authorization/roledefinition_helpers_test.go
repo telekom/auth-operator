@@ -13,8 +13,8 @@ import (
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	authorizationv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1"
-	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/discovery"
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	"github.com/telekom/auth-operator/pkg/discovery"
 )
 
 // TestBuildRoleObject tests the buildRoleObject function

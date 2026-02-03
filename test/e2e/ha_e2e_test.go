@@ -12,7 +12,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/test/utils"
+	"github.com/telekom/auth-operator/test/utils"
 )
 
 var _ = Describe("Leader Election and HA E2E", Ordered, Label("ha", "leader-election"), func() {

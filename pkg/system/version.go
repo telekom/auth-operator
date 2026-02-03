@@ -19,4 +19,4 @@ package system
 var Name = "auth-operator"
 var Version = "v0.0.0-undefined"
 var Commit = "<unset>"
-var Repository = "https://gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator"
+var Repository = "https://github.com/telekom/auth-operator"

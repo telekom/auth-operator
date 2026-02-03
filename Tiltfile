@@ -192,7 +192,7 @@ def build_binary(comp, build_out_path):
     )
 
 dockerfile_contents = """
-FROM golang:1.24 as tilt-helper
+FROM golang:1.25 as tilt-helper
 RUN  export http_proxy={proxy} \
   && export https_proxy={proxy} \
   && export no_proxy={no_proxy} \
