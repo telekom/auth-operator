@@ -46,6 +46,9 @@ const (
 	deleteResultNoOwnerRef
 )
 
+// BindingSuffix is the suffix appended to binding resource names.
+const BindingSuffix = "binding"
+
 // deleteServiceAccount attempts to delete a service account if it has a controller reference.
 // Returns the result of the deletion and any error encountered.
 func (r *BindDefinitionReconciler) deleteServiceAccount(
@@ -219,7 +222,7 @@ func (r *BindDefinitionReconciler) deleteRoleBinding(
 
 // buildBindingName constructs a binding name from target name and role ref.
 func buildBindingName(targetName, roleRef string) string {
-	return fmt.Sprintf("%s-%s-%s", targetName, roleRef, "binding")
+	return fmt.Sprintf("%s-%s-%s", targetName, roleRef, BindingSuffix)
 }
 
 // filterActiveNamespaces returns namespaces that are not in terminating phase.
