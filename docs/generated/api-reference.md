@@ -25,7 +25,7 @@ Package v1alpha1 contains API Schema definitions for the authorization v1alpha1 
 
 
 
-BindDefinition is the Schema for the binddefinitions API
+BindDefinition is the Schema for the binddefinitions API.
 
 
 
@@ -83,7 +83,7 @@ _Appears in:_
 
 
 
-
+ClusterBinding defines cluster-scoped role bindings.
 
 
 
@@ -99,7 +99,7 @@ _Appears in:_
 
 
 
-
+NamespaceBinding defines namespace-scoped role bindings.
 
 
 
@@ -118,7 +118,7 @@ _Appears in:_
 
 
 
-
+Principal represents a requesting user or service account identity.
 
 
 
@@ -136,7 +136,7 @@ _Appears in:_
 
 
 
-RoleDefinition is the Schema for the roledefinitions API
+RoleDefinition is the Schema for the roledefinitions API.
 
 
 
@@ -165,7 +165,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `targetRole` _string_ | The target role that will be reconciled. This can be a ClusterRole or a namespaced Role |  | Enum: [ClusterRole Role] <br />Required: \{\} <br /> |
-| `targetName` _string_ | The name of the target role. This can be any name that accurately describes the ClusterRole/Role |  | MinLength: 5 <br />Required: \{\} <br /> |
+| `targetName` _string_ | The name of the target role. This can be any name that accurately describes the ClusterRole/Role.<br />Must be a valid Kubernetes name (max 63 characters for most resources). |  | MaxLength: 63 <br />MinLength: 5 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` <br />Required: \{\} <br /> |
 | `targetNamespace` _string_ | The target namespace for the Role. This value is necessary when the "TargetRole" is "Role" |  | Optional: \{\} <br /> |
 | `scopeNamespaced` _boolean_ | The scope controls whether the API resource is namespaced or not. This can also be checked by<br />running `kubectl api-resources --namespaced=true/false` |  | Required: \{\} <br /> |
 | `restrictedApis` _[APIGroup](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#apigroup-v1-meta) array_ | The restricted APIs field holds all API groups which will *NOT* be reconciled into the "TargetRole"<br />The RBAC operator discovers all API groups available and removes those which are defined by "RestrictedAPIs" |  | Optional: \{\} <br /> |
