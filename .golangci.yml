@@ -3,6 +3,8 @@ run:
   go: "1.25"
   allow-parallel-runners: true
   timeout: 10m
+  build-tags:
+    - e2e  # Include e2e tests in linting
 linters:
   default: none
   enable:

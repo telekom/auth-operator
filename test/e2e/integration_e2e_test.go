@@ -19,6 +19,7 @@ limitations under the License.
 package e2e
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -526,7 +527,8 @@ func createNamespaceIfNotExists(name string, labels map[string]string) {
 	_, _ = utils.Run(cmd)
 
 	if len(labels) > 0 {
-		labelArgs := []string{"label", "ns", name, "--overwrite"}
+		labelArgs := make([]string, 0, 4+len(labels))
+		labelArgs = append(labelArgs, "label", "ns", name, "--overwrite")
 		for k, v := range labels {
 			labelArgs = append(labelArgs, fmt.Sprintf("%s=%s", k, v))
 		}
@@ -540,24 +542,4 @@ func applyYAML(yaml string) {
 	cmd.Stdin = strings.NewReader(yaml)
 	output, err := utils.Run(cmd)
 	ExpectWithOffset(2, err).NotTo(HaveOccurred(), "Failed to apply YAML: %s\nOutput: %s", yaml, string(output))
-}
-
-func cleanupIntegrationTestCRDs() {
-	binddefs := []string{
-		"int-binddefinition-multi-role",
-		"int-binddefinition-ns-selector",
-		"int-binddefinition-env-selector",
-		"int-binddefinition-multi-sa",
-		"int-binddefinition-system-role",
-	}
-	roledefs := []string{
-		"int-roledefinition-admin-reader",
-		"int-roledefinition-pod-reader",
-		"int-roledefinition-secret-reader",
-		"int-roledefinition-ns-configmap",
-	}
-
-	// Use centralized cleanup for specific resources
-	CleanupCRDsByName(roledefs, binddefs, nil)
-	CleanupAllWebhookAuthorizersClusterWide()
 }

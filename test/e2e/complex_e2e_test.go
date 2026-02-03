@@ -19,6 +19,7 @@ limitations under the License.
 package e2e
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
@@ -30,12 +31,6 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/telekom/auth-operator/test/utils"
-)
-
-// Constants for complex e2e tests
-const (
-	statusTrue    = "True"
-	statusRunning = "Running"
 )
 
 // Complex E2E tests that verify all controller features work in combination
@@ -590,18 +585,4 @@ func containsString(slice []string, s string) bool {
 		}
 	}
 	return false
-}
-
-func cleanupComplexTestCRDs() {
-	// Delete WebhookAuthorizers first
-	cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "webhookauthorizer", "--all", "--ignore-not-found=true")
-	_, _ = utils.Run(cmd)
-
-	// Delete BindDefinitions
-	cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "binddefinition", "--all", "--ignore-not-found=true")
-	_, _ = utils.Run(cmd)
-
-	// Delete RoleDefinitions
-	cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "roledefinition", "--all", "--ignore-not-found=true")
-	_, _ = utils.Run(cmd)
 }

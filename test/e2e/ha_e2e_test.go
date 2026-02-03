@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -464,25 +465,4 @@ func createHASummary(namespace, timestamp string) {
 	summary.WriteString("```\n")
 
 	saveOutput(fmt.Sprintf("ha-summary-%s.md", timestamp), []byte(summary.String()))
-}
-
-func cleanupHATestCRDs() {
-	crds := []struct {
-		kind string
-		name string
-	}{
-		{"roledefinition", "ha-e2e-test-role"},
-	}
-
-	for i := 1; i <= 5; i++ {
-		crds = append(crds, struct {
-			kind string
-			name string
-		}{"webhookauthorizer", fmt.Sprintf("ha-e2e-authorizer-%d", i)})
-	}
-
-	for _, crd := range crds {
-		cmd := exec.CommandContext(context.Background(), "kubectl", "delete", crd.kind, crd.name, "--ignore-not-found=true")
-		_, _ = utils.Run(cmd)
-	}
 }

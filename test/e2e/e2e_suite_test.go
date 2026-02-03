@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -75,7 +76,7 @@ func specOutputDir(report SpecReport) string {
 	}
 	stamp := report.StartTime.UTC().Format("20060102-150405")
 	folder := fmt.Sprintf("%s-%s", stamp, sanitizeSpecName(name))
-	return filepath.Join(base, "specs", sanitizeSpecName(fmt.Sprintf("%s", report.State)), folder)
+	return filepath.Join(base, "specs", sanitizeSpecName(report.State.String()), folder)
 }
 
 // Run e2e tests using the Ginkgo runner.

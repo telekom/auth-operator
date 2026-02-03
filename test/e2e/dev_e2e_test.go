@@ -19,6 +19,7 @@ limitations under the License.
 package e2e
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -343,27 +344,4 @@ func createDevTestNamespace(namespace string) {
 
 	cmd = exec.CommandContext(context.Background(), "kubectl", "label", "ns", namespace, "dev-e2e-test=true", "--overwrite")
 	_, _ = utils.Run(cmd)
-}
-
-func cleanupDevTestCRDs() {
-	cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "webhookauthorizer", "--all", "--ignore-not-found=true")
-	_, _ = utils.Run(cmd)
-
-	binddefs := []string{"dev-e2e-cluster-binding"}
-	for _, bd := range binddefs {
-		cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "binddefinition", bd, "--ignore-not-found=true")
-		_, _ = utils.Run(cmd)
-	}
-
-	roledefs := []string{"dev-e2e-cluster-reader"}
-	for _, rd := range roledefs {
-		cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "roledefinition", rd, "--ignore-not-found=true")
-		_, _ = utils.Run(cmd)
-	}
-
-	clusterRoles := []string{"dev-e2e-generated-clusterrole"}
-	for _, cr := range clusterRoles {
-		cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "clusterrole", cr, "--ignore-not-found=true")
-		_, _ = utils.Run(cmd)
-	}
 }

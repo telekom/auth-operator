@@ -12,22 +12,25 @@ import (
 	"strings"
 	"time"
 
-	. "github.com/onsi/ginkgo/v2"
+	"github.com/onsi/ginkgo/v2"
 	"github.com/telekom/auth-operator/test/utils"
 )
 
-// DebugReport represents a structured test debug report
+// statusTrue is the status condition value for ready nodes.
+const statusTrue = "True"
+
+// DebugReport represents a structured test debug report.
 type DebugReport struct {
-	Metadata    ReportMetadata  `json:"metadata"`
-	TestInfo    TestInfo        `json:"test_info"`
-	ClusterInfo ClusterInfo     `json:"cluster_info"`
-	Resources   ResourceSummary `json:"resources"`
-	Errors      []ErrorEntry    `json:"errors,omitempty"`
-	Timing      TimingInfo      `json:"timing"`
+	Metadata    reportMetadata  `json:"metadata"`
+	TestInfo    testInfo        `json:"test_info"`
+	ClusterInfo clusterInfo     `json:"cluster_info"`
+	Resources   resourceSummary `json:"resources"`
+	Errors      []errorEntry    `json:"errors,omitempty"`
+	Timing      timingInfo      `json:"timing"`
 	Artifacts   []string        `json:"artifacts,omitempty"`
 }
 
-type ReportMetadata struct {
+type reportMetadata struct {
 	GeneratedAt   string `json:"generated_at"`
 	RunID         string `json:"run_id"`
 	DebugLevel    int    `json:"debug_level"`
@@ -36,7 +39,7 @@ type ReportMetadata struct {
 	InstallMethod string `json:"install_method"`
 }
 
-type TestInfo struct {
+type testInfo struct {
 	SuiteName   string `json:"suite_name"`
 	SpecName    string `json:"spec_name"`
 	Labels      string `json:"labels"`
@@ -44,14 +47,14 @@ type TestInfo struct {
 	FailMessage string `json:"fail_message,omitempty"`
 }
 
-type ClusterInfo struct {
+type clusterInfo struct {
 	KubernetesVersion string `json:"kubernetes_version"`
 	NodeCount         int    `json:"node_count"`
 	NodeStatus        string `json:"node_status"`
 	APIServerReady    bool   `json:"api_server_ready"`
 }
 
-type ResourceSummary struct {
+type resourceSummary struct {
 	RoleDefinitions       int      `json:"role_definitions"`
 	BindDefinitions       int      `json:"bind_definitions"`
 	WebhookAuthorizers    int      `json:"webhook_authorizers"`
@@ -61,7 +64,7 @@ type ResourceSummary struct {
 	WebhookPods           []string `json:"webhook_pods"`
 }
 
-type ErrorEntry struct {
+type errorEntry struct {
 	Type      string `json:"type"`
 	Resource  string `json:"resource"`
 	Namespace string `json:"namespace,omitempty"`
@@ -69,26 +72,26 @@ type ErrorEntry struct {
 	Timestamp string `json:"timestamp"`
 }
 
-type TimingInfo struct {
+type timingInfo struct {
 	StartTime string       `json:"start_time"`
 	EndTime   string       `json:"end_time"`
 	Duration  string       `json:"duration"`
-	SlowSteps []StepTiming `json:"slow_steps,omitempty"`
+	SlowSteps []stepTiming `json:"slow_steps,omitempty"`
 }
 
-type StepTiming struct {
+type stepTiming struct {
 	Name     string `json:"name"`
 	Duration string `json:"duration"`
 }
 
-// GenerateDebugReport creates a structured debug report for the current test
-func GenerateDebugReport(report SpecReport, installMethod string) *DebugReport {
+// GenerateDebugReport creates a structured debug report for the current test.
+func GenerateDebugReport(report ginkgo.SpecReport, installMethod string) *DebugReport {
 	clusterName := os.Getenv("KIND_CLUSTER")
 	if clusterName == "" {
 		clusterName = "auth-operator-e2e"
 	}
 	dr := &DebugReport{
-		Metadata: ReportMetadata{
+		Metadata: reportMetadata{
 			GeneratedAt:   time.Now().UTC().Format(time.RFC3339),
 			RunID:         os.Getenv("RUN_ID"),
 			DebugLevel:    utils.DebugLevel,
@@ -96,12 +99,12 @@ func GenerateDebugReport(report SpecReport, installMethod string) *DebugReport {
 			ClusterName:   clusterName,
 			InstallMethod: installMethod,
 		},
-		TestInfo: TestInfo{
+		TestInfo: testInfo{
 			SuiteName: "Auth Operator E2E",
 			SpecName:  report.FullText(),
 			State:     report.State.String(),
 		},
-		Timing: TimingInfo{
+		Timing: timingInfo{
 			StartTime: report.StartTime.UTC().Format(time.RFC3339),
 			EndTime:   report.EndTime.UTC().Format(time.RFC3339),
 			Duration:  report.RunTime.String(),
@@ -130,8 +133,8 @@ func GenerateDebugReport(report SpecReport, installMethod string) *DebugReport {
 	return dr
 }
 
-func collectClusterInfo() ClusterInfo {
-	info := ClusterInfo{}
+func collectClusterInfo() clusterInfo {
+	info := clusterInfo{}
 
 	// Get Kubernetes version
 	cmd := exec.CommandContext(context.Background(), "kubectl", "version", "-o", "json")
@@ -153,7 +156,7 @@ func collectClusterInfo() ClusterInfo {
 		info.NodeCount = len(statuses)
 		allReady := true
 		for _, s := range statuses {
-			if s != "True" {
+			if s != statusTrue {
 				allReady = false
 				break
 			}
@@ -173,8 +176,8 @@ func collectClusterInfo() ClusterInfo {
 	return info
 }
 
-func collectResourceSummary() ResourceSummary {
-	summary := ResourceSummary{}
+func collectResourceSummary() resourceSummary {
+	summary := resourceSummary{}
 
 	// Count RoleDefinitions
 	cmd := exec.CommandContext(context.Background(), "kubectl", "get", "roledefinitions", "-A", "-o", "jsonpath={.items[*].metadata.name}")
@@ -228,8 +231,8 @@ func collectResourceSummary() ResourceSummary {
 	return summary
 }
 
-func collectRecentErrors() []ErrorEntry {
-	var errors []ErrorEntry
+func collectRecentErrors() []errorEntry {
+	var errors []errorEntry
 
 	// Get warning/error events from last 10 minutes
 	cmd := exec.CommandContext(context.Background(), "kubectl", "get", "events", "-A",
@@ -244,7 +247,7 @@ func collectRecentErrors() []ErrorEntry {
 		}
 		parts := strings.SplitN(line, "|", 3)
 		if len(parts) >= 2 {
-			errors = append(errors, ErrorEntry{
+			errors = append(errors, errorEntry{
 				Type:     "Event",
 				Resource: parts[0],
 				Message:  parts[1],
@@ -283,59 +286,59 @@ func SaveDebugReport(report *DebugReport, outputDir string) error {
 	}
 
 	report.Artifacts = append(report.Artifacts, reportPath)
-	_, _ = fmt.Fprintf(GinkgoWriter, "📄 Debug report saved to: %s\n", reportPath)
+	_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "📄 Debug report saved to: %s\n", reportPath)
 
 	return nil
 }
 
 // PrintConciseSummary prints a concise one-screen summary for quick debugging
 func PrintConciseSummary(report *DebugReport) {
-	_, _ = fmt.Fprintf(GinkgoWriter, "\n")
-	_, _ = fmt.Fprintf(GinkgoWriter, "╔══════════════════════════════════════════════════════════════════════════════╗\n")
-	_, _ = fmt.Fprintf(GinkgoWriter, "║                           E2E TEST DEBUG SUMMARY                             ║\n")
-	_, _ = fmt.Fprintf(GinkgoWriter, "╠══════════════════════════════════════════════════════════════════════════════╣\n")
-	_, _ = fmt.Fprintf(GinkgoWriter, "║ Test:     %-66s ║\n", truncate(report.TestInfo.SpecName, 66))
-	_, _ = fmt.Fprintf(GinkgoWriter, "║ State:    %-66s ║\n", report.TestInfo.State)
-	_, _ = fmt.Fprintf(GinkgoWriter, "║ Duration: %-66s ║\n", report.Timing.Duration)
-	_, _ = fmt.Fprintf(GinkgoWriter, "║ Cluster:  %-66s ║\n", report.Metadata.ClusterName)
-	_, _ = fmt.Fprintf(GinkgoWriter, "║ Install:  %-66s ║\n", report.Metadata.InstallMethod)
-	_, _ = fmt.Fprintf(GinkgoWriter, "╠══════════════════════════════════════════════════════════════════════════════╣\n")
-	_, _ = fmt.Fprintf(GinkgoWriter, "║ CLUSTER: K8s %-5s │ Nodes: %d (%-8s) │ API: %-5v                      ║\n",
+	_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "\n")
+	_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "╔══════════════════════════════════════════════════════════════════════════════╗\n")
+	_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "║                           E2E TEST DEBUG SUMMARY                             ║\n")
+	_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "╠══════════════════════════════════════════════════════════════════════════════╣\n")
+	_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "║ Test:     %-66s ║\n", truncate(report.TestInfo.SpecName, 66))
+	_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "║ State:    %-66s ║\n", report.TestInfo.State)
+	_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "║ Duration: %-66s ║\n", report.Timing.Duration)
+	_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "║ Cluster:  %-66s ║\n", report.Metadata.ClusterName)
+	_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "║ Install:  %-66s ║\n", report.Metadata.InstallMethod)
+	_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "╠══════════════════════════════════════════════════════════════════════════════╣\n")
+	_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "║ CLUSTER: K8s %-5s │ Nodes: %d (%-8s) │ API: %-5v                      ║\n",
 		report.ClusterInfo.KubernetesVersion,
 		report.ClusterInfo.NodeCount,
 		report.ClusterInfo.NodeStatus,
 		report.ClusterInfo.APIServerReady)
-	_, _ = fmt.Fprintf(GinkgoWriter, "╠══════════════════════════════════════════════════════════════════════════════╣\n")
-	_, _ = fmt.Fprintf(GinkgoWriter, "║ RESOURCES: RoleDef:%d │ BindDef:%d │ WebhookAuth:%d │ ClusterRoles:%d │ Roles:%d  ║\n",
+	_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "╠══════════════════════════════════════════════════════════════════════════════╣\n")
+	_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "║ RESOURCES: RoleDef:%d │ BindDef:%d │ WebhookAuth:%d │ ClusterRoles:%d │ Roles:%d  ║\n",
 		report.Resources.RoleDefinitions,
 		report.Resources.BindDefinitions,
 		report.Resources.WebhookAuthorizers,
 		report.Resources.GeneratedClusterRoles,
 		report.Resources.GeneratedRoles)
-	_, _ = fmt.Fprintf(GinkgoWriter, "║ PODS: Controller:[%s] Webhook:[%s]            ║\n",
+	_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "║ PODS: Controller:[%s] Webhook:[%s]            ║\n",
 		truncate(strings.Join(report.Resources.OperatorPods, ","), 20),
 		truncate(strings.Join(report.Resources.WebhookPods, ","), 20))
-	_, _ = fmt.Fprintf(GinkgoWriter, "╠══════════════════════════════════════════════════════════════════════════════╣\n")
+	_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "╠══════════════════════════════════════════════════════════════════════════════╣\n")
 
 	if len(report.Errors) > 0 {
-		_, _ = fmt.Fprintf(GinkgoWriter, "║ RECENT ERRORS (%d):                                                           ║\n", len(report.Errors))
+		_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "║ RECENT ERRORS (%d):                                                           ║\n", len(report.Errors))
 		for i, e := range report.Errors {
 			if i >= 3 {
-				_, _ = fmt.Fprintf(GinkgoWriter, "║   ... and %d more (see debug-report.json)                                    ║\n", len(report.Errors)-3)
+				_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "║   ... and %d more (see debug-report.json)                                    ║\n", len(report.Errors)-3)
 				break
 			}
-			_, _ = fmt.Fprintf(GinkgoWriter, "║   • %-71s ║\n", truncate(e.Message, 71))
+			_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "║   • %-71s ║\n", truncate(e.Message, 71))
 		}
 	} else {
-		_, _ = fmt.Fprintf(GinkgoWriter, "║ ERRORS: None                                                                 ║\n")
+		_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "║ ERRORS: None                                                                 ║\n")
 	}
 
 	if report.TestInfo.FailMessage != "" {
-		_, _ = fmt.Fprintf(GinkgoWriter, "╠══════════════════════════════════════════════════════════════════════════════╣\n")
-		_, _ = fmt.Fprintf(GinkgoWriter, "║ FAILURE: %-67s ║\n", truncate(report.TestInfo.FailMessage, 67))
+		_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "╠══════════════════════════════════════════════════════════════════════════════╣\n")
+		_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "║ FAILURE: %-67s ║\n", truncate(report.TestInfo.FailMessage, 67))
 	}
 
-	_, _ = fmt.Fprintf(GinkgoWriter, "╚══════════════════════════════════════════════════════════════════════════════╝\n\n")
+	_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, "╚══════════════════════════════════════════════════════════════════════════════╝\n\n")
 }
 
 func truncate(s string, maxLen int) string {

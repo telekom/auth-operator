@@ -19,6 +19,7 @@ limitations under the License.
 package e2e
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -646,17 +647,6 @@ func checkGoldenBindDefinitionCreated(name, namespace string) bool {
 		return false
 	}
 	return strings.TrimSpace(string(output)) == goldenStatusTrue
-}
-
-func cleanupGoldenTestCRDs(namespace string) {
-	// Use centralized cleanup for all CRDs cluster-wide first
-	CleanupAllWebhookAuthorizersClusterWide()
-	CleanupAllCRDsInNamespace("") // cluster-scoped cleanup
-
-	// Also cleanup namespaced resources if namespace is provided
-	if namespace != "" {
-		CleanupAllCRDsInNamespace(namespace)
-	}
 }
 
 func containsGoldenVerb(verbs []string, verb string) bool {

@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -727,23 +728,4 @@ func countResourceWithLabel(summary *strings.Builder, name, resourceType string)
 	output, _ := utils.Run(cmd)
 	count := len(utils.GetNonEmptyLines(string(output)))
 	fmt.Fprintf(summary, "- %s: %d\n", name, count)
-}
-
-func cleanupHelmTestCRDs() {
-	// Clean up test CRDs created during Helm tests using centralized cleanup
-	roledefs := []string{
-		"helm-e2e-cluster-reader",
-		"helm-e2e-namespaced-reader",
-	}
-	binddefs := []string{
-		"helm-e2e-cluster-binding",
-		"helm-e2e-ns-binding",
-		"helm-e2e-sa-binding",
-	}
-	webhooks := []string{
-		"helm-e2e-authorizer",
-		"helm-e2e-authorizer-deny",
-		"helm-e2e-authorizer-nonresource",
-	}
-	CleanupCRDsByName(roledefs, binddefs, webhooks)
 }
