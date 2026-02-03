@@ -188,7 +188,7 @@ jobs:
 
       - name: Comment PR with delta
         if: steps.diff.outputs.has_diff == 'true'
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           script: |
             const diff = `${{ steps.diff.outputs.diff }}`;
@@ -250,7 +250,7 @@ jobs:
 
       - name: Comment PR - no changes
         if: steps.diff.outputs.has_diff == 'false'
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           script: |
             const body = `## 📊 Output Delta Report
