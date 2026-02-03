@@ -44,5 +44,6 @@ test/e2e/output/*.md
 !test/e2e/output/.gitkeep
 
 test/e2e/output/
-ci-log/**
+**/.DS_Store
 .DS_Store
+ci-log/**
