@@ -13,7 +13,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/test/utils"
+	"github.com/telekom/auth-operator/test/utils"
 )
 
 const (
@@ -82,6 +82,12 @@ var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 		By("Waiting for webhook configurations and service endpoints")
 		Expect(utils.WaitForWebhookConfigurations("authorization.t-caas.telekom.com/component=webhook", deployTimeout)).To(Succeed())
 		Expect(utils.WaitForServiceEndpoints(webhookService, operatorNamespace, deployTimeout)).To(Succeed())
+
+		By("Waiting for webhook CA bundle to be injected by cert-rotator")
+		Expect(utils.WaitForWebhookCABundle("authorization.t-caas.telekom.com/component=webhook", deployTimeout)).To(Succeed())
+
+		By("Waiting for webhook TLS certificate to be ready")
+		Expect(utils.WaitForWebhookReady(deployTimeout)).To(Succeed())
 
 		By("Ensuring test namespace exists")
 		ensureTestNamespace()

@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://github.com/telekom/auth-operator/tree/main/docs
+    about: Please check the documentation before opening an issue
+  - name: Security Vulnerabilities
+    url: https://github.com/telekom/auth-operator/security/advisories/new
+    about: Report security vulnerabilities privately via Security Advisory

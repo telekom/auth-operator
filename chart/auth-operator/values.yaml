@@ -1,6 +1,8 @@
 image:
-  repository: controller
-  tag: latest
+  repository: ghcr.io/telekom/auth-operator
+  # tag should be set explicitly during deployment (e.g., via --set image.tag=v1.0.0)
+  # Using 'latest' is an anti-pattern for production deployments
+  tag: ""
 imagePullSecrets: []
 kubernetesClusterDomain: cluster.local
 serviceAccount:

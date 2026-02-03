@@ -1,6 +1,6 @@
 # E2E test output directory
 # Generated resource dumps are placed here during test runs
-# This directory is git-ignored to avoid committing test artifacts
+# Test artifacts in this directory are not committed; this .gitkeep is tracked to keep the directory in the repo
 
 # To view output after tests:
 #   make test-e2e-output

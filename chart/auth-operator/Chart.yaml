@@ -1,6 +1,18 @@
 apiVersion: v2
 name: auth-operator
-description: A Helm chart for Kubernetes
+description: A Kubernetes operator for managing RBAC with RoleDefinitions, BindDefinitions, and WebhookAuthorizers
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
+home: https://github.com/telekom/auth-operator
+sources:
+  - https://github.com/telekom/auth-operator
+maintainers:
+  - name: Deutsche Telekom AG
+    url: https://github.com/telekom
+keywords:
+  - kubernetes
+  - operator
+  - rbac
+  - authorization
+  - authentication

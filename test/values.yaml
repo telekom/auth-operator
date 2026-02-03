@@ -1,13 +1,12 @@
 manager:
   manager:
     image:
-      repository: artifactory.devops.telekom.de/tdi-caas-docker-images-local/auth-operator
+      repository: ghcr.io/telekom/auth-operator
       tag:
 webhookServer:
   webhook:
     image:
-      repository: artifactory.devops.telekom.de/tdi-caas-docker-images-local/auth-operator
+      repository: ghcr.io/telekom/auth-operator
       tag:
 
-imagePullSecrets:
-  - name: mcicd-artifactory-prod
+imagePullSecrets: []

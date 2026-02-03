@@ -1,5 +1,5 @@
 /*
-Copyright 2024.
+Copyright 2026.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package authorization
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -35,7 +36,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	authorizationv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1"
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -67,14 +68,20 @@ var _ = BeforeSuite(func() {
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "..", "config", "crd", "bases")},
 		ErrorIfCRDPathMissing: true,
+	}
 
-		// The BinaryAssetsDirectory is only required if you want to run the tests directly
-		// without call the makefile target test. If not informed it will look for the
-		// default path defined in controller-runtime which is /usr/local/kubebuilder/.
-		// Note that you must have the required binaries setup under the bin directory to perform
-		// the tests directly. When we run make test it will be setup and used automatically.
-		BinaryAssetsDirectory: filepath.Join("..", "..", "..", "bin", "k8s",
-			fmt.Sprintf("1.33.0-%s-%s", runtime.GOOS, runtime.GOARCH)),
+	// Only set BinaryAssetsDirectory if KUBEBUILDER_ASSETS is not set.
+	// This allows CI to use setup-envtest while still supporting local "go test".
+	if os.Getenv("KUBEBUILDER_ASSETS") == "" {
+		// Get the directory of this test file to build an absolute path
+		_, thisFile, _, ok := runtime.Caller(0)
+		Expect(ok).To(BeTrue(), "failed to determine caller information for BinaryAssetsDirectory")
+		repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..", "..")
+		// Ensure we have an absolute path (runtime.Caller may return relative paths in some build modes)
+		absRepoRoot, absErr := filepath.Abs(repoRoot)
+		Expect(absErr).NotTo(HaveOccurred(), "failed to determine absolute repo root for BinaryAssetsDirectory")
+		testEnv.BinaryAssetsDirectory = filepath.Join(absRepoRoot, "bin", "k8s",
+			fmt.Sprintf("1.34.1-%s-%s", runtime.GOOS, runtime.GOARCH))
 	}
 
 	var err error

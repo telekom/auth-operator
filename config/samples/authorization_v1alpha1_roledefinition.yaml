@@ -1,14 +1,37 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# =============================================================================
+# RoleDefinition Samples - Comprehensive Feature Coverage
+# =============================================================================
+# These samples demonstrate all features of the RoleDefinition CRD:
+# - ClusterRole and Role targets
+# - API group restrictions (velero, calico, cert-manager)
+# - Resource restrictions (pods, secrets, networkpolicies)
+# - Verb restrictions (create, update, delete, patch)
+# - Namespaced vs cluster-scoped resources
+# =============================================================================
+
+---
+# -----------------------------------------------------------------------------
+# ClusterRole: Platform Admin - Full cluster-wide read access
+# Restricts sensitive backup (velero) and network policy (calico) APIs
+# -----------------------------------------------------------------------------
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: RoleDefinition
 metadata:
+  name: rd-platform-admin-reader
   labels:
     app.kubernetes.io/name: auth-operator
     app.kubernetes.io/managed-by: kustomize
-  name: rd-testing-cluster-reader
+    t-caas.telekom.com/privilege-level: admin
+    t-caas.telekom.com/scope: cluster
 spec:
   targetRole: ClusterRole
-  targetName: t-caas-cluster-reader
+  targetName: t-caas-platform-admin-reader
   scopeNamespaced: false
+  # Restrict backup solution APIs - admins should not access backup data directly
   restrictedApis:
     - name: velero.io
       versions:
@@ -16,52 +39,273 @@ spec:
           version: v1
         - groupVersion: velero.io/v2alpha1
           version: v2alpha1
+    # Restrict cert-manager internal APIs
+    - name: acme.cert-manager.io
+      versions:
+        - groupVersion: acme.cert-manager.io/v1
+          version: v1
+  # Restrict sensitive resources even from allowed API groups
   restrictedResources:
+    # Block direct network policy manipulation
     - name: networkpolicies
       singularName: networkpolicy
       namespaced: true
       group: crd.projectcalico.org
       kind: NetworkPolicy
       verbs:
-        - all
+        - "*"
+    - name: globalnetworkpolicies
+      singularName: globalnetworkpolicy
+      namespaced: false
+      group: crd.projectcalico.org
+      kind: GlobalNetworkPolicy
+      verbs:
+        - "*"
+    # Block secret content access at cluster scope
+    - name: secrets
+      singularName: secret
+      namespaced: true
+      group: ""
+      kind: Secret
+      verbs:
+        - get
+        - list
+        - watch
+  # Read-only: restrict all write verbs
   restrictedVerbs:
-    - update
     - create
+    - update
+    - patch
+    - delete
+    - deletecollection
+
 ---
+# -----------------------------------------------------------------------------
+# ClusterRole: Tenant Operator - Limited cluster-wide operations
+# For automation service accounts that manage tenant resources
+# -----------------------------------------------------------------------------
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: RoleDefinition
 metadata:
+  name: rd-tenant-operator
   labels:
     app.kubernetes.io/name: auth-operator
     app.kubernetes.io/managed-by: kustomize
-  name: rd-testing-namespaced-reader
+    t-caas.telekom.com/privilege-level: operator
+    t-caas.telekom.com/scope: cluster
 spec:
-  targetRole: Role
-  targetNamespace: default
-  targetName: t-caas-namespaced-reader
-  scopeNamespaced: true
+  targetRole: ClusterRole
+  targetName: t-caas-tenant-operator
+  scopeNamespaced: false
   restrictedApis:
+    # Block all backup APIs
     - name: velero.io
       versions:
         - groupVersion: velero.io/v1
           version: v1
-        - groupVersion: velero.io/v2alpha1
-          version: v2alpha1
+    # Block monitoring configuration
+    - name: monitoring.coreos.com
+      versions:
+        - groupVersion: monitoring.coreos.com/v1
+          version: v1
+        - groupVersion: monitoring.coreos.com/v1alpha1
+          version: v1alpha1
   restrictedResources:
-    - name: networkpolicies
-      singularName: networkpolicy
-      namespaced: true
-      group: crd.projectcalico.org
-      kind: NetworkPolicy
+    # Cannot manage cluster-level RBAC
+    - name: clusterroles
+      singularName: clusterrole
+      namespaced: false
+      group: rbac.authorization.k8s.io
+      kind: ClusterRole
       verbs:
-        - all
-    - name: pods
-      singularName: pod
+        - "*"
+    - name: clusterrolebindings
+      singularName: clusterrolebinding
+      namespaced: false
+      group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
+      verbs:
+        - "*"
+    # Cannot manage nodes
+    - name: nodes
+      singularName: node
+      namespaced: false
+      group: ""
+      kind: Node
+      verbs:
+        - update
+        - patch
+        - delete
+  restrictedVerbs:
+    - deletecollection
+
+---
+# -----------------------------------------------------------------------------
+# Role: Namespace Developer - Full namespace access for developers
+# Deployed to specific tenant namespaces
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: rd-namespace-developer
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/privilege-level: developer
+    t-caas.telekom.com/scope: namespace
+spec:
+  targetRole: Role
+  targetNamespace: tenant-alpha
+  targetName: t-caas-namespace-developer
+  scopeNamespaced: true
+  restrictedApis:
+    # No access to Calico network policies
+    - name: crd.projectcalico.org
+      versions:
+        - groupVersion: crd.projectcalico.org/v1
+          version: v1
+  restrictedResources:
+    # Cannot manage RBAC within namespace
+    - name: roles
+      singularName: role
+      namespaced: true
+      group: rbac.authorization.k8s.io
+      kind: Role
+      verbs:
+        - "*"
+    - name: rolebindings
+      singularName: rolebinding
+      namespaced: true
+      group: rbac.authorization.k8s.io
+      kind: RoleBinding
+      verbs:
+        - "*"
+    # Limited secret access - can read but not delete
+    - name: secrets
+      singularName: secret
       namespaced: true
       group: ""
-      kind: Pod
+      kind: Secret
       verbs:
-        - all
+        - delete
+        - deletecollection
+    # Cannot exec into pods
+    - name: pods/exec
+      singularName: ""
+      namespaced: true
+      group: ""
+      kind: PodExecOptions
+      verbs:
+        - create
+  restrictedVerbs: []
+
+---
+# -----------------------------------------------------------------------------
+# Role: Namespace Viewer - Read-only namespace access
+# For auditors and read-only service accounts
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: rd-namespace-viewer
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/privilege-level: viewer
+    t-caas.telekom.com/scope: namespace
+spec:
+  targetRole: Role
+  targetNamespace: tenant-beta
+  targetName: t-caas-namespace-viewer
+  scopeNamespaced: true
+  restrictedApis:
+    - name: crd.projectcalico.org
+      versions:
+        - groupVersion: crd.projectcalico.org/v1
+          version: v1
+    - name: velero.io
+      versions:
+        - groupVersion: velero.io/v1
+          version: v1
+  restrictedResources:
+    # Cannot view secrets at all
+    - name: secrets
+      singularName: secret
+      namespaced: true
+      group: ""
+      kind: Secret
+      verbs:
+        - "*"
+    # Cannot view configmaps (may contain sensitive data)
+    - name: configmaps
+      singularName: configmap
+      namespaced: true
+      group: ""
+      kind: ConfigMap
+      verbs:
+        - get
+        - list
+  # Strictly read-only
   restrictedVerbs:
-    - get
+    - create
+    - update
+    - patch
     - delete
+    - deletecollection
+
+---
+# -----------------------------------------------------------------------------
+# ClusterRole: Security Auditor - Cross-namespace security visibility
+# For security teams needing visibility into RBAC and network policies
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: rd-security-auditor
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/privilege-level: auditor
+    t-caas.telekom.com/scope: cluster
+spec:
+  targetRole: ClusterRole
+  targetName: t-caas-security-auditor
+  scopeNamespaced: false
+  restrictedApis:
+    # Block backup access
+    - name: velero.io
+      versions:
+        - groupVersion: velero.io/v1
+          version: v1
+  restrictedResources:
+    # Cannot view secret contents
+    - name: secrets
+      singularName: secret
+      namespaced: true
+      group: ""
+      kind: Secret
+      verbs:
+        - get
+    # Cannot access pod logs (may contain sensitive data)
+    - name: pods/log
+      singularName: ""
+      namespaced: true
+      group: ""
+      kind: PodLogOptions
+      verbs:
+        - get
+    # Cannot exec into pods
+    - name: pods/exec
+      singularName: ""
+      namespaced: true
+      group: ""
+      kind: PodExecOptions
+      verbs:
+        - create
+  # Read-only for auditing
+  restrictedVerbs:
+    - create
+    - update
+    - patch
+    - delete
+    - deletecollection

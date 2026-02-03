@@ -1,0 +1,56 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+version: 2
+
+project_name: auth-operator
+
+dist: dist
+
+builds:
+  - id: auth-operator
+    main: ./main.go
+    binary: auth-operator
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/telekom/auth-operator/pkg/system.Version={{ .Version }}
+      - -X github.com/telekom/auth-operator/pkg/system.Commit={{ .Commit }}
+      - -X github.com/telekom/auth-operator/pkg/system.Repository=https://github.com/{{ .Env.GITHUB_REPOSITORY }}
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+  algorithm: sha256
+
+sboms:
+  - artifacts: archive
+    documents:
+      - "{{ .ArtifactName }}.spdx.json"
+    args:
+      - "$artifact"
+      - "--output"
+      - "spdx-json=$document"
+      - "--enrich"
+      - "all"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+
+release:
+  draft: false
+  prerelease: auto

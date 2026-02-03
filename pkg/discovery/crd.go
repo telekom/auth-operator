@@ -104,10 +104,19 @@ func pluralize(kind string) string {
 	case endsWith(lower, "s"):
 		return lower + "es"
 	case endsWith(lower, "y"):
+		// Vowel + y: just add 's' (e.g., gateway -> gateways, key -> keys)
+		// Consonant + y: replace with 'ies' (e.g., policy -> policies)
+		if len(lower) >= 2 && isVowel(lower[len(lower)-2]) {
+			return lower + "s"
+		}
 		return lower[:len(lower)-1] + "ies"
 	default:
 		return lower + "s"
 	}
+}
+
+func isVowel(c byte) bool {
+	return c == 'a' || c == 'e' || c == 'i' || c == 'o' || c == 'u'
 }
 
 func toLower(s string) string {

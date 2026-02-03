@@ -1,7 +1,7 @@
 //go:build e2e
 
 /*
-Copyright 2025.
+Copyright 2026.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/test/utils"
+	"github.com/telekom/auth-operator/test/utils"
 )
 
 // Dev E2E tests use kustomize/make deploy instead of Helm
@@ -77,6 +77,12 @@ var _ = Describe("Dev Flavor E2E - Kustomize Deploy", Ordered, Label("dev"), fun
 		Expect(utils.WaitForPodsReady("control-plane=webhook-server", devNamespace, deployTimeoutDev)).To(Succeed())
 		Expect(utils.WaitForWebhookConfigurations("authorization.t-caas.telekom.com/component=webhook", deployTimeoutDev)).To(Succeed())
 		Expect(utils.WaitForServiceEndpoints(devWebhookService, devNamespace, deployTimeoutDev)).To(Succeed())
+
+		By("Waiting for webhook CA bundle to be injected by cert-rotator")
+		Expect(utils.WaitForWebhookCABundle("authorization.t-caas.telekom.com/component=webhook", deployTimeoutDev)).To(Succeed())
+
+		By("Waiting for webhook TLS certificate to be ready")
+		Expect(utils.WaitForWebhookReady(deployTimeoutDev)).To(Succeed())
 	})
 
 	AfterAll(func() {

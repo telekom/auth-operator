@@ -1,10 +1,27 @@
 # Auth Operator
 
-This operator serves as the T-CaaS specific authentication (`authN`) and authorization (`authZ`) implementation. The need for this operator arises from the requirement to manage `authN` and `authZ` for multiple cluster consumers in a single cluster. The operator API reference can be found in the `docs/api-reference` directory, specifically for [authorization](https://gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/-/blob/main/docs/api-reference/authorization.t-caas.telekom.com.md) API group and for [authentication](https://gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/-/blob/main/docs/api-reference/authentication.t-caas.telekom.com.md) API group. In case the API reference is out of date or you are making changes to the API groups, run `make docs` locally and commit the documentation changes into the repository.
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![REUSE Compliance](https://github.com/telekom/auth-operator/actions/workflows/reuse-compliance.yml/badge.svg)](https://github.com/telekom/auth-operator/actions/workflows/reuse-compliance.yml)
+[![CI](https://github.com/telekom/auth-operator/actions/workflows/ci.yml/badge.svg)](https://github.com/telekom/auth-operator/actions/workflows/ci.yml)
 
-This repository `README.md` contains several logically grouped chapters. The getting started briefly talks about the repository layout and common actions you would like to perform. The architecture chapter briefly shows the high-level architecture of the whole operator. Following the architecture chapter, each component is explained in great detail. Lastly, some informative data is given on cluster participants and the mappings of those participants to their respective roles.
+This operator serves as the T-CaaS specific authentication (`authN`) and authorization (`authZ`) implementation. The need for this operator arises from the requirement to manage `authN` and `authZ` for multiple cluster consumers in a single cluster.
 
-Please use the following table of contents to quickly navigate through the document:
+## 📚 Documentation
+
+- **[API Reference - Authorization](./docs/api-reference/authorization.t-caas.telekom.com.md)** - Authorization API group reference (RoleDefinition, BindDefinition, WebhookAuthorizer)
+
+> **Note:** If the API reference is out of date or you are making changes to the API groups, run `make docs` locally and commit the documentation changes into the repository.
+
+## 🤝 Contributing
+
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) for contribution requirements, testing policy, and review expectations.
+
+## 🔒 Security
+
+For reporting security vulnerabilities, please see [SECURITY.md](.github/SECURITY.md).
+
+## Table of Contents
+
 - [Auth Operator](#auth-operator)
   - [Getting started](#getting-started)
   - [Running E2E Tests Locally](#running-e2e-tests-locally)
@@ -28,30 +45,39 @@ Please use the following table of contents to quickly navigate through the docum
     - [Onboarding team](#onboarding-team)
     - [First line support](#first-line-support)
 
+
 ## Getting started
 
-To contribute, clone the repository with `SSH` or `HTTPS`. Please make use of the `Makefile` as most common actions that you would like to repeat multiple times are encapsulated in it. The repository structure is the default kubebuilder scaffold for multi-group projects with few additions. Please refer to the snippet below to get acquainted with the `Makefile`:
-# Install kind if not already installed
-go install sigs.k8s.io/kind@v0.31.0
+To contribute, clone the repository from [GitHub](https://github.com/telekom/auth-operator). Please make use of the `Makefile` as most common actions that you would like to repeat multiple times are encapsulated in it. The repository structure is the default kubebuilder scaffold for multi-group projects with few additions. Please refer to the snippet below to get acquainted with the `Makefile`:
 
-# Run the default e2e suite (excludes Helm/complex tests)
-make test-e2e-full
+```bash
+$ make help
 
-# Run Helm e2e tests (uses Helm install)
-make test-e2e-helm-full
+Usage:
+  make <target>
 
-# Run complex e2e tests (Helm-based, should run in a clean cluster)
-make test-e2e-complex
+General
+  help             Display this help.
 
-# Run HA/leader-election tests (multi-node cluster)
-make test-e2e-ha
-
-# Cleanup
-make kind-delete
+Development
+  manifests        Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
+  generate         Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
+  fmt              Run go fmt against code.
+  vet              Run go vet against code.
+  test             Run tests.
+  lint             Run golangci-lint linter.
+  lint-fix         Run golangci-lint linter and perform fixes.
   export-images    Export PNG images from a Draw.io diagram.
-
-> **Note:** The Helm/complex/HA suites install their own auth-operator instances and should be run on a clean cluster (or after cleanup) to avoid webhook and finalizer conflicts.
   docs             Generate markdown API reference into docs directory.
+
+Build
+  build            Build manager binary.
+  run-ctrl         Run the controller from your host.
+  run-wh           Run the webhook server from your host.
+  docker-build     Build docker image with the manager.
+  docker-push      Push docker image with the manager.
+  docker-buildx    Build and push docker image for the manager for cross-platform support
+  build-installer  Generate a consolidated YAML with CRDs and deployment.
 
 Deployment
   install          Install CRDs into the K8s cluster specified in ~/.kube/config.

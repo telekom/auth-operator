@@ -1,4 +1,4 @@
-module gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator
+module github.com/telekom/auth-operator
 
 go 1.25.0
 

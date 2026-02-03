@@ -18,18 +18,21 @@ nameReference:
   fieldSpecs:
   - kind: Deployment
     group: apps
-    path: spec/template/spec/containers/env/value
+    path: spec/template/spec/volumes/secret/secretName
   - kind: Deployment
     group: apps
-    path: spec/template/spec/volumes/secret/secretName
+    path: spec/template/spec/containers/env/value
+# Reference webhook configuration names in deployment env vars for cert-rotator
 - kind: MutatingWebhookConfiguration
   group: admissionregistration.k8s.io
+  version: v1
   fieldSpecs:
   - kind: Deployment
     group: apps
     path: spec/template/spec/containers/env/value
 - kind: ValidatingWebhookConfiguration
   group: admissionregistration.k8s.io
+  version: v1
   fieldSpecs:
   - kind: Deployment
     group: apps

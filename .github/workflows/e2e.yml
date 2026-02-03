@@ -1,0 +1,291 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: E2E Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      test_suite:
+        description: 'Test suite to run'
+        required: true
+        default: 'basic'
+        type: choice
+        options:
+          - basic
+          - helm
+          - complex
+          - ha
+          - all
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.25"
+  KIND_VERSION: "v0.31.0"
+  KIND_K8S_VERSION: "v1.32.5"
+
+jobs:
+  envtest:
+    name: Envtest (Unit + Integration)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'basic' || github.event.inputs.test_suite == 'all'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Go
+        uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Run envtest-based tests
+        run: make test
+
+  e2e-basic:
+    name: E2E Basic Tests
+    runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'basic' || github.event.inputs.test_suite == 'all'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Go
+        uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install kind
+        run: |
+          go install sigs.k8s.io/kind@${{ env.KIND_VERSION }}
+
+      - name: Run E2E tests
+        run: make test-e2e-full
+        env:
+          E2E_RECREATE_CLUSTER: "true"
+          SKIP_E2E_CLEANUP: "true"
+
+      - name: Collect debug info on failure
+        if: failure()
+        run: |
+          chmod +x hack/ci/collect-debug-info.sh
+          ./hack/ci/collect-debug-info.sh /tmp/e2e-debug auth-operator-system
+
+      - name: Upload test artifacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-basic-logs
+          path: |
+            /tmp/e2e-*.log
+            /tmp/e2e-debug-report-*.txt
+            /tmp/e2e-debug/
+
+      - name: Cleanup cluster
+        if: always()
+        run: |
+          kind delete cluster --name auth-operator-e2e || true
+
+  e2e-helm:
+    name: E2E Helm Tests
+    runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'helm' || github.event.inputs.test_suite == 'all'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Go
+        uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Setup Helm
+        uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112 # v4.3.0
+        with:
+          version: v3.17.0
+
+      - name: Install kind
+        run: |
+          go install sigs.k8s.io/kind@${{ env.KIND_VERSION }}
+
+      - name: Run Helm E2E tests
+        run: make test-e2e-helm-full
+        env:
+          E2E_RECREATE_CLUSTER: "true"
+          SKIP_E2E_CLEANUP: "true"
+
+      - name: Collect debug info on failure
+        if: failure()
+        run: |
+          chmod +x hack/ci/collect-debug-info.sh
+          ./hack/ci/collect-debug-info.sh /tmp/e2e-debug auth-operator-helm
+
+      - name: Upload test artifacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-helm-logs
+          path: |
+            /tmp/e2e-*.log
+            /tmp/e2e-debug-report-*.txt
+            /tmp/e2e-debug/
+
+      - name: Cleanup cluster
+        if: always()
+        run: |
+          kind delete cluster --name auth-operator-e2e || true
+
+  e2e-complex:
+    name: E2E Complex Tests
+    runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'complex' || github.event.inputs.test_suite == 'all'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Go
+        uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Setup Helm
+        uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112 # v4.3.0
+        with:
+          version: v3.17.0
+
+      - name: Install kind
+        run: |
+          go install sigs.k8s.io/kind@${{ env.KIND_VERSION }}
+
+      - name: Run Complex E2E tests
+        run: make test-e2e-complex
+        env:
+          E2E_RECREATE_CLUSTER: "true"
+          SKIP_E2E_CLEANUP: "true"
+
+      - name: Collect debug info on failure
+        if: failure()
+        run: |
+          chmod +x hack/ci/collect-debug-info.sh
+          ./hack/ci/collect-debug-info.sh /tmp/e2e-debug auth-operator-complex
+
+      - name: Upload test artifacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-complex-logs
+          path: |
+            /tmp/e2e-*.log
+            /tmp/e2e-debug-report-*.txt
+            /tmp/e2e-debug/
+
+      - name: Cleanup cluster
+        if: always()
+        run: |
+          kind delete cluster --name auth-operator-e2e || true
+
+  e2e-ha:
+    name: E2E HA Tests
+    runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'ha' || github.event.inputs.test_suite == 'all'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Go
+        uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install kind
+        run: |
+          go install sigs.k8s.io/kind@${{ env.KIND_VERSION }}
+
+      - name: Run HA E2E tests
+        run: make test-e2e-ha
+        env:
+          E2E_RECREATE_CLUSTER: "true"
+          SKIP_E2E_CLEANUP: "true"
+          KIND_CLUSTER_NAME: "auth-operator-e2e-ha"
+
+      - name: Collect debug info on failure
+        if: failure()
+        run: |
+          chmod +x hack/ci/collect-debug-info.sh
+          ./hack/ci/collect-debug-info.sh /tmp/e2e-debug auth-operator-ha
+
+      - name: Upload test artifacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-ha-logs
+          path: |
+            /tmp/e2e-*.log
+            /tmp/e2e-debug-report-*.txt
+            /tmp/e2e-debug/
+
+      - name: Cleanup cluster
+        if: always()
+        run: |
+          kind delete cluster --name auth-operator-e2e-ha || true
+
+  e2e-full-chain:
+    name: E2E Full Chain (Popular CRDs)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'all'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Go
+        uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede # v4.0.1
+        with:
+          version: v1.32.5
+
+      - name: Install kind
+        run: |
+          go install sigs.k8s.io/kind@${{ env.KIND_VERSION }}
+
+      - name: Run full chain E2E tests
+        run: make test-e2e-full-chain
+        env:
+          E2E_RECREATE_CLUSTER: "true"
+          SKIP_E2E_CLEANUP: "true"
+
+      - name: Collect debug info on failure
+        if: failure()
+        run: |
+          chmod +x hack/ci/collect-debug-info.sh
+          ./hack/ci/collect-debug-info.sh /tmp/e2e-debug auth-operator-system
+
+      - name: Upload test artifacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-full-chain-logs
+          path: |
+            /tmp/e2e-*.log
+            /tmp/e2e-debug-report-*.txt
+            /tmp/e2e-debug/
+
+      - name: Cleanup cluster
+        if: always()
+        run: |
+          kind delete cluster --name auth-operator-e2e || true

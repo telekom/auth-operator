@@ -12,7 +12,7 @@ import (
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
-	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/test/utils"
+	"github.com/telekom/auth-operator/test/utils"
 )
 
 // DebugReport represents a structured test debug report
