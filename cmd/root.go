@@ -73,13 +73,19 @@ func redactSensitiveFlags() map[string]string {
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "auth-operator",
-	Short: "A brief description of your application",
-	Long: `A longer description that spans multiple lines and likely contains
-examples and usage of using your application. For example:
+	Short: "Kubernetes operator for managing RBAC with RoleDefinitions, BindDefinitions, and WebhookAuthorizers",
+	Long: `Auth Operator is a Kubernetes operator that provides declarative RBAC management
+through Custom Resource Definitions (CRDs).
 
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
+It supports three main resource types:
+  - RoleDefinition: Dynamically generates ClusterRoles or Roles based on API discovery
+  - BindDefinition: Creates RoleBindings/ClusterRoleBindings with namespace selectors
+  - WebhookAuthorizer: Configures authorization webhooks for fine-grained access control
+
+The operator watches for changes in the cluster's API resources and automatically
+updates the generated roles to reflect the current state of available APIs.
+
+For more information, visit: https://github.com/telekom/auth-operator`,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		// Set the verbosity level for klog
 		_ = flag.Set("v", fmt.Sprintf("%d", verbosity))
