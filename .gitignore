@@ -44,3 +44,5 @@ test/e2e/output/*.md
 !test/e2e/output/.gitkeep
 
 test/e2e/output/
+**/.DS_Store
+.DS_Store
