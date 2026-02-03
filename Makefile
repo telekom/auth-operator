@@ -7,7 +7,7 @@ include versions.env
 PROJECT_NAME = "auth-operator"
 APP ?= auth-operator
 IMG ?= $(APP):latest
-NAMESPACE ?= kube-system
+NAMESPACE ?= auth-operator-system
 
 # E2E run identifier and deterministic kind cluster name
 RUN_ID ?= $(shell date +%s)
