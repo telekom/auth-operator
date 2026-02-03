@@ -17,6 +17,8 @@ const (
 	caOrganization = "t-caas"
 )
 
+// Enable sets up the certificate rotator for webhook TLS certificates.
+// It manages automatic certificate generation and rotation for the webhook server.
 func Enable(
 	mgr manager.Manager,
 	namespace string,

@@ -591,7 +591,6 @@ func TestNamespaceMutatorPerformance(t *testing.T) {
 			mu.Lock()
 			durations = append(durations, elapsed)
 			mu.Unlock()
-
 		}(i)
 	}
 

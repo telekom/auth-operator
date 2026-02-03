@@ -1,6 +1,7 @@
-package utils
+package utils //nolint:revive
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -160,7 +161,7 @@ func DebugTable(headers []string, rows [][]string) {
 // InstallPrometheusOperator installs the prometheus Operator to be used to export the enabled metrics.
 func InstallPrometheusOperator() error {
 	url := fmt.Sprintf(prometheusOperatorURL, prometheusOperatorVersion)
-	cmd := exec.Command("kubectl", "create", "-f", url)
+	cmd := exec.CommandContext(context.Background(), "kubectl", "create", "-f", url)
 	_, err := Run(cmd)
 	return err
 }
@@ -180,7 +181,7 @@ func Run(cmd *exec.Cmd) ([]byte, error) {
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		DebugLog(1, "command failed: %s\nerror: %v\noutput: %s", command, err, string(output))
-		return output, fmt.Errorf("%s failed with error: (%v) %s", command, err, string(output))
+		return output, fmt.Errorf("%s failed with error: (%w) %s", command, err, string(output))
 	}
 	if DebugLevel >= 3 {
 		DebugLog(3, "command output: %s", string(output))
@@ -220,7 +221,7 @@ func RunWithTimeout(cmd *exec.Cmd, timeout time.Duration) ([]byte, error) {
 	case err := <-done:
 		if err != nil {
 			DebugLog(1, "command failed: %s\nerror: %v\noutput: %s", command, err, string(output))
-			return output, fmt.Errorf("%s failed with error: (%v) %s", command, err, string(output))
+			return output, fmt.Errorf("%s failed with error: (%w) %s", command, err, string(output))
 		}
 		return output, nil
 	}
@@ -229,7 +230,7 @@ func RunWithTimeout(cmd *exec.Cmd, timeout time.Duration) ([]byte, error) {
 // UninstallPrometheusOperator uninstalls the prometheus
 func UninstallPrometheusOperator() {
 	url := fmt.Sprintf(prometheusOperatorURL, prometheusOperatorVersion)
-	cmd := exec.Command("kubectl", "delete", "-f", url)
+	cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "-f", url)
 	if _, err := Run(cmd); err != nil {
 		warnError(err)
 	}
@@ -238,7 +239,7 @@ func UninstallPrometheusOperator() {
 // UninstallCertManager uninstalls the cert manager
 func UninstallCertManager() {
 	url := fmt.Sprintf(certmanagerURLTmpl, certmanagerVersion)
-	cmd := exec.Command("kubectl", "delete", "-f", url)
+	cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "-f", url)
 	if _, err := Run(cmd); err != nil {
 		warnError(err)
 	}
@@ -246,7 +247,7 @@ func UninstallCertManager() {
 
 // IsCertManagerInstalled checks if cert-manager is already installed
 func IsCertManagerInstalled() bool {
-	cmd := exec.Command("kubectl", "get", "deployment", "cert-manager-webhook",
+	cmd := exec.CommandContext(context.Background(), "kubectl", "get", "deployment", "cert-manager-webhook",
 		"-n", "cert-manager", "-o", "name")
 	_, err := Run(cmd)
 	return err == nil
@@ -258,7 +259,7 @@ func InstallCertManager() error {
 	if IsCertManagerInstalled() {
 		_, _ = fmt.Fprintf(GinkgoWriter, "cert-manager already installed, skipping installation\n")
 		// Still wait for it to be ready
-		cmd := exec.Command("kubectl", "wait", "deployment.apps/cert-manager-webhook",
+		cmd := exec.CommandContext(context.Background(), "kubectl", "wait", "deployment.apps/cert-manager-webhook",
 			"--for", "condition=Available",
 			"--namespace", "cert-manager",
 			"--timeout", "5m",
@@ -273,7 +274,7 @@ func InstallCertManager() error {
 	var lastErr error
 	for attempt := 1; attempt <= 3; attempt++ {
 		_, _ = fmt.Fprintf(GinkgoWriter, "Installing cert-manager (attempt %d/3)\n", attempt)
-		cmd := exec.Command("kubectl", "apply", "-f", url, "--server-side", "--force-conflicts")
+		cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", url, "--server-side", "--force-conflicts")
 		if _, err := Run(cmd); err != nil {
 			lastErr = err
 			if attempt < 3 {
@@ -293,7 +294,7 @@ func InstallCertManager() error {
 
 	// Wait for cert-manager-webhook to be ready, which can take time if cert-manager
 	// was re-installed after uninstalling on a cluster.
-	cmd := exec.Command("kubectl", "wait", "deployment.apps/cert-manager-webhook",
+	cmd := exec.CommandContext(context.Background(), "kubectl", "wait", "deployment.apps/cert-manager-webhook",
 		"--for", "condition=Available",
 		"--namespace", "cert-manager",
 		"--timeout", "5m",
@@ -303,14 +304,14 @@ func InstallCertManager() error {
 	return err
 }
 
-// LoadImageToKindCluster loads a local docker image to the kind cluster
+// LoadImageToKindClusterWithName loads a local docker image to the kind cluster with the specified name.
 func LoadImageToKindClusterWithName(name string) error {
 	cluster := "auth-operator-e2e"
 	if v, ok := os.LookupEnv("KIND_CLUSTER"); ok {
 		cluster = v
 	}
 	kindOptions := []string{"load", "docker-image", name, "--name", cluster}
-	cmd := exec.Command("kind", kindOptions...)
+	cmd := exec.CommandContext(context.Background(), "kind", kindOptions...)
 	_, err := Run(cmd)
 	return err
 }
@@ -341,7 +342,7 @@ func GetProjectDir() (string, error) {
 
 // DeploymentExists checks if a deployment exists for a label selector in a namespace.
 func DeploymentExists(labelSelector, namespace string) bool {
-	cmd := exec.Command("kubectl", "get", "deployment",
+	cmd := exec.CommandContext(context.Background(), "kubectl", "get", "deployment",
 		"-l", labelSelector,
 		"-n", namespace,
 		"-o", "name")
@@ -366,7 +367,7 @@ func WaitForResource(resourceType, name, namespace string, timeout time.Duration
 
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		cmd := exec.Command("kubectl", args...)
+		cmd := exec.CommandContext(context.Background(), "kubectl", args...)
 		if _, err := Run(cmd); err == nil {
 			return nil
 		}
@@ -379,7 +380,7 @@ func WaitForResource(resourceType, name, namespace string, timeout time.Duration
 func WaitForPodRunning(labelSelector, namespace string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		cmd := exec.Command("kubectl", "get", "pods",
+		cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pods",
 			"-l", labelSelector,
 			"-n", namespace,
 			"-o", "jsonpath={.items[0].status.phase}")
@@ -394,7 +395,7 @@ func WaitForPodRunning(labelSelector, namespace string, timeout time.Duration) e
 
 // WaitForPodsReady waits for all pods matching the label selector to be Ready
 func WaitForPodsReady(labelSelector, namespace string, timeout time.Duration) error {
-	cmd := exec.Command("kubectl", "wait", "pod",
+	cmd := exec.CommandContext(context.Background(), "kubectl", "wait", "pod",
 		"-l", labelSelector,
 		"-n", namespace,
 		"--for=condition=Ready",
@@ -405,7 +406,7 @@ func WaitForPodsReady(labelSelector, namespace string, timeout time.Duration) er
 
 // WaitForDeploymentAvailable waits for deployments matching label selector to be Available
 func WaitForDeploymentAvailable(labelSelector, namespace string, timeout time.Duration) error {
-	cmd := exec.Command("kubectl", "wait", "deployment",
+	cmd := exec.CommandContext(context.Background(), "kubectl", "wait", "deployment",
 		"-l", labelSelector,
 		"-n", namespace,
 		"--for=condition=Available",
@@ -418,7 +419,7 @@ func WaitForDeploymentAvailable(labelSelector, namespace string, timeout time.Du
 func WaitForServiceEndpoints(serviceName, namespace string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		cmd := exec.Command("kubectl", "get", "endpoints", serviceName,
+		cmd := exec.CommandContext(context.Background(), "kubectl", "get", "endpoints", serviceName,
 			"-n", namespace,
 			"-o", "jsonpath={.subsets}")
 		output, err := Run(cmd)
@@ -434,9 +435,9 @@ func WaitForServiceEndpoints(serviceName, namespace string, timeout time.Duratio
 func WaitForWebhookConfigurations(labelSelector string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		validating := exec.Command("kubectl", "get", "validatingwebhookconfiguration",
+		validating := exec.CommandContext(context.Background(), "kubectl", "get", "validatingwebhookconfiguration",
 			"-l", labelSelector, "-o", "name")
-		mutating := exec.Command("kubectl", "get", "mutatingwebhookconfiguration",
+		mutating := exec.CommandContext(context.Background(), "kubectl", "get", "mutatingwebhookconfiguration",
 			"-l", labelSelector, "-o", "name")
 		vOut, vErr := Run(validating)
 		mOut, mErr := Run(mutating)
@@ -454,13 +455,13 @@ func WaitForWebhookCABundle(labelSelector string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		// Check if mutating webhook has caBundle populated
-		mutatingCmd := exec.Command("kubectl", "get", "mutatingwebhookconfiguration",
+		mutatingCmd := exec.CommandContext(context.Background(), "kubectl", "get", "mutatingwebhookconfiguration",
 			"-l", labelSelector,
 			"-o", "jsonpath={.items[*].webhooks[*].clientConfig.caBundle}")
 		mutatingOut, mutatingErr := Run(mutatingCmd)
 
 		// Check if validating webhook has caBundle populated
-		validatingCmd := exec.Command("kubectl", "get", "validatingwebhookconfiguration",
+		validatingCmd := exec.CommandContext(context.Background(), "kubectl", "get", "validatingwebhookconfiguration",
 			"-l", labelSelector,
 			"-o", "jsonpath={.items[*].webhooks[*].clientConfig.caBundle}")
 		validatingOut, validatingErr := Run(validatingCmd)
@@ -500,7 +501,7 @@ func WaitForWebhookReady(timeout time.Duration) error {
 	for time.Now().Before(deadline) {
 		// Perform a dry-run namespace create which will trigger the mutating webhook
 		// If the webhook is ready with valid TLS, this will succeed
-		cmd := exec.Command("kubectl", "create", "namespace", testNS,
+		cmd := exec.CommandContext(context.Background(), "kubectl", "create", "namespace", testNS,
 			"--dry-run=server", "-o", "yaml")
 		_, err := Run(cmd)
 		if err == nil {
@@ -532,12 +533,12 @@ func WaitForWebhookReady(timeout time.Duration) error {
 		time.Sleep(2 * time.Second)
 	}
 
-	return fmt.Errorf("timeout waiting for webhook to be ready: %v", lastErr)
+	return fmt.Errorf("timeout waiting for webhook to be ready: %w", lastErr)
 }
 
 // ApplyManifest applies a YAML manifest from a string using server-side apply
 func ApplyManifest(manifest string) error {
-	cmd := exec.Command("kubectl", "apply", "--server-side", "--force-conflicts", "-f", "-")
+	cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "--server-side", "--force-conflicts", "-f", "-")
 	cmd.Stdin = strings.NewReader(manifest)
 	_, err := Run(cmd)
 	return err
@@ -545,7 +546,7 @@ func ApplyManifest(manifest string) error {
 
 // DeleteManifest deletes resources defined in a YAML manifest
 func DeleteManifest(manifest string) error {
-	cmd := exec.Command("kubectl", "delete", "-f", "-", "--ignore-not-found=true")
+	cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "-f", "-", "--ignore-not-found=true")
 	cmd.Stdin = strings.NewReader(manifest)
 	_, err := Run(cmd)
 	return err
@@ -557,7 +558,7 @@ func GetResourceField(resourceType, name, namespace, jsonpath string) (string, e
 	if namespace != "" {
 		args = append(args, "-n", namespace)
 	}
-	cmd := exec.Command("kubectl", args...)
+	cmd := exec.CommandContext(context.Background(), "kubectl", args...)
 	output, err := Run(cmd)
 	if err != nil {
 		return "", err
@@ -567,7 +568,7 @@ func GetResourceField(resourceType, name, namespace, jsonpath string) (string, e
 
 // KindClusterExists checks if a kind cluster with the given name exists
 func KindClusterExists(name string) bool {
-	cmd := exec.Command("kind", "get", "clusters")
+	cmd := exec.CommandContext(context.Background(), "kind", "get", "clusters")
 	output, err := Run(cmd)
 	if err != nil {
 		return false
@@ -589,7 +590,7 @@ func CreateKindCluster(name, k8sVersion string) error {
 	}
 
 	image := fmt.Sprintf("kindest/node:%s", k8sVersion)
-	cmd := exec.Command("kind", "create", "cluster",
+	cmd := exec.CommandContext(context.Background(), "kind", "create", "cluster",
 		"--name", name,
 		"--image", image,
 		"--wait", "5m")
@@ -599,7 +600,7 @@ func CreateKindCluster(name, k8sVersion string) error {
 
 // DeleteKindCluster deletes a kind cluster
 func DeleteKindCluster(name string) error {
-	cmd := exec.Command("kind", "delete", "cluster", "--name", name)
+	cmd := exec.CommandContext(context.Background(), "kind", "delete", "cluster", "--name", name)
 	_, err := Run(cmd)
 	return err
 }
@@ -610,14 +611,14 @@ func CleanupWebhooks(labelSelector string) {
 	_, _ = fmt.Fprintf(GinkgoWriter, "Cleaning up webhooks with label: %s\n", labelSelector)
 
 	// Clean up ValidatingWebhookConfigurations
-	cmd := exec.Command("kubectl", "delete", "validatingwebhookconfiguration",
+	cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "validatingwebhookconfiguration",
 		"-l", labelSelector, "--ignore-not-found=true")
 	if _, err := Run(cmd); err != nil {
 		warnError(err)
 	}
 
 	// Clean up MutatingWebhookConfigurations
-	cmd = exec.Command("kubectl", "delete", "mutatingwebhookconfiguration",
+	cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "mutatingwebhookconfiguration",
 		"-l", labelSelector, "--ignore-not-found=true")
 	if _, err := Run(cmd); err != nil {
 		warnError(err)
@@ -637,22 +638,22 @@ func CleanupAllAuthOperatorWebhooks() {
 	}
 
 	for _, pattern := range webhookPatterns {
-		cmd := exec.Command("kubectl", "get", "validatingwebhookconfiguration", "-o", "name")
+		cmd := exec.CommandContext(context.Background(), "kubectl", "get", "validatingwebhookconfiguration", "-o", "name")
 		output, _ := Run(cmd)
 		for _, line := range GetNonEmptyLines(string(output)) {
 			if strings.Contains(line, pattern) {
 				name := strings.TrimPrefix(line, "validatingwebhookconfiguration.admissionregistration.k8s.io/")
-				cmd := exec.Command("kubectl", "delete", "validatingwebhookconfiguration", name, "--ignore-not-found=true")
+				cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "validatingwebhookconfiguration", name, "--ignore-not-found=true")
 				_, _ = Run(cmd)
 			}
 		}
 
-		cmd = exec.Command("kubectl", "get", "mutatingwebhookconfiguration", "-o", "name")
+		cmd = exec.CommandContext(context.Background(), "kubectl", "get", "mutatingwebhookconfiguration", "-o", "name")
 		output, _ = Run(cmd)
 		for _, line := range GetNonEmptyLines(string(output)) {
 			if strings.Contains(line, pattern) {
 				name := strings.TrimPrefix(line, "mutatingwebhookconfiguration.admissionregistration.k8s.io/")
-				cmd := exec.Command("kubectl", "delete", "mutatingwebhookconfiguration", name, "--ignore-not-found=true")
+				cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "mutatingwebhookconfiguration", name, "--ignore-not-found=true")
 				_, _ = Run(cmd)
 			}
 		}
@@ -661,7 +662,7 @@ func CleanupAllAuthOperatorWebhooks() {
 
 // RemoveFinalizersForAll removes finalizers from all resources of a given type
 func RemoveFinalizersForAll(resourceType string) {
-	cmd := exec.Command("kubectl", "get", resourceType, "-A",
+	cmd := exec.CommandContext(context.Background(), "kubectl", "get", resourceType, "-A",
 		"-o", `jsonpath={range .items[*]}{.metadata.namespace}{"/"}{.metadata.name}{"\n"}{end}`)
 	output, err := Run(cmd)
 	if err != nil {
@@ -675,7 +676,7 @@ func RemoveFinalizersForAll(resourceType string) {
 		if ns != "" {
 			args = append(args, "-n", ns)
 		}
-		patch := exec.Command("kubectl", args...)
+		patch := exec.CommandContext(context.Background(), "kubectl", args...)
 		if _, err := Run(patch); err != nil {
 			warnError(err)
 		}
@@ -703,7 +704,7 @@ func CleanupResourcesByLabel(resourceType, labelSelector, namespace string) {
 	if namespace != "" {
 		args = append(args, "-n", namespace)
 	}
-	cmd := exec.Command("kubectl", args...)
+	cmd := exec.CommandContext(context.Background(), "kubectl", args...)
 	if _, err := Run(cmd); err != nil {
 		warnError(err)
 	}
@@ -711,13 +712,13 @@ func CleanupResourcesByLabel(resourceType, labelSelector, namespace string) {
 
 // CleanupNamespace deletes a namespace and waits for it to be fully removed
 func CleanupNamespace(namespace string) {
-	cmd := exec.Command("kubectl", "delete", "ns", namespace, "--ignore-not-found=true", "--wait=false")
+	cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "ns", namespace, "--ignore-not-found=true", "--wait=false")
 	_, _ = Run(cmd)
 
 	// Wait for namespace to be deleted (with timeout)
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
-		cmd := exec.Command("kubectl", "get", "ns", namespace)
+		cmd := exec.CommandContext(context.Background(), "kubectl", "get", "ns", namespace)
 		if _, err := Run(cmd); err != nil {
 			// Namespace is gone
 			return
@@ -736,7 +737,7 @@ func CleanupClusterResources(labelSelector string) {
 			"delete", resource, "-l", labelSelector,
 			"--ignore-not-found=true", "--wait=false", "--timeout=30s",
 		}
-		cmd := exec.Command("kubectl", args...)
+		cmd := exec.CommandContext(context.Background(), "kubectl", args...)
 		if _, err := Run(cmd); err != nil {
 			warnError(err)
 		}
@@ -1025,13 +1026,13 @@ func getClusterInfo() map[string]string {
 	info := make(map[string]string)
 
 	// Kubernetes version
-	cmd := exec.Command("kubectl", "version", "--client", "--short")
+	cmd := exec.CommandContext(context.Background(), "kubectl", "version", "--client", "--short")
 	if output, err := Run(cmd); err == nil {
 		info["kubectl_version"] = strings.TrimSpace(string(output))
 	}
 
 	// Server version
-	cmd = exec.Command("kubectl", "version", "-o", "json")
+	cmd = exec.CommandContext(context.Background(), "kubectl", "version", "-o", "json")
 	if output, err := Run(cmd); err == nil {
 		// Extract server version from JSON (simplified)
 		if strings.Contains(string(output), "serverVersion") {
@@ -1040,7 +1041,7 @@ func getClusterInfo() map[string]string {
 	}
 
 	// Current context
-	cmd = exec.Command("kubectl", "config", "current-context")
+	cmd = exec.CommandContext(context.Background(), "kubectl", "config", "current-context")
 	if output, err := Run(cmd); err == nil {
 		info["context"] = strings.TrimSpace(string(output))
 	}
@@ -1130,43 +1131,43 @@ func SaveDebugInfoToFile(outputDir, filename, content string) error {
 // CollectAndSaveAllDebugInfo collects all debug info and saves to files
 // into a per-test output directory. Console output is only produced when
 // E2E_DEBUG_LEVEL >= 2 to avoid flooding stdout.
-func CollectAndSaveAllDebugInfo(context string) {
+func CollectAndSaveAllDebugInfo(testContext string) {
 	// Only output to GinkgoWriter if debug level is high
 	if DebugLevel >= 2 {
-		CollectClusterDebugInfo(context)
+		CollectClusterDebugInfo(testContext)
 	} else {
 		DebugLog(1, "Saving debug info to files (set E2E_DEBUG_LEVEL=2 for console output)")
 	}
 
 	// Save to files for CI artifacts
-	outputDir := GetE2EOutputDirForContext(context)
+	outputDir := GetE2EOutputDirForContext(testContext)
 	_ = os.MkdirAll(outputDir, 0o755)
 
 	// Cluster dump
-	cmd := exec.Command("kubectl", "cluster-info", "dump", "--output-directory", filepath.Join(outputDir, "cluster-dump"))
+	cmd := exec.CommandContext(context.Background(), "kubectl", "cluster-info", "dump", "--output-directory", filepath.Join(outputDir, "cluster-dump"))
 	_, _ = Run(cmd)
 
 	// All resources
-	cmd = exec.Command("kubectl", "get", "all", "-A", "-o", "wide")
+	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "all", "-A", "-o", "wide")
 	if output, err := Run(cmd); err == nil {
 		_ = SaveDebugInfoToFile(outputDir, "all-resources.txt", string(output))
 	}
 
 	// Events
-	cmd = exec.Command("kubectl", "get", "events", "-A", "--sort-by=.lastTimestamp")
+	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "events", "-A", "--sort-by=.lastTimestamp")
 	if output, err := Run(cmd); err == nil {
 		_ = SaveDebugInfoToFile(outputDir, "events.txt", string(output))
 	}
 
 	// Pods
-	cmd = exec.Command("kubectl", "get", "pods", "-A", "-o", "wide")
+	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "pods", "-A", "-o", "wide")
 	if output, err := Run(cmd); err == nil {
 		_ = SaveDebugInfoToFile(outputDir, "pods.txt", string(output))
 	}
 
 	// CRD instances
 	for _, crd := range []string{"roledefinitions", "binddefinitions", "webhookauthorizers"} {
-		cmd = exec.Command("kubectl", "get", crd, "-A", "-o", "yaml")
+		cmd = exec.CommandContext(context.Background(), "kubectl", "get", crd, "-A", "-o", "yaml")
 		if output, err := Run(cmd); err == nil {
 			_ = SaveDebugInfoToFile(outputDir, crd+".yaml", string(output))
 		}
@@ -1180,15 +1181,15 @@ func CollectAndSaveAllDebugInfo(context string) {
 		"auth-operator-integration-test",
 	}
 	for _, ns := range operatorNamespaces {
-		cmd = exec.Command("kubectl", "get", "ns", ns, "-o", "name")
+		cmd = exec.CommandContext(context.Background(), "kubectl", "get", "ns", ns, "-o", "name")
 		if _, err := Run(cmd); err != nil {
 			continue
 		}
-		cmd = exec.Command("kubectl", "logs", "-n", ns, "-l", "control-plane=controller-manager", "--tail=1000")
+		cmd = exec.CommandContext(context.Background(), "kubectl", "logs", "-n", ns, "-l", "control-plane=controller-manager", "--tail=1000")
 		if output, err := Run(cmd); err == nil {
 			_ = SaveDebugInfoToFile(outputDir, fmt.Sprintf("%s-controller-logs.txt", ns), string(output))
 		}
-		cmd = exec.Command("kubectl", "logs", "-n", ns, "-l", "app.kubernetes.io/component=webhook", "--tail=1000")
+		cmd = exec.CommandContext(context.Background(), "kubectl", "logs", "-n", ns, "-l", "app.kubernetes.io/component=webhook", "--tail=1000")
 		if output, err := Run(cmd); err == nil {
 			_ = SaveDebugInfoToFile(outputDir, fmt.Sprintf("%s-webhook-logs.txt", ns), string(output))
 		}
@@ -1218,7 +1219,7 @@ func collectSection(title string, fn func()) {
 
 // runDebugCommand runs a command and prints output to GinkgoWriter (ignores errors)
 func runDebugCommand(name string, args ...string) {
-	cmd := exec.Command(name, args...)
+	cmd := exec.CommandContext(context.Background(), name, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		_, _ = fmt.Fprintf(GinkgoWriter, "$ %s %s\n[error: %v]\n", name, strings.Join(args, " "), err)

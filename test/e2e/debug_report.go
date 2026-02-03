@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -133,7 +134,7 @@ func collectClusterInfo() ClusterInfo {
 	info := ClusterInfo{}
 
 	// Get Kubernetes version
-	cmd := exec.Command("kubectl", "version", "-o", "json")
+	cmd := exec.CommandContext(context.Background(), "kubectl", "version", "-o", "json")
 	output, err := utils.Run(cmd)
 	if err == nil {
 		var versionInfo map[string]interface{}
@@ -145,7 +146,7 @@ func collectClusterInfo() ClusterInfo {
 	}
 
 	// Get node count and status
-	cmd = exec.Command("kubectl", "get", "nodes", "-o", "jsonpath={.items[*].status.conditions[?(@.type=='Ready')].status}")
+	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "nodes", "-o", "jsonpath={.items[*].status.conditions[?(@.type=='Ready')].status}")
 	output, err = utils.Run(cmd)
 	if err == nil {
 		statuses := strings.Fields(string(output))
@@ -165,7 +166,7 @@ func collectClusterInfo() ClusterInfo {
 	}
 
 	// Check API server
-	cmd = exec.Command("kubectl", "cluster-info")
+	cmd = exec.CommandContext(context.Background(), "kubectl", "cluster-info")
 	_, err = utils.Run(cmd)
 	info.APIServerReady = err == nil
 
@@ -176,49 +177,49 @@ func collectResourceSummary() ResourceSummary {
 	summary := ResourceSummary{}
 
 	// Count RoleDefinitions
-	cmd := exec.Command("kubectl", "get", "roledefinitions", "-A", "-o", "jsonpath={.items[*].metadata.name}")
+	cmd := exec.CommandContext(context.Background(), "kubectl", "get", "roledefinitions", "-A", "-o", "jsonpath={.items[*].metadata.name}")
 	output, _ := utils.Run(cmd)
 	if len(strings.TrimSpace(string(output))) > 0 {
 		summary.RoleDefinitions = len(strings.Fields(string(output)))
 	}
 
 	// Count BindDefinitions
-	cmd = exec.Command("kubectl", "get", "binddefinitions", "-A", "-o", "jsonpath={.items[*].metadata.name}")
+	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "binddefinitions", "-A", "-o", "jsonpath={.items[*].metadata.name}")
 	output, _ = utils.Run(cmd)
 	if len(strings.TrimSpace(string(output))) > 0 {
 		summary.BindDefinitions = len(strings.Fields(string(output)))
 	}
 
 	// Count WebhookAuthorizers
-	cmd = exec.Command("kubectl", "get", "webhookauthorizers", "-A", "-o", "jsonpath={.items[*].metadata.name}")
+	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "webhookauthorizers", "-A", "-o", "jsonpath={.items[*].metadata.name}")
 	output, _ = utils.Run(cmd)
 	if len(strings.TrimSpace(string(output))) > 0 {
 		summary.WebhookAuthorizers = len(strings.Fields(string(output)))
 	}
 
 	// Count generated ClusterRoles (labeled by auth-operator)
-	cmd = exec.Command("kubectl", "get", "clusterroles", "-l", "app.kubernetes.io/created-by=auth-operator", "-o", "jsonpath={.items[*].metadata.name}")
+	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "clusterroles", "-l", "app.kubernetes.io/created-by=auth-operator", "-o", "jsonpath={.items[*].metadata.name}")
 	output, _ = utils.Run(cmd)
 	if len(strings.TrimSpace(string(output))) > 0 {
 		summary.GeneratedClusterRoles = len(strings.Fields(string(output)))
 	}
 
 	// Count generated Roles (labeled by auth-operator)
-	cmd = exec.Command("kubectl", "get", "roles", "-A", "-l", "app.kubernetes.io/created-by=auth-operator", "-o", "jsonpath={.items[*].metadata.name}")
+	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "roles", "-A", "-l", "app.kubernetes.io/created-by=auth-operator", "-o", "jsonpath={.items[*].metadata.name}")
 	output, _ = utils.Run(cmd)
 	if len(strings.TrimSpace(string(output))) > 0 {
 		summary.GeneratedRoles = len(strings.Fields(string(output)))
 	}
 
 	// Get operator pod names
-	cmd = exec.Command("kubectl", "get", "pods", "-A", "-l", "control-plane=controller-manager", "-o", "jsonpath={.items[*].metadata.name}")
+	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "pods", "-A", "-l", "control-plane=controller-manager", "-o", "jsonpath={.items[*].metadata.name}")
 	output, _ = utils.Run(cmd)
 	if len(strings.TrimSpace(string(output))) > 0 {
 		summary.OperatorPods = strings.Fields(string(output))
 	}
 
 	// Get webhook pod names
-	cmd = exec.Command("kubectl", "get", "pods", "-A", "-l", "control-plane=webhook-server", "-o", "jsonpath={.items[*].metadata.name}")
+	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "pods", "-A", "-l", "control-plane=webhook-server", "-o", "jsonpath={.items[*].metadata.name}")
 	output, _ = utils.Run(cmd)
 	if len(strings.TrimSpace(string(output))) > 0 {
 		summary.WebhookPods = strings.Fields(string(output))
@@ -231,7 +232,7 @@ func collectRecentErrors() []ErrorEntry {
 	var errors []ErrorEntry
 
 	// Get warning/error events from last 10 minutes
-	cmd := exec.Command("kubectl", "get", "events", "-A",
+	cmd := exec.CommandContext(context.Background(), "kubectl", "get", "events", "-A",
 		"--field-selector=type!=Normal",
 		"-o", "jsonpath={range .items[*]}{.involvedObject.kind}/{.involvedObject.name}|{.message}|{.lastTimestamp}\n{end}")
 	output, _ := utils.Run(cmd)

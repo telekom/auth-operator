@@ -5,19 +5,28 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// BindDefinition-related constants for finalizers and binding types.
 const (
-	BindDefinitionFinalizer   = "binddefinition.authorization.t-caas.telekom.com/finalizer"
-	RoleBindingFinalizer      = "rolebinding.authorization.t-caas.telekom.com/finalizer"
-	BindClusterRoleBinding    = "ClusterRoleBinding"
-	BindRoleBinding           = "RoleBinding"
+	// BindDefinitionFinalizer is the finalizer used to prevent orphaned resources.
+	BindDefinitionFinalizer = "binddefinition.authorization.t-caas.telekom.com/finalizer"
+	// RoleBindingFinalizer is the finalizer used on RoleBindings.
+	RoleBindingFinalizer = "rolebinding.authorization.t-caas.telekom.com/finalizer"
+	// BindClusterRoleBinding indicates a ClusterRoleBinding type.
+	BindClusterRoleBinding = "ClusterRoleBinding"
+	// BindRoleBinding indicates a RoleBinding type.
+	BindRoleBinding = "RoleBinding"
+	// BindSubjectServiceAccount indicates a ServiceAccount subject type.
 	BindSubjectServiceAccount = "ServiceAccount"
 )
 
+// ClusterBinding defines cluster-scoped role bindings.
 type ClusterBinding struct {
 	// ClusterRoleRefs references an existing ClusterRole
 	// +kubebuilder:validation:Optional
 	ClusterRoleRefs []string `json:"clusterRoleRefs,omitempty"`
 }
+
+// NamespaceBinding defines namespace-scoped role bindings.
 type NamespaceBinding struct {
 	// ClusterRoleRefs references an existing ClusterRole
 	// +kubebuilder:validation:Optional
@@ -70,13 +79,14 @@ type BindDefinitionStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
+// BindDefinition is the Schema for the binddefinitions API.
+//
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:path=binddefinitions,scope=Cluster,shortName=binddef
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Time duration since creation of this BindDefinition"
 // +kubebuilder:printcolumn:name="Bind name",type="string",JSONPath=".spec.targetName",description="The name of the child object created by this BindDefinition"
 // +kubebuilder:printcolumn:name="Reconciled bind",type="string",JSONPath=".status.bindReconciled",description="The boolean value signifying if the target role has been reconciled or not"
-// BindDefinition is the Schema for the binddefinitions API
 type BindDefinition struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -98,12 +108,12 @@ func init() {
 	SchemeBuilder.Register(&BindDefinition{}, &BindDefinitionList{})
 }
 
-// Satisfy the generic Getter interface
+// GetConditions returns the conditions of the BindDefinition.
 func (bd *BindDefinition) GetConditions() []metav1.Condition {
 	return bd.Status.Conditions
 }
 
-// Satisfy the generic Setter interface
+// SetConditions sets the conditions of the BindDefinition.
 func (bd *BindDefinition) SetConditions(conditions []metav1.Condition) {
 	bd.Status.Conditions = conditions
 }

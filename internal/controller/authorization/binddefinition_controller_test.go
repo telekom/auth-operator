@@ -56,7 +56,7 @@ var _ = Describe("BindDefinition Controller", func() {
 
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
-			controllerReconciler := &bindDefinitionReconciler{
+			controllerReconciler := &BindDefinitionReconciler{
 				client:   k8sClient,
 				scheme:   k8sClient.Scheme(),
 				recorder: recorder,

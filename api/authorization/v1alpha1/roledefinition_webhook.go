@@ -45,7 +45,7 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 		TargetNameField: obj.Spec.TargetName,
 	}); err != nil {
 		logger.Error(err, "failed to list RoleDefinitions", "targetName", obj.Spec.TargetName)
-		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RoleDefinitions: %v", err))
+		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RoleDefinitions: %w", err))
 	}
 
 	for _, roleDefinition := range roleDefinitionList.Items {
@@ -74,7 +74,7 @@ func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 		TargetNameField: newObj.Spec.TargetName,
 	}); err != nil {
 		logger.Error(err, "failed to list RoleDefinitions", "targetName", newObj.Spec.TargetName)
-		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RoleDefinitions: %v", err))
+		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RoleDefinitions: %w", err))
 	}
 
 	for _, roleDefinition := range roleDefinitionList.Items {

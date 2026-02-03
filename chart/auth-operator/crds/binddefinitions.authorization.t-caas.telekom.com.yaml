@@ -34,7 +34,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: BindDefinition is the Schema for the binddefinitions API
+        description: BindDefinition is the Schema for the binddefinitions API.
         properties:
           apiVersion:
             description: |-
@@ -73,6 +73,7 @@ spec:
                   he full rbacv1.RoleRef schema. The result of specifying the field
                   are RoleBindings.
                 items:
+                  description: NamespaceBinding defines namespace-scoped role bindings.
                   properties:
                     clusterRoleRefs:
                       description: ClusterRoleRefs references an existing ClusterRole

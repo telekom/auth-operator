@@ -47,7 +47,7 @@ func validateBindDefinitionSpec(ctx context.Context, r *BindDefinition) (admissi
 		TargetNameField: r.Spec.TargetName,
 	}); err != nil {
 		logger.Error(err, "failed to list BindDefinitions", "targetName", r.Spec.TargetName)
-		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list BindDefinitions: %v", err))
+		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list BindDefinitions: %w", err))
 	}
 
 	for _, bindDefinition := range bindDefinitionList.Items {
@@ -70,7 +70,7 @@ func validateBindDefinitionSpec(ctx context.Context, r *BindDefinition) (admissi
 				warnings = append(warnings, fmt.Sprintf("ClusterRole '%s' not found - binding will fail during reconciliation until the role exists", clusterRoleRef))
 			} else {
 				logger.Error(err, "failed to fetch clusterrole", "clusterRoleName", clusterRoleRef)
-				return warnings, apierrors.NewInternalError(fmt.Errorf("error fetching clusterrole '%s': %v", clusterRoleRef, err))
+				return warnings, apierrors.NewInternalError(fmt.Errorf("error fetching clusterrole '%s': %w", clusterRoleRef, err))
 			}
 		}
 	}
@@ -86,7 +86,7 @@ func validateBindDefinitionSpec(ctx context.Context, r *BindDefinition) (admissi
 					warnings = append(warnings, fmt.Sprintf("ClusterRole '%s' not found - binding will fail during reconciliation until the role exists", clusterRoleRef))
 				} else {
 					logger.Error(err, "failed to fetch clusterrole", "clusterRoleName", clusterRoleRef)
-					return warnings, apierrors.NewInternalError(fmt.Errorf("error fetching clusterrole '%s': %v", clusterRoleRef, err))
+					return warnings, apierrors.NewInternalError(fmt.Errorf("error fetching clusterrole '%s': %w", clusterRoleRef, err))
 				}
 			}
 		}
@@ -109,7 +109,7 @@ func validateBindDefinitionSpec(ctx context.Context, r *BindDefinition) (admissi
 					}
 					if err := bdWebhookClient.List(ctx, namespaceList, listOptions); err != nil {
 						logger.Error(err, "failed to list namespaces", "selector", selector.String())
-						return warnings, apierrors.NewInternalError(fmt.Errorf("unable to list namespaces: %v", err))
+						return warnings, apierrors.NewInternalError(fmt.Errorf("unable to list namespaces: %w", err))
 					}
 					for _, ns := range namespaceList.Items {
 						namespaceSet[ns.Name] = ns
@@ -131,7 +131,7 @@ func validateBindDefinitionSpec(ctx context.Context, r *BindDefinition) (admissi
 							warnings = append(warnings, fmt.Sprintf("Role '%s' not found in namespace '%s' - binding will fail during reconciliation until the role exists", roleRef, ns.Name))
 						} else {
 							logger.Error(err, "failed to fetch role", "roleName", roleRef, "namespace", ns.Name)
-							return warnings, apierrors.NewInternalError(fmt.Errorf("error fetching role '%s' in namespace '%s': %v", roleRef, ns.Name, err))
+							return warnings, apierrors.NewInternalError(fmt.Errorf("error fetching role '%s' in namespace '%s': %w", roleRef, ns.Name, err))
 						}
 					}
 				}

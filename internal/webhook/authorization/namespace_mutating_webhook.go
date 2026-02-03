@@ -17,6 +17,7 @@ import (
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions,verbs=get;list;watch
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions/status,verbs=get;update;patch
 
+// NamespaceMutator is a mutating webhook that adds labels to namespaces based on user groups or ServiceAccount.
 type NamespaceMutator struct {
 	Client       client.Client
 	Decoder      admission.Decoder

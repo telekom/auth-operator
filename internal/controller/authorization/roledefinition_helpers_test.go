@@ -23,7 +23,7 @@ func TestBuildRoleObject(t *testing.T) {
 	_ = authorizationv1alpha1.AddToScheme(s)
 
 	recorder := record.NewFakeRecorder(10)
-	r := &roleDefinitionReconciler{
+	r := &RoleDefinitionReconciler{
 		scheme:   s,
 		recorder: recorder,
 	}
@@ -107,7 +107,7 @@ func TestBuildRoleWithRules(t *testing.T) {
 	_ = authorizationv1alpha1.AddToScheme(s)
 
 	recorder := record.NewFakeRecorder(10)
-	r := &roleDefinitionReconciler{
+	r := &RoleDefinitionReconciler{
 		scheme:   s,
 		recorder: recorder,
 	}
@@ -202,12 +202,12 @@ func TestBuildRoleWithRules(t *testing.T) {
 
 var _ = Describe("RoleDefinition Helpers", func() {
 	ctx := context.Background()
-	var r *roleDefinitionReconciler
+	var r *RoleDefinitionReconciler
 
 	BeforeEach(func() {
 		resourceTracker := discovery.NewResourceTracker(scheme.Scheme, cfg)
 
-		r = &roleDefinitionReconciler{
+		r = &RoleDefinitionReconciler{
 			client:          k8sClient,
 			scheme:          scheme.Scheme,
 			recorder:        record.NewFakeRecorder(10),
