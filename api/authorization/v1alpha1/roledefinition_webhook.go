@@ -39,6 +39,19 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 	logger := log.FromContext(ctx).WithName("roledefinition-webhook")
 	logger.V(1).Info("validating create", "name", obj.Name)
 
+	// Validate that TargetNamespace is set when TargetRole is Role
+	if obj.Spec.TargetRole == "Role" && obj.Spec.TargetNamespace == "" {
+		logger.Info("validation failed: targetNamespace is required when targetRole is Role", "name", obj.Name)
+		return nil, apierrors.NewBadRequest("targetNamespace is required when targetRole is Role")
+	}
+
+	// Validate that TargetNamespace is not set when TargetRole is ClusterRole
+	if obj.Spec.TargetRole == "ClusterRole" && obj.Spec.TargetNamespace != "" {
+		logger.Info("validation failed: targetNamespace must not be set when targetRole is ClusterRole",
+			"name", obj.Name, "targetNamespace", obj.Spec.TargetNamespace)
+		return nil, apierrors.NewBadRequest("targetNamespace must not be set when targetRole is ClusterRole")
+	}
+
 	// Use field index for efficient lookup by TargetName
 	roleDefinitionList := &RoleDefinitionList{}
 	if err := rdWebhookClient.List(ctx, roleDefinitionList, client.MatchingFields{
@@ -66,6 +79,19 @@ func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 
 	if oldObj.Generation == newObj.Generation {
 		return nil, nil
+	}
+
+	// Validate that TargetNamespace is set when TargetRole is Role
+	if newObj.Spec.TargetRole == "Role" && newObj.Spec.TargetNamespace == "" {
+		logger.Info("validation failed: targetNamespace is required when targetRole is Role", "name", newObj.Name)
+		return nil, apierrors.NewBadRequest("targetNamespace is required when targetRole is Role")
+	}
+
+	// Validate that TargetNamespace is not set when TargetRole is ClusterRole
+	if newObj.Spec.TargetRole == "ClusterRole" && newObj.Spec.TargetNamespace != "" {
+		logger.Info("validation failed: targetNamespace must not be set when targetRole is ClusterRole",
+			"name", newObj.Name, "targetNamespace", newObj.Spec.TargetNamespace)
+		return nil, apierrors.NewBadRequest("targetNamespace must not be set when targetRole is ClusterRole")
 	}
 
 	// Use field index for efficient lookup by TargetName
