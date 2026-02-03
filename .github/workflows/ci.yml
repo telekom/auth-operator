@@ -150,16 +150,17 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Generate manifests, code, and Helm chart
+      - name: Generate manifests, code, Helm chart, and docs
         run: |
           make manifests
           make generate
           make helm
+          make docs
 
       - name: Check for uncommitted changes
         run: |
           if ! git diff --exit-code; then
-            echo "ERROR: Generated files are out of date. Run 'make manifests generate helm' and commit changes."
+            echo "ERROR: Generated files are out of date. Run 'make manifests generate helm docs' and commit changes."
             echo ""
             echo "Changed files:"
             git diff --name-only
