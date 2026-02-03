@@ -205,16 +205,28 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return r.reconcileDelete(ctx, bindDefinition)
 	}
 
+	// Mark as Reconciling at the start (kstatus) - best effort, don't fail reconciliation
+	conditions.MarkReconciling(bindDefinition, bindDefinition.Generation,
+		authnv1alpha1.ReconcilingReasonProgressing, authnv1alpha1.ReconcilingMessageProgressing)
+	bindDefinition.Status.ObservedGeneration = bindDefinition.Generation
+	if err := r.client.Status().Update(ctx, bindDefinition); err != nil {
+		log.V(1).Info("failed to update Reconciling status (will retry)", "bindDefinitionName", bindDefinition.Name, "error", err)
+		// Don't return error - continue with reconciliation, markReady will refetch
+	}
+
 	if !controllerutil.ContainsFinalizer(bindDefinition, authnv1alpha1.BindDefinitionFinalizer) {
 		controllerutil.AddFinalizer(bindDefinition, authnv1alpha1.BindDefinitionFinalizer)
 		if err := r.client.Update(ctx, bindDefinition); err != nil {
+			r.markStalled(ctx, bindDefinition, err)
 			return ctrl.Result{}, fmt.Errorf("add finalizer to BindDefinition %s: %w", bindDefinition.Name, err)
 		}
 		r.recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Finalizer", "Adding finalizer to BindDefinition %s", bindDefinition.Name)
 	}
+	// Note: Intermediate status updates are best-effort. markReady/markStalled will refetch and set final state.
 	conditions.MarkTrue(bindDefinition, authnv1alpha1.FinalizerCondition, bindDefinition.Generation, authnv1alpha1.FinalizerReason, authnv1alpha1.FinalizerMessage)
 	if err := r.client.Status().Update(ctx, bindDefinition); err != nil {
-		return ctrl.Result{}, fmt.Errorf("update finalizer condition for BindDefinition %s: %w", bindDefinition.Name, err)
+		log.V(1).Info("failed to update FinalizerCondition status (will retry)", "bindDefinitionName", bindDefinition.Name, "error", err)
+		// Continue - markReady will refetch
 	}
 
 	// Collect namespaces once for both create and update paths
@@ -222,6 +234,7 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	namespaceSet, err := r.collectNamespaces(ctx, bindDefinition)
 	if err != nil {
 		log.Error(err, "Unable to collect namespaces", "bindDefinitionName", bindDefinition.Name)
+		r.markStalled(ctx, bindDefinition, err)
 		return ctrl.Result{}, fmt.Errorf("collect namespaces for BindDefinition %s: %w", bindDefinition.Name, err)
 	}
 
@@ -231,6 +244,7 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	resultCreate, err := r.reconcileCreate(ctx, bindDefinition, activeNamespaces)
 	if err != nil {
 		log.Error(err, "Error occurred in reconcileCreate function")
+		r.markStalled(ctx, bindDefinition, err)
 		return resultCreate, err
 	}
 
@@ -238,8 +252,12 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	resultUpdate, err := r.reconcileUpdate(ctx, bindDefinition, activeNamespaces)
 	if err != nil {
 		log.Error(err, "Error occurred in reconcileUpdate function")
+		r.markStalled(ctx, bindDefinition, err)
 		return resultUpdate, err
 	}
+
+	// Mark Ready on successful completion (kstatus)
+	r.markReady(ctx, bindDefinition)
 
 	// Preserve requeue requests from sub-reconciles
 	return mergeReconcileResults(resultCreate, resultUpdate), nil

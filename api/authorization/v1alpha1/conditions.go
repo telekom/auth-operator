@@ -11,6 +11,73 @@ type AuthZConditionReason = conditions.ConditionReason
 // AuthZConditionMessage represents authorization-related condition messages.
 type AuthZConditionMessage = conditions.ConditionMessage
 
+// kstatus-compliant condition types.
+// See: https://github.com/kubernetes-sigs/cli-utils/blob/master/pkg/kstatus/README.md
+const (
+	// ReadyCondition indicates whether the resource is fully reconciled.
+	// When True, the actual state matches the desired state.
+	// When False, the resource is not yet fully reconciled.
+	ReadyCondition AuthZConditionType = "Ready"
+
+	// ReconcilingCondition indicates the controller is actively working on reconciling
+	// the resource. This follows the "abnormal-true" pattern - present and True when
+	// reconciliation is in progress, absent when reconciliation is complete.
+	ReconcilingCondition AuthZConditionType = "Reconciling"
+
+	// StalledCondition indicates the controller has encountered an error or made
+	// insufficient progress. This follows the "abnormal-true" pattern - present and
+	// True when stalled, absent when not stalled.
+	StalledCondition AuthZConditionType = "Stalled"
+)
+
+// Ready condition reasons.
+const (
+	// ReadyReasonReconciled indicates the resource is fully reconciled.
+	ReadyReasonReconciled AuthZConditionReason = "Reconciled"
+	// ReadyReasonReconciling indicates the resource is being reconciled.
+	ReadyReasonReconciling AuthZConditionReason = "Reconciling"
+	// ReadyReasonFailed indicates the reconciliation failed.
+	ReadyReasonFailed AuthZConditionReason = "Failed"
+)
+
+// Ready condition messages.
+const (
+	// ReadyMessageReconciled is the message when the resource is fully reconciled.
+	ReadyMessageReconciled AuthZConditionMessage = "Resource is fully reconciled"
+	// ReadyMessageReconciling is the message when the resource is being reconciled.
+	ReadyMessageReconciling AuthZConditionMessage = "Resource reconciliation in progress"
+	// ReadyMessageFailed is the message format when reconciliation failed.
+	ReadyMessageFailed AuthZConditionMessage = "Reconciliation failed: %s"
+)
+
+// Reconciling condition reasons.
+const (
+	// ReconcilingReasonProgressing indicates the controller is making progress.
+	ReconcilingReasonProgressing AuthZConditionReason = "Progressing"
+)
+
+// Reconciling condition messages.
+const (
+	// ReconcilingMessageProgressing is the message when the controller is progressing.
+	ReconcilingMessageProgressing AuthZConditionMessage = "Controller is reconciling the resource"
+)
+
+// Stalled condition reasons.
+const (
+	// StalledReasonError indicates an error occurred during reconciliation.
+	StalledReasonError AuthZConditionReason = "Error"
+	// StalledReasonMissingDependency indicates a required dependency is missing.
+	StalledReasonMissingDependency AuthZConditionReason = "MissingDependency"
+)
+
+// Stalled condition messages.
+const (
+	// StalledMessageError is the message format when an error occurred.
+	StalledMessageError AuthZConditionMessage = "Error during reconciliation: %s"
+	// StalledMessageMissingDependency is the message when a dependency is missing.
+	StalledMessageMissingDependency AuthZConditionMessage = "Missing required dependency: %s"
+)
+
 // Finalizer-related condition constants.
 const (
 	// FinalizerCondition indicates whether the finalizer has been set.

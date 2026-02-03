@@ -26,6 +26,50 @@ func logStatusUpdateError(ctx context.Context, err error, resourceName string) {
 	}
 }
 
+// markStalled marks the BindDefinition as stalled with the given error (kstatus pattern).
+// It refetches the resource to avoid optimistic locking conflicts from stale resourceVersion.
+func (r *BindDefinitionReconciler) markStalled(
+	ctx context.Context,
+	bindDefinition *authnv1alpha1.BindDefinition,
+	err error,
+) {
+	log := log.FromContext(ctx)
+	// Refetch to get latest resourceVersion
+	fresh := &authnv1alpha1.BindDefinition{}
+	if getErr := r.client.Get(ctx, types.NamespacedName{Name: bindDefinition.Name}, fresh); getErr != nil {
+		log.Error(getErr, "failed to refetch BindDefinition for Stalled update", "bindDefinitionName", bindDefinition.Name)
+		return
+	}
+	conditions.MarkStalled(fresh, fresh.Generation,
+		authnv1alpha1.StalledReasonError, authnv1alpha1.StalledMessageError, err.Error())
+	fresh.Status.ObservedGeneration = fresh.Generation
+	if updateErr := r.client.Status().Update(ctx, fresh); updateErr != nil {
+		log.Error(updateErr, "failed to update Stalled status", "bindDefinitionName", bindDefinition.Name)
+	}
+}
+
+// markReady marks the BindDefinition as ready (kstatus pattern).
+// It refetches the resource to avoid optimistic locking conflicts from stale resourceVersion.
+func (r *BindDefinitionReconciler) markReady(
+	ctx context.Context,
+	bindDefinition *authnv1alpha1.BindDefinition,
+) {
+	log := log.FromContext(ctx)
+	// Refetch to get latest resourceVersion
+	fresh := &authnv1alpha1.BindDefinition{}
+	if err := r.client.Get(ctx, types.NamespacedName{Name: bindDefinition.Name}, fresh); err != nil {
+		log.Error(err, "failed to refetch BindDefinition for Ready update", "bindDefinitionName", bindDefinition.Name)
+		return
+	}
+	conditions.MarkReady(fresh, fresh.Generation,
+		authnv1alpha1.ReadyReasonReconciled, authnv1alpha1.ReadyMessageReconciled)
+	fresh.Status.ObservedGeneration = fresh.Generation
+	fresh.Status.BindReconciled = true
+	if err := r.client.Status().Update(ctx, fresh); err != nil {
+		log.Error(err, "failed to update Ready status", "bindDefinitionName", bindDefinition.Name)
+	}
+}
+
 // buildResourceLabels creates labels for resources managed by the auth-operator.
 // It merges the source labels with the standard auth-operator managed-by label.
 func buildResourceLabels(sourceLabels map[string]string) map[string]string {
@@ -263,7 +307,13 @@ func (r *BindDefinitionReconciler) createServiceAccounts(
 ) createServiceAccountResult {
 	log := log.FromContext(ctx)
 	saSubjects := []rbacv1.Subject{}
+
+	// Use the configured value from spec, defaulting to true for backward compatibility
+	// with Kubernetes native ServiceAccount behavior
 	automountToken := true
+	if bindDef.Spec.AutomountServiceAccountToken != nil {
+		automountToken = *bindDef.Spec.AutomountServiceAccountToken
+	}
 
 	for _, subject := range bindDef.Spec.Subjects {
 		if subject.Kind != authnv1alpha1.BindSubjectServiceAccount {
@@ -556,7 +606,13 @@ func (r *BindDefinitionReconciler) updateServiceAccounts(
 	bindDef *authnv1alpha1.BindDefinition,
 ) error {
 	log := log.FromContext(ctx)
+
+	// Use the configured value from spec, defaulting to true for backward compatibility
+	// with Kubernetes native ServiceAccount behavior
 	automountToken := true
+	if bindDef.Spec.AutomountServiceAccountToken != nil {
+		automountToken = *bindDef.Spec.AutomountServiceAccountToken
+	}
 
 	for _, subject := range bindDef.Spec.Subjects {
 		if subject.Kind != authnv1alpha1.BindSubjectServiceAccount {

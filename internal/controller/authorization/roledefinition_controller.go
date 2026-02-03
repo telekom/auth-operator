@@ -140,10 +140,20 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	log.V(2).Info("RoleDefinition retrieved", "roleDefinitionName", roleDefinition.Name,
 		"targetRole", roleDefinition.Spec.TargetRole, "targetName", roleDefinition.Spec.TargetName)
 
+	// Mark as Reconciling at the start (kstatus) - best effort, don't fail reconciliation
+	conditions.MarkReconciling(roleDefinition, roleDefinition.Generation,
+		authnv1alpha1.ReconcilingReasonProgressing, authnv1alpha1.ReconcilingMessageProgressing)
+	roleDefinition.Status.ObservedGeneration = roleDefinition.Generation
+	if err := r.client.Status().Update(ctx, roleDefinition); err != nil {
+		log.V(1).Info("failed to update Reconciling status (will retry)", "roleDefinitionName", roleDefinition.Name, "error", err)
+		// Don't return error - continue with reconciliation, markReady will refetch
+	}
+
 	// Build initial role object for deletion handling
 	role, err := r.buildRoleObject(roleDefinition)
 	if err != nil {
 		log.Error(err, "invalid RoleDefinition spec", "roleDefinitionName", roleDefinition.Name, "targetRole", roleDefinition.Spec.TargetRole)
+		r.markStalled(ctx, roleDefinition, err)
 		return ctrl.Result{}, err
 	}
 
@@ -154,21 +164,23 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	// Ensure finalizer
 	if err := r.ensureFinalizer(ctx, roleDefinition); err != nil {
+		r.markStalled(ctx, roleDefinition, err)
 		return ctrl.Result{}, err
 	}
+	// Note: Intermediate status updates are best-effort. markReady/markStalled will refetch and set final state.
 	conditions.MarkTrue(roleDefinition, authnv1alpha1.FinalizerCondition, roleDefinition.Generation,
 		authnv1alpha1.FinalizerReason, authnv1alpha1.FinalizerMessage)
 	if err := r.client.Status().Update(ctx, roleDefinition); err != nil {
-		log.Error(err, "failed to update FinalizerCondition status", "roleDefinitionName", roleDefinition.Name)
-		return ctrl.Result{}, err
+		log.V(1).Info("failed to update FinalizerCondition status (will retry)", "roleDefinitionName", roleDefinition.Name, "error", err)
+		// Continue - markReady will refetch
 	}
 
 	// Get API resources
 	conditions.MarkTrue(roleDefinition, authnv1alpha1.APIDiscoveryCondition, roleDefinition.Generation,
 		authnv1alpha1.APIDiscoveryReason, authnv1alpha1.APIDiscoveryMessage)
 	if err := r.client.Status().Update(ctx, roleDefinition); err != nil {
-		log.Error(err, "failed to update APIDiscoveryCondition status", "roleDefinitionName", roleDefinition.Name)
-		return ctrl.Result{}, err
+		log.V(1).Info("failed to update APIDiscoveryCondition status (will retry)", "roleDefinitionName", roleDefinition.Name, "error", err)
+		// Continue - markReady will refetch
 	}
 
 	apiResources, err := r.resourceTracker.GetAPIResources()
@@ -178,6 +190,7 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 	if err != nil {
 		log.Error(err, "failed to get API resources", "roleDefinitionName", roleDefinition.Name)
+		r.markStalled(ctx, roleDefinition, err)
 		return ctrl.Result{}, err
 	}
 
@@ -185,6 +198,7 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	rulesByAPIGroupAndVerbs, err := r.filterAPIResourcesForRoleDefinition(ctx, roleDefinition, apiResources)
 	if err != nil {
 		log.Error(err, "failed to filter API resources for RoleDefinition", "roleDefinitionName", roleDefinition.Name)
+		r.markStalled(ctx, roleDefinition, err)
 		return ctrl.Result{}, err
 	}
 	finalRules := r.buildFinalRules(roleDefinition, rulesByAPIGroupAndVerbs)
@@ -201,8 +215,8 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		"roleDefinitionName", roleDefinition.Name, "rulesCount", len(finalRules))
 
 	if err := r.client.Status().Update(ctx, roleDefinition); err != nil {
-		log.Error(err, "failed to update status after resource discovery", "roleDefinitionName", roleDefinition.Name)
-		return ctrl.Result{}, err
+		log.V(1).Info("failed to update status after resource discovery (will retry)", "roleDefinitionName", roleDefinition.Name, "error", err)
+		// Continue - markReady will refetch
 	}
 
 	// Build role with rules
@@ -221,11 +235,13 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			return r.createRole(ctx, roleDefinition, roleWithRules)
 		}
 		log.Error(err, "Failed to get existing role", "roleDefinitionName", roleDefinition.Name)
+		r.markStalled(ctx, roleDefinition, err)
 		return ctrl.Result{}, err
 	}
 
 	// Update existing role if needed
 	if err := r.updateRole(ctx, roleDefinition, existingRole, finalRules); err != nil {
+		r.markStalled(ctx, roleDefinition, err)
 		return ctrl.Result{}, err
 	}
 

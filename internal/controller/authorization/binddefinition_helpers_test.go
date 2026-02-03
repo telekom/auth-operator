@@ -10,6 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -410,6 +411,259 @@ var _ = Describe("BindDefinition Helpers", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal(deleteResultDeleted))
 
+			Expect(k8sClient.Delete(ctx, bindDef)).To(Succeed())
+		})
+	})
+
+	Describe("createServiceAccounts", func() {
+		It("should create ServiceAccount with automountServiceAccountToken=true when field is nil (backward compatibility)", func() {
+			bindDef := &authorizationv1alpha1.BindDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-binddef-sa-nil-automount",
+					Namespace: "default",
+				},
+				Spec: authorizationv1alpha1.BindDefinitionSpec{
+					TargetName: "test-sa-nil-automount",
+					Subjects: []rbacv1.Subject{
+						{
+							Kind:      "ServiceAccount",
+							Name:      "test-sa-nil-automount",
+							Namespace: "default",
+						},
+					},
+					AutomountServiceAccountToken: nil, // Explicitly nil - should default to true
+				},
+			}
+			Expect(k8sClient.Create(ctx, bindDef)).To(Succeed())
+
+			// Fetch to get UID
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(bindDef), bindDef)).To(Succeed())
+
+			reconciler := &BindDefinitionReconciler{
+				client:   k8sClient,
+				scheme:   k8sClient.Scheme(),
+				recorder: recorder,
+			}
+
+			result := reconciler.createServiceAccounts(ctx, bindDef)
+			Expect(result.err).NotTo(HaveOccurred())
+
+			// Verify ServiceAccount was created with automountServiceAccountToken=true (backward compatibility)
+			sa := &corev1.ServiceAccount{}
+			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: "test-sa-nil-automount", Namespace: "default"}, sa)).To(Succeed())
+			Expect(sa.AutomountServiceAccountToken).NotTo(BeNil())
+			Expect(*sa.AutomountServiceAccountToken).To(BeTrue())
+
+			// Cleanup
+			Expect(k8sClient.Delete(ctx, sa)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, bindDef)).To(Succeed())
+		})
+
+		It("should create ServiceAccount with automountServiceAccountToken=true when explicitly set", func() {
+			bindDef := &authorizationv1alpha1.BindDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-binddef-sa-true-automount",
+					Namespace: "default",
+				},
+				Spec: authorizationv1alpha1.BindDefinitionSpec{
+					TargetName: "test-sa-true-automount",
+					Subjects: []rbacv1.Subject{
+						{
+							Kind:      "ServiceAccount",
+							Name:      "test-sa-true-automount",
+							Namespace: "default",
+						},
+					},
+					AutomountServiceAccountToken: ptr.To(true),
+				},
+			}
+			Expect(k8sClient.Create(ctx, bindDef)).To(Succeed())
+
+			// Fetch to get UID
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(bindDef), bindDef)).To(Succeed())
+
+			reconciler := &BindDefinitionReconciler{
+				client:   k8sClient,
+				scheme:   k8sClient.Scheme(),
+				recorder: recorder,
+			}
+
+			result := reconciler.createServiceAccounts(ctx, bindDef)
+			Expect(result.err).NotTo(HaveOccurred())
+
+			// Verify ServiceAccount was created with automountServiceAccountToken=true
+			sa := &corev1.ServiceAccount{}
+			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: "test-sa-true-automount", Namespace: "default"}, sa)).To(Succeed())
+			Expect(sa.AutomountServiceAccountToken).NotTo(BeNil())
+			Expect(*sa.AutomountServiceAccountToken).To(BeTrue())
+
+			// Cleanup
+			Expect(k8sClient.Delete(ctx, sa)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, bindDef)).To(Succeed())
+		})
+
+		It("should create ServiceAccount with automountServiceAccountToken=false when explicitly set", func() {
+			bindDef := &authorizationv1alpha1.BindDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-binddef-sa-false-automount",
+					Namespace: "default",
+				},
+				Spec: authorizationv1alpha1.BindDefinitionSpec{
+					TargetName: "test-sa-false-automount",
+					Subjects: []rbacv1.Subject{
+						{
+							Kind:      "ServiceAccount",
+							Name:      "test-sa-false-automount",
+							Namespace: "default",
+						},
+					},
+					AutomountServiceAccountToken: ptr.To(false),
+				},
+			}
+			Expect(k8sClient.Create(ctx, bindDef)).To(Succeed())
+
+			// Fetch to get UID
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(bindDef), bindDef)).To(Succeed())
+
+			reconciler := &BindDefinitionReconciler{
+				client:   k8sClient,
+				scheme:   k8sClient.Scheme(),
+				recorder: recorder,
+			}
+
+			result := reconciler.createServiceAccounts(ctx, bindDef)
+			Expect(result.err).NotTo(HaveOccurred())
+
+			// Verify ServiceAccount was created with automountServiceAccountToken=false
+			sa := &corev1.ServiceAccount{}
+			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: "test-sa-false-automount", Namespace: "default"}, sa)).To(Succeed())
+			Expect(sa.AutomountServiceAccountToken).NotTo(BeNil())
+			Expect(*sa.AutomountServiceAccountToken).To(BeFalse())
+
+			// Cleanup
+			Expect(k8sClient.Delete(ctx, sa)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, bindDef)).To(Succeed())
+		})
+	})
+
+	Describe("updateServiceAccounts", func() {
+		It("should update ServiceAccount automountServiceAccountToken when value changes from false to true", func() {
+			// Create BindDefinition first with automountServiceAccountToken=false
+			bindDef := &authorizationv1alpha1.BindDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-binddef-sa-update-automount",
+					Namespace: "default",
+				},
+				Spec: authorizationv1alpha1.BindDefinitionSpec{
+					TargetName: "test-sa-update-automount",
+					Subjects: []rbacv1.Subject{
+						{
+							Kind:      "ServiceAccount",
+							Name:      "test-sa-update-automount",
+							Namespace: "default",
+						},
+					},
+					AutomountServiceAccountToken: ptr.To(false),
+				},
+			}
+			Expect(k8sClient.Create(ctx, bindDef)).To(Succeed())
+
+			// Fetch to get UID
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(bindDef), bindDef)).To(Succeed())
+
+			// Create ServiceAccount with owner reference and automountServiceAccountToken=false
+			sa := &corev1.ServiceAccount{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-sa-update-automount",
+					Namespace: "default",
+					Labels:    buildResourceLabels(bindDef.Labels),
+				},
+				AutomountServiceAccountToken: ptr.To(false),
+			}
+			Expect(controllerutil.SetControllerReference(bindDef, sa, k8sClient.Scheme())).To(Succeed())
+			Expect(k8sClient.Create(ctx, sa)).To(Succeed())
+
+			// Update BindDefinition to set automountServiceAccountToken=true
+			bindDef.Spec.AutomountServiceAccountToken = ptr.To(true)
+			Expect(k8sClient.Update(ctx, bindDef)).To(Succeed())
+
+			reconciler := &BindDefinitionReconciler{
+				client:   k8sClient,
+				scheme:   k8sClient.Scheme(),
+				recorder: recorder,
+			}
+
+			err := reconciler.updateServiceAccounts(ctx, bindDef)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify ServiceAccount was updated with automountServiceAccountToken=true
+			updatedSa := &corev1.ServiceAccount{}
+			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: "test-sa-update-automount", Namespace: "default"}, updatedSa)).To(Succeed())
+			Expect(updatedSa.AutomountServiceAccountToken).NotTo(BeNil())
+			Expect(*updatedSa.AutomountServiceAccountToken).To(BeTrue())
+
+			// Cleanup
+			Expect(k8sClient.Delete(ctx, updatedSa)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, bindDef)).To(Succeed())
+		})
+
+		It("should update ServiceAccount automountServiceAccountToken when value changes from true to false", func() {
+			// Create BindDefinition first with automountServiceAccountToken=true
+			bindDef := &authorizationv1alpha1.BindDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-binddef-sa-update-to-false",
+					Namespace: "default",
+				},
+				Spec: authorizationv1alpha1.BindDefinitionSpec{
+					TargetName: "test-sa-update-to-false",
+					Subjects: []rbacv1.Subject{
+						{
+							Kind:      "ServiceAccount",
+							Name:      "test-sa-update-to-false",
+							Namespace: "default",
+						},
+					},
+					AutomountServiceAccountToken: ptr.To(true),
+				},
+			}
+			Expect(k8sClient.Create(ctx, bindDef)).To(Succeed())
+
+			// Fetch to get UID
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(bindDef), bindDef)).To(Succeed())
+
+			// Create ServiceAccount with owner reference and automountServiceAccountToken=true
+			sa := &corev1.ServiceAccount{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-sa-update-to-false",
+					Namespace: "default",
+					Labels:    buildResourceLabels(bindDef.Labels),
+				},
+				AutomountServiceAccountToken: ptr.To(true),
+			}
+			Expect(controllerutil.SetControllerReference(bindDef, sa, k8sClient.Scheme())).To(Succeed())
+			Expect(k8sClient.Create(ctx, sa)).To(Succeed())
+
+			// Update BindDefinition to set automountServiceAccountToken=false
+			bindDef.Spec.AutomountServiceAccountToken = ptr.To(false)
+			Expect(k8sClient.Update(ctx, bindDef)).To(Succeed())
+
+			reconciler := &BindDefinitionReconciler{
+				client:   k8sClient,
+				scheme:   k8sClient.Scheme(),
+				recorder: recorder,
+			}
+
+			err := reconciler.updateServiceAccounts(ctx, bindDef)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify ServiceAccount was updated with automountServiceAccountToken=false
+			updatedSa := &corev1.ServiceAccount{}
+			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: "test-sa-update-to-false", Namespace: "default"}, updatedSa)).To(Succeed())
+			Expect(updatedSa.AutomountServiceAccountToken).NotTo(BeNil())
+			Expect(*updatedSa.AutomountServiceAccountToken).To(BeFalse())
+
+			// Cleanup
+			Expect(k8sClient.Delete(ctx, updatedSa)).To(Succeed())
 			Expect(k8sClient.Delete(ctx, bindDef)).To(Succeed())
 		})
 	})

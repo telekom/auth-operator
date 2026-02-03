@@ -12,6 +12,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -24,6 +25,50 @@ import (
 
 // ErrInvalidTargetRole is returned when the target role type is not valid.
 var ErrInvalidTargetRole = fmt.Errorf("invalid target role type: must be ClusterRole or Role")
+
+// markStalled marks the RoleDefinition as stalled with the given error (kstatus pattern).
+// It refetches the resource to avoid optimistic locking conflicts from stale resourceVersion.
+func (r *RoleDefinitionReconciler) markStalled(
+	ctx context.Context,
+	roleDefinition *authnv1alpha1.RoleDefinition,
+	err error,
+) {
+	log := log.FromContext(ctx)
+	// Refetch to get latest resourceVersion
+	fresh := &authnv1alpha1.RoleDefinition{}
+	if getErr := r.client.Get(ctx, types.NamespacedName{Name: roleDefinition.Name}, fresh); getErr != nil {
+		log.Error(getErr, "failed to refetch RoleDefinition for Stalled update", "roleDefinitionName", roleDefinition.Name)
+		return
+	}
+	conditions.MarkStalled(fresh, fresh.Generation,
+		authnv1alpha1.StalledReasonError, authnv1alpha1.StalledMessageError, err.Error())
+	fresh.Status.ObservedGeneration = fresh.Generation
+	if updateErr := r.client.Status().Update(ctx, fresh); updateErr != nil {
+		log.Error(updateErr, "failed to update Stalled status", "roleDefinitionName", roleDefinition.Name)
+	}
+}
+
+// markReady marks the RoleDefinition as ready (kstatus pattern).
+// It refetches the resource to avoid optimistic locking conflicts from stale resourceVersion.
+func (r *RoleDefinitionReconciler) markReady(
+	ctx context.Context,
+	roleDefinition *authnv1alpha1.RoleDefinition,
+) {
+	log := log.FromContext(ctx)
+	// Refetch to get latest resourceVersion
+	fresh := &authnv1alpha1.RoleDefinition{}
+	if err := r.client.Get(ctx, types.NamespacedName{Name: roleDefinition.Name}, fresh); err != nil {
+		log.Error(err, "failed to refetch RoleDefinition for Ready update", "roleDefinitionName", roleDefinition.Name)
+		return
+	}
+	conditions.MarkReady(fresh, fresh.Generation,
+		authnv1alpha1.ReadyReasonReconciled, authnv1alpha1.ReadyMessageReconciled)
+	fresh.Status.ObservedGeneration = fresh.Generation
+	fresh.Status.RoleReconciled = true
+	if err := r.client.Status().Update(ctx, fresh); err != nil {
+		log.Error(err, "failed to update Ready status", "roleDefinitionName", roleDefinition.Name)
+	}
+}
 
 // buildRoleObject creates the initial role object (ClusterRole or Role) based on spec.
 // Returns an error if the target role type is not valid.
@@ -226,11 +271,7 @@ func (r *RoleDefinitionReconciler) createRole(
 			"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
 		conditions.MarkFalse(roleDefinition, authnv1alpha1.OwnerRefCondition, roleDefinition.Generation,
 			authnv1alpha1.OwnerRefReason, authnv1alpha1.OwnerRefMessage)
-		if updateErr := r.client.Status().Update(ctx, roleDefinition); updateErr != nil {
-			log.Error(updateErr, "Failed to update status after OwnerRef error",
-				"roleDefinitionName", roleDefinition.Name)
-			return ctrl.Result{}, updateErr
-		}
+		r.markStalled(ctx, roleDefinition, err)
 		return ctrl.Result{}, err
 	}
 
@@ -240,6 +281,7 @@ func (r *RoleDefinitionReconciler) createRole(
 	if err := r.client.Create(ctx, role); err != nil {
 		log.Error(err, "Failed to create role",
 			"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
+		r.markStalled(ctx, roleDefinition, err)
 		return ctrl.Result{}, err
 	}
 
@@ -258,6 +300,9 @@ func (r *RoleDefinitionReconciler) createRole(
 
 	r.recorder.Eventf(roleDefinition, corev1.EventTypeNormal, "Creation",
 		"Created target resource %s %s", roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetName)
+
+	// Mark Ready (kstatus)
+	r.markReady(ctx, roleDefinition)
 
 	return ctrl.Result{}, nil
 }
@@ -292,6 +337,8 @@ func (r *RoleDefinitionReconciler) updateRole(
 	if helpers.PolicyRulesEqual(existingRules, finalRules) {
 		log.V(3).Info("Role rules already up-to-date - no update needed",
 			"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
+		// Mark Ready even when no update was needed (kstatus)
+		r.markReady(ctx, roleDefinition)
 		return nil
 	}
 
@@ -327,6 +374,9 @@ func (r *RoleDefinitionReconciler) updateRole(
 
 	r.recorder.Eventf(roleDefinition, corev1.EventTypeNormal, "Update",
 		"Updated target resource %s %s", roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetName)
+
+	// Mark Ready (kstatus)
+	r.markReady(ctx, roleDefinition)
 
 	return nil
 }

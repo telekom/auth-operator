@@ -18,6 +18,10 @@ spec:
   scope: Cluster
   versions:
   - additionalPrinterColumns:
+    - description: Whether the BindDefinition is ready
+      jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
     - description: Time duration since creation of this BindDefinition
       jsonPath: .metadata.creationTimestamp
       name: Age
@@ -25,11 +29,6 @@ spec:
     - description: The name of the child object created by this BindDefinition
       jsonPath: .spec.targetName
       name: Bind name
-      type: string
-    - description: The boolean value signifying if the target role has been reconciled
-        or not
-      jsonPath: .status.bindReconciled
-      name: Reconciled bind
       type: string
     name: v1alpha1
     schema:
@@ -56,6 +55,15 @@ spec:
           spec:
             description: BindDefinitionSpec defines the desired state of BindDefinition
             properties:
+              automountServiceAccountToken:
+                default: true
+                description: |-
+                  AutomountServiceAccountToken controls whether to automount API credentials for ServiceAccounts
+                  created by this BindDefinition. Defaults to true for backward compatibility with Kubernetes
+                  native ServiceAccount behavior. Set to false to improve security by preventing automatic
+                  token mounting.
+                  Only applies when Subjects contain ServiceAccount entries that need to be auto-created.
+                type: boolean
               clusterRoleBindings:
                 description: List of ClusterRoles to which subjects will be bound
                   to. The list is a RoleRef which means we have to specify the full
@@ -289,6 +297,12 @@ spec:
                   type: object
                   x-kubernetes-map-type: atomic
                 type: array
+              observedGeneration:
+                description: |-
+                  ObservedGeneration is the last observed generation of the resource.
+                  This is used by kstatus to determine if the resource is current.
+                format: int64
+                type: integer
             type: object
         type: object
     served: true
