@@ -17,6 +17,9 @@ import (
 	"github.com/telekom/auth-operator/pkg/discovery"
 	"github.com/telekom/auth-operator/pkg/indexer"
 
+	// Import metrics package to register custom Prometheus metrics
+	_ "github.com/telekom/auth-operator/pkg/metrics"
+
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
