@@ -379,7 +379,7 @@ func (r *bindDefinitionReconciler) createClusterRoleBindings(
 			},
 			Subjects: bindDef.Spec.Subjects,
 			RoleRef: rbacv1.RoleRef{
-				APIGroup: "rbac.authorization.k8s.io",
+				APIGroup: rbacv1.GroupName,
 				Kind:     "ClusterRole",
 				Name:     clusterRoleRef,
 			},
@@ -525,7 +525,7 @@ func (r *bindDefinitionReconciler) createSingleRoleBinding(
 		},
 		Subjects: bindDef.Spec.Subjects,
 		RoleRef: rbacv1.RoleRef{
-			APIGroup: "rbac.authorization.k8s.io",
+			APIGroup: rbacv1.GroupName,
 			Kind:     roleKind,
 			Name:     roleRef,
 		},
@@ -636,7 +636,7 @@ func (r *bindDefinitionReconciler) updateClusterRoleBindings(
 			},
 			Subjects: bindDef.Spec.Subjects,
 			RoleRef: rbacv1.RoleRef{
-				APIGroup: "rbac.authorization.k8s.io",
+				APIGroup: rbacv1.GroupName,
 				Kind:     "ClusterRole",
 				Name:     clusterRoleRef,
 			},
@@ -721,7 +721,7 @@ func (r *bindDefinitionReconciler) updateSingleRoleBinding(
 		},
 		Subjects: bindDef.Spec.Subjects,
 		RoleRef: rbacv1.RoleRef{
-			APIGroup: "rbac.authorization.k8s.io",
+			APIGroup: rbacv1.GroupName,
 			Kind:     roleKind,
 			Name:     roleRef,
 		},
