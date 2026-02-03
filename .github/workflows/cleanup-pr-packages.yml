@@ -1,0 +1,181 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: Cleanup PR Packages
+
+on:
+  schedule:
+    # Run daily at 3:00 AM UTC
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (do not delete packages)'
+        required: false
+        default: 'false'
+        type: boolean
+
+permissions:
+  contents: read
+  packages: write
+  pull-requests: read
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  cleanup-container-images:
+    name: Cleanup PR Container Images
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Get closed PR numbers
+        id: closed-prs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Get all closed PRs from the last 90 days
+          CLOSED_PRS=$(gh pr list --state closed --limit 500 --json number --jq '.[].number' | tr '\n' ' ')
+          echo "closed_prs=${CLOSED_PRS}" >> $GITHUB_OUTPUT
+          echo "Found closed PRs: ${CLOSED_PRS}"
+
+      - name: List and cleanup PR container images
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+        run: |
+          set -euo pipefail
+          
+          PACKAGE_NAME="auth-operator"
+          OWNER="${{ github.repository_owner }}"
+          
+          echo "Fetching container image versions for ${PACKAGE_NAME}..."
+          
+          # Get all package versions
+          VERSIONS=$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "/orgs/${OWNER}/packages/container/${PACKAGE_NAME}/versions" \
+            --paginate \
+            --jq '.[] | select(.metadata.container.tags[] | test("^pr[0-9]+-")) | {id: .id, tags: .metadata.container.tags}' 2>/dev/null || echo "")
+          
+          if [ -z "$VERSIONS" ]; then
+            echo "No PR container images found."
+            exit 0
+          fi
+          
+          echo "Found PR container images:"
+          echo "$VERSIONS" | jq -c '.'
+          
+          # Process each PR image
+          echo "$VERSIONS" | jq -c '.' | while read -r version; do
+            VERSION_ID=$(echo "$version" | jq -r '.id')
+            TAGS=$(echo "$version" | jq -r '.tags[]' | head -1)
+            
+            # Extract PR number from tag (format: pr<number>-<sha>)
+            PR_NUM=$(echo "$TAGS" | sed -n 's/^pr\([0-9]*\)-.*/\1/p')
+            
+            if [ -z "$PR_NUM" ]; then
+              echo "Could not extract PR number from tag: $TAGS"
+              continue
+            fi
+            
+            # Check if PR is closed
+            PR_STATE=$(gh pr view "$PR_NUM" --json state --jq '.state' 2>/dev/null || echo "UNKNOWN")
+            
+            if [ "$PR_STATE" = "CLOSED" ] || [ "$PR_STATE" = "MERGED" ]; then
+              echo "PR #${PR_NUM} is ${PR_STATE}, cleaning up image version ${VERSION_ID} with tags: ${TAGS}"
+              
+              if [ "$DRY_RUN" = "true" ]; then
+                echo "[DRY RUN] Would delete version ${VERSION_ID}"
+              else
+                gh api \
+                  --method DELETE \
+                  -H "Accept: application/vnd.github+json" \
+                  -H "X-GitHub-Api-Version: 2022-11-28" \
+                  "/orgs/${OWNER}/packages/container/${PACKAGE_NAME}/versions/${VERSION_ID}" \
+                  && echo "Deleted version ${VERSION_ID}" \
+                  || echo "Failed to delete version ${VERSION_ID}"
+              fi
+            else
+              echo "PR #${PR_NUM} is ${PR_STATE}, keeping image version ${VERSION_ID}"
+            fi
+          done
+          
+          echo "Container image cleanup complete."
+
+  cleanup-helm-charts:
+    name: Cleanup PR Helm Charts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: List and cleanup PR Helm charts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+        run: |
+          set -euo pipefail
+          
+          PACKAGE_NAME="auth-operator"
+          OWNER="${{ github.repository_owner }}"
+          
+          echo "Fetching Helm chart versions for ${PACKAGE_NAME}..."
+          
+          # Get all package versions for Helm charts
+          # Helm charts are stored under the 'charts' package in the org
+          VERSIONS=$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "/orgs/${OWNER}/packages/container/charts%2F${PACKAGE_NAME}/versions" \
+            --paginate \
+            --jq '.[] | select(.metadata.container.tags[] | test("^0\\.0\\.0-pr[0-9]+\\.")) | {id: .id, tags: .metadata.container.tags}' 2>/dev/null || echo "")
+          
+          if [ -z "$VERSIONS" ]; then
+            echo "No PR Helm charts found."
+            exit 0
+          fi
+          
+          echo "Found PR Helm charts:"
+          echo "$VERSIONS" | jq -c '.'
+          
+          # Process each PR chart
+          echo "$VERSIONS" | jq -c '.' | while read -r version; do
+            VERSION_ID=$(echo "$version" | jq -r '.id')
+            TAGS=$(echo "$version" | jq -r '.tags[]' | head -1)
+            
+            # Extract PR number from tag (format: 0.0.0-pr<number>.<sha>)
+            PR_NUM=$(echo "$TAGS" | sed -n 's/^0\.0\.0-pr\([0-9]*\)\..*/\1/p')
+            
+            if [ -z "$PR_NUM" ]; then
+              echo "Could not extract PR number from tag: $TAGS"
+              continue
+            fi
+            
+            # Check if PR is closed
+            PR_STATE=$(gh pr view "$PR_NUM" --json state --jq '.state' 2>/dev/null || echo "UNKNOWN")
+            
+            if [ "$PR_STATE" = "CLOSED" ] || [ "$PR_STATE" = "MERGED" ]; then
+              echo "PR #${PR_NUM} is ${PR_STATE}, cleaning up chart version ${VERSION_ID} with tags: ${TAGS}"
+              
+              if [ "$DRY_RUN" = "true" ]; then
+                echo "[DRY RUN] Would delete version ${VERSION_ID}"
+              else
+                gh api \
+                  --method DELETE \
+                  -H "Accept: application/vnd.github+json" \
+                  -H "X-GitHub-Api-Version: 2022-11-28" \
+                  "/orgs/${OWNER}/packages/container/charts%2F${PACKAGE_NAME}/versions/${VERSION_ID}" \
+                  && echo "Deleted version ${VERSION_ID}" \
+                  || echo "Failed to delete version ${VERSION_ID}"
+              fi
+            else
+              echo "PR #${PR_NUM} is ${PR_STATE}, keeping chart version ${VERSION_ID}"
+            fi
+          done
+          
+          echo "Helm chart cleanup complete."
