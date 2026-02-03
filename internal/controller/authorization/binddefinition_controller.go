@@ -205,15 +205,25 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, fmt.Errorf("update finalizer condition for BindDefinition %s: %w", bindDefinition.Name, err)
 	}
 
+	// Collect namespaces once for both create and update paths
+	// This avoids duplicate API calls to list namespaces
+	namespaceSet, err := r.collectNamespaces(ctx, bindDefinition)
+	if err != nil {
+		log.Error(err, "Unable to collect namespaces", "bindDefinitionName", bindDefinition.Name)
+		return ctrl.Result{}, fmt.Errorf("collect namespaces for BindDefinition %s: %w", bindDefinition.Name, err)
+	}
+
+	activeNamespaces := r.filterActiveNamespaces(ctx, bindDefinition, namespaceSet)
+
 	// Reconcile create path
-	resultCreate, err := r.reconcileCreate(ctx, bindDefinition)
+	resultCreate, err := r.reconcileCreate(ctx, bindDefinition, activeNamespaces)
 	if err != nil {
 		log.Error(err, "Error occurred in reconcileCreate function")
 		return resultCreate, err
 	}
 
 	// Reconcile update path
-	resultUpdate, err := r.reconcileUpdate(ctx, bindDefinition)
+	resultUpdate, err := r.reconcileUpdate(ctx, bindDefinition, activeNamespaces)
 	if err != nil {
 		log.Error(err, "Error occurred in reconcileUpdate function")
 		return resultUpdate, err
@@ -404,17 +414,10 @@ func (r *BindDefinitionReconciler) deleteRoleBindingWithStatusUpdate(
 }
 
 // Reconcile BindDefinition method
-func (r *BindDefinitionReconciler) reconcileCreate(ctx context.Context, bindDefinition *authnv1alpha1.BindDefinition) (ctrl.Result, error) {
+func (r *BindDefinitionReconciler) reconcileCreate(ctx context.Context, bindDefinition *authnv1alpha1.BindDefinition, activeNamespaces []corev1.Namespace) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 	log.V(1).Info("starting reconcileCreate", "bindDefinitionName", bindDefinition.Name, "namespace", bindDefinition.Namespace)
 
-	namespaceSet, err := r.collectNamespaces(ctx, bindDefinition)
-	if err != nil {
-		log.Error(err, "Unable to collect namespaces in reconcile Update function")
-		return ctrl.Result{}, err
-	}
-
-	activeNamespaces := r.filterActiveNamespaces(ctx, bindDefinition, namespaceSet)
 	log.V(2).Info("active namespaces count", "bindDefinitionName", bindDefinition.Name, "activeNamespaceCount", len(activeNamespaces))
 
 	// Validate role references exist - set condition but continue processing
@@ -456,8 +459,7 @@ func (r *BindDefinitionReconciler) reconcileCreate(ctx context.Context, bindDefi
 	}
 
 	conditions.MarkTrue(bindDefinition, authnv1alpha1.CreateCondition, bindDefinition.Generation, authnv1alpha1.CreateReason, authnv1alpha1.CreateMessage)
-	err = r.client.Status().Update(ctx, bindDefinition)
-	if err != nil {
+	if err := r.client.Status().Update(ctx, bindDefinition); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -570,23 +572,11 @@ func (r *BindDefinitionReconciler) collectNamespaces(ctx context.Context, bindDe
 	return namespaceSet, nil
 }
 
-func (r *BindDefinitionReconciler) reconcileUpdate(ctx context.Context, bindDefinition *authnv1alpha1.BindDefinition) (ctrl.Result, error) {
+func (r *BindDefinitionReconciler) reconcileUpdate(ctx context.Context, bindDefinition *authnv1alpha1.BindDefinition, activeNamespaces []corev1.Namespace) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 
-	namespaceSet, err := r.collectNamespaces(ctx, bindDefinition)
-	if err != nil {
-		log.Error(err, "Unable to collect namespaces in reconcile Update function")
-		return ctrl.Result{}, err
-	}
-
-	activeNamespaces := []corev1.Namespace{}
-	for _, ns := range namespaceSet {
-		if ns.Status.Phase != corev1.NamespaceTerminating {
-			activeNamespaces = append(activeNamespaces, ns)
-		} else {
-			log.Info("Skipping creation in terminating namespace", "Namespace", ns.Name)
-		}
-	}
+	log.V(2).Info("reconcileUpdate with active namespaces",
+		"bindDefinitionName", bindDefinition.Name, "activeNamespaceCount", len(activeNamespaces))
 
 	// Update ServiceAccount resources
 	if err := r.updateServiceAccounts(ctx, bindDefinition); err != nil {
