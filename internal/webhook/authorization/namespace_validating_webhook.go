@@ -95,9 +95,9 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 
 		// Define the label keys of interest
 		labelKeys := []string{
-			"t-caas.telekom.com/owner",
-			"t-caas.telekom.com/tenant",
-			"t-caas.telekom.com/thirdparty",
+			authzv1alpha1.LabelKeyOwner,
+			authzv1alpha1.LabelKeyTenant,
+			authzv1alpha1.LabelKeyThirdParty,
 		}
 
 		// If TDGMigration is enabled, add the additional label key
