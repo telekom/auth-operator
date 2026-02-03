@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -10,7 +11,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	"github.com/pkg/errors"
+	pkgerrors "github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -253,13 +254,21 @@ func (r *ResourceTracker) collectAPIResources(ctx context.Context) (bool, error)
 	log.V(2).Info("discovered API groups", "groupCount", len(discoveredAPIGroups.Groups))
 
 	// Fetch all existing API Resources and filter them against RestrictedResources
-	var errorGroup errgroup.Group
+	errorGroup, groupCtx := errgroup.WithContext(ctx)
 
 	// Collect results
 	apiResourcesByGroupVersion := make(APIResourcesByGroupVersion)
 	mutex := sync.Mutex{}
 
 	for _, apiGroup := range discoveredAPIGroups.Groups {
+		// Check context cancellation between API group iterations
+		select {
+		case <-ctx.Done():
+			log.V(1).Info("stopping API resource collection due to context cancellation")
+			return false, ctx.Err()
+		default:
+		}
+
 		for _, apiGroupVersion := range apiGroup.Versions {
 			// Copy loop variables to avoid closure capture bug
 			apiGroupName := apiGroup.Name
@@ -269,6 +278,13 @@ func (r *ResourceTracker) collectAPIResources(ctx context.Context) (bool, error)
 				Version: apiVersionStr,
 			}
 			errorGroup.Go(func() error {
+				// Check context before starting work
+				select {
+				case <-groupCtx.Done():
+					return groupCtx.Err()
+				default:
+				}
+
 				resources, err := r.collectAPIResourcesForGroupVersion(discoveryClient, apiGroupName, apiVersionStr)
 				if err != nil {
 					log.Error(err, "failed to discover API resources for group version",
@@ -284,6 +300,11 @@ func (r *ResourceTracker) collectAPIResources(ctx context.Context) (bool, error)
 		}
 	}
 	if err := errorGroup.Wait(); err != nil {
+		// Don't log context cancellation as an error
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			log.V(1).Info("API resource collection cancelled", "reason", err.Error())
+			return false, err
+		}
 		log.Error(err, "failed to discover resources concurrently")
 		return false, err
 	}
@@ -321,7 +342,7 @@ func (r *ResourceTracker) periodicCollection(ctx context.Context) {
 func (r *ResourceTracker) launchWatch(ctx context.Context) error {
 	watchBackoff := NewForeverWatchBackoff()
 	if err := ExponentialBackoffWithContext(ctx, watchBackoff, r.watchAPIResources); err != nil {
-		return errors.Wrap(err, "failed to launch CRD watch with backoff")
+		return pkgerrors.Wrap(err, "failed to launch CRD watch with backoff")
 	}
 
 	return nil
