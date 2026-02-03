@@ -227,6 +227,13 @@ func (r *bindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 func mergeReconcileResults(results ...ctrl.Result) ctrl.Result {
 	merged := ctrl.Result{}
 	for _, res := range results {
+		// Merge Requeue flag - if any result requests requeue, the merged result should too
+		// Note: Requeue is deprecated in favor of RequeueAfter, but we still need to handle
+		// it for backward compatibility with sub-reconcilers that may still use it.
+		if res.Requeue { //nolint:staticcheck // SA1019: Handling deprecated Requeue for compatibility
+			merged.Requeue = true //nolint:staticcheck // SA1019: Setting deprecated Requeue for compatibility
+		}
+		// Merge RequeueAfter - use the longest requeue duration
 		if res.RequeueAfter > 0 && (merged.RequeueAfter == 0 || res.RequeueAfter > merged.RequeueAfter) {
 			merged.RequeueAfter = res.RequeueAfter
 		}
