@@ -38,6 +38,9 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Use request context for proper cancellation and deadline propagation
 	ctx := r.Context()
 
+	// Ensure request body is closed to prevent resource leaks
+	defer func() { _ = r.Body.Close() }()
+
 	var sar authzv1.SubjectAccessReview
 
 	if err := json.NewDecoder(r.Body).Decode(&sar); err != nil {
