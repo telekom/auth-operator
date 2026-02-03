@@ -1,0 +1,293 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: Output Delta
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'api/**'
+      - 'internal/**'
+      - 'pkg/**'
+      - 'config/samples/**'
+      - 'go.mod'
+      - 'go.sum'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  GO_VERSION: "1.25"
+  KIND_VERSION: "v0.31.0"
+
+jobs:
+  output-delta:
+    name: Generate Output Delta
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          path: pr-branch
+
+      - name: Checkout main branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+          path: main-branch
+
+      - name: Setup Go
+        uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: pr-branch/go.sum
+
+      - name: Install kind
+        run: go install sigs.k8s.io/kind@${{ env.KIND_VERSION }}
+
+      - name: Create kind cluster
+        run: |
+          kind create cluster --name output-delta --wait 5m
+          kubectl cluster-info
+
+      - name: Install popular CRDs
+        run: |
+          KIND_CLUSTER_NAME=output-delta bash pr-branch/hack/ci/setup-kind-crds.sh
+
+      - name: Generate outputs from main branch
+        id: main-output
+        continue-on-error: true
+        run: |
+          cd main-branch
+          
+          # Build and load the operator image
+          make docker-build IMG=auth-operator:main
+          kind load docker-image auth-operator:main --name output-delta
+          
+          # Install CRDs
+          make install
+          
+          # Try to apply sample configs - this may fail if main branch samples are incompatible
+          if kubectl apply --server-side -k config/samples/ 2>/dev/null; then
+            sleep 10
+            echo "main_samples_applied=true" >> $GITHUB_OUTPUT
+          else
+            echo "::warning::Main branch samples failed to apply, will use PR branch samples as baseline"
+            echo "main_samples_applied=false" >> $GITHUB_OUTPUT
+          fi
+          
+          # Capture generated resources (may be empty if samples failed)
+          mkdir -p /tmp/main-output
+          kubectl get clusterroles -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/main-output/clusterroles.yaml 2>/dev/null || echo "# No ClusterRoles found" > /tmp/main-output/clusterroles.yaml
+          kubectl get roles -A -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/main-output/roles.yaml 2>/dev/null || echo "# No Roles found" > /tmp/main-output/roles.yaml
+          kubectl get clusterrolebindings -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/main-output/clusterrolebindings.yaml 2>/dev/null || echo "# No ClusterRoleBindings found" > /tmp/main-output/clusterrolebindings.yaml
+          kubectl get rolebindings -A -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/main-output/rolebindings.yaml 2>/dev/null || echo "# No RoleBindings found" > /tmp/main-output/rolebindings.yaml
+          
+          # Also capture by owner reference pattern (fallback)
+          kubectl get clusterroles -o yaml | grep -A 1000 "t-caas" > /tmp/main-output/clusterroles-tcaas.yaml 2>/dev/null || true
+          
+          # Cleanup samples but keep CRDs for PR branch
+          kubectl delete -k config/samples/ --ignore-not-found 2>/dev/null || true
+          
+          echo "Main branch outputs captured"
+
+      - name: Fallback - use PR samples for main baseline
+        if: steps.main-output.outputs.main_samples_applied == 'false' || steps.main-output.outcome == 'failure'
+        run: |
+          echo "::notice::Using PR branch samples as baseline since main branch samples failed to apply"
+          
+          cd pr-branch
+          
+          # Apply PR samples to generate baseline
+          kubectl apply --server-side -k config/samples/
+          sleep 10
+          
+          # Capture as "main" baseline
+          mkdir -p /tmp/main-output
+          kubectl get clusterroles -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/main-output/clusterroles.yaml 2>/dev/null || echo "# No ClusterRoles found" > /tmp/main-output/clusterroles.yaml
+          kubectl get roles -A -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/main-output/roles.yaml 2>/dev/null || echo "# No Roles found" > /tmp/main-output/roles.yaml
+          kubectl get clusterrolebindings -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/main-output/clusterrolebindings.yaml 2>/dev/null || echo "# No ClusterRoleBindings found" > /tmp/main-output/clusterrolebindings.yaml
+          kubectl get rolebindings -A -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/main-output/rolebindings.yaml 2>/dev/null || echo "# No RoleBindings found" > /tmp/main-output/rolebindings.yaml
+          
+          # Cleanup for PR branch fresh run
+          kubectl delete -k config/samples/ --ignore-not-found
+          
+          echo "Fallback baseline captured using PR branch samples"
+          echo "MAIN_FALLBACK=true" >> $GITHUB_ENV
+
+      - name: Generate outputs from PR branch
+        id: pr-output
+        run: |
+          cd pr-branch
+          
+          # Build and load the operator image
+          make docker-build IMG=auth-operator:pr
+          kind load docker-image auth-operator:pr --name output-delta
+          
+          # Update CRDs if changed
+          make install
+          
+          # Apply sample configs and wait for reconciliation
+          kubectl apply --server-side -k config/samples/
+          sleep 10
+          
+          # Capture generated resources
+          mkdir -p /tmp/pr-output
+          kubectl get clusterroles -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/pr-output/clusterroles.yaml 2>/dev/null || echo "# No ClusterRoles found" > /tmp/pr-output/clusterroles.yaml
+          kubectl get roles -A -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/pr-output/roles.yaml 2>/dev/null || echo "# No Roles found" > /tmp/pr-output/roles.yaml
+          kubectl get clusterrolebindings -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/pr-output/clusterrolebindings.yaml 2>/dev/null || echo "# No ClusterRoleBindings found" > /tmp/pr-output/clusterrolebindings.yaml
+          kubectl get rolebindings -A -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/pr-output/rolebindings.yaml 2>/dev/null || echo "# No RoleBindings found" > /tmp/pr-output/rolebindings.yaml
+          
+          # Also capture by owner reference pattern (fallback)
+          kubectl get clusterroles -o yaml | grep -A 1000 "t-caas" > /tmp/pr-output/clusterroles-tcaas.yaml 2>/dev/null || true
+          
+          echo "PR branch outputs captured"
+
+      - name: Generate diff
+        id: diff
+        run: |
+          mkdir -p /tmp/diff-output
+          
+          # Add fallback notice if applicable
+          if [ "$MAIN_FALLBACK" = "true" ]; then
+            echo "⚠️ NOTE: Main branch samples failed to apply. Using PR branch samples as baseline." >> /tmp/diff-output/full-diff.txt
+            echo "This means no meaningful diff can be generated - showing PR output only." >> /tmp/diff-output/full-diff.txt
+            echo "" >> /tmp/diff-output/full-diff.txt
+            echo "main_fallback=true" >> $GITHUB_OUTPUT
+          else
+            echo "main_fallback=false" >> $GITHUB_OUTPUT
+          fi
+          
+          # Generate diffs for each resource type
+          for resource in clusterroles roles clusterrolebindings rolebindings; do
+            echo "=== $resource ===" >> /tmp/diff-output/full-diff.txt
+            diff -u /tmp/main-output/$resource.yaml /tmp/pr-output/$resource.yaml >> /tmp/diff-output/full-diff.txt 2>&1 || true
+            echo "" >> /tmp/diff-output/full-diff.txt
+          done
+          
+          # Check if there are any differences
+          if diff -q /tmp/main-output /tmp/pr-output > /dev/null 2>&1; then
+            echo "has_diff=false" >> $GITHUB_OUTPUT
+            echo "No differences found between main and PR branch outputs"
+          else
+            echo "has_diff=true" >> $GITHUB_OUTPUT
+            echo "Differences found!"
+          fi
+          
+          # Store diff for comment (truncate if too long)
+          DIFF_CONTENT=$(cat /tmp/diff-output/full-diff.txt | head -500)
+          
+          # Use a delimiter for multiline output
+          echo "diff<<EOF" >> $GITHUB_OUTPUT
+          echo "$DIFF_CONTENT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Comment PR with delta
+        if: steps.diff.outputs.has_diff == 'true'
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const diff = `${{ steps.diff.outputs.diff }}`;
+            const mainFallback = '${{ steps.diff.outputs.main_fallback }}' === 'true';
+            
+            let fallbackNotice = '';
+            if (mainFallback) {
+              fallbackNotice = `
+            > ⚠️ **Note:** Main branch samples failed to apply (likely due to schema changes). 
+            > PR branch samples were used as baseline, so no meaningful diff is shown.
+            > This typically happens when sample files are updated with new required fields.
+            
+            `;
+            }
+            
+            const body = `## 📊 Output Delta Report
+            ${fallbackNotice}
+            This PR changes the generated RBAC resources when applied to sample configurations.
+            
+            <details>
+            <summary>Click to expand diff</summary>
+            
+            \`\`\`diff
+            ${diff}
+            \`\`\`
+            
+            </details>
+            
+            > **Note:** This diff shows changes in ClusterRoles, Roles, ClusterRoleBindings, and RoleBindings generated from \`config/samples/\`.
+            `;
+            
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            
+            const botComment = comments.find(comment => 
+              comment.user.type === 'Bot' && 
+              comment.body.includes('Output Delta Report')
+            );
+            
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
+
+      - name: Comment PR - no changes
+        if: steps.diff.outputs.has_diff == 'false'
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const body = `## 📊 Output Delta Report
+            
+            ✅ No changes detected in generated RBAC resources.
+            
+            The sample configurations in \`config/samples/\` produce identical output on both main and this PR.
+            `;
+            
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            
+            const botComment = comments.find(comment => 
+              comment.user.type === 'Bot' && 
+              comment.body.includes('Output Delta Report')
+            );
+            
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
+
+      - name: Cleanup
+        if: always()
+        run: kind delete cluster --name output-delta

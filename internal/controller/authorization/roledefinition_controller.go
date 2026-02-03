@@ -24,9 +24,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
-	authnv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1"
-	conditions "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/conditions"
-	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/discovery"
+	authnv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	conditions "github.com/telekom/auth-operator/pkg/conditions"
+	"github.com/telekom/auth-operator/pkg/discovery"
 )
 
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=roledefinitions,verbs=get;list;watch;update;patch
@@ -42,8 +42,8 @@ import (
 // +kubebuilder:rbac:groups="coordination.k8s.io",resources=leases,verbs=get;list;update;create;delete
 // +kubebuilder:rbac:groups="events.k8s.io",resources=events,verbs=create;patch;update
 
-// roleDefinitionReconciler reconciles a RoleDefinition object
-type roleDefinitionReconciler struct {
+// RoleDefinitionReconciler reconciles a RoleDefinition object.
+type RoleDefinitionReconciler struct {
 	client          client.Client
 	scheme          *runtime.Scheme
 	recorder        record.EventRecorder
@@ -53,7 +53,7 @@ type roleDefinitionReconciler struct {
 
 // NewRoleDefinitionReconciler creates a new RoleDefinition reconciler.
 // Uses the manager's cached client for improved performance.
-func NewRoleDefinitionReconciler(cachedClient client.Client, scheme *runtime.Scheme, recorder record.EventRecorder, resourceTracker *discovery.ResourceTracker) (*roleDefinitionReconciler, error) {
+func NewRoleDefinitionReconciler(cachedClient client.Client, scheme *runtime.Scheme, recorder record.EventRecorder, resourceTracker *discovery.ResourceTracker) (*RoleDefinitionReconciler, error) {
 	if resourceTracker == nil {
 		return nil, fmt.Errorf("resourceTracker cannot be nil")
 	}
@@ -65,7 +65,7 @@ func NewRoleDefinitionReconciler(cachedClient client.Client, scheme *runtime.Sch
 	}
 	resourceTracker.AddSignalFunc(trackerCallback)
 
-	return &roleDefinitionReconciler{
+	return &RoleDefinitionReconciler{
 		client:          cachedClient,
 		scheme:          scheme,
 		recorder:        recorder,
@@ -78,7 +78,7 @@ func NewRoleDefinitionReconciler(cachedClient client.Client, scheme *runtime.Sch
 // Used to watch for CRD creation events https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/handler#example-EnqueueRequestsFromMapFunc
 // Used a predicate to ignore deletes of CRD, as this can be done in a regular
 // reconcile requeue and does not require immediate action from controller
-func (r *roleDefinitionReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, concurrency int) error {
+func (r *RoleDefinitionReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, concurrency int) error {
 	// Channel to watch for CRD events to trigger re-reconcile of all RoleDefinitions
 	crdTrackerChannel := source.Channel(r.trackerEvents, handler.EnqueueRequestsFromMapFunc(r.queueAll()))
 
@@ -90,7 +90,7 @@ func (r *roleDefinitionReconciler) SetupWithManager(ctx context.Context, mgr ctr
 		Complete(r)
 }
 
-func (r *roleDefinitionReconciler) queueAll() handler.MapFunc {
+func (r *RoleDefinitionReconciler) queueAll() handler.MapFunc {
 	return func(ctx context.Context, obj client.Object) []reconcile.Request {
 		logger := log.FromContext(ctx).WithName("roleDefinitionReconciler.queueAll")
 
@@ -119,7 +119,9 @@ func (r *roleDefinitionReconciler) queueAll() handler.MapFunc {
 	}
 }
 
-func (r *roleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+// Reconcile handles the reconciliation loop for RoleDefinition resources.
+// It manages the lifecycle of cluster roles and roles based on the RoleDefinition spec.
+func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 	log.V(1).Info("starting RoleDefinition reconciliation", "roleDefinitionName", req.Name, "namespace", req.Namespace)
 
@@ -231,7 +233,7 @@ func (r *roleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	return ctrl.Result{}, nil
 }
 
-func (r *roleDefinitionReconciler) filterAPIResourcesForRoleDefinition(
+func (r *RoleDefinitionReconciler) filterAPIResourcesForRoleDefinition(
 	_ context.Context,
 	roleDefinition *authnv1alpha1.RoleDefinition,
 	apiResources discovery.APIResourcesByGroupVersion,

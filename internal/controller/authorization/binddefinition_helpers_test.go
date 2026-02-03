@@ -13,8 +13,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	authorizationv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1"
-	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/helpers"
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	"github.com/telekom/auth-operator/pkg/helpers"
 )
 
 func TestBuildBindingName(t *testing.T) {
@@ -140,7 +140,7 @@ var _ = Describe("BindDefinition Helpers", func() {
 			}
 			Expect(k8sClient.Create(ctx, bindDef)).To(Succeed())
 
-			reconciler := &bindDefinitionReconciler{
+			reconciler := &BindDefinitionReconciler{
 				client:   k8sClient,
 				scheme:   k8sClient.Scheme(),
 				recorder: recorder,
@@ -175,7 +175,7 @@ var _ = Describe("BindDefinition Helpers", func() {
 			}
 			Expect(k8sClient.Create(ctx, bindDef)).To(Succeed())
 
-			reconciler := &bindDefinitionReconciler{
+			reconciler := &BindDefinitionReconciler{
 				client:   k8sClient,
 				scheme:   k8sClient.Scheme(),
 				recorder: recorder,
@@ -217,7 +217,7 @@ var _ = Describe("BindDefinition Helpers", func() {
 			Expect(controllerutil.SetControllerReference(bindDef, sa, k8sClient.Scheme())).To(Succeed())
 			Expect(k8sClient.Create(ctx, sa)).To(Succeed())
 
-			reconciler := &bindDefinitionReconciler{
+			reconciler := &BindDefinitionReconciler{
 				client:   k8sClient,
 				scheme:   k8sClient.Scheme(),
 				recorder: recorder,
@@ -245,7 +245,7 @@ var _ = Describe("BindDefinition Helpers", func() {
 			}
 			Expect(k8sClient.Create(ctx, bindDef)).To(Succeed())
 
-			reconciler := &bindDefinitionReconciler{
+			reconciler := &BindDefinitionReconciler{
 				client:   k8sClient,
 				scheme:   k8sClient.Scheme(),
 				recorder: recorder,
@@ -284,7 +284,7 @@ var _ = Describe("BindDefinition Helpers", func() {
 			}
 			Expect(k8sClient.Create(ctx, bindDef)).To(Succeed())
 
-			reconciler := &bindDefinitionReconciler{
+			reconciler := &BindDefinitionReconciler{
 				client:   k8sClient,
 				scheme:   k8sClient.Scheme(),
 				recorder: recorder,
@@ -313,7 +313,7 @@ var _ = Describe("BindDefinition Helpers", func() {
 			}
 			Expect(k8sClient.Create(ctx, bindDef)).To(Succeed())
 
-			reconciler := &bindDefinitionReconciler{
+			reconciler := &BindDefinitionReconciler{
 				client:   k8sClient,
 				scheme:   k8sClient.Scheme(),
 				recorder: recorder,
@@ -353,7 +353,7 @@ var _ = Describe("BindDefinition Helpers", func() {
 			}
 			Expect(k8sClient.Create(ctx, bindDef)).To(Succeed())
 
-			reconciler := &bindDefinitionReconciler{
+			reconciler := &BindDefinitionReconciler{
 				client:   k8sClient,
 				scheme:   k8sClient.Scheme(),
 				recorder: recorder,
@@ -400,7 +400,7 @@ var _ = Describe("BindDefinition Helpers", func() {
 			Expect(controllerutil.SetControllerReference(bindDef, rb, k8sClient.Scheme())).To(Succeed())
 			Expect(k8sClient.Create(ctx, rb)).To(Succeed())
 
-			reconciler := &bindDefinitionReconciler{
+			reconciler := &BindDefinitionReconciler{
 				client:   k8sClient,
 				scheme:   k8sClient.Scheme(),
 				recorder: recorder,

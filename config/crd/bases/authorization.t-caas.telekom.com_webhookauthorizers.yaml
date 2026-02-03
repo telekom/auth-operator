@@ -43,6 +43,8 @@ spec:
                 description: AllowedPrincipals is a slice of principals this authorizer
                   should allow.
                 items:
+                  description: Principal represents a requesting user or service account
+                    identity.
                   properties:
                     groups:
                       description: Groups is the requesting user groups in SubjectAccessReview
@@ -64,6 +66,8 @@ spec:
                 description: DeniedPrincipals is a slice of principals this authorizer
                   should deny.
                 items:
+                  description: Principal represents a requesting user or service account
+                    identity.
                   properties:
                     groups:
                       description: Groups is the requesting user groups in SubjectAccessReview

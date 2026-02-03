@@ -1,5 +1,5 @@
 /*
-Copyright © 2025 Deutsche Telekom AG
+Copyright © 2026 Deutsche Telekom AG
 */
 package indexer
 
@@ -10,7 +10,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	authorizationv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1"
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 )
 
 const (

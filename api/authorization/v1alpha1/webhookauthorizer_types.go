@@ -5,11 +5,15 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// WebhookAuthorizer-related constants for authorization decisions.
 const (
+	// WebhookAuthorizerAllow indicates an allow decision.
 	WebhookAuthorizerAllow = "true"
-	WebhookAuthorizerDeny  = "false"
+	// WebhookAuthorizerDeny indicates a deny decision.
+	WebhookAuthorizerDeny = "false"
 )
 
+// Principal represents a requesting user or service account identity.
 type Principal struct {
 	// User is the requesting user in SubjectAccessReview request.
 	// +kubebuilder:validation:Optional
@@ -84,12 +88,12 @@ func init() {
 	SchemeBuilder.Register(&WebhookAuthorizer{}, &WebhookAuthorizerList{})
 }
 
-// Satisfy the generic Getter interface
+// GetConditions returns the conditions of the WebhookAuthorizer.
 func (wa *WebhookAuthorizer) GetConditions() []metav1.Condition {
 	return wa.Status.Conditions
 }
 
-// Satisfy the generic Setter interface
+// SetConditions sets the conditions of the WebhookAuthorizer.
 func (wa *WebhookAuthorizer) SetConditions(conditions []metav1.Condition) {
 	wa.Status.Conditions = conditions
 }

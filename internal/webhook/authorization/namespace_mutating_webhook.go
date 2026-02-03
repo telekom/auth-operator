@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	authzv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1"
+	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,6 +17,7 @@ import (
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions,verbs=get;list;watch
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions/status,verbs=get;update;patch
 
+// NamespaceMutator is a mutating webhook that adds labels to namespaces based on user groups or ServiceAccount.
 type NamespaceMutator struct {
 	Client       client.Client
 	Decoder      admission.Decoder
@@ -165,25 +166,25 @@ func getLabelsFromNamespaceSelector(selector metav1.LabelSelector) map[string]st
 	labels := map[string]string{}
 	// Process matchLabels
 	for key, value := range selector.MatchLabels {
-		if key == "t-caas.telekom.com/owner" {
+		if key == authzv1alpha1.LabelKeyOwner {
 			labels[key] = value
 		}
-		if key == "t-caas.telekom.com/tenant" {
+		if key == authzv1alpha1.LabelKeyTenant {
 			labels[key] = value
 		}
-		if key == "t-caas.telekom.com/thirdparty" {
+		if key == authzv1alpha1.LabelKeyThirdParty {
 			labels[key] = value
 		}
 	}
 	// Process matchExpressions
 	for _, expr := range selector.MatchExpressions {
-		if expr.Key == "t-caas.telekom.com/owner" && expr.Operator == metav1.LabelSelectorOpIn && len(expr.Values) == 1 {
+		if expr.Key == authzv1alpha1.LabelKeyOwner && expr.Operator == metav1.LabelSelectorOpIn && len(expr.Values) == 1 {
 			labels[expr.Key] = expr.Values[0]
 		}
-		if expr.Key == "t-caas.telekom.com/tenant" && expr.Operator == metav1.LabelSelectorOpIn && len(expr.Values) == 1 {
+		if expr.Key == authzv1alpha1.LabelKeyTenant && expr.Operator == metav1.LabelSelectorOpIn && len(expr.Values) == 1 {
 			labels[expr.Key] = expr.Values[0]
 		}
-		if expr.Key == "t-caas.telekom.com/thirdparty" && expr.Operator == metav1.LabelSelectorOpIn && len(expr.Values) == 1 {
+		if expr.Key == authzv1alpha1.LabelKeyThirdParty && expr.Operator == metav1.LabelSelectorOpIn && len(expr.Values) == 1 {
 			labels[expr.Key] = expr.Values[0]
 		}
 	}

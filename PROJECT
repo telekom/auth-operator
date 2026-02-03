@@ -7,7 +7,7 @@ layout:
 - go.kubebuilder.io/v4
 multigroup: true
 projectName: auth-operator
-repo: gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator
+repo: github.com/telekom/auth-operator
 resources:
 - api:
     crdVersion: v1
@@ -15,7 +15,7 @@ resources:
   domain: t-caas.telekom.com
   group: authorization
   kind: RoleDefinition
-  path: gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1
+  path: github.com/telekom/auth-operator/api/authorization/v1alpha1
   version: v1alpha1
   webhooks:
     validation: true
@@ -26,7 +26,7 @@ resources:
   domain: t-caas.telekom.com
   group: authorization
   kind: BindDefinition
-  path: gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1
+  path: github.com/telekom/auth-operator/api/authorization/v1alpha1
   version: v1alpha1
   webhooks:
     validation: true
@@ -36,6 +36,6 @@ resources:
   domain: t-caas.telekom.com
   group: authorization
   kind: WebhookAuthorizer
-  path: gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1
+  path: github.com/telekom/auth-operator/api/authorization/v1alpha1
   version: v1alpha1
 version: "3"

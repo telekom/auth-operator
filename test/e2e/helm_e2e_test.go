@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,7 +14,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/test/utils"
+	"github.com/telekom/auth-operator/test/utils"
 )
 
 const (
@@ -42,26 +43,26 @@ var _ = Describe("Helm Chart E2E", Ordered, Label("helm"), func() {
 		// cert-manager is installed in BeforeSuite, no need to install here
 
 		By("Creating Helm test namespace")
-		cmd := exec.Command("kubectl", "create", "ns", helmNamespace, "--dry-run=client", "-o", "yaml")
+		cmd := exec.CommandContext(context.Background(), "kubectl", "create", "ns", helmNamespace, "--dry-run=client", "-o", "yaml")
 		output, _ := utils.Run(cmd)
-		cmd = exec.Command("kubectl", "apply", "-f", "-")
+		cmd = exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
 		cmd.Stdin = strings.NewReader(string(output))
 		_, _ = utils.Run(cmd)
 
 		By("Creating test namespace for CRD testing")
-		cmd = exec.Command("kubectl", "create", "ns", helmTestNamespace, "--dry-run=client", "-o", "yaml")
+		cmd = exec.CommandContext(context.Background(), "kubectl", "create", "ns", helmTestNamespace, "--dry-run=client", "-o", "yaml")
 		output, _ = utils.Run(cmd)
-		cmd = exec.Command("kubectl", "apply", "-f", "-")
+		cmd = exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
 		cmd.Stdin = strings.NewReader(string(output))
 		_, _ = utils.Run(cmd)
 
 		// Label the test namespace
-		cmd = exec.Command("kubectl", "label", "ns", helmTestNamespace,
+		cmd = exec.CommandContext(context.Background(), "kubectl", "label", "ns", helmTestNamespace,
 			"e2e-helm-test=true", "--overwrite")
 		_, _ = utils.Run(cmd)
 
 		By("Building the operator image")
-		cmd = exec.Command("make", "docker-build", fmt.Sprintf("IMG=%s", projectImage))
+		cmd = exec.CommandContext(context.Background(), "make", "docker-build", fmt.Sprintf("IMG=%s", projectImage))
 		_, err = utils.Run(cmd)
 		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build operator image")
 
@@ -82,7 +83,7 @@ var _ = Describe("Helm Chart E2E", Ordered, Label("helm"), func() {
 		}
 
 		By("Cleaning up Helm release")
-		cmd := exec.Command("helm", "uninstall", helmReleaseName, "-n", helmNamespace, "--wait", "--timeout", "2m")
+		cmd := exec.CommandContext(context.Background(), "helm", "uninstall", helmReleaseName, "-n", helmNamespace, "--wait", "--timeout", "2m")
 		_, _ = utils.Run(cmd)
 
 		// Use centralized cleanup utility (includes namespace deletion)
@@ -95,14 +96,14 @@ var _ = Describe("Helm Chart E2E", Ordered, Label("helm"), func() {
 	Context("Helm Chart Validation", func() {
 		It("should lint the Helm chart successfully", func() {
 			By("Running helm lint")
-			cmd := exec.Command("helm", "lint", helmChartPath, "--strict")
+			cmd := exec.CommandContext(context.Background(), "helm", "lint", helmChartPath, "--strict")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Helm lint failed: %s", string(output))
 		})
 
 		It("should template the chart without errors", func() {
 			By("Running helm template")
-			cmd := exec.Command("helm", "template", helmReleaseName, helmChartPath,
+			cmd := exec.CommandContext(context.Background(), "helm", "template", helmReleaseName, helmChartPath,
 				"-n", helmNamespace,
 				"--set", fmt.Sprintf("image.repository=%s", strings.Split(projectImage, ":")[0]),
 				"--set", fmt.Sprintf("image.tag=%s", getImageTag()),
@@ -119,7 +120,7 @@ var _ = Describe("Helm Chart E2E", Ordered, Label("helm"), func() {
 
 		It("should template with all features enabled", func() {
 			By("Running helm template with all features")
-			cmd := exec.Command("helm", "template", helmReleaseName, helmChartPath,
+			cmd := exec.CommandContext(context.Background(), "helm", "template", helmReleaseName, helmChartPath,
 				"-n", helmNamespace,
 				"--set", fmt.Sprintf("image.repository=%s", strings.Split(projectImage, ":")[0]),
 				"--set", fmt.Sprintf("image.tag=%s", getImageTag()),
@@ -143,7 +144,7 @@ var _ = Describe("Helm Chart E2E", Ordered, Label("helm"), func() {
 			imageRepo := strings.Split(projectImage, ":")[0]
 			imageTag := getImageTag()
 
-			cmd := exec.Command("helm", "install", helmReleaseName, helmChartPath,
+			cmd := exec.CommandContext(context.Background(), "helm", "install", helmReleaseName, helmChartPath,
 				"-n", helmNamespace,
 				"--create-namespace",
 				"--set", fmt.Sprintf("image.repository=%s", imageRepo),
@@ -174,38 +175,38 @@ var _ = Describe("Helm Chart E2E", Ordered, Label("helm"), func() {
 
 		It("should have CRDs installed", func() {
 			By("Checking RoleDefinition CRD exists")
-			cmd := exec.Command("kubectl", "get", "crd", "roledefinitions.authorization.t-caas.telekom.com")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "crd", "roledefinitions.authorization.t-caas.telekom.com")
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Checking BindDefinition CRD exists")
-			cmd = exec.Command("kubectl", "get", "crd", "binddefinitions.authorization.t-caas.telekom.com")
+			cmd = exec.CommandContext(context.Background(), "kubectl", "get", "crd", "binddefinitions.authorization.t-caas.telekom.com")
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Checking WebhookAuthorizer CRD exists")
-			cmd = exec.Command("kubectl", "get", "crd", "webhookauthorizers.authorization.t-caas.telekom.com")
+			cmd = exec.CommandContext(context.Background(), "kubectl", "get", "crd", "webhookauthorizers.authorization.t-caas.telekom.com")
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
 		It("should have RBAC resources created", func() {
 			By("Checking ClusterRole exists")
-			cmd := exec.Command("kubectl", "get", "clusterrole",
+			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrole",
 				"-l", fmt.Sprintf("app.kubernetes.io/instance=%s", helmReleaseName))
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(string(output)).To(ContainSubstring(helmReleaseName))
 
 			By("Checking ClusterRoleBinding exists")
-			cmd = exec.Command("kubectl", "get", "clusterrolebinding",
+			cmd = exec.CommandContext(context.Background(), "kubectl", "get", "clusterrolebinding",
 				"-l", fmt.Sprintf("app.kubernetes.io/instance=%s", helmReleaseName))
 			output, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(string(output)).To(ContainSubstring(helmReleaseName))
 
 			By("Checking ServiceAccount exists")
-			cmd = exec.Command("kubectl", "get", "serviceaccount", "-n", helmNamespace,
+			cmd = exec.CommandContext(context.Background(), "kubectl", "get", "serviceaccount", "-n", helmNamespace,
 				"-l", fmt.Sprintf("app.kubernetes.io/instance=%s", helmReleaseName))
 			output, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -231,7 +232,7 @@ spec:
     - delete
     - patch
 `
-			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(roleDefYAML)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -263,7 +264,7 @@ spec:
     - create
     - delete
 `, helmTestNamespace)
-			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(roleDefYAML)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -294,7 +295,7 @@ spec:
     clusterRoleRefs:
       - helm-e2e-generated-clusterrole
 `
-			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(bindDefYAML)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -303,7 +304,7 @@ spec:
 			// ClusterRoleBinding name format: {targetName}-{clusterRoleRef}-binding
 			expectedCRBName := "helm-e2e-binding-helm-e2e-generated-clusterrole-binding"
 			Eventually(func() error {
-				cmd := exec.Command("kubectl", "get", "clusterrolebinding", expectedCRBName)
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrolebinding", expectedCRBName)
 				_, err := utils.Run(cmd)
 				return err
 			}, reconcileTimeout, pollingInterval).Should(Succeed())
@@ -334,7 +335,7 @@ spec:
         - matchLabels:
             e2e-helm-test: "true"
 `
-			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(bindDefYAML)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -343,7 +344,7 @@ spec:
 			// RoleBinding name format: {targetName}-{clusterRoleRef}-binding
 			expectedRBName := "helm-e2e-ns-binding-helm-e2e-generated-clusterrole-binding"
 			Eventually(func() error {
-				cmd := exec.Command("kubectl", "get", "rolebinding", expectedRBName,
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "rolebinding", expectedRBName,
 					"-n", helmTestNamespace)
 				_, err := utils.Run(cmd)
 				return err
@@ -367,7 +368,7 @@ spec:
     clusterRoleRefs:
       - helm-e2e-generated-clusterrole
 `, helmTestNamespace)
-			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(bindDefYAML)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -379,7 +380,7 @@ spec:
 
 			By("Verifying BindDefinition status includes generated ServiceAccount")
 			Eventually(func() bool {
-				cmd := exec.Command("kubectl", "get", "binddefinition", "helm-e2e-sa-binding",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "binddefinition", "helm-e2e-sa-binding",
 					"-o", "jsonpath={.status.generatedServiceAccounts}")
 				output, err := utils.Run(cmd)
 				if err != nil {
@@ -414,7 +415,7 @@ spec:
     matchLabels:
       e2e-helm-test: "true"
 `
-			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(authorizerYAML)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -446,7 +447,7 @@ spec:
     - groups:
         - helm-denied-group
 `
-			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(authorizerYAML)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -477,7 +478,7 @@ spec:
   allowedPrincipals:
     - user: helm-health-user
 `
-			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(authorizerYAML)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -496,7 +497,7 @@ spec:
 			imageRepo := strings.Split(projectImage, ":")[0]
 			imageTag := getImageTag()
 
-			cmd := exec.Command("helm", "upgrade", helmReleaseName, helmChartPath,
+			cmd := exec.CommandContext(context.Background(), "helm", "upgrade", helmReleaseName, helmChartPath,
 				"-n", helmNamespace,
 				"--set", fmt.Sprintf("image.repository=%s", imageRepo),
 				"--set", fmt.Sprintf("image.tag=%s", imageTag),
@@ -516,7 +517,7 @@ spec:
 		It("should have PodDisruptionBudget created", func() {
 			By("Checking PodDisruptionBudget exists")
 			Eventually(func() error {
-				cmd := exec.Command("kubectl", "get", "pdb", "-n", helmNamespace)
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pdb", "-n", helmNamespace)
 				output, err := utils.Run(cmd)
 				if err != nil {
 					return err
@@ -531,7 +532,7 @@ spec:
 		It("should have scaled replicas", func() {
 			By("Checking controller has 2 replicas")
 			Eventually(func() int {
-				cmd := exec.Command("kubectl", "get", "deployment",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "deployment",
 					"-l", "control-plane=controller-manager",
 					"-n", helmNamespace,
 					"-o", "jsonpath={.items[0].spec.replicas}")
@@ -572,7 +573,7 @@ func helmFullName() string {
 }
 
 func verifyHelmPodRunning(labelSelector, namespace string) error {
-	cmd := exec.Command("kubectl", "get", "pods",
+	cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pods",
 		"-l", labelSelector,
 		"-n", namespace,
 		"-o", "jsonpath={.items[0].status.phase}")
@@ -646,7 +647,7 @@ func dumpResource(resourceType, namespace, filename string) {
 		args = append(args, "-A")
 	}
 
-	cmd := exec.Command("kubectl", args...)
+	cmd := exec.CommandContext(context.Background(), "kubectl", args...)
 	output, err := utils.Run(cmd)
 	if err != nil {
 		_, _ = fmt.Fprintf(GinkgoWriter, "Failed to dump %s: %v\n", resourceType, err)
@@ -663,7 +664,7 @@ func dumpResourceWithLabel(resourceType, namespace, labelSelector, filename stri
 		args = append(args, "-A")
 	}
 
-	cmd := exec.Command("kubectl", args...)
+	cmd := exec.CommandContext(context.Background(), "kubectl", args...)
 	output, err := utils.Run(cmd)
 	if err != nil {
 		_, _ = fmt.Fprintf(GinkgoWriter, "Failed to dump %s with label %s: %v\n", resourceType, labelSelector, err)
@@ -678,7 +679,7 @@ func dumpLogs(labelSelector, namespace, filename string) {
 		args = append(args, "-n", namespace)
 	}
 
-	cmd := exec.Command("kubectl", args...)
+	cmd := exec.CommandContext(context.Background(), "kubectl", args...)
 	output, _ := utils.Run(cmd)
 	saveOutput(filename, output)
 }
@@ -704,7 +705,7 @@ func createResourceSummary(timestamp string) {
 	// Operator status
 	summary.WriteString("\n## Operator Status\n\n")
 	if helmNamespace != "" {
-		cmd := exec.Command("kubectl", "get", "pods", "-n", helmNamespace, "-o", "wide")
+		cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pods", "-n", helmNamespace, "-o", "wide")
 		output, _ := utils.Run(cmd)
 		summary.WriteString("```\n")
 		summary.WriteString(string(output))
@@ -716,34 +717,15 @@ func createResourceSummary(timestamp string) {
 }
 
 func countResource(summary *strings.Builder, name, resourceType string) {
-	cmd := exec.Command("kubectl", "get", resourceType, "-o", "name")
+	cmd := exec.CommandContext(context.Background(), "kubectl", "get", resourceType, "-o", "name")
 	output, _ := utils.Run(cmd)
 	count := len(utils.GetNonEmptyLines(string(output)))
 	fmt.Fprintf(summary, "- %s: %d\n", name, count)
 }
 
 func countResourceWithLabel(summary *strings.Builder, name, resourceType string) {
-	cmd := exec.Command("kubectl", "get", resourceType, "-l", authOperatorLabel, "-A", "-o", "name")
+	cmd := exec.CommandContext(context.Background(), "kubectl", "get", resourceType, "-l", authOperatorLabel, "-A", "-o", "name")
 	output, _ := utils.Run(cmd)
 	count := len(utils.GetNonEmptyLines(string(output)))
 	fmt.Fprintf(summary, "- %s: %d\n", name, count)
-}
-
-func cleanupHelmTestCRDs() {
-	// Clean up test CRDs created during Helm tests using centralized cleanup
-	roledefs := []string{
-		"helm-e2e-cluster-reader",
-		"helm-e2e-namespaced-reader",
-	}
-	binddefs := []string{
-		"helm-e2e-cluster-binding",
-		"helm-e2e-ns-binding",
-		"helm-e2e-sa-binding",
-	}
-	webhooks := []string{
-		"helm-e2e-authorizer",
-		"helm-e2e-authorizer-deny",
-		"helm-e2e-authorizer-nonresource",
-	}
-	CleanupCRDsByName(roledefs, binddefs, webhooks)
 }

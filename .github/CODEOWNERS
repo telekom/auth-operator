@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Default owners for everything in the repo
+* @telekom/t-caas-maintainers
+
+# API definitions require additional review
+/api/ @telekom/t-caas-maintainers
+
+# Helm chart changes
+/chart/ @telekom/t-caas-maintainers
+
+# CI/CD changes
+/.github/ @telekom/t-caas-maintainers
+
+# Documentation
+/docs/ @telekom/t-caas-maintainers

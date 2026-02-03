@@ -7,7 +7,7 @@ include versions.env
 PROJECT_NAME = "auth-operator"
 APP ?= auth-operator
 IMG ?= $(APP):latest
-NAMESPACE ?= kube-system
+NAMESPACE ?= auth-operator-system
 
 # E2E run identifier and deterministic kind cluster name
 RUN_ID ?= $(shell date +%s)
@@ -19,7 +19,8 @@ export RUN_ID
 export KIND_CLUSTER_NAME
 export E2E_TEARDOWN
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-ENVTEST_K8S_VERSION = 1.33.0
+# Keep in sync with KIND_K8S_VERSION for consistency between envtest and kind-based E2E tests.
+ENVTEST_K8S_VERSION = 1.34.1
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -74,7 +75,7 @@ test: manifests generate fmt vet envtest ## Run tests.
 ##@ E2E Testing
 
 # Kind cluster configuration
-KIND_K8S_VERSION ?= v1.32.5
+KIND_K8S_VERSION ?= v1.34.3
 E2E_IMG ?= auth-operator:e2e-test
 KIND_CONFIG_SINGLE ?= test/e2e/kind-config-single.yaml
 KIND_CONFIG_MULTI ?= test/e2e/kind-config-multi.yaml
@@ -145,6 +146,21 @@ test-e2e-full: ## Run full e2e test suite (fresh cluster each run, configurable 
 	@set -e; \
 	if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e; fi; \
 	$(MAKE) test-e2e-setup KIND_CLUSTER_NAME=auth-operator-e2e; \
+	if $(MAKE) test-e2e KIND_CLUSTER_NAME=auth-operator-e2e; then \
+		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e; fi; \
+	else \
+		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e; fi; exit 1; \
+	fi
+
+.PHONY: test-e2e-full-chain
+test-e2e-full-chain: ## Run full e2e test suite with popular CRDs installed (fresh cluster each run).
+	@set -e; \
+	if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e; fi; \
+	$(MAKE) kind-create KIND_CLUSTER_NAME=auth-operator-e2e; \
+	KIND_CLUSTER_NAME=auth-operator-e2e bash hack/ci/setup-kind-crds.sh; \
+	$(MAKE) kind-load-image KIND_CLUSTER_NAME=auth-operator-e2e; \
+	$(MAKE) install KIND_CLUSTER_NAME=auth-operator-e2e; \
+	$(MAKE) deploy OVERLAY=dev IMG=$(E2E_IMG) KIND_CLUSTER_NAME=auth-operator-e2e; \
 	if $(MAKE) test-e2e KIND_CLUSTER_NAME=auth-operator-e2e; then \
 		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e; fi; \
 	else \

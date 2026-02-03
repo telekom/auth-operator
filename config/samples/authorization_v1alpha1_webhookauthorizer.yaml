@@ -1,24 +1,399 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# =============================================================================
+# WebhookAuthorizer Samples - Comprehensive Feature Coverage
+# =============================================================================
+# These samples demonstrate all features of the WebhookAuthorizer CRD:
+# - Resource rules (API groups, resources, verbs)
+# - Non-resource rules (URL paths)
+# - Allowed principals (users, groups, service accounts)
+# - Denied principals (blacklisting)
+# - Namespace selectors for scoped authorization
+# =============================================================================
+
+---
+# -----------------------------------------------------------------------------
+# Network Policy Protection - Restrict Calico NetworkPolicy modifications
+# Only allows platform-admins and specific service accounts
+# -----------------------------------------------------------------------------
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: WebhookAuthorizer
 metadata:
-  name: webhookauthorizer-sample
+  name: wa-network-policy-protection
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/security-control: network
 spec:
   resourceRules:
-  - apiGroups:
-    - crd.projectcalico.org
-    resources:
-    - networkpolicies
-    verbs:
-    - get
+    # Calico NetworkPolicy resources
+    - apiGroups:
+        - crd.projectcalico.org
+      resources:
+        - networkpolicies
+        - globalnetworkpolicies
+        - networksets
+        - globalnetworksets
+      verbs:
+        - create
+        - update
+        - patch
+        - delete
+    # Kubernetes native NetworkPolicy
+    - apiGroups:
+        - networking.k8s.io
+      resources:
+        - networkpolicies
+      verbs:
+        - create
+        - update
+        - patch
+        - delete
   allowedPrincipals:
-  - user: xavi
+    # Platform admin group
+    - groups:
+        - platform-admins@telekom.de
+        - network-admins@telekom.de
+    # Network automation service account
+    - user: system:serviceaccount:t-caas-system:network-controller
+      namespace: t-caas-system
+    # Calico operator
+    - user: system:serviceaccount:calico-system:calico-kube-controllers
+      namespace: calico-system
   deniedPrincipals:
-  - user: karlito
-    groups:
-    - somefancygroup
+    # Explicitly deny tenant service accounts from network changes
+    - groups:
+        - tenant-admins
+        - tenant-developers
+    # Block known break-glass accounts from automated changes
+    - user: emergency-admin@telekom.de
   namespaceSelector:
     matchExpressions:
-    - key: kubernetes.io/metadata.name
-      operator: In
-      values:
-      - kube-system
+      - key: t-caas.telekom.com/network-policy
+        operator: In
+        values:
+          - enforced
+          - strict
+
+---
+# -----------------------------------------------------------------------------
+# Secret Management - Protect sensitive secret operations
+# Limits who can create/modify secrets in production namespaces
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: WebhookAuthorizer
+metadata:
+  name: wa-secret-protection
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/security-control: secrets
+spec:
+  resourceRules:
+    - apiGroups:
+        - ""
+      resources:
+        - secrets
+      verbs:
+        - create
+        - update
+        - patch
+        - delete
+    # External Secrets Operator resources
+    - apiGroups:
+        - external-secrets.io
+      resources:
+        - externalsecrets
+        - clustersecretstores
+        - secretstores
+      verbs:
+        - create
+        - update
+        - patch
+        - delete
+  allowedPrincipals:
+    # Security team
+    - groups:
+        - security-team@telekom.de
+        - secret-admins@telekom.de
+    # Vault injector
+    - user: system:serviceaccount:vault:vault-agent-injector
+      namespace: vault
+    # External Secrets Operator
+    - user: system:serviceaccount:external-secrets:external-secrets
+      namespace: external-secrets
+    # Cert-manager for TLS secrets
+    - user: system:serviceaccount:cert-manager:cert-manager
+      namespace: cert-manager
+    # Sealed Secrets controller
+    - user: system:serviceaccount:sealed-secrets:sealed-secrets-controller
+      namespace: sealed-secrets
+  deniedPrincipals:
+    # Block direct secret manipulation by developers
+    - groups:
+        - developers
+        - tenant-developers@customer.com
+  namespaceSelector:
+    matchLabels:
+      t-caas.telekom.com/environment: production
+
+---
+# -----------------------------------------------------------------------------
+# RBAC Protection - Prevent unauthorized RBAC modifications
+# Protects Role, RoleBinding, ClusterRole, ClusterRoleBinding
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: WebhookAuthorizer
+metadata:
+  name: wa-rbac-protection
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/security-control: rbac
+spec:
+  resourceRules:
+    - apiGroups:
+        - rbac.authorization.k8s.io
+      resources:
+        - roles
+        - rolebindings
+        - clusterroles
+        - clusterrolebindings
+      verbs:
+        - create
+        - update
+        - patch
+        - delete
+    # Also protect our custom auth-operator CRDs
+    - apiGroups:
+        - authorization.t-caas.telekom.com
+      resources:
+        - roledefinitions
+        - binddefinitions
+        - webhookauthorizers
+      verbs:
+        - create
+        - update
+        - patch
+        - delete
+  allowedPrincipals:
+    # Platform RBAC admins
+    - groups:
+        - platform-admins@telekom.de
+        - rbac-admins@telekom.de
+    # Auth operator controller
+    - user: system:serviceaccount:t-caas-system:auth-operator-controller
+      namespace: t-caas-system
+    # GitOps controllers
+    - user: system:serviceaccount:argocd:argocd-application-controller
+      namespace: argocd
+    - user: system:serviceaccount:flux-system:kustomize-controller
+      namespace: flux-system
+  deniedPrincipals:
+    # Explicitly deny privilege escalation by tenant admins
+    - groups:
+        - tenant-admins
+    # Block automated systems that shouldn't touch RBAC
+    - user: system:serviceaccount:monitoring:prometheus
+      namespace: monitoring
+  namespaceSelector:
+    matchExpressions:
+      - key: t-caas.telekom.com/owner
+        operator: In
+        values:
+          - platform
+          - tenant
+
+---
+# -----------------------------------------------------------------------------
+# Pod Security - Restrict privileged workload creation
+# Controls who can create privileged pods, hostNetwork, etc.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: WebhookAuthorizer
+metadata:
+  name: wa-pod-security
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/security-control: pod-security
+spec:
+  resourceRules:
+    - apiGroups:
+        - ""
+      resources:
+        - pods
+        - pods/exec
+        - pods/attach
+        - pods/portforward
+      verbs:
+        - create
+    - apiGroups:
+        - apps
+      resources:
+        - deployments
+        - daemonsets
+        - statefulsets
+        - replicasets
+      verbs:
+        - create
+        - update
+        - patch
+    # Batch workloads
+    - apiGroups:
+        - batch
+      resources:
+        - jobs
+        - cronjobs
+      verbs:
+        - create
+        - update
+        - patch
+  allowedPrincipals:
+    # Platform operations
+    - groups:
+        - platform-ops@telekom.de
+        - sre-team@telekom.de
+    # System components that need privileged access
+    - user: system:serviceaccount:kube-system:kube-proxy
+      namespace: kube-system
+    - user: system:serviceaccount:calico-system:calico-node
+      namespace: calico-system
+    - user: system:serviceaccount:monitoring:node-exporter
+      namespace: monitoring
+  deniedPrincipals:
+    # Developers cannot deploy privileged workloads
+    - groups:
+        - developers
+        - tenant-developers@customer.com
+        - contractors
+  namespaceSelector:
+    matchExpressions:
+      - key: pod-security.kubernetes.io/enforce
+        operator: In
+        values:
+          - privileged
+          - baseline
+
+---
+# -----------------------------------------------------------------------------
+# API Server Protection - Non-resource rule example
+# Protects sensitive API server endpoints
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: WebhookAuthorizer
+metadata:
+  name: wa-api-server-protection
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/security-control: api-server
+spec:
+  nonResourceRules:
+    # Health and metrics endpoints
+    - nonResourceURLs:
+        - /healthz
+        - /healthz/*
+        - /livez
+        - /livez/*
+        - /readyz
+        - /readyz/*
+      verbs:
+        - get
+    # Metrics endpoint
+    - nonResourceURLs:
+        - /metrics
+      verbs:
+        - get
+    # API discovery
+    - nonResourceURLs:
+        - /api
+        - /api/*
+        - /apis
+        - /apis/*
+      verbs:
+        - get
+    # Logs endpoint - sensitive
+    - nonResourceURLs:
+        - /logs
+        - /logs/*
+      verbs:
+        - get
+  resourceRules:
+    # Also protect node proxy access
+    - apiGroups:
+        - ""
+      resources:
+        - nodes/proxy
+        - nodes/log
+        - nodes/metrics
+      verbs:
+        - get
+        - create
+  allowedPrincipals:
+    # Monitoring systems
+    - user: system:serviceaccount:monitoring:prometheus
+      namespace: monitoring
+    - user: system:serviceaccount:monitoring:grafana
+      namespace: monitoring
+    # Platform SRE team
+    - groups:
+        - sre-team@telekom.de
+        - platform-ops@telekom.de
+  deniedPrincipals:
+    # No tenant access to these endpoints
+    - groups:
+        - tenant-admins
+        - tenant-developers@customer.com
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: kube-system
+
+---
+# -----------------------------------------------------------------------------
+# CRD Protection - Protect custom resource definitions
+# Controls who can modify CRDs cluster-wide
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: WebhookAuthorizer
+metadata:
+  name: wa-crd-protection
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/security-control: crds
+spec:
+  resourceRules:
+    - apiGroups:
+        - apiextensions.k8s.io
+      resources:
+        - customresourcedefinitions
+      verbs:
+        - create
+        - update
+        - patch
+        - delete
+  allowedPrincipals:
+    # Platform admins only
+    - groups:
+        - platform-admins@telekom.de
+    # Operator controllers
+    - user: system:serviceaccount:t-caas-system:auth-operator-controller
+      namespace: t-caas-system
+    - user: system:serviceaccount:cert-manager:cert-manager-cainjector
+      namespace: cert-manager
+    # GitOps for managed CRDs
+    - user: system:serviceaccount:argocd:argocd-application-controller
+      namespace: argocd
+  deniedPrincipals:
+    # No tenant access to CRDs
+    - groups:
+        - tenant-admins
+        - tenant-developers@customer.com
+        - developers
+  # CRDs are cluster-scoped, so namespace selector is for resources that create CRDs
+  namespaceSelector:
+    matchLabels:
+      t-caas.telekom.com/crd-management: enabled

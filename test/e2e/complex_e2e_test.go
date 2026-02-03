@@ -1,7 +1,7 @@
 //go:build e2e
 
 /*
-Copyright 2025.
+Copyright 2026.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ limitations under the License.
 package e2e
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
@@ -29,13 +30,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/test/utils"
-)
-
-// Constants for complex e2e tests
-const (
-	statusTrue    = "True"
-	statusRunning = "Running"
+	"github.com/telekom/auth-operator/test/utils"
 )
 
 // Complex E2E tests that verify all controller features work in combination
@@ -60,13 +55,13 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 		teamBetaNsPath := filepath.Join(complexTestdataPath, "namespace-team-beta.yaml")
 
 		for _, nsPath := range []string{testNsPath, teamAlphaNsPath, teamBetaNsPath} {
-			cmd := exec.Command("kubectl", "apply", "-f", nsPath)
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", nsPath)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Failed to create namespace from %s", nsPath)
 		}
 
 		By("Building the operator image")
-		cmd := exec.Command("make", "docker-build", fmt.Sprintf("IMG=%s", projectImage))
+		cmd := exec.CommandContext(context.Background(), "make", "docker-build", fmt.Sprintf("IMG=%s", projectImage))
 		_, err := utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to build operator image")
 
@@ -81,7 +76,7 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 			imageTag = "latest"
 		}
 
-		cmd = exec.Command("helm", "upgrade", "--install", complexRelease, helmChartPath,
+		cmd = exec.CommandContext(context.Background(), "helm", "upgrade", "--install", complexRelease, helmChartPath,
 			"-n", complexNamespace,
 			"--create-namespace",
 			"--set", fmt.Sprintf("image.repository=%s", imageRepo),
@@ -102,7 +97,7 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 
 		By("Waiting for controller to be ready")
 		Eventually(func() error {
-			cmd := exec.Command("kubectl", "get", "pods",
+			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pods",
 				"-l", "control-plane=controller-manager",
 				"-n", complexNamespace,
 				"-o", "jsonpath={.items[*].status.phase}")
@@ -137,7 +132,7 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 		time.Sleep(5 * time.Second)
 
 		By("Uninstalling Helm release")
-		cmd := exec.Command("helm", "uninstall", complexRelease, "-n", complexNamespace, "--wait", "--timeout", "2m")
+		cmd := exec.CommandContext(context.Background(), "helm", "uninstall", complexRelease, "-n", complexNamespace, "--wait", "--timeout", "2m")
 		_, _ = utils.Run(cmd)
 
 		By("Cleaning up test namespaces")
@@ -146,15 +141,15 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 			"complex-e2e-ns-team-a", "complex-e2e-ns-team-b",
 		}
 		for _, ns := range testNamespaces {
-			cmd = exec.Command("kubectl", "delete", "ns", ns, "--ignore-not-found=true")
+			cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "ns", ns, "--ignore-not-found=true")
 			_, _ = utils.Run(cmd)
 		}
 
 		By("Cleaning up cluster-scoped resources")
-		cmd = exec.Command("kubectl", "delete", "clusterrole",
+		cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "clusterrole",
 			"complex-filtered-role", "--ignore-not-found=true")
 		_, _ = utils.Run(cmd)
-		cmd = exec.Command("kubectl", "delete", "clusterrolebinding",
+		cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "clusterrolebinding",
 			"-l", "app.kubernetes.io/created-by=auth-operator", "--ignore-not-found=true")
 		_, _ = utils.Run(cmd)
 	})
@@ -162,14 +157,14 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 	Context("RoleDefinition with ALL restrictions combined", func() {
 		It("should create ClusterRole excluding APIs, resources, and verbs", func() {
 			By("Applying complex RoleDefinition with all restrictions")
-			cmd := exec.Command("kubectl", "apply", "-f",
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f",
 				filepath.Join(complexTestdataPath, "roledefinition-all-restrictions.yaml"))
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for RoleDefinition to be reconciled")
 			Eventually(func() bool {
-				cmd := exec.Command("kubectl", "get", "roledefinition", "complex-all-restrictions",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "roledefinition", "complex-all-restrictions",
 					"-o", "jsonpath={.status.conditions[?(@.type=='Created')].status}")
 				output, err := utils.Run(cmd)
 				if err != nil {
@@ -180,13 +175,13 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 
 			By("Verifying ClusterRole was created")
 			Eventually(func() error {
-				cmd := exec.Command("kubectl", "get", "clusterrole", "complex-filtered-role")
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrole", "complex-filtered-role")
 				_, err := utils.Run(cmd)
 				return err
 			}, complexReconcileTime, complexPollInterval).Should(Succeed())
 
 			By("Verifying excluded API groups are not present")
-			cmd = exec.Command("kubectl", "get", "clusterrole", "complex-filtered-role", "-o", "json")
+			cmd = exec.CommandContext(context.Background(), "kubectl", "get", "clusterrole", "complex-filtered-role", "-o", "json")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -263,14 +258,14 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 
 		It("should create namespaced Role with all restrictions", func() {
 			By("Applying complex namespaced RoleDefinition")
-			cmd := exec.Command("kubectl", "apply", "-f",
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f",
 				filepath.Join(complexTestdataPath, "roledefinition-namespaced-all-restrictions.yaml"))
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for RoleDefinition to be reconciled")
 			Eventually(func() bool {
-				cmd := exec.Command("kubectl", "get", "roledefinition", "complex-ns-all-restrictions",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "roledefinition", "complex-ns-all-restrictions",
 					"-o", "jsonpath={.status.conditions[?(@.type=='Created')].status}")
 				output, err := utils.Run(cmd)
 				if err != nil {
@@ -281,14 +276,14 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 
 			By("Verifying Role was created in target namespace")
 			Eventually(func() error {
-				cmd := exec.Command("kubectl", "get", "role", "complex-ns-filtered-role",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "role", "complex-ns-filtered-role",
 					"-n", "complex-e2e-test-ns")
 				_, err := utils.Run(cmd)
 				return err
 			}, complexReconcileTime, complexPollInterval).Should(Succeed())
 
 			By("Verifying Role only contains namespaced resources")
-			cmd = exec.Command("kubectl", "get", "role", "complex-ns-filtered-role",
+			cmd = exec.CommandContext(context.Background(), "kubectl", "get", "role", "complex-ns-filtered-role",
 				"-n", "complex-e2e-test-ns", "-o", "json")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -317,14 +312,14 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 	Context("BindDefinition with multiple roles and namespaces", func() {
 		It("should create multiple ClusterRoleBindings from multiple clusterRoleRefs", func() {
 			By("Applying complex multi-binding BindDefinition")
-			cmd := exec.Command("kubectl", "apply", "-f",
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f",
 				filepath.Join(complexTestdataPath, "binddefinition-multi-role-multi-ns.yaml"))
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for BindDefinition to be reconciled")
 			Eventually(func() bool {
-				cmd := exec.Command("kubectl", "get", "binddefinition", "complex-multi-binding",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "binddefinition", "complex-multi-binding",
 					"-o", "jsonpath={.status.conditions[?(@.type=='Created')].status}")
 				output, err := utils.Run(cmd)
 				if err != nil {
@@ -335,7 +330,7 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 
 			By("Verifying ClusterRoleBinding for complex-filtered-role was created")
 			Eventually(func() error {
-				cmd := exec.Command("kubectl", "get", "clusterrolebinding",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrolebinding",
 					"complex-multi-complex-filtered-role-binding")
 				_, err := utils.Run(cmd)
 				return err
@@ -343,14 +338,14 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 
 			By("Verifying ClusterRoleBinding for view role was created")
 			Eventually(func() error {
-				cmd := exec.Command("kubectl", "get", "clusterrolebinding",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrolebinding",
 					"complex-multi-view-binding")
 				_, err := utils.Run(cmd)
 				return err
 			}, complexReconcileTime, complexPollInterval).Should(Succeed())
 
 			By("Verifying ClusterRoleBindings have all 4 subjects")
-			cmd = exec.Command("kubectl", "get", "clusterrolebinding",
+			cmd = exec.CommandContext(context.Background(), "kubectl", "get", "clusterrolebinding",
 				"complex-multi-complex-filtered-role-binding", "-o", "json")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -377,7 +372,7 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 		It("should auto-create ServiceAccounts referenced in subjects", func() {
 			By("Verifying ServiceAccount was auto-created in test namespace")
 			Eventually(func() error {
-				cmd := exec.Command("kubectl", "get", "serviceaccount", "complex-app-sa",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "serviceaccount", "complex-app-sa",
 					"-n", "complex-e2e-test-ns")
 				_, err := utils.Run(cmd)
 				return err
@@ -385,14 +380,14 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 
 			By("Verifying ServiceAccount was auto-created in team-a namespace")
 			Eventually(func() error {
-				cmd := exec.Command("kubectl", "get", "serviceaccount", "complex-worker-sa",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "serviceaccount", "complex-worker-sa",
 					"-n", "complex-e2e-ns-team-a")
 				_, err := utils.Run(cmd)
 				return err
 			}, complexReconcileTime, complexPollInterval).Should(Succeed())
 
 			By("Verifying BindDefinition status shows generated ServiceAccounts")
-			cmd := exec.Command("kubectl", "get", "binddefinition", "complex-multi-binding",
+			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "binddefinition", "complex-multi-binding",
 				"-o", "jsonpath={.status.generatedServiceAccounts}")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -402,7 +397,7 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 		It("should create RoleBindings in namespaces matching label selectors", func() {
 			By("Verifying RoleBinding was created in team-alpha namespace (matches team=alpha)")
 			Eventually(func() error {
-				cmd := exec.Command("kubectl", "get", "rolebinding",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "rolebinding",
 					"-n", "complex-e2e-ns-team-a",
 					"-l", "app.kubernetes.io/created-by=auth-operator")
 				output, err := utils.Run(cmd)
@@ -417,7 +412,7 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 
 			By("Verifying RoleBinding was created in test namespace (matches team=alpha AND env=dev)")
 			Eventually(func() error {
-				cmd := exec.Command("kubectl", "get", "rolebinding",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "rolebinding",
 					"-n", "complex-e2e-test-ns",
 					"-l", "app.kubernetes.io/created-by=auth-operator")
 				output, err := utils.Run(cmd)
@@ -434,7 +429,7 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 		It("should create RoleBinding for explicit namespace reference", func() {
 			By("Verifying RoleBinding for explicit namespace was created")
 			Eventually(func() error {
-				cmd := exec.Command("kubectl", "get", "rolebinding",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "rolebinding",
 					"-n", "complex-e2e-test-ns",
 					"-o", "jsonpath={.items[*].roleRef.name}")
 				output, err := utils.Run(cmd)
@@ -452,14 +447,14 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 	Context("BindDefinition with complex namespace selectors", func() {
 		It("should handle matchExpressions in namespaceSelector", func() {
 			By("Applying BindDefinition with complex namespace selector")
-			cmd := exec.Command("kubectl", "apply", "-f",
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f",
 				filepath.Join(complexTestdataPath, "binddefinition-namespace-selector-complex.yaml"))
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for BindDefinition to be reconciled")
 			Eventually(func() bool {
-				cmd := exec.Command("kubectl", "get", "binddefinition", "complex-ns-selector",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "binddefinition", "complex-ns-selector",
 					"-o", "jsonpath={.status.conditions[?(@.type=='Created')].status}")
 				output, err := utils.Run(cmd)
 				if err != nil {
@@ -470,7 +465,7 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 
 			By("Verifying RoleBinding was created in staging namespace (matches environment=staging)")
 			Eventually(func() error {
-				cmd := exec.Command("kubectl", "get", "rolebinding",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "rolebinding",
 					"-n", "complex-e2e-ns-team-b",
 					"-l", "app.kubernetes.io/created-by=auth-operator")
 				output, err := utils.Run(cmd)
@@ -488,20 +483,20 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 	Context("WebhookAuthorizer with all features", func() {
 		It("should create WebhookAuthorizer with all features enabled", func() {
 			By("Applying full-featured WebhookAuthorizer")
-			cmd := exec.Command("kubectl", "apply", "-f",
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f",
 				filepath.Join(complexTestdataPath, "webhookauthorizer-full-featured.yaml"))
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying WebhookAuthorizer was created")
 			Eventually(func() error {
-				cmd := exec.Command("kubectl", "get", "webhookauthorizer", "complex-full-authorizer")
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "webhookauthorizer", "complex-full-authorizer")
 				_, err := utils.Run(cmd)
 				return err
 			}, complexReconcileTime, complexPollInterval).Should(Succeed())
 
 			By("Verifying WebhookAuthorizer spec is correct")
-			cmd = exec.Command("kubectl", "get", "webhookauthorizer", "complex-full-authorizer", "-o", "json")
+			cmd = exec.CommandContext(context.Background(), "kubectl", "get", "webhookauthorizer", "complex-full-authorizer", "-o", "json")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -537,18 +532,18 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 	Context("Cleanup and Finalizers", func() {
 		It("should properly clean up child resources when RoleDefinition is deleted", func() {
 			By("Verifying ClusterRole exists")
-			cmd := exec.Command("kubectl", "get", "clusterrole", "complex-filtered-role")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrole", "complex-filtered-role")
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Deleting the RoleDefinition")
-			cmd = exec.Command("kubectl", "delete", "roledefinition", "complex-all-restrictions")
+			cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "roledefinition", "complex-all-restrictions")
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying ClusterRole was deleted by finalizer")
 			Eventually(func() error {
-				cmd := exec.Command("kubectl", "get", "clusterrole", "complex-filtered-role")
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrole", "complex-filtered-role")
 				_, err := utils.Run(cmd)
 				if err != nil {
 					return nil // Resource not found = success
@@ -559,18 +554,18 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 
 		It("should properly clean up bindings when BindDefinition is deleted", func() {
 			By("Verifying ClusterRoleBindings exist")
-			cmd := exec.Command("kubectl", "get", "clusterrolebinding", "complex-multi-view-binding")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrolebinding", "complex-multi-view-binding")
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Deleting the BindDefinition")
-			cmd = exec.Command("kubectl", "delete", "binddefinition", "complex-multi-binding")
+			cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "binddefinition", "complex-multi-binding")
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying ClusterRoleBindings were deleted by finalizer")
 			Eventually(func() error {
-				cmd := exec.Command("kubectl", "get", "clusterrolebinding", "complex-multi-view-binding")
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrolebinding", "complex-multi-view-binding")
 				_, err := utils.Run(cmd)
 				if err != nil {
 					return nil // Resource not found = success
@@ -590,18 +585,4 @@ func containsString(slice []string, s string) bool {
 		}
 	}
 	return false
-}
-
-func cleanupComplexTestCRDs() {
-	// Delete WebhookAuthorizers first
-	cmd := exec.Command("kubectl", "delete", "webhookauthorizer", "--all", "--ignore-not-found=true")
-	_, _ = utils.Run(cmd)
-
-	// Delete BindDefinitions
-	cmd = exec.Command("kubectl", "delete", "binddefinition", "--all", "--ignore-not-found=true")
-	_, _ = utils.Run(cmd)
-
-	// Delete RoleDefinitions
-	cmd = exec.Command("kubectl", "delete", "roledefinition", "--all", "--ignore-not-found=true")
-	_, _ = utils.Run(cmd)
 }

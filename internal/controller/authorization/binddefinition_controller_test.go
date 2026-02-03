@@ -13,7 +13,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	authorizationv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1"
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 )
 
 var _ = Describe("BindDefinition Controller", func() {
@@ -56,7 +56,7 @@ var _ = Describe("BindDefinition Controller", func() {
 
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
-			controllerReconciler := &bindDefinitionReconciler{
+			controllerReconciler := &BindDefinitionReconciler{
 				client:   k8sClient,
 				scheme:   k8sClient.Scheme(),
 				recorder: recorder,

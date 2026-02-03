@@ -17,9 +17,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	authnv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1"
-	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/conditions"
-	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/helpers"
+	authnv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	"github.com/telekom/auth-operator/pkg/conditions"
+	"github.com/telekom/auth-operator/pkg/helpers"
 )
 
 // ErrInvalidTargetRole is returned when the target role type is not valid.
@@ -27,7 +27,7 @@ var ErrInvalidTargetRole = fmt.Errorf("invalid target role type: must be Cluster
 
 // buildRoleObject creates the initial role object (ClusterRole or Role) based on spec.
 // Returns an error if the target role type is not valid.
-func (r *roleDefinitionReconciler) buildRoleObject(
+func (r *RoleDefinitionReconciler) buildRoleObject(
 	roleDefinition *authnv1alpha1.RoleDefinition,
 ) (client.Object, error) {
 	switch roleDefinition.Spec.TargetRole {
@@ -52,7 +52,7 @@ func (r *roleDefinitionReconciler) buildRoleObject(
 }
 
 // ensureFinalizer ensures the RoleDefinition has a finalizer.
-func (r *roleDefinitionReconciler) ensureFinalizer(
+func (r *RoleDefinitionReconciler) ensureFinalizer(
 	ctx context.Context,
 	roleDefinition *authnv1alpha1.RoleDefinition,
 ) error {
@@ -75,7 +75,7 @@ func (r *roleDefinitionReconciler) ensureFinalizer(
 
 // handleDeletion handles the deletion of the RoleDefinition and its associated role.
 // Returns the reconcile result and any error.
-func (r *roleDefinitionReconciler) handleDeletion(
+func (r *RoleDefinitionReconciler) handleDeletion(
 	ctx context.Context,
 	roleDefinition *authnv1alpha1.RoleDefinition,
 	role client.Object,
@@ -131,7 +131,7 @@ func (r *roleDefinitionReconciler) handleDeletion(
 }
 
 // buildFinalRules builds the final policy rules from the filtered API resources.
-func (r *roleDefinitionReconciler) buildFinalRules(
+func (r *RoleDefinitionReconciler) buildFinalRules(
 	roleDefinition *authnv1alpha1.RoleDefinition,
 	rulesByAPIGroupAndVerbs map[string]*rbacv1.PolicyRule,
 ) []rbacv1.PolicyRule {
@@ -170,7 +170,7 @@ func (r *roleDefinitionReconciler) buildFinalRules(
 // buildRoleWithRules creates a role object with the given rules.
 // Note: The caller should have already validated the target role type via buildRoleObject,
 // so this function assumes the target role type is valid.
-func (r *roleDefinitionReconciler) buildRoleWithRules(
+func (r *RoleDefinitionReconciler) buildRoleWithRules(
 	roleDefinition *authnv1alpha1.RoleDefinition,
 	finalRules []rbacv1.PolicyRule,
 ) (role client.Object, existingRole client.Object) {
@@ -204,7 +204,7 @@ func (r *roleDefinitionReconciler) buildRoleWithRules(
 }
 
 // createRole creates a new role and updates conditions.
-func (r *roleDefinitionReconciler) createRole(
+func (r *RoleDefinitionReconciler) createRole(
 	ctx context.Context,
 	roleDefinition *authnv1alpha1.RoleDefinition,
 	role client.Object,
@@ -263,7 +263,7 @@ func (r *roleDefinitionReconciler) createRole(
 }
 
 // updateRole updates an existing role if rules differ.
-func (r *roleDefinitionReconciler) updateRole(
+func (r *RoleDefinitionReconciler) updateRole(
 	ctx context.Context,
 	roleDefinition *authnv1alpha1.RoleDefinition,
 	existingRole client.Object,

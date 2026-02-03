@@ -1,0 +1,129 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: 'Bug report'
+description: |
+  Submit a bug report about Auth Operator. Include a reproducible example and 
+  detailed environment information. For security vulnerabilities, use the security advisory form instead.
+title: '[BUG] <brief description>'
+labels: ['bug', 'triage-needed']
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a bug! Before submitting, please:
+        - Check the [documentation](https://github.com/telekom/auth-operator/tree/main/docs)
+        - Search [existing issues](https://github.com/telekom/auth-operator/issues) for similar reports
+        - For security issues, email opensource@telekom.de instead of using this form
+  
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which component is affected?
+      options:
+        - Controller (RoleDefinition/BindDefinition)
+        - Webhook (WebhookAuthorizer)
+        - CRDs/API
+        - Helm Chart
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Describe the bug
+      description: Clear and concise description of what is broken
+      placeholder: |
+        What happened and what did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Steps to reproduce
+      description: Exact steps to reproduce the issue
+      placeholder: |
+        1. Apply the following RoleDefinition ...
+        2. Create a BindDefinition with ...
+        3. Observe the error ...
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Expected behavior
+      description: What should happen instead?
+      placeholder: |
+        The ClusterRole should be created successfully and...
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Error logs or output
+      description: |
+        Relevant error messages, stack traces, or logs
+        Use `kubectl logs -n auth-operator-system deployment/auth-operator-controller-manager` to get controller logs
+      placeholder: |
+        ```
+        error logs here
+        ```
+      render: shell
+
+  - type: textarea
+    attributes:
+      label: Custom Resources
+      description: |
+        If applicable, include the CRs you're using (redact sensitive information)
+      placeholder: |
+        ```yaml
+        apiVersion: authorization.t-caas.telekom.com/v1alpha1
+        kind: RoleDefinition
+        metadata:
+          name: example
+        spec:
+          ...
+        ```
+      render: yaml
+
+  - type: textarea
+    attributes:
+      label: Environment
+      description: |
+        Your setup details
+      value: |
+        - **Operator Version**: [e.g., 0.1.0]
+        - **Go Version**: [e.g., 1.25]
+        - **Kubernetes Version**: [e.g., v1.33]
+        - **OS/Platform**: [e.g., Ubuntu 22.04, macOS 14]
+        - **Deployment Method**: [Helm, Kustomize, Manual]
+      render: markdown
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Additional context
+      description: Any other relevant information
+      placeholder: |
+        - Related issues/PRs
+        - Workarounds you've found
+        - Impact on your deployment
+        - Configuration snippets (sanitize secrets!)
+
+  - type: checkboxes
+    attributes:
+      label: Checklist
+      options:
+        - label: I've checked existing issues and documentation
+          required: true
+        - label: I'm reporting a bug, not a security vulnerability
+          required: true
+        - label: I've included all relevant environment information
+          required: true
+        - label: I've included steps to reproduce the issue
+          required: true

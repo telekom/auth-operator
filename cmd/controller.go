@@ -1,5 +1,5 @@
 /*
-Copyright © 2025 Deutsche Telekom AG
+Copyright © 2026 Deutsche Telekom AG
 */
 package cmd
 
@@ -12,10 +12,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
 
-	authorizationv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1"
-	authorizationcontroller "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/internal/controller/authorization"
-	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/discovery"
-	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/indexer"
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	authorizationcontroller "github.com/telekom/auth-operator/internal/controller/authorization"
+	"github.com/telekom/auth-operator/pkg/discovery"
+	"github.com/telekom/auth-operator/pkg/indexer"
 
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -28,6 +28,7 @@ var (
 	bindDefinitionConcurrency int
 	roleDefinitionConcurrency int
 	cacheSyncTimeout          time.Duration
+	gracefulShutdownTimeout   time.Duration
 	waitForCRDs               bool
 )
 
@@ -52,6 +53,7 @@ are created and kept in sync.`,
 			"bindDefinitionConcurrency", bindDefinitionConcurrency,
 			"roleDefinitionConcurrency", roleDefinitionConcurrency,
 			"cacheSyncTimeout", cacheSyncTimeout,
+			"gracefulShutdownTimeout", gracefulShutdownTimeout,
 			"namespace", namespace,
 		)
 
@@ -76,7 +78,7 @@ are created and kept in sync.`,
 			LeaderElectionNamespace: namespace,
 			HealthProbeBindAddress:  probeAddr,
 			Cache:                   cacheOptions,
-			GracefulShutdownTimeout: &cacheSyncTimeout,
+			GracefulShutdownTimeout: &gracefulShutdownTimeout,
 		})
 		if err != nil {
 			return fmt.Errorf("unable to start manager: %w", err)
@@ -164,7 +166,10 @@ func init() {
 	controllerCmd.Flags().IntVar(&roleDefinitionConcurrency, "roledefinition-concurrency", 5,
 		"Number of concurrent workers for RoleDefinition reconciler. Default is 5. Use 0 to disable the reconciler.")
 	controllerCmd.Flags().DurationVar(&cacheSyncTimeout, "cache-sync-timeout", 2*time.Minute,
-		"Timeout for waiting for caches to sync. Increase this if CRDs take time to become available. Default is 2 minutes.")
+		"Timeout for waiting for CRDs to become available. "+
+			"Increase this if CRDs take time to become available. Default is 2 minutes.")
+	controllerCmd.Flags().DurationVar(&gracefulShutdownTimeout, "graceful-shutdown-timeout", 30*time.Second,
+		"Timeout for graceful shutdown of the manager. Default is 30 seconds.")
 	controllerCmd.Flags().BoolVar(&waitForCRDs, "wait-for-crds", true,
 		"Wait for required CRDs to be established before starting controllers. "+
 			"This prevents cache sync timeout errors when CRDs are not yet installed. Default is true.")

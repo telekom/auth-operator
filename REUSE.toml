@@ -1,0 +1,128 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: CC0-1.0
+
+# See https://reuse.software/spec-3.2/#reusetoml for specification
+version = 1
+
+# GitHub workflows - Apache-2.0
+[[annotations]]
+path = [".github/workflows/*.yml"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
+SPDX-License-Identifier = "Apache-2.0"
+
+# Go source files - Apache-2.0
+[[annotations]]
+path = [
+  "main.go",
+  "cmd/*.go",
+  "api/**/*.go",
+  "internal/**/*.go",
+  "pkg/**/*.go",
+  "test/**/*.go",
+  "hack/boilerplate.go.txt"
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
+SPDX-License-Identifier = "Apache-2.0"
+
+# Configuration files - CC0-1.0
+[[annotations]]
+path = [
+  ".dockerignore",
+  ".gitignore",
+  ".golangci.yml",
+  ".yamllint.yml",
+  ".vscode/**",
+  "Dockerfile",
+  "Makefile",
+  "PROJECT",
+  "Tiltfile",
+  "tilt-*.yaml",
+  "versions.env",
+  "go.mod",
+  "go.sum",
+  "kind-with-registry.sh"
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
+SPDX-License-Identifier = "CC0-1.0"
+
+# GitHub files - CC0-1.0
+[[annotations]]
+path = [
+  ".github/**/*.yml",
+  ".github/**/*.md",
+  ".github/ISSUE_TEMPLATE/**"
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
+SPDX-License-Identifier = "CC0-1.0"
+
+# Kubernetes/Helm configuration - Apache-2.0
+[[annotations]]
+path = [
+  "config/**/*.yaml",
+  "config/**/*.yml",
+  "chart/**/*.yaml",
+  "chart/**/*.yml",
+  "chart/**/*.tpl",
+  "chart/**/.helmignore"
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
+SPDX-License-Identifier = "Apache-2.0"
+
+# Test fixtures and data - CC0-1.0
+[[annotations]]
+path = [
+  "test/**/*.yaml",
+  "test/**/*.yml",
+  "test/**/*.json",
+  "test/**/*.http",
+  "test/**/README.md",
+  "test/**/.gitkeep"
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
+SPDX-License-Identifier = "CC0-1.0"
+
+# Documentation - CC0-1.0
+[[annotations]]
+path = [
+  "README.md",
+  "docs/**/*.md",
+  "docs/**/*.yaml",
+  "docs/**/*.docx",
+  "docs/**/*.drawio",
+  "docs/**/*.bkp",
+  "docs/**/*.png"
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
+SPDX-License-Identifier = "CC0-1.0"
+
+# Hack scripts - Apache-2.0
+[[annotations]]
+path = ["hack/**/*.sh"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
+SPDX-License-Identifier = "Apache-2.0"
+
+# E2E test documentation - CC0-1.0
+[[annotations]]
+path = [
+  "test/e2e/*.md",
+  "test/e2e/testdata/**/*.md"
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
+SPDX-License-Identifier = "CC0-1.0"
+
+# Kind config files - CC0-1.0
+[[annotations]]
+path = ["test/e2e/kind-config-*.yaml"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
+SPDX-License-Identifier = "CC0-1.0"

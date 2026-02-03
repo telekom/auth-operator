@@ -42,7 +42,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: RoleDefinition is the Schema for the roledefinitions API
+        description: RoleDefinition is the Schema for the roledefinitions API.
         properties:
           apiVersion:
             description: |-
@@ -253,9 +253,12 @@ spec:
                   running `kubectl api-resources --namespaced=true/false`
                 type: boolean
               targetName:
-                description: The name of the target role. This can be any name that
-                  accurately describes the ClusterRole/Role
+                description: |-
+                  The name of the target role. This can be any name that accurately describes the ClusterRole/Role.
+                  Must be a valid Kubernetes name (max 63 characters for most resources).
+                maxLength: 63
                 minLength: 5
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                 type: string
               targetNamespace:
                 description: The target namespace for the Role. This value is necessary

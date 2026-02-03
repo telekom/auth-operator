@@ -12,10 +12,12 @@ type namespaceWrapper struct {
 
 var _ Setter = &namespaceWrapper{}
 
+// NewNamespaceWrapper creates a new Setter wrapper around a Namespace.
 func NewNamespaceWrapper(ns *corev1.Namespace) Setter {
 	return &namespaceWrapper{ns}
 }
 
+// GetConditions returns the conditions from the namespace status.
 func (nw *namespaceWrapper) GetConditions() []metav1.Condition {
 	if nw.Namespace == nil {
 		return nil
@@ -34,6 +36,7 @@ func (nw *namespaceWrapper) GetConditions() []metav1.Condition {
 	return result
 }
 
+// SetConditions sets the conditions on the namespace status.
 func (nw *namespaceWrapper) SetConditions(conditions []metav1.Condition) {
 	if nw.Namespace == nil {
 		return

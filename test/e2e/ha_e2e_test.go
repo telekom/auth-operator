@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,7 +13,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/test/utils"
+	"github.com/telekom/auth-operator/test/utils"
 )
 
 var _ = Describe("Leader Election and HA E2E", Ordered, Label("ha", "leader-election"), func() {
@@ -34,19 +35,19 @@ var _ = Describe("Leader Election and HA E2E", Ordered, Label("ha", "leader-elec
 
 		By("Creating HA test namespaces")
 		for _, ns := range []string{haNamespace, haTestNamespace} {
-			cmd := exec.Command("kubectl", "create", "ns", ns, "--dry-run=client", "-o", "yaml")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "create", "ns", ns, "--dry-run=client", "-o", "yaml")
 			output, _ := utils.Run(cmd)
-			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd = exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(string(output))
 			_, _ = utils.Run(cmd)
 		}
 
 		By("Labeling test namespace")
-		cmd := exec.Command("kubectl", "label", "ns", haTestNamespace, "e2e-ha-test=true", "--overwrite")
+		cmd := exec.CommandContext(context.Background(), "kubectl", "label", "ns", haTestNamespace, "e2e-ha-test=true", "--overwrite")
 		_, _ = utils.Run(cmd)
 
 		By("Building the operator image")
-		cmd = exec.Command("make", "docker-build", fmt.Sprintf("IMG=%s", projectImage))
+		cmd = exec.CommandContext(context.Background(), "make", "docker-build", fmt.Sprintf("IMG=%s", projectImage))
 		_, err = utils.Run(cmd)
 		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build operator image")
 
@@ -71,12 +72,12 @@ var _ = Describe("Leader Election and HA E2E", Ordered, Label("ha", "leader-elec
 		CleanupForHelmTests(haNamespace, haHelmRelease)
 
 		By("Cleaning up Helm release")
-		cmd := exec.Command("helm", "uninstall", haHelmRelease, "-n", haNamespace, "--wait", "--timeout", "2m")
+		cmd := exec.CommandContext(context.Background(), "helm", "uninstall", haHelmRelease, "-n", haNamespace, "--wait", "--timeout", "2m")
 		_, _ = utils.Run(cmd)
 
 		By("Cleaning up namespaces")
 		for _, ns := range []string{haNamespace, haTestNamespace} {
-			cmd := exec.Command("kubectl", "delete", "ns", ns, "--ignore-not-found=true")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "ns", ns, "--ignore-not-found=true")
 			_, _ = utils.Run(cmd)
 		}
 
@@ -89,7 +90,7 @@ var _ = Describe("Leader Election and HA E2E", Ordered, Label("ha", "leader-elec
 			imageRepo := strings.Split(projectImage, ":")[0]
 			imageTag := getImageTag()
 
-			cmd := exec.Command("helm", "install", haHelmRelease, helmChartPath,
+			cmd := exec.CommandContext(context.Background(), "helm", "install", haHelmRelease, helmChartPath,
 				"-n", haNamespace,
 				"--create-namespace",
 				"--set", fmt.Sprintf("image.repository=%s", imageRepo),
@@ -114,7 +115,7 @@ var _ = Describe("Leader Election and HA E2E", Ordered, Label("ha", "leader-elec
 		It("should have 3 controller pods running", func() {
 			By("Waiting for all 3 controller pods to be running")
 			Eventually(func() int {
-				cmd := exec.Command("kubectl", "get", "pods",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pods",
 					"-l", "control-plane=controller-manager",
 					"-n", haNamespace,
 					"-o", "jsonpath={.items[*].status.phase}")
@@ -136,7 +137,7 @@ var _ = Describe("Leader Election and HA E2E", Ordered, Label("ha", "leader-elec
 		It("should have exactly one leader", func() {
 			By("Checking leader election lease")
 			Eventually(func() bool {
-				cmd := exec.Command("kubectl", "get", "lease",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "lease",
 					"-n", haNamespace,
 					"-o", "jsonpath={.items[*].spec.holderIdentity}")
 				output, err := utils.Run(cmd)
@@ -147,7 +148,7 @@ var _ = Describe("Leader Election and HA E2E", Ordered, Label("ha", "leader-elec
 			}, reconcileTimeout, pollingInterval).Should(BeTrue())
 
 			By("Verifying leader logs show leadership acquired")
-			cmd := exec.Command("kubectl", "logs",
+			cmd := exec.CommandContext(context.Background(), "kubectl", "logs",
 				"-l", "control-plane=controller-manager",
 				"-n", haNamespace,
 				"--tail=100")
@@ -162,7 +163,7 @@ var _ = Describe("Leader Election and HA E2E", Ordered, Label("ha", "leader-elec
 		It("should have 3 webhook pods running", func() {
 			By("Waiting for all 3 webhook pods to be running")
 			Eventually(func() int {
-				cmd := exec.Command("kubectl", "get", "pods",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pods",
 					"-l", "control-plane=webhook-server",
 					"-n", haNamespace,
 					"-o", "jsonpath={.items[*].status.phase}")
@@ -187,7 +188,7 @@ var _ = Describe("Leader Election and HA E2E", Ordered, Label("ha", "leader-elec
 		It("should have PodDisruptionBudgets configured correctly", func() {
 			By("Checking controller PDB")
 			Eventually(func() bool {
-				cmd := exec.Command("kubectl", "get", "pdb",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pdb",
 					"-l", "control-plane=controller-manager",
 					"-n", haNamespace,
 					"-o", "jsonpath={.items[0].spec.minAvailable}")
@@ -200,7 +201,7 @@ var _ = Describe("Leader Election and HA E2E", Ordered, Label("ha", "leader-elec
 
 			By("Checking webhook PDB")
 			Eventually(func() bool {
-				cmd := exec.Command("kubectl", "get", "pdb",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pdb",
 					"-l", "control-plane=webhook-server",
 					"-n", haNamespace,
 					"-o", "jsonpath={.items[0].spec.minAvailable}")
@@ -219,7 +220,7 @@ var _ = Describe("Leader Election and HA E2E", Ordered, Label("ha", "leader-elec
 		It("should identify the current leader", func() {
 			By("Getting the current leader identity")
 			Eventually(func() string {
-				cmd := exec.Command("kubectl", "get", "lease",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "lease",
 					"-n", haNamespace,
 					"-l", "control-plane=controller-manager",
 					"-o", "jsonpath={.items[0].spec.holderIdentity}")
@@ -244,7 +245,7 @@ spec:
   restrictedVerbs:
     - delete
 `
-			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(roleDefYAML)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -262,14 +263,14 @@ spec:
 			leaderParts := strings.Split(originalLeader, "_")
 			if len(leaderParts) > 0 {
 				leaderPod := leaderParts[0]
-				cmd := exec.Command("kubectl", "delete", "pod", leaderPod,
+				cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "pod", leaderPod,
 					"-n", haNamespace, "--grace-period=0", "--force")
 				_, _ = utils.Run(cmd)
 			}
 
 			By("Waiting for a new leader to be elected")
 			Eventually(func() bool {
-				cmd := exec.Command("kubectl", "get", "lease",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "lease",
 					"-n", haNamespace,
 					"-l", "control-plane=controller-manager",
 					"-o", "jsonpath={.items[0].spec.holderIdentity}")
@@ -283,7 +284,7 @@ spec:
 
 			By("Verifying the system recovered")
 			Eventually(func() int {
-				cmd := exec.Command("kubectl", "get", "pods",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pods",
 					"-l", "control-plane=controller-manager",
 					"-n", haNamespace,
 					"--field-selector=status.phase=Running",
@@ -318,7 +319,7 @@ spec:
   allowedPrincipals:
     - user: ha-user-%d
 `, i, i)
-				cmd := exec.Command("kubectl", "apply", "-f", "-")
+				cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
 				cmd.Stdin = strings.NewReader(authorizerYAML)
 				_, err := utils.Run(cmd)
 				Expect(err).NotTo(HaveOccurred())
@@ -326,7 +327,7 @@ spec:
 
 			By("Verifying all WebhookAuthorizers are configured")
 			Eventually(func() int {
-				cmd := exec.Command("kubectl", "get", "webhookauthorizer", "-o", "name")
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "webhookauthorizer", "-o", "name")
 				output, err := utils.Run(cmd)
 				if err != nil {
 					return 0
@@ -343,7 +344,7 @@ spec:
 
 		It("should have all webhook pods serving requests", func() {
 			By("Checking webhook pod readiness")
-			cmd := exec.Command("kubectl", "get", "pods",
+			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pods",
 				"-l", "control-plane=webhook-server",
 				"-n", haNamespace,
 				"-o", "jsonpath={.items[*].status.containerStatuses[0].ready}")
@@ -360,7 +361,7 @@ spec:
 	Context("Resource Scaling", func() {
 		It("should scale down webhook replicas", func() {
 			By("Scaling webhook to 1 replica")
-			cmd := exec.Command("kubectl", "scale", "deployment",
+			cmd := exec.CommandContext(context.Background(), "kubectl", "scale", "deployment",
 				"-l", "control-plane=webhook-server",
 				"-n", haNamespace,
 				"--replicas=1")
@@ -369,7 +370,7 @@ spec:
 
 			By("Waiting for scale down")
 			Eventually(func() int {
-				cmd := exec.Command("kubectl", "get", "pods",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pods",
 					"-l", "control-plane=webhook-server",
 					"-n", haNamespace,
 					"--field-selector=status.phase=Running",
@@ -384,7 +385,7 @@ spec:
 
 		It("should scale up webhook replicas", func() {
 			By("Scaling webhook back to 3 replicas")
-			cmd := exec.Command("kubectl", "scale", "deployment",
+			cmd := exec.CommandContext(context.Background(), "kubectl", "scale", "deployment",
 				"-l", "control-plane=webhook-server",
 				"-n", haNamespace,
 				"--replicas=3")
@@ -393,7 +394,7 @@ spec:
 
 			By("Waiting for scale up")
 			Eventually(func() int {
-				cmd := exec.Command("kubectl", "get", "pods",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pods",
 					"-l", "control-plane=webhook-server",
 					"-n", haNamespace,
 					"--field-selector=status.phase=Running",
@@ -421,7 +422,7 @@ func dumpHAResources(haNamespace string) {
 }
 
 func dumpAllPodLogs(namespace, filename string) {
-	cmd := exec.Command("kubectl", "get", "pods", "-n", namespace, "-o", "name")
+	cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pods", "-n", namespace, "-o", "name")
 	output, err := utils.Run(cmd)
 	if err != nil {
 		return
@@ -430,7 +431,7 @@ func dumpAllPodLogs(namespace, filename string) {
 	var allLogs strings.Builder
 	for _, podName := range utils.GetNonEmptyLines(string(output)) {
 		allLogs.WriteString(fmt.Sprintf("\n=== Logs for %s ===\n", podName))
-		cmd := exec.Command("kubectl", "logs", podName, "-n", namespace, "--tail=200")
+		cmd := exec.CommandContext(context.Background(), "kubectl", "logs", podName, "-n", namespace, "--tail=200")
 		logOutput, _ := utils.Run(cmd)
 		allLogs.Write(logOutput)
 		allLogs.WriteString("\n")
@@ -443,46 +444,25 @@ func createHASummary(namespace, timestamp string) {
 	summary.WriteString(fmt.Sprintf("# HA/Leader Election Test Summary - %s\n\n", timestamp))
 
 	summary.WriteString("## Pod Status\n\n")
-	cmd := exec.Command("kubectl", "get", "pods", "-n", namespace, "-o", "wide")
+	cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pods", "-n", namespace, "-o", "wide")
 	output, _ := utils.Run(cmd)
 	summary.WriteString("```\n")
 	summary.WriteString(string(output))
 	summary.WriteString("```\n\n")
 
 	summary.WriteString("## Leader Election\n\n")
-	cmd = exec.Command("kubectl", "get", "lease", "-n", namespace, "-o", "wide")
+	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "lease", "-n", namespace, "-o", "wide")
 	output, _ = utils.Run(cmd)
 	summary.WriteString("```\n")
 	summary.WriteString(string(output))
 	summary.WriteString("```\n\n")
 
 	summary.WriteString("## PodDisruptionBudgets\n\n")
-	cmd = exec.Command("kubectl", "get", "pdb", "-n", namespace, "-o", "wide")
+	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "pdb", "-n", namespace, "-o", "wide")
 	output, _ = utils.Run(cmd)
 	summary.WriteString("```\n")
 	summary.WriteString(string(output))
 	summary.WriteString("```\n")
 
 	saveOutput(fmt.Sprintf("ha-summary-%s.md", timestamp), []byte(summary.String()))
-}
-
-func cleanupHATestCRDs() {
-	crds := []struct {
-		kind string
-		name string
-	}{
-		{"roledefinition", "ha-e2e-test-role"},
-	}
-
-	for i := 1; i <= 5; i++ {
-		crds = append(crds, struct {
-			kind string
-			name string
-		}{"webhookauthorizer", fmt.Sprintf("ha-e2e-authorizer-%d", i)})
-	}
-
-	for _, crd := range crds {
-		cmd := exec.Command("kubectl", "delete", crd.kind, crd.name, "--ignore-not-found=true")
-		_, _ = utils.Run(cmd)
-	}
 }

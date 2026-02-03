@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# chart-testing configuration
+# https://github.com/helm/chart-testing
+
+target-branch: main
+chart-dirs:
+  - chart
+charts:
+  - chart/auth-operator
+validate-maintainers: false
+check-version-increment: true

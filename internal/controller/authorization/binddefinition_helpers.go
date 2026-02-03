@@ -13,9 +13,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	authnv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1"
-	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/conditions"
-	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/helpers"
+	authnv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	"github.com/telekom/auth-operator/pkg/conditions"
+	"github.com/telekom/auth-operator/pkg/helpers"
 )
 
 // logStatusUpdateError logs a status update error without failing the operation.
@@ -48,7 +48,7 @@ const (
 
 // deleteServiceAccount attempts to delete a service account if it has a controller reference.
 // Returns the result of the deletion and any error encountered.
-func (r *bindDefinitionReconciler) deleteServiceAccount(
+func (r *BindDefinitionReconciler) deleteServiceAccount(
 	ctx context.Context,
 	bindDef *authnv1alpha1.BindDefinition,
 	saName, saNamespace string,
@@ -113,7 +113,7 @@ func (r *bindDefinitionReconciler) deleteServiceAccount(
 }
 
 // deleteClusterRoleBinding attempts to delete a cluster role binding if it has a controller reference.
-func (r *bindDefinitionReconciler) deleteClusterRoleBinding(
+func (r *BindDefinitionReconciler) deleteClusterRoleBinding(
 	ctx context.Context,
 	bindDef *authnv1alpha1.BindDefinition,
 	clusterRoleRef string,
@@ -165,7 +165,7 @@ func (r *bindDefinitionReconciler) deleteClusterRoleBinding(
 }
 
 // deleteRoleBinding attempts to delete a role binding if it has a controller reference.
-func (r *bindDefinitionReconciler) deleteRoleBinding(
+func (r *BindDefinitionReconciler) deleteRoleBinding(
 	ctx context.Context,
 	bindDef *authnv1alpha1.BindDefinition,
 	roleRef, namespace string,
@@ -223,7 +223,7 @@ func buildBindingName(targetName, roleRef string) string {
 }
 
 // filterActiveNamespaces returns namespaces that are not in terminating phase.
-func (r *bindDefinitionReconciler) filterActiveNamespaces(
+func (r *BindDefinitionReconciler) filterActiveNamespaces(
 	ctx context.Context,
 	bindDef *authnv1alpha1.BindDefinition,
 	namespaceSet map[string]corev1.Namespace,
@@ -254,7 +254,7 @@ type createServiceAccountResult struct {
 }
 
 // createServiceAccounts creates ServiceAccount resources for subjects of kind ServiceAccount.
-func (r *bindDefinitionReconciler) createServiceAccounts(
+func (r *BindDefinitionReconciler) createServiceAccounts(
 	ctx context.Context,
 	bindDef *authnv1alpha1.BindDefinition,
 ) createServiceAccountResult {
@@ -345,7 +345,7 @@ func (r *bindDefinitionReconciler) createServiceAccounts(
 }
 
 // createClusterRoleBindings creates ClusterRoleBinding resources.
-func (r *bindDefinitionReconciler) createClusterRoleBindings(
+func (r *BindDefinitionReconciler) createClusterRoleBindings(
 	ctx context.Context,
 	bindDef *authnv1alpha1.BindDefinition,
 ) error {
@@ -407,7 +407,7 @@ func (r *bindDefinitionReconciler) createClusterRoleBindings(
 
 // createRoleBindings creates RoleBinding resources based on each roleBinding's namespace criteria.
 // Each roleBinding in the spec has its own namespaceSelector or explicit namespace.
-func (r *bindDefinitionReconciler) createRoleBindings(
+func (r *BindDefinitionReconciler) createRoleBindings(
 	ctx context.Context,
 	bindDef *authnv1alpha1.BindDefinition,
 	_ []corev1.Namespace, // Kept for API compatibility but not used - we resolve per roleBinding
@@ -448,7 +448,7 @@ func (r *bindDefinitionReconciler) createRoleBindings(
 }
 
 // resolveRoleBindingNamespaces returns the namespaces that match the roleBinding's selection criteria.
-func (r *bindDefinitionReconciler) resolveRoleBindingNamespaces(
+func (r *BindDefinitionReconciler) resolveRoleBindingNamespaces(
 	ctx context.Context,
 	roleBinding authnv1alpha1.NamespaceBinding,
 ) ([]corev1.Namespace, error) {
@@ -493,7 +493,7 @@ func (r *bindDefinitionReconciler) resolveRoleBindingNamespaces(
 }
 
 // createSingleRoleBinding creates a single RoleBinding resource.
-func (r *bindDefinitionReconciler) createSingleRoleBinding(
+func (r *BindDefinitionReconciler) createSingleRoleBinding(
 	ctx context.Context,
 	bindDef *authnv1alpha1.BindDefinition,
 	namespace, roleRef, roleKind string,
@@ -548,7 +548,7 @@ func (r *bindDefinitionReconciler) createSingleRoleBinding(
 }
 
 // updateServiceAccounts updates ServiceAccount resources if they differ from expected.
-func (r *bindDefinitionReconciler) updateServiceAccounts(
+func (r *BindDefinitionReconciler) updateServiceAccounts(
 	ctx context.Context,
 	bindDef *authnv1alpha1.BindDefinition,
 ) error {
@@ -619,7 +619,7 @@ func (r *bindDefinitionReconciler) updateServiceAccounts(
 }
 
 // updateClusterRoleBindings updates ClusterRoleBinding resources if they differ from expected.
-func (r *bindDefinitionReconciler) updateClusterRoleBindings(
+func (r *BindDefinitionReconciler) updateClusterRoleBindings(
 	ctx context.Context,
 	bindDef *authnv1alpha1.BindDefinition,
 ) error {
@@ -681,7 +681,7 @@ func (r *bindDefinitionReconciler) updateClusterRoleBindings(
 }
 
 // updateRoleBindings updates RoleBinding resources in the given namespaces.
-func (r *bindDefinitionReconciler) updateRoleBindings(
+func (r *BindDefinitionReconciler) updateRoleBindings(
 	ctx context.Context,
 	bindDef *authnv1alpha1.BindDefinition,
 	namespaces []corev1.Namespace,
@@ -704,7 +704,7 @@ func (r *bindDefinitionReconciler) updateRoleBindings(
 }
 
 // updateSingleRoleBinding updates a single RoleBinding if it differs from expected.
-func (r *bindDefinitionReconciler) updateSingleRoleBinding(
+func (r *BindDefinitionReconciler) updateSingleRoleBinding(
 	ctx context.Context,
 	bindDef *authnv1alpha1.BindDefinition,
 	namespace, roleRef, roleKind string,

@@ -13,8 +13,8 @@ import (
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	authorizationv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1"
-	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/discovery"
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	"github.com/telekom/auth-operator/pkg/discovery"
 )
 
 // TestBuildRoleObject tests the buildRoleObject function
@@ -23,7 +23,7 @@ func TestBuildRoleObject(t *testing.T) {
 	_ = authorizationv1alpha1.AddToScheme(s)
 
 	recorder := record.NewFakeRecorder(10)
-	r := &roleDefinitionReconciler{
+	r := &RoleDefinitionReconciler{
 		scheme:   s,
 		recorder: recorder,
 	}
@@ -107,7 +107,7 @@ func TestBuildRoleWithRules(t *testing.T) {
 	_ = authorizationv1alpha1.AddToScheme(s)
 
 	recorder := record.NewFakeRecorder(10)
-	r := &roleDefinitionReconciler{
+	r := &RoleDefinitionReconciler{
 		scheme:   s,
 		recorder: recorder,
 	}
@@ -202,12 +202,12 @@ func TestBuildRoleWithRules(t *testing.T) {
 
 var _ = Describe("RoleDefinition Helpers", func() {
 	ctx := context.Background()
-	var r *roleDefinitionReconciler
+	var r *RoleDefinitionReconciler
 
 	BeforeEach(func() {
 		resourceTracker := discovery.NewResourceTracker(scheme.Scheme, cfg)
 
-		r = &roleDefinitionReconciler{
+		r = &RoleDefinitionReconciler{
 			client:          k8sClient,
 			scheme:          scheme.Scheme,
 			recorder:        record.NewFakeRecorder(10),

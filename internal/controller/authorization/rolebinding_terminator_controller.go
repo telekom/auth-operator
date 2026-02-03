@@ -28,9 +28,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	authnv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1"
-	conditions "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/conditions"
-	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/discovery"
+	authnv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	conditions "github.com/telekom/auth-operator/pkg/conditions"
+	"github.com/telekom/auth-operator/pkg/discovery"
 )
 
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions,verbs=get;list
@@ -74,9 +74,9 @@ func newNamespaceTerminationStatus() *namespaceTerminationStatus {
 	}
 }
 
-// roleBindingTerminator is responsible for handling finalizers on RoleBindings owned by BindDefinitions.
-// during deletion, if the namespace is terminating it checks for remaining resources before removing finalizers; otherwise it removes them directly.
-type roleBindingTerminator struct {
+// RoleBindingTerminator is responsible for handling finalizers on RoleBindings owned by BindDefinitions.
+// During deletion, if the namespace is terminating it checks for remaining resources before removing finalizers; otherwise it removes them directly.
+type RoleBindingTerminator struct {
 	client                             client.Client
 	scheme                             *runtime.Scheme
 	dynamicClient                      dynamic.Interface
@@ -93,13 +93,13 @@ func NewRoleBindingTerminator(
 	scheme *runtime.Scheme,
 	recorder record.EventRecorder,
 	resourceTracker *discovery.ResourceTracker,
-) (*roleBindingTerminator, error) {
+) (*RoleBindingTerminator, error) {
 	dynamicClient, err := dynamic.NewForConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create dynamic client: %w", err)
 	}
 
-	return &roleBindingTerminator{
+	return &RoleBindingTerminator{
 		client:                             cachedClient,
 		dynamicClient:                      dynamicClient,
 		scheme:                             scheme,
@@ -111,7 +111,7 @@ func NewRoleBindingTerminator(
 
 // SetupWithManager sets up the controller with the Manager.
 // Used to watch for role bindings and handle their finalizers if they are managed by a BindDefinition.
-func (r *roleBindingTerminator) SetupWithManager(mgr ctrl.Manager, concurrency int) error {
+func (r *RoleBindingTerminator) SetupWithManager(mgr ctrl.Manager, concurrency int) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&rbacv1.RoleBinding{}).
 		WithOptions(controller.TypedOptions[reconcile.Request]{
@@ -121,7 +121,7 @@ func (r *roleBindingTerminator) SetupWithManager(mgr ctrl.Manager, concurrency i
 }
 
 // getNamespacedBlockingResources retrieves cached blocking resources for a namespace, recalculating them if the rate limiter allows it
-func (r *roleBindingTerminator) getNamespacedBlockingResources(ctx context.Context, namespace string) ([]namespaceDeletionResourceBlocking, error) {
+func (r *RoleBindingTerminator) getNamespacedBlockingResources(ctx context.Context, namespace string) ([]namespaceDeletionResourceBlocking, error) {
 	v, _ := r.namespaceTerminationResourcesCache.LoadOrStore(namespace, newNamespaceTerminationStatus())
 
 	// Use rate limiter to avoid frequent checks
@@ -314,7 +314,7 @@ func isOwnedByBindDefinition(ownerReferences []metav1.OwnerReference) bool {
 	return false
 }
 
-func (r *roleBindingTerminator) getOwningBindDefinition(ctx context.Context, ownerReferences []metav1.OwnerReference) (*authnv1alpha1.BindDefinition, error) {
+func (r *RoleBindingTerminator) getOwningBindDefinition(ctx context.Context, ownerReferences []metav1.OwnerReference) (*authnv1alpha1.BindDefinition, error) {
 	for _, ownerRef := range ownerReferences {
 		if ownerRef.Kind != "BindDefinition" || ownerRef.APIVersion != authnv1alpha1.GroupVersion.String() {
 			continue
@@ -329,7 +329,9 @@ func (r *roleBindingTerminator) getOwningBindDefinition(ctx context.Context, own
 	return nil, fmt.Errorf("no BindDefinition owner reference found")
 }
 
-func (r *roleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+// Reconcile handles the reconciliation loop for RoleBinding resources owned by BindDefinitions.
+// It manages finalizer cleanup during namespace termination.
+func (r *RoleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx).WithValues("roleBinding", req.NamespacedName)
 
 	// Fetching the RoleBinding from Kubernetes API
@@ -338,10 +340,9 @@ func (r *roleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return ctrl.Result{}, nil
-		} else {
-			log.Error(err, "Unable to fetch RoleBinding resource from Kubernetes API")
-			return ctrl.Result{}, err
 		}
+		log.Error(err, "Unable to fetch RoleBinding resource from Kubernetes API")
+		return ctrl.Result{}, err
 	}
 	// we don't care about RoleBindings not owned by a BindDefinition
 	if !isOwnedByBindDefinition(roleBinding.GetOwnerReferences()) {

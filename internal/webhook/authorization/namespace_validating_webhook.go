@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	authzv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1"
+	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,17 +18,20 @@ import (
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions,verbs=get;list;watch
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions/status,verbs=get;update;patch
 
+// NamespaceValidator is a validating webhook that validates namespace operations based on BindDefinitions.
 type NamespaceValidator struct {
 	Client       client.Client
 	Decoder      admission.Decoder
 	TDGMigration bool
 }
 
+// InjectDecoder injects the decoder into the NamespaceValidator.
 func (v *NamespaceValidator) InjectDecoder(d admission.Decoder) error {
 	v.Decoder = d
 	return nil
 }
 
+// Handle validates namespace operations based on BindDefinition configurations.
 func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) admission.Response {
 	logger := logf.FromContext(ctx).WithName("namespace-validator")
 
@@ -95,9 +98,9 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 
 		// Define the label keys of interest
 		labelKeys := []string{
-			"t-caas.telekom.com/owner",
-			"t-caas.telekom.com/tenant",
-			"t-caas.telekom.com/thirdparty",
+			authzv1alpha1.LabelKeyOwner,
+			authzv1alpha1.LabelKeyTenant,
+			authzv1alpha1.LabelKeyThirdParty,
 		}
 
 		// If TDGMigration is enabled, add the additional label key

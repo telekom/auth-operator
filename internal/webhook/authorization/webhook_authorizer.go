@@ -15,7 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	authzv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1"
+	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 )
 
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=webhookauthorizers,verbs=get;list;watch
@@ -37,6 +37,9 @@ type Authorizer struct {
 func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Use request context for proper cancellation and deadline propagation
 	ctx := r.Context()
+
+	// Ensure request body is closed to prevent resource leaks
+	defer func() { _ = r.Body.Close() }()
 
 	var sar authzv1.SubjectAccessReview
 

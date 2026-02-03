@@ -1,5 +1,5 @@
 /*
-Copyright © 2025 Deutsche Telekom AG
+Copyright © 2026 Deutsche Telekom AG
 */
 package cmd
 
@@ -10,10 +10,10 @@ import (
 	"fmt"
 	"net/http"
 
-	authorizationv1alpha1 "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/api/authorization/v1alpha1"
-	authorizationwebhook "gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/internal/webhook/authorization"
-	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/internal/webhook/certrotator"
-	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/pkg/indexer"
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	authorizationwebhook "github.com/telekom/auth-operator/internal/webhook/authorization"
+	"github.com/telekom/auth-operator/internal/webhook/certrotator"
+	"github.com/telekom/auth-operator/pkg/indexer"
 
 	"github.com/open-policy-agent/cert-controller/pkg/rotator"
 	"github.com/spf13/cobra"

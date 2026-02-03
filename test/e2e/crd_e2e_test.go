@@ -13,7 +13,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"gitlab.devops.telekom.de/cit/t-caas/operators/auth-operator/test/utils"
+	"github.com/telekom/auth-operator/test/utils"
 )
 
 const (
@@ -42,33 +42,33 @@ var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 		// cert-manager is installed in BeforeSuite, no need to install here
 
 		By("Creating operator namespace")
-		cmd := exec.Command("kubectl", "get", "ns", operatorNamespace, "-o", "name")
+		cmd := exec.CommandContext(context.Background(), "kubectl", "get", "ns", operatorNamespace, "-o", "name")
 		if _, err := utils.Run(cmd); err != nil {
-			cmd = exec.Command("kubectl", "create", "ns", operatorNamespace, "--dry-run=client", "-o", "yaml")
+			cmd = exec.CommandContext(context.Background(), "kubectl", "create", "ns", operatorNamespace, "--dry-run=client", "-o", "yaml")
 			output, _ := utils.Run(cmd)
-			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd = exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(string(output))
 			_, _ = utils.Run(cmd)
 		}
 
 		// Always deploy fresh operator in dedicated cluster (no reuse)
 		By("Building the operator image")
-		cmd = exec.Command("make", "docker-build", fmt.Sprintf("IMG=%s", projectImage))
+		cmd = exec.CommandContext(context.Background(), "make", "docker-build", fmt.Sprintf("IMG=%s", projectImage))
 		_, err := utils.Run(cmd)
 		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build operator image")
 
 		By("Loading image into kind cluster")
-		cmd = exec.Command("kind", "load", "docker-image", projectImage, "--name", kindClusterName)
+		cmd = exec.CommandContext(context.Background(), "kind", "load", "docker-image", projectImage, "--name", kindClusterName)
 		_, err = utils.Run(cmd)
 		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load image into kind cluster")
 
 		By("Installing CRDs")
-		cmd = exec.Command("make", "install")
+		cmd = exec.CommandContext(context.Background(), "make", "install")
 		_, err = utils.Run(cmd)
 		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to install CRDs")
 
 		By("Deploying the controller-manager")
-		cmd = exec.Command("make", "deploy", fmt.Sprintf("IMG=%s", projectImage))
+		cmd = exec.CommandContext(context.Background(), "make", "deploy", fmt.Sprintf("IMG=%s", projectImage))
 		_, err = utils.Run(cmd)
 		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to deploy controller-manager")
 	})
@@ -82,6 +82,12 @@ var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 		By("Waiting for webhook configurations and service endpoints")
 		Expect(utils.WaitForWebhookConfigurations("authorization.t-caas.telekom.com/component=webhook", deployTimeout)).To(Succeed())
 		Expect(utils.WaitForServiceEndpoints(webhookService, operatorNamespace, deployTimeout)).To(Succeed())
+
+		By("Waiting for webhook CA bundle to be injected by cert-rotator")
+		Expect(utils.WaitForWebhookCABundle("authorization.t-caas.telekom.com/component=webhook", deployTimeout)).To(Succeed())
+
+		By("Waiting for webhook TLS certificate to be ready")
+		Expect(utils.WaitForWebhookReady(deployTimeout)).To(Succeed())
 
 		By("Ensuring test namespace exists")
 		ensureTestNamespace()
@@ -103,7 +109,7 @@ var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 		}
 
 		By("Cleaning up test resources")
-		cmd := exec.Command("kubectl", "delete", "-k", fixturesPath, "--ignore-not-found=true")
+		cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "-k", fixturesPath, "--ignore-not-found=true")
 		_, _ = utils.Run(cmd)
 
 		// Use centralized cleanup
@@ -120,17 +126,17 @@ var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 			utils.CleanupAllAuthOperatorWebhooks()
 
 			By("Undeploying controller-manager")
-			cmd = exec.Command("make", "undeploy", "ignore-not-found=true")
+			cmd = exec.CommandContext(context.Background(), "make", "undeploy", "ignore-not-found=true")
 			_, _ = utils.Run(cmd)
 
 			By("Uninstalling CRDs")
-			cmd = exec.Command("make", "uninstall", "ignore-not-found=true")
+			cmd = exec.CommandContext(context.Background(), "make", "uninstall", "ignore-not-found=true")
 			_, _ = utils.Run(cmd)
 
 			// cert-manager cleanup is handled in AfterSuite
 
 			By("Removing operator namespace")
-			cmd = exec.Command("kubectl", "delete", "ns", operatorNamespace, "--ignore-not-found=true")
+			cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "ns", operatorNamespace, "--ignore-not-found=true")
 			_, _ = utils.Run(cmd)
 		}
 	})
@@ -141,7 +147,7 @@ var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 			Expect(verifyControllerRunning()).To(Succeed())
 
 			By("Checking controller-manager logs for errors")
-			cmd := exec.Command("kubectl", "logs",
+			cmd := exec.CommandContext(context.Background(), "kubectl", "logs",
 				"-l", "control-plane=controller-manager",
 				"-n", operatorNamespace,
 				"--tail=50",
@@ -169,7 +175,7 @@ var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 
 			By("Verifying ClusterRole has expected rules (read-only)")
 			Eventually(func() bool {
-				cmd := exec.Command("kubectl", "get", "clusterrole", "e2e-cluster-reader", "-o", "jsonpath={.rules}")
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrole", "e2e-cluster-reader", "-o", "jsonpath={.rules}")
 				output, err := utils.Run(cmd)
 				if err != nil {
 					return false
@@ -211,7 +217,7 @@ var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 			}, reconcileTimeout, pollingInterval).Should(Succeed())
 
 			By("Verifying velero.io API group is excluded from ClusterRole")
-			cmd := exec.Command("kubectl", "get", "clusterrole", "e2e-cluster-reader", "-o", "yaml")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrole", "e2e-cluster-reader", "-o", "yaml")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(string(output)).NotTo(ContainSubstring("velero.io"))
@@ -242,7 +248,7 @@ var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 			}, reconcileTimeout, pollingInterval).Should(BeTrue())
 
 			By("Verifying ClusterRoleBinding has correct subjects")
-			cmd := exec.Command("kubectl", "get", "clusterrolebinding",
+			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrolebinding",
 				"e2e-cluster-binding-e2e-cluster-reader-binding",
 				"-o", "jsonpath={.subjects}")
 			output, err := utils.Run(cmd)
@@ -271,7 +277,7 @@ var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 			By("Waiting for RoleBinding to be created in labeled namespace")
 			Eventually(func() error {
 				// RoleBinding should be created in the e2e-test-ns namespace (labeled with e2e-test=true)
-				cmd := exec.Command("kubectl", "get", "rolebinding",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "rolebinding",
 					"-l", "app.kubernetes.io/created-by=auth-operator",
 					"-n", testNamespace,
 					"-o", "name")
@@ -310,7 +316,7 @@ var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 
 			By("Verifying BindDefinition status includes generated ServiceAccount")
 			Eventually(func() bool {
-				cmd := exec.Command("kubectl", "get", "binddefinition", "e2e-test-sa-binding",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "binddefinition", "e2e-test-sa-binding",
 					"-o", "jsonpath={.status.generatedServiceAccounts}")
 				output, err := utils.Run(cmd)
 				if err != nil {
@@ -333,7 +339,7 @@ var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 			// Note: .status.authorizerConfigured is not implemented in the controller
 
 			By("Verifying WebhookAuthorizer spec is correct")
-			cmd := exec.Command("kubectl", "get", "webhookauthorizer", "e2e-test-authorizer-allow",
+			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "webhookauthorizer", "e2e-test-authorizer-allow",
 				"-o", "jsonpath={.spec.allowedPrincipals}")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -351,7 +357,7 @@ var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 			// Note: .status.authorizerConfigured is not implemented in the controller
 
 			By("Verifying WebhookAuthorizer has denied principals")
-			cmd := exec.Command("kubectl", "get", "webhookauthorizer", "e2e-test-authorizer-deny",
+			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "webhookauthorizer", "e2e-test-authorizer-deny",
 				"-o", "jsonpath={.spec.deniedPrincipals}")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -369,7 +375,7 @@ var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 			// Note: .status.authorizerConfigured is not implemented in the controller
 
 			By("Verifying WebhookAuthorizer has non-resource rules")
-			cmd := exec.Command("kubectl", "get", "webhookauthorizer", "e2e-test-authorizer-nonresource",
+			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "webhookauthorizer", "e2e-test-authorizer-nonresource",
 				"-o", "jsonpath={.spec.nonResourceRules}")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -391,7 +397,7 @@ var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 			Expect(checkResourceExists("clusterrole", "e2e-cluster-reader", "")).To(Succeed())
 
 			By("Deleting the RoleDefinition")
-			cmd := exec.Command("kubectl", "delete", "roledefinition", "e2e-test-cluster-reader")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "roledefinition", "e2e-test-cluster-reader")
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -417,7 +423,7 @@ var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 			}, reconcileTimeout, pollingInterval).Should(Succeed())
 
 			By("Deleting the BindDefinition")
-			cmd := exec.Command("kubectl", "delete", "binddefinition", "e2e-test-cluster-binding", "--ignore-not-found=true")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "binddefinition", "e2e-test-cluster-binding", "--ignore-not-found=true")
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -445,7 +451,7 @@ spec:
   targetName: invalid-role
   scopeNamespaced: false
 `
-			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(invalidYAML)
 			_, err := utils.Run(cmd)
 			// Should be rejected by validation webhook
@@ -470,7 +476,7 @@ spec:
     clusterRoleRefs:
       - non-existent-clusterrole
 `, bindDefName)
-			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(invalidBindYAML)
 			output, err := utils.Run(cmd)
 
@@ -482,7 +488,7 @@ spec:
 
 			By("Verifying the RoleRefValidCondition is set to False after reconciliation")
 			Eventually(func() bool {
-				cmd := exec.Command("kubectl", "get", "binddefinition", bindDefName,
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "binddefinition", bindDefName,
 					"-o", "jsonpath={.status.conditions[?(@.type=='RoleRefsValid')].status}")
 				statusOutput, err := utils.Run(cmd)
 				if err != nil {
@@ -493,7 +499,7 @@ spec:
 				"Expected RoleRefsValid condition to be False")
 
 			By("Cleanup")
-			cleanupCmd := exec.Command("kubectl", "delete", "binddefinition", bindDefName, "--ignore-not-found=true")
+			cleanupCmd := exec.CommandContext(context.Background(), "kubectl", "delete", "binddefinition", bindDefName, "--ignore-not-found=true")
 			_, _ = utils.Run(cleanupCmd)
 		})
 	})
@@ -502,7 +508,7 @@ spec:
 // Helper functions
 
 func verifyControllerRunning() error {
-	cmd := exec.Command("kubectl", "get", "pods",
+	cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pods",
 		"-l", "control-plane=controller-manager",
 		"-n", operatorNamespace,
 		"-o", "jsonpath={.items[0].status.phase}")
@@ -518,7 +524,7 @@ func verifyControllerRunning() error {
 
 func applyFixture(filename string) {
 	fixturePath := filepath.Join(fixturesPath, filename)
-	cmd := exec.Command("kubectl", "apply", "-f", fixturePath)
+	cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", fixturePath)
 	output, err := utils.Run(cmd)
 	ExpectWithOffset(2, err).NotTo(HaveOccurred(), "Failed to apply fixture %s: %s", filename, string(output))
 }
@@ -528,14 +534,14 @@ func checkResourceExists(resourceType, name, namespace string) error {
 	if namespace != "" {
 		args = append(args, "-n", namespace)
 	}
-	cmd := exec.Command("kubectl", args...)
+	cmd := exec.CommandContext(context.Background(), "kubectl", args...)
 	_, err := utils.Run(cmd)
 	return err
 }
 
 func checkRoleDefinitionReconciled(name string) bool {
 	// Check for the Created condition which indicates the role was created successfully
-	cmd := exec.Command("kubectl", "get", "roledefinition", name,
+	cmd := exec.CommandContext(context.Background(), "kubectl", "get", "roledefinition", name,
 		"-o", "jsonpath={.status.conditions[?(@.type=='Created')].status}")
 	output, err := utils.Run(cmd)
 	if err != nil {
@@ -546,7 +552,7 @@ func checkRoleDefinitionReconciled(name string) bool {
 
 func checkBindDefinitionReconciled(name string) bool {
 	// Check for the Created condition which indicates the binding was created successfully
-	cmd := exec.Command("kubectl", "get", "binddefinition", name,
+	cmd := exec.CommandContext(context.Background(), "kubectl", "get", "binddefinition", name,
 		"-o", "jsonpath={.status.conditions[?(@.type=='Created')].status}")
 	output, err := utils.Run(cmd)
 	if err != nil {
@@ -566,7 +572,7 @@ func cleanupCRDE2ETestState() {
 	const e2eLabelSelector = "app.kubernetes.io/component=e2e-test"
 	const createdByLabelSelector = "app.kubernetes.io/created-by=auth-operator"
 
-	cmd := exec.Command("kubectl", "delete", "-k", fixturesPath, "--ignore-not-found=true", "--wait=false", "--timeout=30s")
+	cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "-k", fixturesPath, "--ignore-not-found=true", "--wait=false", "--timeout=30s")
 	_, _ = utils.Run(cmd)
 
 	utils.RemoveFinalizersForAll("roledefinition")
