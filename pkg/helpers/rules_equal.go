@@ -2,27 +2,51 @@ package helpers
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 
 	rbacv1 "k8s.io/api/rbac/v1"
 )
 
 // PolicyRulesEqual compares two slices of PolicyRules for equality.
+// It does not mutate the input slices.
 func PolicyRulesEqual(a, b []rbacv1.PolicyRule) bool {
 	if len(a) != len(b) {
 		return false
 	}
 
-	// Sort both slices to ensure consistent ordering
-	sortPolicyRules(a)
-	sortPolicyRules(b)
+	// Make deep copies to avoid mutating the original slices
+	aCopy := deepCopyPolicyRules(a)
+	bCopy := deepCopyPolicyRules(b)
 
-	for i := range a {
-		if !policyRuleEqual(a[i], b[i]) {
+	// Sort both slices to ensure consistent ordering
+	sortPolicyRules(aCopy)
+	sortPolicyRules(bCopy)
+
+	for i := range aCopy {
+		if !policyRuleEqual(aCopy[i], bCopy[i]) {
 			return false
 		}
 	}
 	return true
+}
+
+// deepCopyPolicyRules creates a deep copy of a slice of PolicyRules.
+func deepCopyPolicyRules(rules []rbacv1.PolicyRule) []rbacv1.PolicyRule {
+	if rules == nil {
+		return nil
+	}
+	result := make([]rbacv1.PolicyRule, len(rules))
+	for i, rule := range rules {
+		result[i] = rbacv1.PolicyRule{
+			APIGroups:       slices.Clone(rule.APIGroups),
+			Resources:       slices.Clone(rule.Resources),
+			Verbs:           slices.Clone(rule.Verbs),
+			ResourceNames:   slices.Clone(rule.ResourceNames),
+			NonResourceURLs: slices.Clone(rule.NonResourceURLs),
+		}
+	}
+	return result
 }
 
 func policyRuleEqual(a, b rbacv1.PolicyRule) bool {
@@ -38,12 +62,16 @@ func stringSlicesEqual(a, b []string) bool {
 		return false
 	}
 
-	// Sort the slices to ensure consistent ordering
-	sort.Strings(a)
-	sort.Strings(b)
+	// Make copies to avoid mutating the original slices
+	aCopy := slices.Clone(a)
+	bCopy := slices.Clone(b)
 
-	for i := range a {
-		if a[i] != b[i] {
+	// Sort the copies to ensure consistent ordering
+	sort.Strings(aCopy)
+	sort.Strings(bCopy)
+
+	for i := range aCopy {
+		if aCopy[i] != bCopy[i] {
 			return false
 		}
 	}

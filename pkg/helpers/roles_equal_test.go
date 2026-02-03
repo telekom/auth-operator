@@ -149,6 +149,112 @@ func TestPolicyRulesEqual(t *testing.T) {
 	}
 }
 
+func TestPolicyRulesEqualDoesNotMutateInput(t *testing.T) {
+	// Create input slices with unsorted elements
+	a := []rbacv1.PolicyRule{
+		{
+			APIGroups: []string{"apps", ""},
+			Resources: []string{"pods", "deployments"},
+			Verbs:     []string{"get", "list", "watch"},
+		},
+		{
+			APIGroups: []string{"batch"},
+			Resources: []string{"jobs"},
+			Verbs:     []string{"create"},
+		},
+	}
+	b := []rbacv1.PolicyRule{
+		{
+			APIGroups: []string{"batch"},
+			Resources: []string{"jobs"},
+			Verbs:     []string{"create"},
+		},
+		{
+			APIGroups: []string{"", "apps"},
+			Resources: []string{"deployments", "pods"},
+			Verbs:     []string{"watch", "list", "get"},
+		},
+	}
+
+	// Store original values to compare after function call
+	aOriginal := []rbacv1.PolicyRule{
+		{
+			APIGroups: []string{"apps", ""},
+			Resources: []string{"pods", "deployments"},
+			Verbs:     []string{"get", "list", "watch"},
+		},
+		{
+			APIGroups: []string{"batch"},
+			Resources: []string{"jobs"},
+			Verbs:     []string{"create"},
+		},
+	}
+	bOriginal := []rbacv1.PolicyRule{
+		{
+			APIGroups: []string{"batch"},
+			Resources: []string{"jobs"},
+			Verbs:     []string{"create"},
+		},
+		{
+			APIGroups: []string{"", "apps"},
+			Resources: []string{"deployments", "pods"},
+			Verbs:     []string{"watch", "list", "get"},
+		},
+	}
+
+	// Call the function (should return true since they are equivalent)
+	result := PolicyRulesEqual(a, b)
+	if !result {
+		t.Errorf("PolicyRulesEqual() = %v, want true", result)
+	}
+
+	// Verify input slices were not mutated
+	for i := range a {
+		if len(a[i].APIGroups) != len(aOriginal[i].APIGroups) {
+			t.Errorf("PolicyRulesEqual mutated input 'a' APIGroups at index %d", i)
+		}
+		for j := range a[i].APIGroups {
+			if a[i].APIGroups[j] != aOriginal[i].APIGroups[j] {
+				t.Errorf("PolicyRulesEqual mutated input 'a' APIGroups[%d] at index %d: got %q, want %q",
+					j, i, a[i].APIGroups[j], aOriginal[i].APIGroups[j])
+			}
+		}
+		for j := range a[i].Resources {
+			if a[i].Resources[j] != aOriginal[i].Resources[j] {
+				t.Errorf("PolicyRulesEqual mutated input 'a' Resources[%d] at index %d: got %q, want %q",
+					j, i, a[i].Resources[j], aOriginal[i].Resources[j])
+			}
+		}
+		for j := range a[i].Verbs {
+			if a[i].Verbs[j] != aOriginal[i].Verbs[j] {
+				t.Errorf("PolicyRulesEqual mutated input 'a' Verbs[%d] at index %d: got %q, want %q",
+					j, i, a[i].Verbs[j], aOriginal[i].Verbs[j])
+			}
+		}
+	}
+
+	for i := range b {
+		for j := range b[i].APIGroups {
+			if b[i].APIGroups[j] != bOriginal[i].APIGroups[j] {
+				t.Errorf("PolicyRulesEqual mutated input 'b' APIGroups[%d] at index %d: got %q, want %q",
+					j, i, b[i].APIGroups[j], bOriginal[i].APIGroups[j])
+			}
+		}
+		for j := range b[i].Resources {
+			if b[i].Resources[j] != bOriginal[i].Resources[j] {
+				t.Errorf("PolicyRulesEqual mutated input 'b' Resources[%d] at index %d: got %q, want %q",
+					j, i, b[i].Resources[j], bOriginal[i].Resources[j])
+			}
+		}
+		for j := range b[i].Verbs {
+			if b[i].Verbs[j] != bOriginal[i].Verbs[j] {
+				t.Errorf("PolicyRulesEqual mutated input 'b' Verbs[%d] at index %d: got %q, want %q",
+					j, i, b[i].Verbs[j], bOriginal[i].Verbs[j])
+			}
+		}
+	}
+}
+
 func TestClusterRoleBindsEqual(t *testing.T) {
 	tests := []struct {
 		name     string
