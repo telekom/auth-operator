@@ -165,25 +165,25 @@ func getLabelsFromNamespaceSelector(selector metav1.LabelSelector) map[string]st
 	labels := map[string]string{}
 	// Process matchLabels
 	for key, value := range selector.MatchLabels {
-		if key == "t-caas.telekom.com/owner" {
+		if key == authzv1alpha1.LabelKeyOwner {
 			labels[key] = value
 		}
-		if key == "t-caas.telekom.com/tenant" {
+		if key == authzv1alpha1.LabelKeyTenant {
 			labels[key] = value
 		}
-		if key == "t-caas.telekom.com/thirdparty" {
+		if key == authzv1alpha1.LabelKeyThirdParty {
 			labels[key] = value
 		}
 	}
 	// Process matchExpressions
 	for _, expr := range selector.MatchExpressions {
-		if expr.Key == "t-caas.telekom.com/owner" && expr.Operator == metav1.LabelSelectorOpIn && len(expr.Values) == 1 {
+		if expr.Key == authzv1alpha1.LabelKeyOwner && expr.Operator == metav1.LabelSelectorOpIn && len(expr.Values) == 1 {
 			labels[expr.Key] = expr.Values[0]
 		}
-		if expr.Key == "t-caas.telekom.com/tenant" && expr.Operator == metav1.LabelSelectorOpIn && len(expr.Values) == 1 {
+		if expr.Key == authzv1alpha1.LabelKeyTenant && expr.Operator == metav1.LabelSelectorOpIn && len(expr.Values) == 1 {
 			labels[expr.Key] = expr.Values[0]
 		}
-		if expr.Key == "t-caas.telekom.com/thirdparty" && expr.Operator == metav1.LabelSelectorOpIn && len(expr.Values) == 1 {
+		if expr.Key == authzv1alpha1.LabelKeyThirdParty && expr.Operator == metav1.LabelSelectorOpIn && len(expr.Values) == 1 {
 			labels[expr.Key] = expr.Values[0]
 		}
 	}
