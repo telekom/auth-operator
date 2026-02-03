@@ -71,20 +71,13 @@ jobs:
           ref: ${{ steps.latest-tag.outputs.tag }}
           path: tag-branch
 
-      - name: Setup Go
-        uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
+      - name: Setup Go Environment
+        uses: ./pr-branch/.github/actions/setup-go-env
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache: true
+          install-kind: 'true'
+          kind-version: ${{ env.KIND_VERSION }}
           cache-dependency-path: pr-branch/go.sum
-
-      - name: Install kind
-        run: go install sigs.k8s.io/kind@${{ env.KIND_VERSION }}
-
-      - name: Install yq
-        run: |
-          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
 
       - name: Create kind cluster
         run: |
@@ -94,92 +87,6 @@ jobs:
       - name: Install popular CRDs
         run: |
           KIND_CLUSTER_NAME=output-delta bash pr-branch/hack/ci/setup-kind-crds.sh
-
-      - name: Create test namespaces
-        run: |
-          # Create namespaces that match the sample selectors to test Roles and RoleBindings
-          # These namespaces exercise different label selector scenarios:
-          # - matchLabels (exact match)
-          # - matchExpressions with In, Exists operators
-          # - Multiple labels for complex selectors
-
-          # Tenant Alpha namespaces (tests matchLabels with tenant + environment)
-          kubectl create namespace tenant-alpha
-          kubectl label namespace tenant-alpha \
-            t-caas.telekom.com/tenant=alpha \
-            t-caas.telekom.com/environment=development \
-            t-caas.telekom.com/owner=tenant \
-            t-caas.telekom.com/purpose=application
-
-          kubectl create namespace tenant-alpha-staging
-          kubectl label namespace tenant-alpha-staging \
-            t-caas.telekom.com/tenant=alpha \
-            t-caas.telekom.com/environment=staging \
-            t-caas.telekom.com/owner=tenant
-
-          kubectl create namespace tenant-alpha-prod
-          kubectl label namespace tenant-alpha-prod \
-            t-caas.telekom.com/tenant=alpha \
-            t-caas.telekom.com/environment=production \
-            t-caas.telekom.com/owner=tenant
-
-          # Tenant Beta namespaces
-          kubectl create namespace tenant-beta
-          kubectl label namespace tenant-beta \
-            t-caas.telekom.com/tenant=beta \
-            t-caas.telekom.com/environment=staging \
-            t-caas.telekom.com/owner=tenant
-
-          # Platform namespaces (tests matchLabels with owner=platform)
-          kubectl create namespace t-caas-system
-          kubectl label namespace t-caas-system \
-            t-caas.telekom.com/owner=platform \
-            kubernetes.io/metadata.name=t-caas-system
-
-          kubectl create namespace t-caas-monitoring
-          kubectl label namespace t-caas-monitoring \
-            t-caas.telekom.com/owner=platform \
-            t-caas.telekom.com/monitoring=enabled \
-            t-caas.telekom.com/component=observability
-
-          kubectl create namespace t-caas-logging
-          kubectl label namespace t-caas-logging \
-            t-caas.telekom.com/owner=platform \
-            kubernetes.io/metadata.name=t-caas-logging
-
-          # GitOps namespaces (tests matchExpressions with Exists operator)
-          kubectl create namespace argocd
-          kubectl label namespace argocd \
-            argocd.argoproj.io/managed-by=argocd \
-            t-caas.telekom.com/gitops-source=true
-
-          kubectl create namespace flux-system
-          kubectl label namespace flux-system \
-            kustomize.toolkit.fluxcd.io/managed-by=flux \
-            t-caas.telekom.com/gitops-source=true
-
-          # Shared namespaces (tests matchExpressions with In operator for owner in [tenant, shared])
-          kubectl create namespace shared-services
-          kubectl label namespace shared-services \
-            t-caas.telekom.com/owner=shared \
-            t-caas.telekom.com/tenant=shared
-
-          # Compliance namespace (tests specific label for auditor access)
-          kubectl create namespace compliance-pci
-          kubectl label namespace compliance-pci \
-            t-caas.telekom.com/owner=tenant \
-            t-caas.telekom.com/tenant=compliance \
-            t-caas.telekom.com/compliance-scope=pci-dss
-
-          # CI/CD namespace for tenant alpha (tests matchExpressions with purpose in [cicd, gitops, build])
-          kubectl create namespace tenant-alpha-cicd
-          kubectl label namespace tenant-alpha-cicd \
-            t-caas.telekom.com/tenant=alpha \
-            t-caas.telekom.com/purpose=cicd \
-            t-caas.telekom.com/owner=tenant
-
-          echo "Test namespaces created:"
-          kubectl get namespaces --show-labels | grep -E '(tenant-|t-caas-|argocd|flux-|shared-|compliance-)'
 
       - name: Generate outputs from main branch
         id: main-output
@@ -197,49 +104,34 @@ jobs:
           # Deploy the operator
           make deploy IMG=auth-operator:main
           echo "Waiting for operator to be ready..."
-          kubectl wait --for=condition=available --timeout=120s deployment -l control-plane=controller-manager -A 2>/dev/null || \
+          kubectl wait --for=condition=available --timeout=120s deployment/auth-operator-controller-manager -n auth-operator-system 2>/dev/null || \
+            kubectl wait --for=condition=available --timeout=120s deployment -l control-plane=controller-manager -n kube-system 2>/dev/null || \
             echo "::warning::Could not verify controller-manager readiness, continuing anyway"
 
-          # Wait for webhook server if deployed (required for BindDefinition validation)
-          echo "Waiting for webhook server to be ready..."
-          kubectl wait --for=condition=available --timeout=120s deployment -l control-plane=webhook-server -A 2>/dev/null || \
+          # Wait for webhook server if deployed
+          kubectl wait --for=condition=available --timeout=60s deployment -l control-plane=webhook-server -n auth-operator-system 2>/dev/null || \
             echo "::notice::Webhook server not found or not ready, continuing anyway"
-          sleep 5
 
-          # Try to apply sample configs with retry - this may fail if main branch samples are incompatible
-          main_samples_applied=false
-          for i in 1 2 3 4 5; do
-            if kubectl apply --server-side -k config/samples/ 2>&1; then
-              echo "Waiting for reconciliation..."
-              sleep 15
-              main_samples_applied=true
-              break
-            fi
-            echo "Attempt $i failed, waiting before retry..."
-            sleep 10
-          done
-          echo "main_samples_applied=${main_samples_applied}" >> $GITHUB_OUTPUT
-          if [ "$main_samples_applied" = "false" ]; then
+          # Try to apply sample configs - this may fail if main branch samples are incompatible
+          if kubectl apply --server-side -k config/samples/ 2>/dev/null; then
+            echo "Waiting for reconciliation..."
+            sleep 15
+            echo "main_samples_applied=true" >> $GITHUB_OUTPUT
+          else
             echo "::warning::Main branch samples failed to apply, will use PR branch samples as baseline"
+            echo "main_samples_applied=false" >> $GITHUB_OUTPUT
           fi
 
-          # Wait for all CRs to be fully reconciled (Ready condition)
-          echo "Waiting for resources to be reconciled..."
-          kubectl wait --for=condition=Ready roledefinition --all --timeout=120s 2>/dev/null || echo "::notice::Some RoleDefinitions not fully reconciled"
-          kubectl wait --for=condition=Ready binddefinition --all --timeout=120s 2>/dev/null || echo "::notice::Some BindDefinitions not fully reconciled"
-
           # Capture generated resources (may be empty if samples failed)
-          # Remove internal K8s fields for cleaner diff
           mkdir -p /tmp/main-output
-          kubectl get clusterroles -l app.kubernetes.io/created-by=auth-operator -o yaml 2>/dev/null | yq 'del(.items[].metadata.creationTimestamp, .items[].metadata.resourceVersion, .items[].metadata.uid, .items[].metadata.generation, .items[].metadata.managedFields, .items[].metadata.ownerReferences[].uid, .metadata)' > /tmp/main-output/clusterroles.yaml || echo "# No ClusterRoles found" > /tmp/main-output/clusterroles.yaml
-          kubectl get roles -A -l app.kubernetes.io/created-by=auth-operator -o yaml 2>/dev/null | yq 'del(.items[].metadata.creationTimestamp, .items[].metadata.resourceVersion, .items[].metadata.uid, .items[].metadata.generation, .items[].metadata.managedFields, .items[].metadata.ownerReferences[].uid, .metadata)' > /tmp/main-output/roles.yaml || echo "# No Roles found" > /tmp/main-output/roles.yaml
-          kubectl get clusterrolebindings -l app.kubernetes.io/created-by=auth-operator -o yaml 2>/dev/null | yq 'del(.items[].metadata.creationTimestamp, .items[].metadata.resourceVersion, .items[].metadata.uid, .items[].metadata.generation, .items[].metadata.managedFields, .items[].metadata.ownerReferences[].uid, .metadata)' > /tmp/main-output/clusterrolebindings.yaml || echo "# No ClusterRoleBindings found" > /tmp/main-output/clusterrolebindings.yaml
-          kubectl get rolebindings -A -l app.kubernetes.io/created-by=auth-operator -o yaml 2>/dev/null | yq 'del(.items[].metadata.creationTimestamp, .items[].metadata.resourceVersion, .items[].metadata.uid, .items[].metadata.generation, .items[].metadata.managedFields, .items[].metadata.ownerReferences[].uid, .metadata)' > /tmp/main-output/rolebindings.yaml || echo "# No RoleBindings found" > /tmp/main-output/rolebindings.yaml
-          kubectl get serviceaccounts -A -l app.kubernetes.io/created-by=auth-operator -o yaml 2>/dev/null | yq 'del(.items[].metadata.creationTimestamp, .items[].metadata.resourceVersion, .items[].metadata.uid, .items[].metadata.generation, .items[].metadata.managedFields, .items[].metadata.ownerReferences[].uid, .metadata)' > /tmp/main-output/serviceaccounts.yaml || echo "# No ServiceAccounts found" > /tmp/main-output/serviceaccounts.yaml
+          kubectl get clusterroles -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/main-output/clusterroles.yaml 2>/dev/null || echo "# No ClusterRoles found" > /tmp/main-output/clusterroles.yaml
+          kubectl get roles -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/main-output/roles.yaml 2>/dev/null || echo "# No Roles found" > /tmp/main-output/roles.yaml
+          kubectl get clusterrolebindings -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/main-output/clusterrolebindings.yaml 2>/dev/null || echo "# No ClusterRoleBindings found" > /tmp/main-output/clusterrolebindings.yaml
+          kubectl get rolebindings -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/main-output/rolebindings.yaml 2>/dev/null || echo "# No RoleBindings found" > /tmp/main-output/rolebindings.yaml
+          kubectl get serviceaccounts -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/main-output/serviceaccounts.yaml 2>/dev/null || echo "# No ServiceAccounts found" > /tmp/main-output/serviceaccounts.yaml
 
-          # Capture CRD status for debugging
-          kubectl get roledefinitions -o yaml 2>/dev/null | yq 'del(.items[].metadata.creationTimestamp, .items[].metadata.managedFields, .items[].metadata.resourceVersion, .items[].metadata.uid, .items[].metadata.generation, .items[].metadata.ownerReferences[].uid, .items[].status.observedGeneration, .items[].status.conditions[].lastTransitionTime, .metadata)' > /tmp/main-output/roledefinitions-status.yaml || true
-          kubectl get binddefinitions -o yaml 2>/dev/null | yq 'del(.items[].metadata.creationTimestamp, .items[].metadata.managedFields, .items[].metadata.resourceVersion, .items[].metadata.uid, .items[].metadata.generation, .items[].metadata.ownerReferences[].uid, .items[].status.observedGeneration, .items[].status.conditions[].lastTransitionTime, .metadata)' > /tmp/main-output/binddefinitions-status.yaml || true
+          # Also capture by owner reference pattern (fallback)
+          kubectl get clusterroles -o yaml | grep -A 1000 "t-caas" > /tmp/main-output/clusterroles-tcaas.yaml 2>/dev/null || true
 
           # Cleanup samples - delete CRs and wait for finalizers to be processed before undeploying
           kubectl delete -k config/samples/ --ignore-not-found --timeout=60s 2>/dev/null || true
@@ -268,41 +160,21 @@ jobs:
           make deploy IMG=auth-operator:pr
           kubectl wait --for=condition=available --timeout=180s deployment -l control-plane=controller-manager -A 2>/dev/null || \
             echo "::warning::Controller-manager deployment not Available in time (fallback baseline will continue anyway)"
-
-          # Wait for webhook server to be ready (required for BindDefinition validation)
-          echo "Waiting for webhook server to be ready..."
-          kubectl wait --for=condition=available --timeout=120s deployment -l control-plane=webhook-server -A 2>/dev/null || \
-            echo "::warning::Webhook server not ready in time, continuing anyway"
+          kubectl wait --for=condition=available --timeout=60s deployment -l control-plane=webhook-server -A 2>/dev/null || true
           sleep 5
 
-          # Apply PR samples to generate baseline with retry
-          echo "Applying sample configs..."
-          for i in 1 2 3 4 5; do
-            if kubectl apply --server-side -k config/samples/ 2>&1; then
-              echo "Samples applied successfully"
-              break
-            fi
-            echo "Attempt $i failed, waiting before retry..."
-            sleep 10
-          done
-
-          # Wait for all CRs to be fully reconciled (Ready condition)
-          echo "Waiting for resources to be reconciled..."
-          kubectl wait --for=condition=Ready roledefinition --all --timeout=120s 2>/dev/null || echo "::notice::Some RoleDefinitions not fully reconciled"
-          kubectl wait --for=condition=Ready binddefinition --all --timeout=120s 2>/dev/null || echo "::notice::Some BindDefinitions not fully reconciled"
+          # Apply PR samples to generate baseline
+          kubectl apply --server-side -k config/samples/
+          echo "Waiting for reconciliation..."
+          sleep 15
 
           # Capture as "main" baseline
-          # Remove internal K8s fields for cleaner diff
           mkdir -p /tmp/main-output
-          kubectl get clusterroles -l app.kubernetes.io/created-by=auth-operator -o yaml 2>/dev/null | yq 'del(.items[].metadata.creationTimestamp, .items[].metadata.resourceVersion, .items[].metadata.uid, .items[].metadata.generation, .items[].metadata.managedFields, .items[].metadata.ownerReferences[].uid, .metadata)' > /tmp/main-output/clusterroles.yaml || echo "# No ClusterRoles found" > /tmp/main-output/clusterroles.yaml
-          kubectl get roles -A -l app.kubernetes.io/created-by=auth-operator -o yaml 2>/dev/null | yq 'del(.items[].metadata.creationTimestamp, .items[].metadata.resourceVersion, .items[].metadata.uid, .items[].metadata.generation, .items[].metadata.managedFields, .items[].metadata.ownerReferences[].uid, .metadata)' > /tmp/main-output/roles.yaml || echo "# No Roles found" > /tmp/main-output/roles.yaml
-          kubectl get clusterrolebindings -l app.kubernetes.io/created-by=auth-operator -o yaml 2>/dev/null | yq 'del(.items[].metadata.creationTimestamp, .items[].metadata.resourceVersion, .items[].metadata.uid, .items[].metadata.generation, .items[].metadata.managedFields, .items[].metadata.ownerReferences[].uid, .metadata)' > /tmp/main-output/clusterrolebindings.yaml || echo "# No ClusterRoleBindings found" > /tmp/main-output/clusterrolebindings.yaml
-          kubectl get rolebindings -A -l app.kubernetes.io/created-by=auth-operator -o yaml 2>/dev/null | yq 'del(.items[].metadata.creationTimestamp, .items[].metadata.resourceVersion, .items[].metadata.uid, .items[].metadata.generation, .items[].metadata.managedFields, .items[].metadata.ownerReferences[].uid, .metadata)' > /tmp/main-output/rolebindings.yaml || echo "# No RoleBindings found" > /tmp/main-output/rolebindings.yaml
-          kubectl get serviceaccounts -A -l app.kubernetes.io/created-by=auth-operator -o yaml 2>/dev/null | yq 'del(.items[].metadata.creationTimestamp, .items[].metadata.resourceVersion, .items[].metadata.uid, .items[].metadata.generation, .items[].metadata.managedFields, .items[].metadata.ownerReferences[].uid, .metadata)' > /tmp/main-output/serviceaccounts.yaml || echo "# No ServiceAccounts found" > /tmp/main-output/serviceaccounts.yaml
-
-          # Capture CRD status for debugging
-          kubectl get roledefinitions -o yaml 2>/dev/null | yq 'del(.items[].metadata.creationTimestamp, .items[].metadata.managedFields, .items[].metadata.resourceVersion, .items[].metadata.uid, .items[].metadata.generation, .items[].metadata.ownerReferences[].uid, .items[].status.observedGeneration, .items[].status.conditions[].lastTransitionTime, .metadata)' > /tmp/main-output/roledefinitions-status.yaml || true
-          kubectl get binddefinitions -o yaml 2>/dev/null | yq 'del(.items[].metadata.creationTimestamp, .items[].metadata.managedFields, .items[].metadata.resourceVersion, .items[].metadata.uid, .items[].metadata.generation, .items[].metadata.ownerReferences[].uid, .items[].status.observedGeneration, .items[].status.conditions[].lastTransitionTime, .metadata)' > /tmp/main-output/binddefinitions-status.yaml || true
+          kubectl get clusterroles -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/main-output/clusterroles.yaml 2>/dev/null || echo "# No ClusterRoles found" > /tmp/main-output/clusterroles.yaml
+          kubectl get roles -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/main-output/roles.yaml 2>/dev/null || echo "# No Roles found" > /tmp/main-output/roles.yaml
+          kubectl get clusterrolebindings -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/main-output/clusterrolebindings.yaml 2>/dev/null || echo "# No ClusterRoleBindings found" > /tmp/main-output/clusterrolebindings.yaml
+          kubectl get rolebindings -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/main-output/rolebindings.yaml 2>/dev/null || echo "# No RoleBindings found" > /tmp/main-output/rolebindings.yaml
+          kubectl get serviceaccounts -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/main-output/serviceaccounts.yaml 2>/dev/null || echo "# No ServiceAccounts found" > /tmp/main-output/serviceaccounts.yaml
 
           # Cleanup for PR branch fresh run
           kubectl delete -k config/samples/ --ignore-not-found
@@ -343,48 +215,26 @@ jobs:
           }
           echo "Waiting for operator to be ready..."
           kubectl wait --for=condition=available --timeout=120s deployment -l control-plane=controller-manager -A 2>/dev/null || true
-
-          # Wait for webhook server if deployed (required for BindDefinition validation)
-          echo "Waiting for webhook server to be ready..."
-          kubectl wait --for=condition=available --timeout=120s deployment -l control-plane=webhook-server -A 2>/dev/null || \
-            echo "::notice::Webhook server not found or not ready, continuing anyway"
           sleep 5
 
-          # Try to apply sample configs from tag with retry
-          tag_success=false
-          for i in 1 2 3 4 5; do
-            if kubectl apply --server-side -k config/samples/ 2>&1; then
-              echo "Waiting for reconciliation..."
-              sleep 15
-              tag_success=true
-              break
-            fi
-            echo "Attempt $i failed, waiting before retry..."
-            sleep 10
-          done
-          echo "tag_success=${tag_success}" >> $GITHUB_OUTPUT
-          if [ "$tag_success" = "false" ]; then
+          # Try to apply sample configs from tag
+          if kubectl apply --server-side -k config/samples/ 2>/dev/null; then
+            echo "Waiting for reconciliation..."
+            sleep 15
+            echo "tag_success=true" >> $GITHUB_OUTPUT
+          else
             echo "::warning::Tag branch samples failed to apply, skipping tag comparison"
+            echo "tag_success=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          # Wait for all CRs to be fully reconciled (Ready condition)
-          echo "Waiting for resources to be reconciled..."
-          kubectl wait --for=condition=Ready roledefinition --all --timeout=120s 2>/dev/null || echo "::notice::Some RoleDefinitions not fully reconciled"
-          kubectl wait --for=condition=Ready binddefinition --all --timeout=120s 2>/dev/null || echo "::notice::Some BindDefinitions not fully reconciled"
-
           # Capture generated resources
-          # Remove internal K8s fields for cleaner diff
           mkdir -p /tmp/tag-output
-          kubectl get clusterroles -l app.kubernetes.io/created-by=auth-operator -o yaml 2>/dev/null | yq 'del(.items[].metadata.creationTimestamp, .items[].metadata.resourceVersion, .items[].metadata.uid, .items[].metadata.generation, .items[].metadata.managedFields, .items[].metadata.ownerReferences[].uid, .metadata)' > /tmp/tag-output/clusterroles.yaml || echo "# No ClusterRoles found" > /tmp/tag-output/clusterroles.yaml
-          kubectl get roles -A -l app.kubernetes.io/created-by=auth-operator -o yaml 2>/dev/null | yq 'del(.items[].metadata.creationTimestamp, .items[].metadata.resourceVersion, .items[].metadata.uid, .items[].metadata.generation, .items[].metadata.managedFields, .items[].metadata.ownerReferences[].uid, .metadata)' > /tmp/tag-output/roles.yaml || echo "# No Roles found" > /tmp/tag-output/roles.yaml
-          kubectl get clusterrolebindings -l app.kubernetes.io/created-by=auth-operator -o yaml 2>/dev/null | yq 'del(.items[].metadata.creationTimestamp, .items[].metadata.resourceVersion, .items[].metadata.uid, .items[].metadata.generation, .items[].metadata.managedFields, .items[].metadata.ownerReferences[].uid, .metadata)' > /tmp/tag-output/clusterrolebindings.yaml || echo "# No ClusterRoleBindings found" > /tmp/tag-output/clusterrolebindings.yaml
-          kubectl get rolebindings -A -l app.kubernetes.io/created-by=auth-operator -o yaml 2>/dev/null | yq 'del(.items[].metadata.creationTimestamp, .items[].metadata.resourceVersion, .items[].metadata.uid, .items[].metadata.generation, .items[].metadata.managedFields, .items[].metadata.ownerReferences[].uid, .metadata)' > /tmp/tag-output/rolebindings.yaml || echo "# No RoleBindings found" > /tmp/tag-output/rolebindings.yaml
-          kubectl get serviceaccounts -A -l app.kubernetes.io/created-by=auth-operator -o yaml 2>/dev/null | yq 'del(.items[].metadata.creationTimestamp, .items[].metadata.resourceVersion, .items[].metadata.uid, .items[].metadata.generation, .items[].metadata.managedFields, .items[].metadata.ownerReferences[].uid, .metadata)' > /tmp/tag-output/serviceaccounts.yaml || echo "# No ServiceAccounts found" > /tmp/tag-output/serviceaccounts.yaml
-
-          # Capture CRD status for debugging
-          kubectl get roledefinitions -o yaml 2>/dev/null | yq 'del(.items[].metadata.creationTimestamp, .items[].metadata.managedFields, .items[].metadata.resourceVersion, .items[].metadata.uid, .items[].metadata.generation, .items[].metadata.ownerReferences[].uid, .items[].status.observedGeneration, .items[].status.conditions[].lastTransitionTime, .metadata)' > /tmp/tag-output/roledefinitions-status.yaml || true
-          kubectl get binddefinitions -o yaml 2>/dev/null | yq 'del(.items[].metadata.creationTimestamp, .items[].metadata.managedFields, .items[].metadata.resourceVersion, .items[].metadata.uid, .items[].metadata.generation, .items[].metadata.ownerReferences[].uid, .items[].status.observedGeneration, .items[].status.conditions[].lastTransitionTime, .metadata)' > /tmp/tag-output/binddefinitions-status.yaml || true
+          kubectl get clusterroles -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/tag-output/clusterroles.yaml 2>/dev/null || echo "# No ClusterRoles found" > /tmp/tag-output/clusterroles.yaml
+          kubectl get roles -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/tag-output/roles.yaml 2>/dev/null || echo "# No Roles found" > /tmp/tag-output/roles.yaml
+          kubectl get clusterrolebindings -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/tag-output/clusterrolebindings.yaml 2>/dev/null || echo "# No ClusterRoleBindings found" > /tmp/tag-output/clusterrolebindings.yaml
+          kubectl get rolebindings -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/tag-output/rolebindings.yaml 2>/dev/null || echo "# No RoleBindings found" > /tmp/tag-output/rolebindings.yaml
+          kubectl get serviceaccounts -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/tag-output/serviceaccounts.yaml 2>/dev/null || echo "# No ServiceAccounts found" > /tmp/tag-output/serviceaccounts.yaml
 
           # Cleanup samples - delete CRs and wait for finalizers to be processed before undeploying
           kubectl delete -k config/samples/ --ignore-not-found --timeout=60s 2>/dev/null || true
@@ -414,42 +264,24 @@ jobs:
           make deploy IMG=auth-operator:pr
           echo "Waiting for operator to be ready..."
           kubectl wait --for=condition=available --timeout=120s deployment -l control-plane=controller-manager -A 2>/dev/null || \
-            echo "::warning::Could not verify controller-manager readiness, continuing anyway"
-
-          # Wait for webhook server to be ready (required for BindDefinition validation)
-          echo "Waiting for webhook server to be ready..."
-          kubectl wait --for=condition=available --timeout=120s deployment -l control-plane=webhook-server -A 2>/dev/null || \
-            echo "::warning::Could not verify webhook-server readiness, continuing anyway"
+            echo "::warning::Could not verify operator readiness, continuing anyway"
           sleep 5
 
-          # Apply sample configs with retry (webhook may need additional time to be fully ready)
-          echo "Applying sample configs..."
-          for i in 1 2 3 4 5; do
-            if kubectl apply --server-side -k config/samples/ 2>&1; then
-              echo "Samples applied successfully"
-              break
-            fi
-            echo "Attempt $i failed, waiting before retry..."
-            sleep 10
-          done
-
-          # Wait for all CRs to be fully reconciled (Ready condition)
-          echo "Waiting for resources to be reconciled..."
-          kubectl wait --for=condition=Ready roledefinition --all --timeout=120s 2>/dev/null || echo "::notice::Some RoleDefinitions not fully reconciled"
-          kubectl wait --for=condition=Ready binddefinition --all --timeout=120s 2>/dev/null || echo "::notice::Some BindDefinitions not fully reconciled"
+          # Apply sample configs and wait for reconciliation
+          kubectl apply --server-side -k config/samples/
+          echo "Waiting for reconciliation..."
+          sleep 15
 
           # Capture generated resources
-          # Remove internal K8s fields for cleaner diff
           mkdir -p /tmp/pr-output
-          kubectl get clusterroles -l app.kubernetes.io/created-by=auth-operator -o yaml 2>/dev/null | yq 'del(.items[].metadata.creationTimestamp, .items[].metadata.resourceVersion, .items[].metadata.uid, .items[].metadata.generation, .items[].metadata.managedFields, .items[].metadata.ownerReferences[].uid, .metadata)' > /tmp/pr-output/clusterroles.yaml || echo "# No ClusterRoles found" > /tmp/pr-output/clusterroles.yaml
-          kubectl get roles -A -l app.kubernetes.io/created-by=auth-operator -o yaml 2>/dev/null | yq 'del(.items[].metadata.creationTimestamp, .items[].metadata.resourceVersion, .items[].metadata.uid, .items[].metadata.generation, .items[].metadata.managedFields, .items[].metadata.ownerReferences[].uid, .metadata)' > /tmp/pr-output/roles.yaml || echo "# No Roles found" > /tmp/pr-output/roles.yaml
-          kubectl get clusterrolebindings -l app.kubernetes.io/created-by=auth-operator -o yaml 2>/dev/null | yq 'del(.items[].metadata.creationTimestamp, .items[].metadata.resourceVersion, .items[].metadata.uid, .items[].metadata.generation, .items[].metadata.managedFields, .items[].metadata.ownerReferences[].uid, .metadata)' > /tmp/pr-output/clusterrolebindings.yaml || echo "# No ClusterRoleBindings found" > /tmp/pr-output/clusterrolebindings.yaml
-          kubectl get rolebindings -A -l app.kubernetes.io/created-by=auth-operator -o yaml 2>/dev/null | yq 'del(.items[].metadata.creationTimestamp, .items[].metadata.resourceVersion, .items[].metadata.uid, .items[].metadata.generation, .items[].metadata.managedFields, .items[].metadata.ownerReferences[].uid, .metadata)' > /tmp/pr-output/rolebindings.yaml || echo "# No RoleBindings found" > /tmp/pr-output/rolebindings.yaml
-          kubectl get serviceaccounts -A -l app.kubernetes.io/created-by=auth-operator -o yaml 2>/dev/null | yq 'del(.items[].metadata.creationTimestamp, .items[].metadata.resourceVersion, .items[].metadata.uid, .items[].metadata.generation, .items[].metadata.managedFields, .items[].metadata.ownerReferences[].uid, .metadata)' > /tmp/pr-output/serviceaccounts.yaml || echo "# No ServiceAccounts found" > /tmp/pr-output/serviceaccounts.yaml
+          kubectl get clusterroles -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/pr-output/clusterroles.yaml 2>/dev/null || echo "# No ClusterRoles found" > /tmp/pr-output/clusterroles.yaml
+          kubectl get roles -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/pr-output/roles.yaml 2>/dev/null || echo "# No Roles found" > /tmp/pr-output/roles.yaml
+          kubectl get clusterrolebindings -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/pr-output/clusterrolebindings.yaml 2>/dev/null || echo "# No ClusterRoleBindings found" > /tmp/pr-output/clusterrolebindings.yaml
+          kubectl get rolebindings -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/pr-output/rolebindings.yaml 2>/dev/null || echo "# No RoleBindings found" > /tmp/pr-output/rolebindings.yaml
+          kubectl get serviceaccounts -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/pr-output/serviceaccounts.yaml 2>/dev/null || echo "# No ServiceAccounts found" > /tmp/pr-output/serviceaccounts.yaml
 
-          # Capture CRD status for debugging
-          kubectl get roledefinitions -o yaml 2>/dev/null | yq 'del(.items[].metadata.creationTimestamp, .items[].metadata.managedFields, .items[].metadata.resourceVersion, .items[].metadata.uid, .items[].metadata.generation, .items[].metadata.ownerReferences[].uid, .items[].status.observedGeneration, .items[].status.conditions[].lastTransitionTime, .metadata)' > /tmp/pr-output/roledefinitions-status.yaml || true
-          kubectl get binddefinitions -o yaml 2>/dev/null | yq 'del(.items[].metadata.creationTimestamp, .items[].metadata.managedFields, .items[].metadata.resourceVersion, .items[].metadata.uid, .items[].metadata.generation, .items[].metadata.ownerReferences[].uid, .items[].status.observedGeneration, .items[].status.conditions[].lastTransitionTime, .metadata)' > /tmp/pr-output/binddefinitions-status.yaml || true
+          # Also capture by owner reference pattern (fallback)
+          kubectl get clusterroles -o yaml | grep -A 1000 "t-caas" > /tmp/pr-output/clusterroles-tcaas.yaml 2>/dev/null || true
 
           echo "PR branch outputs captured"
 
@@ -467,11 +299,6 @@ jobs:
             kubectl logs -n $ns -l app.kubernetes.io/name=auth-operator --tail=5000 >> /tmp/controller-logs/${ns}-controller.log 2>/dev/null || true
           done
 
-          # Get webhook server logs
-          for ns in auth-operator-system kube-system default; do
-            kubectl logs -n $ns -l control-plane=webhook-server --tail=5000 > /tmp/controller-logs/${ns}-webhook.log 2>/dev/null || true
-          done
-
           # Get all events
           kubectl get events -A --sort-by='.lastTimestamp' > /tmp/controller-logs/all-events.txt 2>/dev/null || true
 
@@ -484,83 +311,12 @@ jobs:
 
           echo "Controller logs collected"
 
-      - name: Extract errors from logs
-        if: always()
-        id: extract-errors
-        run: |
-          mkdir -p /tmp/error-summary
-          
-          echo "Extracting errors and failures from logs..."
-          
-          # Extract error lines from controller logs (case-insensitive)
-          # Match: ERROR, error, Error, FAIL, fail, Fail, panic, PANIC
-          ERROR_LOG="/tmp/error-summary/errors.txt"
-          echo "# Error Summary from Controller Logs" > "$ERROR_LOG"
-          echo "" >> "$ERROR_LOG"
-          
-          for log in /tmp/controller-logs/*.log; do
-            if [ -f "$log" ] && [ -s "$log" ]; then
-              log_name=$(basename "$log")
-              errors=$(grep -iE '(\"level\":\"error|ERROR|\serror\s|\[error\]|level=error|panic:|PANIC|failed|failure|Failed|Failure)' "$log" 2>/dev/null | head -50 || true)
-              if [ -n "$errors" ]; then
-                echo "## $log_name" >> "$ERROR_LOG"
-                echo '```' >> "$ERROR_LOG"
-                echo "$errors" >> "$ERROR_LOG"
-                echo '```' >> "$ERROR_LOG"
-                echo "" >> "$ERROR_LOG"
-              fi
-            fi
-          done
-          
-          # Extract warning events
-          echo "## Warning/Error Events" >> "$ERROR_LOG"
-          echo '```' >> "$ERROR_LOG"
-          grep -iE '(Warning|Error|Failed|BackOff)' /tmp/controller-logs/all-events.txt 2>/dev/null | tail -30 >> "$ERROR_LOG" || echo "No warning events found" >> "$ERROR_LOG"
-          echo '```' >> "$ERROR_LOG"
-          echo "" >> "$ERROR_LOG"
-          
-          # Extract CRD conditions with False status
-          echo "## CRD Conditions (non-Ready)" >> "$ERROR_LOG"
-          echo '```yaml' >> "$ERROR_LOG"
-          for crd in roledefinitions binddefinitions; do
-            if [ -f "/tmp/controller-logs/${crd}.yaml" ]; then
-              yq '.items[] | select(.status.conditions != null) | select(.status.conditions[] | select(.status != "True")) | {"name": .metadata.name, "conditions": .status.conditions}' "/tmp/controller-logs/${crd}.yaml" 2>/dev/null >> "$ERROR_LOG" || true
-            fi
-          done
-          echo '```' >> "$ERROR_LOG"
-          
-          # Check if we found any errors
-          error_count=$(grep -cE '(ERROR|error|panic|failed|failure|Warning)' "$ERROR_LOG" 2>/dev/null || echo "0")
-          if [ "$error_count" -gt 5 ]; then
-            echo "has_errors=true" >> $GITHUB_OUTPUT
-            echo "Found $error_count error indicators in logs"
-          else
-            echo "has_errors=false" >> $GITHUB_OUTPUT
-            echo "No significant errors found in logs"
-          fi
-          
-          # Store error content for PR comment (truncate if too long)
-          ERROR_CONTENT=$(cat "$ERROR_LOG" | head -100)
-          echo "errors<<ERROREOF" >> $GITHUB_OUTPUT
-          echo "$ERROR_CONTENT" >> $GITHUB_OUTPUT
-          echo "ERROREOF" >> $GITHUB_OUTPUT
-          
-          echo "Error extraction complete"
-
       - name: Upload controller logs
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: controller-logs
           path: /tmp/controller-logs/
-          retention-days: 7
-
-      - name: Upload error summary
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: error-summary
-          path: /tmp/error-summary/
           retention-days: 7
 
       - name: Upload output artifacts
@@ -589,34 +345,29 @@ jobs:
             echo "main_fallback=false" >> $GITHUB_OUTPUT
           fi
 
-          # Generate separate diff files for each resource type (main vs PR)
+          # Generate diffs for each resource type (main vs PR)
+          echo "## Changes from main branch" >> /tmp/diff-output/full-diff.txt
+          echo "" >> /tmp/diff-output/full-diff.txt
           for resource in clusterroles roles clusterrolebindings rolebindings serviceaccounts; do
-            diff -u /tmp/main-output/$resource.yaml /tmp/pr-output/$resource.yaml > /tmp/diff-output/$resource.diff 2>&1 || true
+            echo "=== $resource ===" >> /tmp/diff-output/full-diff.txt
+            diff -u /tmp/main-output/$resource.yaml /tmp/pr-output/$resource.yaml >> /tmp/diff-output/full-diff.txt 2>&1 || true
+            echo "" >> /tmp/diff-output/full-diff.txt
           done
 
-          # Include CRD status diffs in separate files
-          for resource in roledefinitions-status binddefinitions-status; do
-            if [ -f "/tmp/main-output/$resource.yaml" ] && [ -f "/tmp/pr-output/$resource.yaml" ]; then
-              diff -u /tmp/main-output/$resource.yaml /tmp/pr-output/$resource.yaml > /tmp/diff-output/$resource.diff 2>&1 || true
-            fi
-          done
-
-          # Generate tag diffs if tag outputs exist (append to resource files with header)
+          # Generate tag diff if tag outputs exist
           if [ -d "/tmp/tag-output" ] && [ "${{ steps.tag-output.outputs.tag_success }}" = "true" ]; then
+            echo "" >> /tmp/diff-output/full-diff.txt
+            echo "## Changes from latest release (${{ steps.latest-tag.outputs.tag }})" >> /tmp/diff-output/full-diff.txt
+            echo "" >> /tmp/diff-output/full-diff.txt
             for resource in clusterroles roles clusterrolebindings rolebindings serviceaccounts; do
-              if [ -s "/tmp/diff-output/$resource.diff" ]; then
-                echo "" >> /tmp/diff-output/$resource.diff
-                echo "# Changes from latest release (${{ steps.latest-tag.outputs.tag }})" >> /tmp/diff-output/$resource.diff
-              fi
-              diff -u /tmp/tag-output/$resource.yaml /tmp/pr-output/$resource.yaml >> /tmp/diff-output/$resource.diff 2>&1 || true
+              echo "=== $resource ===" >> /tmp/diff-output/full-diff.txt
+              diff -u /tmp/tag-output/$resource.yaml /tmp/pr-output/$resource.yaml >> /tmp/diff-output/full-diff.txt 2>&1 || true
+              echo "" >> /tmp/diff-output/full-diff.txt
             done
             echo "has_tag_diff=true" >> $GITHUB_OUTPUT
           else
             echo "has_tag_diff=false" >> $GITHUB_OUTPUT
           fi
-
-          # Also create combined diff for backward compatibility
-          cat /tmp/diff-output/*.diff > /tmp/diff-output/full-diff.txt 2>/dev/null || true
 
           # Check if there are any differences
           # When MAIN_FALLBACK=true, main and PR outputs are from the same branch,
@@ -649,52 +400,21 @@ jobs:
           retention-days: 7
 
       - name: Comment PR with delta
-        if: steps.diff.outputs.has_diff == 'true' || steps.extract-errors.outputs.has_errors == 'true'
+        if: steps.diff.outputs.has_diff == 'true'
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           script: |
-            const fs = require('fs');
-            
-            // Helper to read diff file and check if it has meaningful content
-            function readDiff(filename) {
-              try {
-                const content = fs.readFileSync('/tmp/diff-output/' + filename, 'utf8');
-                // Check if diff has actual changes (not just empty or header-only)
-                if (content.trim() && content.includes('@@')) {
-                  return content.substring(0, 10000);
-                }
-              } catch (e) {
-                // File doesn't exist or can't be read
-              }
-              return '';
-            }
-            
-            // Read per-resource diffs
-            const resourceDiffs = {
-              'ClusterRoles': readDiff('clusterroles.diff'),
-              'Roles': readDiff('roles.diff'),
-              'ClusterRoleBindings': readDiff('clusterrolebindings.diff'),
-              'RoleBindings': readDiff('rolebindings.diff'),
-              'ServiceAccounts': readDiff('serviceaccounts.diff'),
-              'RoleDefinitions Status': readDiff('roledefinitions-status.diff'),
-              'BindDefinitions Status': readDiff('binddefinitions-status.diff')
-            };
-            
-            let errorSummary = '';
-            try {
-              errorSummary = fs.readFileSync('/tmp/error-summary/errors.txt', 'utf8').substring(0, 10000);
-            } catch (e) {
-              console.log('Could not read error summary file:', e.message);
-            }
-            
+            const diff = `${{ steps.diff.outputs.diff }}`;
             const mainFallback = '${{ steps.diff.outputs.main_fallback }}' === 'true';
-            const hasErrors = '${{ steps.extract-errors.outputs.has_errors }}' === 'true';
 
             let fallbackNotice = '';
             if (mainFallback) {
-              fallbackNotice = '\n> ⚠️ **Note:** Main branch samples failed to apply (likely due to schema changes).\n' +
-                '> PR branch samples were used as baseline, so no meaningful diff is shown.\n' +
-                '> This typically happens when sample files are updated with new required fields.\n\n';
+              fallbackNotice = `
+            > ⚠️ **Note:** Main branch samples failed to apply (likely due to schema changes).
+            > PR branch samples were used as baseline, so no meaningful diff is shown.
+            > This typically happens when sample files are updated with new required fields.
+
+            `;
             }
 
             const hasTagDiff = '${{ steps.diff.outputs.has_tag_diff }}' === 'true';
@@ -702,40 +422,24 @@ jobs:
 
             let tagInfo = '';
             if (hasTagDiff && latestTag) {
-              tagInfo = '\n\n📦 **Also compared against latest release:** `' + latestTag + '`';
+              tagInfo = `\n\n📦 **Also compared against latest release:** \`${latestTag}\``;
             }
 
-            // Build resource sections - one fold-out per resource type with changes
-            let resourceSections = '';
-            for (const [name, diff] of Object.entries(resourceDiffs)) {
-              if (diff) {
-                resourceSections += '<details>\n' +
-                  '<summary>📦 ' + name + '</summary>\n\n' +
-                  '```diff\n' + diff + '\n```\n\n' +
-                  '</details>\n\n';
-              }
-            }
-            
-            if (!resourceSections) {
-              resourceSections = '> No resource changes detected.\n\n';
-            }
+            const body = `## 📊 Output Delta Report
+            ${fallbackNotice}
+            This PR changes the generated RBAC resources when applied to sample configurations.${tagInfo}
 
-            let errorSection = '';
-            if (hasErrors && errorSummary) {
-              errorSection = '---\n\n' +
-                '## ⚠️ Controller Logs\n\n' +
-                '<details>\n' +
-                '<summary>Errors/Warnings Found in Logs (click to expand)</summary>\n\n' +
-                errorSummary + '\n\n' +
-                '</details>\n';
-            }
+            <details>
+            <summary>Click to expand diff</summary>
 
-            // Build body with separate fold-outs per resource type
-            const body = '## 📊 Output Delta Report\n' +
-              fallbackNotice +
-              'This PR changes the generated RBAC resources when applied to sample configurations.' + tagInfo + '\n\n' +
-              resourceSections +
-              errorSection;
+            \`\`\`diff
+            ${diff}
+            \`\`\`
+
+            </details>
+
+            > **Note:** This diff shows changes in ClusterRoles, Roles, ClusterRoleBindings, RoleBindings, and ServiceAccounts generated from \`config/samples/\`.
+            `;
 
             // Find existing comment
             const { data: comments } = await github.rest.issues.listComments({
