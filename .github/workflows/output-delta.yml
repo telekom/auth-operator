@@ -32,12 +32,44 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           path: pr-branch
+          fetch-depth: 0 # Needed to fetch tags
 
       - name: Checkout main branch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: main
           path: main-branch
+
+      - name: Get latest release tag
+        id: latest-tag
+        run: |
+          cd pr-branch
+          # Get all version tags, sort by semver, and take the latest
+          # Filter for tags matching v*.*.* pattern (semver)
+          LATEST_TAG=$(git tag -l 'v*.*.*' 2>/dev/null | sort -V | tail -1 || echo "")
+          if [ -n "$LATEST_TAG" ]; then
+            # Verify the tag actually exists and is reachable
+            if git rev-parse "$LATEST_TAG" >/dev/null 2>&1; then
+              echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+              echo "has_tag=true" >> $GITHUB_OUTPUT
+              echo "Latest release tag (by semver): $LATEST_TAG"
+            else
+              echo "::warning::Tag $LATEST_TAG exists but is not reachable, skipping tag comparison"
+              echo "has_tag=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "::notice::No release tags found (looking for v*.*.* pattern), skipping tag comparison"
+            echo "has_tag=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Checkout latest tag
+        if: steps.latest-tag.outputs.has_tag == 'true'
+        id: checkout-tag
+        continue-on-error: true
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ steps.latest-tag.outputs.tag }}
+          path: tag-branch
 
       - name: Setup Go
         uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
@@ -63,14 +95,14 @@ jobs:
         continue-on-error: true
         run: |
           cd main-branch
-          
+
           # Build and load the operator image
           make docker-build IMG=auth-operator:main
           kind load docker-image auth-operator:main --name output-delta
-          
+
           # Install CRDs
           make install
-          
+
           # Try to apply sample configs - this may fail if main branch samples are incompatible
           if kubectl apply --server-side -k config/samples/ 2>/dev/null; then
             sleep 10
@@ -79,79 +111,126 @@ jobs:
             echo "::warning::Main branch samples failed to apply, will use PR branch samples as baseline"
             echo "main_samples_applied=false" >> $GITHUB_OUTPUT
           fi
-          
+
           # Capture generated resources (may be empty if samples failed)
           mkdir -p /tmp/main-output
           kubectl get clusterroles -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/main-output/clusterroles.yaml 2>/dev/null || echo "# No ClusterRoles found" > /tmp/main-output/clusterroles.yaml
           kubectl get roles -A -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/main-output/roles.yaml 2>/dev/null || echo "# No Roles found" > /tmp/main-output/roles.yaml
           kubectl get clusterrolebindings -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/main-output/clusterrolebindings.yaml 2>/dev/null || echo "# No ClusterRoleBindings found" > /tmp/main-output/clusterrolebindings.yaml
           kubectl get rolebindings -A -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/main-output/rolebindings.yaml 2>/dev/null || echo "# No RoleBindings found" > /tmp/main-output/rolebindings.yaml
-          
+
           # Also capture by owner reference pattern (fallback)
           kubectl get clusterroles -o yaml | grep -A 1000 "t-caas" > /tmp/main-output/clusterroles-tcaas.yaml 2>/dev/null || true
-          
+
           # Cleanup samples but keep CRDs for PR branch
           kubectl delete -k config/samples/ --ignore-not-found 2>/dev/null || true
-          
+
           echo "Main branch outputs captured"
 
       - name: Fallback - use PR samples for main baseline
         if: steps.main-output.outputs.main_samples_applied == 'false' || steps.main-output.outcome == 'failure'
         run: |
           echo "::notice::Using PR branch samples as baseline since main branch samples failed to apply"
-          
+
           cd pr-branch
-          
+
           # Apply PR samples to generate baseline
           kubectl apply --server-side -k config/samples/
           sleep 10
-          
+
           # Capture as "main" baseline
           mkdir -p /tmp/main-output
           kubectl get clusterroles -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/main-output/clusterroles.yaml 2>/dev/null || echo "# No ClusterRoles found" > /tmp/main-output/clusterroles.yaml
           kubectl get roles -A -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/main-output/roles.yaml 2>/dev/null || echo "# No Roles found" > /tmp/main-output/roles.yaml
           kubectl get clusterrolebindings -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/main-output/clusterrolebindings.yaml 2>/dev/null || echo "# No ClusterRoleBindings found" > /tmp/main-output/clusterrolebindings.yaml
           kubectl get rolebindings -A -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/main-output/rolebindings.yaml 2>/dev/null || echo "# No RoleBindings found" > /tmp/main-output/rolebindings.yaml
-          
+
           # Cleanup for PR branch fresh run
           kubectl delete -k config/samples/ --ignore-not-found
-          
+
           echo "Fallback baseline captured using PR branch samples"
           echo "MAIN_FALLBACK=true" >> $GITHUB_ENV
+
+      - name: Generate outputs from latest tag
+        id: tag-output
+        if: steps.latest-tag.outputs.has_tag == 'true' && steps.checkout-tag.outcome == 'success'
+        continue-on-error: true
+        run: |
+          # Check if tag-branch directory exists (checkout may have failed)
+          if [ ! -d "tag-branch" ]; then
+            echo "::warning::Tag checkout failed, skipping tag comparison"
+            echo "tag_success=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          cd tag-branch
+
+          # Build and load the operator image from tag
+          make docker-build IMG=auth-operator:tag 2>/dev/null || {
+            echo "::warning::Failed to build tag version (${{ steps.latest-tag.outputs.tag }}), skipping tag comparison"
+            echo "tag_success=false" >> $GITHUB_OUTPUT
+            exit 0
+          }
+          kind load docker-image auth-operator:tag --name output-delta
+
+          # Install CRDs from tag (may differ from main/PR)
+          make install 2>/dev/null || true
+
+          # Try to apply sample configs from tag
+          if kubectl apply --server-side -k config/samples/ 2>/dev/null; then
+            sleep 10
+            echo "tag_success=true" >> $GITHUB_OUTPUT
+          else
+            echo "::warning::Tag branch samples failed to apply, skipping tag comparison"
+            echo "tag_success=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Capture generated resources
+          mkdir -p /tmp/tag-output
+          kubectl get clusterroles -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/tag-output/clusterroles.yaml 2>/dev/null || echo "# No ClusterRoles found" > /tmp/tag-output/clusterroles.yaml
+          kubectl get roles -A -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/tag-output/roles.yaml 2>/dev/null || echo "# No Roles found" > /tmp/tag-output/roles.yaml
+          kubectl get clusterrolebindings -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/tag-output/clusterrolebindings.yaml 2>/dev/null || echo "# No ClusterRoleBindings found" > /tmp/tag-output/clusterrolebindings.yaml
+          kubectl get rolebindings -A -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/tag-output/rolebindings.yaml 2>/dev/null || echo "# No RoleBindings found" > /tmp/tag-output/rolebindings.yaml
+
+          # Cleanup samples for PR branch
+          kubectl delete -k config/samples/ --ignore-not-found 2>/dev/null || true
+
+          echo "Tag branch (${{ steps.latest-tag.outputs.tag }}) outputs captured"
 
       - name: Generate outputs from PR branch
         id: pr-output
         run: |
           cd pr-branch
-          
+
           # Build and load the operator image
           make docker-build IMG=auth-operator:pr
           kind load docker-image auth-operator:pr --name output-delta
-          
+
           # Update CRDs if changed
           make install
-          
+
           # Apply sample configs and wait for reconciliation
           kubectl apply --server-side -k config/samples/
           sleep 10
-          
+
           # Capture generated resources
           mkdir -p /tmp/pr-output
           kubectl get clusterroles -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/pr-output/clusterroles.yaml 2>/dev/null || echo "# No ClusterRoles found" > /tmp/pr-output/clusterroles.yaml
           kubectl get roles -A -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/pr-output/roles.yaml 2>/dev/null || echo "# No Roles found" > /tmp/pr-output/roles.yaml
           kubectl get clusterrolebindings -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/pr-output/clusterrolebindings.yaml 2>/dev/null || echo "# No ClusterRoleBindings found" > /tmp/pr-output/clusterrolebindings.yaml
           kubectl get rolebindings -A -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/pr-output/rolebindings.yaml 2>/dev/null || echo "# No RoleBindings found" > /tmp/pr-output/rolebindings.yaml
-          
+
           # Also capture by owner reference pattern (fallback)
           kubectl get clusterroles -o yaml | grep -A 1000 "t-caas" > /tmp/pr-output/clusterroles-tcaas.yaml 2>/dev/null || true
-          
+
           echo "PR branch outputs captured"
 
       - name: Generate diff
         id: diff
         run: |
           mkdir -p /tmp/diff-output
-          
+
           # Add fallback notice if applicable
           if [ "$MAIN_FALLBACK" = "true" ]; then
             echo "⚠️ NOTE: Main branch samples failed to apply. Using PR branch samples as baseline." >> /tmp/diff-output/full-diff.txt
@@ -161,14 +240,31 @@ jobs:
           else
             echo "main_fallback=false" >> $GITHUB_OUTPUT
           fi
-          
-          # Generate diffs for each resource type
+
+          # Generate diffs for each resource type (main vs PR)
+          echo "## Changes from main branch" >> /tmp/diff-output/full-diff.txt
+          echo "" >> /tmp/diff-output/full-diff.txt
           for resource in clusterroles roles clusterrolebindings rolebindings; do
             echo "=== $resource ===" >> /tmp/diff-output/full-diff.txt
             diff -u /tmp/main-output/$resource.yaml /tmp/pr-output/$resource.yaml >> /tmp/diff-output/full-diff.txt 2>&1 || true
             echo "" >> /tmp/diff-output/full-diff.txt
           done
-          
+
+          # Generate tag diff if tag outputs exist
+          if [ -d "/tmp/tag-output" ] && [ "${{ steps.tag-output.outputs.tag_success }}" = "true" ]; then
+            echo "" >> /tmp/diff-output/full-diff.txt
+            echo "## Changes from latest release (${{ steps.latest-tag.outputs.tag }})" >> /tmp/diff-output/full-diff.txt
+            echo "" >> /tmp/diff-output/full-diff.txt
+            for resource in clusterroles roles clusterrolebindings rolebindings; do
+              echo "=== $resource ===" >> /tmp/diff-output/full-diff.txt
+              diff -u /tmp/tag-output/$resource.yaml /tmp/pr-output/$resource.yaml >> /tmp/diff-output/full-diff.txt 2>&1 || true
+              echo "" >> /tmp/diff-output/full-diff.txt
+            done
+            echo "has_tag_diff=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_tag_diff=false" >> $GITHUB_OUTPUT
+          fi
+
           # Check if there are any differences
           if diff -q /tmp/main-output /tmp/pr-output > /dev/null 2>&1; then
             echo "has_diff=false" >> $GITHUB_OUTPUT
@@ -177,10 +273,10 @@ jobs:
             echo "has_diff=true" >> $GITHUB_OUTPUT
             echo "Differences found!"
           fi
-          
+
           # Store diff for comment (truncate if too long)
           DIFF_CONTENT=$(cat /tmp/diff-output/full-diff.txt | head -500)
-          
+
           # Use a delimiter for multiline output
           echo "diff<<EOF" >> $GITHUB_OUTPUT
           echo "$DIFF_CONTENT" >> $GITHUB_OUTPUT
@@ -193,45 +289,53 @@ jobs:
           script: |
             const diff = `${{ steps.diff.outputs.diff }}`;
             const mainFallback = '${{ steps.diff.outputs.main_fallback }}' === 'true';
-            
+
             let fallbackNotice = '';
             if (mainFallback) {
               fallbackNotice = `
-            > ⚠️ **Note:** Main branch samples failed to apply (likely due to schema changes). 
+            > ⚠️ **Note:** Main branch samples failed to apply (likely due to schema changes).
             > PR branch samples were used as baseline, so no meaningful diff is shown.
             > This typically happens when sample files are updated with new required fields.
-            
+
             `;
             }
-            
+
+            const hasTagDiff = '${{ steps.diff.outputs.has_tag_diff }}' === 'true';
+            const latestTag = '${{ steps.latest-tag.outputs.tag }}';
+
+            let tagInfo = '';
+            if (hasTagDiff && latestTag) {
+              tagInfo = `\n\n📦 **Also compared against latest release:** \`${latestTag}\``;
+            }
+
             const body = `## 📊 Output Delta Report
             ${fallbackNotice}
-            This PR changes the generated RBAC resources when applied to sample configurations.
-            
+            This PR changes the generated RBAC resources when applied to sample configurations.${tagInfo}
+
             <details>
             <summary>Click to expand diff</summary>
-            
+
             \`\`\`diff
             ${diff}
             \`\`\`
-            
+
             </details>
-            
+
             > **Note:** This diff shows changes in ClusterRoles, Roles, ClusterRoleBindings, and RoleBindings generated from \`config/samples/\`.
             `;
-            
+
             // Find existing comment
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
             });
-            
-            const botComment = comments.find(comment => 
-              comment.user.type === 'Bot' && 
+
+            const botComment = comments.find(comment =>
+              comment.user.type === 'Bot' &&
               comment.body.includes('Output Delta Report')
             );
-            
+
             if (botComment) {
               await github.rest.issues.updateComment({
                 owner: context.repo.owner,
@@ -254,24 +358,24 @@ jobs:
         with:
           script: |
             const body = `## 📊 Output Delta Report
-            
+
             ✅ No changes detected in generated RBAC resources.
-            
+
             The sample configurations in \`config/samples/\` produce identical output on both main and this PR.
             `;
-            
+
             // Find existing comment
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
             });
-            
-            const botComment = comments.find(comment => 
-              comment.user.type === 'Bot' && 
+
+            const botComment = comments.find(comment =>
+              comment.user.type === 'Bot' &&
               comment.body.includes('Output Delta Report')
             );
-            
+
             if (botComment) {
               await github.rest.issues.updateComment({
                 owner: context.repo.owner,
