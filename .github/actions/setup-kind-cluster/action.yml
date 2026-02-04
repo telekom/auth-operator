@@ -1,0 +1,81 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# NOTE: This action is designed for standalone cluster setup in custom workflows.
+# The E2E tests in this repository use 'make test-e2e-*' targets with E2E_RECREATE_CLUSTER=true,
+# which handle cluster creation internally for better integration with test lifecycle.
+# Use this action when you need explicit control over cluster creation/deletion.
+
+name: 'Setup Kind Cluster'
+description: 'Create a kind cluster and optionally install popular CRDs'
+
+inputs:
+  cluster-name:
+    description: 'Name of the kind cluster'
+    required: false
+    default: 'auth-operator-e2e'
+  k8s-version:
+    description: 'Kubernetes version for the cluster'
+    required: false
+    default: 'v1.32.5'
+  wait-timeout:
+    description: 'Timeout for cluster to be ready'
+    required: false
+    default: '5m'
+  install-crds:
+    description: 'Install popular CRDs (Prometheus, cert-manager, etc.)'
+    required: false
+    default: 'false'
+  crd-setup-script:
+    description: 'Path to the CRD setup script'
+    required: false
+    default: 'hack/ci/setup-kind-crds.sh'
+  multi-node:
+    description: 'Create a multi-node cluster for HA testing'
+    required: false
+    default: 'false'
+
+outputs:
+  cluster-name:
+    description: 'Name of the created cluster'
+    value: ${{ inputs.cluster-name }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Create kind cluster (single node)
+      if: inputs.multi-node != 'true'
+      shell: bash
+      run: |
+        kind create cluster \
+          --name ${{ inputs.cluster-name }} \
+          --image kindest/node:${{ inputs.k8s-version }} \
+          --wait ${{ inputs.wait-timeout }}
+        kubectl cluster-info
+
+    - name: Create kind cluster (multi-node for HA)
+      if: inputs.multi-node == 'true'
+      shell: bash
+      run: |
+        cat <<EOF | kind create cluster --name ${{ inputs.cluster-name }} --wait ${{ inputs.wait-timeout }} --config=-
+        kind: Cluster
+        apiVersion: kind.x-k8s.io/v1alpha4
+        nodes:
+        - role: control-plane
+          image: kindest/node:${{ inputs.k8s-version }}
+        - role: worker
+          image: kindest/node:${{ inputs.k8s-version }}
+        - role: worker
+          image: kindest/node:${{ inputs.k8s-version }}
+        EOF
+        kubectl cluster-info
+
+    - name: Install popular CRDs
+      if: inputs.install-crds == 'true'
+      shell: bash
+      env:
+        KIND_CLUSTER_NAME: ${{ inputs.cluster-name }}
+      run: |
+        chmod +x ${{ inputs.crd-setup-script }}
+        bash ${{ inputs.crd-setup-script }}

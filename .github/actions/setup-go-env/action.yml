@@ -1,0 +1,66 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: 'Setup Go Environment'
+description: 'Setup Go with caching and optional tools installation'
+
+inputs:
+  go-version:
+    description: 'Go version to install'
+    required: false
+    default: '1.25'
+  install-kind:
+    description: 'Install kind CLI'
+    required: false
+    default: 'false'
+  kind-version:
+    description: 'Kind version to install'
+    required: false
+    default: 'v0.31.0'
+  install-helm:
+    description: 'Install Helm CLI'
+    required: false
+    default: 'false'
+  helm-version:
+    description: 'Helm version to install'
+    required: false
+    default: 'v3.17.0'
+  install-golangci-lint:
+    description: 'Install golangci-lint'
+    required: false
+    default: 'false'
+  golangci-lint-version:
+    description: 'golangci-lint version to install'
+    required: false
+    default: 'v2.8.0'
+  cache-dependency-path:
+    description: 'Path to go.sum for cache key'
+    required: false
+    default: 'go.sum'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Go
+      uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
+      with:
+        go-version: ${{ inputs.go-version }}
+        cache: true
+        cache-dependency-path: ${{ inputs.cache-dependency-path }}
+
+    - name: Install kind
+      if: inputs.install-kind == 'true'
+      shell: bash
+      run: go install sigs.k8s.io/kind@${{ inputs.kind-version }}
+
+    - name: Install Helm
+      if: inputs.install-helm == 'true'
+      uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+      with:
+        version: ${{ inputs.helm-version }}
+
+    - name: Install golangci-lint
+      if: inputs.install-golangci-lint == 'true'
+      shell: bash
+      run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${{ inputs.golangci-lint-version }}
