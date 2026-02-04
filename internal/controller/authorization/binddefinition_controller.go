@@ -23,6 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	authnv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	"github.com/telekom/auth-operator/api/authorization/v1alpha1/applyconfiguration/ssa"
 	conditions "github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/discovery"
 )
@@ -187,6 +188,7 @@ func (r *BindDefinitionReconciler) isSAReferencedByOtherBindDefs(ctx context.Con
 
 // Reconcile handles the reconciliation loop for BindDefinition resources.
 // It manages the lifecycle of role bindings based on the BindDefinition spec.
+// Status updates use Server-Side Apply (SSA) to avoid race conditions.
 func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 
@@ -205,14 +207,10 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return r.reconcileDelete(ctx, bindDefinition)
 	}
 
-	// Mark as Reconciling at the start (kstatus) - best effort, don't fail reconciliation
+	// Mark as Reconciling (kstatus) - this will be batched with final status update via SSA
 	conditions.MarkReconciling(bindDefinition, bindDefinition.Generation,
 		authnv1alpha1.ReconcilingReasonProgressing, authnv1alpha1.ReconcilingMessageProgressing)
 	bindDefinition.Status.ObservedGeneration = bindDefinition.Generation
-	if err := r.client.Status().Update(ctx, bindDefinition); err != nil {
-		log.V(1).Info("failed to update Reconciling status (will retry)", "bindDefinitionName", bindDefinition.Name, "error", err)
-		// Don't return error - continue with reconciliation, markReady will refetch
-	}
 
 	if !controllerutil.ContainsFinalizer(bindDefinition, authnv1alpha1.BindDefinitionFinalizer) {
 		controllerutil.AddFinalizer(bindDefinition, authnv1alpha1.BindDefinitionFinalizer)
@@ -220,14 +218,11 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			r.markStalled(ctx, bindDefinition, err)
 			return ctrl.Result{}, fmt.Errorf("add finalizer to BindDefinition %s: %w", bindDefinition.Name, err)
 		}
-		r.recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "Finalizer", "Adding finalizer to BindDefinition %s", bindDefinition.Name)
+		r.recorder.Eventf(bindDefinition, corev1.EventTypeNormal, authnv1alpha1.EventReasonFinalizer, "Adding finalizer to BindDefinition %s", bindDefinition.Name)
 	}
-	// Note: Intermediate status updates are best-effort. markReady/markStalled will refetch and set final state.
+
+	// Batch condition - finalizer set
 	conditions.MarkTrue(bindDefinition, authnv1alpha1.FinalizerCondition, bindDefinition.Generation, authnv1alpha1.FinalizerReason, authnv1alpha1.FinalizerMessage)
-	if err := r.client.Status().Update(ctx, bindDefinition); err != nil {
-		log.V(1).Info("failed to update FinalizerCondition status (will retry)", "bindDefinitionName", bindDefinition.Name, "error", err)
-		// Continue - markReady will refetch
-	}
 
 	// Collect namespaces once for both create and update paths
 	// This avoids duplicate API calls to list namespaces
@@ -256,11 +251,24 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return resultUpdate, err
 	}
 
-	// Mark Ready on successful completion (kstatus)
+	// Mark Ready and apply final status via SSA (kstatus)
+	bindDefinition.Status.BindReconciled = true
 	r.markReady(ctx, bindDefinition)
+
+	// Apply status via SSA and surface errors so the controller retries if status patch fails
+	if err := r.applyStatus(ctx, bindDefinition); err != nil {
+		log.Error(err, "Failed to apply BindDefinition status")
+		return mergeReconcileResults(resultCreate, resultUpdate), err
+	}
 
 	// Preserve requeue requests from sub-reconciles
 	return mergeReconcileResults(resultCreate, resultUpdate), nil
+}
+
+// applyStatus applies status updates using Server-Side Apply (SSA).
+// This eliminates race conditions from stale object versions and batches all condition updates.
+func (r *BindDefinitionReconciler) applyStatus(ctx context.Context, bindDefinition *authnv1alpha1.BindDefinition) error {
+	return ssa.ApplyBindDefinitionStatus(ctx, r.client, bindDefinition)
 }
 
 func mergeReconcileResults(results ...ctrl.Result) ctrl.Result {
@@ -293,8 +301,8 @@ func (r *BindDefinitionReconciler) reconcileDelete(
 		"bindDefinitionName", bindDefinition.Name)
 	conditions.MarkTrue(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation,
 		authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
-	if err := r.client.Status().Update(ctx, bindDefinition); err != nil {
-		return ctrl.Result{}, fmt.Errorf("update delete condition for BindDefinition %s: %w", bindDefinition.Name, err)
+	if err := r.applyStatus(ctx, bindDefinition); err != nil {
+		return ctrl.Result{}, fmt.Errorf("apply delete condition for BindDefinition %s: %w", bindDefinition.Name, err)
 	}
 
 	// Delete ServiceAccounts
@@ -312,12 +320,11 @@ func (r *BindDefinitionReconciler) reconcileDelete(
 		return ctrl.Result{}, fmt.Errorf("delete RoleBindings for BindDefinition %s: %w", bindDefinition.Name, err)
 	}
 
-	conditions.MarkTrue(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation,
-		authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
+	// Mark finalizer as removed (DeleteCondition already set at start of deletion)
 	conditions.MarkFalse(bindDefinition, authnv1alpha1.FinalizerCondition, bindDefinition.Generation,
 		authnv1alpha1.FinalizerReason, authnv1alpha1.FinalizerMessage)
-	if err := r.client.Status().Update(ctx, bindDefinition); err != nil {
-		return ctrl.Result{}, fmt.Errorf("update status after cleanup for BindDefinition %s: %w", bindDefinition.Name, err)
+	if err := r.applyStatus(ctx, bindDefinition); err != nil {
+		return ctrl.Result{}, fmt.Errorf("apply status after cleanup for BindDefinition %s: %w", bindDefinition.Name, err)
 	}
 
 	log.V(2).Info("removing BindDefinition finalizer", "bindDefinitionName", bindDefinition.Name)
@@ -371,8 +378,8 @@ func (r *BindDefinitionReconciler) deleteAllClusterRoleBindings(
 		if err != nil {
 			conditions.MarkFalse(bindDef, authnv1alpha1.DeleteCondition, bindDef.Generation,
 				authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
-			if errStatus := r.client.Status().Update(ctx, bindDef); errStatus != nil {
-				return fmt.Errorf("update status after ClusterRoleBinding %s deletion failure: %w", clusterRoleRef, errStatus)
+			if errStatus := r.applyStatus(ctx, bindDef); errStatus != nil {
+				return fmt.Errorf("apply status after ClusterRoleBinding %s deletion failure: %w", clusterRoleRef, errStatus)
 			}
 			return fmt.Errorf("deleteAllClusterRoleBindings: %w", err)
 		}
@@ -435,8 +442,8 @@ func (r *BindDefinitionReconciler) deleteRoleBindingWithStatusUpdate(
 	if err != nil {
 		conditions.MarkFalse(bindDef, authnv1alpha1.DeleteCondition, bindDef.Generation,
 			authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
-		if errStatus := r.client.Status().Update(ctx, bindDef); errStatus != nil {
-			return fmt.Errorf("update status after RoleBinding deletion failure: %w", errStatus)
+		if errStatus := r.applyStatus(ctx, bindDef); errStatus != nil {
+			return fmt.Errorf("apply status after RoleBinding deletion failure: %w", errStatus)
 		}
 		return err
 	}
@@ -455,18 +462,18 @@ func (r *BindDefinitionReconciler) reconcileCreate(ctx context.Context, bindDefi
 	if len(missingRoles) > 0 {
 		log.Info("Some referenced roles do not exist - bindings will be created but may not be effective",
 			"bindDefinitionName", bindDefinition.Name, "missingRoles", missingRoles)
-		r.recorder.Eventf(bindDefinition, corev1.EventTypeWarning, "RoleRefNotFound",
+		r.recorder.Eventf(bindDefinition, corev1.EventTypeWarning, authnv1alpha1.EventReasonRoleRefNotFound,
 			"Referenced roles not found: %v. Bindings will be created but ineffective until roles exist.", missingRoles)
 		conditions.MarkFalse(bindDefinition, authnv1alpha1.RoleRefValidCondition, bindDefinition.Generation,
 			authnv1alpha1.RoleRefInvalidReason, authnv1alpha1.RoleRefInvalidMessage)
-		if err := r.client.Status().Update(ctx, bindDefinition); err != nil {
-			log.Error(err, "Failed to update RoleRefValid condition", "bindDefinitionName", bindDefinition.Name)
+		if err := r.applyStatus(ctx, bindDefinition); err != nil {
+			log.Error(err, "Failed to apply RoleRefValid condition", "bindDefinitionName", bindDefinition.Name)
 		}
 	} else {
 		conditions.MarkTrue(bindDefinition, authnv1alpha1.RoleRefValidCondition, bindDefinition.Generation,
 			authnv1alpha1.RoleRefValidReason, authnv1alpha1.RoleRefValidMessage)
-		if err := r.client.Status().Update(ctx, bindDefinition); err != nil {
-			log.Error(err, "Failed to update RoleRefValid condition", "bindDefinitionName", bindDefinition.Name)
+		if err := r.applyStatus(ctx, bindDefinition); err != nil {
+			log.Error(err, "Failed to apply RoleRefValid condition", "bindDefinitionName", bindDefinition.Name)
 		}
 	}
 
@@ -489,7 +496,7 @@ func (r *BindDefinitionReconciler) reconcileCreate(ctx context.Context, bindDefi
 	}
 
 	conditions.MarkTrue(bindDefinition, authnv1alpha1.CreateCondition, bindDefinition.Generation, authnv1alpha1.CreateReason, authnv1alpha1.CreateMessage)
-	if err := r.client.Status().Update(ctx, bindDefinition); err != nil {
+	if err := r.applyStatus(ctx, bindDefinition); err != nil {
 		return ctrl.Result{}, err
 	}
 

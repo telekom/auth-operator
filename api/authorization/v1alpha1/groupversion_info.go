@@ -1,5 +1,6 @@
 // Package v1alpha1 contains API Schema definitions for the authorization v1alpha1 API group
 // +kubebuilder:object:generate=true
+// +kubebuilder:ac:generate=true
 // +groupName=authorization.t-caas.telekom.com
 package v1alpha1
 
@@ -12,6 +13,8 @@ var (
 	// GroupVersion is group version used to register these objects
 	GroupVersion = schema.GroupVersion{Group: "authorization.t-caas.telekom.com", Version: "v1alpha1"}
 
+	// SchemeGroupVersion is an alias for GroupVersion for backwards compatibility with generated code.
+	SchemeGroupVersion = GroupVersion
 	// SchemeBuilder is used to add go types to the GroupVersionKind scheme
 	SchemeBuilder = &scheme.Builder{GroupVersion: GroupVersion}
 

@@ -32,11 +32,11 @@ type NamespaceBinding struct {
 	// +kubebuilder:validation:Optional
 	ClusterRoleRefs []string `json:"clusterRoleRefs,omitempty"`
 
-	// Role references an specific Role that has ro exist in the target namespaces
+	// RoleRefs references a specific Role that has to exist in the target namespaces
 	// +kubebuilder:validation:Optional
 	RoleRefs []string `json:"roleRefs,omitempty"`
 
-	// Namespace of the the Role that should be bound to the subjects.
+	// Namespace of the Role that should be bound to the subjects.
 	// +kubebuilder:validation:Optional
 	Namespace string `json:"namespace,omitempty"`
 
@@ -59,7 +59,7 @@ type BindDefinitionSpec struct {
 	// +kubebuilder:validation:Optional
 	ClusterRoleBindings ClusterBinding `json:"clusterRoleBindings,omitempty"`
 
-	// List of ClusterRoles/Roles to which subjects will be bound to. The list is a RoleRef which means we have to specify t he full rbacv1.RoleRef schema. The result of specifying the field are RoleBindings.
+	// List of ClusterRoles/Roles to which subjects will be bound to. The list is a RoleRef which means we have to specify the full rbacv1.RoleRef schema. The result of specifying the field are RoleBindings.
 	// +kubebuilder:validation:Optional
 	RoleBindings []NamespaceBinding `json:"roleBindings,omitempty"`
 
