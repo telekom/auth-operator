@@ -28,6 +28,7 @@ import (
 	"github.com/telekom/auth-operator/api/authorization/v1alpha1/applyconfiguration/ssa"
 	conditions "github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/discovery"
+	"github.com/telekom/auth-operator/pkg/metrics"
 )
 
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=roledefinitions,verbs=get;list;watch;update;patch
@@ -124,8 +125,14 @@ func (r *RoleDefinitionReconciler) queueAll() handler.MapFunc {
 // It manages the lifecycle of cluster roles and roles based on the RoleDefinition spec.
 // Status updates are batched and applied using Server-Side Apply (SSA) to avoid race conditions.
 func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	startTime := time.Now()
 	log := log.FromContext(ctx)
 	log.V(1).Info("starting RoleDefinition reconciliation", "roleDefinitionName", req.Name, "namespace", req.Namespace)
+
+	// Track reconcile duration on exit
+	defer func() {
+		metrics.ReconcileDuration.WithLabelValues(metrics.ControllerRoleDefinition).Observe(time.Since(startTime).Seconds())
+	}()
 
 	// Fetch the RoleDefinition
 	roleDefinition := &authnv1alpha1.RoleDefinition{}
@@ -133,9 +140,12 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			log.V(2).Info("RoleDefinition not found - already deleted", "roleDefinitionName", req.Name)
+			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ResultSkipped).Inc()
 			return ctrl.Result{}, nil
 		}
 		log.Error(err, "unable to fetch RoleDefinition", "roleDefinitionName", req.Name)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, err
 	}
 
@@ -152,17 +162,28 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err != nil {
 		log.Error(err, "invalid RoleDefinition spec", "roleDefinitionName", roleDefinition.Name, "targetRole", roleDefinition.Spec.TargetRole)
 		r.markStalled(ctx, roleDefinition, err)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ErrorTypeValidation).Inc()
 		return ctrl.Result{}, err
 	}
 
 	// Handle deletion
 	if !roleDefinition.DeletionTimestamp.IsZero() {
-		return r.handleDeletion(ctx, roleDefinition, role)
+		result, err := r.handleDeletion(ctx, roleDefinition, role)
+		if err != nil {
+			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ResultError).Inc()
+			metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ErrorTypeAPI).Inc()
+		} else {
+			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ResultFinalized).Inc()
+		}
+		return result, err
 	}
 
 	// Ensure finalizer
 	if err := r.ensureFinalizer(ctx, roleDefinition); err != nil {
 		r.markStalled(ctx, roleDefinition, err)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, err
 	}
 
@@ -181,11 +202,14 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		if statusErr := r.applyStatus(ctx, roleDefinition); statusErr != nil {
 			log.Error(statusErr, "failed to apply status before requeue", "roleDefinitionName", roleDefinition.Name)
 		}
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ResultRequeue).Inc()
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 	if err != nil {
 		log.Error(err, "failed to get API resources", "roleDefinitionName", roleDefinition.Name)
 		r.markStalled(ctx, roleDefinition, err)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, err
 	}
 
@@ -194,6 +218,8 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err != nil {
 		log.Error(err, "failed to filter API resources for RoleDefinition", "roleDefinitionName", roleDefinition.Name)
 		r.markStalled(ctx, roleDefinition, err)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ErrorTypeInternal).Inc()
 		return ctrl.Result{}, err
 	}
 	finalRules := r.buildFinalRules(roleDefinition, rulesByAPIGroupAndVerbs)
@@ -226,12 +252,16 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 		log.Error(err, "Failed to get existing role", "roleDefinitionName", roleDefinition.Name)
 		r.markStalled(ctx, roleDefinition, err)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, err
 	}
 
 	// Update existing role if needed
 	if err := r.updateRole(ctx, roleDefinition, existingRole, finalRules); err != nil {
 		r.markStalled(ctx, roleDefinition, err)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, err
 	}
 
@@ -239,9 +269,12 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	roleDefinition.Status.RoleReconciled = true
 	if err := r.applyStatus(ctx, roleDefinition); err != nil {
 		log.Error(err, "failed to apply final status", "roleDefinitionName", roleDefinition.Name)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, err
 	}
 
+	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ResultSuccess).Inc()
 	log.V(1).Info("RoleDefinition reconciliation completed successfully", "roleDefinitionName", roleDefinition.Name)
 	return ctrl.Result{}, nil
 }

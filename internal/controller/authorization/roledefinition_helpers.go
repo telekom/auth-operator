@@ -22,6 +22,7 @@ import (
 	"github.com/telekom/auth-operator/api/authorization/v1alpha1/applyconfiguration/ssa"
 	"github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/helpers"
+	"github.com/telekom/auth-operator/pkg/metrics"
 	pkgssa "github.com/telekom/auth-operator/pkg/ssa"
 )
 
@@ -264,6 +265,8 @@ func (r *RoleDefinitionReconciler) buildRoleWithRules(
 
 // createRole creates a new role and applies status using Server-Side Apply (SSA).
 // This function applies status via SSA since it returns early from the Reconcile function.
+//
+//nolint:unparam // result is intentionally always nil - requeue via error propagation
 func (r *RoleDefinitionReconciler) createRole(
 	ctx context.Context,
 	roleDefinition *authnv1alpha1.RoleDefinition,
@@ -279,7 +282,17 @@ func (r *RoleDefinitionReconciler) createRole(
 		log.Error(err, "Failed to apply role via SSA",
 			"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
 		r.markStalled(ctx, roleDefinition, err)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, err
+	}
+
+	// Record RBAC resource creation metric
+	switch roleDefinition.Spec.TargetRole {
+	case authnv1alpha1.DefinitionClusterRole:
+		metrics.RBACResourcesCreated.WithLabelValues(metrics.ResourceClusterRole).Inc()
+	case authnv1alpha1.DefinitionNamespacedRole:
+		metrics.RBACResourcesCreated.WithLabelValues(metrics.ResourceRole).Inc()
 	}
 
 	log.V(1).Info("Role created successfully",
@@ -300,9 +313,12 @@ func (r *RoleDefinitionReconciler) createRole(
 		authnv1alpha1.ReadyReasonReconciled, authnv1alpha1.ReadyMessageReconciled)
 	if err := r.applyStatus(ctx, roleDefinition); err != nil {
 		log.Error(err, "failed to apply status after role creation", "roleDefinitionName", roleDefinition.Name)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, err
 	}
 
+	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ResultSuccess).Inc()
 	log.V(1).Info("RoleDefinition reconciliation completed successfully", "roleDefinitionName", roleDefinition.Name)
 	return ctrl.Result{}, nil
 }
@@ -400,6 +416,7 @@ func (r *RoleDefinitionReconciler) updateRole(
 				"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
 			return err
 		}
+		metrics.RBACResourcesUpdated.WithLabelValues(metrics.ResourceClusterRole).Inc()
 	case *rbacv1.Role:
 		ac := pkgssa.RoleWithLabelsAndRules(
 			roleDefinition.Spec.TargetName,
@@ -412,6 +429,7 @@ func (r *RoleDefinitionReconciler) updateRole(
 				"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
 			return err
 		}
+		metrics.RBACResourcesUpdated.WithLabelValues(metrics.ResourceRole).Inc()
 	default:
 		log.Error(ErrInvalidTargetRole, "Existing role has invalid type",
 			"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName,

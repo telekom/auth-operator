@@ -22,6 +22,8 @@ import (
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	"github.com/telekom/auth-operator/pkg/metrics"
 )
 
 // ErrResourceTrackerNotStarted is returned when the ResourceTracker has not been started yet.
@@ -223,6 +225,7 @@ func (r *ResourceTracker) GetAPIResources() (APIResourcesByGroupVersion, error) 
 // It runs the collection with higher QPS and Burst to speed up the process.
 // It collects resources concurrently for each API group version.
 func (r *ResourceTracker) collectAPIResources(ctx context.Context) (bool, error) {
+	startTime := time.Now()
 	if !r.mutex.TryLock() {
 		// another collection is in progress
 		return false, nil
@@ -240,6 +243,7 @@ func (r *ResourceTracker) collectAPIResources(ctx context.Context) (bool, error)
 	discoveryClient, err := discovery.NewDiscoveryClientForConfig(discoveryConfig)
 	if err != nil {
 		log.Error(err, "failed to create Discovery client")
+		metrics.APIDiscoveryErrors.Inc()
 		return false, err
 	}
 
@@ -249,9 +253,15 @@ func (r *ResourceTracker) collectAPIResources(ctx context.Context) (bool, error)
 	discoveredAPIGroups, err := discoveryClient.ServerGroups()
 	if err != nil {
 		log.Error(err, "failed to discover API groups")
+		metrics.APIDiscoveryErrors.Inc()
 		return false, err
 	}
 	log.V(2).Info("discovered API groups", "groupCount", len(discoveredAPIGroups.Groups))
+
+	// Record API discovery duration after successful completion
+	defer func() {
+		metrics.APIDiscoveryDuration.Observe(time.Since(startTime).Seconds())
+	}()
 
 	// Fetch all existing API Resources and filter them against RestrictedResources
 	errorGroup, groupCtx := errgroup.WithContext(ctx)

@@ -26,6 +26,7 @@ import (
 	"github.com/telekom/auth-operator/api/authorization/v1alpha1/applyconfiguration/ssa"
 	conditions "github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/discovery"
+	"github.com/telekom/auth-operator/pkg/metrics"
 )
 
 const (
@@ -190,21 +191,37 @@ func (r *BindDefinitionReconciler) isSAReferencedByOtherBindDefs(ctx context.Con
 // It manages the lifecycle of role bindings based on the BindDefinition spec.
 // Status updates use Server-Side Apply (SSA) to avoid race conditions.
 func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	startTime := time.Now()
 	log := log.FromContext(ctx)
+
+	// Track reconcile duration on exit
+	defer func() {
+		metrics.ReconcileDuration.WithLabelValues(metrics.ControllerBindDefinition).Observe(time.Since(startTime).Seconds())
+	}()
 
 	// Fetching the BindDefinition custom resource from Kubernetes API
 	bindDefinition := &authnv1alpha1.BindDefinition{}
 	err := r.client.Get(ctx, req.NamespacedName, bindDefinition)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
+			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultSkipped).Inc()
 			return ctrl.Result{}, nil
 		}
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerBindDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, fmt.Errorf("fetch BindDefinition %s: %w", req.NamespacedName, err)
 	}
 
 	// Check if controller should reconcile BindDefinition delete
 	if !bindDefinition.DeletionTimestamp.IsZero() {
-		return r.reconcileDelete(ctx, bindDefinition)
+		result, err := r.reconcileDelete(ctx, bindDefinition)
+		if err != nil {
+			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultError).Inc()
+			metrics.ReconcileErrors.WithLabelValues(metrics.ControllerBindDefinition, metrics.ErrorTypeAPI).Inc()
+		} else {
+			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultFinalized).Inc()
+		}
+		return result, err
 	}
 
 	// Mark as Reconciling (kstatus) - this will be batched with final status update via SSA
@@ -216,6 +233,8 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		controllerutil.AddFinalizer(bindDefinition, authnv1alpha1.BindDefinitionFinalizer)
 		if err := r.client.Update(ctx, bindDefinition); err != nil {
 			r.markStalled(ctx, bindDefinition, err)
+			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultError).Inc()
+			metrics.ReconcileErrors.WithLabelValues(metrics.ControllerBindDefinition, metrics.ErrorTypeAPI).Inc()
 			return ctrl.Result{}, fmt.Errorf("add finalizer to BindDefinition %s: %w", bindDefinition.Name, err)
 		}
 		r.recorder.Eventf(bindDefinition, corev1.EventTypeNormal, authnv1alpha1.EventReasonFinalizer, "Adding finalizer to BindDefinition %s", bindDefinition.Name)
@@ -230,6 +249,8 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err != nil {
 		log.Error(err, "Unable to collect namespaces", "bindDefinitionName", bindDefinition.Name)
 		r.markStalled(ctx, bindDefinition, err)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerBindDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, fmt.Errorf("collect namespaces for BindDefinition %s: %w", bindDefinition.Name, err)
 	}
 
@@ -240,6 +261,8 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err != nil {
 		log.Error(err, "Error occurred in reconcileCreate function")
 		r.markStalled(ctx, bindDefinition, err)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerBindDefinition, metrics.ErrorTypeAPI).Inc()
 		return resultCreate, err
 	}
 
@@ -248,6 +271,8 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err != nil {
 		log.Error(err, "Error occurred in reconcileUpdate function")
 		r.markStalled(ctx, bindDefinition, err)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerBindDefinition, metrics.ErrorTypeAPI).Inc()
 		return resultUpdate, err
 	}
 
@@ -258,11 +283,21 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// Apply status via SSA and surface errors so the controller retries if status patch fails
 	if err := r.applyStatus(ctx, bindDefinition); err != nil {
 		log.Error(err, "Failed to apply BindDefinition status")
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerBindDefinition, metrics.ErrorTypeAPI).Inc()
 		return mergeReconcileResults(resultCreate, resultUpdate), err
 	}
 
+	// Track success or requeue result
+	merged := mergeReconcileResults(resultCreate, resultUpdate)
+	if !merged.IsZero() {
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultRequeue).Inc()
+	} else {
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultSuccess).Inc()
+	}
+
 	// Preserve requeue requests from sub-reconciles
-	return mergeReconcileResults(resultCreate, resultUpdate), nil
+	return merged, nil
 }
 
 // applyStatus applies status updates using Server-Side Apply (SSA).
@@ -288,6 +323,11 @@ func mergeReconcileResults(results ...ctrl.Result) ctrl.Result {
 	return merged
 }
 
+// reconcileDelete handles deletion of a BindDefinition and its managed resources.
+// It returns ctrl.Result{} for all successful/error paths since requeue is handled
+// through error propagation to the controller runtime.
+//
+//nolint:unparam // result is intentionally always nil - requeue via error or RequeueAfter in caller
 func (r *BindDefinitionReconciler) reconcileDelete(
 	ctx context.Context,
 	bindDefinition *authnv1alpha1.BindDefinition,

@@ -17,6 +17,7 @@ import (
 	"github.com/telekom/auth-operator/api/authorization/v1alpha1/applyconfiguration/ssa"
 	"github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/helpers"
+	"github.com/telekom/auth-operator/pkg/metrics"
 )
 
 // logStatusApplyError logs a status apply error without failing the operation.
@@ -200,6 +201,7 @@ func (r *BindDefinitionReconciler) deleteClusterRoleBinding(
 		return 0, fmt.Errorf("delete ClusterRoleBinding %s: %w", crbName, err)
 	}
 
+	metrics.RBACResourcesDeleted.WithLabelValues(metrics.ResourceClusterRoleBinding).Inc()
 	log.V(1).Info("Successfully deleted ClusterRoleBinding",
 		"bindDefinitionName", bindDef.Name, "clusterRoleBindingName", crbName)
 	return deleteResultDeleted, nil
@@ -253,6 +255,7 @@ func (r *BindDefinitionReconciler) deleteRoleBinding(
 		return 0, fmt.Errorf("delete RoleBinding %s/%s: %w", namespace, rbName, err)
 	}
 
+	metrics.RBACResourcesDeleted.WithLabelValues(metrics.ResourceRoleBinding).Inc()
 	log.V(1).Info("Successfully deleted RoleBinding",
 		"bindDefinitionName", bindDef.Name, "roleBindingName", rbName, "namespace", namespace)
 	return deleteResultDeleted, nil
@@ -444,6 +447,7 @@ func (r *BindDefinitionReconciler) createClusterRoleBindings(
 				"bindDefinitionName", bindDef.Name, "clusterRoleBindingName", crbName)
 			return fmt.Errorf("create ClusterRoleBinding %s: %w", crbName, err)
 		}
+		metrics.RBACResourcesCreated.WithLabelValues(metrics.ResourceClusterRoleBinding).Inc()
 		log.V(1).Info("Created ClusterRoleBinding",
 			"bindDefinitionName", bindDef.Name, "clusterRoleBindingName", crbName)
 		r.recorder.Eventf(bindDef, corev1.EventTypeNormal, authnv1alpha1.EventReasonCreate,
@@ -588,6 +592,7 @@ func (r *BindDefinitionReconciler) createSingleRoleBinding(
 	if err := r.client.Create(ctx, rb); err != nil {
 		return fmt.Errorf("create RoleBinding %s/%s: %w", namespace, rbName, err)
 	}
+	metrics.RBACResourcesCreated.WithLabelValues(metrics.ResourceRoleBinding).Inc()
 	log.Info("Created", "RoleBinding", rb.Name)
 	r.recorder.Eventf(bindDef, corev1.EventTypeNormal, authnv1alpha1.EventReasonCreate,
 		"Created resource %s/%s in namespace %s", rb.Kind, rb.Name, rb.Namespace)
