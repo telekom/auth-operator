@@ -15,20 +15,19 @@ import (
 // This index must be registered with the manager before use.
 const TargetNameField = ".spec.targetName"
 
-// rdWebhookClient is a cached client from the manager.
-// List operations use the informer cache with field indexes for efficient lookups.
-var rdWebhookClient client.Client
-
 // RoleDefinitionValidator implements admission.Validator for RoleDefinition.
-type RoleDefinitionValidator struct{}
+// It holds a client reference for listing existing resources during validation.
+// +kubebuilder:object:generate=false
+type RoleDefinitionValidator struct {
+	Client client.Client
+}
 
 var _ admission.Validator[*RoleDefinition] = &RoleDefinitionValidator{}
 
 // SetupWebhookWithManager will setup the manager to manage the webhooks
 func (r *RoleDefinition) SetupWebhookWithManager(mgr ctrl.Manager) error {
-	rdWebhookClient = mgr.GetClient() // needed to initialize the client somewhere
 	return ctrl.NewWebhookManagedBy(mgr, r).
-		WithValidator(&RoleDefinitionValidator{}).
+		WithValidator(&RoleDefinitionValidator{Client: mgr.GetClient()}).
 		Complete()
 }
 
@@ -39,22 +38,19 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 	logger := log.FromContext(ctx).WithName("roledefinition-webhook")
 	logger.V(1).Info("validating create", "name", obj.Name)
 
-	// Validate that TargetNamespace is set when TargetRole is Role
-	if obj.Spec.TargetRole == "Role" && obj.Spec.TargetNamespace == "" {
-		logger.Info("validation failed: targetNamespace is required when targetRole is Role", "name", obj.Name)
-		return nil, apierrors.NewBadRequest("targetNamespace is required when targetRole is Role")
+	// Validate TargetNamespace is required when TargetRole is Role
+	if obj.Spec.TargetRole == DefinitionNamespacedRole && obj.Spec.TargetNamespace == "" {
+		return nil, apierrors.NewBadRequest("targetNamespace is required when targetRole is 'Role'")
 	}
 
-	// Validate that TargetNamespace is not set when TargetRole is ClusterRole
-	if obj.Spec.TargetRole == "ClusterRole" && obj.Spec.TargetNamespace != "" {
-		logger.Info("validation failed: targetNamespace must not be set when targetRole is ClusterRole",
-			"name", obj.Name, "targetNamespace", obj.Spec.TargetNamespace)
-		return nil, apierrors.NewBadRequest("targetNamespace must not be set when targetRole is ClusterRole")
+	// Validate TargetNamespace must not be set when TargetRole is ClusterRole
+	if obj.Spec.TargetRole == DefinitionClusterRole && obj.Spec.TargetNamespace != "" {
+		return nil, apierrors.NewBadRequest("targetNamespace must not be set when targetRole is 'ClusterRole'")
 	}
 
 	// Use field index for efficient lookup by TargetName
 	roleDefinitionList := &RoleDefinitionList{}
-	if err := rdWebhookClient.List(ctx, roleDefinitionList, client.MatchingFields{
+	if err := v.Client.List(ctx, roleDefinitionList, client.MatchingFields{
 		TargetNameField: obj.Spec.TargetName,
 	}); err != nil {
 		logger.Error(err, "failed to list RoleDefinitions", "targetName", obj.Spec.TargetName)
@@ -81,22 +77,19 @@ func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 		return nil, nil
 	}
 
-	// Validate that TargetNamespace is set when TargetRole is Role
-	if newObj.Spec.TargetRole == "Role" && newObj.Spec.TargetNamespace == "" {
-		logger.Info("validation failed: targetNamespace is required when targetRole is Role", "name", newObj.Name)
-		return nil, apierrors.NewBadRequest("targetNamespace is required when targetRole is Role")
+	// Validate TargetNamespace is required when TargetRole is Role
+	if newObj.Spec.TargetRole == DefinitionNamespacedRole && newObj.Spec.TargetNamespace == "" {
+		return nil, apierrors.NewBadRequest("targetNamespace is required when targetRole is 'Role'")
 	}
 
-	// Validate that TargetNamespace is not set when TargetRole is ClusterRole
-	if newObj.Spec.TargetRole == "ClusterRole" && newObj.Spec.TargetNamespace != "" {
-		logger.Info("validation failed: targetNamespace must not be set when targetRole is ClusterRole",
-			"name", newObj.Name, "targetNamespace", newObj.Spec.TargetNamespace)
-		return nil, apierrors.NewBadRequest("targetNamespace must not be set when targetRole is ClusterRole")
+	// Validate TargetNamespace must not be set when TargetRole is ClusterRole
+	if newObj.Spec.TargetRole == DefinitionClusterRole && newObj.Spec.TargetNamespace != "" {
+		return nil, apierrors.NewBadRequest("targetNamespace must not be set when targetRole is 'ClusterRole'")
 	}
 
 	// Use field index for efficient lookup by TargetName
 	roleDefinitionList := &RoleDefinitionList{}
-	if err := rdWebhookClient.List(ctx, roleDefinitionList, client.MatchingFields{
+	if err := v.Client.List(ctx, roleDefinitionList, client.MatchingFields{
 		TargetNameField: newObj.Spec.TargetName,
 	}); err != nil {
 		logger.Error(err, "failed to list RoleDefinitions", "targetName", newObj.Spec.TargetName)
