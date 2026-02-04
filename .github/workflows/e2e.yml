@@ -159,7 +159,7 @@ jobs:
         if: failure()
         run: |
           chmod +x hack/ci/collect-debug-info.sh
-          ./hack/ci/collect-debug-info.sh /tmp/e2e-debug auth-operator-complex
+          ./hack/ci/collect-debug-info.sh /tmp/e2e-debug auth-operator-complex-test
 
       - name: Upload test artifacts
         if: failure()

@@ -70,6 +70,13 @@ runs:
         IMAGE="${{ inputs.image-name }}:${{ inputs.image-tag }}"
         echo "Building image: $IMAGE"
 
+        # Validate: cannot push to registry when loading to kind
+        if [ "${{ inputs.push-to-registry }}" = "true" ] && [ "${{ inputs.load-to-kind }}" = "true" ]; then
+          echo "ERROR: Cannot use push-to-registry and load-to-kind simultaneously"
+          echo "load-to-kind requires the image to be available locally (--load), but push-to-registry uses --push"
+          exit 1
+        fi
+
         # Determine build flags based on push/load requirements
         BUILD_FLAGS=""
         if [ "${{ inputs.push-to-registry }}" = "true" ]; then

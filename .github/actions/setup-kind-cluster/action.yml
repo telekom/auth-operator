@@ -2,6 +2,11 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
+# NOTE: This action is designed for standalone cluster setup in custom workflows.
+# The E2E tests in this repository use 'make test-e2e-*' targets with E2E_RECREATE_CLUSTER=true,
+# which handle cluster creation internally for better integration with test lifecycle.
+# Use this action when you need explicit control over cluster creation/deletion.
+
 name: 'Setup Kind Cluster'
 description: 'Create a kind cluster and optionally install popular CRDs'
 
