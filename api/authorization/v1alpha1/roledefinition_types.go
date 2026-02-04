@@ -56,6 +56,11 @@ type RoleDefinitionSpec struct {
 
 // RoleDefinitionStatus defines the observed state of RoleDefinition
 type RoleDefinitionStatus struct {
+	// ObservedGeneration is the last observed generation of the resource.
+	// This is used by kstatus to determine if the resource is current.
+	// +kubebuilder:validation:Optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
 	// Not extremely important as most status updates are driven by Conditions. We read the JSONPath from this status field to signify completed reconciliation.
 	// +kubebuilder:validation:Optional
 	RoleReconciled bool `json:"roleReconciled,omitempty"`
@@ -70,11 +75,11 @@ type RoleDefinitionStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:path=roledefinitions,scope=Cluster,shortName=roledef
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status",description="Whether the RoleDefinition is ready"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Time duration since creation of this RoleDefinition"
 // +kubebuilder:printcolumn:name="Target",type="string",JSONPath=".spec.targetRole",description="Kubernetes API target RBAC object - can be ClusterRole or Role"
 // +kubebuilder:printcolumn:name="Role name",type="string",JSONPath=".spec.targetName",description="The name of the child object created by this RoleDefinition"
 // +kubebuilder:printcolumn:name="Namespaced scope",type="boolean",JSONPath=".spec.scopeNamespaced",description="The boolean value signifying whether this RoleDefinition is reconciling Cluster scoped resources or Namespace scoped resources"
-// +kubebuilder:printcolumn:name="Reconciled role",type="string",JSONPath=".status.roleReconciled",description="The boolean value signifying if the target role has been reconciled or not"
 type RoleDefinition struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

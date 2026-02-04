@@ -57,6 +57,7 @@ _Appears in:_
 | `subjects` _[Subject](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#subject-v1-rbac) array_ | List of subjects that will be bound to a target ClusterRole/Role. Can be "User", "Group" or "ServiceAccount". |  | Required: \{\} <br /> |
 | `clusterRoleBindings` _[ClusterBinding](#clusterbinding)_ | List of ClusterRoles to which subjects will be bound to. The list is a RoleRef which means we have to specify the full rbacv1.RoleRef schema. The result of specifying this field are ClusterRoleBindings. |  | Optional: \{\} <br /> |
 | `roleBindings` _[NamespaceBinding](#namespacebinding) array_ | List of ClusterRoles/Roles to which subjects will be bound to. The list is a RoleRef which means we have to specify t he full rbacv1.RoleRef schema. The result of specifying the field are RoleBindings. |  | Optional: \{\} <br /> |
+| `automountServiceAccountToken` _boolean_ | AutomountServiceAccountToken controls whether to automount API credentials for ServiceAccounts<br />created by this BindDefinition. Defaults to true for backward compatibility with Kubernetes<br />native ServiceAccount behavior. Set to false to improve security by preventing automatic<br />token mounting.<br />Only applies when Subjects contain ServiceAccount entries that need to be auto-created. | true | Optional: \{\} <br /> |
 
 
 #### BindDefinitionStatus
@@ -72,6 +73,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
+| `observedGeneration` _integer_ | ObservedGeneration is the last observed generation of the resource.<br />This is used by kstatus to determine if the resource is current. |  | Optional: \{\} <br /> |
 | `bindReconciled` _boolean_ | Not extremely important as most status updates are driven by Conditions. We read the JSONPath from this status field to signify completed reconciliation. |  | Optional: \{\} <br /> |
 | `generatedServiceAccounts` _[Subject](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#subject-v1-rbac) array_ | If the BindDefinition points to a subject of "Kind: ServiceAccount" and the service account is not present. The controller will reconcile it automatically. |  | Optional: \{\} <br /> |
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#condition-v1-meta) array_ | Conditions defines current service state of the Bind definition. All conditions should evaluate to true to signify successful reconciliation. |  | Optional: \{\} <br /> |
@@ -186,6 +188,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
+| `observedGeneration` _integer_ | ObservedGeneration is the last observed generation of the resource.<br />This is used by kstatus to determine if the resource is current. |  | Optional: \{\} <br /> |
 | `roleReconciled` _boolean_ | Not extremely important as most status updates are driven by Conditions. We read the JSONPath from this status field to signify completed reconciliation. |  | Optional: \{\} <br /> |
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#condition-v1-meta) array_ | Conditions defines current service state of the Role definition. All conditions should evaluate to true to signify successful reconciliation. |  | Optional: \{\} <br /> |
 
@@ -244,6 +247,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
+| `observedGeneration` _integer_ | ObservedGeneration is the last observed generation of the resource.<br />This is used by kstatus to determine if the resource is current. |  | Optional: \{\} <br /> |
 | `authorizerConfigured` _boolean_ | Not extremely important as most status updates are driven by Conditions. We read the JSONPath from this status field to signify webhook authorizer as configured. |  | Optional: \{\} <br /> |
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#condition-v1-meta) array_ | Conditions defines current service state of the Webhook authorizer. All conditions should evaluate to true to signify successful configuration. |  | Optional: \{\} <br /> |
 

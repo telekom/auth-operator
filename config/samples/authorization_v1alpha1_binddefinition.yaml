@@ -201,6 +201,7 @@ spec:
 # -----------------------------------------------------------------------------
 # Monitoring Stack - Service account bindings for observability
 # Demonstrates ServiceAccount-only bindings with specific namespace targeting
+# Also tests automountServiceAccountToken feature (set to true for monitoring)
 # -----------------------------------------------------------------------------
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: BindDefinition
@@ -212,6 +213,8 @@ metadata:
     t-caas.telekom.com/component: monitoring
 spec:
   targetName: monitoring-stack
+  # Enable automount for monitoring SAs that need API access
+  automountServiceAccountToken: true
   subjects:
     # Prometheus service account
     - kind: ServiceAccount
@@ -247,7 +250,7 @@ spec:
               values:
                 - enabled
                 - required
-    # Special access to kube-system for cluster metrics
+    # Special access to kube-system for cluster metrics (specific namespace, not selector)
     - clusterRoleRefs:
         - view
       namespace: kube-system
@@ -256,6 +259,7 @@ spec:
 # -----------------------------------------------------------------------------
 # GitOps Controllers - ArgoCD/Flux access patterns
 # Demonstrates automation service account bindings
+# Note: GitOps controllers typically require API access (automountServiceAccountToken default true)
 # -----------------------------------------------------------------------------
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: BindDefinition
@@ -267,6 +271,7 @@ metadata:
     t-caas.telekom.com/component: gitops
 spec:
   targetName: gitops-controllers
+  # Use default automount to allow API access for GitOps controllers
   subjects:
     # ArgoCD components
     - kind: ServiceAccount
@@ -293,7 +298,7 @@ spec:
     clusterRoleRefs:
       - cluster-admin
   roleBindings:
-    # Full control of managed namespaces
+    # Full control of managed namespaces (uses selector)
     - clusterRoleRefs:
         - admin
       namespaceSelector:
@@ -303,9 +308,358 @@ spec:
         - matchExpressions:
             - key: kustomize.toolkit.fluxcd.io/managed-by
               operator: Exists
-    # Read access to source namespaces
+    # Read access to argocd namespace (uses specific namespace, not selector)
+    - clusterRoleRefs:
+        - view
+      namespace: argocd
+    # Read access to flux-system namespace (uses specific namespace, not selector)
+    - clusterRoleRefs:
+        - view
+      namespace: flux-system
+
+---
+# -----------------------------------------------------------------------------
+# Default Namespace Test - Simple binding for testing in default namespace
+# Ensures RoleBindings are created in commonly existing namespaces
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: bd-default-ns-test
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/purpose: testing
+spec:
+  targetName: default-ns-test
+  subjects:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group
+      name: developers@example.com
+    # ServiceAccount that will be auto-created
+    - kind: ServiceAccount
+      name: test-automation
+      namespace: default
+  roleBindings:
+    # Bind to default namespace (always exists in any cluster)
+    - clusterRoleRefs:
+        - view
+      namespace: default
+    # Bind to kube-public namespace (always exists in any cluster)
+    - clusterRoleRefs:
+        - view
+      namespace: kube-public
+
+---
+# -----------------------------------------------------------------------------
+# Non-default automountServiceAccountToken sample
+# Demonstrates explicit disablement for a read-only UI service account
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: bd-readonly-ui
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/purpose: example
+spec:
+  targetName: readonly-ui
+  # Explicitly disable automount for a non-controller UI workload
+  automountServiceAccountToken: false
+  subjects:
+    - kind: ServiceAccount
+      name: readonly-ui
+      namespace: default
+  roleBindings:
+    - clusterRoleRefs:
+        - view
+      namespace: default
+
+---
+# -----------------------------------------------------------------------------
+# Cluster-Only Binding - Tests ClusterRoleBinding without any RoleBindings
+# Demonstrates a pure cluster-scoped binding scenario
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: bd-cluster-only
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/purpose: testing
+spec:
+  targetName: cluster-only-access
+  subjects:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group
+      name: cluster-readers@example.com
+  # Only ClusterRoleBindings, no RoleBindings
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - view
+      - t-caas-security-auditor
+
+---
+# -----------------------------------------------------------------------------
+# Namespace-Only Binding - Tests RoleBindings without any ClusterRoleBindings
+# Demonstrates a pure namespace-scoped binding scenario
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: bd-namespace-only
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/purpose: testing
+spec:
+  targetName: namespace-only-access
+  subjects:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group
+      name: namespace-developers@example.com
+    - kind: ServiceAccount
+      name: namespace-automation
+      namespace: tenant-alpha
+  # Only RoleBindings, no ClusterRoleBindings
+  roleBindings:
+    # Bind to RoleDefinition-created Role (t-caas-namespace-developer in tenant-alpha)
+    - roleRefs:
+        - t-caas-namespace-developer
+      namespace: tenant-alpha
+    # Also bind to built-in edit role
+    - clusterRoleRefs:
+        - edit
+      namespace: tenant-alpha-staging
+
+---
+# -----------------------------------------------------------------------------
+# Multi-Tenant Binding - Second binding to same RoleDefinition (1:N test)
+# Tests that multiple BindDefinitions can reference the same Role/ClusterRole
+# This binds DIFFERENT subjects to the SAME RoleDefinition-created roles
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: bd-tenant-beta-team
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/tenant: beta
+spec:
+  targetName: tenant-beta
+  subjects:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group
+      name: tenant-beta-developers@example.org
+    - kind: ServiceAccount
+      name: beta-automation
+      namespace: tenant-beta
+  # Bind to SAME ClusterRoles as tenant-alpha (tests 1:N relationship)
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - view
+      - t-caas-security-auditor
+      - t-caas-platform-admin-reader
+  roleBindings:
+    # Bind to RoleDefinition-created Role in tenant-beta namespace
+    - roleRefs:
+        - t-caas-namespace-viewer
+      namespace: tenant-beta
+    # Also use namespace selector
+    - clusterRoleRefs:
+        - edit
+      namespaceSelector:
+        - matchLabels:
+            t-caas.telekom.com/tenant: beta
+
+---
+# -----------------------------------------------------------------------------
+# Complex Selector Binding - Tests all matchExpression operators
+# Exercises NotIn, DoesNotExist operators (if supported)
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: bd-complex-selectors
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/purpose: testing
+spec:
+  targetName: complex-selector-test
+  subjects:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group
+      name: advanced-users@example.com
+  roleBindings:
+    # Test In operator with multiple values
+    - clusterRoleRefs:
+        - view
+      namespaceSelector:
+        - matchExpressions:
+            - key: t-caas.telekom.com/environment
+              operator: In
+              values:
+                - development
+                - staging
+                - production
+    # Test Exists operator
+    - clusterRoleRefs:
+        - view
+      namespaceSelector:
+        - matchExpressions:
+            - key: t-caas.telekom.com/tenant
+              operator: Exists
+    # Test combined matchLabels AND matchExpressions
+    - clusterRoleRefs:
+        - edit
+      namespaceSelector:
+        - matchLabels:
+            t-caas.telekom.com/owner: tenant
+          matchExpressions:
+            - key: t-caas.telekom.com/environment
+              operator: In
+              values:
+                - development
+
+---
+# -----------------------------------------------------------------------------
+# Multiple Selector Terms WITH Overlap - Same namespaces matched by multiple terms
+# Tests that overlapping selector terms are properly deduplicated
+# This should create RoleBindings in:
+# - tenant-alpha (matched by term 1 AND term 2 - overlap)
+# - tenant-alpha-staging (matched by term 2 only)
+# - tenant-alpha-prod (matched by term 2 only)
+# - tenant-beta (matched by term 1 only)
+# The controller should deduplicate and not create duplicate bindings
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: bd-overlapping-selectors
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/purpose: testing
+spec:
+  targetName: overlapping-selector-test
+  subjects:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group
+      name: overlap-test-users@example.com
+  roleBindings:
+    # Single roleBinding entry with MULTIPLE namespaceSelector terms that OVERLAP
+    # Term 1: matches namespaces with environment=development (tenant-alpha)
+    # Term 2: matches namespaces with tenant=alpha (tenant-alpha, tenant-alpha-staging, tenant-alpha-prod)
+    # OVERLAP: tenant-alpha namespace matches BOTH terms
+    - clusterRoleRefs:
+        - view
+      namespaceSelector:
+        # Term 1: Development environments only
+        - matchLabels:
+            t-caas.telekom.com/environment: development
+        # Term 2: All tenant-alpha namespaces (overlaps with term 1 on tenant-alpha namespace)
+        - matchLabels:
+            t-caas.telekom.com/tenant: alpha
+        # Term 3: Also match tenant-beta for non-overlapping coverage
+        - matchLabels:
+            t-caas.telekom.com/tenant: beta
+
+---
+# -----------------------------------------------------------------------------
+# Multiple Selector Terms WITHOUT Overlap - Disjoint namespace sets
+# Tests that non-overlapping selector terms all contribute unique namespaces
+# This should create RoleBindings in:
+# - Platform namespaces (owner=platform): t-caas-system, t-caas-monitoring, t-caas-logging
+# - GitOps namespaces (gitops-source=true): argocd, flux-system
+# - Compliance namespaces (compliance-scope exists): compliance-pci
+# No namespace should match multiple terms (no overlap)
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: bd-disjoint-selectors
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/purpose: testing
+spec:
+  targetName: disjoint-selector-test
+  subjects:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group
+      name: disjoint-test-users@example.com
+  roleBindings:
+    # Single roleBinding entry with MULTIPLE namespaceSelector terms that do NOT overlap
+    # Each term matches completely different namespaces
+    - clusterRoleRefs:
+        - view
+      namespaceSelector:
+        # Term 1: Platform-owned namespaces
+        - matchLabels:
+            t-caas.telekom.com/owner: platform
+        # Term 2: GitOps source namespaces (disjoint from platform)
+        - matchLabels:
+            t-caas.telekom.com/gitops-source: "true"
+        # Term 3: Compliance namespaces (disjoint from both)
+        - matchExpressions:
+            - key: t-caas.telekom.com/compliance-scope
+              operator: Exists
+
+---
+# -----------------------------------------------------------------------------
+# Mixed Selector Types in Single RoleBinding - Combines namespace and selectors
+# Tests mixing specific namespace with namespaceSelector in different roleBinding entries
+# Also tests multiple roleBindings entries with different selector complexities
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: bd-mixed-binding-types
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/purpose: testing
+spec:
+  targetName: mixed-binding-test
+  subjects:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: User
+      name: mixed-test-user@example.com
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - t-caas-security-auditor
+  roleBindings:
+    # Entry 1: Specific namespace (no selector)
+    - clusterRoleRefs:
+        - view
+      namespace: default
+    # Entry 2: Single simple selector
     - clusterRoleRefs:
         - view
       namespaceSelector:
         - matchLabels:
-            t-caas.telekom.com/gitops-source: "true"
+            t-caas.telekom.com/owner: shared
+    # Entry 3: Multiple overlapping selector terms (same as bd-overlapping-selectors pattern)
+    - roleRefs:
+        - t-caas-namespace-viewer
+      namespaceSelector:
+        - matchLabels:
+            t-caas.telekom.com/environment: staging
+        - matchLabels:
+            t-caas.telekom.com/tenant: beta
+    # Entry 4: Complex selector with matchLabels + matchExpressions combined
+    - clusterRoleRefs:
+        - edit
+      namespaceSelector:
+        - matchLabels:
+            t-caas.telekom.com/owner: tenant
+          matchExpressions:
+            - key: t-caas.telekom.com/purpose
+              operator: In
+              values:
+                - application
+                - cicd

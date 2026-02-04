@@ -62,10 +62,24 @@ type BindDefinitionSpec struct {
 	// List of ClusterRoles/Roles to which subjects will be bound to. The list is a RoleRef which means we have to specify t he full rbacv1.RoleRef schema. The result of specifying the field are RoleBindings.
 	// +kubebuilder:validation:Optional
 	RoleBindings []NamespaceBinding `json:"roleBindings,omitempty"`
+
+	// AutomountServiceAccountToken controls whether to automount API credentials for ServiceAccounts
+	// created by this BindDefinition. Defaults to true for backward compatibility with Kubernetes
+	// native ServiceAccount behavior. Set to false to improve security by preventing automatic
+	// token mounting.
+	// Only applies when Subjects contain ServiceAccount entries that need to be auto-created.
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:default=true
+	AutomountServiceAccountToken *bool `json:"automountServiceAccountToken,omitempty"`
 }
 
 // BindDefinitionStatus defines the observed state of BindDefinition
 type BindDefinitionStatus struct {
+	// ObservedGeneration is the last observed generation of the resource.
+	// This is used by kstatus to determine if the resource is current.
+	// +kubebuilder:validation:Optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
 	// Not extremely important as most status updates are driven by Conditions. We read the JSONPath from this status field to signify completed reconciliation.
 	// +kubebuilder:validation:Optional
 	BindReconciled bool `json:"bindReconciled,omitempty"`
@@ -84,9 +98,9 @@ type BindDefinitionStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:path=binddefinitions,scope=Cluster,shortName=binddef
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status",description="Whether the BindDefinition is ready"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Time duration since creation of this BindDefinition"
 // +kubebuilder:printcolumn:name="Bind name",type="string",JSONPath=".spec.targetName",description="The name of the child object created by this BindDefinition"
-// +kubebuilder:printcolumn:name="Reconciled bind",type="string",JSONPath=".status.bindReconciled",description="The boolean value signifying if the target role has been reconciled or not"
 type BindDefinition struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

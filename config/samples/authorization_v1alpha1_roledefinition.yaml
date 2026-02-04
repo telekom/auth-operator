@@ -309,3 +309,150 @@ spec:
     - patch
     - delete
     - deletecollection
+---
+# -----------------------------------------------------------------------------
+# ClusterRole: Full Access Admin - No restrictions (tests empty restriction lists)
+# For super-admin scenarios where no restrictions apply
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: rd-full-access-admin
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/privilege-level: super-admin
+    t-caas.telekom.com/scope: cluster
+spec:
+  targetRole: ClusterRole
+  targetName: t-caas-full-access-admin
+  scopeNamespaced: false
+  # Empty restrictions = full access to all discovered APIs
+  restrictedApis: []
+  restrictedResources: []
+  restrictedVerbs: []
+
+---
+# -----------------------------------------------------------------------------
+# Role: Shared Services - Role deployed to shared-services namespace
+# Tests Role creation in a different namespace than tenant namespaces
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: rd-shared-services-operator
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/privilege-level: operator
+    t-caas.telekom.com/scope: namespace
+spec:
+  targetRole: Role
+  targetNamespace: shared-services
+  targetName: t-caas-shared-operator
+  scopeNamespaced: true
+  restrictedApis:
+    - name: velero.io
+      versions:
+        - groupVersion: velero.io/v1
+          version: v1
+  restrictedResources:
+    # Cannot manage secrets
+    - name: secrets
+      singularName: secret
+      namespaced: true
+      group: ""
+      kind: Secret
+      verbs:
+        - create
+        - delete
+  restrictedVerbs:
+    - deletecollection
+
+---
+# -----------------------------------------------------------------------------
+# Role: Compliance Namespace - Role for PCI-DSS compliance namespace
+# Tests Role in compliance namespace (referenced by bd-security-auditors)
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: rd-compliance-operator
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/privilege-level: operator
+    t-caas.telekom.com/scope: namespace
+spec:
+  targetRole: Role
+  targetNamespace: compliance-pci
+  targetName: t-caas-compliance-operator
+  scopeNamespaced: true
+  # Stricter restrictions for compliance namespace
+  restrictedApis:
+    - name: velero.io
+      versions:
+        - groupVersion: velero.io/v1
+          version: v1
+    - name: crd.projectcalico.org
+      versions:
+        - groupVersion: crd.projectcalico.org/v1
+          version: v1
+  restrictedResources:
+    # Cannot manage any RBAC
+    - name: roles
+      singularName: role
+      namespaced: true
+      group: rbac.authorization.k8s.io
+      kind: Role
+      verbs:
+        - "*"
+    - name: rolebindings
+      singularName: rolebinding
+      namespaced: true
+      group: rbac.authorization.k8s.io
+      kind: RoleBinding
+      verbs:
+        - "*"
+    # Cannot manage secrets at all
+    - name: secrets
+      singularName: secret
+      namespaced: true
+      group: ""
+      kind: Secret
+      verbs:
+        - "*"
+  restrictedVerbs:
+    - delete
+    - deletecollection
+
+---
+# -----------------------------------------------------------------------------
+# ClusterRole: Minimal Viewer - Only restrictedVerbs (no API/Resource restrictions)
+# Tests RoleDefinition with only verb restrictions
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: rd-minimal-viewer
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/privilege-level: viewer
+    t-caas.telekom.com/scope: cluster
+spec:
+  targetRole: ClusterRole
+  targetName: t-caas-minimal-viewer
+  scopeNamespaced: false
+  # No API restrictions
+  restrictedApis: []
+  # No resource restrictions
+  restrictedResources: []
+  # Only verb restrictions - pure read-only
+  restrictedVerbs:
+    - create
+    - update
+    - patch
+    - delete
+    - deletecollection
+    - watch

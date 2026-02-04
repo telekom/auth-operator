@@ -53,6 +53,11 @@ type WebhookAuthorizerSpec struct {
 
 // WebhookAuthorizerStatus defines the observed state of WebhookAuthorizer
 type WebhookAuthorizerStatus struct {
+	// ObservedGeneration is the last observed generation of the resource.
+	// This is used by kstatus to determine if the resource is current.
+	// +kubebuilder:validation:Optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
 	// Not extremely important as most status updates are driven by Conditions. We read the JSONPath from this status field to signify webhook authorizer as configured.
 	// +kubebuilder:validation:Optional
 	AuthorizerConfigured bool `json:"authorizerConfigured,omitempty"`
@@ -65,6 +70,8 @@ type WebhookAuthorizerStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster
+// +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status",description="Whether the WebhookAuthorizer is ready"
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Time duration since creation"
 
 // WebhookAuthorizer is the Schema for the webhookauthorizers API
 type WebhookAuthorizer struct {
