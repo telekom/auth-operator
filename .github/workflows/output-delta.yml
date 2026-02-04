@@ -106,22 +106,30 @@ jobs:
           # Deploy the operator
           make deploy IMG=auth-operator:main
           echo "Waiting for operator to be ready..."
-          kubectl wait --for=condition=available --timeout=120s deployment/auth-operator-controller-manager -n auth-operator-system 2>/dev/null || \
-            kubectl wait --for=condition=available --timeout=120s deployment -l control-plane=controller-manager -n kube-system 2>/dev/null || \
+          kubectl wait --for=condition=available --timeout=120s deployment -l control-plane=controller-manager -A 2>/dev/null || \
             echo "::warning::Could not verify controller-manager readiness, continuing anyway"
 
-          # Wait for webhook server if deployed
-          kubectl wait --for=condition=available --timeout=60s deployment -l control-plane=webhook-server -n auth-operator-system 2>/dev/null || \
+          # Wait for webhook server if deployed (required for BindDefinition validation)
+          echo "Waiting for webhook server to be ready..."
+          kubectl wait --for=condition=available --timeout=120s deployment -l control-plane=webhook-server -A 2>/dev/null || \
             echo "::notice::Webhook server not found or not ready, continuing anyway"
+          sleep 5
 
-          # Try to apply sample configs - this may fail if main branch samples are incompatible
-          if kubectl apply --server-side -k config/samples/ 2>/dev/null; then
-            echo "Waiting for reconciliation..."
-            sleep 15
-            echo "main_samples_applied=true" >> $GITHUB_OUTPUT
-          else
+          # Try to apply sample configs with retry - this may fail if main branch samples are incompatible
+          main_samples_applied=false
+          for i in 1 2 3 4 5; do
+            if kubectl apply --server-side -k config/samples/ 2>&1; then
+              echo "Waiting for reconciliation..."
+              sleep 15
+              main_samples_applied=true
+              break
+            fi
+            echo "Attempt $i failed, waiting before retry..."
+            sleep 10
+          done
+          echo "main_samples_applied=${main_samples_applied}" >> $GITHUB_OUTPUT
+          if [ "$main_samples_applied" = "false" ]; then
             echo "::warning::Main branch samples failed to apply, will use PR branch samples as baseline"
-            echo "main_samples_applied=false" >> $GITHUB_OUTPUT
           fi
 
           # Capture generated resources (may be empty if samples failed)
@@ -162,11 +170,23 @@ jobs:
           make deploy IMG=auth-operator:pr
           kubectl wait --for=condition=available --timeout=180s deployment -l control-plane=controller-manager -A 2>/dev/null || \
             echo "::warning::Controller-manager deployment not Available in time (fallback baseline will continue anyway)"
-          kubectl wait --for=condition=available --timeout=60s deployment -l control-plane=webhook-server -A 2>/dev/null || true
+
+          # Wait for webhook server to be ready (required for BindDefinition validation)
+          echo "Waiting for webhook server to be ready..."
+          kubectl wait --for=condition=available --timeout=120s deployment -l control-plane=webhook-server -A 2>/dev/null || \
+            echo "::warning::Webhook server not ready in time, continuing anyway"
           sleep 5
 
-          # Apply PR samples to generate baseline
-          kubectl apply --server-side -k config/samples/
+          # Apply PR samples to generate baseline with retry
+          echo "Applying sample configs..."
+          for i in 1 2 3 4 5; do
+            if kubectl apply --server-side -k config/samples/ 2>&1; then
+              echo "Samples applied successfully"
+              break
+            fi
+            echo "Attempt $i failed, waiting before retry..."
+            sleep 10
+          done
           echo "Waiting for reconciliation..."
           sleep 15
 
@@ -217,16 +237,28 @@ jobs:
           }
           echo "Waiting for operator to be ready..."
           kubectl wait --for=condition=available --timeout=120s deployment -l control-plane=controller-manager -A 2>/dev/null || true
+
+          # Wait for webhook server if deployed (required for BindDefinition validation)
+          echo "Waiting for webhook server to be ready..."
+          kubectl wait --for=condition=available --timeout=120s deployment -l control-plane=webhook-server -A 2>/dev/null || \
+            echo "::notice::Webhook server not found or not ready, continuing anyway"
           sleep 5
 
-          # Try to apply sample configs from tag
-          if kubectl apply --server-side -k config/samples/ 2>/dev/null; then
-            echo "Waiting for reconciliation..."
-            sleep 15
-            echo "tag_success=true" >> $GITHUB_OUTPUT
-          else
+          # Try to apply sample configs from tag with retry
+          tag_success=false
+          for i in 1 2 3 4 5; do
+            if kubectl apply --server-side -k config/samples/ 2>&1; then
+              echo "Waiting for reconciliation..."
+              sleep 15
+              tag_success=true
+              break
+            fi
+            echo "Attempt $i failed, waiting before retry..."
+            sleep 10
+          done
+          echo "tag_success=${tag_success}" >> $GITHUB_OUTPUT
+          if [ "$tag_success" = "false" ]; then
             echo "::warning::Tag branch samples failed to apply, skipping tag comparison"
-            echo "tag_success=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
@@ -266,11 +298,24 @@ jobs:
           make deploy IMG=auth-operator:pr
           echo "Waiting for operator to be ready..."
           kubectl wait --for=condition=available --timeout=120s deployment -l control-plane=controller-manager -A 2>/dev/null || \
-            echo "::warning::Could not verify operator readiness, continuing anyway"
+            echo "::warning::Could not verify controller-manager readiness, continuing anyway"
+
+          # Wait for webhook server to be ready (required for BindDefinition validation)
+          echo "Waiting for webhook server to be ready..."
+          kubectl wait --for=condition=available --timeout=120s deployment -l control-plane=webhook-server -A 2>/dev/null || \
+            echo "::warning::Could not verify webhook-server readiness, continuing anyway"
           sleep 5
 
-          # Apply sample configs and wait for reconciliation
-          kubectl apply --server-side -k config/samples/
+          # Apply sample configs with retry (webhook may need additional time to be fully ready)
+          echo "Applying sample configs..."
+          for i in 1 2 3 4 5; do
+            if kubectl apply --server-side -k config/samples/ 2>&1; then
+              echo "Samples applied successfully"
+              break
+            fi
+            echo "Attempt $i failed, waiting before retry..."
+            sleep 10
+          done
           echo "Waiting for reconciliation..."
           sleep 15
 
