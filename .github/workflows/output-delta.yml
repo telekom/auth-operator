@@ -103,9 +103,21 @@ jobs:
           # Install CRDs
           make install
 
+          # Deploy the operator
+          make deploy IMG=auth-operator:main
+          echo "Waiting for operator to be ready..."
+          kubectl wait --for=condition=available --timeout=120s deployment/auth-operator-controller-manager -n auth-operator-system 2>/dev/null || \
+            kubectl wait --for=condition=available --timeout=120s deployment -l control-plane=controller-manager -n kube-system 2>/dev/null || \
+            echo "::warning::Could not verify controller-manager readiness, continuing anyway"
+
+          # Wait for webhook server if deployed
+          kubectl wait --for=condition=available --timeout=60s deployment -l control-plane=webhook-server -n auth-operator-system 2>/dev/null || \
+            echo "::notice::Webhook server not found or not ready, continuing anyway"
+
           # Try to apply sample configs - this may fail if main branch samples are incompatible
           if kubectl apply --server-side -k config/samples/ 2>/dev/null; then
-            sleep 10
+            echo "Waiting for reconciliation..."
+            sleep 15
             echo "main_samples_applied=true" >> $GITHUB_OUTPUT
           else
             echo "::warning::Main branch samples failed to apply, will use PR branch samples as baseline"
@@ -114,16 +126,24 @@ jobs:
 
           # Capture generated resources (may be empty if samples failed)
           mkdir -p /tmp/main-output
-          kubectl get clusterroles -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/main-output/clusterroles.yaml 2>/dev/null || echo "# No ClusterRoles found" > /tmp/main-output/clusterroles.yaml
-          kubectl get roles -A -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/main-output/roles.yaml 2>/dev/null || echo "# No Roles found" > /tmp/main-output/roles.yaml
-          kubectl get clusterrolebindings -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/main-output/clusterrolebindings.yaml 2>/dev/null || echo "# No ClusterRoleBindings found" > /tmp/main-output/clusterrolebindings.yaml
-          kubectl get rolebindings -A -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/main-output/rolebindings.yaml 2>/dev/null || echo "# No RoleBindings found" > /tmp/main-output/rolebindings.yaml
+          kubectl get clusterroles -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/main-output/clusterroles.yaml 2>/dev/null || echo "# No ClusterRoles found" > /tmp/main-output/clusterroles.yaml
+          kubectl get roles -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/main-output/roles.yaml 2>/dev/null || echo "# No Roles found" > /tmp/main-output/roles.yaml
+          kubectl get clusterrolebindings -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/main-output/clusterrolebindings.yaml 2>/dev/null || echo "# No ClusterRoleBindings found" > /tmp/main-output/clusterrolebindings.yaml
+          kubectl get rolebindings -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/main-output/rolebindings.yaml 2>/dev/null || echo "# No RoleBindings found" > /tmp/main-output/rolebindings.yaml
+          kubectl get serviceaccounts -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/main-output/serviceaccounts.yaml 2>/dev/null || echo "# No ServiceAccounts found" > /tmp/main-output/serviceaccounts.yaml
 
           # Also capture by owner reference pattern (fallback)
           kubectl get clusterroles -o yaml | grep -A 1000 "t-caas" > /tmp/main-output/clusterroles-tcaas.yaml 2>/dev/null || true
 
-          # Cleanup samples but keep CRDs for PR branch
-          kubectl delete -k config/samples/ --ignore-not-found 2>/dev/null || true
+          # Cleanup samples - delete CRs and wait for finalizers to be processed before undeploying
+          kubectl delete -k config/samples/ --ignore-not-found --timeout=60s 2>/dev/null || true
+          # Wait for CRs to be fully deleted (finalizers processed by controller)
+          echo "Waiting for CRs to be fully deleted..."
+          kubectl wait --for=delete roledefinition --all --timeout=60s 2>/dev/null || true
+          kubectl wait --for=delete binddefinition --all --timeout=60s 2>/dev/null || true
+          kubectl wait --for=delete webhookauthorizer --all --timeout=60s 2>/dev/null || true
+          # Now safe to undeploy the operator
+          make undeploy 2>/dev/null || true
 
           echo "Main branch outputs captured"
 
@@ -134,16 +154,29 @@ jobs:
 
           cd pr-branch
 
+          # Ensure operator image is built and loaded into kind for fallback baseline
+          make docker-build IMG=auth-operator:pr
+          kind load docker-image auth-operator:pr --name output-delta
+
+          # Ensure operator is deployed
+          make deploy IMG=auth-operator:pr
+          kubectl wait --for=condition=available --timeout=180s deployment -l control-plane=controller-manager -A 2>/dev/null || \
+            echo "::warning::Controller-manager deployment not Available in time (fallback baseline will continue anyway)"
+          kubectl wait --for=condition=available --timeout=60s deployment -l control-plane=webhook-server -A 2>/dev/null || true
+          sleep 5
+
           # Apply PR samples to generate baseline
           kubectl apply --server-side -k config/samples/
-          sleep 10
+          echo "Waiting for reconciliation..."
+          sleep 15
 
           # Capture as "main" baseline
           mkdir -p /tmp/main-output
-          kubectl get clusterroles -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/main-output/clusterroles.yaml 2>/dev/null || echo "# No ClusterRoles found" > /tmp/main-output/clusterroles.yaml
-          kubectl get roles -A -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/main-output/roles.yaml 2>/dev/null || echo "# No Roles found" > /tmp/main-output/roles.yaml
-          kubectl get clusterrolebindings -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/main-output/clusterrolebindings.yaml 2>/dev/null || echo "# No ClusterRoleBindings found" > /tmp/main-output/clusterrolebindings.yaml
-          kubectl get rolebindings -A -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/main-output/rolebindings.yaml 2>/dev/null || echo "# No RoleBindings found" > /tmp/main-output/rolebindings.yaml
+          kubectl get clusterroles -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/main-output/clusterroles.yaml 2>/dev/null || echo "# No ClusterRoles found" > /tmp/main-output/clusterroles.yaml
+          kubectl get roles -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/main-output/roles.yaml 2>/dev/null || echo "# No Roles found" > /tmp/main-output/roles.yaml
+          kubectl get clusterrolebindings -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/main-output/clusterrolebindings.yaml 2>/dev/null || echo "# No ClusterRoleBindings found" > /tmp/main-output/clusterrolebindings.yaml
+          kubectl get rolebindings -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/main-output/rolebindings.yaml 2>/dev/null || echo "# No RoleBindings found" > /tmp/main-output/rolebindings.yaml
+          kubectl get serviceaccounts -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/main-output/serviceaccounts.yaml 2>/dev/null || echo "# No ServiceAccounts found" > /tmp/main-output/serviceaccounts.yaml
 
           # Cleanup for PR branch fresh run
           kubectl delete -k config/samples/ --ignore-not-found
@@ -176,9 +209,20 @@ jobs:
           # Install CRDs from tag (may differ from main/PR)
           make install 2>/dev/null || true
 
+          # Deploy the operator from tag
+          make deploy IMG=auth-operator:tag 2>/dev/null || {
+            echo "::warning::Failed to deploy tag version, skipping tag comparison"
+            echo "tag_success=false" >> $GITHUB_OUTPUT
+            exit 0
+          }
+          echo "Waiting for operator to be ready..."
+          kubectl wait --for=condition=available --timeout=120s deployment -l control-plane=controller-manager -A 2>/dev/null || true
+          sleep 5
+
           # Try to apply sample configs from tag
           if kubectl apply --server-side -k config/samples/ 2>/dev/null; then
-            sleep 10
+            echo "Waiting for reconciliation..."
+            sleep 15
             echo "tag_success=true" >> $GITHUB_OUTPUT
           else
             echo "::warning::Tag branch samples failed to apply, skipping tag comparison"
@@ -188,13 +232,21 @@ jobs:
 
           # Capture generated resources
           mkdir -p /tmp/tag-output
-          kubectl get clusterroles -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/tag-output/clusterroles.yaml 2>/dev/null || echo "# No ClusterRoles found" > /tmp/tag-output/clusterroles.yaml
-          kubectl get roles -A -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/tag-output/roles.yaml 2>/dev/null || echo "# No Roles found" > /tmp/tag-output/roles.yaml
-          kubectl get clusterrolebindings -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/tag-output/clusterrolebindings.yaml 2>/dev/null || echo "# No ClusterRoleBindings found" > /tmp/tag-output/clusterrolebindings.yaml
-          kubectl get rolebindings -A -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/tag-output/rolebindings.yaml 2>/dev/null || echo "# No RoleBindings found" > /tmp/tag-output/rolebindings.yaml
+          kubectl get clusterroles -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/tag-output/clusterroles.yaml 2>/dev/null || echo "# No ClusterRoles found" > /tmp/tag-output/clusterroles.yaml
+          kubectl get roles -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/tag-output/roles.yaml 2>/dev/null || echo "# No Roles found" > /tmp/tag-output/roles.yaml
+          kubectl get clusterrolebindings -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/tag-output/clusterrolebindings.yaml 2>/dev/null || echo "# No ClusterRoleBindings found" > /tmp/tag-output/clusterrolebindings.yaml
+          kubectl get rolebindings -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/tag-output/rolebindings.yaml 2>/dev/null || echo "# No RoleBindings found" > /tmp/tag-output/rolebindings.yaml
+          kubectl get serviceaccounts -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/tag-output/serviceaccounts.yaml 2>/dev/null || echo "# No ServiceAccounts found" > /tmp/tag-output/serviceaccounts.yaml
 
-          # Cleanup samples for PR branch
-          kubectl delete -k config/samples/ --ignore-not-found 2>/dev/null || true
+          # Cleanup samples - delete CRs and wait for finalizers to be processed before undeploying
+          kubectl delete -k config/samples/ --ignore-not-found --timeout=60s 2>/dev/null || true
+          # Wait for CRs to be fully deleted (finalizers processed by controller)
+          echo "Waiting for CRs to be fully deleted..."
+          kubectl wait --for=delete roledefinition --all --timeout=60s 2>/dev/null || true
+          kubectl wait --for=delete binddefinition --all --timeout=60s 2>/dev/null || true
+          kubectl wait --for=delete webhookauthorizer --all --timeout=60s 2>/dev/null || true
+          # Now safe to undeploy the operator
+          make undeploy 2>/dev/null || true
 
           echo "Tag branch (${{ steps.latest-tag.outputs.tag }}) outputs captured"
 
@@ -210,21 +262,75 @@ jobs:
           # Update CRDs if changed
           make install
 
+          # Deploy the operator from PR branch
+          make deploy IMG=auth-operator:pr
+          echo "Waiting for operator to be ready..."
+          kubectl wait --for=condition=available --timeout=120s deployment -l control-plane=controller-manager -A 2>/dev/null || \
+            echo "::warning::Could not verify operator readiness, continuing anyway"
+          sleep 5
+
           # Apply sample configs and wait for reconciliation
           kubectl apply --server-side -k config/samples/
-          sleep 10
+          echo "Waiting for reconciliation..."
+          sleep 15
 
           # Capture generated resources
           mkdir -p /tmp/pr-output
-          kubectl get clusterroles -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/pr-output/clusterroles.yaml 2>/dev/null || echo "# No ClusterRoles found" > /tmp/pr-output/clusterroles.yaml
-          kubectl get roles -A -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/pr-output/roles.yaml 2>/dev/null || echo "# No Roles found" > /tmp/pr-output/roles.yaml
-          kubectl get clusterrolebindings -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/pr-output/clusterrolebindings.yaml 2>/dev/null || echo "# No ClusterRoleBindings found" > /tmp/pr-output/clusterrolebindings.yaml
-          kubectl get rolebindings -A -l app.kubernetes.io/managed-by=auth-operator -o yaml > /tmp/pr-output/rolebindings.yaml 2>/dev/null || echo "# No RoleBindings found" > /tmp/pr-output/rolebindings.yaml
+          kubectl get clusterroles -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/pr-output/clusterroles.yaml 2>/dev/null || echo "# No ClusterRoles found" > /tmp/pr-output/clusterroles.yaml
+          kubectl get roles -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/pr-output/roles.yaml 2>/dev/null || echo "# No Roles found" > /tmp/pr-output/roles.yaml
+          kubectl get clusterrolebindings -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/pr-output/clusterrolebindings.yaml 2>/dev/null || echo "# No ClusterRoleBindings found" > /tmp/pr-output/clusterrolebindings.yaml
+          kubectl get rolebindings -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/pr-output/rolebindings.yaml 2>/dev/null || echo "# No RoleBindings found" > /tmp/pr-output/rolebindings.yaml
+          kubectl get serviceaccounts -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/pr-output/serviceaccounts.yaml 2>/dev/null || echo "# No ServiceAccounts found" > /tmp/pr-output/serviceaccounts.yaml
 
           # Also capture by owner reference pattern (fallback)
           kubectl get clusterroles -o yaml | grep -A 1000 "t-caas" > /tmp/pr-output/clusterroles-tcaas.yaml 2>/dev/null || true
 
           echo "PR branch outputs captured"
+
+      - name: Collect controller logs
+        if: always()
+        run: |
+          mkdir -p /tmp/controller-logs
+
+          # Get auth-operator controller manager pod logs from all namespaces
+          echo "Collecting controller logs..."
+
+          # Try to find the controller manager pod in common namespaces
+          for ns in auth-operator-system kube-system default; do
+            kubectl logs -n $ns -l control-plane=controller-manager --tail=5000 > /tmp/controller-logs/${ns}-controller.log 2>/dev/null || true
+            kubectl logs -n $ns -l app.kubernetes.io/name=auth-operator --tail=5000 >> /tmp/controller-logs/${ns}-controller.log 2>/dev/null || true
+          done
+
+          # Get all events
+          kubectl get events -A --sort-by='.lastTimestamp' > /tmp/controller-logs/all-events.txt 2>/dev/null || true
+
+          # Get pod statuses
+          kubectl get pods -A > /tmp/controller-logs/all-pods.txt 2>/dev/null || true
+
+          # Get CRD statuses
+          kubectl get roledefinitions -A -o yaml > /tmp/controller-logs/roledefinitions.yaml 2>/dev/null || true
+          kubectl get binddefinitions -A -o yaml > /tmp/controller-logs/binddefinitions.yaml 2>/dev/null || true
+
+          echo "Controller logs collected"
+
+      - name: Upload controller logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: controller-logs
+          path: /tmp/controller-logs/
+          retention-days: 7
+
+      - name: Upload output artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: output-delta-artifacts
+          path: |
+            /tmp/main-output/
+            /tmp/pr-output/
+            /tmp/tag-output/
+          retention-days: 7
 
       - name: Generate diff
         id: diff
@@ -244,7 +350,7 @@ jobs:
           # Generate diffs for each resource type (main vs PR)
           echo "## Changes from main branch" >> /tmp/diff-output/full-diff.txt
           echo "" >> /tmp/diff-output/full-diff.txt
-          for resource in clusterroles roles clusterrolebindings rolebindings; do
+          for resource in clusterroles roles clusterrolebindings rolebindings serviceaccounts; do
             echo "=== $resource ===" >> /tmp/diff-output/full-diff.txt
             diff -u /tmp/main-output/$resource.yaml /tmp/pr-output/$resource.yaml >> /tmp/diff-output/full-diff.txt 2>&1 || true
             echo "" >> /tmp/diff-output/full-diff.txt
@@ -255,7 +361,7 @@ jobs:
             echo "" >> /tmp/diff-output/full-diff.txt
             echo "## Changes from latest release (${{ steps.latest-tag.outputs.tag }})" >> /tmp/diff-output/full-diff.txt
             echo "" >> /tmp/diff-output/full-diff.txt
-            for resource in clusterroles roles clusterrolebindings rolebindings; do
+            for resource in clusterroles roles clusterrolebindings rolebindings serviceaccounts; do
               echo "=== $resource ===" >> /tmp/diff-output/full-diff.txt
               diff -u /tmp/tag-output/$resource.yaml /tmp/pr-output/$resource.yaml >> /tmp/diff-output/full-diff.txt 2>&1 || true
               echo "" >> /tmp/diff-output/full-diff.txt
@@ -266,7 +372,12 @@ jobs:
           fi
 
           # Check if there are any differences
-          if diff -q /tmp/main-output /tmp/pr-output > /dev/null 2>&1; then
+          # When MAIN_FALLBACK=true, main and PR outputs are from the same branch,
+          # so force has_diff=true to avoid misleading "no changes" comment
+          if [ "$MAIN_FALLBACK" = "true" ]; then
+            echo "has_diff=true" >> $GITHUB_OUTPUT
+            echo "Forcing has_diff=true due to main fallback - comparison not meaningful"
+          elif diff -q /tmp/main-output /tmp/pr-output > /dev/null 2>&1; then
             echo "has_diff=false" >> $GITHUB_OUTPUT
             echo "No differences found between main and PR branch outputs"
           else
@@ -281,6 +392,14 @@ jobs:
           echo "diff<<EOF" >> $GITHUB_OUTPUT
           echo "$DIFF_CONTENT" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Upload diff artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: diff-output
+          path: /tmp/diff-output/
+          retention-days: 7
 
       - name: Comment PR with delta
         if: steps.diff.outputs.has_diff == 'true'
@@ -321,7 +440,7 @@ jobs:
 
             </details>
 
-            > **Note:** This diff shows changes in ClusterRoles, Roles, ClusterRoleBindings, and RoleBindings generated from \`config/samples/\`.
+            > **Note:** This diff shows changes in ClusterRoles, Roles, ClusterRoleBindings, RoleBindings, and ServiceAccounts generated from \`config/samples/\`.
             `;
 
             // Find existing comment
@@ -353,7 +472,7 @@ jobs:
             }
 
       - name: Comment PR - no changes
-        if: steps.diff.outputs.has_diff == 'false'
+        if: steps.diff.outputs.has_diff == 'false' && steps.diff.outputs.main_fallback != 'true'
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           script: |
