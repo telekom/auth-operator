@@ -12,61 +12,49 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
+	metav1ac "k8s.io/client-go/applyconfigurations/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	authnv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	"github.com/telekom/auth-operator/api/authorization/v1alpha1/applyconfiguration/ssa"
 	"github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/helpers"
+	pkgssa "github.com/telekom/auth-operator/pkg/ssa"
 )
 
 // ErrInvalidTargetRole is returned when the target role type is not valid.
 var ErrInvalidTargetRole = fmt.Errorf("invalid target role type: must be ClusterRole or Role")
 
+// ownerRefForRoleDefinition creates an OwnerReference ApplyConfiguration for a RoleDefinition.
+// This centralizes owner reference construction for consistency across create/update paths.
+func ownerRefForRoleDefinition(roleDefinition *authnv1alpha1.RoleDefinition) *metav1ac.OwnerReferenceApplyConfiguration {
+	return pkgssa.OwnerReference(
+		authnv1alpha1.GroupVersion.String(),
+		"RoleDefinition",
+		roleDefinition.Name,
+		roleDefinition.UID,
+		true, // controller
+		true, // blockOwnerDeletion
+	)
+}
+
 // markStalled marks the RoleDefinition as stalled with the given error (kstatus pattern).
-// It refetches the resource to avoid optimistic locking conflicts from stale resourceVersion.
+// Uses SSA to apply the stalled condition atomically.
 func (r *RoleDefinitionReconciler) markStalled(
 	ctx context.Context,
 	roleDefinition *authnv1alpha1.RoleDefinition,
 	err error,
 ) {
 	log := log.FromContext(ctx)
-	// Refetch to get latest resourceVersion
-	fresh := &authnv1alpha1.RoleDefinition{}
-	if getErr := r.client.Get(ctx, types.NamespacedName{Name: roleDefinition.Name}, fresh); getErr != nil {
-		log.Error(getErr, "failed to refetch RoleDefinition for Stalled update", "roleDefinitionName", roleDefinition.Name)
-		return
-	}
-	conditions.MarkStalled(fresh, fresh.Generation,
+	// Copy status and apply stalled condition
+	conditions.MarkStalled(roleDefinition, roleDefinition.Generation,
 		authnv1alpha1.StalledReasonError, authnv1alpha1.StalledMessageError, err.Error())
-	fresh.Status.ObservedGeneration = fresh.Generation
-	if updateErr := r.client.Status().Update(ctx, fresh); updateErr != nil {
-		log.Error(updateErr, "failed to update Stalled status", "roleDefinitionName", roleDefinition.Name)
-	}
-}
-
-// markReady marks the RoleDefinition as ready (kstatus pattern).
-// It refetches the resource to avoid optimistic locking conflicts from stale resourceVersion.
-func (r *RoleDefinitionReconciler) markReady(
-	ctx context.Context,
-	roleDefinition *authnv1alpha1.RoleDefinition,
-) {
-	log := log.FromContext(ctx)
-	// Refetch to get latest resourceVersion
-	fresh := &authnv1alpha1.RoleDefinition{}
-	if err := r.client.Get(ctx, types.NamespacedName{Name: roleDefinition.Name}, fresh); err != nil {
-		log.Error(err, "failed to refetch RoleDefinition for Ready update", "roleDefinitionName", roleDefinition.Name)
-		return
-	}
-	conditions.MarkReady(fresh, fresh.Generation,
-		authnv1alpha1.ReadyReasonReconciled, authnv1alpha1.ReadyMessageReconciled)
-	fresh.Status.ObservedGeneration = fresh.Generation
-	fresh.Status.RoleReconciled = true
-	if err := r.client.Status().Update(ctx, fresh); err != nil {
-		log.Error(err, "failed to update Ready status", "roleDefinitionName", roleDefinition.Name)
+	roleDefinition.Status.ObservedGeneration = roleDefinition.Generation
+	if updateErr := ssa.ApplyRoleDefinitionStatus(ctx, r.client, roleDefinition); updateErr != nil {
+		log.Error(updateErr, "failed to apply Stalled status via SSA", "roleDefinitionName", roleDefinition.Name)
 	}
 }
 
@@ -113,13 +101,14 @@ func (r *RoleDefinitionReconciler) ensureFinalizer(
 		log.Error(err, "Failed to add finalizer", "roleDefinitionName", roleDefinition.Name)
 		return err
 	}
-	r.recorder.Eventf(roleDefinition, corev1.EventTypeNormal, "Finalizer",
+	r.recorder.Eventf(roleDefinition, corev1.EventTypeNormal, authnv1alpha1.EventReasonFinalizer,
 		"Adding finalizer to RoleDefinition %s", roleDefinition.Name)
 	return nil
 }
 
 // handleDeletion handles the deletion of the RoleDefinition and its associated role.
 // Returns the reconcile result and any error.
+// Status updates use Server-Side Apply (SSA) to avoid race conditions.
 func (r *RoleDefinitionReconciler) handleDeletion(
 	ctx context.Context,
 	roleDefinition *authnv1alpha1.RoleDefinition,
@@ -133,12 +122,12 @@ func (r *RoleDefinitionReconciler) handleDeletion(
 
 	conditions.MarkTrue(roleDefinition, authnv1alpha1.DeleteCondition, roleDefinition.Generation,
 		authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
-	if err := r.client.Status().Update(ctx, roleDefinition); err != nil {
-		log.Error(err, "Failed to update DeleteCondition status", "roleDefinitionName", roleDefinition.Name)
+	if err := ssa.ApplyRoleDefinitionStatus(ctx, r.client, roleDefinition); err != nil {
+		log.Error(err, "Failed to apply DeleteCondition status", "roleDefinitionName", roleDefinition.Name)
 		return ctrl.Result{}, err
 	}
 
-	r.recorder.Eventf(roleDefinition, corev1.EventTypeWarning, "Deletion",
+	r.recorder.Eventf(roleDefinition, corev1.EventTypeWarning, authnv1alpha1.EventReasonDeletion,
 		"Deleting target resource %s %s", roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetName)
 
 	role.SetName(roleDefinition.Spec.TargetName)
@@ -162,8 +151,8 @@ func (r *RoleDefinitionReconciler) handleDeletion(
 			"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
 		conditions.MarkFalse(roleDefinition, authnv1alpha1.DeleteCondition, roleDefinition.Generation,
 			authnv1alpha1.DeleteReason, "error deleting resource: %s", err.Error())
-		if updateErr := r.client.Status().Update(ctx, roleDefinition); updateErr != nil {
-			log.Error(updateErr, "Failed to update status after deletion error",
+		if updateErr := ssa.ApplyRoleDefinitionStatus(ctx, r.client, roleDefinition); updateErr != nil {
+			log.Error(updateErr, "Failed to apply status after deletion error",
 				"roleDefinitionName", roleDefinition.Name)
 			return ctrl.Result{}, fmt.Errorf("deletion failed with error %s and a second error was found during update of role definition status: %w",
 				err.Error(), updateErr)
@@ -193,19 +182,44 @@ func (r *RoleDefinitionReconciler) buildFinalRules(
 		})
 	}
 
-	// Sort resources within each rule
+	// Sort resources within each rule for deterministic output
 	for i := range finalRules {
+		sort.Strings(finalRules[i].APIGroups)
 		sort.Strings(finalRules[i].Resources)
+		sort.Strings(finalRules[i].ResourceNames)
 		sort.Strings(finalRules[i].Verbs)
+		sort.Strings(finalRules[i].NonResourceURLs)
 	}
 
-	// Sort rules for consistent ordering
+	// Sort rules for consistent ordering:
+	// 1. NonResourceURLs rules come last (they have no APIGroups/Resources)
+	// 2. Then sort by APIGroups, then Resources, then Verbs
 	sort.Slice(finalRules, func(i, j int) bool {
 		iRule := finalRules[i]
 		jRule := finalRules[j]
-		if strings.Join(iRule.APIGroups, ",") != strings.Join(jRule.APIGroups, ",") {
-			return strings.Join(iRule.APIGroups, ",") < strings.Join(jRule.APIGroups, ",")
+
+		// NonResourceURLs rules should come last
+		iHasNonResource := len(iRule.NonResourceURLs) > 0
+		jHasNonResource := len(jRule.NonResourceURLs) > 0
+		if iHasNonResource != jHasNonResource {
+			return !iHasNonResource // Regular rules before NonResourceURL rules
 		}
+
+		// Sort by APIGroups
+		iAPIGroups := strings.Join(iRule.APIGroups, ",")
+		jAPIGroups := strings.Join(jRule.APIGroups, ",")
+		if iAPIGroups != jAPIGroups {
+			return iAPIGroups < jAPIGroups
+		}
+
+		// Sort by Resources
+		iResources := strings.Join(iRule.Resources, ",")
+		jResources := strings.Join(jRule.Resources, ",")
+		if iResources != jResources {
+			return iResources < jResources
+		}
+
+		// Sort by Verbs
 		return strings.Join(iRule.Verbs, ",") < strings.Join(jRule.Verbs, ",")
 	})
 
@@ -248,7 +262,8 @@ func (r *RoleDefinitionReconciler) buildRoleWithRules(
 	return role, existingRole
 }
 
-// createRole creates a new role and updates conditions.
+// createRole creates a new role and applies status using Server-Side Apply (SSA).
+// This function applies status via SSA since it returns early from the Reconcile function.
 func (r *RoleDefinitionReconciler) createRole(
 	ctx context.Context,
 	roleDefinition *authnv1alpha1.RoleDefinition,
@@ -256,30 +271,12 @@ func (r *RoleDefinitionReconciler) createRole(
 ) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 
-	log.V(2).Info("Role does not exist - creating new role",
+	log.V(2).Info("Role does not exist - creating new role via SSA",
 		"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
 
-	conditions.MarkUnknown(roleDefinition, authnv1alpha1.CreateCondition, roleDefinition.Generation,
-		authnv1alpha1.CreateReason, authnv1alpha1.CreateMessage)
-	if err := r.client.Status().Update(ctx, roleDefinition); err != nil {
-		log.Error(err, "Failed to update CreateCondition status", "roleDefinitionName", roleDefinition.Name)
-		return ctrl.Result{}, err
-	}
-
-	if err := controllerutil.SetControllerReference(roleDefinition, role, r.scheme); err != nil {
-		log.Error(err, "Failed to set controller reference",
-			"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
-		conditions.MarkFalse(roleDefinition, authnv1alpha1.OwnerRefCondition, roleDefinition.Generation,
-			authnv1alpha1.OwnerRefReason, authnv1alpha1.OwnerRefMessage)
-		r.markStalled(ctx, roleDefinition, err)
-		return ctrl.Result{}, err
-	}
-
-	r.recorder.Eventf(roleDefinition, corev1.EventTypeNormal, "OwnerRef",
-		"Setting Owner reference for %s %s", roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetName)
-
-	if err := r.client.Create(ctx, role); err != nil {
-		log.Error(err, "Failed to create role",
+	// Apply the role using SSA
+	if err := r.applyRoleSSA(ctx, roleDefinition, role); err != nil {
+		log.Error(err, "Failed to apply role via SSA",
 			"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
 		r.markStalled(ctx, roleDefinition, err)
 		return ctrl.Result{}, err
@@ -288,26 +285,53 @@ func (r *RoleDefinitionReconciler) createRole(
 	log.V(1).Info("Role created successfully",
 		"roleDefinitionName", roleDefinition.Name, "roleName", role.GetName())
 
+	// Set conditions and status
 	conditions.MarkTrue(roleDefinition, authnv1alpha1.OwnerRefCondition, roleDefinition.Generation,
 		authnv1alpha1.OwnerRefReason, authnv1alpha1.OwnerRefMessage)
 	conditions.MarkTrue(roleDefinition, authnv1alpha1.CreateCondition, roleDefinition.Generation,
 		authnv1alpha1.CreateReason, authnv1alpha1.CreateMessage)
-	if err := r.client.Status().Update(ctx, roleDefinition); err != nil {
-		log.Error(err, "Failed to update status after role creation",
-			"roleDefinitionName", roleDefinition.Name)
+	roleDefinition.Status.RoleReconciled = true
+
+	r.recorder.Eventf(roleDefinition, corev1.EventTypeNormal, authnv1alpha1.EventReasonCreation,
+		"Created target resource %s %s", roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetName)
+
+	// Mark Ready and apply status via SSA (this function returns early from Reconcile)
+	conditions.MarkReady(roleDefinition, roleDefinition.Generation,
+		authnv1alpha1.ReadyReasonReconciled, authnv1alpha1.ReadyMessageReconciled)
+	if err := r.applyStatus(ctx, roleDefinition); err != nil {
+		log.Error(err, "failed to apply status after role creation", "roleDefinitionName", roleDefinition.Name)
 		return ctrl.Result{}, err
 	}
 
-	r.recorder.Eventf(roleDefinition, corev1.EventTypeNormal, "Creation",
-		"Created target resource %s %s", roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetName)
-
-	// Mark Ready (kstatus)
-	r.markReady(ctx, roleDefinition)
-
+	log.V(1).Info("RoleDefinition reconciliation completed successfully", "roleDefinitionName", roleDefinition.Name)
 	return ctrl.Result{}, nil
 }
 
-// updateRole updates an existing role if rules differ.
+// applyRoleSSA applies a role using Server-Side Apply.
+func (r *RoleDefinitionReconciler) applyRoleSSA(
+	ctx context.Context,
+	roleDefinition *authnv1alpha1.RoleDefinition,
+	role client.Object,
+) error {
+	ownerRef := ownerRefForRoleDefinition(roleDefinition)
+
+	switch t := role.(type) {
+	case *rbacv1.ClusterRole:
+		ac := pkgssa.ClusterRoleWithLabelsAndRules(t.Name, t.Labels, t.Rules).
+			WithOwnerReferences(ownerRef)
+		return pkgssa.ApplyClusterRole(ctx, r.client, ac)
+	case *rbacv1.Role:
+		ac := pkgssa.RoleWithLabelsAndRules(t.Name, t.Namespace, t.Labels, t.Rules).
+			WithOwnerReferences(ownerRef)
+		return pkgssa.ApplyRole(ctx, r.client, ac)
+	default:
+		return fmt.Errorf("unsupported role type: %T", role)
+	}
+}
+
+// updateRole updates an existing role if rules differ using Server-Side Apply (SSA).
+// This function mutates conditions on the roleDefinition object; the caller applies
+// the final status via SSA after this function returns.
 func (r *RoleDefinitionReconciler) updateRole(
 	ctx context.Context,
 	roleDefinition *authnv1alpha1.RoleDefinition,
@@ -320,10 +344,20 @@ func (r *RoleDefinitionReconciler) updateRole(
 	if !metav1.IsControlledBy(existingRole, roleDefinition) {
 		log.V(1).Info("Skipping role update - not controlled by this RoleDefinition",
 			"roleDefinitionName", roleDefinition.Name, "roleName", existingRole.GetName())
-		r.recorder.Eventf(roleDefinition, corev1.EventTypeWarning, "Ownership",
+		r.recorder.Eventf(roleDefinition, corev1.EventTypeWarning, authnv1alpha1.EventReasonOwnership,
 			"Skipping update for %s %s: not controlled by this RoleDefinition", roleDefinition.Spec.TargetRole, existingRole.GetName())
+		// Mark OwnerRef condition as false to indicate the role is not managed
+		conditions.MarkFalse(roleDefinition, authnv1alpha1.OwnerRefCondition, roleDefinition.Generation,
+			authnv1alpha1.OwnerRefReason, "Role %s exists but is not controlled by this RoleDefinition", existingRole.GetName())
+		// Still mark Ready since the controller cannot take any action
+		conditions.MarkReady(roleDefinition, roleDefinition.Generation,
+			authnv1alpha1.ReadyReasonReconciled, authnv1alpha1.ReadyMessageReconciled)
 		return nil
 	}
+
+	// Role is controlled by this RoleDefinition - set OwnerRef condition
+	conditions.MarkTrue(roleDefinition, authnv1alpha1.OwnerRefCondition, roleDefinition.Generation,
+		authnv1alpha1.OwnerRefReason, authnv1alpha1.OwnerRefMessage)
 
 	// Get existing rules
 	var existingRules []rbacv1.PolicyRule
@@ -337,46 +371,73 @@ func (r *RoleDefinitionReconciler) updateRole(
 	if helpers.PolicyRulesEqual(existingRules, finalRules) {
 		log.V(3).Info("Role rules already up-to-date - no update needed",
 			"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
-		// Mark Ready even when no update was needed (kstatus)
-		r.markReady(ctx, roleDefinition)
+		// Ensure CreateCondition is set (role exists and is managed by this controller)
+		// This handles controller restarts where the role already exists
+		conditions.MarkTrue(roleDefinition, authnv1alpha1.CreateCondition, roleDefinition.Generation,
+			authnv1alpha1.CreateReason, authnv1alpha1.CreateMessage)
+		// Mark Ready condition even when no update was needed (kstatus) - caller will apply
+		conditions.MarkReady(roleDefinition, roleDefinition.Generation,
+			authnv1alpha1.ReadyReasonReconciled, authnv1alpha1.ReadyMessageReconciled)
 		return nil
 	}
 
-	log.V(2).Info("Role rules differ - updating role",
+	log.V(2).Info("Role rules differ - updating role via SSA",
 		"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName,
 		"existingRuleCount", len(existingRules), "newRuleCount", len(finalRules))
 
-	// Update rules on existing role
-	switch t := existingRole.(type) {
-	case *rbacv1.ClusterRole:
-		t.Rules = finalRules
-	case *rbacv1.Role:
-		t.Rules = finalRules
-	}
+	ownerRef := ownerRefForRoleDefinition(roleDefinition)
 
-	if err := r.client.Update(ctx, existingRole); err != nil {
-		log.Error(err, "Failed to update role",
-			"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
-		return err
+	// Apply the role using SSA
+	switch existingRole.(type) {
+	case *rbacv1.ClusterRole:
+		ac := pkgssa.ClusterRoleWithLabelsAndRules(
+			roleDefinition.Spec.TargetName,
+			buildResourceLabels(roleDefinition.Labels),
+			finalRules,
+		).WithOwnerReferences(ownerRef)
+		if err := pkgssa.ApplyClusterRole(ctx, r.client, ac); err != nil {
+			log.Error(err, "Failed to apply ClusterRole via SSA",
+				"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
+			return err
+		}
+	case *rbacv1.Role:
+		ac := pkgssa.RoleWithLabelsAndRules(
+			roleDefinition.Spec.TargetName,
+			roleDefinition.Spec.TargetNamespace,
+			buildResourceLabels(roleDefinition.Labels),
+			finalRules,
+		).WithOwnerReferences(ownerRef)
+		if err := pkgssa.ApplyRole(ctx, r.client, ac); err != nil {
+			log.Error(err, "Failed to apply Role via SSA",
+				"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
+			return err
+		}
+	default:
+		log.Error(ErrInvalidTargetRole, "Existing role has invalid type",
+			"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName,
+			"actualType", fmt.Sprintf("%T", existingRole))
+		return ErrInvalidTargetRole
 	}
 
 	log.V(1).Info("Role updated successfully",
 		"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
 
+	// Batch condition updates - caller will apply status via SSA
+	// Ensure CreateCondition is set (role exists and is managed by this controller)
+	// This handles controller restarts where the role already exists
+	conditions.MarkTrue(roleDefinition, authnv1alpha1.CreateCondition, roleDefinition.Generation,
+		authnv1alpha1.CreateReason, authnv1alpha1.CreateMessage)
+	// Set UpdateCondition to indicate the role was updated
 	conditions.MarkTrue(roleDefinition, authnv1alpha1.UpdateCondition, roleDefinition.Generation,
 		authnv1alpha1.UpdateReason, authnv1alpha1.UpdateMessage)
-	conditions.Delete(roleDefinition, authnv1alpha1.CreateCondition)
-	if err := r.client.Status().Update(ctx, roleDefinition); err != nil {
-		log.Error(err, "Failed to update status after role update",
-			"roleDefinitionName", roleDefinition.Name)
-		return err
-	}
+	roleDefinition.Status.RoleReconciled = true
 
-	r.recorder.Eventf(roleDefinition, corev1.EventTypeNormal, "Update",
+	r.recorder.Eventf(roleDefinition, corev1.EventTypeNormal, authnv1alpha1.EventReasonUpdate,
 		"Updated target resource %s %s", roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetName)
 
-	// Mark Ready (kstatus)
-	r.markReady(ctx, roleDefinition)
+	// Mark Ready condition (kstatus) - caller will apply status
+	conditions.MarkReady(roleDefinition, roleDefinition.Generation,
+		authnv1alpha1.ReadyReasonReconciled, authnv1alpha1.ReadyMessageReconciled)
 
 	return nil
 }

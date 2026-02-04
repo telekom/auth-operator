@@ -57,8 +57,9 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and Cust
 	$(CONTROLLER_GEN) webhook paths=./internal/... rbac:roleName=manager-role
 
 .PHONY: generate
-generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
+generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, DeepCopyObject, and ApplyConfiguration implementations.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
+	$(CONTROLLER_GEN) applyconfiguration:headerFile="hack/boilerplate.go.txt" paths="./api/..." output:applyconfiguration:dir=./api/authorization/v1alpha1/applyconfiguration
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.

@@ -23,9 +23,9 @@ var _ = Describe("RoleDefinition Controller", func() {
 
 		ctx := context.Background()
 
+		// RoleDefinition is cluster-scoped, so Namespace should be empty
 		typeNamespacedName := types.NamespacedName{
-			Name:      resourceName,
-			Namespace: "default", // TODO(user):Modify as needed
+			Name: resourceName,
 		}
 		roledefinition := &authorizationv1alpha1.RoleDefinition{}
 
@@ -35,8 +35,7 @@ var _ = Describe("RoleDefinition Controller", func() {
 			if err != nil && errors.IsNotFound(err) {
 				resource := &authorizationv1alpha1.RoleDefinition{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: "default",
+						Name: resourceName,
 					},
 					// TODO(user): Specify other spec details if needed.
 					Spec: authorizationv1alpha1.RoleDefinitionSpec{
@@ -71,8 +70,22 @@ var _ = Describe("RoleDefinition Controller", func() {
 				NamespacedName: typeNamespacedName,
 			})
 			Expect(err).NotTo(HaveOccurred())
-			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
-			// Example: If you expect a certain status condition after reconciliation, verify it here.
+
+			// Verify finalizer was added and conditions are set via SSA
+			By("Verifying finalizer and initial conditions are set")
+			var updatedRD authorizationv1alpha1.RoleDefinition
+			Expect(k8sClient.Get(ctx, typeNamespacedName, &updatedRD)).To(Succeed())
+
+			// Verify Finalizer condition is set (happens before resource tracker check)
+			var finalizerCondition *metav1.Condition
+			for i := range updatedRD.Status.Conditions {
+				if updatedRD.Status.Conditions[i].Type == string(authorizationv1alpha1.FinalizerCondition) {
+					finalizerCondition = &updatedRD.Status.Conditions[i]
+					break
+				}
+			}
+			Expect(finalizerCondition).NotTo(BeNil(), "Finalizer condition should be set via SSA")
+			Expect(finalizerCondition.Status).To(Equal(metav1.ConditionTrue), "Finalizer condition should be True")
 		})
 	})
 })

@@ -437,7 +437,7 @@ func (r *RoleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request)
 			log.Error(err, "failed to remove finalizer from RoleBinding", "roleBindingName", roleBinding.Name, "roleBinding", roleBinding.Name, "namespace", namespace.Name)
 			return ctrl.Result{}, err
 		}
-		r.recorder.Eventf(bindDefinition, corev1.EventTypeNormal, "FinalizerRemoved", "Removed finalizer from RoleBinding %s in terminating namespace %s", roleBinding.Name, namespace.Name)
+		r.recorder.Eventf(bindDefinition, corev1.EventTypeNormal, authnv1alpha1.EventReasonFinalizerRemoved, "Removed finalizer from RoleBinding %s in terminating namespace %s", roleBinding.Name, namespace.Name)
 		log.V(1).Info("successfully removed finalizer from RoleBinding in terminating namespace")
 	} else {
 		log.V(3).Info("RoleBinding does not have finalizer", "bindDefinitionName")

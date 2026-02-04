@@ -95,8 +95,8 @@ func TestSubjectsEqual(t *testing.T) {
 	}
 }
 
-// TestLogStatusUpdateError tests that logStatusUpdateError handles nil and non-nil errors
-func TestLogStatusUpdateError(t *testing.T) {
+// TestLogStatusApplyError tests that logStatusApplyError handles nil and non-nil errors
+func TestLogStatusApplyError(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
@@ -111,7 +111,7 @@ func TestLogStatusUpdateError(t *testing.T) {
 		},
 		{
 			name:     "non-nil error logs without panicking",
-			err:      errors.New("status update failed"),
+			err:      errors.New("status apply failed"),
 			resource: "test-resource",
 		},
 	}
@@ -119,7 +119,7 @@ func TestLogStatusUpdateError(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Should not panic regardless of error value
-			logStatusUpdateError(ctx, tt.err, tt.resource)
+			logStatusApplyError(ctx, tt.err, tt.resource)
 		})
 	}
 }

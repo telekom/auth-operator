@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	authnv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	"github.com/telekom/auth-operator/api/authorization/v1alpha1/applyconfiguration/ssa"
 	conditions "github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/discovery"
 )
@@ -121,6 +122,7 @@ func (r *RoleDefinitionReconciler) queueAll() handler.MapFunc {
 
 // Reconcile handles the reconciliation loop for RoleDefinition resources.
 // It manages the lifecycle of cluster roles and roles based on the RoleDefinition spec.
+// Status updates are batched and applied using Server-Side Apply (SSA) to avoid race conditions.
 func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 	log.V(1).Info("starting RoleDefinition reconciliation", "roleDefinitionName", req.Name, "namespace", req.Namespace)
@@ -140,14 +142,10 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	log.V(2).Info("RoleDefinition retrieved", "roleDefinitionName", roleDefinition.Name,
 		"targetRole", roleDefinition.Spec.TargetRole, "targetName", roleDefinition.Spec.TargetName)
 
-	// Mark as Reconciling at the start (kstatus) - best effort, don't fail reconciliation
+	// Mark as Reconciling (kstatus) - this will be batched with final status update via SSA
 	conditions.MarkReconciling(roleDefinition, roleDefinition.Generation,
 		authnv1alpha1.ReconcilingReasonProgressing, authnv1alpha1.ReconcilingMessageProgressing)
 	roleDefinition.Status.ObservedGeneration = roleDefinition.Generation
-	if err := r.client.Status().Update(ctx, roleDefinition); err != nil {
-		log.V(1).Info("failed to update Reconciling status (will retry)", "roleDefinitionName", roleDefinition.Name, "error", err)
-		// Don't return error - continue with reconciliation, markReady will refetch
-	}
 
 	// Build initial role object for deletion handling
 	role, err := r.buildRoleObject(roleDefinition)
@@ -167,25 +165,22 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		r.markStalled(ctx, roleDefinition, err)
 		return ctrl.Result{}, err
 	}
-	// Note: Intermediate status updates are best-effort. markReady/markStalled will refetch and set final state.
+
+	// Batch condition updates - set finalizer condition
 	conditions.MarkTrue(roleDefinition, authnv1alpha1.FinalizerCondition, roleDefinition.Generation,
 		authnv1alpha1.FinalizerReason, authnv1alpha1.FinalizerMessage)
-	if err := r.client.Status().Update(ctx, roleDefinition); err != nil {
-		log.V(1).Info("failed to update FinalizerCondition status (will retry)", "roleDefinitionName", roleDefinition.Name, "error", err)
-		// Continue - markReady will refetch
-	}
 
-	// Get API resources
+	// Set API discovery condition
 	conditions.MarkTrue(roleDefinition, authnv1alpha1.APIDiscoveryCondition, roleDefinition.Generation,
 		authnv1alpha1.APIDiscoveryReason, authnv1alpha1.APIDiscoveryMessage)
-	if err := r.client.Status().Update(ctx, roleDefinition); err != nil {
-		log.V(1).Info("failed to update APIDiscoveryCondition status (will retry)", "roleDefinitionName", roleDefinition.Name, "error", err)
-		// Continue - markReady will refetch
-	}
 
 	apiResources, err := r.resourceTracker.GetAPIResources()
 	if errors.Is(err, discovery.ErrResourceTrackerNotStarted) {
 		log.V(1).Info("ResourceTracker not started yet - requeuing", "roleDefinitionName", roleDefinition.Name)
+		// Apply status before requeuing to persist conditions
+		if statusErr := r.applyStatus(ctx, roleDefinition); statusErr != nil {
+			log.Error(statusErr, "failed to apply status before requeue", "roleDefinitionName", roleDefinition.Name)
+		}
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 	if err != nil {
@@ -203,7 +198,7 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 	finalRules := r.buildFinalRules(roleDefinition, rulesByAPIGroupAndVerbs)
 
-	// Update conditions
+	// Batch more conditions - resource discovery and filtering completed
 	conditions.MarkTrue(roleDefinition, authnv1alpha1.APIFilteredCondition, roleDefinition.Generation,
 		authnv1alpha1.APIFilteredReason, authnv1alpha1.APIFilteredMessage)
 	conditions.MarkTrue(roleDefinition, authnv1alpha1.ResourceDiscoveryCondition, roleDefinition.Generation,
@@ -213,11 +208,6 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	log.V(2).Info("resource discovery and filtering completed",
 		"roleDefinitionName", roleDefinition.Name, "rulesCount", len(finalRules))
-
-	if err := r.client.Status().Update(ctx, roleDefinition); err != nil {
-		log.V(1).Info("failed to update status after resource discovery (will retry)", "roleDefinitionName", roleDefinition.Name, "error", err)
-		// Continue - markReady will refetch
-	}
 
 	// Build role with rules
 	roleWithRules, existingRole := r.buildRoleWithRules(roleDefinition, finalRules)
@@ -245,8 +235,21 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
+	// Final status update using SSA - batch all conditions together
+	roleDefinition.Status.RoleReconciled = true
+	if err := r.applyStatus(ctx, roleDefinition); err != nil {
+		log.Error(err, "failed to apply final status", "roleDefinitionName", roleDefinition.Name)
+		return ctrl.Result{}, err
+	}
+
 	log.V(1).Info("RoleDefinition reconciliation completed successfully", "roleDefinitionName", roleDefinition.Name)
 	return ctrl.Result{}, nil
+}
+
+// applyStatus applies status updates using Server-Side Apply (SSA).
+// This eliminates race conditions from stale object versions and batches all condition updates.
+func (r *RoleDefinitionReconciler) applyStatus(ctx context.Context, roleDefinition *authnv1alpha1.RoleDefinition) error {
+	return ssa.ApplyRoleDefinitionStatus(ctx, r.client, roleDefinition)
 }
 
 func (r *RoleDefinitionReconciler) filterAPIResourcesForRoleDefinition(

@@ -14,60 +14,54 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	authnv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	"github.com/telekom/auth-operator/api/authorization/v1alpha1/applyconfiguration/ssa"
 	"github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/helpers"
 )
 
-// logStatusUpdateError logs a status update error without failing the operation.
-// This is used when the primary error is more important than the status update failure.
-func logStatusUpdateError(ctx context.Context, err error, resourceName string) {
+// logStatusApplyError logs a status apply error without failing the operation.
+// This is used when the primary error is more important than the status apply failure.
+func logStatusApplyError(ctx context.Context, err error, resourceName string) {
 	if err != nil {
-		log.FromContext(ctx).Error(err, "failed to update status (non-fatal)", "resource", resourceName)
+		log.FromContext(ctx).Error(err, "failed to apply status (non-fatal)", "resource", resourceName)
+	}
+}
+
+// applyStatusNonFatal applies status via SSA and logs any error without failing.
+// This is used for helper functions that need to update status but shouldn't fail on status errors.
+func (r *BindDefinitionReconciler) applyStatusNonFatal(ctx context.Context, bindDef *authnv1alpha1.BindDefinition) {
+	if err := ssa.ApplyBindDefinitionStatus(ctx, r.client, bindDef); err != nil {
+		logStatusApplyError(ctx, err, bindDef.Name)
 	}
 }
 
 // markStalled marks the BindDefinition as stalled with the given error (kstatus pattern).
-// It refetches the resource to avoid optimistic locking conflicts from stale resourceVersion.
+// Uses SSA to apply the stalled condition atomically.
 func (r *BindDefinitionReconciler) markStalled(
 	ctx context.Context,
 	bindDefinition *authnv1alpha1.BindDefinition,
 	err error,
 ) {
 	log := log.FromContext(ctx)
-	// Refetch to get latest resourceVersion
-	fresh := &authnv1alpha1.BindDefinition{}
-	if getErr := r.client.Get(ctx, types.NamespacedName{Name: bindDefinition.Name}, fresh); getErr != nil {
-		log.Error(getErr, "failed to refetch BindDefinition for Stalled update", "bindDefinitionName", bindDefinition.Name)
-		return
-	}
-	conditions.MarkStalled(fresh, fresh.Generation,
+	conditions.MarkStalled(bindDefinition, bindDefinition.Generation,
 		authnv1alpha1.StalledReasonError, authnv1alpha1.StalledMessageError, err.Error())
-	fresh.Status.ObservedGeneration = fresh.Generation
-	if updateErr := r.client.Status().Update(ctx, fresh); updateErr != nil {
-		log.Error(updateErr, "failed to update Stalled status", "bindDefinitionName", bindDefinition.Name)
+	bindDefinition.Status.ObservedGeneration = bindDefinition.Generation
+	if updateErr := ssa.ApplyBindDefinitionStatus(ctx, r.client, bindDefinition); updateErr != nil {
+		log.Error(updateErr, "failed to apply Stalled status via SSA", "bindDefinitionName", bindDefinition.Name)
 	}
 }
 
 // markReady marks the BindDefinition as ready (kstatus pattern).
-// It refetches the resource to avoid optimistic locking conflicts from stale resourceVersion.
+// This only mutates conditions/fields; caller is responsible for applying status via SSA.
 func (r *BindDefinitionReconciler) markReady(
 	ctx context.Context,
 	bindDefinition *authnv1alpha1.BindDefinition,
 ) {
-	log := log.FromContext(ctx)
-	// Refetch to get latest resourceVersion
-	fresh := &authnv1alpha1.BindDefinition{}
-	if err := r.client.Get(ctx, types.NamespacedName{Name: bindDefinition.Name}, fresh); err != nil {
-		log.Error(err, "failed to refetch BindDefinition for Ready update", "bindDefinitionName", bindDefinition.Name)
-		return
-	}
-	conditions.MarkReady(fresh, fresh.Generation,
+	_ = ctx // unused but kept for consistent function signature
+	conditions.MarkReady(bindDefinition, bindDefinition.Generation,
 		authnv1alpha1.ReadyReasonReconciled, authnv1alpha1.ReadyMessageReconciled)
-	fresh.Status.ObservedGeneration = fresh.Generation
-	fresh.Status.BindReconciled = true
-	if err := r.client.Status().Update(ctx, fresh); err != nil {
-		log.Error(err, "failed to update Ready status", "bindDefinitionName", bindDefinition.Name)
-	}
+	bindDefinition.Status.ObservedGeneration = bindDefinition.Generation
+	bindDefinition.Status.BindReconciled = true
 }
 
 // buildResourceLabels creates labels for resources managed by the auth-operator.
@@ -130,7 +124,7 @@ func (r *BindDefinitionReconciler) deleteServiceAccount(
 	}
 
 	if !metav1.IsControlledBy(sa, bindDef) {
-		r.recorder.Eventf(bindDef, corev1.EventTypeNormal, "Deletion",
+		r.recorder.Eventf(bindDef, corev1.EventTypeNormal, authnv1alpha1.EventReasonDeletion,
 			"Not deleting target resource ServiceAccount/%s in namespace %s because we do not have OwnerRef",
 			saName, saNamespace)
 		log.V(1).Info("Cannot delete ServiceAccount - no OwnerRef",
@@ -138,7 +132,7 @@ func (r *BindDefinitionReconciler) deleteServiceAccount(
 		return deleteResultNoOwnerRef, nil
 	}
 
-	r.recorder.Eventf(bindDef, corev1.EventTypeNormal, "Deletion",
+	r.recorder.Eventf(bindDef, corev1.EventTypeNormal, authnv1alpha1.EventReasonDeletion,
 		"Deleting target resource ServiceAccount/%s in namespace %s", saName, saNamespace)
 	log.V(1).Info("Cleanup ServiceAccount",
 		"bindDefinitionName", bindDef.Name, "serviceAccount", saName, "namespace", saNamespace)
@@ -183,14 +177,14 @@ func (r *BindDefinitionReconciler) deleteClusterRoleBinding(
 	}
 
 	if !metav1.IsControlledBy(crb, bindDef) {
-		r.recorder.Eventf(bindDef, corev1.EventTypeNormal, "Deletion",
+		r.recorder.Eventf(bindDef, corev1.EventTypeNormal, authnv1alpha1.EventReasonDeletion,
 			"Not deleting target resource ClusterRoleBinding/%s because we do not have OwnerRef", crbName)
 		log.V(1).Info("Cannot delete ClusterRoleBinding - no OwnerRef",
 			"bindDefinitionName", bindDef.Name, "clusterRoleBindingName", crbName)
 		return deleteResultNoOwnerRef, nil
 	}
 
-	r.recorder.Eventf(bindDef, corev1.EventTypeNormal, "Deletion",
+	r.recorder.Eventf(bindDef, corev1.EventTypeNormal, authnv1alpha1.EventReasonDeletion,
 		"Deleting target resource ClusterRoleBinding %s", crbName)
 	log.V(1).Info("Cleanup ClusterRoleBinding",
 		"bindDefinitionName", bindDef.Name, "clusterRoleBindingName", crbName)
@@ -235,7 +229,7 @@ func (r *BindDefinitionReconciler) deleteRoleBinding(
 	}
 
 	if !metav1.IsControlledBy(rb, bindDef) {
-		r.recorder.Eventf(bindDef, corev1.EventTypeNormal, "Deletion",
+		r.recorder.Eventf(bindDef, corev1.EventTypeNormal, authnv1alpha1.EventReasonDeletion,
 			"Not deleting target resource RoleBinding/%s in namespace %s because we do not have OwnerRef",
 			rbName, namespace)
 		log.V(1).Info("Cannot delete RoleBinding - no OwnerRef",
@@ -243,7 +237,7 @@ func (r *BindDefinitionReconciler) deleteRoleBinding(
 		return deleteResultNoOwnerRef, nil
 	}
 
-	r.recorder.Eventf(bindDef, corev1.EventTypeWarning, "Deletion",
+	r.recorder.Eventf(bindDef, corev1.EventTypeWarning, authnv1alpha1.EventReasonDeletion,
 		"Deleting target resource RoleBinding/%s in namespace %s", rbName, namespace)
 	log.V(1).Info("Cleanup RoleBinding",
 		"bindDefinitionName", bindDef.Name, "roleBindingName", rbName, "namespace", namespace)
@@ -286,7 +280,7 @@ func (r *BindDefinitionReconciler) filterActiveNamespaces(
 				"bindDefinitionName", bindDef.Name, "namespace", ns.Name)
 			nsObj := &corev1.Namespace{}
 			if err := r.client.Get(ctx, types.NamespacedName{Name: ns.Name}, nsObj); err == nil {
-				r.recorder.Eventf(nsObj, corev1.EventTypeWarning, "DeletionPending",
+				r.recorder.Eventf(nsObj, corev1.EventTypeWarning, authnv1alpha1.EventReasonDeletionPending,
 					"Namespace deletion is waiting for resources to be deleted before auth-operator can complete cleanup")
 			}
 		}
@@ -334,7 +328,7 @@ func (r *BindDefinitionReconciler) createServiceAccounts(
 		if saNamespace.Status.Phase == corev1.NamespaceTerminating {
 			log.V(1).Info("Skipping ServiceAccount creation in terminating namespace",
 				"bindDefinitionName", bindDef.Name, "namespace", subject.Namespace)
-			r.recorder.Eventf(saNamespace, corev1.EventTypeWarning, "DeletionPending",
+			r.recorder.Eventf(saNamespace, corev1.EventTypeWarning, authnv1alpha1.EventReasonDeletionPending,
 				"Namespace deletion is waiting for resources to be deleted before auth-operator can complete cleanup")
 			continue
 		}
@@ -352,7 +346,7 @@ func (r *BindDefinitionReconciler) createServiceAccounts(
 				"bindDefinitionName", bindDef.Name, "serviceAccount", subject.Name)
 			conditions.MarkFalse(bindDef, authnv1alpha1.CreateCondition, bindDef.Generation,
 				authnv1alpha1.CreateReason, authnv1alpha1.CreateMessage)
-			logStatusUpdateError(ctx, r.client.Status().Update(ctx, bindDef), bindDef.Name)
+			r.applyStatusNonFatal(ctx, bindDef)
 			return createServiceAccountResult{err: fmt.Errorf("get ServiceAccount %s/%s: %w", subject.Namespace, subject.Name, err)}
 		}
 
@@ -370,7 +364,7 @@ func (r *BindDefinitionReconciler) createServiceAccounts(
 				"bindDefinitionName", bindDef.Name, "serviceAccount", sa.Name)
 			conditions.MarkFalse(bindDef, authnv1alpha1.OwnerRefCondition, bindDef.Generation,
 				authnv1alpha1.OwnerRefReason, authnv1alpha1.OwnerRefMessage)
-			logStatusUpdateError(ctx, r.client.Status().Update(ctx, bindDef), bindDef.Name)
+			r.applyStatusNonFatal(ctx, bindDef)
 			return createServiceAccountResult{err: fmt.Errorf("set controller reference for ServiceAccount %s/%s: %w", sa.Namespace, sa.Name, err)}
 		}
 		if err := r.client.Create(ctx, sa); err != nil {
@@ -380,7 +374,7 @@ func (r *BindDefinitionReconciler) createServiceAccounts(
 		}
 		log.V(1).Info("Created ServiceAccount",
 			"bindDefinitionName", bindDef.Name, "serviceAccount", sa.Name, "namespace", sa.Namespace)
-		r.recorder.Eventf(bindDef, corev1.EventTypeNormal, "Create",
+		r.recorder.Eventf(bindDef, corev1.EventTypeNormal, authnv1alpha1.EventReasonCreate,
 			"Created resource %s/%s in namespace %s", sa.Kind, sa.Name, sa.Namespace)
 
 		if !helpers.SubjectExists(bindDef.Status.GeneratedServiceAccounts, subject) {
@@ -388,10 +382,10 @@ func (r *BindDefinitionReconciler) createServiceAccounts(
 		}
 		bindDef.Status.GeneratedServiceAccounts = helpers.MergeSubjects(
 			bindDef.Status.GeneratedServiceAccounts, saSubjects)
-		if err := r.client.Status().Update(ctx, bindDef); err != nil {
-			log.Error(err, "Failed to update BindDefinition status",
+		if err := ssa.ApplyBindDefinitionStatus(ctx, r.client, bindDef); err != nil {
+			log.Error(err, "Failed to apply BindDefinition status",
 				"bindDefinitionName", bindDef.Name)
-			return createServiceAccountResult{err: fmt.Errorf("update BindDefinition status after ServiceAccount creation: %w", err)}
+			return createServiceAccountResult{err: fmt.Errorf("apply BindDefinition status after ServiceAccount creation: %w", err)}
 		}
 	}
 	return createServiceAccountResult{generatedSAs: saSubjects}
@@ -420,7 +414,7 @@ func (r *BindDefinitionReconciler) createClusterRoleBindings(
 				"bindDefinitionName", bindDef.Name, "clusterRoleBindingName", crbName)
 			conditions.MarkFalse(bindDef, authnv1alpha1.CreateCondition, bindDef.Generation,
 				authnv1alpha1.CreateReason, authnv1alpha1.CreateMessage)
-			logStatusUpdateError(ctx, r.client.Status().Update(ctx, bindDef), bindDef.Name)
+			r.applyStatusNonFatal(ctx, bindDef)
 			return fmt.Errorf("get ClusterRoleBinding %s: %w", crbName, err)
 		}
 
@@ -442,7 +436,7 @@ func (r *BindDefinitionReconciler) createClusterRoleBindings(
 				"bindDefinitionName", bindDef.Name, "clusterRoleBindingName", crbName)
 			conditions.MarkFalse(bindDef, authnv1alpha1.OwnerRefCondition, bindDef.Generation,
 				authnv1alpha1.OwnerRefReason, authnv1alpha1.OwnerRefMessage)
-			logStatusUpdateError(ctx, r.client.Status().Update(ctx, bindDef), bindDef.Name)
+			r.applyStatusNonFatal(ctx, bindDef)
 			return fmt.Errorf("set controller reference for ClusterRoleBinding %s: %w", crbName, err)
 		}
 		if err := r.client.Create(ctx, crb); err != nil {
@@ -452,7 +446,7 @@ func (r *BindDefinitionReconciler) createClusterRoleBindings(
 		}
 		log.V(1).Info("Created ClusterRoleBinding",
 			"bindDefinitionName", bindDef.Name, "clusterRoleBindingName", crbName)
-		r.recorder.Eventf(bindDef, corev1.EventTypeNormal, "Create",
+		r.recorder.Eventf(bindDef, corev1.EventTypeNormal, authnv1alpha1.EventReasonCreate,
 			"Created resource %s/%s", crb.Kind, crb.Name)
 	}
 	return nil
@@ -565,7 +559,7 @@ func (r *BindDefinitionReconciler) createSingleRoleBinding(
 			"bindDefinitionName", bindDef.Name, "roleBindingName", rbName)
 		conditions.MarkFalse(bindDef, authnv1alpha1.CreateCondition, bindDef.Generation,
 			authnv1alpha1.CreateReason, authnv1alpha1.CreateMessage)
-		logStatusUpdateError(ctx, r.client.Status().Update(ctx, bindDef), bindDef.Name)
+		r.applyStatusNonFatal(ctx, bindDef)
 		return fmt.Errorf("get RoleBinding %s/%s: %w", namespace, rbName, err)
 	}
 
@@ -588,14 +582,14 @@ func (r *BindDefinitionReconciler) createSingleRoleBinding(
 			"bindDefinitionName", bindDef.Name, "roleBindingName", rbName)
 		conditions.MarkFalse(bindDef, authnv1alpha1.OwnerRefCondition, bindDef.Generation,
 			authnv1alpha1.OwnerRefReason, authnv1alpha1.OwnerRefMessage)
-		logStatusUpdateError(ctx, r.client.Status().Update(ctx, bindDef), bindDef.Name)
+		r.applyStatusNonFatal(ctx, bindDef)
 		return fmt.Errorf("set controller reference for RoleBinding %s/%s: %w", namespace, rbName, err)
 	}
 	if err := r.client.Create(ctx, rb); err != nil {
 		return fmt.Errorf("create RoleBinding %s/%s: %w", namespace, rbName, err)
 	}
 	log.Info("Created", "RoleBinding", rb.Name)
-	r.recorder.Eventf(bindDef, corev1.EventTypeNormal, "Create",
+	r.recorder.Eventf(bindDef, corev1.EventTypeNormal, authnv1alpha1.EventReasonCreate,
 		"Created resource %s/%s in namespace %s", rb.Kind, rb.Name, rb.Namespace)
 	return nil
 }
@@ -667,7 +661,7 @@ func (r *BindDefinitionReconciler) updateServiceAccounts(
 					return fmt.Errorf("update ServiceAccount %s/%s: %w", existingSa.Namespace, existingSa.Name, err)
 				}
 				log.Info("Updated", "ServiceAccount", existingSa.Name, "Namespace", existingSa.Namespace)
-				r.recorder.Eventf(bindDef, corev1.EventTypeNormal, "Update",
+				r.recorder.Eventf(bindDef, corev1.EventTypeNormal, authnv1alpha1.EventReasonUpdate,
 					"Updated resource %s/%s in namespace %s", existingSa.Kind, existingSa.Name, existingSa.Namespace)
 			}
 		} else {
@@ -729,7 +723,7 @@ func (r *BindDefinitionReconciler) updateClusterRoleBindings(
 					return fmt.Errorf("update ClusterRoleBinding %s: %w", existingCrb.Name, err)
 				}
 				log.Info("Updated", "ClusterRoleBinding", existingCrb.Name)
-				r.recorder.Eventf(bindDef, corev1.EventTypeNormal, "Update",
+				r.recorder.Eventf(bindDef, corev1.EventTypeNormal, authnv1alpha1.EventReasonUpdate,
 					"Updated resource %s/%s", existingCrb.Kind, existingCrb.Name)
 			}
 		} else {
@@ -814,7 +808,7 @@ func (r *BindDefinitionReconciler) updateSingleRoleBinding(
 				return fmt.Errorf("update RoleBinding %s/%s: %w", namespace, existingRb.Name, err)
 			}
 			log.Info("Updated", "RoleBinding", existingRb.Name)
-			r.recorder.Eventf(bindDef, corev1.EventTypeNormal, "Update",
+			r.recorder.Eventf(bindDef, corev1.EventTypeNormal, authnv1alpha1.EventReasonUpdate,
 				"Updated resource %s/%s in namespace %s", existingRb.Kind, existingRb.Name, existingRb.Namespace)
 		}
 	} else {
