@@ -301,9 +301,6 @@ jobs:
             kubectl logs -n $ns -l app.kubernetes.io/name=auth-operator --tail=5000 >> /tmp/controller-logs/${ns}-controller.log 2>/dev/null || true
           done
 
-          # Get all pods in kube-system that might be relevant
-          kubectl logs -n kube-system -l app=auth-operator --tail=5000 > /tmp/controller-logs/kube-system-auth-operator.log 2>/dev/null || true
-
           # Get all events
           kubectl get events -A --sort-by='.lastTimestamp' > /tmp/controller-logs/all-events.txt 2>/dev/null || true
 
