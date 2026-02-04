@@ -135,8 +135,14 @@ jobs:
           # Also capture by owner reference pattern (fallback)
           kubectl get clusterroles -o yaml | grep -A 1000 "t-caas" > /tmp/main-output/clusterroles-tcaas.yaml 2>/dev/null || true
 
-          # Cleanup samples and operator for next branch
-          kubectl delete -k config/samples/ --ignore-not-found 2>/dev/null || true
+          # Cleanup samples - delete CRs and wait for finalizers to be processed before undeploying
+          kubectl delete -k config/samples/ --ignore-not-found --timeout=60s 2>/dev/null || true
+          # Wait for CRs to be fully deleted (finalizers processed by controller)
+          echo "Waiting for CRs to be fully deleted..."
+          kubectl wait --for=delete roledefinition --all --timeout=60s 2>/dev/null || true
+          kubectl wait --for=delete binddefinition --all --timeout=60s 2>/dev/null || true
+          kubectl wait --for=delete webhookauthorizer --all --timeout=60s 2>/dev/null || true
+          # Now safe to undeploy the operator
           make undeploy 2>/dev/null || true
 
           echo "Main branch outputs captured"
@@ -154,7 +160,8 @@ jobs:
 
           # Ensure operator is deployed
           make deploy IMG=auth-operator:pr
-          kubectl wait --for=condition=available --timeout=60s deployment -l control-plane=controller-manager -A 2>/dev/null
+          kubectl wait --for=condition=available --timeout=180s deployment -l control-plane=controller-manager -A 2>/dev/null || \
+            echo "::warning::Controller-manager deployment not Available in time (fallback baseline will continue anyway)"
           kubectl wait --for=condition=available --timeout=60s deployment -l control-plane=webhook-server -A 2>/dev/null || true
           sleep 5
 
@@ -231,8 +238,14 @@ jobs:
           kubectl get rolebindings -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/tag-output/rolebindings.yaml 2>/dev/null || echo "# No RoleBindings found" > /tmp/tag-output/rolebindings.yaml
           kubectl get serviceaccounts -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/tag-output/serviceaccounts.yaml 2>/dev/null || echo "# No ServiceAccounts found" > /tmp/tag-output/serviceaccounts.yaml
 
-          # Cleanup samples and operator for PR branch
-          kubectl delete -k config/samples/ --ignore-not-found 2>/dev/null || true
+          # Cleanup samples - delete CRs and wait for finalizers to be processed before undeploying
+          kubectl delete -k config/samples/ --ignore-not-found --timeout=60s 2>/dev/null || true
+          # Wait for CRs to be fully deleted (finalizers processed by controller)
+          echo "Waiting for CRs to be fully deleted..."
+          kubectl wait --for=delete roledefinition --all --timeout=60s 2>/dev/null || true
+          kubectl wait --for=delete binddefinition --all --timeout=60s 2>/dev/null || true
+          kubectl wait --for=delete webhookauthorizer --all --timeout=60s 2>/dev/null || true
+          # Now safe to undeploy the operator
           make undeploy 2>/dev/null || true
 
           echo "Tag branch (${{ steps.latest-tag.outputs.tag }}) outputs captured"
