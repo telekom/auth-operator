@@ -85,6 +85,8 @@ pkg/
   discovery/                         # API resource discovery & tracking
   helpers/                           # Shared helpers
   indexer/                           # Client indexer utilities
+  metrics/                           # Prometheus metrics registration
+  ssa/                               # Server-Side Apply helpers for RBAC
   system/                            # System-level utilities
 config/
   crd/bases/                         # AUTO-GENERATED CRDs (never edit)
