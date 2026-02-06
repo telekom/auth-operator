@@ -89,6 +89,67 @@ var (
 		},
 		[]string{"resource_type"},
 	)
+
+	// RoleRefsMissing tracks the number of BindDefinitions whose referenced
+	// Roles or ClusterRoles do not yet exist. The gauge is set to the count of
+	// missing references per BindDefinition during each reconciliation.
+	// A non-zero value triggers a faster requeue so the condition self-heals
+	// once the referenced roles are created.
+	RoleRefsMissing = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: Namespace,
+			Name:      "role_refs_missing",
+			Help:      "Number of missing role references per BindDefinition (0 = all refs valid)",
+		},
+		[]string{"binddefinition"},
+	)
+
+	// NamespacesActive tracks the number of active (non-terminating) namespaces
+	// that matched a BindDefinition's namespace selectors during the last
+	// reconciliation. Useful for detecting selector misconfiguration or
+	// namespace churn.
+	NamespacesActive = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: Namespace,
+			Name:      "namespaces_active",
+			Help:      "Number of active namespaces matching selectors per BindDefinition",
+		},
+		[]string{"binddefinition"},
+	)
+
+	// ManagedResources tracks the current number of managed RBAC resources by type.
+	// Set at the end of each successful reconciliation by counting owned resources.
+	// Enables alerting on unexpected resource count drops (mass-deletion, drift).
+	ManagedResources = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: Namespace,
+			Name:      "managed_resources",
+			Help:      "Current number of managed RBAC resources by controller and type",
+		},
+		[]string{"controller", "resource_type"},
+	)
+
+	// WebhookRequestsTotal counts the total number of webhook admission requests.
+	WebhookRequestsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Name:      "webhook_requests_total",
+			Help:      "Total number of webhook admission requests",
+		},
+		[]string{"webhook", "operation", "result"},
+	)
+
+	// ServiceAccountSkippedPreExisting counts ServiceAccounts that were
+	// not adopted because they already existed without an OwnerReference
+	// from the BindDefinition. Useful for auditing pre-existing SA usage.
+	ServiceAccountSkippedPreExisting = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Name:      "serviceaccount_skipped_preexisting_total",
+			Help:      "Total number of pre-existing ServiceAccounts skipped (not adopted) per BindDefinition",
+		},
+		[]string{"binddefinition"},
+	)
 )
 
 func init() {
@@ -101,6 +162,11 @@ func init() {
 		APIDiscoveryErrors,
 		RBACResourcesApplied,
 		RBACResourcesDeleted,
+		RoleRefsMissing,
+		NamespacesActive,
+		ManagedResources,
+		WebhookRequestsTotal,
+		ServiceAccountSkippedPreExisting,
 	)
 }
 
@@ -111,6 +177,7 @@ const (
 	ResultRequeue   = "requeue"
 	ResultSkipped   = "skipped"
 	ResultFinalized = "finalized"
+	ResultDegraded  = "degraded"
 )
 
 // ErrorType constants for categorizing reconciliation errors.
@@ -136,4 +203,18 @@ const (
 	ResourceClusterRoleBinding = "ClusterRoleBinding"
 	ResourceRoleBinding        = "RoleBinding"
 	ResourceServiceAccount     = "ServiceAccount"
+)
+
+// WebhookName constants.
+const (
+	WebhookNamespaceValidator = "namespace_validator"
+	WebhookNamespaceMutator   = "namespace_mutator"
+	WebhookBinderValidator    = "binder_validator"
+)
+
+// WebhookResult constants.
+const (
+	WebhookResultAllowed = "allowed"
+	WebhookResultDenied  = "denied"
+	WebhookResultErrored = "errored"
 )

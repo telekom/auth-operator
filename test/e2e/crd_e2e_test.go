@@ -547,7 +547,7 @@ func checkRoleDefinitionReconciled(name string) bool {
 	if err != nil {
 		return false
 	}
-	return string(output) == "True"
+	return string(output) == statusTrue
 }
 
 func checkBindDefinitionReconciled(name string) bool {
@@ -558,7 +558,7 @@ func checkBindDefinitionReconciled(name string) bool {
 	if err != nil {
 		return false
 	}
-	return string(output) == "True"
+	return string(output) == statusTrue
 }
 
 func ensureTestNamespace() {

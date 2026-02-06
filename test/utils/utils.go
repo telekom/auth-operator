@@ -191,6 +191,8 @@ func Run(cmd *exec.Cmd) ([]byte, error) {
 }
 
 // RunWithTimeout executes a command with a timeout.
+// It rebuilds the command using exec.CommandContext so the OS process is killed
+// automatically when the timeout expires, avoiding goroutine leaks.
 func RunWithTimeout(cmd *exec.Cmd, timeout time.Duration) ([]byte, error) {
 	dir, _ := GetProjectDir()
 	cmd.Dir = dir
@@ -203,28 +205,24 @@ func RunWithTimeout(cmd *exec.Cmd, timeout time.Duration) ([]byte, error) {
 	command := strings.Join(cmd.Args, " ")
 	DebugLogf(2, "running with timeout %v: %s", timeout, command)
 
-	done := make(chan error)
-	var output []byte
-	var cmdErr error
+	// Rebuild the command with a context timeout so CombinedOutput returns
+	// when the deadline expires — no goroutine needed.
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 
-	go func() {
-		output, cmdErr = cmd.CombinedOutput()
-		done <- cmdErr
-	}()
+	ctxCmd := exec.CommandContext(ctx, cmd.Args[0], cmd.Args[1:]...) // args come from test code
+	ctxCmd.Dir = cmd.Dir
+	ctxCmd.Env = cmd.Env
 
-	select {
-	case <-time.After(timeout):
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-		return nil, fmt.Errorf("command timed out after %v: %s", timeout, command)
-	case err := <-done:
-		if err != nil {
-			DebugLogf(1, "command failed: %s\nerror: %v\noutput: %s", command, err, string(output))
-			return output, fmt.Errorf("%s failed with error: (%w) %s", command, err, string(output))
-		}
-		return output, nil
+	output, err := ctxCmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return output, fmt.Errorf("command timed out after %v: %s", timeout, command)
 	}
+	if err != nil {
+		DebugLogf(1, "command failed: %s\nerror: %v\noutput: %s", command, err, string(output))
+		return output, fmt.Errorf("%s failed with error: (%w) %s", command, err, string(output))
+	}
+	return output, nil
 }
 
 // UninstallPrometheusOperator uninstalls the prometheus.

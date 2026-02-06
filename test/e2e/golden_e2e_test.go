@@ -34,8 +34,7 @@ import (
 	"github.com/telekom/auth-operator/test/utils"
 )
 
-// Package level constant for status checking
-const goldenStatusTrue = "True"
+// Package level constant for status checking - uses statusTrue from debug_report.go
 
 var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func() {
 	const (
@@ -635,7 +634,7 @@ func checkGoldenRoleDefinitionCreated(name, namespace string) bool {
 	if err != nil {
 		return false
 	}
-	return strings.TrimSpace(string(output)) == goldenStatusTrue
+	return strings.TrimSpace(string(output)) == statusTrue
 }
 
 func checkGoldenBindDefinitionCreated(name, namespace string) bool {
@@ -646,7 +645,7 @@ func checkGoldenBindDefinitionCreated(name, namespace string) bool {
 	if err != nil {
 		return false
 	}
-	return strings.TrimSpace(string(output)) == goldenStatusTrue
+	return strings.TrimSpace(string(output)) == statusTrue
 }
 
 func containsGoldenVerb(verbs []string, verb string) bool {

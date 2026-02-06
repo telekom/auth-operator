@@ -90,7 +90,7 @@ var _ = Describe("BindDefinition Webhook", func() {
 			Expect(k8sClient.Delete(ctx, bd1)).To(Succeed())
 		})
 
-		It("Should return a warning when referenced ClusterRole does not exist", func() {
+		It("should admit even if referenced ClusterRole does not exist", func() {
 			bd := &BindDefinition{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-bd-missing-role",
@@ -103,7 +103,8 @@ var _ = Describe("BindDefinition Webhook", func() {
 					},
 				},
 			}
-			// The webhook admits with a warning when roles don't exist
+			// The webhook admits with a warning when roles don't exist;
+			// warning verification requires a custom round-tripper (not yet wired).
 			Expect(k8sClient.Create(ctx, bd)).To(Succeed())
 
 			// Cleanup

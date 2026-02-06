@@ -12,6 +12,15 @@
 # - RoleBindings with specific namespaces
 # - Multiple namespace selectors with complex label matching
 # - Cross-namespace service account bindings
+#
+# Edge-case / conflict scenarios (bd-edge-* prefix):
+# - Pre-existing roles that clash with RoleDefinition-generated roles
+# - Pre-existing ServiceAccounts referenced as subjects
+# - The same pre-existing SA bound by multiple BindDefinitions
+# - BD-generated ServiceAccounts (operator auto-creates them)
+# - BD-generated SA shared by multiple BindDefinitions
+# - Deliberate missing ClusterRole / Role references (RoleRefsValid: False)
+# - Mixed valid + missing role references
 # =============================================================================
 
 ---
@@ -190,7 +199,9 @@ spec:
                 - shared
             - key: t-caas.telekom.com/tenant
               operator: Exists
-    # Additional secret-viewing rights for compliance namespaces
+    # Additional secret-viewing rights for compliance namespaces.
+    # NOTE: "secret-reader" is deliberately NOT created by any RoleDefinition —
+    # this exercises the RoleRefsValid: False condition (missing Role reference).
     - roleRefs:
         - secret-reader
       namespaceSelector:
@@ -663,3 +674,285 @@ spec:
               values:
                 - application
                 - cicd
+
+# #############################################################################
+#  EDGE-CASE / CONFLICT SCENARIOS
+# #############################################################################
+# These samples deliberately exercise problematic situations:
+#   - Pre-existing (not operator-managed) roles and service accounts
+#   - Missing role references that trigger RoleRefsValid: False
+#   - Multiple BindDefinitions sharing the same ServiceAccount subject
+# Pre-existing resources are created by edge-case-prerequisites.yaml which
+# must be applied BEFORE these BindDefinitions.
+# #############################################################################
+
+---
+# -----------------------------------------------------------------------------
+# Edge Case 1: Pre-existing ClusterRole
+# References a ClusterRole ("pre-existing-reader") that was created manually,
+# NOT by any RoleDefinition. Tests that BindDefinition happily binds to roles
+# it does not own.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: bd-edge-preexisting-role
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/purpose: edge-case
+spec:
+  targetName: edge-preexisting-role
+  subjects:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group
+      name: preexisting-role-consumers@example.com
+  clusterRoleBindings:
+    clusterRoleRefs:
+      # This role exists before the operator starts — created by
+      # edge-case-prerequisites.yaml
+      - pre-existing-reader
+
+---
+# -----------------------------------------------------------------------------
+# Edge Case 2: Pre-existing ServiceAccount used as a subject
+# Binds a ServiceAccount ("pre-existing-sa" in tenant-alpha) that already exists
+# in the cluster. The operator creates the binding but SKIPS the SA —
+# it does not adopt (apply/own) a pre-existing ServiceAccount.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: bd-edge-preexisting-sa
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/purpose: edge-case
+spec:
+  targetName: edge-preexisting-sa
+  subjects:
+    - kind: ServiceAccount
+      name: pre-existing-sa
+      namespace: tenant-alpha
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - view
+
+---
+# -----------------------------------------------------------------------------
+# Edge Case 3a: Shared pre-existing SA — first consumer
+# Two BindDefinitions bind to the SAME pre-existing ServiceAccount
+# ("shared-monitoring-sa" in t-caas-monitoring). Tests that deletion of one BD
+# does NOT remove the SA because the other BD still references it.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: bd-edge-shared-sa-consumer-a
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/purpose: edge-case
+spec:
+  targetName: edge-shared-sa-a
+  subjects:
+    - kind: ServiceAccount
+      name: shared-monitoring-sa
+      namespace: t-caas-monitoring
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - view
+
+---
+# -----------------------------------------------------------------------------
+# Edge Case 3b: Shared pre-existing SA — second consumer
+# Same SA as 3a, different roles.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: bd-edge-shared-sa-consumer-b
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/purpose: edge-case
+spec:
+  targetName: edge-shared-sa-b
+  subjects:
+    - kind: ServiceAccount
+      name: shared-monitoring-sa
+      namespace: t-caas-monitoring
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - t-caas-security-auditor
+
+---
+# -----------------------------------------------------------------------------
+# Edge Case 4: BD-generated ServiceAccount
+# References a ServiceAccount ("generated-deploy-sa" in tenant-beta) that does
+# NOT exist yet. The operator should auto-create it and track it in
+# status.generatedServiceAccounts.
+# Also sets automountServiceAccountToken: false to exercise that option.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: bd-edge-generated-sa
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/purpose: edge-case
+spec:
+  targetName: edge-generated-sa
+  automountServiceAccountToken: false
+  subjects:
+    - kind: ServiceAccount
+      name: generated-deploy-sa
+      namespace: tenant-beta
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - view
+  roleBindings:
+    - clusterRoleRefs:
+        - edit
+      namespace: tenant-beta
+
+---
+# -----------------------------------------------------------------------------
+# Edge Case 5a: BD-generated SA shared by multiple BDs — first owner
+# Two BDs reference the same non-existent SA ("shared-generated-sa" in
+# tenant-alpha). Both should attempt to ensure it via SSA (idempotent).
+# Deletion of one BD must NOT delete the SA while the other still needs it.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: bd-edge-shared-generated-sa-a
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/purpose: edge-case
+spec:
+  targetName: edge-shared-gen-a
+  subjects:
+    - kind: ServiceAccount
+      name: shared-generated-sa
+      namespace: tenant-alpha
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - view
+
+---
+# -----------------------------------------------------------------------------
+# Edge Case 5b: BD-generated SA shared by multiple BDs — second owner
+# Same SA as 5a, different role bindings.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: bd-edge-shared-generated-sa-b
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/purpose: edge-case
+spec:
+  targetName: edge-shared-gen-b
+  subjects:
+    - kind: ServiceAccount
+      name: shared-generated-sa
+      namespace: tenant-alpha
+  roleBindings:
+    - clusterRoleRefs:
+        - edit
+      namespace: tenant-alpha
+
+---
+# -----------------------------------------------------------------------------
+# Edge Case 6: Missing ClusterRole reference (deliberate RoleRefsValid: False)
+# References "nonexistent-cluster-role" which no RoleDefinition creates and is
+# not a built-in K8s role. This BD should reconcile successfully (Ready: True)
+# but with RoleRefsValid: False and a Warning event.
+# The controller will requeue at RoleRefRequeueInterval (10s) until the role
+# appears.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: bd-edge-missing-clusterrole
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/purpose: edge-case
+spec:
+  targetName: edge-missing-cr
+  subjects:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group
+      name: missing-role-testers@example.com
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - nonexistent-cluster-role
+
+---
+# -----------------------------------------------------------------------------
+# Edge Case 7: Missing Role reference (deliberate RoleRefsValid: False)
+# References "nonexistent-role" as a roleRef in tenant-alpha. The Role does not
+# exist in that namespace. Again: Ready: True, RoleRefsValid: False.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: bd-edge-missing-role
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/purpose: edge-case
+spec:
+  targetName: edge-missing-role
+  subjects:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group
+      name: missing-role-testers@example.com
+  roleBindings:
+    - roleRefs:
+        - nonexistent-role
+      namespace: tenant-alpha
+
+---
+# -----------------------------------------------------------------------------
+# Edge Case 8: Mixed valid + missing role references
+# Has both valid refs (view, t-caas-security-auditor) and invalid refs
+# (phantom-cluster-role, phantom-namespace-role). Tests that:
+#   - Valid bindings are still created
+#   - RoleRefsValid: False lists only the missing ones
+#   - The Warning event enumerates both missing refs
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: bd-edge-mixed-refs
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/purpose: edge-case
+spec:
+  targetName: edge-mixed-refs
+  subjects:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group
+      name: mixed-ref-testers@example.com
+  clusterRoleBindings:
+    clusterRoleRefs:
+      # valid — built-in K8s role
+      - view
+      # valid — created by rd-security-auditor RoleDefinition
+      - t-caas-security-auditor
+      # MISSING — does not exist anywhere
+      - phantom-cluster-role
+  roleBindings:
+    - clusterRoleRefs:
+        - edit
+      roleRefs:
+        # MISSING — no such Role in tenant-alpha
+        - phantom-namespace-role
+      namespace: tenant-alpha

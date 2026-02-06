@@ -78,6 +78,34 @@ _Appears in:_
 | `generatedServiceAccounts` _[Subject](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#subject-v1-rbac) array_ | If the BindDefinition points to a subject of "Kind: ServiceAccount" and the service account is not present. The controller will reconcile it automatically. |  | Optional: \{\} <br /> |
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#condition-v1-meta) array_ | Conditions defines current service state of the Bind definition. All conditions should evaluate to true to signify successful reconciliation. |  | Optional: \{\} <br /> |
 
+##### Status Conditions
+
+| Type | Description |
+| --- | --- |
+| `Ready` | Whether the BindDefinition is fully reconciled. `True` even when `RoleRefsValid` is `False` — bindings are created regardless. |
+| `Reconciling` | Controller is actively reconciling (abnormal-true pattern). |
+| `Stalled` | An unrecoverable error occurred (abnormal-true pattern). |
+| `RoleRefsValid` | Whether **all** referenced ClusterRoles and Roles exist. When `False`, the controller requeues every 10 s and emits a `RoleRefNotFound` warning event. The condition self-heals once the missing roles are created (e.g. by a RoleDefinition). |
+| `Finalizer` | Set once the BindDefinition finalizer is in place. |
+| `Created` | Set after all CRBs, RBs, and SAs have been applied. |
+| `Deleted` | Set during the deletion workflow. |
+
+##### Prometheus Metrics (BindDefinition)
+
+| Metric | Type | Labels | Description |
+| --- | --- | --- | --- |
+| `auth_operator_role_refs_missing` | Gauge | `binddefinition` | Number of missing role references per BindDefinition. 0 when all refs resolve. |
+| `auth_operator_namespaces_active` | Gauge | `binddefinition` | Number of active (non-terminating) namespaces matching the BindDefinition's selectors. |
+| `auth_operator_reconcile_total` | Counter | `controller`, `result` | Per-reconcile outcome. `result` is one of: `success`, `degraded` (missing role refs), `error`, `finalized`, `skipped`. |
+
+##### Requeue Behaviour
+
+| Scenario | Interval | Notes |
+| --- | --- | --- |
+| All role refs valid | 60 s | Default drift-correction interval. |
+| One or more role refs missing | 10 s | Faster poll until roles appear. |
+| Owned resource changes | immediate | Triggered by watch on owned CRBs, SAs, RBs, and Namespaces. |
+
 
 
 

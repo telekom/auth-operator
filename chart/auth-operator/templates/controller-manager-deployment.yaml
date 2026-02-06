@@ -35,6 +35,13 @@ spec:
           initialDelaySeconds: 15
           periodSeconds: 20
         name: manager
+        ports:
+        - containerPort: 8081
+          name: health-probe
+          protocol: TCP
+        - containerPort: 8080
+          name: metrics
+          protocol: TCP
         resources: {{- toYaml .Values.controller.resources | nindent 10 }}
         securityContext:
           allowPrivilegeEscalation: false

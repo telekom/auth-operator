@@ -103,8 +103,8 @@ var _ = BeforeSuite(func() {
 
 var _ = AfterSuite(func() {
 	By("tearing down the test environment")
-	// Use a deadline to avoid flaky CI failures from slow kube-apiserver shutdown.
-	// The test environment stop can sometimes exceed the default process kill timeout.
+	// Best-effort stop: log but don't fail if the kube-apiserver is slow to shut down,
+	// since all specs have already passed by this point.
 	if testEnv != nil {
 		err := testEnv.Stop()
 		if err != nil {

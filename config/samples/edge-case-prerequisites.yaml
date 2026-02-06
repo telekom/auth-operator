@@ -1,0 +1,50 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# =============================================================================
+# Edge-Case Prerequisites
+# =============================================================================
+# Resources that must exist BEFORE the BindDefinition samples are applied.
+# They simulate "pre-existing" cluster state that the operator must coexist with.
+#
+# Applied by: kubectl apply -f config/samples/edge-case-prerequisites.yaml
+# (included in config/samples/kustomization.yaml)
+# =============================================================================
+
+---
+# Pre-existing ClusterRole — NOT managed by the operator.
+# Referenced by bd-edge-preexisting-role.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pre-existing-reader
+  labels:
+    t-caas.telekom.com/purpose: edge-case
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "configmaps"]
+    verbs: ["get", "list", "watch"]
+
+---
+# Pre-existing ServiceAccount in tenant-alpha — NOT managed by the operator.
+# Referenced as a subject by bd-edge-preexisting-sa.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pre-existing-sa
+  namespace: tenant-alpha
+  labels:
+    t-caas.telekom.com/purpose: edge-case
+
+---
+# Pre-existing ServiceAccount in t-caas-monitoring — NOT managed by the operator.
+# Referenced as a subject by BOTH bd-edge-shared-sa-consumer-a and
+# bd-edge-shared-sa-consumer-b (shared SA, multiple consumers).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: shared-monitoring-sa
+  namespace: t-caas-monitoring
+  labels:
+    t-caas.telekom.com/purpose: edge-case

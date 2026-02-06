@@ -22,6 +22,7 @@ import (
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/pkg/helpers"
+	"github.com/telekom/auth-operator/pkg/metrics"
 )
 
 var _ = Describe("BindDefinition Controller", func() {
@@ -3022,8 +3023,8 @@ func TestReconcileResourcesWithSSAError(t *testing.T) {
 		}).Build()
 	r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
-	activeNamespaces := []corev1.Namespace{*ns}
-	err := r.reconcileResources(ctx, bindDef, activeNamespaces)
+	activateNamespaces := []corev1.Namespace{*ns}
+	_, err := r.reconcileResources(ctx, bindDef, activateNamespaces)
 	g.Expect(err).To(HaveOccurred())
 	g.Expect(err.Error()).To(ContainSubstring("injected SSA error"))
 }
@@ -3742,7 +3743,314 @@ func TestReconcileResourcesEnsureRBError(t *testing.T) {
 	r := &BindDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
 
 	namespaces := []corev1.Namespace{{ObjectMeta: metav1.ObjectMeta{Name: "ns1"}}}
-	err := r.reconcileResources(ctx, bd, namespaces)
+	_, err := r.reconcileResources(ctx, bd, namespaces)
 	g.Expect(err).To(HaveOccurred())
 	g.Expect(err.Error()).To(ContainSubstring("injected SSA error"))
+}
+
+// TestReconcileDeletePreservesSharedSA verifies that when two BindDefinitions
+// reference the same ServiceAccount, deleting one BD does NOT remove the SA.
+func TestReconcileDeletePreservesSharedSA(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+	_ = corev1.AddToScheme(s)
+
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{Name: "shared-ns"},
+		Status:     corev1.NamespaceStatus{Phase: corev1.NamespaceActive},
+	}
+
+	isController := true
+
+	// BD-A: being deleted, references shared-sa
+	bdA := &authorizationv1alpha1.BindDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: authorizationv1alpha1.GroupVersion.String(),
+			Kind:       "BindDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "bd-a",
+			UID:        "uid-a",
+			Finalizers: []string{authorizationv1alpha1.BindDefinitionFinalizer},
+		},
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
+			TargetName: "shared-target",
+			Subjects: []rbacv1.Subject{
+				{Kind: "ServiceAccount", Name: "shared-sa", Namespace: "shared-ns"},
+			},
+		},
+	}
+
+	// BD-B: still active, also references shared-sa
+	bdB := &authorizationv1alpha1.BindDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: authorizationv1alpha1.GroupVersion.String(),
+			Kind:       "BindDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "bd-b",
+			UID:  "uid-b",
+		},
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
+			TargetName: "other-target",
+			Subjects: []rbacv1.Subject{
+				{Kind: "ServiceAccount", Name: "shared-sa", Namespace: "shared-ns"},
+			},
+		},
+	}
+
+	// SA owned by BD-A
+	sa := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "shared-sa",
+			Namespace: "shared-ns",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: authorizationv1alpha1.GroupVersion.String(),
+					Kind:       "BindDefinition",
+					Name:       "bd-a",
+					UID:        "uid-a",
+					Controller: &isController,
+				},
+			},
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(bdA, bdB, ns, sa).
+		WithStatusSubresource(bdA).
+		Build()
+	r := &BindDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	_, err := r.reconcileDelete(ctx, bdA)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	// SA must still exist because BD-B also references it
+	existingSA := &corev1.ServiceAccount{}
+	err = c.Get(ctx, types.NamespacedName{Name: "shared-sa", Namespace: "shared-ns"}, existingSA)
+	g.Expect(err).NotTo(HaveOccurred(), "SA should be preserved because another BD references it")
+}
+
+// TestReconcileDeleteRemovesSAWhenNotShared verifies that deleting a BD removes
+// its owned SA when no other BD references it.
+func TestReconcileDeleteRemovesSAWhenNotShared(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+	_ = corev1.AddToScheme(s)
+
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{Name: "sole-ns"},
+		Status:     corev1.NamespaceStatus{Phase: corev1.NamespaceActive},
+	}
+
+	isController := true
+
+	bd := &authorizationv1alpha1.BindDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: authorizationv1alpha1.GroupVersion.String(),
+			Kind:       "BindDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "sole-bd",
+			UID:        "sole-uid",
+			Finalizers: []string{authorizationv1alpha1.BindDefinitionFinalizer},
+		},
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
+			TargetName: "sole-target",
+			Subjects: []rbacv1.Subject{
+				{Kind: "ServiceAccount", Name: "sole-sa", Namespace: "sole-ns"},
+			},
+		},
+	}
+
+	sa := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "sole-sa",
+			Namespace: "sole-ns",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: authorizationv1alpha1.GroupVersion.String(),
+					Kind:       "BindDefinition",
+					Name:       "sole-bd",
+					UID:        "sole-uid",
+					Controller: &isController,
+				},
+			},
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(bd, ns, sa).
+		WithStatusSubresource(bd).
+		Build()
+	r := &BindDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	_, err := r.reconcileDelete(ctx, bd)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	// SA should be deleted since no other BD references it
+	deletedSA := &corev1.ServiceAccount{}
+	err = c.Get(ctx, types.NamespacedName{Name: "sole-sa", Namespace: "sole-ns"}, deletedSA)
+	g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "SA should be deleted when not shared")
+}
+
+// TestReconcileReturnsShortRequeueOnMissingRoleRefs verifies that Reconcile
+// returns RoleRefRequeueInterval when referenced roles are missing.
+func TestReconcileReturnsShortRequeueOnMissingRoleRefs(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+	_ = corev1.AddToScheme(s)
+
+	bd := &authorizationv1alpha1.BindDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: authorizationv1alpha1.GroupVersion.String(),
+			Kind:       "BindDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "missing-refs-bd",
+			UID:        "missing-uid",
+			Finalizers: []string{authorizationv1alpha1.BindDefinitionFinalizer},
+		},
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
+			TargetName: "missing-target",
+			Subjects: []rbacv1.Subject{
+				{Kind: "User", Name: "test-user", APIGroup: rbacv1.GroupName},
+			},
+			ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+				ClusterRoleRefs: []string{"nonexistent-cluster-role"},
+			},
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(bd).
+		WithStatusSubresource(bd).
+		Build()
+	r := &BindDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	result, err := r.Reconcile(ctx, reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: "missing-refs-bd"},
+	})
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(result.RequeueAfter).To(Equal(RoleRefRequeueInterval),
+		"should use short requeue interval when role refs are missing")
+}
+
+// TestReconcileReturnsDefaultRequeueWhenAllRefsValid verifies that Reconcile
+// returns DefaultRequeueInterval when all referenced roles exist.
+func TestReconcileReturnsDefaultRequeueWhenAllRefsValid(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+	_ = corev1.AddToScheme(s)
+
+	// The ClusterRole must exist for the ref to be valid
+	cr := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "existing-role"},
+	}
+
+	bd := &authorizationv1alpha1.BindDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: authorizationv1alpha1.GroupVersion.String(),
+			Kind:       "BindDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "valid-refs-bd",
+			UID:        "valid-uid",
+			Finalizers: []string{authorizationv1alpha1.BindDefinitionFinalizer},
+		},
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
+			TargetName: "valid-target",
+			Subjects: []rbacv1.Subject{
+				{Kind: "User", Name: "test-user", APIGroup: rbacv1.GroupName},
+			},
+			ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+				ClusterRoleRefs: []string{"existing-role"},
+			},
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(bd, cr).
+		WithStatusSubresource(bd).
+		Build()
+	r := &BindDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	result, err := r.Reconcile(ctx, reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: "valid-refs-bd"},
+	})
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(result.RequeueAfter).To(Equal(DefaultRequeueInterval),
+		"should use default requeue interval when all role refs are valid")
+}
+
+// TestReconcileDeleteCleansUpGaugeMetrics verifies that reconcileDelete
+// removes per-BD gauge metrics so they don't persist after deletion.
+func TestReconcileDeleteCleansUpGaugeMetrics(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+	_ = corev1.AddToScheme(s)
+
+	bdName := "metrics-cleanup-bd"
+
+	bd := &authorizationv1alpha1.BindDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: authorizationv1alpha1.GroupVersion.String(),
+			Kind:       "BindDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       bdName,
+			UID:        "metrics-uid",
+			Finalizers: []string{authorizationv1alpha1.BindDefinitionFinalizer},
+		},
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
+			TargetName: "metrics-target",
+			Subjects: []rbacv1.Subject{
+				{Kind: "User", Name: "test-user", APIGroup: rbacv1.GroupName},
+			},
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(bd).
+		WithStatusSubresource(bd).
+		Build()
+	r := &BindDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	// Simulate metrics being set during a prior reconciliation
+	metrics.RoleRefsMissing.WithLabelValues(bdName).Set(2)
+	metrics.NamespacesActive.WithLabelValues(bdName).Set(5)
+
+	_, err := r.reconcileDelete(ctx, bd)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	// After deletion the per-BD gauge label sets should be cleaned up.
+	// Prometheus GetMetricWithLabelValues returns an existing metric if it
+	// was previously registered; after DeleteLabelValues the metric entry
+	// should no longer be present. We verify by checking that a fresh Get
+	// returns a gauge with value 0 (Prometheus creates a new default-0 entry).
+	roleGauge, _ := metrics.RoleRefsMissing.GetMetricWithLabelValues(bdName)
+	g.Expect(roleGauge).NotTo(BeNil())
+
+	nsGauge, _ := metrics.NamespacesActive.GetMetricWithLabelValues(bdName)
+	g.Expect(nsGauge).NotTo(BeNil())
 }

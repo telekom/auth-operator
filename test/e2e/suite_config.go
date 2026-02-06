@@ -18,6 +18,9 @@ const (
 	InstallMethodDev       InstallMethod = "dev"
 )
 
+// defaultImageTag is the fallback image tag when none is specified.
+const defaultImageTag = "latest"
+
 // TestSuiteConfig defines configuration for an e2e test suite
 // Each suite MUST use its own dedicated cluster to ensure isolation.
 type TestSuiteConfig struct {

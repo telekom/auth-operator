@@ -49,6 +49,13 @@ const (
 	//
 	// Used by: RoleDefinitionReconciler, BindDefinitionReconciler.
 	DefaultRequeueInterval = 60 * time.Second
+
+	// RoleRefRequeueInterval is a shorter requeue used when one or more
+	// referenced Roles/ClusterRoles do not yet exist. The BindDefinition
+	// controller does not watch Roles directly (they are not owned resources),
+	// so a faster poll ensures the RoleRefsValid condition self-heals promptly
+	// once the missing roles are created (e.g. by a RoleDefinition).
+	RoleRefRequeueInterval = 10 * time.Second
 )
 
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions,verbs=get;list;watch;update;patch
@@ -266,9 +273,11 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	activeNamespaces := r.filterActiveNamespaces(ctx, bindDefinition, namespaceSet)
+	metrics.NamespacesActive.WithLabelValues(bindDefinition.Name).Set(float64(len(activeNamespaces)))
 
 	// Reconcile all resources using ensure pattern (create-or-update via SSA)
-	if err := r.reconcileResources(ctx, bindDefinition, activeNamespaces); err != nil {
+	missingRoleRefs, err := r.reconcileResources(ctx, bindDefinition, activeNamespaces)
+	if err != nil {
 		logger.Error(err, "Error occurred in reconcileResources")
 		r.markStalled(ctx, bindDefinition, err)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultError).Inc()
@@ -288,27 +297,39 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
+	// Use a shorter requeue when role references are missing so the condition
+	// self-heals quickly once the referenced roles are created.
+	if missingRoleRefs > 0 {
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultDegraded).Inc()
+		logger.Info("Requeuing with shorter interval due to missing role references",
+			"missingCount", missingRoleRefs, "requeueAfter", RoleRefRequeueInterval)
+		return ctrl.Result{RequeueAfter: RoleRefRequeueInterval}, nil
+	}
+
 	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultSuccess).Inc()
 	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
 }
 
-// reconcileResources ensures all resources managed by the BindDefinition exist and are up-to-date.
-// Uses the "ensure" pattern with Server-Side Apply (SSA) to handle both create and update in one pass.
-// This replaces the separate reconcileCreate and reconcileUpdate functions.
+// reconcileResources ensures all resources managed by the BindDefinition exist
+// and are up-to-date.  It returns the number of role references that could not
+// be resolved (0 = all valid).  The caller uses this to choose a shorter
+// requeue interval so the RoleRefsValid condition self-heals.
 func (r *BindDefinitionReconciler) reconcileResources(
 	ctx context.Context,
 	bindDefinition *authnv1alpha1.BindDefinition,
 	activeNamespaces []corev1.Namespace,
-) error {
+) (int, error) {
 	logger := log.FromContext(ctx)
 
 	// Validate role references exist - set condition but continue processing
 	missingRoles := r.validateRoleReferences(ctx, bindDefinition, activeNamespaces)
-	if len(missingRoles) > 0 {
+	missingCount := len(missingRoles)
+	metrics.RoleRefsMissing.WithLabelValues(bindDefinition.Name).Set(float64(missingCount))
+	if missingCount > 0 {
 		logger.Info("Some referenced roles do not exist - bindings will be created but may not be effective",
 			"bindDefinitionName", bindDefinition.Name, "missingRoles", missingRoles)
 		r.recorder.Eventf(bindDefinition, nil, corev1.EventTypeWarning, authnv1alpha1.EventReasonRoleRefNotFound, authnv1alpha1.EventActionValidate,
-			"Referenced roles not found: %v. Bindings will be created but ineffective until roles exist.", missingRoles)
+			"Referenced roles not found: %v. Bindings will be created but ineffective until roles exist. Will requeue in %s.", missingRoles, RoleRefRequeueInterval)
 		conditions.MarkFalse(bindDefinition, authnv1alpha1.RoleRefValidCondition, bindDefinition.Generation,
 			authnv1alpha1.RoleRefInvalidReason, authnv1alpha1.RoleRefInvalidMessage)
 	} else {
@@ -319,7 +340,7 @@ func (r *BindDefinitionReconciler) reconcileResources(
 	// Ensure ServiceAccounts
 	generatedSAs, err := r.ensureServiceAccounts(ctx, bindDefinition)
 	if err != nil {
-		return fmt.Errorf("ensure ServiceAccounts: %w", err)
+		return 0, fmt.Errorf("ensure ServiceAccounts: %w", err)
 	}
 	// Update status with generated ServiceAccounts
 	if len(generatedSAs) > 0 {
@@ -329,18 +350,29 @@ func (r *BindDefinitionReconciler) reconcileResources(
 
 	// Ensure ClusterRoleBindings (uses SSA - handles both create and update)
 	if err := r.ensureClusterRoleBindings(ctx, bindDefinition); err != nil {
-		return fmt.Errorf("ensure ClusterRoleBindings: %w", err)
+		return 0, fmt.Errorf("ensure ClusterRoleBindings: %w", err)
 	}
 
 	// Ensure RoleBindings (uses SSA - handles both create and update)
 	if err := r.ensureRoleBindings(ctx, bindDefinition); err != nil {
-		return fmt.Errorf("ensure RoleBindings: %w", err)
+		return 0, fmt.Errorf("ensure RoleBindings: %w", err)
 	}
 
 	conditions.MarkTrue(bindDefinition, authnv1alpha1.CreateCondition, bindDefinition.Generation,
 		authnv1alpha1.CreateReason, authnv1alpha1.CreateMessage)
 
-	return nil
+	// Update managed resource gauges. These counts reflect the spec-declared
+	// resources that were applied during this reconciliation, not a live count.
+	crbCount := len(bindDefinition.Spec.ClusterRoleBindings.ClusterRoleRefs)
+	var rbCount int
+	for _, rb := range bindDefinition.Spec.RoleBindings {
+		rbCount += (len(rb.ClusterRoleRefs) + len(rb.RoleRefs)) * len(activeNamespaces)
+	}
+	metrics.ManagedResources.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResourceClusterRoleBinding).Set(float64(crbCount))
+	metrics.ManagedResources.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResourceRoleBinding).Set(float64(rbCount))
+	metrics.ManagedResources.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResourceServiceAccount).Set(float64(len(generatedSAs)))
+
+	return missingCount, nil
 }
 
 // ensureClusterRoleBindings ensures all ClusterRoleBindings for the BindDefinition exist and are up-to-date.
@@ -534,6 +566,8 @@ func (r *BindDefinitionReconciler) applyServiceAccount(
 
 // ensureServiceAccounts ensures all ServiceAccounts for the BindDefinition exist and are up-to-date.
 // Uses Server-Side Apply (SSA) so that create-or-update is handled declaratively.
+// Pre-existing ServiceAccounts (those not owned by this BindDefinition) are left
+// untouched — the controller will NOT add an OwnerReference to them.
 func (r *BindDefinitionReconciler) ensureServiceAccounts(
 	ctx context.Context,
 	bindDef *authnv1alpha1.BindDefinition,
@@ -556,6 +590,25 @@ func (r *BindDefinitionReconciler) ensureServiceAccounts(
 		}
 		if ns == nil {
 			continue // Namespace not found or terminating, logged in validateServiceAccountNamespace
+		}
+
+		// Check if the ServiceAccount already exists and whether we own it.
+		// Pre-existing SAs (created outside of any BindDefinition) must NOT be
+		// adopted — we skip SSA so we never add an OwnerReference to them.
+		existing := &corev1.ServiceAccount{}
+		err = r.client.Get(ctx, types.NamespacedName{Name: subject.Name, Namespace: subject.Namespace}, existing)
+		if err != nil && !apierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("get ServiceAccount %s/%s: %w", subject.Namespace, subject.Name, err)
+		}
+
+		saExists := err == nil
+		if saExists && !metav1.IsControlledBy(existing, bindDef) {
+			// SA exists but is not owned by this BD — do not adopt it.
+			logger.V(1).Info("Skipping pre-existing ServiceAccount (not owned by this BindDefinition)",
+				"bindDefinitionName", bindDef.Name,
+				"serviceAccount", subject.Name, "namespace", subject.Namespace)
+			metrics.ServiceAccountSkippedPreExisting.WithLabelValues(bindDef.Name).Inc()
+			continue
 		}
 
 		// Apply ServiceAccount via SSA — creates or updates declaratively
@@ -592,6 +645,11 @@ func (r *BindDefinitionReconciler) reconcileDelete(
 	// RoleDefinition is marked to be deleted.
 	logger.V(1).Info("BindDefinition marked for deletion - cleaning up resources",
 		"bindDefinitionName", bindDefinition.Name)
+
+	// Remove per-BD gauge metrics so they don't persist after deletion.
+	metrics.RoleRefsMissing.DeleteLabelValues(bindDefinition.Name)
+	metrics.NamespacesActive.DeleteLabelValues(bindDefinition.Name)
+
 	conditions.MarkTrue(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation,
 		authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
 	if err := r.applyStatus(ctx, bindDefinition); err != nil {

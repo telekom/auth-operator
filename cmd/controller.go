@@ -24,6 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
 var (
@@ -76,6 +77,9 @@ are created and kept in sync.`,
 		mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 			Scheme: scheme,
 
+			Metrics: metricsserver.Options{
+				BindAddress: metricsAddr,
+			},
 			LeaderElection:          enableLeaderElection,
 			LeaderElectionID:        "auth.t-caas.telekom.com",
 			LeaderElectionNamespace: namespace,

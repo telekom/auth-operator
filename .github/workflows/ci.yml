@@ -66,45 +66,19 @@ jobs:
 
       - name: Run tests
         run: |
-          # Get the path from setup-envtest and ensure it's absolute
           ENVTEST_PATH="$(setup-envtest use 1.34.1 --bin-dir ./bin -p path)"
-          echo "DEBUG: setup-envtest returned path: ${ENVTEST_PATH}"
-
           # Convert to absolute path if relative
           if [[ "${ENVTEST_PATH}" != /* ]]; then
-            KUBEBUILDER_ASSETS="${GITHUB_WORKSPACE}/${ENVTEST_PATH}"
-            echo "DEBUG: Converted relative path to absolute: ${KUBEBUILDER_ASSETS}"
-          else
-            KUBEBUILDER_ASSETS="${ENVTEST_PATH}"
+            ENVTEST_PATH="${GITHUB_WORKSPACE}/${ENVTEST_PATH}"
           fi
-          export KUBEBUILDER_ASSETS
+          export KUBEBUILDER_ASSETS="${ENVTEST_PATH}"
 
-          echo "DEBUG: KUBEBUILDER_ASSETS=${KUBEBUILDER_ASSETS}"
-          echo "DEBUG: Current working directory: $(pwd)"
-          echo "DEBUG: GITHUB_WORKSPACE=${GITHUB_WORKSPACE}"
-
-          if [ -z "$KUBEBUILDER_ASSETS" ]; then
-            echo "ERROR: KUBEBUILDER_ASSETS is empty"
+          if [ ! -x "${KUBEBUILDER_ASSETS}/etcd" ]; then
+            echo "ERROR: envtest binaries not found at ${KUBEBUILDER_ASSETS}"
+            ls -la "${KUBEBUILDER_ASSETS}/" 2>/dev/null || echo "Directory does not exist"
             exit 1
           fi
 
-          if [ ! -d "$KUBEBUILDER_ASSETS" ]; then
-            echo "ERROR: KUBEBUILDER_ASSETS directory does not exist: ${KUBEBUILDER_ASSETS}"
-            exit 1
-          fi
-
-          echo "DEBUG: Listing KUBEBUILDER_ASSETS directory:"
-          ls -la "${KUBEBUILDER_ASSETS}/"
-
-          echo "DEBUG: Checking if etcd exists and is executable:"
-          if [ -x "${KUBEBUILDER_ASSETS}/etcd" ]; then
-            echo "DEBUG: etcd exists and is executable"
-          else
-            echo "ERROR: etcd not found or not executable at ${KUBEBUILDER_ASSETS}/etcd"
-            exit 1
-          fi
-
-          echo "DEBUG: Running tests..."
           go test ./... -coverprofile=coverage.out -covermode=atomic
         env:
           CGO_ENABLED: "1"

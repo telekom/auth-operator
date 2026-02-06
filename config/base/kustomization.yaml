@@ -9,6 +9,7 @@ resources:
 - ../rbac
 - ../manager
 - ../webhook
+- metrics_service.yaml
 
 # Common labels for all resources
 labels:

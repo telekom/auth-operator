@@ -562,7 +562,7 @@ func getImageTag() string {
 	if len(parts) > 1 {
 		return parts[1]
 	}
-	return "latest"
+	return defaultImageTag
 }
 
 func helmFullName() string {

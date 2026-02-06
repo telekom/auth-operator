@@ -27,11 +27,12 @@ import (
 var sensitivePattern = regexp.MustCompile(`(?i)(token|secret|password|passphrase|key|auth|credential|private|cert|bearer|api[_-]?key|client[_-]?id)`)
 
 var (
-	setupLog  logr.Logger
-	scheme    *runtime.Scheme
-	verbosity int
-	probeAddr string
-	namespace string
+	setupLog    logr.Logger
+	scheme      *runtime.Scheme
+	verbosity   int
+	probeAddr   string
+	metricsAddr string
+	namespace   string
 )
 
 // redactSensitiveFlags returns a map of flags with sensitive values redacted.
@@ -78,7 +79,8 @@ For more information, visit: https://github.com/telekom/auth-operator`,
 		log := klog.NewKlogr()
 
 		log.Info("app info", "name", system.Name, "version", system.Version, "commit", system.Commit)
-		log.Info("startup flags", "verbosity", verbosity, "namespace", namespace, "health-probe-bind-address", probeAddr)
+		log.Info("startup flags", "verbosity", verbosity, "namespace", namespace,
+			"health-probe-bind-address", probeAddr, "metrics-bind-address", metricsAddr)
 
 		// Log all flags with redaction of sensitive values
 		redactedFlags := redactSensitiveFlags()
@@ -109,6 +111,8 @@ func init() {
 	rootCmd.PersistentFlags().IntVarP(&verbosity, "verbosity", "v", 2, "Log level (0-9)")
 	rootCmd.PersistentFlags().StringVar(&probeAddr, "health-probe-bind-address", ":8081",
 		"The address the probe endpoint binds to.")
+	rootCmd.PersistentFlags().StringVar(&metricsAddr, "metrics-bind-address", ":8080",
+		"The address the metrics endpoint binds to. Use \"0\" to disable metrics serving.")
 }
 
 func initScheme() {

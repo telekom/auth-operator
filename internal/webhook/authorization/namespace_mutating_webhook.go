@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	"github.com/telekom/auth-operator/pkg/metrics"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -58,6 +59,7 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 	var err = m.Decoder.Decode(req, ns)
 	if err != nil {
 		logger.Error(err, "failed to decode namespace", "namespace", req.Name)
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultErrored).Inc()
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 
@@ -76,6 +78,7 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 	bindDefinitions := &authzv1alpha1.BindDefinitionList{}
 	if err := m.Client.List(ctx, bindDefinitions); err != nil {
 		logger.Error(err, "failed to list BindDefinitions", "namespace", req.Name)
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultErrored).Inc()
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
 
@@ -149,15 +152,18 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 		marshalledNS, err := json.Marshal(ns)
 		if err != nil {
 			logger.Error(err, "failed to marshal mutated namespace", "namespace", req.Name)
+			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultErrored).Inc()
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
 		logger.V(1).Info("namespace mutation successful", "namespace", req.Name, "labelCount", len(labelsToAdd))
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
 		return admission.PatchResponseFromRaw(req.Object.Raw, marshalledNS)
 	}
 
 	// If no labels to add, deny the request with a warning
 	denialMsg := "The user does not have any OIDC attributes assigned to this cluster and the user is not a Kubernetes admin. Namespace creation is not allowed."
 	logger.V(1).Info("namespace mutation denied - no labels matched", "namespace", req.Name, "username", req.UserInfo.Username)
+	metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultDenied).Inc()
 	return admission.Denied(denialMsg)
 }
 
