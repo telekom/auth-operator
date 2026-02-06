@@ -28,7 +28,7 @@ type Principal struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
-// WebhookAuthorizerSpec defines the desired state of WebhookAuthorizer
+// WebhookAuthorizerSpec defines the desired state of WebhookAuthorizer.
 type WebhookAuthorizerSpec struct {
 	// Resources which will be used to evaluate the SubjectAccessReviewSpec.ResourceAttributes
 	// +kubebuilder:validation:Optional
@@ -51,7 +51,7 @@ type WebhookAuthorizerSpec struct {
 	NamespaceSelector metav1.LabelSelector `json:"namespaceSelector,omitempty"`
 }
 
-// WebhookAuthorizerStatus defines the observed state of WebhookAuthorizer
+// WebhookAuthorizerStatus defines the observed state of WebhookAuthorizer.
 type WebhookAuthorizerStatus struct {
 	// ObservedGeneration is the last observed generation of the resource.
 	// This is used by kstatus to determine if the resource is current.
@@ -73,7 +73,7 @@ type WebhookAuthorizerStatus struct {
 // +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status",description="Whether the WebhookAuthorizer is ready"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Time duration since creation"
 
-// WebhookAuthorizer is the Schema for the webhookauthorizers API
+// WebhookAuthorizer is the Schema for the webhookauthorizers API.
 type WebhookAuthorizer struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -84,7 +84,7 @@ type WebhookAuthorizer struct {
 
 // +kubebuilder:object:root=true
 
-// WebhookAuthorizerList contains a list of WebhookAuthorizer
+// WebhookAuthorizerList contains a list of WebhookAuthorizer.
 type WebhookAuthorizerList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`

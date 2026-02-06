@@ -138,9 +138,16 @@ func TestNamespaceMutatorHandle(t *testing.T) {
 		ns *corev1.Namespace,
 		oldNs *corev1.Namespace,
 	) crAdmission.Request {
+		t.Helper()
 		// Marshal the new namespace for the request
-		nsRaw, _ := json.Marshal(ns)
-		oldNsRaw, _ := json.Marshal(oldNs)
+		nsRaw, err := json.Marshal(ns)
+		if err != nil {
+			t.Fatalf("failed to marshal namespace: %v", err)
+		}
+		oldNsRaw, err := json.Marshal(oldNs)
+		if err != nil {
+			t.Fatalf("failed to marshal old namespace: %v", err)
+		}
 
 		return crAdmission.Request{
 			AdmissionRequest: admissionv1.AdmissionRequest{
@@ -549,7 +556,10 @@ func TestNamespaceMutatorPerformance(t *testing.T) {
 				Name: "perf-ns-test",
 			},
 		}
-		nsRaw, _ := json.Marshal(ns)
+		nsRaw, err := json.Marshal(ns)
+		if err != nil {
+			t.Fatalf("failed to marshal namespace: %v", err)
+		}
 		return crAdmission.Request{
 			AdmissionRequest: admissionv1.AdmissionRequest{
 				Operation: admissionv1.Create,
@@ -566,7 +576,7 @@ func TestNamespaceMutatorPerformance(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(totalRequests)
 
-	for i := 0; i < totalRequests; i++ {
+	for i := range totalRequests {
 		go func(index int) {
 			defer wg.Done()
 

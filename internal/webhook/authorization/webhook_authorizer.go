@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/go-logr/logr"
@@ -16,13 +17,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	"github.com/telekom/auth-operator/pkg/helpers"
 )
 
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=webhookauthorizers,verbs=get;list;watch
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=webhookauthorizers/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
 
-// Constants for user identity parsing
+// Constants for user identity parsing.
 const (
 	systemPrefix       = "system"
 	serviceAccountKind = "serviceaccount"
@@ -49,7 +51,8 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if sar.Spec.ResourceAttributes != nil {
+	switch {
+	case sar.Spec.ResourceAttributes != nil:
 		wa.Log.Info("received SubjectAccessReview",
 			"namespace", sar.Spec.ResourceAttributes.Namespace,
 			"user", sar.Spec.User,
@@ -57,13 +60,13 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"verb", sar.Spec.ResourceAttributes.Verb,
 			"apiGroup", sar.Spec.ResourceAttributes.Group,
 			"resource", sar.Spec.ResourceAttributes.Resource)
-	} else if sar.Spec.NonResourceAttributes != nil {
+	case sar.Spec.NonResourceAttributes != nil:
 		wa.Log.Info("received SubjectAccessReview",
 			"user", sar.Spec.User,
 			"groups", sar.Spec.Groups,
 			"verb", sar.Spec.NonResourceAttributes.Verb,
 			"path", sar.Spec.NonResourceAttributes.Path)
-	} else {
+	default:
 		wa.Log.Info("received SubjectAccessReview",
 			"user", sar.Spec.User,
 			"groups", sar.Spec.Groups,
@@ -99,9 +102,9 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAccessReview, waList *authzv1alpha1.WebhookAuthorizerList) (bool, string) {
+func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAccessReview, waList *authzv1alpha1.WebhookAuthorizerList) (allowed bool, reason string) {
 	for _, webhookAuthorizer := range waList.Items {
-		if sar.Spec.ResourceAttributes != nil && !isLabelSelectorEmpty(&webhookAuthorizer.Spec.NamespaceSelector) && sar.Spec.ResourceAttributes.Namespace != "" {
+		if sar.Spec.ResourceAttributes != nil && !helpers.IsLabelSelectorEmpty(&webhookAuthorizer.Spec.NamespaceSelector) && sar.Spec.ResourceAttributes.Namespace != "" {
 			if !wa.namespaceMatches(ctx, sar.Spec.ResourceAttributes.Namespace, &webhookAuthorizer.Spec.NamespaceSelector) {
 				continue
 			}
@@ -125,10 +128,6 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 		}
 	}
 	return false, "Access denied: no matching rules"
-}
-
-func isLabelSelectorEmpty(selector *metav1.LabelSelector) bool {
-	return selector == nil || (len(selector.MatchLabels) == 0 && len(selector.MatchExpressions) == 0)
 }
 
 // namespaceMatches checks if the namespace matches the selector.
@@ -168,11 +167,9 @@ func (wa *Authorizer) principalMatches(user string, groups []string, principals 
 
 // intersects checks if two slices have any common elements.
 func intersects(slice1, slice2 []string) bool {
-	for _, s1 := range slice1 {
-		for _, s2 := range slice2 {
-			if s1 == s2 {
-				return true
-			}
+	for _, s := range slice1 {
+		if slices.Contains(slice2, s) {
+			return true
 		}
 	}
 	return false

@@ -20,7 +20,7 @@ permissions:
   pull-requests: write
 
 env:
-  GO_VERSION: "1.25"
+  GO_VERSION: "1.25.7"
   KIND_VERSION: "v0.31.0"
 
 jobs:
@@ -113,7 +113,7 @@ jobs:
             echo "::notice::Webhook server not found or not ready, continuing anyway"
 
           # Try to apply sample configs - this may fail if main branch samples are incompatible
-          if kubectl apply --server-side -k config/samples/ 2>/dev/null; then
+          if kubectl apply --server-side --force-conflicts -k config/samples/ 2>/dev/null; then
             echo "Waiting for reconciliation..."
             sleep 15
             echo "main_samples_applied=true" >> $GITHUB_OUTPUT
@@ -129,6 +129,13 @@ jobs:
           kubectl get clusterrolebindings -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/main-output/clusterrolebindings.yaml 2>/dev/null || echo "# No ClusterRoleBindings found" > /tmp/main-output/clusterrolebindings.yaml
           kubectl get rolebindings -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/main-output/rolebindings.yaml 2>/dev/null || echo "# No RoleBindings found" > /tmp/main-output/rolebindings.yaml
           kubectl get serviceaccounts -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/main-output/serviceaccounts.yaml 2>/dev/null || echo "# No ServiceAccounts found" > /tmp/main-output/serviceaccounts.yaml
+
+          # Capture Prometheus metrics from operator
+          kubectl port-forward -n kube-system svc/auth-operator-controller-manager-metrics-service 8443:8443 &>/dev/null &
+          PF_PID=$!
+          sleep 2
+          curl -sk https://localhost:8443/metrics 2>/dev/null | grep '^auth_operator_' | sort > /tmp/main-output/metrics.txt || echo "# No metrics available" > /tmp/main-output/metrics.txt
+          kill $PF_PID 2>/dev/null || true
 
           # Also capture by owner reference pattern (fallback)
           kubectl get clusterroles -o yaml | grep -A 1000 "t-caas" > /tmp/main-output/clusterroles-tcaas.yaml 2>/dev/null || true
@@ -164,7 +171,7 @@ jobs:
           sleep 5
 
           # Apply PR samples to generate baseline
-          kubectl apply --server-side -k config/samples/
+          kubectl apply --server-side --force-conflicts -k config/samples/
           echo "Waiting for reconciliation..."
           sleep 15
 
@@ -175,6 +182,13 @@ jobs:
           kubectl get clusterrolebindings -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/main-output/clusterrolebindings.yaml 2>/dev/null || echo "# No ClusterRoleBindings found" > /tmp/main-output/clusterrolebindings.yaml
           kubectl get rolebindings -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/main-output/rolebindings.yaml 2>/dev/null || echo "# No RoleBindings found" > /tmp/main-output/rolebindings.yaml
           kubectl get serviceaccounts -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/main-output/serviceaccounts.yaml 2>/dev/null || echo "# No ServiceAccounts found" > /tmp/main-output/serviceaccounts.yaml
+
+          # Capture Prometheus metrics from operator
+          kubectl port-forward -A svc/auth-operator-controller-manager-metrics-service 8443:8443 &>/dev/null &
+          PF_PID=$!
+          sleep 2
+          curl -sk https://localhost:8443/metrics 2>/dev/null | grep '^auth_operator_' | sort > /tmp/main-output/metrics.txt || echo "# No metrics available" > /tmp/main-output/metrics.txt
+          kill $PF_PID 2>/dev/null || true
 
           # Cleanup for PR branch fresh run
           kubectl delete -k config/samples/ --ignore-not-found
@@ -218,7 +232,7 @@ jobs:
           sleep 5
 
           # Try to apply sample configs from tag
-          if kubectl apply --server-side -k config/samples/ 2>/dev/null; then
+          if kubectl apply --server-side --force-conflicts -k config/samples/ 2>/dev/null; then
             echo "Waiting for reconciliation..."
             sleep 15
             echo "tag_success=true" >> $GITHUB_OUTPUT
@@ -235,6 +249,13 @@ jobs:
           kubectl get clusterrolebindings -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/tag-output/clusterrolebindings.yaml 2>/dev/null || echo "# No ClusterRoleBindings found" > /tmp/tag-output/clusterrolebindings.yaml
           kubectl get rolebindings -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/tag-output/rolebindings.yaml 2>/dev/null || echo "# No RoleBindings found" > /tmp/tag-output/rolebindings.yaml
           kubectl get serviceaccounts -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/tag-output/serviceaccounts.yaml 2>/dev/null || echo "# No ServiceAccounts found" > /tmp/tag-output/serviceaccounts.yaml
+
+          # Capture Prometheus metrics from operator
+          kubectl port-forward -A svc/auth-operator-controller-manager-metrics-service 8443:8443 &>/dev/null &
+          PF_PID=$!
+          sleep 2
+          curl -sk https://localhost:8443/metrics 2>/dev/null | grep '^auth_operator_' | sort > /tmp/tag-output/metrics.txt || echo "# No metrics available" > /tmp/tag-output/metrics.txt
+          kill $PF_PID 2>/dev/null || true
 
           # Cleanup samples - delete CRs and wait for finalizers to be processed before undeploying
           kubectl delete -k config/samples/ --ignore-not-found --timeout=60s 2>/dev/null || true
@@ -268,7 +289,7 @@ jobs:
           sleep 5
 
           # Apply sample configs and wait for reconciliation
-          kubectl apply --server-side -k config/samples/
+          kubectl apply --server-side --force-conflicts -k config/samples/
           echo "Waiting for reconciliation..."
           sleep 15
 
@@ -279,6 +300,13 @@ jobs:
           kubectl get clusterrolebindings -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/pr-output/clusterrolebindings.yaml 2>/dev/null || echo "# No ClusterRoleBindings found" > /tmp/pr-output/clusterrolebindings.yaml
           kubectl get rolebindings -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/pr-output/rolebindings.yaml 2>/dev/null || echo "# No RoleBindings found" > /tmp/pr-output/rolebindings.yaml
           kubectl get serviceaccounts -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/pr-output/serviceaccounts.yaml 2>/dev/null || echo "# No ServiceAccounts found" > /tmp/pr-output/serviceaccounts.yaml
+
+          # Capture Prometheus metrics from operator
+          kubectl port-forward -A svc/auth-operator-controller-manager-metrics-service 8443:8443 &>/dev/null &
+          PF_PID=$!
+          sleep 2
+          curl -sk https://localhost:8443/metrics 2>/dev/null | grep '^auth_operator_' | sort > /tmp/pr-output/metrics.txt || echo "# No metrics available" > /tmp/pr-output/metrics.txt
+          kill $PF_PID 2>/dev/null || true
 
           # Also capture by owner reference pattern (fallback)
           kubectl get clusterroles -o yaml | grep -A 1000 "t-caas" > /tmp/pr-output/clusterroles-tcaas.yaml 2>/dev/null || true
@@ -354,6 +382,13 @@ jobs:
             echo "" >> /tmp/diff-output/full-diff.txt
           done
 
+          # Metrics diff (main vs PR)
+          if [ -f /tmp/main-output/metrics.txt ] && [ -f /tmp/pr-output/metrics.txt ]; then
+            echo "=== prometheus metrics ===" >> /tmp/diff-output/full-diff.txt
+            diff -u /tmp/main-output/metrics.txt /tmp/pr-output/metrics.txt >> /tmp/diff-output/full-diff.txt 2>&1 || true
+            echo "" >> /tmp/diff-output/full-diff.txt
+          fi
+
           # Generate tag diff if tag outputs exist
           if [ -d "/tmp/tag-output" ] && [ "${{ steps.tag-output.outputs.tag_success }}" = "true" ]; then
             echo "" >> /tmp/diff-output/full-diff.txt
@@ -364,6 +399,14 @@ jobs:
               diff -u /tmp/tag-output/$resource.yaml /tmp/pr-output/$resource.yaml >> /tmp/diff-output/full-diff.txt 2>&1 || true
               echo "" >> /tmp/diff-output/full-diff.txt
             done
+
+            # Metrics diff (tag vs PR)
+            if [ -f /tmp/tag-output/metrics.txt ] && [ -f /tmp/pr-output/metrics.txt ]; then
+              echo "=== prometheus metrics ===" >> /tmp/diff-output/full-diff.txt
+              diff -u /tmp/tag-output/metrics.txt /tmp/pr-output/metrics.txt >> /tmp/diff-output/full-diff.txt 2>&1 || true
+              echo "" >> /tmp/diff-output/full-diff.txt
+            fi
+
             echo "has_tag_diff=true" >> $GITHUB_OUTPUT
           else
             echo "has_tag_diff=false" >> $GITHUB_OUTPUT
@@ -438,7 +481,7 @@ jobs:
 
             </details>
 
-            > **Note:** This diff shows changes in ClusterRoles, Roles, ClusterRoleBindings, RoleBindings, and ServiceAccounts generated from \`config/samples/\`.
+            > **Note:** This diff shows changes in ClusterRoles, Roles, ClusterRoleBindings, RoleBindings, ServiceAccounts, and Prometheus metrics generated from \`config/samples/\`.
             `;
 
             // Find existing comment

@@ -26,7 +26,7 @@ import (
 // WebhookAuthorizerApplyConfiguration represents a declarative configuration of the WebhookAuthorizer type for use
 // with apply.
 //
-// WebhookAuthorizer is the Schema for the webhookauthorizers API
+// WebhookAuthorizer is the Schema for the webhookauthorizers API.
 type WebhookAuthorizerApplyConfiguration struct {
 	v1.TypeMetaApplyConfiguration    `json:",inline"`
 	*v1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`

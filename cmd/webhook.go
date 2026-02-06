@@ -1,5 +1,5 @@
 /*
-Copyright © 2026 Deutsche Telekom AG
+Copyright © 2026 Deutsche Telekom AG.
 */
 package cmd
 
@@ -36,7 +36,7 @@ var (
 	enableTDGMigration             bool
 )
 
-// webhookCmd represents the webhook command
+// webhookCmd represents the webhook command.
 var webhookCmd = &cobra.Command{
 	Use:   "webhook",
 	Short: "Run the auth-operator webhook server",

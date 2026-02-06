@@ -45,7 +45,7 @@ type NamespaceBinding struct {
 	NamespaceSelector []metav1.LabelSelector `json:"namespaceSelector,omitempty"`
 }
 
-// BindDefinitionSpec defines the desired state of BindDefinition
+// BindDefinitionSpec defines the desired state of BindDefinition.
 type BindDefinitionSpec struct {
 	// Name that will be prefixed to the concatenated string which is the name of the binding. Follows format "targetName-clusterrole/role-binding" where clusterrole/role is the in-cluster existing ClusterRole or Role.
 	// +kubebuilder:validation:Required
@@ -73,7 +73,7 @@ type BindDefinitionSpec struct {
 	AutomountServiceAccountToken *bool `json:"automountServiceAccountToken,omitempty"`
 }
 
-// BindDefinitionStatus defines the observed state of BindDefinition
+// BindDefinitionStatus defines the observed state of BindDefinition.
 type BindDefinitionStatus struct {
 	// ObservedGeneration is the last observed generation of the resource.
 	// This is used by kstatus to determine if the resource is current.
@@ -111,7 +111,7 @@ type BindDefinition struct {
 
 // +kubebuilder:object:root=true
 
-// BindDefinitionList contains a list of BindDefinition
+// BindDefinitionList contains a list of BindDefinition.
 type BindDefinitionList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`

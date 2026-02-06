@@ -1,5 +1,5 @@
 /*
-Copyright © 2026 Deutsche Telekom AG
+Copyright © 2026 Deutsche Telekom AG.
 */
 package cmd
 
@@ -54,7 +54,7 @@ func redactSensitiveFlags() map[string]string {
 	return flagValues
 }
 
-// rootCmd represents the base command when called without any subcommands
+// rootCmd represents the base command when called without any subcommands.
 var rootCmd = &cobra.Command{
 	Use:   "auth-operator",
 	Short: "Kubernetes operator for managing RBAC with RoleDefinitions, BindDefinitions, and WebhookAuthorizers",

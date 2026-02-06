@@ -297,8 +297,8 @@ var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func(
 			Expect(subjectNames).To(ContainElements("golden-test-user@example.com", "golden-test-group"))
 
 			By("Golden file comparison completed successfully")
-			GinkgoWriter.Printf("Expected content (from file):\n%s\n", string(expectedBytes))
-			GinkgoWriter.Printf("Actual ClusterRoleBinding matches expected structure\n")
+			_, _ = fmt.Fprintf(GinkgoWriter, "Expected content (from file):\n%s\n", string(expectedBytes))
+			_, _ = fmt.Fprintf(GinkgoWriter, "Actual ClusterRoleBinding matches expected structure\n")
 		})
 	})
 
@@ -443,7 +443,7 @@ var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func(
 			expectedPath := filepath.Join(testdataPath, "golden/expected/multi-clusterrolebindings.yaml")
 			expectedBytes, err := os.ReadFile(expectedPath)
 			Expect(err).NotTo(HaveOccurred())
-			GinkgoWriter.Printf("Expected multi-ClusterRoleBindings:\n%s\n", string(expectedBytes))
+			_, _ = fmt.Fprintf(GinkgoWriter, "Expected multi-ClusterRoleBindings:\n%s\n", string(expectedBytes))
 		})
 	})
 

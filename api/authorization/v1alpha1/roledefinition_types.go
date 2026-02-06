@@ -14,7 +14,7 @@ const (
 	DefinitionNamespacedRole = "Role"
 )
 
-// RoleDefinitionSpec defines the desired state of RoleDefinition
+// RoleDefinitionSpec defines the desired state of RoleDefinition.
 type RoleDefinitionSpec struct {
 	// The target role that will be reconciled. This can be a ClusterRole or a namespaced Role
 	// +kubebuilder:validation:Required
@@ -54,7 +54,7 @@ type RoleDefinitionSpec struct {
 	RestrictedVerbs []string `json:"restrictedVerbs,omitempty"`
 }
 
-// RoleDefinitionStatus defines the observed state of RoleDefinition
+// RoleDefinitionStatus defines the observed state of RoleDefinition.
 type RoleDefinitionStatus struct {
 	// ObservedGeneration is the last observed generation of the resource.
 	// This is used by kstatus to determine if the resource is current.
@@ -90,7 +90,7 @@ type RoleDefinition struct {
 
 // +kubebuilder:object:root=true
 
-// RoleDefinitionList contains a list of RoleDefinition
+// RoleDefinitionList contains a list of RoleDefinition.
 type RoleDefinitionList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`

@@ -52,7 +52,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: BindDefinitionSpec defines the desired state of BindDefinition
+            description: BindDefinitionSpec defines the desired state of BindDefinition.
             properties:
               automountServiceAccountToken:
                 default: true
@@ -196,7 +196,7 @@ spec:
             - targetName
             type: object
           status:
-            description: BindDefinitionStatus defines the observed state of BindDefinition
+            description: BindDefinitionStatus defines the observed state of BindDefinition.
             properties:
               bindReconciled:
                 description: Not extremely important as most status updates are driven

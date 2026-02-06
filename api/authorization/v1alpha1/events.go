@@ -35,3 +35,28 @@ const (
 	// EventReasonRoleRefNotFound indicates a referenced role was not found.
 	EventReasonRoleRefNotFound = "RoleRefNotFound"
 )
+
+// Event action constants for the events.k8s.io/v1 API.
+// These describe the controller action that generated the event.
+const (
+	// EventActionReconcile indicates a reconciliation action.
+	EventActionReconcile = "Reconcile"
+
+	// EventActionCreate indicates a resource creation action.
+	EventActionCreate = "CreateResource"
+
+	// EventActionUpdate indicates a resource update action.
+	EventActionUpdate = "UpdateResource"
+
+	// EventActionDelete indicates a resource deletion action.
+	EventActionDelete = "DeleteResource"
+
+	// EventActionFinalizerAdd indicates adding a finalizer.
+	EventActionFinalizerAdd = "AddFinalizer"
+
+	// EventActionFinalizerRemove indicates removing a finalizer.
+	EventActionFinalizerRemove = "RemoveFinalizer"
+
+	// EventActionValidate indicates a validation check.
+	EventActionValidate = "Validate"
+)

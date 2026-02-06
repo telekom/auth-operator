@@ -1,5 +1,5 @@
 /*
-Copyright © 2026 Deutsche Telekom AG
+Copyright © 2026 Deutsche Telekom AG.
 */
 package indexer
 
@@ -14,10 +14,10 @@ import (
 )
 
 const (
-	// RoleDefinitionTargetNameField is the field index for RoleDefinition.Spec.TargetName
+	// RoleDefinitionTargetNameField is the field index for RoleDefinition.Spec.TargetName.
 	RoleDefinitionTargetNameField = ".spec.targetName"
 
-	// BindDefinitionTargetNameField is the field index for BindDefinition.Spec.TargetName
+	// BindDefinitionTargetNameField is the field index for BindDefinition.Spec.TargetName.
 	BindDefinitionTargetNameField = ".spec.targetName"
 )
 

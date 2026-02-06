@@ -7,7 +7,7 @@ import (
 	"github.com/onsi/ginkgo/v2"
 )
 
-// TestProgress tracks test execution progress with step-by-step details
+// TestProgress tracks test execution progress with step-by-step details.
 type TestProgress struct {
 	SuiteName      string
 	TotalSteps     int
@@ -18,7 +18,7 @@ type TestProgress struct {
 }
 
 // NewTestProgress creates a new progress tracker
-// Usage: progress := NewTestProgress("Helm Installation", 7)
+// Usage: progress := NewTestProgress("Helm Installation", 7).
 func NewTestProgress(suiteName string, totalSteps int) *TestProgress {
 	return &TestProgress{
 		SuiteName:  suiteName,
@@ -29,7 +29,7 @@ func NewTestProgress(suiteName string, totalSteps int) *TestProgress {
 }
 
 // Step marks the beginning of a test step and prints progress
-// Usage: done := progress.Step("Building operator image"); buildImage(); done()
+// Usage: done := progress.Step("Building operator image"); buildImage(); done().
 func (tp *TestProgress) Step(name string) func() {
 	w := ginkgo.GinkgoWriter
 	stepStart := time.Now()
@@ -67,7 +67,7 @@ func (tp *TestProgress) Step(name string) func() {
 	}
 }
 
-// Complete prints the final summary
+// Complete prints the final summary.
 func (tp *TestProgress) Complete() {
 	w := ginkgo.GinkgoWriter
 	total := time.Since(tp.StartTime)
@@ -110,7 +110,7 @@ func (tp *TestProgress) Complete() {
 		if len(steps) < 3 {
 			count = len(steps)
 		}
-		for i := 0; i < count; i++ {
+		for i := range count {
 			_, _ = fmt.Fprintf(w, "    %d. Step %d: %s\n",
 				i+1, steps[i].index, steps[i].duration.Round(time.Second))
 		}
@@ -118,7 +118,7 @@ func (tp *TestProgress) Complete() {
 	_, _ = fmt.Fprintf(w, "═══════════════════════════════════════════════════════════════════════════\n\n")
 }
 
-// Fail marks the progress as failed with an error message
+// Fail marks the progress as failed with an error message.
 func (tp *TestProgress) Fail(err error) {
 	w := ginkgo.GinkgoWriter
 	elapsed := time.Since(tp.StartTime)
@@ -132,14 +132,14 @@ func (tp *TestProgress) Fail(err error) {
 	_, _ = fmt.Fprintf(w, "╚═══════════════════════════════════════════════════════════════════════════╝\n\n")
 }
 
-// SimpleProgress provides a simpler progress indicator for quick operations
+// SimpleProgress provides a simpler progress indicator for quick operations.
 type SimpleProgress struct {
 	message   string
 	startTime time.Time
 }
 
 // NewSimpleProgress creates a simple progress indicator
-// Usage: progress := NewSimpleProgress("Waiting for pods to be ready")
+// Usage: progress := NewSimpleProgress("Waiting for pods to be ready").
 func NewSimpleProgress(message string) *SimpleProgress {
 	sp := &SimpleProgress{
 		message:   message,
@@ -149,19 +149,19 @@ func NewSimpleProgress(message string) *SimpleProgress {
 	return sp
 }
 
-// Done marks the simple progress as complete
+// Done marks the simple progress as complete.
 func (sp *SimpleProgress) Done() {
 	duration := time.Since(sp.startTime)
 	_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, " ✓ (took %s)\n", duration.Round(time.Second))
 }
 
-// DoneWithDetails marks completion with additional details
+// DoneWithDetails marks completion with additional details.
 func (sp *SimpleProgress) DoneWithDetails(details string) {
 	duration := time.Since(sp.startTime)
 	_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, " ✓ %s (took %s)\n", details, duration.Round(time.Second))
 }
 
-// Fail marks the simple progress as failed
+// Fail marks the simple progress as failed.
 func (sp *SimpleProgress) Fail(err error) {
 	duration := time.Since(sp.startTime)
 	_, _ = fmt.Fprintf(ginkgo.GinkgoWriter, " ✗ Failed after %s: %v\n", duration.Round(time.Second), err)

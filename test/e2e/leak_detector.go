@@ -10,7 +10,7 @@ import (
 	"github.com/telekom/auth-operator/test/utils"
 )
 
-// ResourceSnapshot captures cluster state at a point in time
+// ResourceSnapshot captures cluster state at a point in time.
 type ResourceSnapshot struct {
 	Namespaces          []string
 	ClusterRoles        []string
@@ -22,7 +22,7 @@ type ResourceSnapshot struct {
 	MutatingWebhooks    []string
 }
 
-// TakeSnapshot captures current cluster state for leak detection
+// TakeSnapshot captures current cluster state for leak detection.
 func TakeSnapshot() (*ResourceSnapshot, error) {
 	snapshot := &ResourceSnapshot{}
 
@@ -104,7 +104,7 @@ func TakeSnapshot() (*ResourceSnapshot, error) {
 	return snapshot, nil
 }
 
-// DetectLeaks compares two snapshots and returns detected leaks
+// DetectLeaks compares two snapshots and returns detected leaks.
 func DetectLeaks(before, after *ResourceSnapshot) []string {
 	leaks := []string{}
 
@@ -167,7 +167,7 @@ func DetectLeaks(before, after *ResourceSnapshot) []string {
 	return leaks
 }
 
-// PrintLeakReport prints a formatted leak report
+// PrintLeakReport prints a formatted leak report.
 func PrintLeakReport(leaks []string) {
 	w := ginkgo.GinkgoWriter
 	if len(leaks) == 0 {
@@ -201,7 +201,7 @@ func PrintLeakReport(leaks []string) {
 					line += word + " "
 				}
 			}
-			if len(line) > 0 {
+			if line != "" {
 				_, _ = fmt.Fprintf(w, "║ %-69s ║\n", strings.TrimSpace(line))
 			}
 		}
@@ -213,7 +213,7 @@ func PrintLeakReport(leaks []string) {
 	_, _ = fmt.Fprintf(w, "╚═══════════════════════════════════════════════════════════════════════╝\n\n")
 }
 
-// difference returns elements in 'a' that are not in 'b'
+// difference returns elements in 'a' that are not in 'b'.
 func difference(a, b []string) []string {
 	mb := make(map[string]struct{}, len(b))
 	for _, x := range b {

@@ -25,7 +25,7 @@ import (
 // BindDefinitionStatusApplyConfiguration represents a declarative configuration of the BindDefinitionStatus type for use
 // with apply.
 //
-// BindDefinitionStatus defines the observed state of BindDefinition
+// BindDefinitionStatus defines the observed state of BindDefinition.
 type BindDefinitionStatusApplyConfiguration struct {
 	// ObservedGeneration is the last observed generation of the resource.
 	// This is used by kstatus to determine if the resource is current.

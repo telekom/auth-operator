@@ -52,3 +52,16 @@ func (nw *namespaceWrapper) SetConditions(conditions []metav1.Condition) {
 		}
 	}
 }
+
+// IsNamespaceTerminating checks if a namespace is in the terminating phase.
+// This is a common check used across controllers to skip operations
+// on namespaces that are being deleted.
+func IsNamespaceTerminating(ns *corev1.Namespace) bool {
+	return ns != nil && ns.Status.Phase == corev1.NamespaceTerminating
+}
+
+// IsNamespaceActive checks if a namespace is active (not terminating).
+// This is the inverse of IsNamespaceTerminating for cleaner code.
+func IsNamespaceActive(ns *corev1.Namespace) bool {
+	return ns != nil && ns.Status.Phase != corev1.NamespaceTerminating
+}

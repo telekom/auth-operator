@@ -14,13 +14,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// CRDWaiter provides functionality to wait for CRDs to become available and established
+// CRDWaiter provides functionality to wait for CRDs to become available and established.
 type CRDWaiter struct {
 	client client.Client
 	log    logr.Logger
 }
 
-// NewCRDWaiter creates a new CRDWaiter
+// NewCRDWaiter creates a new CRDWaiter.
 func NewCRDWaiter(c client.Client, log logr.Logger) *CRDWaiter {
 	return &CRDWaiter{
 		client: c,
@@ -47,7 +47,7 @@ func (w *CRDWaiter) WaitForCRDs(ctx context.Context, gvks []schema.GroupVersionK
 	return nil
 }
 
-// waitForCRD waits for a single CRD to be established
+// waitForCRD waits for a single CRD to be established.
 func (w *CRDWaiter) waitForCRD(ctx context.Context, crdName string) error {
 	backoff := wait.Backoff{
 		Duration: 500 * time.Millisecond,
@@ -88,7 +88,7 @@ func (w *CRDWaiter) waitForCRD(ctx context.Context, crdName string) error {
 
 // crdNameFromGVK constructs the CRD name from a GroupVersionKind
 // CRD names follow the pattern: <plural>.<group>
-// For example: roledefinitions.authorization.t-caas.telekom.com
+// For example: roledefinitions.authorization.t-caas.telekom.com.
 func crdNameFromGVK(gvk schema.GroupVersionKind) string {
 	// Convert Kind to lowercase plural form (simple heuristic)
 	plural := pluralize(gvk.Kind)
@@ -96,7 +96,7 @@ func crdNameFromGVK(gvk schema.GroupVersionKind) string {
 }
 
 // pluralize converts a Kind to its lowercase plural form
-// This is a simple heuristic that works for most Kubernetes resource kinds
+// This is a simple heuristic that works for most Kubernetes resource kinds.
 func pluralize(kind string) string {
 	lower := toLower(kind)
 	// Handle common cases
@@ -121,7 +121,7 @@ func isVowel(c byte) bool {
 
 func toLower(s string) string {
 	result := make([]byte, len(s))
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		c := s[i]
 		if c >= 'A' && c <= 'Z' {
 			result[i] = c + 32

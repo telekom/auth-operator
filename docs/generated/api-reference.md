@@ -44,7 +44,7 @@ BindDefinition is the Schema for the binddefinitions API.
 
 
 
-BindDefinitionSpec defines the desired state of BindDefinition
+BindDefinitionSpec defines the desired state of BindDefinition.
 
 
 
@@ -64,7 +64,7 @@ _Appears in:_
 
 
 
-BindDefinitionStatus defines the observed state of BindDefinition
+BindDefinitionStatus defines the observed state of BindDefinition.
 
 
 
@@ -157,7 +157,7 @@ RoleDefinition is the Schema for the roledefinitions API.
 
 
 
-RoleDefinitionSpec defines the desired state of RoleDefinition
+RoleDefinitionSpec defines the desired state of RoleDefinition.
 
 
 
@@ -179,7 +179,7 @@ _Appears in:_
 
 
 
-RoleDefinitionStatus defines the observed state of RoleDefinition
+RoleDefinitionStatus defines the observed state of RoleDefinition.
 
 
 
@@ -199,7 +199,7 @@ _Appears in:_
 
 
 
-WebhookAuthorizer is the Schema for the webhookauthorizers API
+WebhookAuthorizer is the Schema for the webhookauthorizers API.
 
 
 
@@ -218,7 +218,7 @@ WebhookAuthorizer is the Schema for the webhookauthorizers API
 
 
 
-WebhookAuthorizerSpec defines the desired state of WebhookAuthorizer
+WebhookAuthorizerSpec defines the desired state of WebhookAuthorizer.
 
 
 
@@ -238,7 +238,7 @@ _Appears in:_
 
 
 
-WebhookAuthorizerStatus defines the observed state of WebhookAuthorizer
+WebhookAuthorizerStatus defines the observed state of WebhookAuthorizer.
 
 
 

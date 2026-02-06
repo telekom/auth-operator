@@ -3,6 +3,7 @@ kind: Kustomization
 
 resources:
 - manifests.yaml
+- namespace_webhooks.yaml
 - service.yaml
 - secret.yaml
 - deployment.yaml

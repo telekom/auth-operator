@@ -8,7 +8,7 @@ import (
 	"github.com/telekom/auth-operator/test/utils"
 )
 
-// CleanupOptions configures cleanup behavior for test resources
+// CleanupOptions configures cleanup behavior for test resources.
 type CleanupOptions struct {
 	Namespaces          []string // Namespaces to delete
 	ClusterRoles        []string // ClusterRoles to delete (by name)
@@ -20,7 +20,7 @@ type CleanupOptions struct {
 }
 
 // CleanupTestResources performs comprehensive cleanup of test resources
-// This function centralizes cleanup logic to avoid duplication across test files
+// This function centralizes cleanup logic to avoid duplication across test files.
 func CleanupTestResources(opts CleanupOptions) {
 	// Step 1: Remove finalizers if requested (prevents stuck deletions)
 	if opts.RemoveFinalizers {
@@ -64,7 +64,7 @@ func CleanupTestResources(opts CleanupOptions) {
 	}
 }
 
-// cleanupAllCRDs deletes all auth-operator custom resources
+// cleanupAllCRDs deletes all auth-operator custom resources.
 func cleanupAllCRDs() {
 	resources := []string{"roledefinition", "binddefinition", "webhookauthorizer"}
 	for _, resource := range resources {
@@ -89,7 +89,7 @@ func CleanupForHelmTests(namespace, release string, additionalNamespaces ...stri
 }
 
 // CleanupForDevTests provides convenient cleanup for dev/kustomize tests
-// Usage: CleanupForDevTests(devNamespace, []string{"cluster-role-1", "cluster-role-2"})
+// Usage: CleanupForDevTests(devNamespace, []string{"cluster-role-1", "cluster-role-2"}).
 func CleanupForDevTests(namespace string, clusterRoles []string) {
 	CleanupTestResources(CleanupOptions{
 		Namespaces:       []string{namespace},
@@ -100,8 +100,8 @@ func CleanupForDevTests(namespace string, clusterRoles []string) {
 	})
 }
 
-// CleanupForComplexTests provides convenient cleanup for complex scenario tests
-func CleanupForComplexTests(namespace string, clusterRoles []string, clusterRoleBindings []string) {
+// CleanupForComplexTests provides convenient cleanup for complex scenario tests.
+func CleanupForComplexTests(namespace string, clusterRoles, clusterRoleBindings []string) {
 	CleanupTestResources(CleanupOptions{
 		Namespaces:          []string{namespace},
 		ClusterRoles:        clusterRoles,
@@ -112,8 +112,8 @@ func CleanupForComplexTests(namespace string, clusterRoles []string, clusterRole
 	})
 }
 
-// CleanupForIntegrationTests provides convenient cleanup for integration tests
-func CleanupForIntegrationTests(namespaces []string, clusterRoles []string, clusterRoleBindings []string) {
+// CleanupForIntegrationTests provides convenient cleanup for integration tests.
+func CleanupForIntegrationTests(namespaces, clusterRoles, clusterRoleBindings []string) {
 	CleanupTestResources(CleanupOptions{
 		Namespaces:          namespaces,
 		ClusterRoles:        clusterRoles,
@@ -125,7 +125,7 @@ func CleanupForIntegrationTests(namespaces []string, clusterRoles []string, clus
 }
 
 // CleanupMinimal performs minimal cleanup (CRDs only, no cluster resources)
-// Use when cluster resources should persist
+// Use when cluster resources should persist.
 func CleanupMinimal() {
 	CleanupTestResources(CleanupOptions{
 		RemoveCRDs:       true,
@@ -135,8 +135,8 @@ func CleanupMinimal() {
 }
 
 // CleanupComplete performs complete cleanup (everything)
-// Use in AfterAll to ensure clean state
-func CleanupComplete(namespaces []string, clusterRoles []string, clusterRoleBindings []string, webhookSelector string) {
+// Use in AfterAll to ensure clean state.
+func CleanupComplete(namespaces, clusterRoles, clusterRoleBindings []string, webhookSelector string) {
 	CleanupTestResources(CleanupOptions{
 		Namespaces:          namespaces,
 		ClusterRoles:        clusterRoles,
@@ -149,7 +149,7 @@ func CleanupComplete(namespaces []string, clusterRoles []string, clusterRoleBind
 }
 
 // CleanupCRDsByName deletes specific CRD instances by name
-// Use within tests for cleanup between test cases
+// Use within tests for cleanup between test cases.
 func CleanupCRDsByName(roledefs, binddefs, webhookauthorizers []string) {
 	for _, name := range binddefs {
 		cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "binddefinition", name, "--ignore-not-found=true")
@@ -166,7 +166,7 @@ func CleanupCRDsByName(roledefs, binddefs, webhookauthorizers []string) {
 }
 
 // CleanupAllCRDsInNamespace deletes all auth-operator CRDs in a namespace
-// Useful for cleaning up after golden tests or when namespace isolation is used
+// Useful for cleaning up after golden tests or when namespace isolation is used.
 func CleanupAllCRDsInNamespace(namespace string) {
 	resources := []string{"binddefinition", "roledefinition", "webhookauthorizer"}
 	for _, resource := range resources {
@@ -180,7 +180,7 @@ func CleanupAllCRDsInNamespace(namespace string) {
 	}
 }
 
-// CleanupAllWebhookAuthorizersClusterWide deletes all WebhookAuthorizers (cluster-scoped)
+// CleanupAllWebhookAuthorizersClusterWide deletes all WebhookAuthorizers (cluster-scoped).
 func CleanupAllWebhookAuthorizersClusterWide() {
 	cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "webhookauthorizer", "--all", "--ignore-not-found=true")
 	_, _ = utils.Run(cmd)

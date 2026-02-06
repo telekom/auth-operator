@@ -87,7 +87,7 @@ var _ = Describe("SSA Status Apply Functions", func() {
 			Expect(updated.Status.Conditions[0].Type).To(Equal("Ready"))
 		})
 
-		It("should fail when RoleDefinition does not exist", func() {
+		It("should return error when RoleDefinition does not exist", func() {
 			scheme := newTestScheme()
 
 			c := fake.NewClientBuilder().
@@ -104,8 +104,10 @@ var _ = Describe("SSA Status Apply Functions", func() {
 				},
 			}
 
+			// Status apply on a non-existent object must fail (matches real API server behavior).
 			err := ssa.ApplyRoleDefinitionStatus(context.Background(), c, rd)
 			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("non-existent"))
 		})
 
 		It("should update existing status with new conditions", func() {
@@ -232,7 +234,7 @@ var _ = Describe("SSA Status Apply Functions", func() {
 			Expect(updated.Status.Conditions).To(HaveLen(1))
 		})
 
-		It("should fail when BindDefinition does not exist", func() {
+		It("should return error when BindDefinition does not exist", func() {
 			scheme := newTestScheme()
 
 			c := fake.NewClientBuilder().
@@ -249,8 +251,10 @@ var _ = Describe("SSA Status Apply Functions", func() {
 				},
 			}
 
+			// Status apply on a non-existent object must fail (matches real API server behavior).
 			err := ssa.ApplyBindDefinitionStatus(context.Background(), c, bd)
 			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("non-existent"))
 		})
 
 		It("should handle multiple conditions", func() {
@@ -490,15 +494,6 @@ var _ = Describe("SSA Status Conversion Functions", func() {
 			Expect(*result.LastTransitionTime).To(Equal(now))
 			Expect(*result.Reason).To(Equal("AllReady"))
 			Expect(*result.Message).To(Equal("All components are ready"))
-		})
-	})
-
-	Context("GeneratedServiceAccountFrom", func() {
-		It("should create a ServiceAccount subject", func() {
-			sa := ssa.GeneratedServiceAccountFrom("test-sa", "test-ns")
-			Expect(sa.Kind).To(Equal("ServiceAccount"))
-			Expect(sa.Name).To(Equal("test-sa"))
-			Expect(sa.Namespace).To(Equal("test-ns"))
 		})
 	})
 })

@@ -62,7 +62,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: RoleDefinitionSpec defines the desired state of RoleDefinition
+            description: RoleDefinitionSpec defines the desired state of RoleDefinition.
             properties:
               restrictedApis:
                 description: |-
@@ -277,7 +277,7 @@ spec:
             - targetRole
             type: object
           status:
-            description: RoleDefinitionStatus defines the observed state of RoleDefinition
+            description: RoleDefinitionStatus defines the observed state of RoleDefinition.
             properties:
               conditions:
                 description: Conditions defines current service state of the Role

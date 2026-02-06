@@ -1,5 +1,5 @@
 /*
-Copyright © 2025 Deutsche Telekom AG
+Copyright © 2025 Deutsche Telekom AG.
 */
 
 // Package metrics provides Prometheus metrics for the auth-operator.
@@ -13,12 +13,12 @@ import (
 )
 
 const (
-	// Namespace is the Prometheus metrics namespace for auth-operator
+	// Namespace is the Prometheus metrics namespace for auth-operator.
 	Namespace = "auth_operator"
 )
 
 var (
-	// ReconcileTotal counts the total number of reconciliations per controller
+	// ReconcileTotal counts the total number of reconciliations per controller.
 	ReconcileTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: Namespace,
@@ -28,7 +28,7 @@ var (
 		[]string{"controller", "result"},
 	)
 
-	// ReconcileDuration measures the duration of reconciliations in seconds
+	// ReconcileDuration measures the duration of reconciliations in seconds.
 	ReconcileDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: Namespace,
@@ -39,7 +39,7 @@ var (
 		[]string{"controller"},
 	)
 
-	// ReconcileErrors counts the total number of reconciliation errors per controller
+	// ReconcileErrors counts the total number of reconciliation errors per controller.
 	ReconcileErrors = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: Namespace,
@@ -49,17 +49,7 @@ var (
 		[]string{"controller", "error_type"},
 	)
 
-	// ResourcesManaged tracks the number of resources managed per controller type
-	ResourcesManaged = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: Namespace,
-			Name:      "resources_managed",
-			Help:      "Number of resources currently being managed per controller type",
-		},
-		[]string{"controller", "resource_type"},
-	)
-
-	// APIDiscoveryDuration measures the duration of API discovery operations in seconds
+	// APIDiscoveryDuration measures the duration of API discovery operations in seconds.
 	APIDiscoveryDuration = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Namespace: Namespace,
@@ -69,7 +59,7 @@ var (
 		},
 	)
 
-	// APIDiscoveryErrors counts the total number of API discovery errors
+	// APIDiscoveryErrors counts the total number of API discovery errors.
 	APIDiscoveryErrors = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Namespace: Namespace,
@@ -78,17 +68,7 @@ var (
 		},
 	)
 
-	// RBACResourcesCreated counts the total number of RBAC resources created
-	RBACResourcesCreated = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: Namespace,
-			Name:      "rbac_resources_created_total",
-			Help:      "Total number of RBAC resources created",
-		},
-		[]string{"resource_type"},
-	)
-
-	// RBACResourcesDeleted counts the total number of RBAC resources deleted
+	// RBACResourcesDeleted counts the total number of RBAC resources deleted.
 	RBACResourcesDeleted = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: Namespace,
@@ -98,33 +78,33 @@ var (
 		[]string{"resource_type"},
 	)
 
-	// RBACResourcesUpdated counts the total number of RBAC resources updated
-	RBACResourcesUpdated = prometheus.NewCounterVec(
+	// RBACResourcesApplied counts the total number of RBAC resources applied (created or updated)
+	// via Server-Side Apply (SSA). SSA merges desired state declaratively, so create and update
+	// are a single operation.
+	RBACResourcesApplied = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: Namespace,
-			Name:      "rbac_resources_updated_total",
-			Help:      "Total number of RBAC resources updated",
+			Name:      "rbac_resources_applied_total",
+			Help:      "Total number of RBAC resources applied (created or updated via SSA)",
 		},
 		[]string{"resource_type"},
 	)
 )
 
 func init() {
-	// Register all metrics with controller-runtime's registry
+	// Register all metrics with controller-runtime's registry.
 	metrics.Registry.MustRegister(
 		ReconcileTotal,
 		ReconcileDuration,
 		ReconcileErrors,
-		ResourcesManaged,
 		APIDiscoveryDuration,
 		APIDiscoveryErrors,
-		RBACResourcesCreated,
+		RBACResourcesApplied,
 		RBACResourcesDeleted,
-		RBACResourcesUpdated,
 	)
 }
 
-// ReconcileResult constants for labeling reconcile outcomes
+// ReconcileResult constants for labeling reconcile outcomes.
 const (
 	ResultSuccess   = "success"
 	ResultError     = "error"
@@ -133,7 +113,7 @@ const (
 	ResultFinalized = "finalized"
 )
 
-// ErrorType constants for categorizing reconciliation errors
+// ErrorType constants for categorizing reconciliation errors.
 const (
 	ErrorTypeAPI        = "api"
 	ErrorTypeValidation = "validation"
@@ -142,16 +122,18 @@ const (
 	ErrorTypeInternal   = "internal"
 )
 
-// ControllerName constants
+// ControllerName constants.
 const (
-	ControllerRoleDefinition = "RoleDefinition"
-	ControllerBindDefinition = "BindDefinition"
+	ControllerRoleDefinition        = "RoleDefinition"
+	ControllerBindDefinition        = "BindDefinition"
+	ControllerRoleBindingTerminator = "RoleBindingTerminator"
 )
 
-// ResourceType constants
+// ResourceType constants.
 const (
 	ResourceClusterRole        = "ClusterRole"
 	ResourceRole               = "Role"
 	ResourceClusterRoleBinding = "ClusterRoleBinding"
 	ResourceRoleBinding        = "RoleBinding"
+	ResourceServiceAccount     = "ServiceAccount"
 )

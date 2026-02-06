@@ -24,7 +24,7 @@ import (
 // BindDefinitionSpecApplyConfiguration represents a declarative configuration of the BindDefinitionSpec type for use
 // with apply.
 //
-// BindDefinitionSpec defines the desired state of BindDefinition
+// BindDefinitionSpec defines the desired state of BindDefinition.
 type BindDefinitionSpecApplyConfiguration struct {
 	// Name that will be prefixed to the concatenated string which is the name of the binding. Follows format "targetName-clusterrole/role-binding" where clusterrole/role is the in-cluster existing ClusterRole or Role.
 	TargetName *string `json:"targetName,omitempty"`
