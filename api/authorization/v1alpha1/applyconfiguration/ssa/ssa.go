@@ -13,7 +13,6 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	metav1ac "k8s.io/client-go/applyconfigurations/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -36,8 +35,8 @@ func applyStatus(ctx context.Context, c client.Client, applyConfig runtime.Apply
 }
 
 // ApplyRoleDefinitionStatus applies a status update to a RoleDefinition using native SSA.
-// The target object must already exist; applying status to a non-existent object is an error
-// (real API servers return NotFound for status subresource patches on missing objects).
+// The target object must already exist; applying status to a non-existent object returns
+// NotFound from the API server (wrapped with a descriptive message).
 func ApplyRoleDefinitionStatus(ctx context.Context, c client.Client, rd *authv1alpha1.RoleDefinition) error {
 	if rd == nil {
 		return fmt.Errorf("roleDefinition must not be nil")
@@ -46,19 +45,18 @@ func ApplyRoleDefinitionStatus(ctx context.Context, c client.Client, rd *authv1a
 		return fmt.Errorf("roleDefinition must have a name")
 	}
 
-	// Verify the object exists — status subresource apply requires an existing parent object.
-	if err := c.Get(ctx, types.NamespacedName{Name: rd.Name, Namespace: rd.Namespace}, &authv1alpha1.RoleDefinition{}); err != nil {
-		return fmt.Errorf("get RoleDefinition %s before status apply: %w", rd.Name, err)
-	}
-
 	applyConfig := ac.RoleDefinition(rd.Name, rd.Namespace).
 		WithStatus(RoleDefinitionStatusFrom(&rd.Status))
 
-	return applyStatus(ctx, c, applyConfig)
+	if err := applyStatus(ctx, c, applyConfig); err != nil {
+		return fmt.Errorf("apply RoleDefinition %s status: %w", rd.Name, err)
+	}
+	return nil
 }
 
 // ApplyBindDefinitionStatus applies a status update to a BindDefinition using native SSA.
-// The target object must already exist; applying status to a non-existent object is an error.
+// The target object must already exist; applying status to a non-existent object returns
+// NotFound from the API server (wrapped with a descriptive message).
 func ApplyBindDefinitionStatus(ctx context.Context, c client.Client, bd *authv1alpha1.BindDefinition) error {
 	if bd == nil {
 		return fmt.Errorf("bindDefinition must not be nil")
@@ -67,19 +65,18 @@ func ApplyBindDefinitionStatus(ctx context.Context, c client.Client, bd *authv1a
 		return fmt.Errorf("bindDefinition must have a name")
 	}
 
-	// Verify the object exists — status subresource apply requires an existing parent object.
-	if err := c.Get(ctx, types.NamespacedName{Name: bd.Name, Namespace: bd.Namespace}, &authv1alpha1.BindDefinition{}); err != nil {
-		return fmt.Errorf("get BindDefinition %s before status apply: %w", bd.Name, err)
-	}
-
 	applyConfig := ac.BindDefinition(bd.Name, bd.Namespace).
 		WithStatus(BindDefinitionStatusFrom(&bd.Status))
 
-	return applyStatus(ctx, c, applyConfig)
+	if err := applyStatus(ctx, c, applyConfig); err != nil {
+		return fmt.Errorf("apply BindDefinition %s status: %w", bd.Name, err)
+	}
+	return nil
 }
 
 // ApplyWebhookAuthorizerStatus applies a status update to a WebhookAuthorizer using native SSA.
-// The target object must already exist; applying status to a non-existent object is an error.
+// The target object must already exist; applying status to a non-existent object returns
+// NotFound from the API server (wrapped with a descriptive message).
 func ApplyWebhookAuthorizerStatus(ctx context.Context, c client.Client, wa *authv1alpha1.WebhookAuthorizer) error {
 	if wa == nil {
 		return fmt.Errorf("webhookAuthorizer must not be nil")
@@ -88,15 +85,13 @@ func ApplyWebhookAuthorizerStatus(ctx context.Context, c client.Client, wa *auth
 		return fmt.Errorf("webhookAuthorizer must have a name")
 	}
 
-	// Verify the object exists — status subresource apply requires an existing parent object.
-	if err := c.Get(ctx, types.NamespacedName{Name: wa.Name, Namespace: wa.Namespace}, &authv1alpha1.WebhookAuthorizer{}); err != nil {
-		return fmt.Errorf("get WebhookAuthorizer %s before status apply: %w", wa.Name, err)
-	}
-
 	applyConfig := ac.WebhookAuthorizer(wa.Name, wa.Namespace).
 		WithStatus(WebhookAuthorizerStatusFrom(&wa.Status))
 
-	return applyStatus(ctx, c, applyConfig)
+	if err := applyStatus(ctx, c, applyConfig); err != nil {
+		return fmt.Errorf("apply WebhookAuthorizer %s status: %w", wa.Name, err)
+	}
+	return nil
 }
 
 // RoleDefinitionStatusFrom converts a RoleDefinitionStatus to its ApplyConfiguration.

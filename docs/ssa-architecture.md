@@ -108,13 +108,13 @@ return c.SubResource("status").Apply(ctx, applyConfig,
     client.FieldOwner(FieldOwner), client.ForceOwnership)
 ```
 
-### Existence Check
+### Error Wrapping
 
 Each status applier (`ApplyRoleDefinitionStatus`, `ApplyBindDefinitionStatus`,
-`ApplyWebhookAuthorizerStatus`) performs a `Get` call before applying. This is
-necessary because the Kubernetes API returns `NotFound` when applying a status
-subresource to a non-existent parent object. During deletion or if the object
-was removed between reconciliation steps, this prevents misleading errors.
+`ApplyWebhookAuthorizerStatus`) calls `SubResource("status").Apply()` directly
+and wraps any error with a descriptive message including the object name. If the
+parent object no longer exists, the API server returns `NotFound`, which the
+caller can handle — no pre-flight `Get` is needed, avoiding TOCTOU races.
 
 ### Status ApplyConfiguration Types
 
@@ -211,7 +211,7 @@ conditions. The operator never silently drops errors.
 | API call failure | `Stalled=True`, `Ready=False` | `MarkStalled()` |
 | Missing dependency (role ref) | `RoleRefsValid=False` | `MarkNotReady()` |
 | Finalizer patch conflict | Requeue (automatic) | Controller-runtime retry |
-| Status apply on deleted object | Graceful skip | Existence check prevents error |
+| Status apply on deleted object | Graceful handling | Apply returns NotFound, wrapped with context |
 
 ---
 

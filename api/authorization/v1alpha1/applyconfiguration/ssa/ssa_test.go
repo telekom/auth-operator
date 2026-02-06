@@ -6,6 +6,7 @@ package ssa_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -15,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	authv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/api/authorization/v1alpha1/applyconfiguration/ssa"
@@ -90,9 +92,17 @@ var _ = Describe("SSA Status Apply Functions", func() {
 		It("should return error when RoleDefinition does not exist", func() {
 			scheme := newTestScheme()
 
+			// The fake client does not enforce status subresource semantics for SSA,
+			// so we use an interceptor to simulate the real API-server behaviour:
+			// SubResource("status").Apply on a non-existent parent returns NotFound.
 			c := fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithStatusSubresource(&authv1alpha1.RoleDefinition{}).
+				WithInterceptorFuncs(interceptor.Funcs{
+					SubResourceApply: func(_ context.Context, _ client.Client, _ string, _ runtime.ApplyConfiguration, _ ...client.SubResourceApplyOption) error {
+						return fmt.Errorf("roledefinitions \"non-existent\" not found")
+					},
+				}).
 				Build()
 
 			rd := &authv1alpha1.RoleDefinition{
@@ -237,9 +247,17 @@ var _ = Describe("SSA Status Apply Functions", func() {
 		It("should return error when BindDefinition does not exist", func() {
 			scheme := newTestScheme()
 
+			// The fake client does not enforce status subresource semantics for SSA,
+			// so we use an interceptor to simulate the real API-server behaviour:
+			// SubResource("status").Apply on a non-existent parent returns NotFound.
 			c := fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithStatusSubresource(&authv1alpha1.BindDefinition{}).
+				WithInterceptorFuncs(interceptor.Funcs{
+					SubResourceApply: func(_ context.Context, _ client.Client, _ string, _ runtime.ApplyConfiguration, _ ...client.SubResourceApplyOption) error {
+						return fmt.Errorf("binddefinitions \"non-existent\" not found")
+					},
+				}).
 				Build()
 
 			bd := &authv1alpha1.BindDefinition{

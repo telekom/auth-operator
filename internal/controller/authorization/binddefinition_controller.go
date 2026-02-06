@@ -33,20 +33,21 @@ import (
 )
 
 const (
-	// DefaultRequeueInterval is the interval at which BindDefinition resources are
-	// re-reconciled to ensure drift from manual modifications is corrected.
+	// DefaultRequeueInterval is the interval at which resources are re-reconciled
+	// to ensure drift from manual modifications is corrected.
 	//
 	// This interval serves multiple purposes:
-	// 1. Drift Correction: If someone manually modifies a ClusterRoleBinding, RoleBinding,
-	//    or ServiceAccount managed by the operator, the next reconciliation will restore
-	//    the desired state defined in the BindDefinition.
-	// 2. Namespace Discovery: New namespaces matching the BindDefinition's selector will
-	//    be picked up within this interval, creating the appropriate RoleBindings.
+	// 1. Drift Correction: If someone manually modifies a managed RBAC resource,
+	//    the next reconciliation will restore the desired state.
+	// 2. Namespace Discovery: New namespaces matching selectors will be picked up
+	//    within this interval, creating the appropriate bindings.
 	// 3. Resilience: Acts as a safety net in case watch events are missed due to
 	//    temporary network issues or API server restarts.
 	//
 	// The 60-second interval balances responsiveness with API server load. For clusters
-	// with many BindDefinitions, this can be tuned via the operator's configuration.
+	// with many resources, this can be tuned via the operator's configuration.
+	//
+	// Used by: RoleDefinitionReconciler, BindDefinitionReconciler.
 	DefaultRequeueInterval = 60 * time.Second
 )
 

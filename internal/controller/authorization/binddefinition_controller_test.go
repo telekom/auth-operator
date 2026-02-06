@@ -3441,9 +3441,8 @@ func TestReconcileDeleteRefetchError(t *testing.T) {
 
 	// Count Get calls for BindDefinition specifically.
 	// Gets: #1 Reconcile initial fetch,
-	//        #2 applyStatus existence check (delete condition),
-	//        #3 applyStatus existence check (finalizer condition),
-	//        #4 re-fetch before finalizer removal
+	//        #2 re-fetch before finalizer removal
+	// (status apply uses SSA directly without a pre-flight GET)
 	getCallCount := 0
 	c := fake.NewClientBuilder().WithScheme(s).
 		WithObjects(bd).
@@ -3452,8 +3451,8 @@ func TestReconcileDeleteRefetchError(t *testing.T) {
 			Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
 				if _, ok := obj.(*authorizationv1alpha1.BindDefinition); ok {
 					getCallCount++
-					// Fail on the re-fetch Get (#4)
-					if getCallCount >= 4 {
+					// Fail on the re-fetch Get (#2)
+					if getCallCount >= 2 {
 						return fmt.Errorf("injected refetch error")
 					}
 				}
