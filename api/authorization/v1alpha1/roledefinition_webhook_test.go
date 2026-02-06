@@ -5,9 +5,12 @@ SPDX-License-Identifier: Apache-2.0
 package v1alpha1
 
 import (
+	"time"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var _ = Describe("RoleDefinition Webhook", func() {
@@ -95,6 +98,8 @@ var _ = Describe("RoleDefinition Webhook", func() {
 			}
 			Expect(k8sClient.Create(ctx, rd1)).To(Succeed())
 
+			// The webhook validator uses the manager's cached client for MatchingFields lookups.
+			// Use DryRun to poll until the informer cache has synced rd1, avoiding side effects.
 			rd2 := &RoleDefinition{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-dup-second",
@@ -105,9 +110,11 @@ var _ = Describe("RoleDefinition Webhook", func() {
 					ScopeNamespaced: false,
 				},
 			}
-			err := k8sClient.Create(ctx, rd2)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("targetName shared-target-name already exists"))
+			Eventually(func(g Gomega) {
+				err := k8sClient.Create(ctx, rd2.DeepCopy(), client.DryRunAll)
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(err.Error()).To(ContainSubstring("targetName shared-target-name already exists"))
+			}).WithTimeout(10 * time.Second).WithPolling(250 * time.Millisecond).Should(Succeed())
 
 			// Cleanup
 			Expect(k8sClient.Delete(ctx, rd1)).To(Succeed())
@@ -126,6 +133,7 @@ var _ = Describe("RoleDefinition Webhook", func() {
 			}
 			Expect(k8sClient.Create(ctx, rd1)).To(Succeed())
 
+			// Wait for the informer cache to sync rd1 before verifying cross-role allowance.
 			rd2 := &RoleDefinition{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-same-name-role",
@@ -137,6 +145,14 @@ var _ = Describe("RoleDefinition Webhook", func() {
 					ScopeNamespaced: true,
 				},
 			}
+			Eventually(func(g Gomega) {
+				// DryRun: Cache must have synced rd1 for this check to be meaningful.
+				// The webhook should allow this since targetRoles differ.
+				err := k8sClient.Create(ctx, rd2.DeepCopy(), client.DryRunAll)
+				g.Expect(err).NotTo(HaveOccurred())
+			}).WithTimeout(10 * time.Second).WithPolling(250 * time.Millisecond).Should(Succeed())
+
+			// Now actually create rd2.
 			Expect(k8sClient.Create(ctx, rd2)).To(Succeed())
 
 			// Cleanup

@@ -5,10 +5,13 @@ SPDX-License-Identifier: Apache-2.0
 package v1alpha1
 
 import (
+	"time"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var _ = Describe("BindDefinition Webhook", func() {
@@ -66,6 +69,8 @@ var _ = Describe("BindDefinition Webhook", func() {
 			}
 			Expect(k8sClient.Create(ctx, bd1)).To(Succeed())
 
+			// The webhook validator uses the manager's cached client for MatchingFields lookups.
+			// Use DryRun to poll until the informer cache has synced bd1, avoiding side effects.
 			bd2 := &BindDefinition{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-dup-bd-second",
@@ -75,9 +80,11 @@ var _ = Describe("BindDefinition Webhook", func() {
 					Subjects:   validSubjects,
 				},
 			}
-			err := k8sClient.Create(ctx, bd2)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("targetName shared-bd-target already exists"))
+			Eventually(func(g Gomega) {
+				err := k8sClient.Create(ctx, bd2.DeepCopy(), client.DryRunAll)
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(err.Error()).To(ContainSubstring("targetName shared-bd-target already exists"))
+			}).WithTimeout(10 * time.Second).WithPolling(250 * time.Millisecond).Should(Succeed())
 
 			// Cleanup
 			Expect(k8sClient.Delete(ctx, bd1)).To(Succeed())

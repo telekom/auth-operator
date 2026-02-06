@@ -236,12 +236,23 @@ func (r *RoleDefinitionReconciler) buildFinalRules(
 // ensureRole ensures the role (ClusterRole or Role) exists and is up-to-date using Server-Side Apply (SSA).
 // This unified function replaces the separate createRole and updateRole functions.
 // SSA handles both creation (if not exists) and update (if different) in a single operation.
+// Before applying, it checks whether the target role is already controlled by a different owner
+// to avoid silently taking over roles managed by other controllers.
 func (r *RoleDefinitionReconciler) ensureRole(
 	ctx context.Context,
 	roleDefinition *authnv1alpha1.RoleDefinition,
 	finalRules []rbacv1.PolicyRule,
 ) error {
 	logger := log.FromContext(ctx)
+
+	// Pre-flight ownership check: verify the target role is not already controlled
+	// by a different owner. Kubernetes rejects multiple controller ownerReferences,
+	// and this check produces a clearer error/event than the raw API rejection.
+	if err := r.checkRoleOwnership(ctx, roleDefinition); err != nil {
+		conditions.MarkFalse(roleDefinition, authnv1alpha1.OwnerRefCondition, roleDefinition.Generation,
+			authnv1alpha1.OwnerRefReason, "ownership conflict: %s", err.Error())
+		return err
+	}
 
 	ownerRef := ownerRefForRoleDefinition(roleDefinition)
 	labels := helpers.BuildResourceLabels(roleDefinition.Labels)
@@ -291,6 +302,53 @@ func (r *RoleDefinitionReconciler) ensureRole(
 
 	r.recorder.Eventf(roleDefinition, nil, corev1.EventTypeNormal, authnv1alpha1.EventReasonCreation, authnv1alpha1.EventActionReconcile,
 		"Ensured target resource %s %s", roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetName)
+
+	return nil
+}
+
+// checkRoleOwnership verifies that the target role (if it already exists) is not controlled
+// by a different owner. This prevents silently taking over roles managed by other controllers,
+// which would fail at the API level (Kubernetes rejects multiple controller ownerReferences)
+// or cause unexpected behavior. If the role does not exist yet, this is a no-op.
+func (r *RoleDefinitionReconciler) checkRoleOwnership(
+	ctx context.Context,
+	roleDefinition *authnv1alpha1.RoleDefinition,
+) error {
+	logger := log.FromContext(ctx)
+
+	var existing client.Object
+	key := client.ObjectKey{Name: roleDefinition.Spec.TargetName}
+
+	switch roleDefinition.Spec.TargetRole {
+	case authnv1alpha1.DefinitionClusterRole:
+		existing = &rbacv1.ClusterRole{}
+	case authnv1alpha1.DefinitionNamespacedRole:
+		existing = &rbacv1.Role{}
+		key.Namespace = roleDefinition.Spec.TargetNamespace
+	default:
+		return nil
+	}
+
+	if err := r.client.Get(ctx, key, existing); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil // Target doesn't exist yet — will be created by SSA.
+		}
+		return fmt.Errorf("check existing %s %s: %w", roleDefinition.Spec.TargetRole, key, err)
+	}
+
+	for _, ref := range existing.GetOwnerReferences() {
+		if ref.Controller != nil && *ref.Controller && ref.UID != roleDefinition.UID {
+			logger.Info("Target role is already controlled by a different owner",
+				"roleName", roleDefinition.Spec.TargetName,
+				"existingOwnerKind", ref.Kind, "existingOwner", ref.Name, "existingOwnerUID", ref.UID)
+			r.recorder.Eventf(roleDefinition, nil, corev1.EventTypeWarning,
+				authnv1alpha1.EventReasonOwnership, authnv1alpha1.EventActionReconcile,
+				"Target %s %s is already controlled by %s %s (UID: %s)",
+				roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetName, ref.Kind, ref.Name, ref.UID)
+			return fmt.Errorf("target %s %s is already controlled by %s %s (UID: %s)",
+				roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetName, ref.Kind, ref.Name, ref.UID)
+		}
+	}
 
 	return nil
 }

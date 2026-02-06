@@ -184,7 +184,7 @@ jobs:
           kubectl get serviceaccounts -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/main-output/serviceaccounts.yaml 2>/dev/null || echo "# No ServiceAccounts found" > /tmp/main-output/serviceaccounts.yaml
 
           # Capture Prometheus metrics from operator
-          kubectl port-forward -A svc/auth-operator-controller-manager-metrics-service 8443:8443 &>/dev/null &
+          kubectl port-forward -n kube-system svc/auth-operator-controller-manager-metrics-service 8443:8443 &>/dev/null &
           PF_PID=$!
           sleep 2
           curl -sk https://localhost:8443/metrics 2>/dev/null | grep '^auth_operator_' | sort > /tmp/main-output/metrics.txt || echo "# No metrics available" > /tmp/main-output/metrics.txt
@@ -251,7 +251,7 @@ jobs:
           kubectl get serviceaccounts -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/tag-output/serviceaccounts.yaml 2>/dev/null || echo "# No ServiceAccounts found" > /tmp/tag-output/serviceaccounts.yaml
 
           # Capture Prometheus metrics from operator
-          kubectl port-forward -A svc/auth-operator-controller-manager-metrics-service 8443:8443 &>/dev/null &
+          kubectl port-forward -n kube-system svc/auth-operator-controller-manager-metrics-service 8443:8443 &>/dev/null &
           PF_PID=$!
           sleep 2
           curl -sk https://localhost:8443/metrics 2>/dev/null | grep '^auth_operator_' | sort > /tmp/tag-output/metrics.txt || echo "# No metrics available" > /tmp/tag-output/metrics.txt
@@ -302,7 +302,7 @@ jobs:
           kubectl get serviceaccounts -A -l app.kubernetes.io/created-by=auth-operator -o yaml > /tmp/pr-output/serviceaccounts.yaml 2>/dev/null || echo "# No ServiceAccounts found" > /tmp/pr-output/serviceaccounts.yaml
 
           # Capture Prometheus metrics from operator
-          kubectl port-forward -A svc/auth-operator-controller-manager-metrics-service 8443:8443 &>/dev/null &
+          kubectl port-forward -n kube-system svc/auth-operator-controller-manager-metrics-service 8443:8443 &>/dev/null &
           PF_PID=$!
           sleep 2
           curl -sk https://localhost:8443/metrics 2>/dev/null | grep '^auth_operator_' | sort > /tmp/pr-output/metrics.txt || echo "# No metrics available" > /tmp/pr-output/metrics.txt

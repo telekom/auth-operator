@@ -295,6 +295,8 @@ For detailed development instructions, see [CONTRIBUTING.md](CONTRIBUTING.md).
 ## Additional Documentation
 
 - **[API Reference](./docs/api-reference/authorization.t-caas.telekom.com.md)** — Full CRD specification
+- **[SSA Architecture](./docs/ssa-architecture.md)** — Server-Side Apply patterns, field ownership, and conflict resolution
+- **[Condition Lifecycle](./docs/condition-lifecycle.md)** — Condition types, state transitions, and kstatus compliance
 - **[Helm Chart](./chart/auth-operator/README.md)** — Helm installation and configuration
 - **[T-CaaS Integration](./docs/t-caas-integration.md)** — Platform-specific role mappings and group conventions
 - **[Security Policy](.github/SECURITY.md)** — Vulnerability reporting
