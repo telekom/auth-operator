@@ -126,6 +126,9 @@ jobs:
           image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
           format: spdx-json
           output-file: sbom.spdx.json
+          # Disable built-in upload due to permission issues with the action's artifact handling
+          # We upload via gh CLI in a separate step instead
+          upload-release-assets: false
 
       - name: Install cosign
         if: github.event_name != 'pull_request'
@@ -144,6 +147,13 @@ jobs:
           COSIGN_EXPERIMENTAL: "true"
         run: |
           cosign attest --yes --type spdx --predicate sbom.spdx.json ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+
+      - name: Upload SBOM to release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.ref_name }}" sbom.spdx.json --clobber || echo "Release not found or upload failed - SBOM is still attested via cosign"
 
   helm-release:
     name: Release Helm Chart
