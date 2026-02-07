@@ -18,7 +18,7 @@ var _ = Describe("BindDefinition Webhook", func() {
 
 	validSubjects := []rbacv1.Subject{
 		{
-			Kind:     "Group",
+			Kind:     rbacv1.GroupKind,
 			APIGroup: rbacv1.GroupName,
 			Name:     "test-group",
 		},

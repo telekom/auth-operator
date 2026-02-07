@@ -11,7 +11,7 @@ metadata:
 spec:
   endpoints:
     - path: /metrics
-      port: http # Ensure this is the name of the port that exposes HTTP metrics
+      port: metrics
       scheme: http
   selector:
     matchLabels:

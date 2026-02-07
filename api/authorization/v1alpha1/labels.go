@@ -14,6 +14,15 @@ const (
 	LabelKeyThirdParty = "t-caas.telekom.com/thirdparty"
 )
 
+// Annotation keys used by the auth-operator.
+const (
+	// AnnotationKeyReferencedBy tracks which BindDefinitions reference an external ServiceAccount.
+	// The value is a comma-separated list of BindDefinition names.
+	// This annotation is added to external (pre-existing) ServiceAccounts when a BindDefinition
+	// references them, and removed when no BindDefinitions reference them anymore.
+	AnnotationKeyReferencedBy = "authorization.t-caas.telekom.com/referenced-by"
+)
+
 // Owner label values.
 const (
 	// OwnerPlatform indicates the namespace is owned by the platform team.

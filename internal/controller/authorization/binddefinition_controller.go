@@ -211,45 +211,88 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	startTime := time.Now()
 	logger := log.FromContext(ctx)
 
+	// === RECONCILE START ===
+	logger.V(1).Info("=== Reconcile START ===",
+		"bindDefinition", req.Name,
+		"namespace", req.Namespace)
+
 	// Track reconcile duration on exit
 	defer func() {
-		metrics.ReconcileDuration.WithLabelValues(metrics.ControllerBindDefinition).Observe(time.Since(startTime).Seconds())
+		duration := time.Since(startTime)
+		metrics.ReconcileDuration.WithLabelValues(metrics.ControllerBindDefinition).Observe(duration.Seconds())
+		logger.V(1).Info("=== Reconcile END ===",
+			"bindDefinition", req.Name,
+			"duration", duration.String())
 	}()
 
 	// Fetching the BindDefinition custom resource from Kubernetes API
+	logger.V(2).Info("Fetching BindDefinition from API",
+		"bindDefinition", req.Name)
 	bindDefinition := &authnv1alpha1.BindDefinition{}
 	err := r.client.Get(ctx, req.NamespacedName, bindDefinition)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
+			logger.V(1).Info("BindDefinition not found (deleted), skipping reconcile",
+				"bindDefinition", req.Name)
 			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultSkipped).Inc()
 			return ctrl.Result{}, nil
 		}
+		logger.Error(err, "Failed to fetch BindDefinition",
+			"bindDefinition", req.Name)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultError).Inc()
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerBindDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, fmt.Errorf("fetch BindDefinition %s: %w", req.NamespacedName, err)
 	}
 
+	logger.V(2).Info("BindDefinition fetched successfully",
+		"bindDefinition", bindDefinition.Name,
+		"generation", bindDefinition.Generation,
+		"resourceVersion", bindDefinition.ResourceVersion,
+		"isDeleting", !bindDefinition.DeletionTimestamp.IsZero(),
+		"subjectCount", len(bindDefinition.Spec.Subjects),
+		"clusterRoleRefCount", len(bindDefinition.Spec.ClusterRoleBindings.ClusterRoleRefs),
+		"roleBindingCount", len(bindDefinition.Spec.RoleBindings))
+
 	// Check if controller should reconcile BindDefinition delete
 	if !bindDefinition.DeletionTimestamp.IsZero() {
+		logger.V(1).Info("BindDefinition marked for deletion, starting delete reconcile",
+			"bindDefinition", bindDefinition.Name,
+			"deletionTimestamp", bindDefinition.DeletionTimestamp)
 		result, err := r.reconcileDelete(ctx, bindDefinition)
 		if err != nil {
+			logger.Error(err, "Delete reconcile failed",
+				"bindDefinition", bindDefinition.Name)
 			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultError).Inc()
 			metrics.ReconcileErrors.WithLabelValues(metrics.ControllerBindDefinition, metrics.ErrorTypeAPI).Inc()
 		} else {
+			logger.V(1).Info("Delete reconcile completed successfully",
+				"bindDefinition", bindDefinition.Name)
 			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultFinalized).Inc()
+			// Clean up per-BD gauge series so they don't linger with stale values.
+			metrics.DeleteManagedResourceSeries(metrics.ControllerBindDefinition, bindDefinition.Name)
+			metrics.RoleRefsMissing.DeleteLabelValues(bindDefinition.Name)
+			metrics.NamespacesActive.DeleteLabelValues(bindDefinition.Name)
+			metrics.ExternalSAsReferenced.DeleteLabelValues(bindDefinition.Name)
 		}
 		return result, err
 	}
 
 	// Mark as Reconciling (kstatus) - this will be batched with final status update via SSA
+	logger.V(2).Info("Marking BindDefinition as Reconciling",
+		"bindDefinition", bindDefinition.Name,
+		"generation", bindDefinition.Generation)
 	conditions.MarkReconciling(bindDefinition, bindDefinition.Generation,
 		authnv1alpha1.ReconcilingReasonProgressing, authnv1alpha1.ReconcilingMessageProgressing)
 	bindDefinition.Status.ObservedGeneration = bindDefinition.Generation
 
 	if !controllerutil.ContainsFinalizer(bindDefinition, authnv1alpha1.BindDefinitionFinalizer) {
+		logger.V(2).Info("Adding finalizer to BindDefinition",
+			"bindDefinition", bindDefinition.Name)
 		old := bindDefinition.DeepCopy()
 		controllerutil.AddFinalizer(bindDefinition, authnv1alpha1.BindDefinitionFinalizer)
 		if err := r.client.Patch(ctx, bindDefinition, client.MergeFromWithOptions(old, client.MergeFromWithOptimisticLock{})); err != nil {
+			logger.Error(err, "Failed to add finalizer",
+				"bindDefinition", bindDefinition.Name)
 			r.markStalled(ctx, bindDefinition, err)
 			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultError).Inc()
 			metrics.ReconcileErrors.WithLabelValues(metrics.ControllerBindDefinition, metrics.ErrorTypeAPI).Inc()
@@ -263,6 +306,8 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	// Collect namespaces once for both create and update paths.
 	// This avoids duplicate API calls to list namespaces.
+	logger.V(2).Info("Collecting namespaces for BindDefinition",
+		"bindDefinition", bindDefinition.Name)
 	namespaceSet, err := r.collectNamespaces(ctx, bindDefinition)
 	if err != nil {
 		logger.Error(err, "Unable to collect namespaces", "bindDefinitionName", bindDefinition.Name)
@@ -271,41 +316,70 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerBindDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, fmt.Errorf("collect namespaces for BindDefinition %s: %w", bindDefinition.Name, err)
 	}
+	logger.V(2).Info("Namespaces collected",
+		"bindDefinition", bindDefinition.Name,
+		"totalNamespaces", len(namespaceSet))
 
 	activeNamespaces := r.filterActiveNamespaces(ctx, bindDefinition, namespaceSet)
+	logger.V(2).Info("Active namespaces filtered",
+		"bindDefinition", bindDefinition.Name,
+		"activeNamespaceCount", len(activeNamespaces),
+		"activeNamespaces", activeNamespaces)
 	metrics.NamespacesActive.WithLabelValues(bindDefinition.Name).Set(float64(len(activeNamespaces)))
 
 	// Reconcile all resources using ensure pattern (create-or-update via SSA)
+	logger.V(2).Info("Starting resource reconciliation",
+		"bindDefinition", bindDefinition.Name,
+		"subjects", len(bindDefinition.Spec.Subjects),
+		"clusterRoleRefs", len(bindDefinition.Spec.ClusterRoleBindings.ClusterRoleRefs),
+		"roleBindings", len(bindDefinition.Spec.RoleBindings))
 	missingRoleRefs, err := r.reconcileResources(ctx, bindDefinition, activeNamespaces)
 	if err != nil {
-		logger.Error(err, "Error occurred in reconcileResources")
+		logger.Error(err, "Error occurred in reconcileResources",
+			"bindDefinition", bindDefinition.Name)
 		r.markStalled(ctx, bindDefinition, err)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultError).Inc()
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerBindDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, err
 	}
+	logger.V(2).Info("Resource reconciliation completed",
+		"bindDefinition", bindDefinition.Name,
+		"missingRoleRefCount", missingRoleRefs)
 
 	// Mark Ready and apply final status via SSA (kstatus)
+	logger.V(2).Info("Marking BindDefinition as Ready and applying status",
+		"bindDefinition", bindDefinition.Name,
+		"generation", bindDefinition.Generation,
+		"missingRoleRefs", missingRoleRefs)
 	bindDefinition.Status.BindReconciled = true
 	r.markReady(ctx, bindDefinition)
 
 	// Apply status via SSA and surface errors so the controller retries if status patch fails
 	if err := r.applyStatus(ctx, bindDefinition); err != nil {
-		logger.Error(err, "Failed to apply BindDefinition status")
+		logger.Error(err, "Failed to apply BindDefinition status",
+			"bindDefinition", bindDefinition.Name)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultError).Inc()
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerBindDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, err
 	}
+	logger.V(2).Info("Status applied successfully",
+		"bindDefinition", bindDefinition.Name,
+		"observedGeneration", bindDefinition.Status.ObservedGeneration)
 
 	// Use a shorter requeue when role references are missing so the condition
 	// self-heals quickly once the referenced roles are created.
 	if missingRoleRefs > 0 {
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultDegraded).Inc()
 		logger.Info("Requeuing with shorter interval due to missing role references",
-			"missingCount", missingRoleRefs, "requeueAfter", RoleRefRequeueInterval)
+			"bindDefinition", bindDefinition.Name,
+			"missingCount", missingRoleRefs,
+			"requeueAfter", RoleRefRequeueInterval)
 		return ctrl.Result{RequeueAfter: RoleRefRequeueInterval}, nil
 	}
 
+	logger.V(1).Info("Reconcile completed successfully",
+		"bindDefinition", bindDefinition.Name,
+		"requeueAfter", DefaultRequeueInterval)
 	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultSuccess).Inc()
 	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
 }
@@ -321,42 +395,74 @@ func (r *BindDefinitionReconciler) reconcileResources(
 ) (int, error) {
 	logger := log.FromContext(ctx)
 
+	logger.V(2).Info("reconcileResources: Starting",
+		"bindDefinition", bindDefinition.Name,
+		"activeNamespaceCount", len(activeNamespaces))
+
 	// Validate role references exist - set condition but continue processing
+	logger.V(3).Info("reconcileResources: Validating role references",
+		"bindDefinition", bindDefinition.Name)
 	missingRoles := r.validateRoleReferences(ctx, bindDefinition, activeNamespaces)
 	missingCount := len(missingRoles)
 	metrics.RoleRefsMissing.WithLabelValues(bindDefinition.Name).Set(float64(missingCount))
+	bindDefinition.Status.MissingRoleRefs = missingRoles // Store names in status
+	logger.V(2).Info("reconcileResources: Role reference validation complete",
+		"bindDefinition", bindDefinition.Name,
+		"missingCount", missingCount,
+		"missingRoles", missingRoles)
 	if missingCount > 0 {
 		logger.Info("Some referenced roles do not exist - bindings will be created but may not be effective",
 			"bindDefinitionName", bindDefinition.Name, "missingRoles", missingRoles)
 		r.recorder.Eventf(bindDefinition, nil, corev1.EventTypeWarning, authnv1alpha1.EventReasonRoleRefNotFound, authnv1alpha1.EventActionValidate,
 			"Referenced roles not found: %v. Bindings will be created but ineffective until roles exist. Will requeue in %s.", missingRoles, RoleRefRequeueInterval)
 		conditions.MarkFalse(bindDefinition, authnv1alpha1.RoleRefValidCondition, bindDefinition.Generation,
-			authnv1alpha1.RoleRefInvalidReason, authnv1alpha1.RoleRefInvalidMessage)
+			authnv1alpha1.RoleRefInvalidReason, authnv1alpha1.RoleRefInvalidMessage, missingRoles)
 	} else {
 		conditions.MarkTrue(bindDefinition, authnv1alpha1.RoleRefValidCondition, bindDefinition.Generation,
 			authnv1alpha1.RoleRefValidReason, authnv1alpha1.RoleRefValidMessage)
 	}
 
 	// Ensure ServiceAccounts
-	generatedSAs, err := r.ensureServiceAccounts(ctx, bindDefinition)
+	logger.V(2).Info("reconcileResources: Ensuring ServiceAccounts",
+		"bindDefinition", bindDefinition.Name,
+		"subjectCount", len(bindDefinition.Spec.Subjects))
+	generatedSAs, externalSAs, err := r.ensureServiceAccounts(ctx, bindDefinition)
 	if err != nil {
 		return 0, fmt.Errorf("ensure ServiceAccounts: %w", err)
 	}
+	logger.V(2).Info("reconcileResources: ServiceAccounts ensured",
+		"bindDefinition", bindDefinition.Name,
+		"generatedCount", len(generatedSAs),
+		"externalCount", len(externalSAs))
 	// Update status with generated ServiceAccounts
 	if len(generatedSAs) > 0 {
 		bindDefinition.Status.GeneratedServiceAccounts = helpers.MergeSubjects(
 			bindDefinition.Status.GeneratedServiceAccounts, generatedSAs)
 	}
+	// Update status with external (pre-existing) ServiceAccounts
+	bindDefinition.Status.ExternalServiceAccounts = externalSAs
+	// Update metric for external SAs count
+	metrics.ExternalSAsReferenced.WithLabelValues(bindDefinition.Name).Set(float64(len(externalSAs)))
 
 	// Ensure ClusterRoleBindings (uses SSA - handles both create and update)
+	logger.V(2).Info("reconcileResources: Ensuring ClusterRoleBindings",
+		"bindDefinition", bindDefinition.Name,
+		"clusterRoleRefCount", len(bindDefinition.Spec.ClusterRoleBindings.ClusterRoleRefs))
 	if err := r.ensureClusterRoleBindings(ctx, bindDefinition); err != nil {
 		return 0, fmt.Errorf("ensure ClusterRoleBindings: %w", err)
 	}
+	logger.V(2).Info("reconcileResources: ClusterRoleBindings ensured",
+		"bindDefinition", bindDefinition.Name)
 
 	// Ensure RoleBindings (uses SSA - handles both create and update)
+	logger.V(2).Info("reconcileResources: Ensuring RoleBindings",
+		"bindDefinition", bindDefinition.Name,
+		"roleBindingSpecCount", len(bindDefinition.Spec.RoleBindings))
 	if err := r.ensureRoleBindings(ctx, bindDefinition); err != nil {
 		return 0, fmt.Errorf("ensure RoleBindings: %w", err)
 	}
+	logger.V(2).Info("reconcileResources: RoleBindings ensured",
+		"bindDefinition", bindDefinition.Name)
 
 	conditions.MarkTrue(bindDefinition, authnv1alpha1.CreateCondition, bindDefinition.Generation,
 		authnv1alpha1.CreateReason, authnv1alpha1.CreateMessage)
@@ -368,9 +474,15 @@ func (r *BindDefinitionReconciler) reconcileResources(
 	for _, rb := range bindDefinition.Spec.RoleBindings {
 		rbCount += (len(rb.ClusterRoleRefs) + len(rb.RoleRefs)) * len(activeNamespaces)
 	}
-	metrics.ManagedResources.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResourceClusterRoleBinding).Set(float64(crbCount))
-	metrics.ManagedResources.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResourceRoleBinding).Set(float64(rbCount))
-	metrics.ManagedResources.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResourceServiceAccount).Set(float64(len(generatedSAs)))
+	metrics.ManagedResources.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResourceClusterRoleBinding, bindDefinition.Name).Set(float64(crbCount))
+	logger.V(2).Info("reconcileResources: Complete",
+		"bindDefinition", bindDefinition.Name,
+		"crbCount", crbCount,
+		"rbCount", rbCount,
+		"generatedSACount", len(generatedSAs),
+		"missingRoleRefs", missingCount)
+	metrics.ManagedResources.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResourceRoleBinding, bindDefinition.Name).Set(float64(rbCount))
+	metrics.ManagedResources.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResourceServiceAccount, bindDefinition.Name).Set(float64(len(generatedSAs)))
 
 	return missingCount, nil
 }
@@ -536,6 +648,9 @@ func (r *BindDefinitionReconciler) validateServiceAccountNamespace(
 }
 
 // applyServiceAccount applies a ServiceAccount using SSA, creating or updating it declaratively.
+// Uses per-BD FieldOwner to ensure multiple BDs can independently manage ownerReferences
+// on shared ServiceAccounts without overwriting each other's entries.
+// The source-names annotation tracks all BDs managing this SA (comma-separated).
 func (r *BindDefinitionReconciler) applyServiceAccount(
 	ctx context.Context,
 	bindDef *authnv1alpha1.BindDefinition,
@@ -544,19 +659,40 @@ func (r *BindDefinitionReconciler) applyServiceAccount(
 ) error {
 	logger := log.FromContext(ctx)
 
+	// Read existing SA to merge source-names annotation (if SA already exists)
+	existingSA := &corev1.ServiceAccount{}
+	var sourceNames string
+	err := r.client.Get(ctx, types.NamespacedName{Name: subject.Name, Namespace: subject.Namespace}, existingSA)
+	switch {
+	case err == nil:
+		// SA exists - merge our BD name into existing source-names
+		existing := existingSA.Annotations[helpers.SourceNamesAnnotation]
+		sourceNames = helpers.MergeSourceNames(existing, bindDef.Name)
+	case apierrors.IsNotFound(err):
+		// New SA - just our BD name
+		sourceNames = bindDef.Name
+	default:
+		// Unexpected error
+		return fmt.Errorf("get existing ServiceAccount %s/%s: %w", subject.Namespace, subject.Name, err)
+	}
+
 	ac := pkgssa.ServiceAccountWith(subject.Name, subject.Namespace,
 		helpers.BuildResourceLabels(bindDef.Labels), automountToken).
-		WithOwnerReferences(ownerRefForBindDefinition(bindDef)).
-		WithAnnotations(helpers.BuildResourceAnnotations("BindDefinition", bindDef.Name))
+		WithOwnerReferences(saOwnerRefForBindDefinition(bindDef)).
+		WithAnnotations(helpers.BuildManagedSAAnnotations(sourceNames))
 
-	if err := pkgssa.ApplyServiceAccount(ctx, r.client, ac); err != nil {
+	// Use per-BD FieldOwner so each BD's ownerRef is tracked independently.
+	// Without this, SSA would remove BD-A's ownerRef when BD-B applies its ownerRef.
+	fieldOwner := pkgssa.FieldOwnerForBD(bindDef.Name)
+	if err := pkgssa.ApplyServiceAccountWithFieldOwner(ctx, r.client, ac, fieldOwner); err != nil {
 		logger.Error(err, "Failed to apply ServiceAccount",
 			"bindDefinitionName", bindDef.Name, "serviceAccount", subject.Name)
 		return fmt.Errorf("apply ServiceAccount %s/%s: %w", subject.Namespace, subject.Name, err)
 	}
 
 	logger.V(1).Info("Applied ServiceAccount",
-		"bindDefinitionName", bindDef.Name, "serviceAccount", subject.Name, "namespace", subject.Namespace)
+		"bindDefinitionName", bindDef.Name, "serviceAccount", subject.Name, "namespace", subject.Namespace,
+		"sourceNames", sourceNames)
 	metrics.RBACResourcesApplied.WithLabelValues(metrics.ResourceServiceAccount).Inc()
 	r.recorder.Eventf(bindDef, nil, corev1.EventTypeNormal, authnv1alpha1.EventReasonUpdate, authnv1alpha1.EventActionReconcile,
 		"Applied resource ServiceAccount/%s in namespace %s", subject.Name, subject.Namespace)
@@ -566,14 +702,18 @@ func (r *BindDefinitionReconciler) applyServiceAccount(
 
 // ensureServiceAccounts ensures all ServiceAccounts for the BindDefinition exist and are up-to-date.
 // Uses Server-Side Apply (SSA) so that create-or-update is handled declaratively.
-// Pre-existing ServiceAccounts (those not owned by this BindDefinition) are left
+// Pre-existing ServiceAccounts (those not owned by any BindDefinition) are left
 // untouched — the controller will NOT add an OwnerReference to them.
+// SAs already owned by another BindDefinition ARE updated via SSA to add this BD's
+// ownerRef, enabling shared ownership so that the SA survives individual BD deletions.
+// Returns the list of generated/managed SAs and the list of external (pre-existing) SAs.
 func (r *BindDefinitionReconciler) ensureServiceAccounts(
 	ctx context.Context,
 	bindDef *authnv1alpha1.BindDefinition,
-) ([]rbacv1.Subject, error) {
+) ([]rbacv1.Subject, []string, error) {
 	logger := log.FromContext(ctx)
 	var generatedSAs []rbacv1.Subject
+	var externalSAs []string
 
 	// Use the configured value from spec, defaulting to true for backward compatibility
 	automountToken := ptr.Deref(bindDef.Spec.AutomountServiceAccountToken, true)
@@ -586,34 +726,59 @@ func (r *BindDefinitionReconciler) ensureServiceAccounts(
 		// Validate namespace
 		ns, err := r.validateServiceAccountNamespace(ctx, bindDef.Name, subject.Namespace)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if ns == nil {
 			continue // Namespace not found or terminating, logged in validateServiceAccountNamespace
 		}
 
-		// Check if the ServiceAccount already exists and whether we own it.
+		// Check if the ServiceAccount already exists and whether any BindDefinition owns it.
 		// Pre-existing SAs (created outside of any BindDefinition) must NOT be
 		// adopted — we skip SSA so we never add an OwnerReference to them.
+		// SAs owned by another BindDefinition are updated via SSA to add this BD's
+		// ownerRef, enabling shared ownership for proper GC lifecycle.
 		existing := &corev1.ServiceAccount{}
 		err = r.client.Get(ctx, types.NamespacedName{Name: subject.Name, Namespace: subject.Namespace}, existing)
 		if err != nil && !apierrors.IsNotFound(err) {
-			return nil, fmt.Errorf("get ServiceAccount %s/%s: %w", subject.Namespace, subject.Name, err)
+			return nil, nil, fmt.Errorf("get ServiceAccount %s/%s: %w", subject.Namespace, subject.Name, err)
 		}
 
 		saExists := err == nil
-		if saExists && !metav1.IsControlledBy(existing, bindDef) {
-			// SA exists but is not owned by this BD — do not adopt it.
-			logger.V(1).Info("Skipping pre-existing ServiceAccount (not owned by this BindDefinition)",
+		if saExists && !isOwnedByBindDefinition(existing.OwnerReferences) {
+			// SA exists but is not owned by any BD — do not adopt it.
+			saRef := fmt.Sprintf("%s/%s", subject.Namespace, subject.Name)
+			externalSAs = append(externalSAs, saRef)
+			logger.V(1).Info("Skipping pre-existing ServiceAccount (not owned by any BindDefinition)",
 				"bindDefinitionName", bindDef.Name,
 				"serviceAccount", subject.Name, "namespace", subject.Namespace)
 			metrics.ServiceAccountSkippedPreExisting.WithLabelValues(bindDef.Name).Inc()
+			r.recorder.Eventf(bindDef, nil, corev1.EventTypeNormal,
+				authnv1alpha1.EventReasonServiceAccountPreExisting, authnv1alpha1.EventActionReconcile,
+				"Using pre-existing ServiceAccount %s/%s (not managed by any BindDefinition)",
+				subject.Namespace, subject.Name)
+			// Add tracking annotation to external SA
+			if err := r.addExternalSAReference(ctx, existing, bindDef.Name); err != nil {
+				logger.Error(err, "Failed to add tracking annotation to external ServiceAccount",
+					"serviceAccount", subject.Name, "namespace", subject.Namespace)
+				// Non-fatal: continue reconciliation even if annotation update fails
+			}
 			continue
+		}
+
+		// If SA exists and is owned by another BD, emit a shared-ownership event
+		if saExists && !hasOwnerRef(existing, bindDef) {
+			logger.V(1).Info("ServiceAccount is owned by another BindDefinition, adding shared ownership",
+				"bindDefinitionName", bindDef.Name,
+				"serviceAccount", subject.Name, "namespace", subject.Namespace)
+			r.recorder.Eventf(bindDef, nil, corev1.EventTypeNormal,
+				authnv1alpha1.EventReasonServiceAccountShared, authnv1alpha1.EventActionReconcile,
+				"Adding shared ownership to ServiceAccount %s/%s (already owned by another BindDefinition)",
+				subject.Namespace, subject.Name)
 		}
 
 		// Apply ServiceAccount via SSA — creates or updates declaratively
 		if err := r.applyServiceAccount(ctx, bindDef, subject, automountToken); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		if !helpers.SubjectExists(generatedSAs, subject) {
@@ -622,9 +787,9 @@ func (r *BindDefinitionReconciler) ensureServiceAccounts(
 	}
 
 	logger.V(1).Info("ServiceAccount reconciliation complete",
-		"bindDefinitionName", bindDef.Name, "generatedSAs", len(generatedSAs))
+		"bindDefinitionName", bindDef.Name, "generatedSAs", len(generatedSAs), "externalSAs", len(externalSAs))
 
-	return generatedSAs, nil
+	return generatedSAs, externalSAs, nil
 }
 
 // applyStatus applies status updates using Server-Side Apply (SSA).
@@ -649,12 +814,16 @@ func (r *BindDefinitionReconciler) reconcileDelete(
 	// Remove per-BD gauge metrics so they don't persist after deletion.
 	metrics.RoleRefsMissing.DeleteLabelValues(bindDefinition.Name)
 	metrics.NamespacesActive.DeleteLabelValues(bindDefinition.Name)
+	metrics.ExternalSAsReferenced.DeleteLabelValues(bindDefinition.Name)
 
 	conditions.MarkTrue(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation,
 		authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
 	if err := r.applyStatus(ctx, bindDefinition); err != nil {
 		return ctrl.Result{}, fmt.Errorf("apply delete condition for BindDefinition %s: %w", bindDefinition.Name, err)
 	}
+
+	// Clean up tracking annotations from external ServiceAccounts
+	r.cleanupExternalSAReferences(ctx, bindDefinition)
 
 	// Delete ServiceAccounts
 	if err := r.deleteSubjectServiceAccounts(ctx, bindDefinition); err != nil {

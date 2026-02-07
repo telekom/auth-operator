@@ -103,12 +103,12 @@ var _ = BeforeSuite(func() {
 
 var _ = AfterSuite(func() {
 	By("tearing down the test environment")
-	// Best-effort stop: log but don't fail if the kube-apiserver is slow to shut down,
-	// since all specs have already passed by this point.
 	if testEnv != nil {
 		err := testEnv.Stop()
 		if err != nil {
-			// Log but don't fail — all specs already passed; this is only cleanup.
+			// Log stop errors via GinkgoWriter for visibility, but don't fail the suite.
+			// envtest shutdown can timeout on busy systems even when tests pass.
+			// This is a best-effort cleanup - the OS will reclaim resources regardless.
 			_, _ = fmt.Fprintf(GinkgoWriter, "warning: testEnv.Stop() returned error: %v\n", err)
 		}
 	}

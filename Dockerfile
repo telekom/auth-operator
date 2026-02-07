@@ -1,5 +1,8 @@
 # Build stage
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS build
+# Go version is read from go.mod via GO_VERSION build arg
+# Default fallback if not provided (should match go.mod)
+ARG GO_VERSION=1.25
+FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine AS build
 
 ARG TARGETOS
 ARG TARGETARCH

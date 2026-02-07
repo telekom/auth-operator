@@ -135,6 +135,16 @@ func BindDefinitionStatusFrom(status *authv1alpha1.BindDefinitionStatus) *ac.Bin
 		result.WithGeneratedServiceAccounts(sa)
 	}
 
+	// Set MissingRoleRefs
+	for _, ref := range status.MissingRoleRefs {
+		result.WithMissingRoleRefs(ref)
+	}
+
+	// Set ExternalServiceAccounts
+	for _, sa := range status.ExternalServiceAccounts {
+		result.WithExternalServiceAccounts(sa)
+	}
+
 	// Set conditions
 	for i := range status.Conditions {
 		result.WithConditions(ConditionFrom(&status.Conditions[i]))

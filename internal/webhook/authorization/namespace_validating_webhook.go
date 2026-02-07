@@ -40,6 +40,7 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 	if req.Kind.Kind != "Namespace" {
 		logger.V(4).Info("webhook request for non-Namespace resource - ignoring",
 			"kind", req.Kind.Kind)
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
 		return admission.Allowed("")
 	}
 
@@ -53,6 +54,7 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 		logger.Info("AUDIT: webhook bypass granted",
 			"namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username,
 			"bypassReason", bypassResult.Reason, "webhook", "validator")
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
 		return admission.Allowed("")
 	}
 
@@ -74,6 +76,7 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 		err = v.Decoder.DecodeRaw(req.OldObject, &ns)
 	default:
 		logger.V(3).Info("unknown operation type - allowing", "namespace", req.Name, "operation", req.Operation)
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
 		return admission.Allowed("")
 	}
 
@@ -117,6 +120,7 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 			if oldExists != newExists || oldValue != newValue {
 				logger.V(2).Info("label modification denied",
 					"namespace", req.Name, "label", key, "oldValue", oldValue, "newValue", newValue)
+				metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultDenied).Inc()
 				return admission.Denied(fmt.Sprintf("Modification of label '%s' is not allowed", key))
 			}
 		}

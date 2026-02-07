@@ -19,10 +19,6 @@ permissions:
   contents: read
   pull-requests: write
 
-env:
-  GO_VERSION: "1.25.7"
-  KIND_VERSION: "v0.31.0"
-
 jobs:
   output-delta:
     name: Generate Output Delta
@@ -33,6 +29,9 @@ jobs:
         with:
           path: pr-branch
           fetch-depth: 0 # Needed to fetch tags
+
+      - name: Load versions from versions.env
+        run: grep -v '^#' pr-branch/versions.env | grep -v '^$' >> $GITHUB_ENV
 
       - name: Checkout main branch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -71,7 +70,7 @@ jobs:
       - name: Setup Go Environment
         uses: ./pr-branch/.github/actions/setup-go-env
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: pr-branch/go.mod
           install-kind: 'true'
           kind-version: ${{ env.KIND_VERSION }}
           cache-dependency-path: pr-branch/go.sum
@@ -143,6 +142,24 @@ jobs:
 
           # Capture generated resources (yq strips volatile K8s internal fields)
           bash ../pr-branch/hack/ci/capture-operator-output.sh /tmp/main-output
+
+          # Capture controller logs before undeploy (they're lost once pods are deleted)
+          mkdir -p /tmp/controller-logs
+          echo "Capturing main branch controller logs (FULL - no truncation)..."
+          for ns in auth-operator-system kube-system default; do
+            # Try multiple methods to capture logs (NO --tail limit = capture ALL)
+            kubectl logs -n $ns -l control-plane=controller-manager >> /tmp/controller-logs/main-${ns}-controller.log 2>&1 || true
+            kubectl logs -n $ns -l app.kubernetes.io/name=auth-operator >> /tmp/controller-logs/main-${ns}-controller.log 2>&1 || true
+            
+            # Also try getting logs by pod directly
+            PODS=$(kubectl get pods -n $ns -l control-plane=controller-manager --no-headers -o custom-columns=":metadata.name" 2>/dev/null || true)
+            for pod in $PODS; do
+              echo "=== Pod: $pod in $ns (main) ===" >> /tmp/controller-logs/main-${ns}-controller.log
+              kubectl logs -n $ns "$pod" >> /tmp/controller-logs/main-${ns}-controller.log 2>&1 || true
+            done
+            
+            kubectl logs -n $ns -l control-plane=webhook-server > /tmp/controller-logs/main-${ns}-webhook.log 2>/dev/null || true
+          done
 
           # Cleanup samples -- delete CRs and wait for finalizers to be processed before undeploying
           kubectl delete -k config/samples/ --ignore-not-found --timeout=60s 2>/dev/null || true
@@ -259,6 +276,21 @@ jobs:
 
           bash ../pr-branch/hack/ci/capture-operator-output.sh /tmp/tag-output
 
+          # Capture controller logs before undeploy (they're lost once pods are deleted)
+          echo "Capturing tag branch controller logs (FULL - no truncation)..."
+          for ns in auth-operator-system kube-system default; do
+            kubectl logs -n $ns -l control-plane=controller-manager >> /tmp/controller-logs/tag-${ns}-controller.log 2>&1 || true
+            kubectl logs -n $ns -l app.kubernetes.io/name=auth-operator >> /tmp/controller-logs/tag-${ns}-controller.log 2>&1 || true
+            
+            PODS=$(kubectl get pods -n $ns -l control-plane=controller-manager --no-headers -o custom-columns=":metadata.name" 2>/dev/null || true)
+            for pod in $PODS; do
+              echo "=== Pod: $pod in $ns (tag) ===" >> /tmp/controller-logs/tag-${ns}-controller.log
+              kubectl logs -n $ns "$pod" >> /tmp/controller-logs/tag-${ns}-controller.log 2>&1 || true
+            done
+            
+            kubectl logs -n $ns -l control-plane=webhook-server > /tmp/controller-logs/tag-${ns}-webhook.log 2>/dev/null || true
+          done
+
           kubectl delete -k config/samples/ --ignore-not-found --timeout=60s 2>/dev/null || true
           echo "Waiting for CRs to be fully deleted..."
           kubectl wait --for=delete roledefinition --all --timeout=60s 2>/dev/null || true
@@ -316,19 +348,41 @@ jobs:
         run: |
           mkdir -p /tmp/controller-logs
 
-          echo "Collecting controller logs..."
+          echo "Collecting controller logs (PR branch — FULL capture, no truncation)..."
+          
+          # Debug: Show what pods exist
+          echo "=== All pods ===" > /tmp/controller-logs/debug-pods.txt
+          kubectl get pods -A -o wide >> /tmp/controller-logs/debug-pods.txt 2>&1 || true
+          
+          # Try multiple label selectors to find controller pods (NO --tail limit = capture ALL)
           for ns in auth-operator-system kube-system default; do
-            kubectl logs -n $ns -l control-plane=controller-manager --tail=5000 > /tmp/controller-logs/${ns}-controller.log 2>/dev/null || true
-            kubectl logs -n $ns -l app.kubernetes.io/name=auth-operator --tail=5000 >> /tmp/controller-logs/${ns}-controller.log 2>/dev/null || true
+            echo "Checking namespace: $ns"
+            
+            # Method 1: By control-plane label
+            kubectl logs -n $ns -l control-plane=controller-manager >> /tmp/controller-logs/pr-${ns}-controller.log 2>&1 || true
+            
+            # Method 2: By app.kubernetes.io/name label  
+            kubectl logs -n $ns -l app.kubernetes.io/name=auth-operator >> /tmp/controller-logs/pr-${ns}-controller.log 2>&1 || true
+            
+            # Method 3: By deployment name directly (use -l selector on deployment, then get pods)
+            PODS=$(kubectl get pods -n $ns -l control-plane=controller-manager --no-headers -o custom-columns=":metadata.name" 2>/dev/null || true)
+            for pod in $PODS; do
+              echo "=== Pod: $pod in $ns (PR) ===" >> /tmp/controller-logs/pr-${ns}-controller.log
+              kubectl logs -n $ns "$pod" >> /tmp/controller-logs/pr-${ns}-controller.log 2>&1 || true
+            done
           done
 
-          # Get webhook server logs
+          # Get webhook server logs (PR branch - FULL)
           for ns in auth-operator-system kube-system default; do
-            kubectl logs -n $ns -l control-plane=webhook-server --tail=5000 > /tmp/controller-logs/${ns}-webhook.log 2>/dev/null || true
+            kubectl logs -n $ns -l control-plane=webhook-server > /tmp/controller-logs/pr-${ns}-webhook.log 2>/dev/null || true
           done
 
-          # Get all events
-          kubectl get events -A --sort-by='.lastTimestamp' > /tmp/controller-logs/all-events.txt 2>/dev/null || true
+          # Get ALL events (no limit)
+          echo "=== All Events (sorted by time) ===" > /tmp/controller-logs/all-events.txt
+          kubectl get events -A --sort-by='.lastTimestamp' -o wide >> /tmp/controller-logs/all-events.txt 2>/dev/null || true
+          echo "" >> /tmp/controller-logs/all-events.txt
+          echo "=== Events YAML (full detail) ===" >> /tmp/controller-logs/all-events.txt
+          kubectl get events -A -o yaml >> /tmp/controller-logs/all-events.txt 2>/dev/null || true
 
           # Get pod statuses
           kubectl get pods -A > /tmp/controller-logs/all-pods.txt 2>/dev/null || true
@@ -363,9 +417,9 @@ jobs:
             fi
           done
 
-          echo "## Warning/Error Events" >> "$ERROR_LOG"
+          echo "## Warning/Error Events (ALL)" >> "$ERROR_LOG"
           echo '```' >> "$ERROR_LOG"
-          grep -iE '(Warning|Error|Failed|BackOff)' /tmp/controller-logs/all-events.txt 2>/dev/null | tail -30 >> "$ERROR_LOG" || echo "No warning events found" >> "$ERROR_LOG"
+          grep -iE '(Warning|Error|Failed|BackOff)' /tmp/controller-logs/all-events.txt 2>/dev/null >> "$ERROR_LOG" || echo "No warning events found" >> "$ERROR_LOG"
           echo '```' >> "$ERROR_LOG"
           echo "" >> "$ERROR_LOG"
 

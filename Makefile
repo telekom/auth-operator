@@ -29,6 +29,9 @@ else
 GOBIN=$(shell go env GOBIN)
 endif
 
+# Extract Go version from go.mod (single source of truth)
+GO_VERSION := $(shell grep -E '^go [0-9]+\.[0-9]+' go.mod | awk '{print $$2}' | cut -d. -f1,2)
+
 # CONTAINER_TOOL defines the container tool to be used for building images.
 # Be aware that the target commands are only tested with Docker which is
 # scaffolded by default. However, you might want to replace it to use other
@@ -54,7 +57,7 @@ help: ## Display this help.
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	$(CONTROLLER_GEN) crd paths="./api/..." output:crd:artifacts:config=config/crd/bases
-	$(CONTROLLER_GEN) rbac:roleName=manager-role webhook paths="./api/..." paths="./internal/..."
+	$(CONTROLLER_GEN) rbac:roleName=manager-role webhook paths="{./api/...,./internal/...}"
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, DeepCopyObject, and ApplyConfiguration implementations.

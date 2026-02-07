@@ -393,7 +393,7 @@ var _ = Describe("BindDefinition Helpers", func() {
 				recorder: recorder,
 			}
 
-			_, err := reconciler.ensureServiceAccounts(ctx, bindDef)
+			_, _, err := reconciler.ensureServiceAccounts(ctx, bindDef)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Verify ServiceAccount was created with automountServiceAccountToken=true (backward compatibility)
@@ -436,7 +436,7 @@ var _ = Describe("BindDefinition Helpers", func() {
 				recorder: recorder,
 			}
 
-			_, err := reconciler.ensureServiceAccounts(ctx, bindDef)
+			_, _, err := reconciler.ensureServiceAccounts(ctx, bindDef)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Verify ServiceAccount was created with automountServiceAccountToken=true
@@ -479,7 +479,7 @@ var _ = Describe("BindDefinition Helpers", func() {
 				recorder: recorder,
 			}
 
-			_, err := reconciler.ensureServiceAccounts(ctx, bindDef)
+			_, _, err := reconciler.ensureServiceAccounts(ctx, bindDef)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Verify ServiceAccount was created with automountServiceAccountToken=false
@@ -542,7 +542,7 @@ var _ = Describe("BindDefinition Helpers", func() {
 			}
 
 			// ensureServiceAccounts handles both create and update
-			_, err := reconciler.ensureServiceAccounts(ctx, bindDef)
+			_, _, err := reconciler.ensureServiceAccounts(ctx, bindDef)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Verify ServiceAccount was updated with automountServiceAccountToken=true
@@ -603,7 +603,7 @@ var _ = Describe("BindDefinition Helpers", func() {
 			}
 
 			// ensureServiceAccounts handles both create and update
-			_, err := reconciler.ensureServiceAccounts(ctx, bindDef)
+			_, _, err := reconciler.ensureServiceAccounts(ctx, bindDef)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Verify ServiceAccount was updated with automountServiceAccountToken=false
@@ -841,6 +841,40 @@ func TestDeleteServiceAccountUnit(t *testing.T) {
 		r := &BindDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
 
 		result, err := r.deleteServiceAccount(ctx, bindDef, "my-sa", "test-ns")
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(result).To(Equal(deleteResultDeleted))
+	})
+
+	t.Run("deletes SA with non-controller ownerRef", func(t *testing.T) {
+		g := NewWithT(t)
+
+		isNotController := false
+		bindDef := &authorizationv1alpha1.BindDefinition{
+			TypeMeta: metav1.TypeMeta{
+				APIVersion: authorizationv1alpha1.GroupVersion.String(),
+				Kind:       "BindDefinition",
+			},
+			ObjectMeta: metav1.ObjectMeta{Name: "nc-sa-bd", UID: "nc-sa-uid"},
+			Spec: authorizationv1alpha1.BindDefinitionSpec{
+				TargetName: "nc-sa-target",
+				Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Name: "nc-sa", Namespace: "test-ns"}},
+			},
+		}
+
+		sa := &corev1.ServiceAccount{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "nc-sa",
+				Namespace: "test-ns",
+				OwnerReferences: []metav1.OwnerReference{
+					{APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: "BindDefinition", Name: "nc-sa-bd", UID: "nc-sa-uid", Controller: &isNotController},
+				},
+			},
+		}
+
+		c := fake.NewClientBuilder().WithScheme(s).WithObjects(bindDef, sa).Build()
+		r := &BindDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+		result, err := r.deleteServiceAccount(ctx, bindDef, "nc-sa", "test-ns")
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(result).To(Equal(deleteResultDeleted))
 	})
@@ -1195,7 +1229,7 @@ func TestEnsureServiceAccountsUnit(t *testing.T) {
 			Build()
 		r := &BindDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
 
-		generatedSAs, err := r.ensureServiceAccounts(ctx, bindDef)
+		generatedSAs, _, err := r.ensureServiceAccounts(ctx, bindDef)
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(generatedSAs).To(HaveLen(1))
 		g.Expect(generatedSAs[0].Name).To(Equal("new-sa"))
@@ -1229,7 +1263,7 @@ func TestEnsureServiceAccountsUnit(t *testing.T) {
 			Build()
 		r := &BindDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
 
-		generatedSAs, err := r.ensureServiceAccounts(ctx, bindDef)
+		generatedSAs, _, err := r.ensureServiceAccounts(ctx, bindDef)
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(generatedSAs).To(BeEmpty())
 	})
@@ -1257,7 +1291,7 @@ func TestEnsureServiceAccountsUnit(t *testing.T) {
 			Build()
 		r := &BindDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
 
-		generatedSAs, err := r.ensureServiceAccounts(ctx, bindDef)
+		generatedSAs, _, err := r.ensureServiceAccounts(ctx, bindDef)
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(generatedSAs).To(BeEmpty())
 	})

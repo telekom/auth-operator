@@ -294,12 +294,24 @@ For detailed development instructions, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Additional Documentation
 
+### Operations
+- **[Operator Guide](./docs/operator-guide.md)** — Installation, configuration, HA, upgrades, and day-to-day operations
+- **[Debugging Guide](./docs/debugging-guide.md)** — Troubleshooting, diagnostics, and log analysis
+- **[Metrics and Alerting](./docs/metrics-and-alerting.md)** — Prometheus metrics and recommended alert rules
+
+### Reference
 - **[API Reference](./docs/api-reference/authorization.t-caas.telekom.com.md)** — Full CRD specification
 - **[SSA Architecture](./docs/ssa-architecture.md)** — Server-Side Apply patterns, field ownership, and conflict resolution
 - **[Condition Lifecycle](./docs/condition-lifecycle.md)** — Condition types, state transitions, and kstatus compliance
 - **[Helm Chart](./chart/auth-operator/README.md)** — Helm installation and configuration
+
+### Platform
 - **[T-CaaS Integration](./docs/t-caas-integration.md)** — Platform-specific role mappings and group conventions
+- **[k8s-breakglass Integration](./docs/breakglass-integration.md)** — Integration with temporary privilege escalation system
 - **[Security Policy](.github/SECURITY.md)** — Vulnerability reporting
+
+### Related Projects
+- **[k8s-breakglass](https://github.com/telekom/k8s-breakglass)** — Temporary privilege escalation system for Kubernetes
 
 ---
 

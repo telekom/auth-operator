@@ -39,8 +39,24 @@ helm upgrade auth-operator chart/auth-operator \
 
 ### Kustomize
 
-The `config/prometheus/monitor.yaml` defines a ServiceMonitor that can be
-included via `config/default/kustomization.yaml`.
+The `config/prometheus/monitor.yaml` defines a ServiceMonitor. To include it,
+add `../../prometheus` to your overlay's `resources:` list:
+
+```yaml
+# In config/overlays/dev/kustomization.yaml or config/overlays/production/kustomization.yaml
+resources:
+- ../../base
+- ../../prometheus  # Add this line to enable ServiceMonitor
+```
+
+Alternatively, you can add the ServiceMonitor directly to your overlay:
+
+```yaml
+# In your overlay's kustomization.yaml
+resources:
+- ../../base
+- ../../prometheus/monitor.yaml
+```
 
 ---
 
@@ -52,7 +68,7 @@ included via `config/default/kustomization.yaml`.
 |--------|------|--------|-------------|
 | `auth_operator_reconcile_total` | Counter | `controller`, `result` | Total reconciliations. `result` is one of `success`, `error`, `requeue`, `skipped`, `finalized`, `degraded`. |
 | `auth_operator_reconcile_duration_seconds` | Histogram | `controller` | Wall-clock duration of each reconciliation. |
-| `auth_operator_reconcile_errors_total` | Counter | `controller`, `error_type` | Error count categorised by type: `api`, `validation`, `conflict`, `not_found`, `internal`. |
+| `auth_operator_reconcile_errors_total` | Counter | `controller`, `error_type` | Error count categorised by type: `api`, `validation`, `internal`. |
 
 ### RBAC Resource Operations
 
@@ -60,7 +76,7 @@ included via `config/default/kustomization.yaml`.
 |--------|------|--------|-------------|
 | `auth_operator_rbac_resources_applied_total` | Counter | `resource_type` | Resources created or updated via SSA. Types: `ClusterRole`, `Role`, `ClusterRoleBinding`, `RoleBinding`, `ServiceAccount`. |
 | `auth_operator_rbac_resources_deleted_total` | Counter | `resource_type` | Resources deleted during finalizer cleanup. |
-| `auth_operator_managed_resources` | Gauge | `controller`, `resource_type` | Current number of managed resources from the last successful reconciliation. |
+| `auth_operator_managed_resources` | Gauge | `controller`, `resource_type`, `name` | Current number of managed resources per source resource (BindDefinition). Use `sum by (resource_type)(…)` for cluster-wide totals. |
 
 ### BindDefinition Health
 
@@ -194,7 +210,7 @@ thresholds and `for` durations to your environment.
 ```yaml
 - alert: AuthOperatorManagedResourceDrop
   expr: |
-    delta(auth_operator_managed_resources[10m]) < -5
+    delta(sum by (controller, resource_type)(auth_operator_managed_resources)[10m:]) < -5
   for: 5m
   labels:
     severity: warning

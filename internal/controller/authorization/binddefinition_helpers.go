@@ -3,6 +3,7 @@ package authorization
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -23,6 +24,7 @@ import (
 
 // ownerRefForBindDefinition creates an OwnerReference ApplyConfiguration for a BindDefinition.
 // Uses hardcoded GVK to avoid empty APIVersion/Kind after client.Get() (TypeMeta is not populated by the API server).
+// This creates a controller ownerRef — used for CRBs and RBs where each binding is owned by exactly one BD.
 func ownerRefForBindDefinition(bindDef *authnv1alpha1.BindDefinition) *metav1ac.OwnerReferenceApplyConfiguration {
 	return pkgssa.OwnerReference(
 		authnv1alpha1.GroupVersion.String(),
@@ -32,6 +34,33 @@ func ownerRefForBindDefinition(bindDef *authnv1alpha1.BindDefinition) *metav1ac.
 		true, // controller
 		true, // blockOwnerDeletion
 	)
+}
+
+// saOwnerRefForBindDefinition creates a non-controller OwnerReference for ServiceAccounts.
+// Multiple BindDefinitions may reference the same SA, so we use controller=false to allow
+// shared ownership. With non-controller ownerRefs, Kubernetes GC only deletes the SA when
+// ALL owner BDs are gone — preventing premature deletion when one of several owners is removed.
+func saOwnerRefForBindDefinition(bindDef *authnv1alpha1.BindDefinition) *metav1ac.OwnerReferenceApplyConfiguration {
+	return pkgssa.OwnerReference(
+		authnv1alpha1.GroupVersion.String(),
+		"BindDefinition",
+		bindDef.Name,
+		bindDef.UID,
+		false, // controller — shared ownership, no single controller
+		false, // blockOwnerDeletion — let GC handle lifecycle naturally
+	)
+}
+
+// hasOwnerRef checks if the object has an ownerReference pointing to the given owner (by UID).
+// Unlike metav1.IsControlledBy, this matches any ownerRef regardless of the controller flag.
+func hasOwnerRef(obj, owner metav1.ObjectMetaAccessor) bool {
+	ownerUID := owner.(metav1.Object).GetUID()
+	for _, ref := range obj.(metav1.Object).GetOwnerReferences() {
+		if ref.UID == ownerUID {
+			return true
+		}
+	}
+	return false
 }
 
 // logStatusApplyError logs a status apply error without failing the operation.
@@ -88,7 +117,7 @@ const (
 	deleteResultNoOwnerRef
 )
 
-// deleteServiceAccount attempts to delete a service account if it has a controller reference.
+// deleteServiceAccount attempts to delete a service account if it has an ownerReference.
 // Returns the result of the deletion and any error encountered.
 func (r *BindDefinitionReconciler) deleteServiceAccount(
 	ctx context.Context,
@@ -119,12 +148,38 @@ func (r *BindDefinitionReconciler) deleteServiceAccount(
 	}
 
 	if isReferenced {
-		logger.V(2).Info("ServiceAccount is referenced by other BindDefinitions - NOT deleting",
+		logger.V(2).Info("ServiceAccount is referenced by other BindDefinitions - NOT deleting, updating source-names",
 			"bindDefinitionName", bindDef.Name, "serviceAccount", sa.Name, "namespace", sa.Namespace)
+
+		// Remove our BD name from the source-names annotation
+		if sa.Annotations != nil {
+			oldSourceNames := sa.Annotations[helpers.SourceNamesAnnotation]
+			newSourceNames := helpers.RemoveSourceName(oldSourceNames, bindDef.Name)
+			if newSourceNames != oldSourceNames {
+				if sa.Annotations == nil {
+					sa.Annotations = make(map[string]string)
+				}
+				sa.Annotations[helpers.SourceNamesAnnotation] = newSourceNames
+				if err := r.client.Update(ctx, sa); err != nil {
+					logger.Error(err, "Failed to update source-names annotation on retained ServiceAccount",
+						"bindDefinitionName", bindDef.Name, "serviceAccount", sa.Name, "namespace", sa.Namespace)
+					// Non-fatal - continue with deletion cleanup
+				} else {
+					logger.V(2).Info("Updated source-names annotation on retained ServiceAccount",
+						"bindDefinitionName", bindDef.Name, "serviceAccount", sa.Name,
+						"oldSourceNames", oldSourceNames, "newSourceNames", newSourceNames)
+				}
+			}
+		}
+
+		r.recorder.Eventf(bindDef, nil, corev1.EventTypeNormal,
+			authnv1alpha1.EventReasonServiceAccountRetained, authnv1alpha1.EventActionDelete,
+			"Retained ServiceAccount %s/%s (still referenced by other BindDefinitions)",
+			sa.Namespace, sa.Name)
 		return deleteResultNoOwnerRef, nil
 	}
 
-	if !metav1.IsControlledBy(sa, bindDef) {
+	if !hasOwnerRef(sa, bindDef) {
 		r.recorder.Eventf(bindDef, nil, corev1.EventTypeNormal, authnv1alpha1.EventReasonDeletion, authnv1alpha1.EventActionDelete,
 			"Not deleting target resource ServiceAccount/%s in namespace %s because we do not have OwnerRef",
 			saName, saNamespace)
@@ -330,4 +385,180 @@ func (r *BindDefinitionReconciler) resolveRoleBindingNamespaces(
 	}
 
 	return namespaces, nil
+}
+
+// addExternalSAReference adds the BindDefinition name to the referenced-by annotation
+// on an external ServiceAccount. This tracks which BDs reference pre-existing SAs.
+func (r *BindDefinitionReconciler) addExternalSAReference(
+	ctx context.Context,
+	sa *corev1.ServiceAccount,
+	bdName string,
+) error {
+	logger := log.FromContext(ctx)
+
+	// Get current annotation value
+	current := ""
+	if sa.Annotations != nil {
+		current = sa.Annotations[authnv1alpha1.AnnotationKeyReferencedBy]
+	}
+
+	// Parse existing references and check if already present
+	refs := parseReferencedBy(current)
+	for _, ref := range refs {
+		if ref == bdName {
+			// Already referenced, nothing to do
+			return nil
+		}
+	}
+
+	// Add our reference
+	refs = append(refs, bdName)
+	newValue := strings.Join(refs, ",")
+
+	// Patch the ServiceAccount to add/update the annotation
+	old := sa.DeepCopy()
+	if sa.Annotations == nil {
+		sa.Annotations = make(map[string]string)
+	}
+	sa.Annotations[authnv1alpha1.AnnotationKeyReferencedBy] = newValue
+
+	if err := r.client.Patch(ctx, sa, sigs_client.MergeFrom(old)); err != nil {
+		return fmt.Errorf("patch ServiceAccount %s/%s to add referenced-by annotation: %w",
+			sa.Namespace, sa.Name, err)
+	}
+
+	logger.V(1).Info("Added referenced-by annotation to external ServiceAccount",
+		"serviceAccount", sa.Name, "namespace", sa.Namespace, "bindDefinition", bdName)
+	r.recorder.Eventf(sa, nil, corev1.EventTypeNormal,
+		authnv1alpha1.EventReasonExternalSATracked, authnv1alpha1.EventActionReconcile,
+		"BindDefinition %s now references this ServiceAccount", bdName)
+
+	return nil
+}
+
+// removeExternalSAReference removes the BindDefinition name from the referenced-by annotation
+// on an external ServiceAccount. If no references remain, the annotation is removed entirely.
+func (r *BindDefinitionReconciler) removeExternalSAReference(
+	ctx context.Context,
+	saNamespace, saName, bdName string,
+) error {
+	logger := log.FromContext(ctx)
+
+	sa := &corev1.ServiceAccount{}
+	err := r.client.Get(ctx, types.NamespacedName{Name: saName, Namespace: saNamespace}, sa)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			// SA no longer exists, nothing to clean up
+			return nil
+		}
+		return fmt.Errorf("get ServiceAccount %s/%s: %w", saNamespace, saName, err)
+	}
+
+	// Check if annotation exists
+	if sa.Annotations == nil {
+		return nil // No annotations, nothing to remove
+	}
+	current, exists := sa.Annotations[authnv1alpha1.AnnotationKeyReferencedBy]
+	if !exists {
+		return nil // Annotation doesn't exist
+	}
+
+	// Parse and remove our reference
+	refs := parseReferencedBy(current)
+	newRefs := make([]string, 0, len(refs))
+	found := false
+	for _, ref := range refs {
+		if ref == bdName {
+			found = true
+			continue
+		}
+		newRefs = append(newRefs, ref)
+	}
+
+	if !found {
+		return nil // We weren't in the list anyway
+	}
+
+	// Patch the ServiceAccount to update/remove the annotation
+	old := sa.DeepCopy()
+	if len(newRefs) == 0 {
+		delete(sa.Annotations, authnv1alpha1.AnnotationKeyReferencedBy)
+	} else {
+		sa.Annotations[authnv1alpha1.AnnotationKeyReferencedBy] = strings.Join(newRefs, ",")
+	}
+
+	if err := r.client.Patch(ctx, sa, sigs_client.MergeFrom(old)); err != nil {
+		return fmt.Errorf("patch ServiceAccount %s/%s to remove referenced-by annotation: %w",
+			saNamespace, saName, err)
+	}
+
+	logger.V(1).Info("Removed referenced-by annotation from external ServiceAccount",
+		"serviceAccount", saName, "namespace", saNamespace, "bindDefinition", bdName)
+	r.recorder.Eventf(sa, nil, corev1.EventTypeNormal,
+		authnv1alpha1.EventReasonExternalSAUntracked, authnv1alpha1.EventActionDelete,
+		"BindDefinition %s no longer references this ServiceAccount", bdName)
+
+	return nil
+}
+
+// parseReferencedBy parses a comma-separated referenced-by annotation value into a slice.
+// It trims whitespace from each entry.
+func parseReferencedBy(value string) []string {
+	if value == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+// cleanupExternalSAReferences removes the BindDefinition's tracking annotations
+// from all external ServiceAccounts it references. This is called during deletion.
+func (r *BindDefinitionReconciler) cleanupExternalSAReferences(
+	ctx context.Context,
+	bindDef *authnv1alpha1.BindDefinition,
+) {
+	logger := log.FromContext(ctx)
+
+	// Clean up based on current status (which tracks what we've been referencing)
+	for _, saRef := range bindDef.Status.ExternalServiceAccounts {
+		parts := strings.SplitN(saRef, "/", 2)
+		if len(parts) != 2 {
+			logger.V(1).Info("Invalid external SA reference format, skipping cleanup",
+				"reference", saRef)
+			continue
+		}
+		ns, name := parts[0], parts[1]
+		if err := r.removeExternalSAReference(ctx, ns, name, bindDef.Name); err != nil {
+			// Log but don't fail - best effort cleanup
+			logger.Error(err, "Failed to remove tracking annotation from external ServiceAccount",
+				"serviceAccount", name, "namespace", ns)
+		}
+	}
+
+	// Also scan spec subjects in case status is out of date
+	for _, subject := range bindDef.Spec.Subjects {
+		if subject.Kind != authnv1alpha1.BindSubjectServiceAccount {
+			continue
+		}
+		// Check if this SA is external (not owned by any BD)
+		sa := &corev1.ServiceAccount{}
+		err := r.client.Get(ctx, types.NamespacedName{Name: subject.Name, Namespace: subject.Namespace}, sa)
+		if err != nil {
+			continue // SA doesn't exist or error - skip
+		}
+		if !isOwnedByBindDefinition(sa.OwnerReferences) {
+			// External SA - remove our reference
+			if err := r.removeExternalSAReference(ctx, subject.Namespace, subject.Name, bindDef.Name); err != nil {
+				logger.Error(err, "Failed to remove tracking annotation from external ServiceAccount",
+					"serviceAccount", subject.Name, "namespace", subject.Namespace)
+			}
+		}
+	}
 }

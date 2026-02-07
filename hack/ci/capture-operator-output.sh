@@ -93,7 +93,9 @@ done
 
 # --- Prometheus metrics (optional) ---
 echo "Capturing Prometheus metrics ..."
-SVC="svc/auth-operator-controller-manager-metrics"
+# Discover the metrics service by label; fall back to the kustomize-generated name.
+SVC="${METRICS_SVC:-$(kubectl get svc -n "$METRICS_NS" -l control-plane=controller-manager --no-headers -o name 2>/dev/null | head -1)}"
+SVC="${SVC:-svc/auth-operator-controller-manager-metrics-service}"
 if kubectl get "$SVC" -n "$METRICS_NS" &>/dev/null; then
   kubectl port-forward -n "$METRICS_NS" "$SVC" 8080:8080 &>/dev/null &
   PF_PID=$!

@@ -88,6 +88,55 @@ var _ = Describe("SSA Helper Functions", func() {
 		})
 	})
 
+	Context("FieldOwnerForBD", func() {
+		It("should return prefixed name for short BD names", func() {
+			result := ssa.FieldOwnerForBD("my-binddefinition")
+			Expect(result).To(Equal("auth-operator/my-binddefinition"))
+		})
+
+		It("should fit within 128 characters for any BD name", func() {
+			// Very long BD name (253 chars is max K8s name)
+			longName := ""
+			for range 253 {
+				longName += "a"
+			}
+			result := ssa.FieldOwnerForBD(longName)
+			Expect(len(result)).To(BeNumerically("<=", 128))
+		})
+
+		It("should produce stable output for same input", func() {
+			longName := ""
+			for range 200 {
+				longName += "x"
+			}
+			result1 := ssa.FieldOwnerForBD(longName)
+			result2 := ssa.FieldOwnerForBD(longName)
+			Expect(result1).To(Equal(result2))
+		})
+
+		It("should produce different output for different long names", func() {
+			longName1 := ""
+			longName2 := ""
+			for range 200 {
+				longName1 += "a"
+				longName2 += "b"
+			}
+			result1 := ssa.FieldOwnerForBD(longName1)
+			result2 := ssa.FieldOwnerForBD(longName2)
+			Expect(result1).NotTo(Equal(result2))
+		})
+
+		It("should not truncate names that fit within limit", func() {
+			// 128 - len("auth-operator/") = 114 chars available for BD name
+			shortEnoughName := ""
+			for range 100 {
+				shortEnoughName += "x"
+			}
+			result := ssa.FieldOwnerForBD(shortEnoughName)
+			Expect(result).To(Equal("auth-operator/" + shortEnoughName))
+		})
+	})
+
 	Context("OwnerReference", func() {
 		It("should create an OwnerReference with all fields set", func() {
 			uid := types.UID("test-uid-123")

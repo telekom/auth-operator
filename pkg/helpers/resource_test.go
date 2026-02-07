@@ -5,6 +5,7 @@
 package helpers
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -28,16 +29,16 @@ func TestBuildBindingName(t *testing.T) {
 			want:       "my-target-name-cluster-admin-binding",
 		},
 		{
-			name:       "empty target",
-			targetName: "",
-			roleRef:    "admin",
-			want:       "-admin-binding",
+			name:       "single char names",
+			targetName: "a",
+			roleRef:    "b",
+			want:       "a-b-binding",
 		},
 		{
-			name:       "empty role",
-			targetName: "target",
-			roleRef:    "",
-			want:       "target--binding",
+			name:       "numeric suffix",
+			targetName: "app1",
+			roleRef:    "role2",
+			want:       "app1-role2-binding",
 		},
 	}
 
@@ -49,6 +50,88 @@ func TestBuildBindingName(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBuildBindingNameTruncation(t *testing.T) {
+	t.Run("truncates long names to 253 chars", func(t *testing.T) {
+		// Create a name that would exceed 253 chars
+		longTargetName := strings.Repeat("a", 200)
+		longRoleRef := strings.Repeat("b", 100)
+		// Full name would be: 200 + 1 + 100 + 1 + 7 = 309 chars
+
+		result := BuildBindingName(longTargetName, longRoleRef)
+
+		if len(result) > 253 {
+			t.Errorf("BuildBindingName() returned name of length %d, want <= 253", len(result))
+		}
+		if len(result) != 253 {
+			t.Errorf("BuildBindingName() returned name of length %d, want exactly 253", len(result))
+		}
+	})
+
+	t.Run("consistent hash for same inputs", func(t *testing.T) {
+		longTargetName := strings.Repeat("x", 200)
+		longRoleRef := strings.Repeat("y", 100)
+
+		result1 := BuildBindingName(longTargetName, longRoleRef)
+		result2 := BuildBindingName(longTargetName, longRoleRef)
+
+		if result1 != result2 {
+			t.Errorf("BuildBindingName() not deterministic: %q != %q", result1, result2)
+		}
+	})
+
+	t.Run("different hashes for different long names", func(t *testing.T) {
+		longTargetName1 := strings.Repeat("a", 200) + "1"
+		longTargetName2 := strings.Repeat("a", 200) + "2"
+		roleRef := strings.Repeat("b", 100)
+
+		result1 := BuildBindingName(longTargetName1, roleRef)
+		result2 := BuildBindingName(longTargetName2, roleRef)
+
+		if result1 == result2 {
+			t.Errorf("BuildBindingName() should produce different results for different inputs")
+		}
+	})
+
+	t.Run("no truncation for names at exactly 253 chars", func(t *testing.T) {
+		// binding suffix is 7 chars, plus 2 hyphens = 9 chars overhead
+		// So targetName + roleRef should be 244 chars to hit exactly 253
+		targetName := strings.Repeat("a", 122)
+		roleRef := strings.Repeat("b", 122)
+		expectedName := targetName + "-" + roleRef + "-binding"
+
+		if len(expectedName) != 253 {
+			t.Fatalf("Test setup error: expected name length %d, want 253", len(expectedName))
+		}
+
+		result := BuildBindingName(targetName, roleRef)
+
+		if result != expectedName {
+			t.Errorf("BuildBindingName() = %q, want %q", result, expectedName)
+		}
+	})
+
+	t.Run("truncates names at 254 chars", func(t *testing.T) {
+		// One char over the limit
+		targetName := strings.Repeat("a", 123)
+		roleRef := strings.Repeat("b", 122)
+		fullName := targetName + "-" + roleRef + "-binding"
+
+		if len(fullName) != 254 {
+			t.Fatalf("Test setup error: full name length %d, want 254", len(fullName))
+		}
+
+		result := BuildBindingName(targetName, roleRef)
+
+		if len(result) > 253 {
+			t.Errorf("BuildBindingName() returned name of length %d, want <= 253", len(result))
+		}
+		// Should have hash suffix
+		if !strings.Contains(result, "-") {
+			t.Errorf("BuildBindingName() truncated name should contain hash suffix")
+		}
+	})
 }
 
 func TestBuildResourceLabels(t *testing.T) {

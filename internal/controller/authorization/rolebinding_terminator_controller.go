@@ -138,9 +138,10 @@ func (r *RoleBindingTerminator) getNamespacedBlockingResources(ctx context.Conte
 	return nsTermStatus.blockingResources, nsTermStatus.lastError
 }
 
-// For checking if terminating namespace has deleting resources
-// Needed for RoleBinding finalizer removal
-// Returns: hasResources (bool), blockingResources ([]ResourceBlocking), error.
+// namespaceHasResources returns the namespaced resources (excluding RoleBindings and
+// sub-resources) that still exist in a terminating namespace. A non-empty slice means
+// the namespace cannot be fully cleaned up yet and RoleBinding finalizers must be kept.
+// Returns ([]namespaceDeletionResourceBlocking, error).
 func namespaceHasResources(ctx context.Context, resourceTracker *discovery.ResourceTracker, dynamicClient dynamic.Interface, namespace string) ([]namespaceDeletionResourceBlocking, error) {
 	logger := log.FromContext(ctx)
 	logger.V(2).Info("starting namespace resource check", "namespace", namespace)
@@ -403,9 +404,10 @@ func (r *RoleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request)
 				return ctrl.Result{}, err
 			}
 			logger.V(1).Info("removed finalizer from RoleBinding")
-			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleBindingTerminator, metrics.ResultSuccess).Inc()
-			return ctrl.Result{}, nil
 		}
+		// Namespace is not terminating — no blocking-resource check needed.
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleBindingTerminator, metrics.ResultSuccess).Inc()
+		return ctrl.Result{}, nil
 	}
 
 	// if namespace is being terminated, we need to check if there are any remaining resources and make sure the last resources to get removed are the RoleBinings.

@@ -117,16 +117,18 @@ var (
 		[]string{"binddefinition"},
 	)
 
-	// ManagedResources tracks the current number of managed RBAC resources by type.
-	// Set at the end of each successful reconciliation by counting owned resources.
-	// Enables alerting on unexpected resource count drops (mass-deletion, drift).
+	// ManagedResources tracks the desired/applied count of RBAC resources per
+	// source resource (BindDefinition) from the last reconciliation. This reflects
+	// the number of resources the controller intends to manage based on the spec,
+	// not a live inventory from the cluster. Each reconciliation updates the gauge.
+	// Call DeleteManagedResourceSeries on resource deletion to avoid stale series.
 	ManagedResources = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: Namespace,
 			Name:      "managed_resources",
-			Help:      "Current number of managed RBAC resources by controller and type",
+			Help:      "Desired/applied count of RBAC resources from last reconciliation, by controller, type, and source resource name",
 		},
-		[]string{"controller", "resource_type"},
+		[]string{"controller", "resource_type", "name"},
 	)
 
 	// WebhookRequestsTotal counts the total number of webhook admission requests.
@@ -150,6 +152,17 @@ var (
 		},
 		[]string{"binddefinition"},
 	)
+
+	// ExternalSAsReferenced tracks the number of external (pre-existing) ServiceAccounts
+	// referenced by each BindDefinition. These SAs are used but not managed by the operator.
+	ExternalSAsReferenced = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: Namespace,
+			Name:      "external_serviceaccounts_referenced",
+			Help:      "Number of external ServiceAccounts referenced per BindDefinition",
+		},
+		[]string{"binddefinition"},
+	)
 )
 
 func init() {
@@ -167,6 +180,7 @@ func init() {
 		ManagedResources,
 		WebhookRequestsTotal,
 		ServiceAccountSkippedPreExisting,
+		ExternalSAsReferenced,
 	)
 }
 
@@ -184,8 +198,6 @@ const (
 const (
 	ErrorTypeAPI        = "api"
 	ErrorTypeValidation = "validation"
-	ErrorTypeConflict   = "conflict"
-	ErrorTypeNotFound   = "not_found"
 	ErrorTypeInternal   = "internal"
 )
 
@@ -209,7 +221,6 @@ const (
 const (
 	WebhookNamespaceValidator = "namespace_validator"
 	WebhookNamespaceMutator   = "namespace_mutator"
-	WebhookBinderValidator    = "binder_validator"
 )
 
 // WebhookResult constants.
@@ -218,3 +229,12 @@ const (
 	WebhookResultDenied  = "denied"
 	WebhookResultErrored = "errored"
 )
+
+// DeleteManagedResourceSeries removes all ManagedResources gauge series for a
+// specific source resource (e.g. a BindDefinition being deleted). This prevents
+// stale zero-value series from lingering after the resource is removed.
+func DeleteManagedResourceSeries(controller, name string) {
+	for _, rt := range []string{ResourceClusterRoleBinding, ResourceRoleBinding, ResourceServiceAccount} {
+		ManagedResources.DeleteLabelValues(controller, rt, name)
+	}
+}

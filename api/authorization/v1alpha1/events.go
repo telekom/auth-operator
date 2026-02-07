@@ -34,6 +34,26 @@ const (
 
 	// EventReasonRoleRefNotFound indicates a referenced role was not found.
 	EventReasonRoleRefNotFound = "RoleRefNotFound"
+
+	// EventReasonServiceAccountPreExisting indicates a ServiceAccount already exists
+	// and is not owned by any BindDefinition, so it will not be adopted.
+	EventReasonServiceAccountPreExisting = "ServiceAccountPreExisting"
+
+	// EventReasonServiceAccountShared indicates a ServiceAccount is shared between
+	// multiple BindDefinitions (co-owned via non-controller ownerRefs).
+	EventReasonServiceAccountShared = "ServiceAccountShared"
+
+	// EventReasonServiceAccountRetained indicates a ServiceAccount was not deleted
+	// because other BindDefinitions still reference it.
+	EventReasonServiceAccountRetained = "ServiceAccountRetained"
+
+	// EventReasonExternalSATracked indicates a BindDefinition now references
+	// an external (pre-existing) ServiceAccount.
+	EventReasonExternalSATracked = "ExternalSATracked"
+
+	// EventReasonExternalSAUntracked indicates a BindDefinition no longer references
+	// an external (pre-existing) ServiceAccount.
+	EventReasonExternalSAUntracked = "ExternalSAUntracked"
 )
 
 // Event action constants for the events.k8s.io/v1 API.

@@ -25,6 +25,7 @@ resources:
 - ../rbac
 - ../manager
 - ../webhook
+- metrics_service.yaml
 
 # configurations:
 #   - prefix_rules.yaml

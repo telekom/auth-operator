@@ -39,6 +39,7 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 	if req.Operation != admissionv1.Create && req.Operation != admissionv1.Update {
 		logger.V(4).Info("operation not CREATE/UPDATE - allowing",
 			"namespace", req.Name, "operation", req.Operation)
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
 		return admission.Allowed("Operation is neither CREATE nor UPDATE")
 	}
 
@@ -52,6 +53,7 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 		logger.Info("AUDIT: webhook bypass granted",
 			"namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username,
 			"bypassReason", bypassResult.Reason, "webhook", "mutator")
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
 		return admission.Allowed("")
 	}
 

@@ -6,10 +6,10 @@ name: 'Setup Go Environment'
 description: 'Setup Go with caching and optional tools installation'
 
 inputs:
-  go-version:
-    description: 'Go version to install'
+  go-version-file:
+    description: 'Path to go.mod file for Go version (single source of truth)'
     required: false
-    default: '1.25.7'
+    default: 'go.mod'
   install-kind:
     description: 'Install kind CLI'
     required: false
@@ -42,10 +42,23 @@ inputs:
 runs:
   using: 'composite'
   steps:
+    - name: Extract Go version from toolchain or go directive
+      id: go-version
+      shell: bash
+      run: |
+        GO_MOD="${{ inputs.go-version-file }}"
+        # Prefer toolchain directive, fall back to go directive
+        VERSION=$(grep -E '^toolchain go' "$GO_MOD" | sed 's/toolchain go//' || true)
+        if [ -z "$VERSION" ]; then
+          VERSION=$(grep -E '^go [0-9]' "$GO_MOD" | awk '{print $2}')
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Using Go version: $VERSION"
+
     - name: Setup Go
       uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
       with:
-        go-version: ${{ inputs.go-version }}
+        go-version: ${{ steps.go-version.outputs.version }}
         cache: true
         cache-dependency-path: ${{ inputs.cache-dependency-path }}
 

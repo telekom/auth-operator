@@ -718,7 +718,7 @@ spec:
 # Edge Case 2: Pre-existing ServiceAccount used as a subject
 # Binds a ServiceAccount ("pre-existing-sa" in tenant-alpha) that already exists
 # in the cluster. The operator creates the binding but SKIPS the SA —
-# it does not adopt (apply/own) a pre-existing ServiceAccount.
+# it does not add an OwnerReference to a pre-existing ServiceAccount.
 # -----------------------------------------------------------------------------
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: BindDefinition

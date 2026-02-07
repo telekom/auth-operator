@@ -34,6 +34,15 @@ type BindDefinitionStatusApplyConfiguration struct {
 	BindReconciled *bool `json:"bindReconciled,omitempty"`
 	// If the BindDefinition points to a subject of "Kind: ServiceAccount" and the service account is not present. The controller will reconcile it automatically.
 	GeneratedServiceAccounts []v1.Subject `json:"generatedServiceAccounts,omitempty"`
+	// MissingRoleRefs lists role references that could not be resolved during the
+	// last reconciliation. Format: "ClusterRole/<name>" or "Role/<namespace>/<name>".
+	// Empty when all referenced roles exist.
+	MissingRoleRefs []string `json:"missingRoleRefs,omitempty"`
+	// ExternalServiceAccounts lists ServiceAccounts referenced by this BindDefinition
+	// that already existed and are not owned by any BindDefinition. These SAs are used
+	// in bindings but not managed (created/deleted) by the controller.
+	// Format: "<namespace>/<name>".
+	ExternalServiceAccounts []string `json:"externalServiceAccounts,omitempty"`
 	// Conditions defines current service state of the Bind definition. All conditions should evaluate to true to signify successful reconciliation.
 	Conditions []metav1.ConditionApplyConfiguration `json:"conditions,omitempty"`
 }
@@ -66,6 +75,26 @@ func (b *BindDefinitionStatusApplyConfiguration) WithBindReconciled(value bool) 
 func (b *BindDefinitionStatusApplyConfiguration) WithGeneratedServiceAccounts(values ...v1.Subject) *BindDefinitionStatusApplyConfiguration {
 	for i := range values {
 		b.GeneratedServiceAccounts = append(b.GeneratedServiceAccounts, values[i])
+	}
+	return b
+}
+
+// WithMissingRoleRefs adds the given value to the MissingRoleRefs field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the MissingRoleRefs field.
+func (b *BindDefinitionStatusApplyConfiguration) WithMissingRoleRefs(values ...string) *BindDefinitionStatusApplyConfiguration {
+	for i := range values {
+		b.MissingRoleRefs = append(b.MissingRoleRefs, values[i])
+	}
+	return b
+}
+
+// WithExternalServiceAccounts adds the given value to the ExternalServiceAccounts field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the ExternalServiceAccounts field.
+func (b *BindDefinitionStatusApplyConfiguration) WithExternalServiceAccounts(values ...string) *BindDefinitionStatusApplyConfiguration {
+	for i := range values {
+		b.ExternalServiceAccounts = append(b.ExternalServiceAccounts, values[i])
 	}
 	return b
 }

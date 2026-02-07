@@ -47,7 +47,8 @@ var _ = Describe("BindDefinition Controller", func() {
 						Namespace: "default",
 					},
 					Spec: authorizationv1alpha1.BindDefinitionSpec{
-						Subjects: []rbacv1.Subject{},
+						TargetName: "test-target",
+						Subjects:   []rbacv1.Subject{},
 					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
@@ -772,7 +773,7 @@ func TestBindDefinitionDriftDetection(t *testing.T) {
 		}
 
 		// Create ServiceAccount
-		_, err := r.ensureServiceAccounts(ctx, bindDef)
+		_, _, err := r.ensureServiceAccounts(ctx, bindDef)
 		g.Expect(err).NotTo(HaveOccurred())
 
 		// Verify SA created with automount=false
@@ -788,7 +789,7 @@ func TestBindDefinitionDriftDetection(t *testing.T) {
 		g.Expect(err).NotTo(HaveOccurred())
 
 		// Reconcile to correct
-		_, err = r.ensureServiceAccounts(ctx, bindDef)
+		_, _, err = r.ensureServiceAccounts(ctx, bindDef)
 		g.Expect(err).NotTo(HaveOccurred())
 
 		// Verify restored
@@ -1305,7 +1306,7 @@ func TestResourceRecreationOnExternalDeletion(t *testing.T) {
 		}
 
 		// Step 1: Create the ServiceAccount
-		_, err := r.ensureServiceAccounts(ctx, bindDef)
+		_, _, err := r.ensureServiceAccounts(ctx, bindDef)
 		g.Expect(err).NotTo(HaveOccurred())
 
 		// Verify SA was created
@@ -1323,7 +1324,7 @@ func TestResourceRecreationOnExternalDeletion(t *testing.T) {
 		g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "ServiceAccount should not exist after deletion")
 
 		// Step 4: Reconcile again
-		_, err = r.ensureServiceAccounts(ctx, bindDef)
+		_, _, err = r.ensureServiceAccounts(ctx, bindDef)
 		g.Expect(err).NotTo(HaveOccurred())
 
 		// Step 5: Verify SA exists again with correct spec
@@ -1591,7 +1592,7 @@ func TestEnsureServiceAccounts(t *testing.T) {
 			recorder: events.NewFakeRecorder(10),
 		}
 
-		generatedSAs, err := r.ensureServiceAccounts(ctx, bindDef)
+		generatedSAs, _, err := r.ensureServiceAccounts(ctx, bindDef)
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(generatedSAs).To(HaveLen(1))
 
@@ -1627,7 +1628,7 @@ func TestEnsureServiceAccounts(t *testing.T) {
 			recorder: events.NewFakeRecorder(10),
 		}
 
-		_, err := r.ensureServiceAccounts(ctx, bindDef)
+		_, _, err := r.ensureServiceAccounts(ctx, bindDef)
 		g.Expect(err).NotTo(HaveOccurred())
 
 		sa := &corev1.ServiceAccount{}
@@ -1653,7 +1654,7 @@ func TestEnsureServiceAccounts(t *testing.T) {
 			recorder: events.NewFakeRecorder(10),
 		}
 
-		generatedSAs, err := r.ensureServiceAccounts(ctx, bindDef)
+		generatedSAs, _, err := r.ensureServiceAccounts(ctx, bindDef)
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(generatedSAs).To(BeEmpty())
 
@@ -3148,7 +3149,7 @@ func TestEnsureServiceAccountsApplyError(t *testing.T) {
 		Build()
 	r := &BindDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
 
-	_, err := r.ensureServiceAccounts(ctx, bindDef)
+	_, _, err := r.ensureServiceAccounts(ctx, bindDef)
 	g.Expect(err).To(HaveOccurred())
 	g.Expect(err.Error()).To(ContainSubstring("apply ServiceAccount"))
 }

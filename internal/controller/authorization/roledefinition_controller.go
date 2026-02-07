@@ -141,24 +141,45 @@ func (r *RoleDefinitionReconciler) queueAll() handler.MapFunc {
 func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	startTime := time.Now()
 	logger := log.FromContext(ctx)
-	logger.V(1).Info("starting RoleDefinition reconciliation", "roleDefinitionName", req.Name, "namespace", req.Namespace)
+
+	// === RECONCILE START ===
+	logger.V(1).Info("=== Reconcile START ===",
+		"roleDefinition", req.Name,
+		"namespace", req.Namespace)
 
 	// Track reconcile duration on exit
 	defer func() {
-		metrics.ReconcileDuration.WithLabelValues(metrics.ControllerRoleDefinition).Observe(time.Since(startTime).Seconds())
+		duration := time.Since(startTime)
+		metrics.ReconcileDuration.WithLabelValues(metrics.ControllerRoleDefinition).Observe(duration.Seconds())
+		logger.V(1).Info("=== Reconcile END ===",
+			"roleDefinition", req.Name,
+			"duration", duration.String())
 	}()
 
 	// Step 1: Fetch the RoleDefinition
+	logger.V(2).Info("Fetching RoleDefinition from API",
+		"roleDefinition", req.Name)
 	roleDefinition, err := r.fetchRoleDefinition(ctx, req.NamespacedName)
 	if err != nil || roleDefinition == nil {
 		if err != nil {
+			logger.Error(err, "Failed to fetch RoleDefinition",
+				"roleDefinition", req.Name)
 			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ResultError).Inc()
 			metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ErrorTypeAPI).Inc()
 		} else {
+			logger.V(1).Info("RoleDefinition not found (deleted), skipping reconcile",
+				"roleDefinition", req.Name)
 			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ResultSkipped).Inc()
 		}
 		return ctrl.Result{}, err
 	}
+
+	logger.V(2).Info("RoleDefinition fetched successfully",
+		"roleDefinition", roleDefinition.Name,
+		"generation", roleDefinition.Generation,
+		"resourceVersion", roleDefinition.ResourceVersion,
+		"isDeleting", !roleDefinition.DeletionTimestamp.IsZero(),
+		"targetName", roleDefinition.Spec.TargetName)
 
 	// Initialize status for reconciliation
 	conditions.MarkReconciling(roleDefinition, roleDefinition.Generation,
@@ -166,6 +187,8 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	roleDefinition.Status.ObservedGeneration = roleDefinition.Generation
 
 	// Build initial role object for validation and deletion handling
+	logger.V(2).Info("Building role object",
+		"roleDefinition", roleDefinition.Name)
 	role, err := r.buildRoleObject(roleDefinition)
 	if err != nil {
 		logger.Error(err, "invalid RoleDefinition spec", "roleDefinitionName", roleDefinition.Name)
@@ -177,18 +200,29 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	// Step 2: Handle deletion
 	if !roleDefinition.DeletionTimestamp.IsZero() {
+		logger.V(1).Info("RoleDefinition marked for deletion, starting delete reconcile",
+			"roleDefinition", roleDefinition.Name,
+			"deletionTimestamp", roleDefinition.DeletionTimestamp)
 		result, err := r.handleDeletion(ctx, roleDefinition, role)
 		if err != nil {
+			logger.Error(err, "Delete reconcile failed",
+				"roleDefinition", roleDefinition.Name)
 			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ResultError).Inc()
 			metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ErrorTypeAPI).Inc()
 		} else {
+			logger.V(1).Info("Delete reconcile completed successfully",
+				"roleDefinition", roleDefinition.Name)
 			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ResultFinalized).Inc()
 		}
 		return result, err
 	}
 
 	// Step 3: Ensure finalizer
+	logger.V(2).Info("Ensuring finalizer",
+		"roleDefinition", roleDefinition.Name)
 	if err := r.ensureFinalizer(ctx, roleDefinition); err != nil {
+		logger.Error(err, "Failed to ensure finalizer",
+			"roleDefinition", roleDefinition.Name)
 		r.markStalled(ctx, roleDefinition, err)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ResultError).Inc()
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ErrorTypeAPI).Inc()
@@ -198,20 +232,39 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		authnv1alpha1.FinalizerReason, authnv1alpha1.FinalizerMessage)
 
 	// Step 4: Discover and filter resources to build policy rules
+	logger.V(2).Info("Discovering and filtering resources",
+		"roleDefinition", roleDefinition.Name)
 	finalRules, result, err := r.discoverAndFilterResources(ctx, roleDefinition)
 	if err != nil || result.RequeueAfter > 0 {
+		logger.V(2).Info("Discovery phase returned early",
+			"roleDefinition", roleDefinition.Name,
+			"error", err,
+			"requeueAfter", result.RequeueAfter)
 		return result, err
 	}
+	logger.V(2).Info("Discovery complete",
+		"roleDefinition", roleDefinition.Name,
+		"ruleCount", len(finalRules))
 
 	// Step 5: Ensure the target role exists with computed rules
+	logger.V(2).Info("Ensuring role with computed rules",
+		"roleDefinition", roleDefinition.Name,
+		"ruleCount", len(finalRules))
 	if err := r.ensureRole(ctx, roleDefinition, finalRules); err != nil {
+		logger.Error(err, "Failed to ensure role",
+			"roleDefinition", roleDefinition.Name)
 		r.markStalled(ctx, roleDefinition, err)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ResultError).Inc()
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, err
 	}
+	logger.V(2).Info("Role ensured successfully",
+		"roleDefinition", roleDefinition.Name)
 
 	// Step 6: Apply final status
+	logger.V(2).Info("Applying final status",
+		"roleDefinition", roleDefinition.Name,
+		"generation", roleDefinition.Generation)
 	roleDefinition.Status.RoleReconciled = true
 	if err := r.applyStatus(ctx, roleDefinition); err != nil {
 		logger.Error(err, "failed to apply final status", "roleDefinitionName", roleDefinition.Name)
@@ -220,8 +273,10 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
+	logger.V(1).Info("Reconcile completed successfully",
+		"roleDefinition", roleDefinition.Name,
+		"requeueAfter", DefaultRequeueInterval)
 	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ResultSuccess).Inc()
-	logger.V(1).Info("RoleDefinition reconciliation completed successfully", "roleDefinitionName", roleDefinition.Name)
 	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
 }
 
@@ -335,6 +390,10 @@ func (r *RoleDefinitionReconciler) filterAPIResourcesForRoleDefinition(
 			return nil, fmt.Errorf("failed to parse GroupVersion %q: %w", gv, err)
 		}
 
+		// NOTE: Currently filters by API group name only. The Versions field in metav1.APIGroup
+		// is accepted but ignored - specifying a group restricts ALL versions of that group.
+		// TODO: Implement version-specific filtering to respect the Versions field in RestrictedAPIs.
+		// When Versions is empty, restrict all versions; when specified, restrict only those versions.
 		apiIsRestricted := slices.ContainsFunc(roleDefinition.Spec.RestrictedAPIs, func(ag metav1.APIGroup) bool { return ag.Name == groupVersion.Group })
 		// Skip restricted API groups
 		if apiIsRestricted {

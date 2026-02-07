@@ -8,8 +8,7 @@
 # Resources that must exist BEFORE the BindDefinition samples are applied.
 # They simulate "pre-existing" cluster state that the operator must coexist with.
 #
-# Applied by: kubectl apply -f config/samples/edge-case-prerequisites.yaml
-# (included in config/samples/kustomization.yaml)
+# Applied via: config/samples/kustomization.yaml (or kubectl apply -f during manual testing)
 # =============================================================================
 
 ---

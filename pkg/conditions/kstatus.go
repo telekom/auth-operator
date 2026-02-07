@@ -19,12 +19,6 @@ const (
 	StalledConditionType ConditionType = "Stalled"
 )
 
-// ObservedGenerationSetter is an interface for objects that track observed generation.
-type ObservedGenerationSetter interface {
-	Setter
-	SetObservedGeneration(gen int64)
-}
-
 // MarkReady sets the Ready condition to True and removes Reconciling/Stalled conditions.
 // This indicates the resource is fully reconciled.
 func MarkReady(to Setter, gen int64, reason ConditionReason, message ConditionMessage, messageArgs ...interface{}) {
