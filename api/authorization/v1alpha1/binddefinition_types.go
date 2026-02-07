@@ -45,10 +45,13 @@ type NamespaceBinding struct {
 	NamespaceSelector []metav1.LabelSelector `json:"namespaceSelector,omitempty"`
 }
 
-// BindDefinitionSpec defines the desired state of BindDefinition
+// BindDefinitionSpec defines the desired state of BindDefinition.
 type BindDefinitionSpec struct {
 	// Name that will be prefixed to the concatenated string which is the name of the binding. Follows format "targetName-clusterrole/role-binding" where clusterrole/role is the in-cluster existing ClusterRole or Role.
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	TargetName string `json:"targetName"`
 
 	// List of subjects that will be bound to a target ClusterRole/Role. Can be "User", "Group" or "ServiceAccount".
@@ -73,7 +76,7 @@ type BindDefinitionSpec struct {
 	AutomountServiceAccountToken *bool `json:"automountServiceAccountToken,omitempty"`
 }
 
-// BindDefinitionStatus defines the observed state of BindDefinition
+// BindDefinitionStatus defines the observed state of BindDefinition.
 type BindDefinitionStatus struct {
 	// ObservedGeneration is the last observed generation of the resource.
 	// This is used by kstatus to determine if the resource is current.
@@ -87,6 +90,19 @@ type BindDefinitionStatus struct {
 	// If the BindDefinition points to a subject of "Kind: ServiceAccount" and the service account is not present. The controller will reconcile it automatically.
 	// +kubebuilder:validation:Optional
 	GeneratedServiceAccounts []rbacv1.Subject `json:"generatedServiceAccounts"`
+
+	// MissingRoleRefs lists role references that could not be resolved during the
+	// last reconciliation. Format: "ClusterRole/<name>" or "Role/<namespace>/<name>".
+	// Empty when all referenced roles exist.
+	// +kubebuilder:validation:Optional
+	MissingRoleRefs []string `json:"missingRoleRefs,omitempty"`
+
+	// ExternalServiceAccounts lists ServiceAccounts referenced by this BindDefinition
+	// that already existed and are not owned by any BindDefinition. These SAs are used
+	// in bindings but not managed (created/deleted) by the controller.
+	// Format: "<namespace>/<name>".
+	// +kubebuilder:validation:Optional
+	ExternalServiceAccounts []string `json:"externalServiceAccounts,omitempty"`
 
 	// Conditions defines current service state of the Bind definition. All conditions should evaluate to true to signify successful reconciliation.
 	// +kubebuilder:validation:Optional
@@ -111,7 +127,7 @@ type BindDefinition struct {
 
 // +kubebuilder:object:root=true
 
-// BindDefinitionList contains a list of BindDefinition
+// BindDefinitionList contains a list of BindDefinition.
 type BindDefinitionList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`

@@ -73,7 +73,7 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 		imageRepo := strings.Split(projectImage, ":")[0]
 		imageTag := strings.Split(projectImage, ":")[1]
 		if imageTag == "" {
-			imageTag = "latest"
+			imageTag = defaultImageTag
 		}
 
 		cmd = exec.CommandContext(context.Background(), "helm", "upgrade", "--install", complexRelease, helmChartPath,

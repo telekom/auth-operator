@@ -15,11 +15,17 @@ Package v1alpha1 contains API Schema definitions for the authorization v1alpha1 
 
 
 
+
+
+
+
+
+
 #### BindDefinition
 
 
 
-BindDefinition is the Schema for the binddefinitions API
+BindDefinition is the Schema for the binddefinitions API.
 
 
 
@@ -38,7 +44,7 @@ BindDefinition is the Schema for the binddefinitions API
 
 
 
-BindDefinitionSpec defines the desired state of BindDefinition
+BindDefinitionSpec defines the desired state of BindDefinition.
 
 
 
@@ -50,14 +56,15 @@ _Appears in:_
 | `targetName` _string_ | Name that will be prefixed to the concatenated string which is the name of the binding. Follows format "targetName-clusterrole/role-binding" where clusterrole/role is the in-cluster existing ClusterRole or Role. |  | Required: \{\} <br /> |
 | `subjects` _[Subject](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#subject-v1-rbac) array_ | List of subjects that will be bound to a target ClusterRole/Role. Can be "User", "Group" or "ServiceAccount". |  | Required: \{\} <br /> |
 | `clusterRoleBindings` _[ClusterBinding](#clusterbinding)_ | List of ClusterRoles to which subjects will be bound to. The list is a RoleRef which means we have to specify the full rbacv1.RoleRef schema. The result of specifying this field are ClusterRoleBindings. |  | Optional: \{\} <br /> |
-| `roleBindings` _[NamespaceBinding](#namespacebinding) array_ | List of ClusterRoles/Roles to which subjects will be bound to. The list is a RoleRef which means we have to specify t he full rbacv1.RoleRef schema. The result of specifying the field are RoleBindings. |  | Optional: \{\} <br /> |
+| `roleBindings` _[NamespaceBinding](#namespacebinding) array_ | List of ClusterRoles/Roles to which subjects will be bound to. The list is a RoleRef which means we have to specify the full rbacv1.RoleRef schema. The result of specifying the field are RoleBindings. |  | Optional: \{\} <br /> |
+| `automountServiceAccountToken` _boolean_ | AutomountServiceAccountToken controls whether to automount API credentials for ServiceAccounts<br />created by this BindDefinition. Defaults to true for backward compatibility with Kubernetes<br />native ServiceAccount behavior. Set to false to improve security by preventing automatic<br />token mounting.<br />Only applies when Subjects contain ServiceAccount entries that need to be auto-created. | true | Optional: \{\} <br /> |
 
 
 #### BindDefinitionStatus
 
 
 
-BindDefinitionStatus defines the observed state of BindDefinition
+BindDefinitionStatus defines the observed state of BindDefinition.
 
 
 
@@ -66,16 +73,47 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
+| `observedGeneration` _integer_ | ObservedGeneration is the last observed generation of the resource.<br />This is used by kstatus to determine if the resource is current. |  | Optional: \{\} <br /> |
 | `bindReconciled` _boolean_ | Not extremely important as most status updates are driven by Conditions. We read the JSONPath from this status field to signify completed reconciliation. |  | Optional: \{\} <br /> |
 | `generatedServiceAccounts` _[Subject](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#subject-v1-rbac) array_ | If the BindDefinition points to a subject of "Kind: ServiceAccount" and the service account is not present. The controller will reconcile it automatically. |  | Optional: \{\} <br /> |
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#condition-v1-meta) array_ | Conditions defines current service state of the Bind definition. All conditions should evaluate to true to signify successful reconciliation. |  | Optional: \{\} <br /> |
+
+##### Status Conditions
+
+| Type | Description |
+| --- | --- |
+| `Ready` | Whether the BindDefinition is fully reconciled. `True` even when `RoleRefsValid` is `False` — bindings are created regardless. |
+| `Reconciling` | Controller is actively reconciling (abnormal-true pattern). |
+| `Stalled` | An unrecoverable error occurred (abnormal-true pattern). |
+| `RoleRefsValid` | Whether **all** referenced ClusterRoles and Roles exist. When `False`, the controller requeues every 10 s and emits a `RoleRefNotFound` warning event. The condition self-heals once the missing roles are created (e.g. by a RoleDefinition). |
+| `Finalizer` | Set once the BindDefinition finalizer is in place. |
+| `Created` | Set after all CRBs, RBs, and SAs have been applied. |
+| `Deleted` | Set during the deletion workflow. |
+
+##### Prometheus Metrics (BindDefinition)
+
+| Metric | Type | Labels | Description |
+| --- | --- | --- | --- |
+| `auth_operator_role_refs_missing` | Gauge | `binddefinition` | Number of missing role references per BindDefinition. 0 when all refs resolve. |
+| `auth_operator_namespaces_active` | Gauge | `binddefinition` | Number of active (non-terminating) namespaces matching the BindDefinition's selectors. |
+| `auth_operator_reconcile_total` | Counter | `controller`, `result` | Per-reconcile outcome. `result` is one of: `success`, `degraded` (missing role refs), `error`, `finalized`, `skipped`. |
+
+##### Requeue Behaviour
+
+| Scenario | Interval | Notes |
+| --- | --- | --- |
+| All role refs valid | 60 s | Default drift-correction interval. |
+| One or more role refs missing | 10 s | Faster poll until roles appear. |
+| Owned resource changes | immediate | Triggered by watch on owned CRBs, SAs, RBs, and Namespaces. |
+
+
 
 
 #### ClusterBinding
 
 
 
-
+ClusterBinding defines cluster-scoped role bindings.
 
 
 
@@ -85,19 +123,13 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `clusterRoleRefs` _string array_ | ClusterRoleRefs references an existing ClusterRole |  | Optional: \{\} <br /> |
-
-
-
-
-
-
 
 
 #### NamespaceBinding
 
 
 
-
+NamespaceBinding defines namespace-scoped role bindings.
 
 
 
@@ -107,8 +139,8 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `clusterRoleRefs` _string array_ | ClusterRoleRefs references an existing ClusterRole |  | Optional: \{\} <br /> |
-| `roleRefs` _string array_ | Role references an specific Role that has ro exist in the target namespaces |  | Optional: \{\} <br /> |
-| `namespace` _string_ | Namespace of the the Role that should be bound to the subjects. |  | Optional: \{\} <br /> |
+| `roleRefs` _string array_ | RoleRefs references a specific Role that has to exist in the target namespaces |  | Optional: \{\} <br /> |
+| `namespace` _string_ | Namespace of the Role that should be bound to the subjects. |  | Optional: \{\} <br /> |
 | `namespaceSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#labelselector-v1-meta) array_ | NamespaceSelector is a label selector which will match namespaces that should have the RoleBinding/s. |  | Optional: \{\} <br /> |
 
 
@@ -116,7 +148,7 @@ _Appears in:_
 
 
 
-
+Principal represents a requesting user or service account identity.
 
 
 
@@ -134,7 +166,7 @@ _Appears in:_
 
 
 
-RoleDefinition is the Schema for the roledefinitions API
+RoleDefinition is the Schema for the roledefinitions API.
 
 
 
@@ -153,7 +185,7 @@ RoleDefinition is the Schema for the roledefinitions API
 
 
 
-RoleDefinitionSpec defines the desired state of RoleDefinition
+RoleDefinitionSpec defines the desired state of RoleDefinition.
 
 
 
@@ -163,7 +195,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `targetRole` _string_ | The target role that will be reconciled. This can be a ClusterRole or a namespaced Role |  | Enum: [ClusterRole Role] <br />Required: \{\} <br /> |
-| `targetName` _string_ | The name of the target role. This can be any name that accurately describes the ClusterRole/Role |  | MinLength: 5 <br />Required: \{\} <br /> |
+| `targetName` _string_ | The name of the target role. This can be any name that accurately describes the ClusterRole/Role.<br />Must be a valid Kubernetes name (max 63 characters for most resources). |  | MaxLength: 63 <br />MinLength: 5 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` <br />Required: \{\} <br /> |
 | `targetNamespace` _string_ | The target namespace for the Role. This value is necessary when the "TargetRole" is "Role" |  | Optional: \{\} <br /> |
 | `scopeNamespaced` _boolean_ | The scope controls whether the API resource is namespaced or not. This can also be checked by<br />running `kubectl api-resources --namespaced=true/false` |  | Required: \{\} <br /> |
 | `restrictedApis` _[APIGroup](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#apigroup-v1-meta) array_ | The restricted APIs field holds all API groups which will *NOT* be reconciled into the "TargetRole"<br />The RBAC operator discovers all API groups available and removes those which are defined by "RestrictedAPIs" |  | Optional: \{\} <br /> |
@@ -175,7 +207,7 @@ _Appears in:_
 
 
 
-RoleDefinitionStatus defines the observed state of RoleDefinition
+RoleDefinitionStatus defines the observed state of RoleDefinition.
 
 
 
@@ -184,15 +216,18 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
+| `observedGeneration` _integer_ | ObservedGeneration is the last observed generation of the resource.<br />This is used by kstatus to determine if the resource is current. |  | Optional: \{\} <br /> |
 | `roleReconciled` _boolean_ | Not extremely important as most status updates are driven by Conditions. We read the JSONPath from this status field to signify completed reconciliation. |  | Optional: \{\} <br /> |
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#condition-v1-meta) array_ | Conditions defines current service state of the Role definition. All conditions should evaluate to true to signify successful reconciliation. |  | Optional: \{\} <br /> |
+
+
 
 
 #### WebhookAuthorizer
 
 
 
-WebhookAuthorizer is the Schema for the webhookauthorizers API
+WebhookAuthorizer is the Schema for the webhookauthorizers API.
 
 
 
@@ -211,7 +246,7 @@ WebhookAuthorizer is the Schema for the webhookauthorizers API
 
 
 
-WebhookAuthorizerSpec defines the desired state of WebhookAuthorizer
+WebhookAuthorizerSpec defines the desired state of WebhookAuthorizer.
 
 
 
@@ -231,7 +266,7 @@ _Appears in:_
 
 
 
-WebhookAuthorizerStatus defines the observed state of WebhookAuthorizer
+WebhookAuthorizerStatus defines the observed state of WebhookAuthorizer.
 
 
 
@@ -240,6 +275,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
+| `observedGeneration` _integer_ | ObservedGeneration is the last observed generation of the resource.<br />This is used by kstatus to determine if the resource is current. |  | Optional: \{\} <br /> |
 | `authorizerConfigured` _boolean_ | Not extremely important as most status updates are driven by Conditions. We read the JSONPath from this status field to signify webhook authorizer as configured. |  | Optional: \{\} <br /> |
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#condition-v1-meta) array_ | Conditions defines current service state of the Webhook authorizer. All conditions should evaluate to true to signify successful configuration. |  | Optional: \{\} <br /> |
 

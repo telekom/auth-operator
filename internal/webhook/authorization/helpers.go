@@ -49,10 +49,10 @@ MODIFYING BYPASS ACCOUNTS:
 - Any changes to bypass accounts should be reviewed by security team
 - Consider adding new accounts to TDG migration mode if temporary
 - Always scope bypasses as narrowly as possible
-- Ensure audit logging captures all bypass decisions
+- Ensure audit logging captures all bypass decisions.
 */
 
-// Common service account constants
+// Common service account constants.
 const (
 	kubernetesAdmin            = "kubernetes-admin"
 	tridentOperatorStorageSA   = "system:serviceaccount:t-caas-storage:trident-operator"
@@ -63,12 +63,12 @@ const (
 	schiffSystemM2MSA          = "system:serviceaccount:schiff-system:m2m-sa"
 	capiOperatorManagerSAConst = "system:serviceaccount:capi-operator-system:capi-operator-manager"
 
-	// Namespace names for special cases
+	// Namespace names for special cases.
 	tridentStorageNamespace = "t-caas-storage"
 	tridentSystemNamespace  = "trident-system"
 )
 
-// ServiceAccountInfo holds parsed service account information
+// ServiceAccountInfo holds parsed service account information.
 type ServiceAccountInfo struct {
 	Namespace        string
 	Name             string
@@ -76,7 +76,7 @@ type ServiceAccountInfo struct {
 }
 
 // ParseServiceAccount parses a username to extract service account info.
-// Format: system:serviceaccount:<namespace>:<name>
+// Format: system:serviceaccount:<namespace>:<name>.
 func ParseServiceAccount(username string) ServiceAccountInfo {
 	parts := strings.Split(username, ":")
 	if len(parts) == 4 && parts[0] == "system" && parts[1] == "serviceaccount" {
@@ -89,7 +89,7 @@ func ParseServiceAccount(username string) ServiceAccountInfo {
 	return ServiceAccountInfo{IsServiceAccount: false}
 }
 
-// BypassCheckResult represents the result of a bypass check
+// BypassCheckResult represents the result of a bypass check.
 type BypassCheckResult struct {
 	ShouldBypass bool
 	Reason       string

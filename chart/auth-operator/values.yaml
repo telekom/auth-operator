@@ -46,3 +46,17 @@ webhookServer:
     port: 443
     protocol: TCP
     type: ClusterIP
+metrics:
+  service:
+    # Enable a dedicated Service for Prometheus scraping
+    enabled: true
+    port: 8080
+  serviceMonitor:
+    # Enable ServiceMonitor for Prometheus Operator
+    enabled: false
+    # Scrape interval (uses Prometheus default if empty)
+    interval: ""
+    # Scrape timeout (uses Prometheus default if empty)
+    scrapeTimeout: ""
+    # Additional labels for ServiceMonitor (e.g., for label-based selection)
+    additionalLabels: {}

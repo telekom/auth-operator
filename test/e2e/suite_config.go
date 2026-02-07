@@ -18,8 +18,11 @@ const (
 	InstallMethodDev       InstallMethod = "dev"
 )
 
+// defaultImageTag is the fallback image tag when none is specified.
+const defaultImageTag = "latest"
+
 // TestSuiteConfig defines configuration for an e2e test suite
-// Each suite MUST use its own dedicated cluster to ensure isolation
+// Each suite MUST use its own dedicated cluster to ensure isolation.
 type TestSuiteConfig struct {
 	// SuiteName is the unique identifier for this test suite
 	SuiteName string
@@ -54,7 +57,7 @@ type TestSuiteConfig struct {
 }
 
 // ClusterMapping defines which test suite uses which cluster
-// This ensures complete isolation between install methods
+// This ensures complete isolation between install methods.
 var ClusterMapping = map[string]TestSuiteConfig{
 	"base": {
 		SuiteName:        "base",
@@ -143,7 +146,7 @@ var ClusterMapping = map[string]TestSuiteConfig{
 	},
 }
 
-// GetSuiteConfig returns the configuration for a test suite
+// GetSuiteConfig returns the configuration for a test suite.
 func GetSuiteConfig(suiteName string) (TestSuiteConfig, error) {
 	config, ok := ClusterMapping[suiteName]
 	if !ok {
@@ -152,7 +155,7 @@ func GetSuiteConfig(suiteName string) (TestSuiteConfig, error) {
 	return config, nil
 }
 
-// GetSuiteForLabels determines which suite config to use based on active labels
+// GetSuiteForLabels determines which suite config to use based on active labels.
 func GetSuiteForLabels(labels []string) (TestSuiteConfig, error) {
 	for _, label := range labels {
 		for name, config := range ClusterMapping {
@@ -166,7 +169,7 @@ func GetSuiteForLabels(labels []string) (TestSuiteConfig, error) {
 	return ClusterMapping["base"], nil
 }
 
-// ValidateClusterIsolation checks that the current cluster matches the expected suite
+// ValidateClusterIsolation checks that the current cluster matches the expected suite.
 func ValidateClusterIsolation(config TestSuiteConfig) error {
 	currentCluster := os.Getenv("KIND_CLUSTER")
 	if currentCluster == "" {
@@ -190,7 +193,7 @@ func ValidateClusterIsolation(config TestSuiteConfig) error {
 	return nil
 }
 
-// PrintSuiteConfig prints the current test suite configuration
+// PrintSuiteConfig prints the current test suite configuration.
 func PrintSuiteConfig(config TestSuiteConfig) {
 	fmt.Printf(`
 ╔══════════════════════════════════════════════════════════════════════════════╗
@@ -213,7 +216,7 @@ func PrintSuiteConfig(config TestSuiteConfig) {
 	)
 }
 
-// GetAllClusterNames returns all cluster names for cleanup
+// GetAllClusterNames returns all cluster names for cleanup.
 func GetAllClusterNames() []string {
 	clusters := make([]string, 0, len(ClusterMapping))
 	seen := make(map[string]bool)
@@ -226,7 +229,7 @@ func GetAllClusterNames() []string {
 	return clusters
 }
 
-// InstallMethodDocs provides documentation for each install method
+// InstallMethodDocs provides documentation for each install method.
 var InstallMethodDocs = map[InstallMethod]string{
 	InstallMethodHelm: `
 Helm Installation:

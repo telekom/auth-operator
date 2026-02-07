@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Service to expose Prometheus metrics from the controller-manager.
+# controller-runtime defaults to serving metrics on :8080 (plain HTTP).
+apiVersion: v1
+kind: Service
+metadata:
+  name: controller-manager-metrics
+  namespace: system
+  labels:
+    control-plane: controller-manager
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/component: metrics
+spec:
+  ports:
+    - name: metrics
+      port: 8080
+      protocol: TCP
+      targetPort: 8080
+  selector:
+    control-plane: controller-manager

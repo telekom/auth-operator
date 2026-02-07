@@ -30,7 +30,7 @@ import (
 var ErrResourceTrackerNotStarted = fmt.Errorf("resource tracker not started")
 
 const (
-	// Duration between periodic API resource collections
+	// Duration between periodic API resource collections.
 	periodicCollectionInterval = 30 * time.Second
 )
 
@@ -232,8 +232,8 @@ func (r *ResourceTracker) collectAPIResources(ctx context.Context) (bool, error)
 	}
 	defer r.mutex.Unlock()
 
-	log := log.FromContext(ctx)
-	log.V(2).Info("collecting API resources - locking mutex")
+	logger := log.FromContext(ctx)
+	logger.V(2).Info("collecting API resources - locking mutex")
 
 	// Create a Discovery client with higher QPS and Burst to speed up the discovery process
 	discoveryConfig := rest.CopyConfig(r.config)
@@ -242,21 +242,21 @@ func (r *ResourceTracker) collectAPIResources(ctx context.Context) (bool, error)
 
 	discoveryClient, err := discovery.NewDiscoveryClientForConfig(discoveryConfig)
 	if err != nil {
-		log.Error(err, "failed to create Discovery client")
+		logger.Error(err, "failed to create Discovery client")
 		metrics.APIDiscoveryErrors.Inc()
 		return false, err
 	}
 
 	// Fetch all existing API Groups and filter them against RestrictedAPIs
-	log.V(2).Info("starting API discovery")
+	logger.V(2).Info("starting API discovery")
 
 	discoveredAPIGroups, err := discoveryClient.ServerGroups()
 	if err != nil {
-		log.Error(err, "failed to discover API groups")
+		logger.Error(err, "failed to discover API groups")
 		metrics.APIDiscoveryErrors.Inc()
 		return false, err
 	}
-	log.V(2).Info("discovered API groups", "groupCount", len(discoveredAPIGroups.Groups))
+	logger.V(2).Info("discovered API groups", "groupCount", len(discoveredAPIGroups.Groups))
 
 	// Record API discovery duration after successful completion
 	defer func() {
@@ -274,7 +274,7 @@ func (r *ResourceTracker) collectAPIResources(ctx context.Context) (bool, error)
 		// Check context cancellation between API group iterations
 		select {
 		case <-ctx.Done():
-			log.V(1).Info("stopping API resource collection due to context cancellation")
+			logger.V(1).Info("stopping API resource collection due to context cancellation")
 			return false, ctx.Err()
 		default:
 		}
@@ -297,7 +297,7 @@ func (r *ResourceTracker) collectAPIResources(ctx context.Context) (bool, error)
 
 				resources, err := r.collectAPIResourcesForGroupVersion(discoveryClient, apiGroupName, apiVersionStr)
 				if err != nil {
-					log.Error(err, "failed to discover API resources for group version",
+					logger.Error(err, "failed to discover API resources for group version",
 						"group", apiGroupName, "version", apiVersionStr)
 					return err
 				}
@@ -312,22 +312,22 @@ func (r *ResourceTracker) collectAPIResources(ctx context.Context) (bool, error)
 	if err := errorGroup.Wait(); err != nil {
 		// Don't log context cancellation as an error
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			log.V(1).Info("API resource collection cancelled", "reason", err.Error())
+			logger.V(1).Info("API resource collection cancelled", "reason", err.Error())
 			return false, err
 		}
-		log.Error(err, "failed to discover resources concurrently")
+		logger.Error(err, "failed to discover resources concurrently")
 		return false, err
 	}
 
-	log.V(2).Info("discovered API resources", "resourceCount", len(apiResourcesByGroupVersion))
+	logger.V(2).Info("discovered API resources", "resourceCount", len(apiResourcesByGroupVersion))
 
 	if apiResourcesByGroupVersion.Equals(r.cache) {
-		log.V(2).Info("API resources cache unchanged")
+		logger.V(2).Info("API resources cache unchanged")
 		return false, nil
 	}
 	r.cache = apiResourcesByGroupVersion
 
-	log.V(2).Info("API resources cache updated")
+	logger.V(2).Info("API resources cache updated")
 	return true, nil
 }
 
@@ -359,40 +359,40 @@ func (r *ResourceTracker) launchWatch(ctx context.Context) error {
 }
 
 func (r *ResourceTracker) watchAPIResources(ctx context.Context) {
-	log := log.FromContext(ctx)
+	logger := log.FromContext(ctx)
 	cli, err := client.NewWithWatch(r.config, client.Options{Scheme: r.scheme})
 	if err != nil {
-		log.Error(err, "unable to create client for CRD watch")
+		logger.Error(err, "unable to create client for CRD watch")
 		return
 	}
 
 	var crdList apiextensionsv1.CustomResourceDefinitionList
 	watcher, err := cli.Watch(ctx, &crdList)
 	if err != nil {
-		log.Error(err, "unable to start CRD watch")
+		logger.Error(err, "unable to start CRD watch")
 		return
 	}
 
-	log.Info("starting CRD watch for RoleDefinitionReconciler")
+	logger.Info("starting CRD watch for RoleDefinitionReconciler")
 	for {
 		select {
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
-				log.Info("CRD watch channel closed")
+				logger.Info("CRD watch channel closed")
 				return
 			}
 			if event.Type == watch.Error {
 				status, isStatus := event.Object.(*metav1.Status)
 				if isStatus {
-					log.Info("CRD watch error event received", "message", status.Message, "code", "reason", status.Reason, status.Code)
+					logger.Info("CRD watch error event received", "message", status.Message, "reason", status.Reason, "code", status.Code)
 					return
 				}
-				log.Info("CRD watch error event received", "eventObject", event.Object)
+				logger.Info("CRD watch error event received", "eventObject", event.Object)
 				return
 			}
 			crd := event.Object.(*apiextensionsv1.CustomResourceDefinition)
 
-			log.V(2).Info("CRD watch event received", "eventType", event.Type, "name", crd.Name, "uid", crd.UID)
+			logger.V(2).Info("CRD watch event received", "eventType", event.Type, "name", crd.Name, "uid", crd.UID)
 			if event.Type == watch.Added {
 				if _, exists := r.crdsUUIDs[string(crd.UID)]; exists {
 					// already exists, skip
@@ -412,7 +412,7 @@ func (r *ResourceTracker) watchAPIResources(ctx context.Context) {
 			r.rateLimit.Do(r.collectAndNotify(ctx))
 
 		case <-ctx.Done():
-			log.Info("stopping CRD watch after context done")
+			logger.Info("stopping CRD watch after context done")
 			return
 		}
 	}
@@ -476,8 +476,7 @@ func (r *ResourceTracker) collectAPIResourcesForGroupVersion(
 		finalizersSubresourceResource.Name = fmt.Sprintf("%s/%s", resource.Name, "finalizers")
 		finalizersSubresourceResource.Verbs = metav1.Verbs{"update", "list", "watch"}
 		result = append(result, *finalizersSubresourceResource)
-		switch {
-		case group == "" && version == "v1" && resource.Name == "nodes":
+		if group == "" && version == "v1" && resource.Name == "nodes" {
 			// nodes/metrics in the core group are not filtered by the RestrictedResources,
 			// as they are not part of the API discovery.
 			nodeMetricsSubresource := resource.DeepCopy()

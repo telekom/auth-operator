@@ -15,7 +15,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	admissionv1 "k8s.io/api/admission/v1"
-	// +kubebuilder:scaffold:imports
+	rbacv1 "k8s.io/api/rbac/v1"
 	apimachineryruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
+	// +kubebuilder:scaffold:imports
 )
 
 // These tests use Ginkgo (BDD-style Go testing framework). Refer to
@@ -84,6 +85,9 @@ var _ = BeforeSuite(func() {
 	err = admissionv1.AddToScheme(scheme)
 	Expect(err).NotTo(HaveOccurred())
 
+	err = rbacv1.AddToScheme(scheme)
+	Expect(err).NotTo(HaveOccurred())
+
 	// +kubebuilder:scaffold:scheme
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme})
@@ -108,6 +112,28 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 
 	err = (&BindDefinition{}).SetupWebhookWithManager(mgr)
+	Expect(err).NotTo(HaveOccurred())
+
+	// Register field indexes required by webhook validation (duplicate targetName checks)
+	// Inlined here to avoid import cycle with pkg/indexer
+	err = mgr.GetFieldIndexer().IndexField(ctx, &RoleDefinition{}, TargetNameField,
+		func(obj client.Object) []string {
+			rd, ok := obj.(*RoleDefinition)
+			if !ok || rd.Spec.TargetName == "" {
+				return nil
+			}
+			return []string{rd.Spec.TargetName}
+		})
+	Expect(err).NotTo(HaveOccurred())
+
+	err = mgr.GetFieldIndexer().IndexField(ctx, &BindDefinition{}, TargetNameField,
+		func(obj client.Object) []string {
+			bd, ok := obj.(*BindDefinition)
+			if !ok || bd.Spec.TargetName == "" {
+				return nil
+			}
+			return []string{bd.Spec.TargetName}
+		})
 	Expect(err).NotTo(HaveOccurred())
 
 	// +kubebuilder:scaffold:webhook

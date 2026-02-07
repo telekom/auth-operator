@@ -1,4 +1,4 @@
-package utils //nolint:revive
+package utils //nolint:revive // e2e test utilities package
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	. "github.com/onsi/ginkgo/v2" //nolint:revive,staticcheck
+	. "github.com/onsi/ginkgo/v2" //nolint:revive,staticcheck // dot import is standard Ginkgo convention
 )
 
 const (
@@ -21,7 +21,7 @@ const (
 	certmanagerURLTmpl = "https://github.com/jetstack/cert-manager/releases/download/%s/cert-manager.yaml"
 )
 
-// DebugLevel controls verbosity of debug output (0=minimal, 1=normal, 2=verbose, 3=trace)
+// DebugLevel controls verbosity of debug output (0=minimal, 1=normal, 2=verbose, 3=trace).
 var DebugLevel = getDebugLevel()
 
 // GetE2EOutputDir returns the base output directory for e2e artifacts.
@@ -34,7 +34,7 @@ func GetE2EOutputDir() string {
 	if runID == "" {
 		runID = time.Now().UTC().Format("20060102T150405Z")
 	}
-	return filepath.Join("test/e2e/output", runID)
+	return filepath.Join("test", "e2e", "output", runID)
 }
 
 // sanitizeOutputName creates a filesystem-safe path segment from input.
@@ -61,12 +61,12 @@ func sanitizeOutputName(value string) string {
 }
 
 // GetE2EOutputDirForContext returns an output directory for a specific context.
-func GetE2EOutputDirForContext(context string) string {
+func GetE2EOutputDirForContext(contextName string) string {
 	base := GetE2EOutputDir()
-	if context == "" {
+	if contextName == "" {
 		return base
 	}
-	return filepath.Join(base, sanitizeOutputName(context))
+	return filepath.Join(base, sanitizeOutputName(contextName))
 }
 
 func getDebugLevel() int {
@@ -87,8 +87,8 @@ func warnError(err error) {
 	_, _ = fmt.Fprintf(GinkgoWriter, "warning: %v\n", err)
 }
 
-// DebugLog writes debug output at the specified level
-func DebugLog(level int, format string, args ...interface{}) {
+// DebugLogf writes debug output at the specified level.
+func DebugLogf(level int, format string, args ...interface{}) {
 	if level <= DebugLevel {
 		prefix := ""
 		switch level {
@@ -105,7 +105,7 @@ func DebugLog(level int, format string, args ...interface{}) {
 	}
 }
 
-// DebugSection prints a visually distinct section header
+// DebugSection prints a visually distinct section header.
 func DebugSection(title string) {
 	_, _ = fmt.Fprintf(GinkgoWriter, "\n")
 	_, _ = fmt.Fprintf(GinkgoWriter, "═══════════════════════════════════════════════════════════════════════════════\n")
@@ -113,14 +113,14 @@ func DebugSection(title string) {
 	_, _ = fmt.Fprintf(GinkgoWriter, "═══════════════════════════════════════════════════════════════════════════════\n\n")
 }
 
-// DebugSubSection prints a subsection header
+// DebugSubSection prints a subsection header.
 func DebugSubSection(title string) {
 	_, _ = fmt.Fprintf(GinkgoWriter, "\n───────────────────────────────────────────────────────────────────────────────\n")
 	_, _ = fmt.Fprintf(GinkgoWriter, "  %s\n", title)
 	_, _ = fmt.Fprintf(GinkgoWriter, "───────────────────────────────────────────────────────────────────────────────\n")
 }
 
-// DebugTable prints data in a table format
+// DebugTable prints data in a table format.
 func DebugTable(headers []string, rows [][]string) {
 	// Calculate column widths
 	widths := make([]int, len(headers))
@@ -166,7 +166,7 @@ func InstallPrometheusOperator() error {
 	return err
 }
 
-// Run executes the provided command within this context
+// Run executes the provided command within this context.
 func Run(cmd *exec.Cmd) ([]byte, error) {
 	dir, _ := GetProjectDir()
 	cmd.Dir = dir
@@ -177,57 +177,55 @@ func Run(cmd *exec.Cmd) ([]byte, error) {
 
 	cmd.Env = append(os.Environ(), "GO111MODULE=on")
 	command := strings.Join(cmd.Args, " ")
-	DebugLog(2, "running: %s", command)
+	DebugLogf(2, "running: %s", command)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		DebugLog(1, "command failed: %s\nerror: %v\noutput: %s", command, err, string(output))
+		DebugLogf(1, "command failed: %s\nerror: %v\noutput: %s", command, err, string(output))
 		return output, fmt.Errorf("%s failed with error: (%w) %s", command, err, string(output))
 	}
 	if DebugLevel >= 3 {
-		DebugLog(3, "command output: %s", string(output))
+		DebugLogf(3, "command output: %s", string(output))
 	}
 
 	return output, nil
 }
 
-// RunWithTimeout executes a command with a timeout
+// RunWithTimeout executes a command with a timeout.
+// It rebuilds the command using exec.CommandContext so the OS process is killed
+// automatically when the timeout expires, avoiding goroutine leaks.
 func RunWithTimeout(cmd *exec.Cmd, timeout time.Duration) ([]byte, error) {
 	dir, _ := GetProjectDir()
 	cmd.Dir = dir
 
 	if err := os.Chdir(cmd.Dir); err != nil {
-		DebugLog(1, "chdir dir: %s", err)
+		DebugLogf(1, "chdir dir: %s", err)
 	}
 
 	cmd.Env = append(os.Environ(), "GO111MODULE=on")
 	command := strings.Join(cmd.Args, " ")
-	DebugLog(2, "running with timeout %v: %s", timeout, command)
+	DebugLogf(2, "running with timeout %v: %s", timeout, command)
 
-	done := make(chan error)
-	var output []byte
-	var cmdErr error
+	// Rebuild the command with a context timeout so CombinedOutput returns
+	// when the deadline expires — no goroutine needed.
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 
-	go func() {
-		output, cmdErr = cmd.CombinedOutput()
-		done <- cmdErr
-	}()
+	ctxCmd := exec.CommandContext(ctx, cmd.Args[0], cmd.Args[1:]...) // args come from test code
+	ctxCmd.Dir = cmd.Dir
+	ctxCmd.Env = cmd.Env
 
-	select {
-	case <-time.After(timeout):
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-		return nil, fmt.Errorf("command timed out after %v: %s", timeout, command)
-	case err := <-done:
-		if err != nil {
-			DebugLog(1, "command failed: %s\nerror: %v\noutput: %s", command, err, string(output))
-			return output, fmt.Errorf("%s failed with error: (%w) %s", command, err, string(output))
-		}
-		return output, nil
+	output, err := ctxCmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return output, fmt.Errorf("command timed out after %v: %s", timeout, command)
 	}
+	if err != nil {
+		DebugLogf(1, "command failed: %s\nerror: %v\noutput: %s", command, err, string(output))
+		return output, fmt.Errorf("%s failed with error: (%w) %s", command, err, string(output))
+	}
+	return output, nil
 }
 
-// UninstallPrometheusOperator uninstalls the prometheus
+// UninstallPrometheusOperator uninstalls the prometheus.
 func UninstallPrometheusOperator() {
 	url := fmt.Sprintf(prometheusOperatorURL, prometheusOperatorVersion)
 	cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "-f", url)
@@ -236,7 +234,7 @@ func UninstallPrometheusOperator() {
 	}
 }
 
-// UninstallCertManager uninstalls the cert manager
+// UninstallCertManager uninstalls the cert manager.
 func UninstallCertManager() {
 	url := fmt.Sprintf(certmanagerURLTmpl, certmanagerVersion)
 	cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "-f", url)
@@ -245,7 +243,7 @@ func UninstallCertManager() {
 	}
 }
 
-// IsCertManagerInstalled checks if cert-manager is already installed
+// IsCertManagerInstalled checks if cert-manager is already installed.
 func IsCertManagerInstalled() bool {
 	cmd := exec.CommandContext(context.Background(), "kubectl", "get", "deployment", "cert-manager-webhook",
 		"-n", "cert-manager", "-o", "name")
@@ -330,7 +328,7 @@ func GetNonEmptyLines(output string) []string {
 	return res
 }
 
-// GetProjectDir will return the directory where the project is
+// GetProjectDir will return the directory where the project is.
 func GetProjectDir() (string, error) {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -358,7 +356,7 @@ func ShouldTeardown() bool {
 	return os.Getenv("E2E_TEARDOWN") == "true"
 }
 
-// WaitForResource waits for a Kubernetes resource to exist
+// WaitForResource waits for a Kubernetes resource to exist.
 func WaitForResource(resourceType, name, namespace string, timeout time.Duration) error {
 	args := []string{"get", resourceType, name}
 	if namespace != "" {
@@ -376,7 +374,7 @@ func WaitForResource(resourceType, name, namespace string, timeout time.Duration
 	return fmt.Errorf("timeout waiting for %s/%s", resourceType, name)
 }
 
-// WaitForPodRunning waits for a pod matching the label selector to be running
+// WaitForPodRunning waits for a pod matching the label selector to be running.
 func WaitForPodRunning(labelSelector, namespace string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -393,7 +391,7 @@ func WaitForPodRunning(labelSelector, namespace string, timeout time.Duration) e
 	return fmt.Errorf("timeout waiting for pod with label %s to be running", labelSelector)
 }
 
-// WaitForPodsReady waits for all pods matching the label selector to be Ready
+// WaitForPodsReady waits for all pods matching the label selector to be Ready.
 func WaitForPodsReady(labelSelector, namespace string, timeout time.Duration) error {
 	cmd := exec.CommandContext(context.Background(), "kubectl", "wait", "pod",
 		"-l", labelSelector,
@@ -404,7 +402,7 @@ func WaitForPodsReady(labelSelector, namespace string, timeout time.Duration) er
 	return err
 }
 
-// WaitForDeploymentAvailable waits for deployments matching label selector to be Available
+// WaitForDeploymentAvailable waits for deployments matching label selector to be Available.
 func WaitForDeploymentAvailable(labelSelector, namespace string, timeout time.Duration) error {
 	cmd := exec.CommandContext(context.Background(), "kubectl", "wait", "deployment",
 		"-l", labelSelector,
@@ -415,7 +413,7 @@ func WaitForDeploymentAvailable(labelSelector, namespace string, timeout time.Du
 	return err
 }
 
-// WaitForServiceEndpoints waits for a service to have endpoints
+// WaitForServiceEndpoints waits for a service to have endpoints.
 func WaitForServiceEndpoints(serviceName, namespace string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -423,7 +421,7 @@ func WaitForServiceEndpoints(serviceName, namespace string, timeout time.Duratio
 			"-n", namespace,
 			"-o", "jsonpath={.subsets}")
 		output, err := Run(cmd)
-		if err == nil && len(strings.TrimSpace(string(output))) > 0 {
+		if err == nil && strings.TrimSpace(string(output)) != "" {
 			return nil
 		}
 		time.Sleep(2 * time.Second)
@@ -431,7 +429,7 @@ func WaitForServiceEndpoints(serviceName, namespace string, timeout time.Duratio
 	return fmt.Errorf("timeout waiting for endpoints for service %s in namespace %s", serviceName, namespace)
 }
 
-// WaitForWebhookConfigurations waits for validating and mutating webhook configurations matching label selector
+// WaitForWebhookConfigurations waits for validating and mutating webhook configurations matching label selector.
 func WaitForWebhookConfigurations(labelSelector string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -536,7 +534,7 @@ func WaitForWebhookReady(timeout time.Duration) error {
 	return fmt.Errorf("timeout waiting for webhook to be ready: %w", lastErr)
 }
 
-// ApplyManifest applies a YAML manifest from a string using server-side apply
+// ApplyManifest applies a YAML manifest from a string using server-side apply.
 func ApplyManifest(manifest string) error {
 	cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "--server-side", "--force-conflicts", "-f", "-")
 	cmd.Stdin = strings.NewReader(manifest)
@@ -544,7 +542,7 @@ func ApplyManifest(manifest string) error {
 	return err
 }
 
-// DeleteManifest deletes resources defined in a YAML manifest
+// DeleteManifest deletes resources defined in a YAML manifest.
 func DeleteManifest(manifest string) error {
 	cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "-f", "-", "--ignore-not-found=true")
 	cmd.Stdin = strings.NewReader(manifest)
@@ -552,7 +550,7 @@ func DeleteManifest(manifest string) error {
 	return err
 }
 
-// GetResourceField gets a specific field from a resource using jsonpath
+// GetResourceField gets a specific field from a resource using jsonpath.
 func GetResourceField(resourceType, name, namespace, jsonpath string) (string, error) {
 	args := []string{"get", resourceType, name, "-o", fmt.Sprintf("jsonpath=%s", jsonpath)}
 	if namespace != "" {
@@ -566,7 +564,7 @@ func GetResourceField(resourceType, name, namespace, jsonpath string) (string, e
 	return string(output), nil
 }
 
-// KindClusterExists checks if a kind cluster with the given name exists
+// KindClusterExists checks if a kind cluster with the given name exists.
 func KindClusterExists(name string) bool {
 	cmd := exec.CommandContext(context.Background(), "kind", "get", "clusters")
 	output, err := Run(cmd)
@@ -582,7 +580,7 @@ func KindClusterExists(name string) bool {
 	return false
 }
 
-// CreateKindCluster creates a new kind cluster
+// CreateKindCluster creates a new kind cluster.
 func CreateKindCluster(name, k8sVersion string) error {
 	if KindClusterExists(name) {
 		_, _ = fmt.Fprintf(GinkgoWriter, "Kind cluster '%s' already exists\n", name)
@@ -598,7 +596,7 @@ func CreateKindCluster(name, k8sVersion string) error {
 	return err
 }
 
-// DeleteKindCluster deletes a kind cluster
+// DeleteKindCluster deletes a kind cluster.
 func DeleteKindCluster(name string) error {
 	cmd := exec.CommandContext(context.Background(), "kind", "delete", "cluster", "--name", name)
 	_, err := Run(cmd)
@@ -625,7 +623,7 @@ func CleanupWebhooks(labelSelector string) {
 	}
 }
 
-// CleanupAllAuthOperatorWebhooks removes all auth-operator related webhooks
+// CleanupAllAuthOperatorWebhooks removes all auth-operator related webhooks.
 func CleanupAllAuthOperatorWebhooks() {
 	_, _ = fmt.Fprintf(GinkgoWriter, "Cleaning up all auth-operator webhooks\n")
 
@@ -660,7 +658,7 @@ func CleanupAllAuthOperatorWebhooks() {
 	}
 }
 
-// RemoveFinalizersForAll removes finalizers from all resources of a given type
+// RemoveFinalizersForAll removes finalizers from all resources of a given type.
 func RemoveFinalizersForAll(resourceType string) {
 	cmd := exec.CommandContext(context.Background(), "kubectl", "get", resourceType, "-A",
 		"-o", `jsonpath={range .items[*]}{.metadata.namespace}{"/"}{.metadata.name}{"\n"}{end}`)
@@ -683,8 +681,8 @@ func RemoveFinalizersForAll(resourceType string) {
 	}
 }
 
-// parseNamespacedName parses "namespace/name" or "/name" for cluster-scoped resources
-func parseNamespacedName(value string) (string, string) {
+// parseNamespacedName parses "namespace/name" or "/name" for cluster-scoped resources.
+func parseNamespacedName(value string) (namespace, name string) {
 	parts := strings.SplitN(value, "/", 2)
 	if len(parts) == 1 {
 		return "", parts[0]
@@ -695,7 +693,7 @@ func parseNamespacedName(value string) (string, string) {
 	return parts[0], parts[1]
 }
 
-// CleanupResourcesByLabel deletes resources by label selector with optional namespace
+// CleanupResourcesByLabel deletes resources by label selector with optional namespace.
 func CleanupResourcesByLabel(resourceType, labelSelector, namespace string) {
 	args := []string{
 		"delete", resourceType, "-l", labelSelector,
@@ -710,7 +708,7 @@ func CleanupResourcesByLabel(resourceType, labelSelector, namespace string) {
 	}
 }
 
-// CleanupNamespace deletes a namespace and waits for it to be fully removed
+// CleanupNamespace deletes a namespace and waits for it to be fully removed.
 func CleanupNamespace(namespace string) {
 	cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "ns", namespace, "--ignore-not-found=true", "--wait=false")
 	_, _ = Run(cmd)
@@ -727,7 +725,7 @@ func CleanupNamespace(namespace string) {
 	}
 }
 
-// CleanupClusterResources cleans up cluster-scoped resources created by tests
+// CleanupClusterResources cleans up cluster-scoped resources created by tests.
 func CleanupClusterResources(labelSelector string) {
 	_, _ = fmt.Fprintf(GinkgoWriter, "Cleaning up cluster resources with label: %s\n", labelSelector)
 
@@ -746,14 +744,14 @@ func CleanupClusterResources(labelSelector string) {
 
 // =============================================================================
 // Debug and Diagnostic Functions
-// =============================================================================
+// =============================================================================.
 
 // CollectClusterDebugInfo gathers comprehensive cluster debug information
 // and writes it to GinkgoWriter. Call this on test failures.
-func CollectClusterDebugInfo(context string) {
+func CollectClusterDebugInfo(contextName string) {
 	_, _ = fmt.Fprintf(GinkgoWriter, "\n")
 	printSeparator()
-	_, _ = fmt.Fprintf(GinkgoWriter, "=== DEBUG INFO COLLECTION: %s\n", context)
+	_, _ = fmt.Fprintf(GinkgoWriter, "=== DEBUG INFO COLLECTION: %s\n", contextName)
 	_, _ = fmt.Fprintf(GinkgoWriter, "=== Timestamp: %s\n", time.Now().UTC().Format(time.RFC3339))
 	printSeparatorWithNewline()
 
@@ -812,11 +810,11 @@ func CollectClusterDebugInfo(context string) {
 	printSeparatorWithNewline()
 }
 
-// CollectNamespaceDebugInfo gathers debug info for a specific namespace
-func CollectNamespaceDebugInfo(namespace, context string) {
+// CollectNamespaceDebugInfo gathers debug info for a specific namespace.
+func CollectNamespaceDebugInfo(namespace, contextName string) {
 	_, _ = fmt.Fprintf(GinkgoWriter, "\n")
 	printSeparator()
-	_, _ = fmt.Fprintf(GinkgoWriter, "=== NAMESPACE DEBUG: %s (ns: %s)\n", context, namespace)
+	_, _ = fmt.Fprintf(GinkgoWriter, "=== NAMESPACE DEBUG: %s (ns: %s)\n", contextName, namespace)
 	_, _ = fmt.Fprintf(GinkgoWriter, "=== Timestamp: %s\n", time.Now().UTC().Format(time.RFC3339))
 	printSeparatorWithNewline()
 
@@ -853,7 +851,7 @@ func CollectNamespaceDebugInfo(namespace, context string) {
 	printSeparatorWithNewline()
 }
 
-// CollectOperatorLogs collects logs from auth-operator pods in the specified namespace
+// CollectOperatorLogs collects logs from auth-operator pods in the specified namespace.
 func CollectOperatorLogs(namespace string, tailLines int) {
 	_, _ = fmt.Fprintf(GinkgoWriter, "\n")
 	printSeparator()
@@ -895,7 +893,7 @@ func CollectOperatorLogs(namespace string, tailLines int) {
 	printSeparatorWithNewline()
 }
 
-// CollectPodDebugInfo collects detailed debug info for a specific pod
+// CollectPodDebugInfo collects detailed debug info for a specific pod.
 func CollectPodDebugInfo(namespace, podName string) {
 	_, _ = fmt.Fprintf(GinkgoWriter, "\n=== Pod Debug: %s/%s ===\n", namespace, podName)
 
@@ -904,7 +902,7 @@ func CollectPodDebugInfo(namespace, podName string) {
 	runDebugCommand("kubectl", "logs", podName, "-n", namespace, "--all-containers=true", "--tail=100")
 }
 
-// CollectCRDDebugInfo collects detailed info about auth-operator CRDs and their instances
+// CollectCRDDebugInfo collects detailed info about auth-operator CRDs and their instances.
 func CollectCRDDebugInfo() {
 	_, _ = fmt.Fprintf(GinkgoWriter, "\n")
 	printSeparator()
@@ -935,7 +933,7 @@ func CollectCRDDebugInfo() {
 	printSeparatorWithNewline()
 }
 
-// CollectDockerDebugInfo collects Docker/container runtime debug info
+// CollectDockerDebugInfo collects Docker/container runtime debug info.
 func CollectDockerDebugInfo() {
 	_, _ = fmt.Fprintf(GinkgoWriter, "\n")
 	printSeparator()
@@ -968,7 +966,7 @@ func CollectDockerDebugInfo() {
 	printSeparatorWithNewline()
 }
 
-// TestSummary holds structured test run summary data for JSON output
+// TestSummary holds structured test run summary data for JSON output.
 type TestSummary struct {
 	Timestamp   string                 `json:"timestamp"`
 	RunID       string                 `json:"run_id"`
@@ -985,7 +983,7 @@ type TestSummary struct {
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
 }
 
-// SaveTestSummaryJSON creates a structured JSON summary of the test run
+// SaveTestSummaryJSON creates a structured JSON summary of the test run.
 func SaveTestSummaryJSON(
 	suite string,
 	passed, failed, skipped int,
@@ -1021,7 +1019,7 @@ func SaveTestSummaryJSON(
 	return SaveDebugInfoToFile(outputDir, "test-summary.json", string(jsonData))
 }
 
-// getClusterInfo collects basic cluster information
+// getClusterInfo collects basic cluster information.
 func getClusterInfo() map[string]string {
 	info := make(map[string]string)
 
@@ -1049,7 +1047,7 @@ func getClusterInfo() map[string]string {
 	return info
 }
 
-// getTestMetadata collects environment-based test metadata
+// getTestMetadata collects environment-based test metadata.
 func getTestMetadata() map[string]interface{} {
 	metadata := make(map[string]interface{})
 
@@ -1072,7 +1070,7 @@ func getTestMetadata() map[string]interface{} {
 }
 
 // jsonMarshalIndent is a simple JSON marshal with indentation
-// Uses manual construction to avoid importing encoding/json
+// Uses manual construction to avoid importing encoding/json.
 func jsonMarshalIndent(v interface{}, indent string) ([]byte, error) {
 	summary, ok := v.(TestSummary)
 	if !ok {
@@ -1118,7 +1116,7 @@ func jsonMarshalIndent(v interface{}, indent string) ([]byte, error) {
 	return []byte(sb.String()), nil
 }
 
-// SaveDebugInfoToFile saves debug info to a file in the output directory
+// SaveDebugInfoToFile saves debug info to a file in the output directory.
 func SaveDebugInfoToFile(outputDir, filename, content string) error {
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return err
@@ -1136,7 +1134,7 @@ func CollectAndSaveAllDebugInfo(testContext string) {
 	if DebugLevel >= 2 {
 		CollectClusterDebugInfo(testContext)
 	} else {
-		DebugLog(1, "Saving debug info to files (set E2E_DEBUG_LEVEL=2 for console output)")
+		DebugLogf(1, "Saving debug info to files (set E2E_DEBUG_LEVEL=2 for console output)")
 	}
 
 	// Save to files for CI artifacts
@@ -1195,29 +1193,29 @@ func CollectAndSaveAllDebugInfo(testContext string) {
 		}
 	}
 
-	DebugLog(1, "Debug info saved to %s", outputDir)
+	DebugLogf(1, "Debug info saved to %s", outputDir)
 }
 
-// separator is used for debug output formatting (80 chars to fit line limits)
+// separator is used for debug output formatting (80 chars to fit line limits).
 const separator = "================================================================================"
 
-// printSeparator prints a separator line to GinkgoWriter
+// printSeparator prints a separator line to GinkgoWriter.
 func printSeparator() {
 	_, _ = fmt.Fprintf(GinkgoWriter, "%s\n", separator)
 }
 
-// printSeparatorWithNewline prints a separator line with trailing newline
+// printSeparatorWithNewline prints a separator line with trailing newline.
 func printSeparatorWithNewline() {
 	_, _ = fmt.Fprintf(GinkgoWriter, "%s\n\n", separator)
 }
 
-// collectSection is a helper to print a section header and run collection functions
+// collectSection is a helper to print a section header and run collection functions.
 func collectSection(title string, fn func()) {
 	_, _ = fmt.Fprintf(GinkgoWriter, "\n--- %s ---\n", title)
 	fn()
 }
 
-// runDebugCommand runs a command and prints output to GinkgoWriter (ignores errors)
+// runDebugCommand runs a command and prints output to GinkgoWriter (ignores errors).
 func runDebugCommand(name string, args ...string) {
 	cmd := exec.CommandContext(context.Background(), name, args...)
 	output, err := cmd.CombinedOutput()
@@ -1228,15 +1226,15 @@ func runDebugCommand(name string, args ...string) {
 	}
 }
 
-// OnTestFailure is a helper to be called in AfterEach to collect debug info on failure
+// OnTestFailure is a helper to be called in AfterEach to collect debug info on failure.
 func OnTestFailure(namespaces ...string) {
 	if CurrentSpecReport().Failed() {
-		context := fmt.Sprintf("Test Failed: %s", CurrentSpecReport().FullText())
-		CollectClusterDebugInfo(context)
+		debugContext := fmt.Sprintf("Test Failed: %s", CurrentSpecReport().FullText())
+		CollectClusterDebugInfo(debugContext)
 
 		for _, ns := range namespaces {
 			if ns != "" {
-				CollectNamespaceDebugInfo(ns, context)
+				CollectNamespaceDebugInfo(ns, debugContext)
 				CollectOperatorLogs(ns, 200)
 			}
 		}

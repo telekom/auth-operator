@@ -24,7 +24,7 @@ import (
 // WebhookAuthorizerStatusApplyConfiguration represents a declarative configuration of the WebhookAuthorizerStatus type for use
 // with apply.
 //
-// WebhookAuthorizerStatus defines the observed state of WebhookAuthorizer
+// WebhookAuthorizerStatus defines the observed state of WebhookAuthorizer.
 type WebhookAuthorizerStatusApplyConfiguration struct {
 	// ObservedGeneration is the last observed generation of the resource.
 	// This is used by kstatus to determine if the resource is current.

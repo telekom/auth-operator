@@ -1,0 +1,126 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: Check Tool Updates
+
+on:
+  schedule:
+    # Run weekly on Wednesday at 8:00 UTC
+    - cron: '0 8 * * 3'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check-updates:
+    name: Check for Tool Updates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Load versions.env
+        id: versions
+        run: |
+          # Source versions.env and export to outputs
+          set -a
+          source versions.env
+          set +a
+
+          echo "kustomize=${KUSTOMIZE_VERSION}" >> $GITHUB_OUTPUT
+          echo "controller_tools=${CONTROLLER_TOOLS_VERSION}" >> $GITHUB_OUTPUT
+          echo "golangci_lint=${GOLANGCI_LINT_VERSION}" >> $GITHUB_OUTPUT
+          echo "crd_ref_docs=${CRD_REF_DOCS_VERSION}" >> $GITHUB_OUTPUT
+          echo "helmify=${HELMIFY_VERSION}" >> $GITHUB_OUTPUT
+          echo "mockgen=${MOCKGEN_VERSION}" >> $GITHUB_OUTPUT
+          echo "kind=${KIND_VERSION}" >> $GITHUB_OUTPUT
+          echo "helm=${HELM_VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Check for updates
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          check_github_release() {
+            local repo=$1
+            local current=$2
+            local name=$3
+
+            latest=$(gh api "repos/${repo}/releases/latest" --jq '.tag_name' 2>/dev/null || echo "unknown")
+            if [ "$latest" != "unknown" ] && [ "$latest" != "$current" ]; then
+              echo "  - **${name}**: ${current} → ${latest} ([releases](https://github.com/${repo}/releases))" >> updates.md
+              echo "found=true" >> $GITHUB_OUTPUT
+            fi
+          }
+
+          check_go_module() {
+            local module=$1
+            local current=$2
+            local name=$3
+
+            latest=$(go list -m -versions "${module}" 2>/dev/null | awk '{print $NF}' || echo "unknown")
+            if [ "$latest" != "unknown" ] && [ "$latest" != "$current" ]; then
+              echo "  - **${name}**: ${current} → ${latest}" >> updates.md
+              echo "found=true" >> $GITHUB_OUTPUT
+            fi
+          }
+
+          echo "## Tool Update Report" > updates.md
+          echo "" >> updates.md
+          echo "The following tools have newer versions available:" >> updates.md
+          echo "" >> updates.md
+
+          # Check GitHub releases
+          check_github_release "kubernetes-sigs/kustomize" "${{ steps.versions.outputs.kustomize }}" "kustomize"
+          check_github_release "kubernetes-sigs/controller-tools" "${{ steps.versions.outputs.controller_tools }}" "controller-tools"
+          check_github_release "golangci/golangci-lint" "${{ steps.versions.outputs.golangci_lint }}" "golangci-lint"
+          check_github_release "elastic/crd-ref-docs" "${{ steps.versions.outputs.crd_ref_docs }}" "crd-ref-docs"
+          check_github_release "arttor/helmify" "${{ steps.versions.outputs.helmify }}" "helmify"
+          check_github_release "uber-go/mock" "${{ steps.versions.outputs.mockgen }}" "mockgen"
+          check_github_release "kubernetes-sigs/kind" "${{ steps.versions.outputs.kind }}" "kind"
+          check_github_release "helm/helm" "${{ steps.versions.outputs.helm }}" "helm"
+
+          echo "" >> updates.md
+          echo "---" >> updates.md
+          echo "To update, edit \`versions.env\` and run \`make manifests generate\` to verify compatibility." >> updates.md
+
+          if [ -f updates.md ]; then
+            cat updates.md
+          fi
+
+      - name: Create or update issue
+        if: steps.check.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ISSUE_TITLE="🔧 Tool Updates Available"
+
+          # Check if issue already exists
+          EXISTING_ISSUE=$(gh issue list --label "dependencies" --label "automation" --state open --search "$ISSUE_TITLE" --json number --jq '.[0].number' || echo "")
+
+          if [ -n "$EXISTING_ISSUE" ]; then
+            # Update existing issue
+            gh issue comment "$EXISTING_ISSUE" --body-file updates.md
+            echo "Updated issue #${EXISTING_ISSUE}"
+          else
+            # Create new issue
+            gh issue create \
+              --title "$ISSUE_TITLE" \
+              --body-file updates.md \
+              --label "dependencies" \
+              --label "automation"
+            echo "Created new issue"
+          fi
+
+      - name: Summary
+        run: |
+          echo "### Tool Update Check Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f updates.md ]; then
+            cat updates.md >> $GITHUB_STEP_SUMMARY
+          else
+            echo "All tools are up to date!" >> $GITHUB_STEP_SUMMARY
+          fi

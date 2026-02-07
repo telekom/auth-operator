@@ -127,6 +127,16 @@ func (in *BindDefinitionStatus) DeepCopyInto(out *BindDefinitionStatus) {
 		*out = make([]rbacv1.Subject, len(*in))
 		copy(*out, *in)
 	}
+	if in.MissingRoleRefs != nil {
+		in, out := &in.MissingRoleRefs, &out.MissingRoleRefs
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.ExternalServiceAccounts != nil {
+		in, out := &in.ExternalServiceAccounts, &out.ExternalServiceAccounts
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
 		*out = make([]v1.Condition, len(*in))

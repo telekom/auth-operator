@@ -27,7 +27,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: WebhookAuthorizer is the Schema for the webhookauthorizers API
+        description: WebhookAuthorizer is the Schema for the webhookauthorizers API.
         properties:
           apiVersion:
             description: |-
@@ -47,7 +47,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: WebhookAuthorizerSpec defines the desired state of WebhookAuthorizer
+            description: WebhookAuthorizerSpec defines the desired state of WebhookAuthorizer.
             properties:
               allowedPrincipals:
                 description: AllowedPrincipals is a slice of principals this authorizer
@@ -213,7 +213,7 @@ spec:
                 type: array
             type: object
           status:
-            description: WebhookAuthorizerStatus defines the observed state of WebhookAuthorizer
+            description: WebhookAuthorizerStatus defines the observed state of WebhookAuthorizer.
             properties:
               authorizerConfigured:
                 description: Not extremely important as most status updates are driven

@@ -9,14 +9,31 @@ linters:
   default: none
   enable:
     # Code Quality
+    - asasalint       # Detect []any in variadic args (e.g., misleading Printf calls)
+    - asciicheck      # Find non-ASCII identifiers
+    - copyloopvar     # Detect loop variable capture issues
+    - dogsled         # Find excessive blank identifiers in assignments
     - dupl            # Detect duplicate code
+    - dupword         # Find duplicated words in comments
+    - durationcheck   # Detect incorrect time.Duration multiplication
     - errcheck        # Check for unchecked errors
+    - errchkjson      # Check error handling of json encoding functions
     - goconst         # Find repeated strings that could be constants
+    - gocritic        # Collection of opinionated linting checks
     - gocyclo         # Check cyclomatic complexity
+    - godot           # Check that comments end with a period
+    - goprintffuncname # Check printf-like function names end with f
     - govet           # Reports suspicious constructs
+    - importas        # Enforce consistent import aliases
     - ineffassign     # Detect ineffective assignments
+    - intrange        # Suggest integer range loops (Go 1.22+)
+    - loggercheck     # Check logr/slog key-value pair consistency
     - nakedret        # Find naked returns in long functions
+    - nolintlint      # Check nolint directives are well-formed and necessary
+    - nosprintfhostport # Detect misuse of Sprintf for host:port
     - prealloc        # Find slice declarations that could be preallocated
+    - predeclared     # Find shadowed predeclared identifiers
+    - thelper         # Detect test helpers without t.Helper()
     - unconvert       # Remove unnecessary type conversions
     - unparam         # Find unused function parameters
     - unused          # Find unused code
@@ -27,6 +44,7 @@ linters:
     # Error Handling
     - errorlint       # Proper error wrapping and comparison
     - nilerr          # Check for nil error returns
+    - nilnil          # Detect functions returning nil,nil
 
     # Security
     - gosec           # Security-oriented linting
@@ -38,6 +56,7 @@ linters:
     # Code Style
     - lll             # Line length limit
     - misspell        # Find misspelled words
+    - usestdlibvars   # Detect manual construction of stdlib vars/consts
     - whitespace      # Check for unnecessary whitespace
 
     # Testing
@@ -48,10 +67,41 @@ linters:
     - revive          # Fast, configurable linter (replaces golint)
 
   settings:
+    gocritic:
+      enable-all: true
+      disabled-checks:
+        - appendAssign
+        - commentedOutCode
+        - hugeParam
+        - rangeValCopy
+        - regexpMust
     gocyclo:
       min-complexity: 20
+    godot:
+      scope: toplevel   # Only check top-level comments (exported symbols)
+      exclude:
+        - "SPDX-"       # Exclude SPDX license headers
+        - "\\+kubebuilder"  # Exclude kubebuilder markers
+        - "\\+groupName"    # Exclude kubebuilder group markers
+    importas:
+      no-unaliased: true
+      alias:
+        - pkg: k8s.io/api/core/v1
+          alias: corev1
+        - pkg: k8s.io/api/rbac/v1
+          alias: rbacv1
+        - pkg: k8s.io/apimachinery/pkg/api/errors
+          alias: apierrors
+        - pkg: k8s.io/apimachinery/pkg/apis/meta/v1
+          alias: metav1
+        - pkg: sigs.k8s.io/controller-runtime
+          alias: ctrl
     lll:
       line-length: 180
+    nolintlint:
+      allow-unused: false
+      require-explanation: true
+      require-specific: true
     revive:
       rules:
         - name: exported
@@ -59,22 +109,31 @@ linters:
             - checkPrivateReceivers
             - disableStutteringCheck
         - name: blank-imports
+        - name: bool-literal-in-expr
+        - name: constant-logical-expr
         - name: context-as-argument
         - name: context-keys-type
         - name: dot-imports
+        - name: empty-block
         - name: error-return
         - name: error-strings
         - name: error-naming
+        - name: errorf
+        - name: if-return
         - name: increment-decrement
-        - name: var-naming
+        - name: indent-error-flow
         - name: package-comments
           disabled: true  # Too noisy for existing codebase
         - name: range
         - name: receiver-naming
+        - name: redefines-builtin-id
+        - name: superfluous-else
         - name: time-naming
         - name: unexported-return
-        - name: indent-error-flow
-        - name: errorf
+        - name: unreachable-code
+        - name: unused-parameter
+          disabled: true  # Conflicts with interface compliance and callback signatures
+        - name: var-naming
     gosec:
       excludes:
         - G104  # Unhandled errors (covered by errcheck)
@@ -88,6 +147,11 @@ linters:
         path: api/*
       - linters:
           - dupl
+        path: _test\.go$
+      - linters:
+          - dupl
+        path: test/
+      - linters:
           - lll
         path: internal/*
       - linters:
@@ -107,6 +171,16 @@ linters:
         path: _test\.go$
         text: "dot-imports"
       - linters:
+          - gocritic
+        path: _test\.go$
+      - linters:
+          - godot
+        path: _test\.go$
+      - linters:
+          - thelper
+        path: _test\.go$
+        text: "ginkgo"
+      - linters:
           - gocyclo
         path: api/authorization/v1alpha1/binddefinition_webhook\.go$
       - linters:
@@ -115,6 +189,9 @@ linters:
       - linters:
           - gocyclo
         path: internal/webhook/authorization/namespace_validating_webhook\.go$
+      - linters:
+          - gocyclo
+        path: internal/webhook/authorization/namespace_mutating_webhook_test\.go$
     paths:
       - third_party$
       - builtin$

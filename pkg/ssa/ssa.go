@@ -9,20 +9,47 @@ package ssa
 
 import (
 	"context"
-	"encoding/json"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 
 	rbacv1 "k8s.io/api/rbac/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	corev1ac "k8s.io/client-go/applyconfigurations/core/v1"
+	metav1ac "k8s.io/client-go/applyconfigurations/meta/v1"
 	rbacv1ac "k8s.io/client-go/applyconfigurations/rbac/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	metav1ac "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
 // FieldOwner is the field manager name for the auth-operator.
 const FieldOwner = "auth-operator"
+
+// maxFieldManagerLength is the Kubernetes API server limit for fieldManager.
+const maxFieldManagerLength = 128
+
+// FieldOwnerForBD returns a per-BindDefinition field owner for SSA.
+// This allows multiple BDs to independently manage ownerReferences on shared SAs.
+// Each BD's ownerRef is tracked separately so one BD's apply doesn't remove another's.
+// If the resulting field owner would exceed 128 characters (K8s limit), the BD name
+// is truncated and suffixed with a short hash to ensure uniqueness.
+func FieldOwnerForBD(bdName string) string {
+	prefix := FieldOwner + "/"
+	fullOwner := prefix + bdName
+
+	if len(fullOwner) <= maxFieldManagerLength {
+		return fullOwner
+	}
+
+	// Hash the full name for uniqueness
+	hash := sha256.Sum256([]byte(bdName))
+	hashSuffix := hex.EncodeToString(hash[:4]) // 8 hex chars
+
+	// Truncate bdName to fit: prefix + truncated + "-" + hash <= 128
+	maxNameLen := maxFieldManagerLength - len(prefix) - 1 - len(hashSuffix)
+	truncatedName := bdName[:maxNameLen]
+
+	return prefix + truncatedName + "-" + hashSuffix
+}
 
 // OwnerReference creates an OwnerReference ApplyConfiguration for use with SSA.
 func OwnerReference(
@@ -37,6 +64,53 @@ func OwnerReference(
 		WithUID(uid).
 		WithController(controller).
 		WithBlockOwnerDeletion(blockOwnerDeletion)
+}
+
+// ServiceAccountWith creates a ServiceAccount ApplyConfiguration with labels
+// and automountServiceAccountToken. Attach owner references via the returned AC.
+func ServiceAccountWith(
+	name, namespace string,
+	labels map[string]string,
+	automountToken bool,
+) *corev1ac.ServiceAccountApplyConfiguration {
+	ac := corev1ac.ServiceAccount(name, namespace).
+		WithAutomountServiceAccountToken(automountToken)
+
+	if len(labels) > 0 {
+		ac.WithLabels(labels)
+	}
+
+	return ac
+}
+
+// ApplyServiceAccount applies a ServiceAccount using Server-Side Apply.
+func ApplyServiceAccount(
+	ctx context.Context,
+	c client.Client,
+	ac *corev1ac.ServiceAccountApplyConfiguration,
+) error {
+	return ApplyServiceAccountWithFieldOwner(ctx, c, ac, FieldOwner)
+}
+
+// ApplyServiceAccountWithFieldOwner applies a ServiceAccount using SSA with a custom field owner.
+// Use FieldOwnerForBD(bdName) for shared SAs to ensure each BD's ownerRef is tracked independently.
+func ApplyServiceAccountWithFieldOwner(
+	ctx context.Context,
+	c client.Client,
+	ac *corev1ac.ServiceAccountApplyConfiguration,
+	fieldOwner string,
+) error {
+	if ac == nil || ac.Name == nil {
+		return fmt.Errorf("serviceAccount ApplyConfiguration must have a name")
+	}
+	if *ac.Name == "" {
+		return fmt.Errorf("serviceAccount ApplyConfiguration name must not be empty")
+	}
+	if ac.Namespace == nil || *ac.Namespace == "" {
+		return fmt.Errorf("serviceAccount ApplyConfiguration must have a namespace")
+	}
+
+	return c.Apply(ctx, ac, client.FieldOwner(fieldOwner), client.ForceOwnership)
 }
 
 // ClusterRoleWithLabelsAndRules creates a ClusterRole ApplyConfiguration with the specified
@@ -121,15 +195,7 @@ func ApplyClusterRole(
 		return fmt.Errorf("clusterRole ApplyConfiguration name must not be empty")
 	}
 
-	clusterRole := &rbacv1.ClusterRole{}
-	clusterRole.Name = *ac.Name
-
-	patch, err := createPatch(ac)
-	if err != nil {
-		return fmt.Errorf("create patch for ClusterRole %s: %w", *ac.Name, err)
-	}
-
-	return c.Patch(ctx, clusterRole, patch, client.FieldOwner(FieldOwner), client.ForceOwnership)
+	return c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership)
 }
 
 // ApplyRole applies a Role using Server-Side Apply.
@@ -151,16 +217,7 @@ func ApplyRole(
 		return fmt.Errorf("role ApplyConfiguration namespace must not be empty")
 	}
 
-	role := &rbacv1.Role{}
-	role.Name = *ac.Name
-	role.Namespace = *ac.Namespace
-
-	patch, err := createPatch(ac)
-	if err != nil {
-		return fmt.Errorf("create patch for Role %s/%s: %w", *ac.Namespace, *ac.Name, err)
-	}
-
-	return c.Patch(ctx, role, patch, client.FieldOwner(FieldOwner), client.ForceOwnership)
+	return c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership)
 }
 
 // ClusterRoleBindingWithSubjectsAndRoleRef creates a ClusterRoleBinding ApplyConfiguration.
@@ -256,15 +313,7 @@ func ApplyClusterRoleBinding(
 		return fmt.Errorf("clusterRoleBinding ApplyConfiguration name must not be empty")
 	}
 
-	crb := &rbacv1.ClusterRoleBinding{}
-	crb.Name = *ac.Name
-
-	patch, err := createPatch(ac)
-	if err != nil {
-		return fmt.Errorf("create patch for ClusterRoleBinding %s: %w", *ac.Name, err)
-	}
-
-	return c.Patch(ctx, crb, patch, client.FieldOwner(FieldOwner), client.ForceOwnership)
+	return c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership)
 }
 
 // ApplyRoleBinding applies a RoleBinding using Server-Side Apply.
@@ -286,40 +335,5 @@ func ApplyRoleBinding(
 		return fmt.Errorf("roleBinding ApplyConfiguration namespace must not be empty")
 	}
 
-	rb := &rbacv1.RoleBinding{}
-	rb.Name = *ac.Name
-	rb.Namespace = *ac.Namespace
-
-	patch, err := createPatch(ac)
-	if err != nil {
-		return fmt.Errorf("create patch for RoleBinding %s/%s: %w", *ac.Namespace, *ac.Name, err)
-	}
-
-	return c.Patch(ctx, rb, patch, client.FieldOwner(FieldOwner), client.ForceOwnership)
-}
-
-// applyPatch is a custom patch type for Server-Side Apply that marshals an ApplyConfiguration to JSON.
-// This properly applies the ApplyConfiguration fields instead of applying an empty object.
-type applyPatch struct {
-	data []byte
-}
-
-// Type implements client.Patch.
-func (p applyPatch) Type() types.PatchType {
-	return types.ApplyPatchType
-}
-
-// Data implements client.Patch.
-func (p applyPatch) Data(_ client.Object) ([]byte, error) {
-	return p.data, nil
-}
-
-// createPatch creates an Apply patch from an ApplyConfiguration by marshaling it to JSON.
-// Uses runtime.ApplyConfiguration interface for type safety at compile time.
-func createPatch(ac runtime.ApplyConfiguration) (client.Patch, error) {
-	data, err := json.Marshal(ac)
-	if err != nil {
-		return nil, fmt.Errorf("marshal ApplyConfiguration: %w", err)
-	}
-	return applyPatch{data: data}, nil
+	return c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership)
 }

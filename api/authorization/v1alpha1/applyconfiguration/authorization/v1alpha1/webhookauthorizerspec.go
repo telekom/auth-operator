@@ -25,7 +25,7 @@ import (
 // WebhookAuthorizerSpecApplyConfiguration represents a declarative configuration of the WebhookAuthorizerSpec type for use
 // with apply.
 //
-// WebhookAuthorizerSpec defines the desired state of WebhookAuthorizer
+// WebhookAuthorizerSpec defines the desired state of WebhookAuthorizer.
 type WebhookAuthorizerSpecApplyConfiguration struct {
 	// Resources which will be used to evaluate the SubjectAccessReviewSpec.ResourceAttributes
 	ResourceRules []v1.ResourceRule `json:"resourceRules,omitempty"`

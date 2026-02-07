@@ -1,5 +1,5 @@
 /*
-Copyright © 2026 Deutsche Telekom AG
+Copyright © 2026 Deutsche Telekom AG.
 */
 package cmd
 
@@ -17,13 +17,14 @@ import (
 	"github.com/telekom/auth-operator/pkg/discovery"
 	"github.com/telekom/auth-operator/pkg/indexer"
 
-	// Import metrics package to register custom Prometheus metrics
+	// Import metrics package to register custom Prometheus metrics.
 	_ "github.com/telekom/auth-operator/pkg/metrics"
 
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
 var (
@@ -35,7 +36,7 @@ var (
 	waitForCRDs               bool
 )
 
-// controllerCmd represents the controller command
+// controllerCmd represents the controller command.
 var controllerCmd = &cobra.Command{
 	Use:   "controller",
 	Short: "Run the auth-operator controller manager",
@@ -76,6 +77,9 @@ are created and kept in sync.`,
 		mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 			Scheme: scheme,
 
+			Metrics: metricsserver.Options{
+				BindAddress: metricsAddr,
+			},
 			LeaderElection:          enableLeaderElection,
 			LeaderElectionID:        "auth.t-caas.telekom.com",
 			LeaderElectionNamespace: namespace,
@@ -111,7 +115,7 @@ are created and kept in sync.`,
 			roleDefinitionController, err := authorizationcontroller.NewRoleDefinitionReconciler(
 				mgr.GetClient(),
 				mgr.GetScheme(),
-				mgr.GetEventRecorderFor("RoleDefinitionReconciler"), //nolint:staticcheck // TODO: migrate to events.EventRecorder
+				mgr.GetEventRecorder("RoleDefinitionReconciler"),
 				resourceTracker)
 			if err != nil {
 				return fmt.Errorf("unable to create RoleDefinition reconciler: %w", err)
@@ -131,7 +135,7 @@ are created and kept in sync.`,
 				mgr.GetClient(),
 				mgr.GetConfig(),
 				mgr.GetScheme(),
-				mgr.GetEventRecorderFor("BindDefinitionReconciler"), //nolint:staticcheck // TODO: migrate to events.EventRecorder
+				mgr.GetEventRecorder("BindDefinitionReconciler"),
 				resourceTracker)
 			if err != nil {
 				return fmt.Errorf("unable to create BindDefinition reconciler: %w", err)

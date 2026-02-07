@@ -1,5 +1,5 @@
 /*
-Copyright © 2026 Deutsche Telekom AG
+Copyright © 2026 Deutsche Telekom AG.
 */
 package main
 

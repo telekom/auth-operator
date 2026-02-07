@@ -23,14 +23,14 @@ type BindDefinitionValidator struct {
 
 var _ admission.Validator[*BindDefinition] = &BindDefinitionValidator{}
 
-// SetupWebhookWithManager will setup the manager to manage the webhooks
+// SetupWebhookWithManager will setup the manager to manage the webhooks.
 func (r *BindDefinition) SetupWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr, r).
 		WithValidator(&BindDefinitionValidator{Client: mgr.GetClient()}).
 		Complete()
 }
 
-// +kubebuilder:webhook:path=/validate-authorization-t-caas-telekom-com-v1alpha1-binddefinition,mutating=false,failurePolicy=fail,sideEffects=None,groups=authorization.t-caas.telekom.com,resources=binddefinitions,verbs=create;update,versions=v1alpha1,name=webhook.auth.t-caas.telekom.de,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/validate-authorization-t-caas-telekom-com-v1alpha1-binddefinition,mutating=false,failurePolicy=fail,sideEffects=None,groups=authorization.t-caas.telekom.com,resources=binddefinitions,verbs=create;update,versions=v1alpha1,name=binddefinition.validating.webhook.auth.t-caas.telekom.de,admissionReviewVersions=v1
 
 // validateBindDefinitionSpec validates the BindDefinition spec for duplicate targetName.
 // Role existence is checked but only returns warnings (not errors) to allow applying
@@ -95,24 +95,26 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 			namespaceSet := make(map[string]corev1.Namespace)
 
 			for _, nsSelector := range roleBinding.NamespaceSelector {
-				if !isLabelSelectorEmpty(&nsSelector) {
-					selector, err := metav1.LabelSelectorAsSelector(&nsSelector)
-					if err != nil {
-						logger.Info("validation failed: invalid namespaceSelector",
-							"name", r.Name, "error", err.Error())
-						return warnings, apierrors.NewBadRequest(fmt.Sprintf("invalid namespaceSelector: %v", err))
-					}
-					namespaceList := &corev1.NamespaceList{}
-					listOptions := &client.ListOptions{
-						LabelSelector: selector,
-					}
-					if err := v.Client.List(ctx, namespaceList, listOptions); err != nil {
-						logger.Error(err, "failed to list namespaces", "selector", selector.String())
-						return warnings, apierrors.NewInternalError(fmt.Errorf("unable to list namespaces: %w", err))
-					}
-					for _, ns := range namespaceList.Items {
-						namespaceSet[ns.Name] = ns
-					}
+				if isLabelSelectorEmpty(&nsSelector) {
+					continue
+				}
+
+				selector, err := metav1.LabelSelectorAsSelector(&nsSelector)
+				if err != nil {
+					logger.Info("validation failed: invalid namespaceSelector",
+						"name", r.Name, "error", err.Error())
+					return warnings, apierrors.NewBadRequest(fmt.Sprintf("invalid namespaceSelector: %v", err))
+				}
+				namespaceList := &corev1.NamespaceList{}
+				listOptions := &client.ListOptions{
+					LabelSelector: selector,
+				}
+				if err := v.Client.List(ctx, namespaceList, listOptions); err != nil {
+					logger.Error(err, "failed to list namespaces", "selector", selector.String())
+					return warnings, apierrors.NewInternalError(fmt.Errorf("unable to list namespaces: %w", err))
+				}
+				for _, ns := range namespaceList.Items {
+					namespaceSet[ns.Name] = ns
 				}
 			}
 

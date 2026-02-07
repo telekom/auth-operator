@@ -7,7 +7,7 @@ Auth Operator is a Kubernetes operator for T-CaaS that manages authentication (`
 - **BindDefinition**: Creates ClusterRoleBindings/RoleBindings for subjects (Users, Groups, ServiceAccounts)
 - **WebhookAuthorizer**: Configures webhook-based authorization decisions
 
-**Stack**: Go 1.25, Kubebuilder v4 (multi-group layout), controller-runtime v0.23, Ginkgo/Gomega testing, Helm chart  
+**Stack**: Go (see go.mod), Kubebuilder v4 (multi-group layout), controller-runtime v0.23, Ginkgo/Gomega testing, Helm chart  
 **Domain**: `t-caas.telekom.com` | **API Group**: `authorization.t-caas.telekom.com` | **Version**: `v1alpha1`
 
 ## Build & Validation Commands
@@ -185,7 +185,8 @@ logger.V(1).Info("debug")  // Verbose
 
 | File | Purpose |
 |------|---------|
-| `.golangci.yml` | Go linter config (v2 format, Go 1.25) |
+| `go.mod` | **Single source of truth for Go version** - CI, Dockerfile, Makefile all read from here |
+| `.golangci.yml` | Go linter config (v2 format) |
 | `.yamllint.yml` | YAML linting rules |
 | `versions.env` | Tool versions (controller-gen, kustomize, etc.) |
 | `PROJECT` | Kubebuilder project metadata (do not edit) |
@@ -224,6 +225,20 @@ kubebuilder create api --group core --version v1 --kind Pod --controller=true --
 
 ## References
 
+### Internal Documentation
+- **Operator Guide**: `docs/operator-guide.md` — Installation, configuration, HA, upgrades
+- **Debugging Guide**: `docs/debugging-guide.md` — Troubleshooting and diagnostics
+- **Metrics & Alerting**: `docs/metrics-and-alerting.md` — Prometheus metrics and alerts
+- **SSA Architecture**: `docs/ssa-architecture.md` — Server-Side Apply patterns
+- **Condition Lifecycle**: `docs/condition-lifecycle.md` — Status condition reference
+- **API Reference**: `docs/api-reference/authorization.t-caas.telekom.com.md` — CRD specification
+- **E2E Testing**: `test/e2e/README.md` — End-to-end test guide
+- **k8s-breakglass Integration**: `docs/breakglass-integration.md` — Temporary privilege escalation
+
+### Related Projects
+- **k8s-breakglass**: https://github.com/telekom/k8s-breakglass — Temporary privilege escalation system
+
+### External References
 - **Kubebuilder Book**: https://book.kubebuilder.io
 - **controller-runtime**: https://github.com/kubernetes-sigs/controller-runtime
 - **API Conventions**: https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md

@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	"github.com/telekom/auth-operator/pkg/metrics"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -24,13 +25,13 @@ type NamespaceMutator struct {
 	TDGMigration bool
 }
 
-// InjectDecoder injects the decoder into the NamespaceMutator
+// InjectDecoder injects the decoder into the NamespaceMutator.
 func (m *NamespaceMutator) InjectDecoder(d admission.Decoder) error {
 	m.Decoder = d
 	return nil
 }
 
-// Handle mutates the Namespace by adding a label based on user groups or ServiceAccount
+// Handle mutates the Namespace by adding a label based on user groups or ServiceAccount.
 func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) admission.Response {
 	logger := logf.FromContext(ctx).WithName("namespace-mutator")
 
@@ -38,6 +39,7 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 	if req.Operation != admissionv1.Create && req.Operation != admissionv1.Update {
 		logger.V(4).Info("operation not CREATE/UPDATE - allowing",
 			"namespace", req.Name, "operation", req.Operation)
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
 		return admission.Allowed("Operation is neither CREATE nor UPDATE")
 	}
 
@@ -51,6 +53,7 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 		logger.Info("AUDIT: webhook bypass granted",
 			"namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username,
 			"bypassReason", bypassResult.Reason, "webhook", "mutator")
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
 		return admission.Allowed("")
 	}
 
@@ -58,6 +61,7 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 	var err = m.Decoder.Decode(req, ns)
 	if err != nil {
 		logger.Error(err, "failed to decode namespace", "namespace", req.Name)
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultErrored).Inc()
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 
@@ -76,6 +80,7 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 	bindDefinitions := &authzv1alpha1.BindDefinitionList{}
 	if err := m.Client.List(ctx, bindDefinitions); err != nil {
 		logger.Error(err, "failed to list BindDefinitions", "namespace", req.Name)
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultErrored).Inc()
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
 
@@ -149,19 +154,22 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 		marshalledNS, err := json.Marshal(ns)
 		if err != nil {
 			logger.Error(err, "failed to marshal mutated namespace", "namespace", req.Name)
+			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultErrored).Inc()
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
 		logger.V(1).Info("namespace mutation successful", "namespace", req.Name, "labelCount", len(labelsToAdd))
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
 		return admission.PatchResponseFromRaw(req.Object.Raw, marshalledNS)
 	}
 
 	// If no labels to add, deny the request with a warning
 	denialMsg := "The user does not have any OIDC attributes assigned to this cluster and the user is not a Kubernetes admin. Namespace creation is not allowed."
 	logger.V(1).Info("namespace mutation denied - no labels matched", "namespace", req.Name, "username", req.UserInfo.Username)
+	metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultDenied).Inc()
 	return admission.Denied(denialMsg)
 }
 
-// Extract labels from NamespaceSelector
+// Extract labels from NamespaceSelector.
 func getLabelsFromNamespaceSelector(selector metav1.LabelSelector) map[string]string {
 	labels := map[string]string{}
 	// Process matchLabels

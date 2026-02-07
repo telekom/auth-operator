@@ -24,7 +24,7 @@ import (
 // RoleDefinitionSpecApplyConfiguration represents a declarative configuration of the RoleDefinitionSpec type for use
 // with apply.
 //
-// RoleDefinitionSpec defines the desired state of RoleDefinition
+// RoleDefinitionSpec defines the desired state of RoleDefinition.
 type RoleDefinitionSpecApplyConfiguration struct {
 	// The target role that will be reconciled. This can be a ClusterRole or a namespaced Role
 	TargetRole *string `json:"targetRole,omitempty"`

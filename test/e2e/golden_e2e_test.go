@@ -34,8 +34,7 @@ import (
 	"github.com/telekom/auth-operator/test/utils"
 )
 
-// Package level constant for status checking
-const goldenStatusTrue = "True"
+// Package level constant for status checking - uses statusTrue from debug_report.go
 
 var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func() {
 	const (
@@ -297,8 +296,8 @@ var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func(
 			Expect(subjectNames).To(ContainElements("golden-test-user@example.com", "golden-test-group"))
 
 			By("Golden file comparison completed successfully")
-			GinkgoWriter.Printf("Expected content (from file):\n%s\n", string(expectedBytes))
-			GinkgoWriter.Printf("Actual ClusterRoleBinding matches expected structure\n")
+			_, _ = fmt.Fprintf(GinkgoWriter, "Expected content (from file):\n%s\n", string(expectedBytes))
+			_, _ = fmt.Fprintf(GinkgoWriter, "Actual ClusterRoleBinding matches expected structure\n")
 		})
 	})
 
@@ -443,7 +442,7 @@ var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func(
 			expectedPath := filepath.Join(testdataPath, "golden/expected/multi-clusterrolebindings.yaml")
 			expectedBytes, err := os.ReadFile(expectedPath)
 			Expect(err).NotTo(HaveOccurred())
-			GinkgoWriter.Printf("Expected multi-ClusterRoleBindings:\n%s\n", string(expectedBytes))
+			_, _ = fmt.Fprintf(GinkgoWriter, "Expected multi-ClusterRoleBindings:\n%s\n", string(expectedBytes))
 		})
 	})
 
@@ -635,7 +634,7 @@ func checkGoldenRoleDefinitionCreated(name, namespace string) bool {
 	if err != nil {
 		return false
 	}
-	return strings.TrimSpace(string(output)) == goldenStatusTrue
+	return strings.TrimSpace(string(output)) == statusTrue
 }
 
 func checkGoldenBindDefinitionCreated(name, namespace string) bool {
@@ -646,7 +645,7 @@ func checkGoldenBindDefinitionCreated(name, namespace string) bool {
 	if err != nil {
 		return false
 	}
-	return strings.TrimSpace(string(output)) == goldenStatusTrue
+	return strings.TrimSpace(string(output)) == statusTrue
 }
 
 func containsGoldenVerb(verbs []string, verb string) bool {

@@ -82,10 +82,10 @@ Tests are organized using Ginkgo labels for selective execution:
 Before running e2e tests, ensure you have:
 
 - **Docker**: Running and accessible
-- **Go**: 1.22 or later
+- **Go**: 1.25 or later
 - **kubectl**: Compatible with Kubernetes 1.28+
-- **Kind**: v0.20.0 or later
-- **Helm**: v3.12.0 or later
+- **Kind**: v0.31.0 or later
+- **Helm**: v3.17.0 or later
 - **kustomize**: v5.0.0 or later (optional, can be installed via Make)
 
 **Verify Prerequisites:**

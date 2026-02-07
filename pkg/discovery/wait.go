@@ -21,7 +21,7 @@ func NewForeverWatchBackoff() wait.Backoff {
 }
 
 // ExponentialBackoffWithContext repeats an operation with exponential backoff and keeps it running forever.
-// It immediately returns if the context is cancelled
+// It immediately returns if the context is cancelled.
 func ExponentialBackoffWithContext(ctx context.Context, backoff wait.Backoff, operation func(context.Context)) error {
 	for {
 		select {

@@ -1,0 +1,64 @@
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: namespace-validating-webhook-configuration
+  labels:
+    authorization.t-caas.telekom.com/component: "webhook"
+webhooks:
+  - admissionReviewVersions:
+      - v1
+    clientConfig:
+      service:
+        name: webhook-service
+        namespace: system
+        path: /validate-v1-namespace
+        port: 443
+    failurePolicy: Fail
+    matchPolicy: Equivalent
+    name: namespace.validating.webhook.auth.t-caas.telekom.de
+    rules:
+      - apiGroups:
+          - ""
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+          - UPDATE
+          - DELETE
+        resources:
+          - namespaces
+        scope: "*"
+    sideEffects: None
+    timeoutSeconds: 10
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: namespace-mutating-webhook-configuration
+  labels:
+    authorization.t-caas.telekom.com/component: "webhook"
+webhooks:
+  - admissionReviewVersions:
+      - v1
+    clientConfig:
+      service:
+        name: webhook-service
+        namespace: system
+        path: /mutate-v1-namespace
+        port: 443
+    failurePolicy: Fail
+    matchPolicy: Equivalent
+    name: namespace.mutating.webhook.auth.t-caas.telekom.de
+    rules:
+      - apiGroups:
+          - ""
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+        resources:
+          - namespaces
+        scope: "*"
+    sideEffects: None
+    timeoutSeconds: 10

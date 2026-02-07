@@ -53,7 +53,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: BindDefinitionSpec defines the desired state of BindDefinition
+            description: BindDefinitionSpec defines the desired state of BindDefinition.
             properties:
               automountServiceAccountToken:
                 default: true
@@ -191,13 +191,16 @@ spec:
                   which is the name of the binding. Follows format "targetName-clusterrole/role-binding"
                   where clusterrole/role is the in-cluster existing ClusterRole or
                   Role.
+                maxLength: 253
+                minLength: 1
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                 type: string
             required:
             - subjects
             - targetName
             type: object
           status:
-            description: BindDefinitionStatus defines the observed state of BindDefinition
+            description: BindDefinitionStatus defines the observed state of BindDefinition.
             properties:
               bindReconciled:
                 description: Not extremely important as most status updates are driven
@@ -263,6 +266,15 @@ spec:
                   - type
                   type: object
                 type: array
+              externalServiceAccounts:
+                description: |-
+                  ExternalServiceAccounts lists ServiceAccounts referenced by this BindDefinition
+                  that already existed and are not owned by any BindDefinition. These SAs are used
+                  in bindings but not managed (created/deleted) by the controller.
+                  Format: "<namespace>/<name>".
+                items:
+                  type: string
+                type: array
               generatedServiceAccounts:
                 description: 'If the BindDefinition points to a subject of "Kind:
                   ServiceAccount" and the service account is not present. The controller
@@ -296,6 +308,14 @@ spec:
                   - name
                   type: object
                   x-kubernetes-map-type: atomic
+                type: array
+              missingRoleRefs:
+                description: |-
+                  MissingRoleRefs lists role references that could not be resolved during the
+                  last reconciliation. Format: "ClusterRole/<name>" or "Role/<namespace>/<name>".
+                  Empty when all referenced roles exist.
+                items:
+                  type: string
                 type: array
               observedGeneration:
                 description: |-

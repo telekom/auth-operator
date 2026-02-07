@@ -24,7 +24,7 @@ import (
 // RoleDefinitionStatusApplyConfiguration represents a declarative configuration of the RoleDefinitionStatus type for use
 // with apply.
 //
-// RoleDefinitionStatus defines the observed state of RoleDefinition
+// RoleDefinitionStatus defines the observed state of RoleDefinition.
 type RoleDefinitionStatusApplyConfiguration struct {
 	// ObservedGeneration is the last observed generation of the resource.
 	// This is used by kstatus to determine if the resource is current.

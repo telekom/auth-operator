@@ -1,26 +1,24 @@
 package helpers
 
 import (
-	"sort"
+	"slices"
+	"strings"
 
 	rbacv1 "k8s.io/api/rbac/v1"
 )
 
-// SubjectExists checks if an rbacv1.Subject exists in a slice
+// SubjectExists checks if an rbacv1.Subject exists in a slice.
 func SubjectExists(subjectList []rbacv1.Subject, subject rbacv1.Subject) bool {
-	for _, existingSubject := range subjectList {
-		if existingSubject.Kind == subject.Kind &&
-			existingSubject.Name == subject.Name &&
-			existingSubject.Namespace == subject.Namespace &&
-			existingSubject.APIGroup == subject.APIGroup {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(subjectList, func(s rbacv1.Subject) bool {
+		return s.Kind == subject.Kind &&
+			s.Name == subject.Name &&
+			s.Namespace == subject.Namespace &&
+			s.APIGroup == subject.APIGroup
+	})
 }
 
-// MergeSubjects merges two slices of rbacv1.Subject without duplicates
-func MergeSubjects(existingSubjects []rbacv1.Subject, newSubjects []rbacv1.Subject) []rbacv1.Subject {
+// MergeSubjects merges two slices of rbacv1.Subject without duplicates.
+func MergeSubjects(existingSubjects, newSubjects []rbacv1.Subject) []rbacv1.Subject {
 	// Create a map to hold Subjects with keys as "kind|apiGroup|namespace|name"
 	subjectMap := make(map[string]rbacv1.Subject)
 
@@ -43,14 +41,14 @@ func MergeSubjects(existingSubjects []rbacv1.Subject, newSubjects []rbacv1.Subje
 	}
 
 	// Sort subjects for deterministic ordering
-	sort.Slice(mergedSubjects, func(i, j int) bool {
-		return subjectKey(mergedSubjects[i]) < subjectKey(mergedSubjects[j])
+	slices.SortFunc(mergedSubjects, func(a, b rbacv1.Subject) int {
+		return strings.Compare(subjectKey(a), subjectKey(b))
 	})
 
 	return mergedSubjects
 }
 
-// Helper function to generate a unique key for a subject
+// subjectKey generates a unique key for a subject.
 func subjectKey(subject rbacv1.Subject) string {
 	return subject.Kind + "|" + subject.APIGroup + "|" + subject.Namespace + "|" + subject.Name
 }

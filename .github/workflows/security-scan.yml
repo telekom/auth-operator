@@ -18,8 +18,10 @@ permissions:
   contents: read
   security-events: write
 
-env:
-  GO_VERSION: "1.25"
+# Cancel in-progress runs when a new run is triggered for the same branch/PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   govulncheck:
@@ -29,10 +31,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
+      - name: Extract Go version from toolchain or go directive
+        id: go-version
+        run: |
+          VERSION=$(grep -E '^toolchain go' go.mod | sed 's/toolchain go//' || true)
+          if [ -z "$VERSION" ]; then
+            VERSION=$(grep -E '^go [0-9]' go.mod | awk '{print $2}')
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
       - name: Setup Go
         uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version: ${{ steps.go-version.outputs.version }}
           cache: true
 
       - name: Install govulncheck
@@ -103,10 +114,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
+      - name: Load versions from versions.env
+        run: grep -v '^#' versions.env | grep -v '^$' >> $GITHUB_ENV
+
       - name: Setup Helm
         uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
         with:
-          version: v3.17.0
+          version: ${{ env.HELM_VERSION }}
 
       - name: Template Helm chart
         run: |

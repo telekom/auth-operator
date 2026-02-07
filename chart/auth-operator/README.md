@@ -82,6 +82,20 @@ helm install auth-operator ./chart/auth-operator \
 |-----------|-------------|---------|
 | `serviceAccount.annotations` | Service account annotations | `{}` |
 
+### Metrics & Monitoring
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `metrics.service.enabled` | Create a dedicated metrics Service | `true` |
+| `metrics.service.port` | Metrics service port | `8080` |
+| `metrics.serviceMonitor.enabled` | Create a Prometheus ServiceMonitor | `false` |
+| `metrics.serviceMonitor.interval` | Scrape interval (empty = Prometheus default) | `""` |
+| `metrics.serviceMonitor.scrapeTimeout` | Scrape timeout | `""` |
+| `metrics.serviceMonitor.additionalLabels` | Extra labels on the ServiceMonitor | `{}` |
+
+For the full list of exposed metrics and recommended alert rules, see the
+[Metrics and Alerting documentation](https://github.com/telekom/auth-operator/blob/main/docs/metrics-and-alerting.md).
+
 ## High Availability
 
 For production deployments, enable high availability:

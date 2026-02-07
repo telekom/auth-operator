@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	"github.com/telekom/auth-operator/pkg/metrics"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -39,6 +40,7 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 	if req.Kind.Kind != "Namespace" {
 		logger.V(4).Info("webhook request for non-Namespace resource - ignoring",
 			"kind", req.Kind.Kind)
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
 		return admission.Allowed("")
 	}
 
@@ -52,6 +54,7 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 		logger.Info("AUDIT: webhook bypass granted",
 			"namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username,
 			"bypassReason", bypassResult.Reason, "webhook", "validator")
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
 		return admission.Allowed("")
 	}
 
@@ -73,15 +76,18 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 		err = v.Decoder.DecodeRaw(req.OldObject, &ns)
 	default:
 		logger.V(3).Info("unknown operation type - allowing", "namespace", req.Name, "operation", req.Operation)
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
 		return admission.Allowed("")
 	}
 
 	if err != nil {
 		logger.Error(err, "failed to decode namespace object", "namespace", req.Name, "operation", req.Operation)
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 	if oldErr != nil {
 		logger.Error(oldErr, "failed to decode old namespace object", "namespace", req.Name, "operation", req.Operation)
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()
 		return admission.Errored(http.StatusBadRequest, oldErr)
 	}
 
@@ -114,6 +120,7 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 			if oldExists != newExists || oldValue != newValue {
 				logger.V(2).Info("label modification denied",
 					"namespace", req.Name, "label", key, "oldValue", oldValue, "newValue", newValue)
+				metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultDenied).Inc()
 				return admission.Denied(fmt.Sprintf("Modification of label '%s' is not allowed", key))
 			}
 		}
@@ -136,6 +143,7 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 	bindDefinitions := &authzv1alpha1.BindDefinitionList{}
 	if err := v.Client.List(ctx, bindDefinitions); err != nil {
 		logger.Error(err, "failed to list BindDefinitions", "namespace", req.Name)
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
 
@@ -175,6 +183,7 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 				if err != nil {
 					logger.Error(err, "failed to match namespace selector",
 						"namespace", req.Name, "bindDefinition", bindDef.Name)
+					metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()
 					return admission.Errored(http.StatusInternalServerError, err)
 				}
 				if matches {
@@ -201,6 +210,7 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 	if isAllowed {
 		logger.V(1).Info("namespace operation allowed",
 			"namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username)
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
 		return admission.Allowed("")
 	}
 
@@ -208,6 +218,7 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 	logger.V(1).Info("namespace operation denied",
 		"namespace", req.Name, "operation", req.Operation,
 		"username", req.UserInfo.Username, "reason", denialMsg)
+	metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultDenied).Inc()
 	return admission.Denied(denialMsg)
 }
 

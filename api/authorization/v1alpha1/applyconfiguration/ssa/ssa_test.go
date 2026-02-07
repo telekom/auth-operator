@@ -6,6 +6,7 @@ package ssa_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -15,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	authv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/api/authorization/v1alpha1/applyconfiguration/ssa"
@@ -87,12 +89,20 @@ var _ = Describe("SSA Status Apply Functions", func() {
 			Expect(updated.Status.Conditions[0].Type).To(Equal("Ready"))
 		})
 
-		It("should fail when RoleDefinition does not exist", func() {
+		It("should return error when RoleDefinition does not exist", func() {
 			scheme := newTestScheme()
 
+			// The fake client does not enforce status subresource semantics for SSA,
+			// so we use an interceptor to simulate the real API-server behaviour:
+			// SubResource("status").Apply on a non-existent parent returns NotFound.
 			c := fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithStatusSubresource(&authv1alpha1.RoleDefinition{}).
+				WithInterceptorFuncs(interceptor.Funcs{
+					SubResourceApply: func(_ context.Context, _ client.Client, _ string, _ runtime.ApplyConfiguration, _ ...client.SubResourceApplyOption) error {
+						return fmt.Errorf("roledefinitions \"non-existent\" not found")
+					},
+				}).
 				Build()
 
 			rd := &authv1alpha1.RoleDefinition{
@@ -104,8 +114,10 @@ var _ = Describe("SSA Status Apply Functions", func() {
 				},
 			}
 
+			// Status apply on a non-existent object must fail (matches real API server behavior).
 			err := ssa.ApplyRoleDefinitionStatus(context.Background(), c, rd)
 			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("non-existent"))
 		})
 
 		It("should update existing status with new conditions", func() {
@@ -232,12 +244,20 @@ var _ = Describe("SSA Status Apply Functions", func() {
 			Expect(updated.Status.Conditions).To(HaveLen(1))
 		})
 
-		It("should fail when BindDefinition does not exist", func() {
+		It("should return error when BindDefinition does not exist", func() {
 			scheme := newTestScheme()
 
+			// The fake client does not enforce status subresource semantics for SSA,
+			// so we use an interceptor to simulate the real API-server behaviour:
+			// SubResource("status").Apply on a non-existent parent returns NotFound.
 			c := fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithStatusSubresource(&authv1alpha1.BindDefinition{}).
+				WithInterceptorFuncs(interceptor.Funcs{
+					SubResourceApply: func(_ context.Context, _ client.Client, _ string, _ runtime.ApplyConfiguration, _ ...client.SubResourceApplyOption) error {
+						return fmt.Errorf("binddefinitions \"non-existent\" not found")
+					},
+				}).
 				Build()
 
 			bd := &authv1alpha1.BindDefinition{
@@ -249,8 +269,10 @@ var _ = Describe("SSA Status Apply Functions", func() {
 				},
 			}
 
+			// Status apply on a non-existent object must fail (matches real API server behavior).
 			err := ssa.ApplyBindDefinitionStatus(context.Background(), c, bd)
 			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("non-existent"))
 		})
 
 		It("should handle multiple conditions", func() {
@@ -490,15 +512,6 @@ var _ = Describe("SSA Status Conversion Functions", func() {
 			Expect(*result.LastTransitionTime).To(Equal(now))
 			Expect(*result.Reason).To(Equal("AllReady"))
 			Expect(*result.Message).To(Equal("All components are ready"))
-		})
-	})
-
-	Context("GeneratedServiceAccountFrom", func() {
-		It("should create a ServiceAccount subject", func() {
-			sa := ssa.GeneratedServiceAccountFrom("test-sa", "test-ns")
-			Expect(sa.Kind).To(Equal("ServiceAccount"))
-			Expect(sa.Name).To(Equal("test-sa"))
-			Expect(sa.Namespace).To(Equal("test-ns"))
 		})
 	})
 })

@@ -1,5 +1,5 @@
 /*
-Copyright © 2026 Deutsche Telekom AG
+Copyright © 2026 Deutsche Telekom AG.
 */
 package cmd
 
@@ -20,6 +20,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
@@ -36,7 +37,7 @@ var (
 	enableTDGMigration             bool
 )
 
-// webhookCmd represents the webhook command
+// webhookCmd represents the webhook command.
 var webhookCmd = &cobra.Command{
 	Use:   "webhook",
 	Short: "Run the auth-operator webhook server",
@@ -80,6 +81,7 @@ ensuring authorization policies are enforced at creation time.`,
 
 		mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 			Scheme:                 scheme,
+			Metrics:                metricsserver.Options{BindAddress: metricsAddr},
 			WebhookServer:          webhookServer,
 			HealthProbeBindAddress: probeAddr,
 		})
