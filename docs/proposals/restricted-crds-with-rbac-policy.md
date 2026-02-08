@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2025 Deutsche Telekom AG
+
+SPDX-License-Identifier: CC-BY-4.0
+-->
+
 # Proposal: Restricted CRDs with Decoupled Policy Limits
 
 ## Summary
@@ -323,12 +329,12 @@ spec:
         - cert-manager
         - istio-system
       
-      # Forbidden namespace prefixes (simple prefix match, NO regex)
-      # Simple prefix match: "kube-" matches "kube-system", "kube-public"
+      # Forbidden namespace prefixes (simple wildcard, NO regex)
+      # Simple prefix match: "kube-*" matches "kube-system", "kube-public"
       forbiddenNamespacePrefixes:
-        - "kube-"
-        - "istio-"
-        - "team-b-"  # Other tenant's namespaces
+        - "kube-*"
+        - "istio-*"
+        - "team-b-*"  # Other tenant's namespaces
       
       # Max namespaces a single RestrictedBD can target
       maxTargetNamespaces: 10
@@ -471,8 +477,8 @@ spec:
       
       # Forbidden namespace prefixes (simple wildcard, NO regex)
       forbiddenNamespacePrefixes:
-        - "kube-"
-        - "team-b-"
+        - "kube-*"
+        - "team-b-*"
       
       # Forbidden ServiceAccounts (simple wildcards: prefix*, *suffix)
       forbiddenServiceAccounts:
@@ -2192,11 +2198,11 @@ type UnifiedSelector struct {
     // Explicit list of allowed/forbidden values (exact match)
     Names []string `json:"names,omitempty"`
     
-    // Prefix patterns (e.g., "team-a-" matches "team-a-dev", "team-a-prod")
+    // Prefix patterns (e.g., "team-a-*" matches "team-a-dev", "team-a-prod")
     // Equivalent to "prefix*" wildcard
     Prefixes []string `json:"prefixes,omitempty"`
     
-    // Suffix patterns (e.g., "-admin" matches "team-a-admin", "cluster-admin")
+    // Suffix patterns (e.g., "*-admin" matches "team-a-admin", "cluster-admin")
     // Equivalent to "*suffix" wildcard
     Suffixes []string `json:"suffixes,omitempty"`
     
@@ -2227,12 +2233,12 @@ spec:
       # Method 2: Prefix-based (simple wildcard, NO regex)
       # Matches: team-a-dev, team-a-staging, team-a-anything
       allowedNamespacePrefixes:
-        - "team-a-"
+        - "team-a-*"
     
       # Method 3: Suffix-based (simple wildcard, NO regex)
       # Matches: team-a-dev, team-b-dev
       allowedNamespaceSuffixes:
-        - "-dev"
+        - "*-dev"
     
       # Method 4: Label selector (preferred for dynamic environments)
       # Standard K8s LabelSelector - most flexible option
@@ -2252,8 +2258,8 @@ spec:
           - kube-system
           - kube-public
       forbiddenNamespacePrefixes:
-        - "kube-"
-        - "istio-"
+        - "kube-*"
+        - "istio-*"
       forbiddenNamespaceSelector:
         matchLabels:
           protected: "true"
