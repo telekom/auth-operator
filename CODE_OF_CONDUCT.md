@@ -1,8 +1,3 @@
-<!--
-SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
-SPDX-License-Identifier: CC0-1.0
--->
-
 # Contributor Covenant Code of Conduct
 
 ## Our Pledge

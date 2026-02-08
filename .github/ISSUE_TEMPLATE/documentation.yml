@@ -1,7 +1,3 @@
-# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
-#
-# SPDX-License-Identifier: Apache-2.0
-
 name: Documentation
 description: 'Submit a documentation issue related to a docstring or the docs to improve our documentation.'
 title: '[DOCS] <Please write a short and informative title>'

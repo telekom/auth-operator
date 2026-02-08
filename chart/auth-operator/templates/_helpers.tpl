@@ -51,8 +51,14 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
-Image
+Image - supports both tag and digest references
+If digest is provided, use digest (immutable reference)
+Otherwise, use tag (or default to Chart.AppVersion)
 */}}
 {{- define "auth-operator.image" -}}
+{{- if .Values.image.digest -}}
+{{ .Values.image.repository }}@{{ .Values.image.digest }}
+{{- else -}}
 {{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}
+{{- end -}}
 {{- end }}

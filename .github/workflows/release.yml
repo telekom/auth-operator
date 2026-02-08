@@ -15,6 +15,8 @@ permissions:
   contents: write
   packages: write
   id-token: write
+  security-events: write  # For uploading Trivy SARIF results
+  attestations: write     # For GitHub artifact attestations
 
 env:
   REGISTRY: ghcr.io
@@ -29,11 +31,14 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       image_tag: ${{ steps.version.outputs.image_tag }}
       chart_version: ${{ steps.version.outputs.chart_version }}
+      is_prerelease: ${{ steps.version.outputs.is_prerelease }}
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+          # For PRs, checkout the exact commit that will be built (not the merge commit)
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
       - name: Determine version
         id: version
@@ -45,18 +50,27 @@ jobs:
             IMAGE_TAG="${VERSION}"
             # Helm chart version must be valid semver - use 0.0.0-pr<num>.<sha> format
             CHART_VERSION="0.0.0-pr${{ github.event.pull_request.number }}.${SHORT_SHA}"
+            IS_PRERELEASE="true"
           else
             # Release: use tag without 'v' prefix for version
             VERSION="${GITHUB_REF_NAME#v}"
             IMAGE_TAG="${GITHUB_REF_NAME#v}"
             CHART_VERSION="${VERSION}"
+            # Detect pre-release (semver: -rc, -alpha, -beta suffixes)
+            if [[ "$VERSION" =~ -(rc|alpha|beta)[0-9.]* ]]; then
+              IS_PRERELEASE="true"
+            else
+              IS_PRERELEASE="false"
+            fi
           fi
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
           echo "chart_version=${CHART_VERSION}" >> $GITHUB_OUTPUT
+          echo "is_prerelease=${IS_PRERELEASE}" >> $GITHUB_OUTPUT
           echo "Determined version: ${VERSION}"
           echo "Image tag: ${IMAGE_TAG}"
           echo "Chart version: ${CHART_VERSION}"
+          echo "Is pre-release: ${IS_PRERELEASE}"
 
       - name: Extract Go version from toolchain or go directive
         id: go-version
@@ -68,7 +82,7 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Setup Go
-        uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
+        uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
         with:
           go-version: ${{ steps.go-version.outputs.version }}
           cache: true
@@ -80,7 +94,7 @@ jobs:
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Log in to Container Registry
-        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -89,6 +103,8 @@ jobs:
       - name: Extract metadata for Docker
         id: meta
         uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804 # v5.7.0
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,manifest-descriptor,index
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -100,6 +116,17 @@ jobs:
             type=raw,value=${{ steps.version.outputs.image_tag }},enable=${{ github.event_name == 'pull_request' }}
             # Always add sha
             type=sha
+          labels: |
+            org.opencontainers.image.title=auth-operator
+            org.opencontainers.image.description=A Kubernetes operator for managing RBAC with RoleDefinitions, BindDefinitions, and WebhookAuthorizers
+            org.opencontainers.image.vendor=Deutsche Telekom AG
+            org.opencontainers.image.licenses=Apache-2.0
+            org.opencontainers.image.documentation=https://github.com/${{ github.repository }}/blob/main/docs/operator-guide.md
+            org.opencontainers.image.revision=${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+            org.opencontainers.image.base.name=gcr.io/distroless/static-debian12
+            io.artifacthub.package.readme-url=https://raw.githubusercontent.com/${{ github.repository }}/main/README.md
+            io.artifacthub.package.maintainers=[{"name":"T-CaaS Team","email":"t-caas@telekom.de"}]
+            slsa.dev/buildType=https://github.com/slsa-framework/slsa-github-generator/container@v1
 
       - name: Build and push Docker image
         id: build
@@ -111,17 +138,36 @@ jobs:
           push: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
           provenance: mode=max
           sbom: true
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
-            COMMIT=${{ github.sha }}
+            COMMIT=${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
             REPOSITORY=https://github.com/${{ github.repository }}
 
-      # Release-only steps (SBOM, signing)
+      # Release-only steps (SBOM, signing, scanning)
+      - name: Scan image for vulnerabilities
+        if: github.event_name != 'pull_request'
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          # Don't fail on vulnerabilities for now, just report
+          exit-code: '0'
+
+      - name: Upload Trivy scan results to GitHub Security
+        if: github.event_name != 'pull_request'
+        uses: github/codeql-action/upload-sarif@f3a6ee42055dd5f618fb31d987aae7b94518f043 # v4.32.2
+        with:
+          sarif_file: 'trivy-results.sarif'
+        continue-on-error: true  # Don't fail if security tab isn't enabled
+
       - name: Generate SBOM (SPDX)
         if: github.event_name != 'pull_request'
-        uses: anchore/sbom-action@deef08a0db64bfad603422135db61477b16cef56 # v0.22.1
+        uses: anchore/sbom-action@28d71544de8eaf1b958d335707167c5f783590ad # v0.22.2
         with:
           image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
           format: spdx-json
@@ -132,7 +178,7 @@ jobs:
 
       - name: Install cosign
         if: github.event_name != 'pull_request'
-        uses: sigstore/cosign-installer@dc72c7d5c4d10cd6bcb8cf6e3fd625a9e5e537da # v3.7.0
+        uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
 
       - name: Sign container image (keyless)
         if: github.event_name != 'pull_request'
@@ -148,12 +194,148 @@ jobs:
         run: |
           cosign attest --yes --type spdx --predicate sbom.spdx.json ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
 
-      - name: Upload SBOM to release
+      # GitHub-native attestations (visible in GitHub UI and verifiable with `gh attestation verify`)
+      - name: Attest container image provenance (GitHub)
+        if: github.event_name != 'pull_request'
+        uses: actions/attest-build-provenance@62fc1d596301d0ab9914e1fec14dc5c8d93f65cd # v3.2.0
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Generate install manifest
+        if: github.event_name != 'pull_request'
+        run: |
+          # Install kustomize
+          make kustomize
+          # Update image reference in kustomization
+          cd config/manager && ${{ github.workspace }}/bin/kustomize edit set image controller=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          cd ${{ github.workspace }}
+          # Generate consolidated install manifest
+          bin/kustomize build config/default > install.yaml
+          echo "Generated install.yaml with $(wc -l < install.yaml) lines"
+
+      - name: Attest install manifest provenance (GitHub)
+        if: github.event_name != 'pull_request'
+        uses: actions/attest-build-provenance@62fc1d596301d0ab9914e1fec14dc5c8d93f65cd # v3.2.0
+        with:
+          subject-path: install.yaml
+
+      - name: Generate checksums
+        if: github.event_name != 'pull_request'
+        run: |
+          sha256sum sbom.spdx.json install.yaml > checksums.txt
+          echo "Checksums:"
+          cat checksums.txt
+
+      - name: Create or update release with artifacts
         if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload "${{ github.ref_name }}" sbom.spdx.json --clobber || echo "Release not found or upload failed - SBOM is still attested via cosign"
+          VERSION="${{ steps.version.outputs.version }}"
+          IS_PRERELEASE="${{ steps.version.outputs.is_prerelease }}"
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          DIGEST="${{ steps.build.outputs.digest }}"
+          CHART_REPO="oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/auth-operator"
+          CHART_REF="${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/auth-operator:${VERSION}"
+          
+          # Build release notes with verification instructions
+          cat > release-notes.md << EOF
+          ## Installation
+          
+          ### Using kubectl
+          \`\`\`bash
+          kubectl apply -f https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/install.yaml
+          \`\`\`
+          
+          ### Using Helm (OCI)
+          \`\`\`bash
+          helm install auth-operator ${CHART_REPO} --version ${VERSION}
+          \`\`\`
+          
+          ## Container Image
+          
+          \`\`\`
+          ${IMAGE}:${VERSION}
+          ${IMAGE}@${DIGEST}
+          \`\`\`
+          
+          ## Helm Chart
+          
+          \`\`\`
+          ${CHART_REPO} --version ${VERSION}
+          \`\`\`
+          
+          ## Verification
+          
+          ### Container Image
+          
+          Verify the container image signature:
+          \`\`\`bash
+          cosign verify ${IMAGE}@${DIGEST} \\
+            --certificate-identity-regexp="https://github.com/${{ github.repository }}/.github/workflows/release.yml@.*" \\
+            --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
+          \`\`\`
+          
+          Verify the SBOM attestation:
+          \`\`\`bash
+          cosign verify-attestation ${IMAGE}@${DIGEST} \\
+            --type spdx \\
+            --certificate-identity-regexp="https://github.com/${{ github.repository }}/.github/workflows/release.yml@.*" \\
+            --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
+          \`\`\`
+          
+          Verify with GitHub CLI (SLSA provenance):
+          \`\`\`bash
+          gh attestation verify oci://${IMAGE}@${DIGEST} --repo ${{ github.repository }}
+          \`\`\`
+          
+          ### Helm Chart
+          
+          Verify the Helm chart signature:
+          \`\`\`bash
+          cosign verify ${CHART_REF} \\
+            --certificate-identity-regexp="https://github.com/${{ github.repository }}/.github/workflows/release.yml@.*" \\
+            --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
+          \`\`\`
+          
+          ### Release Artifacts
+          
+          Verify checksums:
+          \`\`\`bash
+          sha256sum -c checksums.txt
+          \`\`\`
+          
+          Verify install manifest with GitHub CLI:
+          \`\`\`bash
+          gh attestation verify install.yaml --repo ${{ github.repository }}
+          \`\`\`
+          EOF
+          
+          # Create or update release
+          PRERELEASE_FLAG=""
+          if [[ "${IS_PRERELEASE}" == "true" ]]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+          
+          if ! gh release view "${{ github.ref_name }}" > /dev/null 2>&1; then
+            echo "Creating release ${{ github.ref_name }}..."
+            gh release create "${{ github.ref_name }}" \
+              --title "${{ github.ref_name }}" \
+              --notes-file release-notes.md \
+              ${PRERELEASE_FLAG}
+          else
+            echo "Release ${{ github.ref_name }} already exists, updating..."
+            gh release edit "${{ github.ref_name }}" --notes-file release-notes.md ${PRERELEASE_FLAG} || true
+          fi
+          
+          echo "Uploading artifacts to release ${{ github.ref_name }}..."
+          gh release upload "${{ github.ref_name }}" \
+            sbom.spdx.json \
+            install.yaml \
+            checksums.txt \
+            --clobber
 
   helm-release:
     name: Release Helm Chart
@@ -162,9 +344,10 @@ jobs:
     permissions:
       contents: write
       packages: write
+      id-token: write  # For cosign keyless signing
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
 
@@ -176,35 +359,127 @@ jobs:
         with:
           version: ${{ env.HELM_VERSION }}
 
+      - name: Install cosign
+        if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
+
       - name: Log in to Container Registry
-        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Generate changelog for Artifact Hub
+        id: changelog
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ needs.build-and-push.outputs.version }}"
+          
+          # Find previous tag for changelog diff
+          PREV_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]' | head -2 | tail -1)
+          echo "Generating changelog: ${PREV_TAG:-initial}..${VERSION}"
+          
+          if [[ -n "${PREV_TAG}" ]]; then
+            # Use GitHub API to generate release notes from merged PRs
+            NOTES=$(gh api repos/${{ github.repository }}/releases/generate-notes \
+              -f tag_name="${{ github.ref_name }}" \
+              -f previous_tag_name="${PREV_TAG}" \
+              --jq '.body' 2>/dev/null || echo "")
+          else
+            NOTES=""
+          fi
+          
+          # Parse PR titles into Artifact Hub changelog format
+          # Convention: feat: -> added, fix: -> fixed, everything else -> changed
+          CHANGES=""
+          if [[ -n "${NOTES}" ]]; then
+            while IFS= read -r line; do
+              # Extract PR title from "* description by @user in URL" format
+              TITLE=$(echo "${line}" | sed -n 's/^\* \(.*\) by @.*/\1/p')
+              [[ -z "${TITLE}" ]] && continue
+              
+              # Determine kind from conventional commit prefix
+              KIND="changed"
+              if echo "${TITLE}" | grep -qiE '^feat(\(.*\))?[!]?:'; then
+                KIND="added"
+              elif echo "${TITLE}" | grep -qiE '^fix(\(.*\))?[!]?:'; then
+                KIND="fixed"
+              elif echo "${TITLE}" | grep -qiE '^(security|vuln)(\(.*\))?[!]?:'; then
+                KIND="security"
+              fi
+              
+              # Clean up: remove conventional commit prefix for cleaner display
+              CLEAN_TITLE=$(echo "${TITLE}" | sed -E 's/^(feat|fix|chore|docs|ci|refactor|perf|test|build|style|security|vuln)(\([^)]*\))?[!]?:[[:space:]]*//')
+              [[ -z "${CLEAN_TITLE}" ]] && CLEAN_TITLE="${TITLE}"
+              
+              # YAML-escape: double-quote the description to handle special chars (: # " \)
+              ESCAPED_TITLE=$(echo "${CLEAN_TITLE}" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
+              CHANGES="${CHANGES}    - kind: ${KIND}\n      description: \"${ESCAPED_TITLE}\"\n"
+            done <<< "${NOTES}"
+          fi
+          
+          # Fallback if no changes were parsed
+          if [[ -z "${CHANGES}" ]]; then
+            CHANGES="    - kind: changed\n      description: \"Release ${VERSION}\"\n"
+          fi
+          
+          echo "Generated changelog:"
+          echo -e "${CHANGES}"
+          
+          # Write to file for use in next step
+          echo -e "${CHANGES}" > changelog-entries.yaml
+
       - name: Update Chart version and image
         run: |
           VERSION="${{ needs.build-and-push.outputs.version }}"
           CHART_VERSION="${{ needs.build-and-push.outputs.chart_version }}"
-          IMAGE_TAG="${{ needs.build-and-push.outputs.image_tag }}"
+          DIGEST="${{ needs.build-and-push.outputs.digest }}"
+          IS_PRERELEASE="${{ needs.build-and-push.outputs.is_prerelease }}"
           
           echo "Setting chart version to: ${CHART_VERSION}"
           echo "Setting appVersion to: ${VERSION}"
-          echo "Setting image tag to: ${IMAGE_TAG}"
+          echo "Setting image digest to: ${DIGEST}"
+          echo "Is pre-release: ${IS_PRERELEASE}"
           
           # Update Chart.yaml with version (chart version must be semver)
           sed -i "s/^version:.*/version: ${CHART_VERSION}/" chart/auth-operator/Chart.yaml
           sed -i "s/^appVersion:.*/appVersion: \"${VERSION}\"/" chart/auth-operator/Chart.yaml
           
-          # Update values.yaml with correct image tag
-          sed -i "s/^  tag:.*/  tag: \"${IMAGE_TAG}\"/" chart/auth-operator/values.yaml
+          # Update OCI revision annotation with actual source commit SHA
+          # For PRs, use the head SHA (matches the actually-built source); for tags, use github.sha
+          REVISION_SHA="${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+          sed -i "s|org.opencontainers.image.revision:.*|org.opencontainers.image.revision: ${REVISION_SHA}|" chart/auth-operator/Chart.yaml
+          
+          # Update artifacthub.io/images with actual version
+          sed -i "s|image: ghcr.io/telekom/auth-operator:.*|image: ghcr.io/telekom/auth-operator:${VERSION}|" chart/auth-operator/Chart.yaml
+          
+          # Update artifacthub.io/prerelease annotation
+          sed -i "s|artifacthub.io/prerelease:.*|artifacthub.io/prerelease: \"${IS_PRERELEASE}\"|" chart/auth-operator/Chart.yaml
+          
+          # Update artifacthub.io/changes from generated changelog
+          CHANGELOG=$(cat changelog-entries.yaml)
+          awk -v changes="${CHANGELOG}" '
+            /artifacthub\.io\/changes:/ {
+              print "  artifacthub.io/changes: |"
+              printf "%s", changes
+              skip=1; next
+            }
+            skip && /^  [a-zA-Z]/ { skip=0 }
+            skip && /^[^ ]/ { skip=0 }
+            !skip { print }
+          ' chart/auth-operator/Chart.yaml > Chart.yaml.tmp
+          mv Chart.yaml.tmp chart/auth-operator/Chart.yaml
+          
+          # Update values.yaml with digest reference for immutable deployments
+          sed -i 's/^  digest:.*/  digest: "'"${DIGEST}"'"/' chart/auth-operator/values.yaml
           
           echo "Updated Chart.yaml:"
           cat chart/auth-operator/Chart.yaml
           echo ""
           echo "Updated values.yaml image section:"
-          grep -A5 "^image:" chart/auth-operator/values.yaml
+          grep -A8 "^image:" chart/auth-operator/values.yaml
 
       - name: Package Helm chart
         run: |
@@ -213,6 +488,32 @@ jobs:
           ls -la auth-operator-*.tgz
 
       - name: Push Helm chart to OCI registry
+        # Only push for releases and non-fork PRs (forks don't have packages:write permission)
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        id: helm-push
         run: |
-          helm push auth-operator-*.tgz oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts
-          echo "Pushed chart to: oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/auth-operator:${{ needs.build-and-push.outputs.version }}"
+          CHART_FILE=$(ls auth-operator-*.tgz)
+          helm push "${CHART_FILE}" oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts
+          
+          # Output chart reference (note: helm push doesn't return a digest, only logs success)
+          CHART_VERSION="${{ needs.build-and-push.outputs.chart_version }}"
+          echo "chart_ref=oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/auth-operator:${CHART_VERSION}" >> $GITHUB_OUTPUT
+          echo "Pushed chart to: oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/auth-operator:${CHART_VERSION}"
+
+      - name: Sign Helm chart (keyless)
+        if: github.event_name != 'pull_request'
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+        run: |
+          CHART_VERSION="${{ needs.build-and-push.outputs.chart_version }}"
+          CHART_REF="${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/auth-operator:${CHART_VERSION}"
+          echo "Signing Helm chart: ${CHART_REF}"
+          cosign sign --yes "${CHART_REF}"
+
+      - name: Upload Helm chart to release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Uploading Helm chart to release ${{ github.ref_name }}..."
+          gh release upload "${{ github.ref_name }}" auth-operator-*.tgz --clobber

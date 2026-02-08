@@ -1,7 +1,3 @@
-# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
-#
-# SPDX-License-Identifier: Apache-2.0
-
 name: 'Bug report'
 description: |
   Submit a bug report about Auth Operator. Include a reproducible example and 

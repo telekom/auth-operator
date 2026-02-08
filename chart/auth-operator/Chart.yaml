@@ -16,3 +16,76 @@ keywords:
   - rbac
   - authorization
   - authentication
+# icon: https://raw.githubusercontent.com/telekom/auth-operator/main/docs/images/logo.svg  # TODO: add logo
+# OCI annotations for registry metadata (applied when pushing to OCI registry)
+annotations:
+  # OCI standard annotations
+  org.opencontainers.image.title: auth-operator
+  org.opencontainers.image.description: A Kubernetes operator for managing RBAC with RoleDefinitions, BindDefinitions, and WebhookAuthorizers
+  org.opencontainers.image.url: https://github.com/telekom/auth-operator
+  org.opencontainers.image.source: https://github.com/telekom/auth-operator
+  org.opencontainers.image.vendor: Deutsche Telekom AG
+  org.opencontainers.image.authors: Deutsche Telekom AG
+  org.opencontainers.image.licenses: Apache-2.0
+  org.opencontainers.image.documentation: https://github.com/telekom/auth-operator/blob/main/docs/operator-guide.md
+  org.opencontainers.image.revision: ""  # Updated by CI with git commit SHA
+  # Artifact Hub annotations (https://artifacthub.io/docs/topics/annotations/helm/)
+  artifacthub.io/operator: "true"
+  artifacthub.io/operatorCapabilities: Seamless Upgrades
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/containsSecurityUpdates: "false"  # Set to "true" in releases with security fixes
+  artifacthub.io/prerelease: "false"  # Updated by CI for pre-release versions
+  artifacthub.io/maintainers: |
+    - name: Maximilian Rink (DTAG)
+      email: maximilian.rink@telekom.de
+  artifacthub.io/changes: |
+    - kind: changed
+      description: See release notes  # Updated by CI from GitHub release notes
+  artifacthub.io/links: |
+    - name: Documentation
+      url: https://github.com/telekom/auth-operator/blob/main/docs/operator-guide.md
+    - name: API Reference
+      url: https://github.com/telekom/auth-operator/blob/main/docs/api-reference/authorization.t-caas.telekom.com.md
+  artifacthub.io/crds: |
+    - kind: RoleDefinition
+      version: v1alpha1
+      name: roledefinitions.authorization.t-caas.telekom.com
+      displayName: RoleDefinition
+      description: Dynamically generates ClusterRoles/Roles based on API discovery
+    - kind: BindDefinition
+      version: v1alpha1
+      name: binddefinitions.authorization.t-caas.telekom.com
+      displayName: BindDefinition
+      description: Creates ClusterRoleBindings/RoleBindings for subjects
+    - kind: WebhookAuthorizer
+      version: v1alpha1
+      name: webhookauthorizers.authorization.t-caas.telekom.com
+      displayName: WebhookAuthorizer
+      description: Configures webhook-based authorization decisions
+  artifacthub.io/crdsExamples: |
+    - apiVersion: authorization.t-caas.telekom.com/v1alpha1
+      kind: RoleDefinition
+      metadata:
+        name: example-role
+      spec:
+        roleType: ClusterRole
+        rules:
+          - apiGroups: [""]
+            resources: ["pods", "services"]
+            verbs: ["get", "list", "watch"]
+    - apiVersion: authorization.t-caas.telekom.com/v1alpha1
+      kind: BindDefinition
+      metadata:
+        name: example-binding
+      spec:
+        roleRef:
+          kind: ClusterRole
+          name: example-role
+        subjects:
+          - kind: Group
+            name: developers
+  artifacthub.io/images: |
+    - name: auth-operator
+      image: ghcr.io/telekom/auth-operator:0.1.0
+  # Note: We use cosign keyless signing instead of Helm's GPG provenance
+  # Verify chart signatures with: cosign verify ghcr.io/telekom/charts/auth-operator:<version>
