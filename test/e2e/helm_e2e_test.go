@@ -132,7 +132,8 @@ var _ = Describe("Helm Chart E2E", Ordered, Label("helm"), func() {
 				"--set", "metrics.serviceMonitor.enabled=true",
 			)
 			cmd := exec.CommandContext(context.Background(), "helm", templateArgs...)
-			Expect(err).NotTo(HaveOccurred(), "Helm template with all features failed")
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Helm template with all features failed: %s", string(output))
 			Expect(string(output)).To(ContainSubstring("PodDisruptionBudget"))
 			Expect(string(output)).To(ContainSubstring("ServiceMonitor"))
 
@@ -161,7 +162,8 @@ var _ = Describe("Helm Chart E2E", Ordered, Label("helm"), func() {
 				"--set-string", "podLabels.environment=test",
 			)
 			cmd := exec.CommandContext(context.Background(), "helm", templateArgs...)
-			Expect(err).NotTo(HaveOccurred(), "Helm template with scheduling constraints failed")
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Helm template with scheduling constraints failed: %s", string(output))
 
 			outputStr := string(output)
 			// Verify nodeSelector

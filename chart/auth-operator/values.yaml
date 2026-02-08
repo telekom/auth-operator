@@ -9,8 +9,6 @@ image:
   pullPolicy: IfNotPresent
 imagePullSecrets: []
 
-kubernetesClusterDomain: cluster.local
-
 # Global settings applied to all components
 global:
   # Log verbosity level (0-9, higher is more verbose)
