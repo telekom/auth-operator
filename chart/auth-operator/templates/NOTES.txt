@@ -1,0 +1,63 @@
+Thank you for installing {{ .Chart.Name }}!
+
+Your release is named: {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+
+## Getting Started
+
+1. Verify the installation:
+
+   kubectl get pods -n {{ .Release.Namespace }}
+
+2. Check that CRDs are installed:
+
+   kubectl get crds | grep authorization.t-caas.telekom.com
+
+3. View the operator logs:
+
+   kubectl logs -n {{ .Release.Namespace }} -l control-plane=controller-manager -f
+
+## Creating Your First RoleDefinition
+
+Create a RoleDefinition to generate a ClusterRole:
+
+```yaml
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: example-role
+spec:
+  targetRole: ClusterRole
+  targetName: example-cluster-role
+  scopeNamespaced: true
+```
+
+## Creating Your First BindDefinition
+
+Create a BindDefinition to create ClusterRoleBindings:
+
+```yaml
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: example-binding
+spec:
+  targetName: example-cluster-role-binding
+  subjects:
+    - kind: Group
+      name: developers
+      apiGroup: rbac.authorization.k8s.io
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - example-cluster-role
+```
+
+## Documentation
+
+For more information, visit:
+{{ .Chart.Home }}
+
+## Support
+
+If you encounter any issues, please file a bug report at:
+{{ .Chart.Home }}/issues

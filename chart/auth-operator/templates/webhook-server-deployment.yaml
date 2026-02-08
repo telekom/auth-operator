@@ -15,9 +15,15 @@ spec:
     metadata:
       labels:
         control-plane: webhook-server
+      {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- include "auth-operator.selectorLabels" . | nindent 8 }}
       annotations:
         kubectl.kubernetes.io/default-container: manager
+      {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     spec:
       containers:
       - args: 
@@ -31,6 +37,7 @@ spec:
         - --cert-rotation-validating-webhook={{ include "auth-operator.fullname" . }}-namespace-validating-webhook-configuration
         - --cert-rotation-validating-webhook={{ include "auth-operator.fullname" . }}-binder-validating-webhook-configuration
         - --tdg-migration={{ .Values.webhookServer.tdgMigration }}
+        - --verbosity={{ .Values.global.logLevel }}
         command:
         - /auth-operator
         env:
@@ -39,6 +46,7 @@ spec:
             fieldRef:
               fieldPath: metadata.namespace
         image: {{ include "auth-operator.image" . }}
+        imagePullPolicy: {{ include "auth-operator.imagePullPolicy" . }}
         livenessProbe:
           httpGet:
             path: /healthz
@@ -60,20 +68,39 @@ spec:
           initialDelaySeconds: 5
           periodSeconds: 10
         resources: {{- toYaml .Values.webhookServer.resources | nindent 10 }}
-        securityContext: 
-          allowPrivilegeEscalation: false
-          capabilities:
-            drop:
-            - ALL
+        securityContext:
+          {{- toYaml .Values.containerSecurityContext | nindent 10 }}
         volumeMounts:
         - mountPath: /tmp/k8s-webhook-server/serving-certs
           name: cert
           readOnly: true
-      imagePullSecrets: {{ .Values.imagePullSecrets | default list | toJson }}
-      securityContext: 
-          runAsNonRoot: true
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       serviceAccountName: {{ include "auth-operator.fullname" . }}
       terminationGracePeriodSeconds: 10
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
       volumes:
       - name: cert
         secret:

@@ -62,3 +62,12 @@ Otherwise, use tag (or default to Chart.AppVersion)
 {{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}
 {{- end -}}
 {{- end }}
+
+{{/*
+Image pull policy
+*/}}
+{{- define "auth-operator.imagePullPolicy" -}}
+{{ .Values.image.pullPolicy | default "IfNotPresent" }}
+{{- end }}
+
+
