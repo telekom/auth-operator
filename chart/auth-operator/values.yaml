@@ -1,8 +1,11 @@
 image:
   repository: ghcr.io/telekom/auth-operator
-  # tag should be set explicitly during deployment (e.g., via --set image.tag=v1.0.0)
-  # Using 'latest' is an anti-pattern for production deployments
+  # Image reference precedence: digest > tag > Chart.AppVersion
+  # - digest: immutable reference, preferred for production (e.g., sha256:<digest>)
+  # - tag: mutable reference, useful for development
+  # - If neither is set, defaults to Chart.AppVersion
   tag: ""
+  digest: ""
 imagePullSecrets: []
 kubernetesClusterDomain: cluster.local
 serviceAccount:

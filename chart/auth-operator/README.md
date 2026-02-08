@@ -1,8 +1,3 @@
-<!--
-SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
-SPDX-License-Identifier: Apache-2.0
--->
-
 # Auth Operator Helm Chart
 
 A Kubernetes operator for managing RBAC with RoleDefinitions, BindDefinitions, and WebhookAuthorizers.
@@ -18,12 +13,27 @@ A Kubernetes operator for managing RBAC with RoleDefinitions, BindDefinitions, a
 
 ### From OCI Registry (Recommended)
 
+Using image digest (preferred for production - immutable reference):
+
 ```bash
-helm install auth-operator oci://ghcr.io/telekom/auth-operator/auth-operator \
+helm install auth-operator oci://ghcr.io/telekom/charts/auth-operator \
+  --version <chart-version> \
   --namespace auth-operator-system \
   --create-namespace \
-  --set image.tag=v0.1.0
+  --set image.digest=sha256:<digest>  # Use actual digest from release
 ```
+
+Using image tag:
+
+```bash
+helm install auth-operator oci://ghcr.io/telekom/charts/auth-operator \
+  --version <chart-version> \
+  --namespace auth-operator-system \
+  --create-namespace \
+  --set image.tag=<image-tag>  # Optional: defaults to Chart.AppVersion if omitted
+```
+
+> **Note:** If both `image.digest` and `image.tag` are set, digest takes precedence. If neither is set, defaults to `Chart.AppVersion`.
 
 ### From Source
 
@@ -36,17 +46,20 @@ cd auth-operator
 helm install auth-operator ./chart/auth-operator \
   --namespace auth-operator-system \
   --create-namespace \
-  --set image.tag=v0.1.0
+  --set image.tag=<image-tag>  # Optional: defaults to Chart.AppVersion if omitted
 ```
 
 ## Configuration
 
 ### Image Configuration
 
+Image reference precedence: `digest` > `tag` > `Chart.AppVersion`
+
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `image.repository` | Container image repository | `ghcr.io/telekom/auth-operator` |
-| `image.tag` | Container image tag | `""` (must be set explicitly) |
+| `image.digest` | Container image digest, immutable reference (highest precedence) | `""` |
+| `image.tag` | Container image tag (if digest not set, falls back to Chart.AppVersion if empty) | `""` |
 | `imagePullSecrets` | Image pull secrets | `[]` |
 
 ### Controller Configuration
@@ -98,13 +111,14 @@ For the full list of exposed metrics and recommended alert rules, see the
 
 ## High Availability
 
-For production deployments, enable high availability:
+For production deployments, enable high availability with digest-based image reference:
 
 ```bash
-helm install auth-operator oci://ghcr.io/telekom/auth-operator/auth-operator \
+helm install auth-operator oci://ghcr.io/telekom/charts/auth-operator \
+  --version <chart-version> \
   --namespace auth-operator-system \
   --create-namespace \
-  --set image.tag=v0.1.0 \
+  --set image.digest=sha256:<digest> \
   --set controller.replicas=2 \
   --set controller.podDisruptionBudget.enabled=true \
   --set webhookServer.replicas=2 \

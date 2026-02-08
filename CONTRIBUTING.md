@@ -1,8 +1,3 @@
-<!--
-SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
-SPDX-License-Identifier: Apache-2.0
--->
-
 # Contributing to Auth Operator
 
 Thank you for your interest in contributing to the Auth Operator! This document provides guidelines and contribution requirements.

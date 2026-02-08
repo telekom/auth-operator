@@ -42,10 +42,10 @@ of the auth-operator in production Kubernetes environments.
 #### Helm (Recommended)
 
 ```bash
-helm install auth-operator oci://ghcr.io/telekom/auth-operator/auth-operator \
+helm install auth-operator oci://ghcr.io/telekom/charts/auth-operator \
   --namespace auth-operator-system \
   --create-namespace \
-  --version v0.1.0
+  --version <chart-version>
 ```
 
 #### Kustomize
@@ -179,7 +179,7 @@ For production environments, deploy multiple replicas with leader election:
 ### Helm Configuration
 
 ```bash
-helm upgrade auth-operator oci://ghcr.io/telekom/auth-operator/auth-operator \
+helm upgrade auth-operator oci://ghcr.io/telekom/charts/auth-operator \
   --namespace auth-operator-system \
   --set controller.replicas=2 \
   --set controller.podDisruptionBudget.enabled=true \
@@ -238,7 +238,7 @@ The operator exposes metrics at `:8080/metrics`. Key metrics:
 ### Enable ServiceMonitor
 
 ```bash
-helm upgrade auth-operator oci://ghcr.io/telekom/auth-operator/auth-operator \
+helm upgrade auth-operator oci://ghcr.io/telekom/charts/auth-operator \
   --set metrics.serviceMonitor.enabled=true \
   --set metrics.serviceMonitor.additionalLabels.release=prometheus
 ```
@@ -324,7 +324,7 @@ spec:
 
 ```bash
 # Helm upgrade
-helm upgrade auth-operator oci://ghcr.io/telekom/auth-operator/auth-operator \
+helm upgrade auth-operator oci://ghcr.io/telekom/charts/auth-operator \
   --namespace auth-operator-system \
   --version <new-version>
 

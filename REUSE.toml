@@ -54,7 +54,8 @@ SPDX-License-Identifier = "CC0-1.0"
 path = [
   ".github/**/*.yml",
   ".github/**/*.md",
-  ".github/ISSUE_TEMPLATE/**"
+  ".github/ISSUE_TEMPLATE/**",
+  ".github/CODEOWNERS"
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
@@ -92,12 +93,15 @@ SPDX-License-Identifier = "CC0-1.0"
 [[annotations]]
 path = [
   "README.md",
+  "CONTRIBUTING.md",
+  "CODE_OF_CONDUCT.md",
   "docs/**/*.md",
   "docs/**/*.yaml",
   "docs/**/*.docx",
   "docs/**/*.drawio",
   "docs/**/*.bkp",
-  "docs/**/*.png"
+  "docs/**/*.png",
+  "chart/**/*.md"
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"

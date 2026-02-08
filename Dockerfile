@@ -29,6 +29,15 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
 # Runtime stage (distroless)
 FROM gcr.io/distroless/static-debian12
 
+# OCI image labels (may be overridden by docker/metadata-action in CI)
+LABEL org.opencontainers.image.title="auth-operator" \
+      org.opencontainers.image.description="A Kubernetes operator for managing RBAC with RoleDefinitions, BindDefinitions, and WebhookAuthorizers" \
+      org.opencontainers.image.url="https://github.com/telekom/auth-operator" \
+      org.opencontainers.image.source="https://github.com/telekom/auth-operator" \
+      org.opencontainers.image.vendor="Deutsche Telekom AG" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.base.name="gcr.io/distroless/static-debian12"
+
 WORKDIR /
 
 COPY --from=build /out/auth-operator ./auth-operator

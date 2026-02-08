@@ -42,11 +42,13 @@ A Kubernetes operator for managing dynamic RBAC through Custom Resource Definiti
 ### Using Helm (Recommended)
 
 ```bash
-helm install auth-operator oci://ghcr.io/telekom/auth-operator/auth-operator \
+helm install auth-operator oci://ghcr.io/telekom/charts/auth-operator \
+  --version <chart-version> \
   --namespace auth-operator-system \
-  --create-namespace \
-  --set image.tag=v0.1.0
+  --create-namespace
 ```
+
+> **Note:** Published charts use `image.digest` for immutable, digest-pinned images by default. If digest is empty, falls back to `image.tag`, then `Chart.AppVersion`. See [values.yaml](./chart/auth-operator/values.yaml) for details.
 
 For configuration options, see the [Helm Chart README](./chart/auth-operator/README.md).
 
