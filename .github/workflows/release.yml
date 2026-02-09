@@ -197,7 +197,7 @@ jobs:
       # GitHub-native attestations (visible in GitHub UI and verifiable with `gh attestation verify`)
       - name: Attest container image provenance (GitHub)
         if: github.event_name != 'pull_request'
-        uses: actions/attest-build-provenance@62fc1d596301d0ab9914e1fec14dc5c8d93f65cd # v3.2.0
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           subject-digest: ${{ steps.build.outputs.digest }}
@@ -217,7 +217,7 @@ jobs:
 
       - name: Attest install manifest provenance (GitHub)
         if: github.event_name != 'pull_request'
-        uses: actions/attest-build-provenance@62fc1d596301d0ab9914e1fec14dc5c8d93f65cd # v3.2.0
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
         with:
           subject-path: install.yaml
 
