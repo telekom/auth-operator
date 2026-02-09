@@ -271,7 +271,7 @@ jobs:
           IMAGE="ghcr.io/${{ github.repository }}:${IMAGE_VERSION}"
           cosign verify-attestation \
             --type spdxjson \
-            --certificate-identity-regexp "https://github.com/${{ github.repository }}/.github/workflows/release.yml@.*" \
+            --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/release.yml@refs/tags/${TAG}" \
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
             "$IMAGE"
         env:
