@@ -224,7 +224,9 @@ jobs:
       - name: Generate checksums
         if: github.event_name != 'pull_request'
         run: |
-          sha256sum sbom.spdx.json install.yaml > checksums.txt
+          # Bundle all license files into a single archive for the release
+          tar czf licenses.tar.gz LICENSE LICENSES/
+          sha256sum sbom.spdx.json install.yaml licenses.tar.gz > checksums.txt
           echo "Checksums:"
           cat checksums.txt
 
@@ -334,6 +336,7 @@ jobs:
           gh release upload "${{ github.ref_name }}" \
             sbom.spdx.json \
             install.yaml \
+            licenses.tar.gz \
             checksums.txt \
             --clobber
 
@@ -483,6 +486,8 @@ jobs:
 
       - name: Package Helm chart
         run: |
+          # Include license files in the Helm chart package
+          cp LICENSE chart/auth-operator/
           helm package chart/auth-operator
           echo "Packaged chart:"
           ls -la auth-operator-*.tgz

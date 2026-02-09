@@ -41,5 +41,7 @@ LABEL org.opencontainers.image.title="auth-operator" \
 WORKDIR /
 
 COPY --from=build /out/auth-operator ./auth-operator
+COPY --from=build /src/LICENSE /licenses/LICENSE
+COPY --from=build /src/LICENSES/ /licenses/LICENSES/
 USER 65532:65532
 ENTRYPOINT ["/auth-operator"]
