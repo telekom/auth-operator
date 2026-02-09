@@ -1,5 +1,5 @@
 <!--
-SPDX-FileCopyrightText: 2025 Deutsche Telekom AG
+SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
 
 SPDX-License-Identifier: CC-BY-4.0
 -->
@@ -469,11 +469,12 @@ spec:
           - team-a-staging
           - team-a-prod
       
-      # Global: forbidden SA namespaces  
+      # Global: forbidden SA namespaces (uses UnifiedSelector)
       forbiddenNamespaces:
-        - kube-system
-        - kube-public
-        - default
+        names:
+          - kube-system
+          - kube-public
+          - default
       
       # Forbidden namespace prefixes (simple wildcard, NO regex)
       forbiddenNamespacePrefixes:
@@ -558,7 +559,8 @@ spec:
     # Complex subject validation rules
     # ----------------------------------------
     # For scenarios that don't fit the above limits.
-    # Uses simple prefix/suffix matching (NO wildcards needed in values, NO regex)
+    # Uses simple prefix/suffix matching for subject names (NO regex)
+    # Annotation value matching uses "*" as a sentinel meaning "any non-empty value"
     customRules:
       # Rule 1: CI service accounts can only be bound in CI namespace
       - name: ci-sa-restriction
@@ -655,7 +657,13 @@ spec:
 
 ## RestrictedBindDefinition
 
-Tenants create bindings with explicit policy reference. Matches the existing BindDefinition structure with support for **multiple roleRefs**:
+Tenants create bindings with explicit policy reference. Extends the BindDefinition concept to a **namespaced** scope with policy governance and support for **multiple roleRefs**.
+
+> **Note:** Unlike BindDefinition (which is cluster-scoped), RestrictedBindDefinition is
+> **namespace-scoped** to enforce tenant boundaries. The `spec.subjects` and
+> `spec.roleBindings` fields follow a similar structure but are adapted for
+> namespaced restrictions (e.g., `namespaceSelector` uses a list of
+> `LabelSelectorRequirement` rather than a single `LabelSelector`).
 
 ```yaml
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
@@ -1070,7 +1078,7 @@ When multiple RestrictedBindDefinitions reference the **same ServiceAccount**:
 
 **Shared ownership behavior:**
 1. **First RestrictedBindDefinition** creates the SA with its ownerReference
-2. **Subsequent RestrictedBindDefinitions** add their ownerReference via SSA (shared ownership)
+2. **Subsequent RestrictedBindDefinitions** add their ownerReference via SSA (shared ownership, `controller=false`)
 3. **SA is deleted only when ALL owning RestrictedBindDefinitions are deleted**
 4. **Event emitted** when shared ownership is detected
 
@@ -1449,7 +1457,7 @@ Audit trail is implemented via two complementary mechanisms:
    webhook must mutate the object to persist annotations.
 
 2. **Controller reconciliation**: Copies durable annotation data into
-   `.status.auditInfo` for convenient read access and long-term visibility.
+   `.status.audit` for convenient read access and long-term visibility.
 
 ```go
 // RestrictedBindDefinitionMutator implements admission.Handler to access
@@ -1964,6 +1972,7 @@ webhooks:
         path: /validate-restricted
     failurePolicy: Fail
     sideEffects: None
+```
 
 **Advantages:**
 - Self-contained solution - no external dependencies
@@ -2327,7 +2336,7 @@ spec:
       # Forbid roles with specific labels (if ClusterRoles are labeled)
       forbiddenRoleRefSelector:
         matchExpressions:
-          - key: rbac.authorization.t-caas.telekom.com/privilege-level
+          - key: authorization.t-caas.telekom.com/privilege-level
             operator: In
             values: [admin, superuser]
           - key: rbac.authorization.k8s.io/aggregate-to-admin
@@ -2348,7 +2357,9 @@ Evaluation:
   IF matches(forbiddenNames) OR matches(forbiddenPrefixes) OR matches(forbiddenSuffixes) OR matches(forbiddenLabelSelector):
     REJECT
   
-  # Step 2: If no allowed selectors are defined, allow by default
+  # Step 2: If no allowed selectors are defined, no allow-list filtering is needed (open).
+  # NOTE: This is per-selector-type evaluation. The overall system is deny-by-default
+  # when multiple policies match (see Implementation Notes: most restrictive wins).
   IF no allowed selectors are set:
     ALLOW
   
@@ -2363,7 +2374,7 @@ Evaluation:
 ## Implementation Notes
 
 - `RBACPolicy` should be cluster-scoped (managing multiple namespaces)
-- Multiple policies can match - most restrictive wins (deny-by-default)
+- Multiple policies can match — most restrictive wins across policies (deny-by-default when policies conflict)
 - Consider policy inheritance (base policy + tenant-specific overrides)
 - Integration with k8s-breakglass for temporary policy bypass with approval
 - Support dry-run mode for testing policies before enforcement
