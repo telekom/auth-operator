@@ -199,6 +199,24 @@ jobs:
         with:
           sarif_file: 'trivy-fs-results.sarif'
 
+  license-audit:
+    name: Dependency License Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Go Environment
+        uses: ./.github/actions/setup-go-env
+
+      - name: Install go-licenses
+        run: go install github.com/google/go-licenses/v2@v2.0.1
+
+      - name: Check dependency licenses
+        run: |
+          go-licenses check ./... \
+            --allowed_licenses=Apache-2.0,MIT,BSD-2-Clause,BSD-3-Clause,ISC,MPL-2.0,CC0-1.0,Unlicense
+
   verify-image-signature:
     name: Verify Release Image Signature
     runs-on: ubuntu-latest
@@ -240,7 +258,20 @@ jobs:
           IMAGE_VERSION="${TAG#v}"
           IMAGE="ghcr.io/${{ github.repository }}:${IMAGE_VERSION}"
           cosign verify \
-            --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/release.yml@refs/tags/${{ steps.tag.outputs.tag }}" \
+            --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/release.yml@refs/tags/${TAG}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$IMAGE"
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+
+      - name: Verify SBOM attestation
+        if: steps.tag.outputs.tag_found == 'true'
+        run: |
+          IMAGE_VERSION="${TAG#v}"
+          IMAGE="ghcr.io/${{ github.repository }}:${IMAGE_VERSION}"
+          cosign verify-attestation \
+            --type spdxjson \
+            --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/release.yml@refs/tags/${TAG}" \
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
             "$IMAGE"
         env:

@@ -19,8 +19,11 @@ RUN go mod download
 
 COPY . .
 
+# Ensure LICENSES directory exists for the runtime stage COPY
+RUN mkdir -p /src/LICENSES
+
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
-	go build -ldflags="-s -w \
+	go build -trimpath -ldflags="-s -w \
 	-X github.com/telekom/auth-operator/pkg/system.Version=$VERSION \
 	-X github.com/telekom/auth-operator/pkg/system.Commit=$COMMIT \
 	-X github.com/telekom/auth-operator/pkg/system.Repository=$REPOSITORY" \
@@ -41,5 +44,7 @@ LABEL org.opencontainers.image.title="auth-operator" \
 WORKDIR /
 
 COPY --from=build /out/auth-operator ./auth-operator
+COPY --from=build /src/LICENSE /licenses/LICENSE
+COPY --from=build /src/LICENSES/ /licenses/LICENSES/
 USER 65532:65532
 ENTRYPOINT ["/auth-operator"]

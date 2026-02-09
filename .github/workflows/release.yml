@@ -90,6 +90,13 @@ jobs:
       - name: Set up QEMU
         uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
 
+      - name: Generate third-party license notices
+        if: github.event_name != 'pull_request'
+        run: |
+          go install github.com/google/go-licenses/v2@v2.0.1
+          go-licenses save ./... --save_path=/tmp/third-party-notices --force
+          tar --sort=name --mtime='1970-01-01' --owner=0 --group=0 --numeric-owner -cf - -C /tmp third-party-notices | gzip -n > /tmp/third-party-notices.tar.gz
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
@@ -182,15 +189,11 @@ jobs:
 
       - name: Sign container image (keyless)
         if: github.event_name != 'pull_request'
-        env:
-          COSIGN_EXPERIMENTAL: "true"
         run: |
           cosign sign --yes ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
 
       - name: Attest SBOM (keyless)
         if: github.event_name != 'pull_request'
-        env:
-          COSIGN_EXPERIMENTAL: "true"
         run: |
           cosign attest --yes --type spdxjson --predicate sbom.spdx.json ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
 
@@ -224,7 +227,10 @@ jobs:
       - name: Generate checksums
         if: github.event_name != 'pull_request'
         run: |
-          sha256sum sbom.spdx.json install.yaml > checksums.txt
+          # Bundle all license files into a single archive for the release (deterministic)
+          tar --sort=name --mtime='1970-01-01' --owner=0 --group=0 --numeric-owner -cf - LICENSE LICENSES/ | gzip -n > licenses.tar.gz
+          sha256sum sbom.spdx.json install.yaml licenses.tar.gz /tmp/third-party-notices.tar.gz > checksums.txt
+          cp /tmp/third-party-notices.tar.gz third-party-notices.tar.gz
           echo "Checksums:"
           cat checksums.txt
 
@@ -311,6 +317,14 @@ jobs:
           \`\`\`bash
           gh attestation verify install.yaml --repo ${{ github.repository }}
           \`\`\`
+          
+          ### License & Notices
+          
+          | Artifact | Description |
+          |----------|-------------|
+          | \`licenses.tar.gz\` | Project license files (Apache-2.0, CC-BY-4.0, CC0-1.0) |
+          | \`third-party-notices.tar.gz\` | Licenses for all Go dependencies |
+          | \`sbom.spdx.json\` | Software Bill of Materials (SPDX) |
           EOF
           
           # Create or update release
@@ -334,6 +348,8 @@ jobs:
           gh release upload "${{ github.ref_name }}" \
             sbom.spdx.json \
             install.yaml \
+            licenses.tar.gz \
+            third-party-notices.tar.gz \
             checksums.txt \
             --clobber
 
@@ -483,6 +499,11 @@ jobs:
 
       - name: Package Helm chart
         run: |
+          # Include license files in the Helm chart package
+          cp LICENSE chart/auth-operator/
+          if [ -d LICENSES ]; then
+            cp -r LICENSES chart/auth-operator/
+          fi
           helm package chart/auth-operator
           echo "Packaged chart:"
           ls -la auth-operator-*.tgz
@@ -502,8 +523,6 @@ jobs:
 
       - name: Sign Helm chart (keyless)
         if: github.event_name != 'pull_request'
-        env:
-          COSIGN_EXPERIMENTAL: "true"
         run: |
           CHART_VERSION="${{ needs.build-and-push.outputs.chart_version }}"
           CHART_REF="${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/auth-operator:${CHART_VERSION}"
