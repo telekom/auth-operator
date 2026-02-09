@@ -103,11 +103,11 @@ var _ = Describe("Helm Chart E2E", Ordered, Label("helm"), func() {
 
 		It("should template the chart without errors", func() {
 			By("Running helm template")
-			cmd := exec.CommandContext(context.Background(), "helm", "template", helmReleaseName, helmChartPath,
-				"-n", helmNamespace,
-				"--set", fmt.Sprintf("image.repository=%s", strings.Split(projectImage, ":")[0]),
-				"--set", fmt.Sprintf("image.tag=%s", getImageTag()),
+			templateArgs := append([]string{"template", helmReleaseName, helmChartPath,
+				"-n", helmNamespace},
+				imageSetArgs()...,
 			)
+			cmd := exec.CommandContext(context.Background(), "helm", templateArgs...)
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Helm template failed")
 			Expect(string(output)).To(ContainSubstring("Deployment"))
@@ -120,40 +120,99 @@ var _ = Describe("Helm Chart E2E", Ordered, Label("helm"), func() {
 
 		It("should template with all features enabled", func() {
 			By("Running helm template with all features")
-			cmd := exec.CommandContext(context.Background(), "helm", "template", helmReleaseName, helmChartPath,
-				"-n", helmNamespace,
-				"--set", fmt.Sprintf("image.repository=%s", strings.Split(projectImage, ":")[0]),
-				"--set", fmt.Sprintf("image.tag=%s", getImageTag()),
+			templateArgs := append([]string{"template", helmReleaseName, helmChartPath,
+				"-n", helmNamespace},
+				imageSetArgs()...,
+			)
+			templateArgs = append(templateArgs,
 				"--set", "controller.replicas=2",
 				"--set", "controller.podDisruptionBudget.enabled=true",
 				"--set", "webhookServer.replicas=2",
 				"--set", "webhookServer.podDisruptionBudget.enabled=true",
+				"--set", "metrics.serviceMonitor.enabled=true",
 			)
+			cmd := exec.CommandContext(context.Background(), "helm", templateArgs...)
 			output, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred(), "Helm template with all features failed")
+			Expect(err).NotTo(HaveOccurred(), "Helm template with all features failed: %s", string(output))
 			Expect(string(output)).To(ContainSubstring("PodDisruptionBudget"))
+			Expect(string(output)).To(ContainSubstring("ServiceMonitor"))
 
 			// Save templated output
 			saveOutput("helm-template-all-features.yaml", output)
+		})
+
+		It("should template with scheduling constraints", func() {
+			By("Running helm template with nodeSelector, tolerations, and affinity")
+			templateArgs := append([]string{"template", helmReleaseName, helmChartPath,
+				"-n", helmNamespace},
+				imageSetArgs()...,
+			)
+			templateArgs = append(templateArgs,
+				"--set", "nodeSelector.kubernetes\\.io/os=linux",
+				"--set", "tolerations[0].key=dedicated",
+				"--set", "tolerations[0].operator=Equal",
+				"--set", "tolerations[0].value=control-plane",
+				"--set", "tolerations[0].effect=NoSchedule",
+				"--set", "affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].key=node-role.kubernetes.io/control-plane",
+				"--set", "affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].operator=Exists",
+				"--set", "priorityClassName=system-cluster-critical",
+				"--set", "global.logLevel=4",
+				"--set", "image.pullPolicy=Always",
+				"--set-string", "podAnnotations.prometheus\\.io/scrape=true",
+				"--set-string", "podLabels.environment=test",
+			)
+			cmd := exec.CommandContext(context.Background(), "helm", templateArgs...)
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Helm template with scheduling constraints failed: %s", string(output))
+
+			outputStr := string(output)
+			// Verify nodeSelector
+			Expect(outputStr).To(ContainSubstring("nodeSelector:"))
+			Expect(outputStr).To(ContainSubstring("kubernetes.io/os: linux"))
+
+			// Verify tolerations
+			Expect(outputStr).To(ContainSubstring("tolerations:"))
+			Expect(outputStr).To(ContainSubstring("dedicated"))
+
+			// Verify affinity
+			Expect(outputStr).To(ContainSubstring("affinity:"))
+			Expect(outputStr).To(ContainSubstring("nodeAffinity:"))
+
+			// Verify priorityClassName
+			Expect(outputStr).To(ContainSubstring("priorityClassName: system-cluster-critical"))
+
+			// Verify global log level
+			Expect(outputStr).To(ContainSubstring("--verbosity=4"))
+
+			// Verify imagePullPolicy
+			Expect(outputStr).To(ContainSubstring("imagePullPolicy: Always"))
+
+			// Verify pod annotations
+			Expect(outputStr).To(ContainSubstring("prometheus.io/scrape"))
+
+			// Verify pod labels
+			Expect(outputStr).To(ContainSubstring("environment: test"))
+
+			// Save templated output
+			saveOutput("helm-template-scheduling.yaml", output)
 		})
 	})
 
 	Context("Helm Chart Installation", func() {
 		It("should install the Helm chart successfully", func() {
 			By("Installing the Helm chart")
-			imageRepo := strings.Split(projectImage, ":")[0]
-			imageTag := getImageTag()
-
-			cmd := exec.CommandContext(context.Background(), "helm", "install", helmReleaseName, helmChartPath,
+			installArgs := append([]string{"install", helmReleaseName, helmChartPath,
 				"-n", helmNamespace,
-				"--create-namespace",
-				"--set", fmt.Sprintf("image.repository=%s", imageRepo),
-				"--set", fmt.Sprintf("image.tag=%s", imageTag),
+				"--create-namespace"},
+				imageSetArgs()...,
+			)
+			installArgs = append(installArgs,
 				"--set", "controller.replicas=1",
 				"--set", "webhookServer.replicas=1",
 				"--wait",
 				"--timeout", "5m",
 			)
+			cmd := exec.CommandContext(context.Background(), "helm", installArgs...)
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Helm install failed: %s", string(output))
 		})
@@ -494,13 +553,12 @@ spec:
 	Context("Helm Upgrade", func() {
 		It("should upgrade the Helm chart with PDB enabled", func() {
 			By("Upgrading the Helm chart with PDB enabled")
-			imageRepo := strings.Split(projectImage, ":")[0]
-			imageTag := getImageTag()
 
-			cmd := exec.CommandContext(context.Background(), "helm", "upgrade", helmReleaseName, helmChartPath,
-				"-n", helmNamespace,
-				"--set", fmt.Sprintf("image.repository=%s", imageRepo),
-				"--set", fmt.Sprintf("image.tag=%s", imageTag),
+			upgradeArgs := append([]string{"upgrade", helmReleaseName, helmChartPath,
+				"-n", helmNamespace},
+				imageSetArgs()...,
+			)
+			upgradeArgs = append(upgradeArgs,
 				"--set", "controller.replicas=2",
 				"--set", "controller.podDisruptionBudget.enabled=true",
 				"--set", "controller.podDisruptionBudget.minAvailable=1",
@@ -510,6 +568,7 @@ spec:
 				"--wait",
 				"--timeout", "5m",
 			)
+			cmd := exec.CommandContext(context.Background(), "helm", upgradeArgs...)
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Helm upgrade failed: %s", string(output))
 		})
@@ -557,12 +616,54 @@ spec:
 
 // Helper functions
 
+// getImageRepo extracts the repository from projectImage, correctly handling
+// registry:port/name:tag and name@sha256:digest formats.
+func getImageRepo() string {
+	// Handle digest references (name@sha256:...)
+	if idx := strings.Index(projectImage, "@"); idx != -1 {
+		return projectImage[:idx]
+	}
+	// Handle tag references - find last colon after last slash
+	lastSlash := strings.LastIndex(projectImage, "/")
+	lastColon := strings.LastIndex(projectImage, ":")
+	if lastColon > lastSlash {
+		return projectImage[:lastColon]
+	}
+	return projectImage
+}
+
 func getImageTag() string {
-	parts := strings.Split(projectImage, ":")
-	if len(parts) > 1 {
-		return parts[1]
+	// Digest references have no tag
+	if strings.Contains(projectImage, "@") {
+		return ""
+	}
+	lastSlash := strings.LastIndex(projectImage, "/")
+	lastColon := strings.LastIndex(projectImage, ":")
+	if lastColon > lastSlash {
+		return projectImage[lastColon+1:]
 	}
 	return defaultImageTag
+}
+
+// getImageDigest extracts the digest from projectImage (e.g., sha256:abc...).
+// Returns empty string for tag-based references.
+func getImageDigest() string {
+	if idx := strings.Index(projectImage, "@"); idx != -1 {
+		return projectImage[idx+1:]
+	}
+	return ""
+}
+
+// imageSetArgs returns the appropriate --set arguments for image configuration,
+// handling both tag and digest references correctly.
+func imageSetArgs() []string {
+	args := []string{"--set", fmt.Sprintf("image.repository=%s", getImageRepo())}
+	if digest := getImageDigest(); digest != "" {
+		args = append(args, "--set", fmt.Sprintf("image.digest=%s", digest))
+	} else {
+		args = append(args, "--set", fmt.Sprintf("image.tag=%s", getImageTag()))
+	}
+	return args
 }
 
 func helmFullName() string {

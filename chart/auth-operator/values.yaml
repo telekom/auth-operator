@@ -6,11 +6,43 @@ image:
   # - If neither is set, defaults to Chart.AppVersion
   tag: ""
   digest: ""
+  pullPolicy: IfNotPresent
 imagePullSecrets: []
-kubernetesClusterDomain: cluster.local
+
+# Global settings applied to all components
+global:
+  # Log verbosity level (0-9, higher is more verbose)
+  logLevel: 2
+
 serviceAccount:
   annotations: {}
+
+# Node selection constraints (applied to all pods)
+nodeSelector: {}
+
+# Tolerations (applied to all pods)
+tolerations: []
+
+# Pod affinity rules (applied to all pods)
+affinity: {}
+
+# Pod topology spread constraints (applied to all pods)
+topologySpreadConstraints: []
+
+# Priority class name for pods
+priorityClassName: ""
+
+# Additional pod annotations (applied to all pods)
+podAnnotations: {}
+
+# Additional pod labels (applied to all pods)
+podLabels: {}
+
 controller:
+  # Number of concurrent reconcilers for BindDefinition controller
+  bindDefinitionConcurrency: 10
+  # Number of concurrent reconcilers for RoleDefinition controller
+  roleDefinitionConcurrency: 10
   resources:
     limits:
       cpu: 500m
@@ -27,6 +59,7 @@ controller:
     # Maximum number of pods that can be unavailable during disruption
     # (mutually exclusive with minAvailable)
     # maxUnavailable: 1
+
 webhookServer:
   replicas: 1
   tdgMigration: "false"
@@ -49,6 +82,7 @@ webhookServer:
     port: 443
     protocol: TCP
     type: ClusterIP
+
 metrics:
   service:
     # Enable a dedicated Service for Prometheus scraping
@@ -63,3 +97,20 @@ metrics:
     scrapeTimeout: ""
     # Additional labels for ServiceMonitor (e.g., for label-based selection)
     additionalLabels: {}
+
+# Pod-level security context (applied to all pods)
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+# Container-level security context (applied to all containers)
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL

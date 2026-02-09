@@ -16,24 +16,38 @@ spec:
       labels:
         control-plane: controller-manager
       {{- include "auth-operator.selectorLabels" . | nindent 8 }}
+      {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       annotations:
         kubectl.kubernetes.io/default-container: manager
+      {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     spec:
       containers:
       - args:
         - controller
         - --leader-elect
-        - --binddefinition-concurrency=10
-        - --roledefinition-concurrency=10
+        - --binddefinition-concurrency={{ .Values.controller.bindDefinitionConcurrency }}
+        - --roledefinition-concurrency={{ .Values.controller.roleDefinitionConcurrency }}
+        - --verbosity={{ .Values.global.logLevel }}
         command:
         - /auth-operator
         image: {{ include "auth-operator.image" . }}
+        imagePullPolicy: {{ include "auth-operator.imagePullPolicy" . }}
         livenessProbe:
           httpGet:
             path: /healthz
             port: 8081
           initialDelaySeconds: 15
           periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
         name: manager
         ports:
         - containerPort: 8081
@@ -44,12 +58,31 @@ spec:
           protocol: TCP
         resources: {{- toYaml .Values.controller.resources | nindent 10 }}
         securityContext:
-          allowPrivilegeEscalation: false
-          capabilities:
-            drop:
-            - ALL
-      imagePullSecrets: {{ .Values.imagePullSecrets | default list | toJson }}
+          {{- toYaml .Values.containerSecurityContext | nindent 10 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       securityContext:
-        runAsNonRoot: true
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       serviceAccountName: {{ include "auth-operator.fullname" . }}
       terminationGracePeriodSeconds: 10
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
