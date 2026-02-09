@@ -192,7 +192,7 @@ jobs:
         env:
           COSIGN_EXPERIMENTAL: "true"
         run: |
-          cosign attest --yes --type spdx --predicate sbom.spdx.json ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          cosign attest --yes --type spdxjson --predicate sbom.spdx.json ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
 
       # GitHub-native attestations (visible in GitHub UI and verifiable with `gh attestation verify`)
       - name: Attest container image provenance (GitHub)
@@ -281,7 +281,7 @@ jobs:
           Verify the SBOM attestation:
           \`\`\`bash
           cosign verify-attestation ${IMAGE}@${DIGEST} \\
-            --type spdx \\
+            --type spdxjson \\
             --certificate-identity-regexp="https://github.com/${{ github.repository }}/.github/workflows/release.yml@.*" \\
             --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
           \`\`\`
