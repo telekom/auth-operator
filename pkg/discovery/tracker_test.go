@@ -26,9 +26,9 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -430,9 +430,9 @@ var _ = Describe("ResourceTracker Integration - CRD Lifecycle", Ordered, func() 
 			}
 			if len(updatedFinalizers) != len(crd.Finalizers) {
 				crd.Finalizers = updatedFinalizers
-				_ = k8sClient.Update(cleanupCtx, crd) //nolint:errcheck // best-effort
+				_ = k8sClient.Update(cleanupCtx, crd)
 			}
-			_ = k8sClient.Delete(cleanupCtx, lifecycleCRD) //nolint:errcheck // best-effort
+			_ = k8sClient.Delete(cleanupCtx, lifecycleCRD)
 		}
 	})
 
@@ -600,8 +600,13 @@ var _ = Describe("ResourceTracker RefreshUUIDMap", func() {
 
 	AfterEach(func() {
 		cancel()
-		// Clean up CRD if it exists
+		// Clean up CRD and wait for it to be fully removed to avoid
+		// races when the next test re-creates a CRD with the same name.
 		_ = k8sClient.Delete(context.Background(), testCRD)
+		Eventually(func() bool {
+			err := k8sClient.Get(context.Background(), client.ObjectKeyFromObject(testCRD), &apiextensionsv1.CustomResourceDefinition{})
+			return apierrors.IsNotFound(err)
+		}, "30s", "1s").Should(BeTrue(), "CRD should be fully deleted before next test")
 	})
 
 	It("should refresh UUID map with current CRDs", func() {

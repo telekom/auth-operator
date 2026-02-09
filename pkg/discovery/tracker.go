@@ -33,9 +33,10 @@ const (
 	// Duration between periodic API resource collections.
 	periodicCollectionInterval = 30 * time.Second
 
-	// Duration between full rescans to account for missed events.
+	// Default duration between full rescans to account for missed events.
 	// This refreshes both the CRD UUID map and the API resources cache.
-	fullRescanInterval = 15 * time.Minute
+	// In stable clusters with few CRD changes, this can be set higher.
+	defaultFullRescanInterval = 15 * time.Minute
 )
 
 // APIResourcesByGroupVersion maps GroupVersion strings to their corresponding API resources.
@@ -78,16 +79,17 @@ type signalFunc func() error
 
 // ResourceTracker tracks and caches the available API resources in the Kubernetes cluster.
 type ResourceTracker struct {
-	started     atomic.Bool
-	rateLimit   rate.Sometimes
-	scheme      *runtime.Scheme
-	config      *rest.Config
-	mutex       sync.RWMutex
-	cache       APIResourcesByGroupVersion
-	signalFuncs []signalFunc
-	crdsMutex   sync.RWMutex
-	crdsUUIDs   map[string]struct{}
-	crdClient   client.Client // reusable client for CRD list operations
+	started            atomic.Bool
+	rateLimit          rate.Sometimes
+	scheme             *runtime.Scheme
+	config             *rest.Config
+	mutex              sync.RWMutex
+	cache              APIResourcesByGroupVersion
+	signalFuncs        []signalFunc
+	crdsMutex          sync.RWMutex
+	crdsUUIDs          map[string]struct{}
+	crdClient          client.Client // reusable client for CRD list operations
+	FullRescanInterval time.Duration // interval between periodic full rescans (0 = use default)
 }
 
 // hasCRDUUID returns true if the given UID is in the CRD UUID map (thread-safe).
@@ -103,6 +105,13 @@ func (r *ResourceTracker) addCRDUUID(uid string) {
 	r.crdsMutex.Lock()
 	defer r.crdsMutex.Unlock()
 	r.crdsUUIDs[uid] = struct{}{}
+}
+
+// removeCRDUUID removes a UID from the CRD UUID map (thread-safe).
+func (r *ResourceTracker) removeCRDUUID(uid string) {
+	r.crdsMutex.Lock()
+	defer r.crdsMutex.Unlock()
+	delete(r.crdsUUIDs, uid)
 }
 
 // setCRDUUIDs replaces the CRD UUID map atomically (thread-safe).
@@ -124,6 +133,14 @@ func (r *ResourceTracker) crdUUIDCount() int {
 // remain in generated roles until the CRD is fully deleted.
 func shouldSkipTerminatingCRD(crd *apiextensionsv1.CustomResourceDefinition, eventType watch.EventType) bool {
 	return crd.DeletionTimestamp != nil && eventType != watch.Deleted
+}
+
+// fullRescanInterval returns the configured full rescan interval or the default.
+func (r *ResourceTracker) fullRescanInterval() time.Duration {
+	if r.FullRescanInterval > 0 {
+		return r.FullRescanInterval
+	}
+	return defaultFullRescanInterval
 }
 
 // NewResourceTracker creates a new ResourceTracker.
@@ -203,6 +220,8 @@ func (r *ResourceTracker) initUUIDMap(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("unable to create client for CRD watch: %w", err)
 	}
+	// Store as the reusable CRD client so refreshUUIDMap doesn't create another one.
+	r.crdClient = cli
 
 	// List existing CRDs to initialize the known CRD UUIDs.
 	// This will be used to filter ADDED events in the watch and skip running
@@ -404,9 +423,9 @@ func (r *ResourceTracker) periodicCollection(ctx context.Context) {
 // of watch-event rate limiting (collectAPIResources still serialises via its own mutex).
 func (r *ResourceTracker) periodicFullRescan(ctx context.Context) {
 	logger := log.FromContext(ctx).WithName("ResourceTracker.periodicFullRescan")
-	logger.Info("starting periodic full rescan", "interval", fullRescanInterval)
+	logger.Info("starting periodic full rescan", "interval", r.fullRescanInterval())
 
-	ticker := time.NewTicker(fullRescanInterval)
+	ticker := time.NewTicker(r.fullRescanInterval())
 	defer ticker.Stop()
 	for {
 		select {
@@ -520,12 +539,15 @@ func (r *ResourceTracker) watchAPIResources(ctx context.Context) {
 			crd := event.Object.(*apiextensionsv1.CustomResourceDefinition)
 
 			logger.V(2).Info("CRD watch event received", "eventType", event.Type, "name", crd.Name, "uid", crd.UID)
-			if event.Type == watch.Added {
+			switch event.Type {
+			case watch.Added:
 				if r.hasCRDUUID(string(crd.UID)) {
 					// already exists, skip
 					continue
 				}
 				r.addCRDUUID(string(crd.UID))
+			case watch.Deleted:
+				r.removeCRDUUID(string(crd.UID))
 			}
 
 			// Skip re-collection for CRDs that are being deleted (have deletionTimestamp).
