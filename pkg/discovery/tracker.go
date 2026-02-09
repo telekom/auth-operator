@@ -87,6 +87,7 @@ type ResourceTracker struct {
 	signalFuncs []signalFunc
 	crdsMutex   sync.RWMutex
 	crdsUUIDs   map[string]struct{}
+	crdClient   client.Client // reusable client for CRD list operations
 }
 
 // hasCRDUUID returns true if the given UID is in the CRD UUID map (thread-safe).
@@ -203,7 +204,7 @@ func (r *ResourceTracker) initUUIDMap(ctx context.Context) error {
 		return fmt.Errorf("unable to create client for CRD watch: %w", err)
 	}
 
-	// List existing CRDs to initialize the known CRD UUIDs
+	// List existing CRDs to initialize the known CRD UUIDs.
 	// This will be used to filter ADDED events in the watch and skip running
 	// expensive operations (like API resource collection) for "non-events". Watch always
 	// sends an ADDED event for existing objects when the watch is created.
@@ -212,9 +213,13 @@ func (r *ResourceTracker) initUUIDMap(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	// Build the complete map and swap it in once to reduce lock contention.
+	uuids := make(map[string]struct{}, len(crdList.Items))
 	for _, crd := range crdList.Items {
-		r.addCRDUUID(string(crd.UID))
+		uuids[string(crd.UID)] = struct{}{}
 	}
+	r.setCRDUUIDs(uuids)
 	return nil
 }
 
@@ -395,7 +400,8 @@ func (r *ResourceTracker) periodicCollection(ctx context.Context) {
 }
 
 // periodicFullRescan performs a full rescan of the cluster to account for missed events.
-// This refreshes the CRD UUID map and forces an API resources collection regardless of the rate limiter.
+// This refreshes the CRD UUID map and triggers an API resources collection independent
+// of watch-event rate limiting (collectAPIResources still serialises via its own mutex).
 func (r *ResourceTracker) periodicFullRescan(ctx context.Context) {
 	logger := log.FromContext(ctx).WithName("ResourceTracker.periodicFullRescan")
 	logger.Info("starting periodic full rescan", "interval", fullRescanInterval)
@@ -413,7 +419,7 @@ func (r *ResourceTracker) periodicFullRescan(ctx context.Context) {
 				// Continue with collection anyway
 			}
 
-			// Force collection bypassing rate limiter
+			// Trigger collection (not rate-limited, but still serialised by collectAPIResources)
 			changed, err := r.collectAPIResources(ctx)
 			if err != nil {
 				logger.Error(err, "failed to collect API resources during full rescan")
@@ -443,13 +449,16 @@ func (r *ResourceTracker) periodicFullRescan(ctx context.Context) {
 func (r *ResourceTracker) refreshUUIDMap(ctx context.Context) error {
 	logger := log.FromContext(ctx).WithName("ResourceTracker.refreshUUIDMap")
 
-	cli, err := client.New(r.config, client.Options{Scheme: r.scheme})
-	if err != nil {
-		return fmt.Errorf("unable to create client for CRD list: %w", err)
+	if r.crdClient == nil {
+		cli, err := client.New(r.config, client.Options{Scheme: r.scheme})
+		if err != nil {
+			return fmt.Errorf("unable to create client for CRD list: %w", err)
+		}
+		r.crdClient = cli
 	}
 
 	var crdList apiextensionsv1.CustomResourceDefinitionList
-	err = cli.List(ctx, &crdList)
+	err := r.crdClient.List(ctx, &crdList)
 	if err != nil {
 		return fmt.Errorf("unable to list CRDs: %w", err)
 	}

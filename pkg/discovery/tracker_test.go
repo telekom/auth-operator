@@ -415,7 +415,25 @@ var _ = Describe("ResourceTracker Integration - CRD Lifecycle", Ordered, func() 
 
 	AfterAll(func() {
 		cancel()
-		// Cleanup is handled by the delete test
+
+		// Best-effort cleanup: remove test finalizer and delete CRD
+		// so the suite doesn't leave resources behind if an earlier assertion fails.
+		cleanupCtx := context.Background()
+		crd := &apiextensionsv1.CustomResourceDefinition{}
+		if err := k8sClient.Get(cleanupCtx, client.ObjectKeyFromObject(lifecycleCRD), crd); err == nil {
+			// Remove test finalizer if present
+			updatedFinalizers := make([]string, 0, len(crd.Finalizers))
+			for _, f := range crd.Finalizers {
+				if f != "test.example.com/lifecycle-test" {
+					updatedFinalizers = append(updatedFinalizers, f)
+				}
+			}
+			if len(updatedFinalizers) != len(crd.Finalizers) {
+				crd.Finalizers = updatedFinalizers
+				_ = k8sClient.Update(cleanupCtx, crd) //nolint:errcheck // best-effort
+			}
+			_ = k8sClient.Delete(cleanupCtx, lifecycleCRD) //nolint:errcheck // best-effort
+		}
 	})
 
 	It("should have lifecycle CRD resources in cache after creation", func() {
