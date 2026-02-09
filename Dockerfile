@@ -20,7 +20,7 @@ RUN go mod download
 COPY . .
 
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
-	go build -ldflags="-s -w \
+	go build -trimpath -ldflags="-s -w \
 	-X github.com/telekom/auth-operator/pkg/system.Version=$VERSION \
 	-X github.com/telekom/auth-operator/pkg/system.Commit=$COMMIT \
 	-X github.com/telekom/auth-operator/pkg/system.Repository=$REPOSITORY" \

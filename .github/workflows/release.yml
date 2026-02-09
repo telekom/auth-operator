@@ -182,15 +182,11 @@ jobs:
 
       - name: Sign container image (keyless)
         if: github.event_name != 'pull_request'
-        env:
-          COSIGN_EXPERIMENTAL: "true"
         run: |
           cosign sign --yes ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
 
       - name: Attest SBOM (keyless)
         if: github.event_name != 'pull_request'
-        env:
-          COSIGN_EXPERIMENTAL: "true"
         run: |
           cosign attest --yes --type spdxjson --predicate sbom.spdx.json ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
 
@@ -507,8 +503,6 @@ jobs:
 
       - name: Sign Helm chart (keyless)
         if: github.event_name != 'pull_request'
-        env:
-          COSIGN_EXPERIMENTAL: "true"
         run: |
           CHART_VERSION="${{ needs.build-and-push.outputs.chart_version }}"
           CHART_REF="${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/auth-operator:${CHART_VERSION}"
