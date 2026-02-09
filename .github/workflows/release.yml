@@ -91,10 +91,11 @@ jobs:
         uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
 
       - name: Generate third-party license notices
+        if: github.event_name != 'pull_request'
         run: |
           go install github.com/google/go-licenses/v2@v2.0.1
           go-licenses save ./... --save_path=/tmp/third-party-notices --force
-          tar --sort=name --mtime='1970-01-01' --owner=0 --group=0 --numeric-owner -czf /tmp/third-party-notices.tar.gz -C /tmp third-party-notices
+          tar --sort=name --mtime='1970-01-01' --owner=0 --group=0 --numeric-owner -cf - -C /tmp third-party-notices | gzip -n > /tmp/third-party-notices.tar.gz
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
@@ -227,7 +228,7 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           # Bundle all license files into a single archive for the release (deterministic)
-          tar --sort=name --mtime='1970-01-01' --owner=0 --group=0 --numeric-owner -czf licenses.tar.gz LICENSE LICENSES/
+          tar --sort=name --mtime='1970-01-01' --owner=0 --group=0 --numeric-owner -cf - LICENSE LICENSES/ | gzip -n > licenses.tar.gz
           sha256sum sbom.spdx.json install.yaml licenses.tar.gz /tmp/third-party-notices.tar.gz > checksums.txt
           cp /tmp/third-party-notices.tar.gz third-party-notices.tar.gz
           echo "Checksums:"

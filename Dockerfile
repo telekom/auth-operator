@@ -19,6 +19,9 @@ RUN go mod download
 
 COPY . .
 
+# Ensure LICENSES directory exists for the runtime stage COPY
+RUN mkdir -p /src/LICENSES
+
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
 	go build -trimpath -ldflags="-s -w \
 	-X github.com/telekom/auth-operator/pkg/system.Version=$VERSION \
