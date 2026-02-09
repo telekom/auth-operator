@@ -92,7 +92,7 @@ jobs:
 
       - name: Generate third-party license notices
         run: |
-          go install github.com/google/go-licenses@latest
+          go install github.com/google/go-licenses/v2@v2.0.1
           go-licenses save ./... --save_path=./third-party-notices --force
           tar czf third-party-notices.tar.gz third-party-notices/
 
