@@ -32,6 +32,11 @@ var ErrResourceTrackerNotStarted = fmt.Errorf("resource tracker not started")
 const (
 	// Duration between periodic API resource collections.
 	periodicCollectionInterval = 30 * time.Second
+
+	// Default duration between full rescans to account for missed events.
+	// This refreshes both the CRD UUID map and the API resources cache.
+	// In stable clusters with few CRD changes, this can be set higher.
+	defaultFullRescanInterval = 15 * time.Minute
 )
 
 // APIResourcesByGroupVersion maps GroupVersion strings to their corresponding API resources.
@@ -74,14 +79,68 @@ type signalFunc func() error
 
 // ResourceTracker tracks and caches the available API resources in the Kubernetes cluster.
 type ResourceTracker struct {
-	started     atomic.Bool
-	rateLimit   rate.Sometimes
-	scheme      *runtime.Scheme
-	config      *rest.Config
-	mutex       sync.RWMutex
-	cache       APIResourcesByGroupVersion
-	signalFuncs []signalFunc
-	crdsUUIDs   map[string]struct{}
+	started            atomic.Bool
+	rateLimit          rate.Sometimes
+	scheme             *runtime.Scheme
+	config             *rest.Config
+	mutex              sync.RWMutex
+	cache              APIResourcesByGroupVersion
+	signalFuncs        []signalFunc
+	crdsMutex          sync.RWMutex
+	crdsUUIDs          map[string]struct{}
+	crdClient          client.Client // reusable client for CRD list operations
+	FullRescanInterval time.Duration // interval between periodic full rescans (0 = use default)
+}
+
+// hasCRDUUID returns true if the given UID is in the CRD UUID map (thread-safe).
+func (r *ResourceTracker) hasCRDUUID(uid string) bool {
+	r.crdsMutex.RLock()
+	defer r.crdsMutex.RUnlock()
+	_, exists := r.crdsUUIDs[uid]
+	return exists
+}
+
+// addCRDUUID adds a UID to the CRD UUID map (thread-safe).
+func (r *ResourceTracker) addCRDUUID(uid string) {
+	r.crdsMutex.Lock()
+	defer r.crdsMutex.Unlock()
+	r.crdsUUIDs[uid] = struct{}{}
+}
+
+// removeCRDUUID removes a UID from the CRD UUID map (thread-safe).
+func (r *ResourceTracker) removeCRDUUID(uid string) {
+	r.crdsMutex.Lock()
+	defer r.crdsMutex.Unlock()
+	delete(r.crdsUUIDs, uid)
+}
+
+// setCRDUUIDs replaces the CRD UUID map atomically (thread-safe).
+func (r *ResourceTracker) setCRDUUIDs(uuids map[string]struct{}) {
+	r.crdsMutex.Lock()
+	defer r.crdsMutex.Unlock()
+	r.crdsUUIDs = uuids
+}
+
+// crdUUIDCount returns the count of tracked CRD UUIDs (thread-safe).
+func (r *ResourceTracker) crdUUIDCount() int {
+	r.crdsMutex.RLock()
+	defer r.crdsMutex.RUnlock()
+	return len(r.crdsUUIDs)
+}
+
+// shouldSkipTerminatingCRD returns true if the CRD has a DeletionTimestamp and
+// the event is not a DELETED event. This ensures resources from terminating CRDs
+// remain in generated roles until the CRD is fully deleted.
+func shouldSkipTerminatingCRD(crd *apiextensionsv1.CustomResourceDefinition, eventType watch.EventType) bool {
+	return crd.DeletionTimestamp != nil && eventType != watch.Deleted
+}
+
+// fullRescanInterval returns the configured full rescan interval or the default.
+func (r *ResourceTracker) fullRescanInterval() time.Duration {
+	if r.FullRescanInterval > 0 {
+		return r.FullRescanInterval
+	}
+	return defaultFullRescanInterval
 }
 
 // NewResourceTracker creates a new ResourceTracker.
@@ -150,6 +209,9 @@ func (r *ResourceTracker) Start(ctx context.Context) error {
 	// Start periodic collection
 	go r.periodicCollection(ctx)
 
+	// Start periodic full rescan to account for missed events
+	go r.periodicFullRescan(ctx)
+
 	return nil
 }
 
@@ -158,8 +220,10 @@ func (r *ResourceTracker) initUUIDMap(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("unable to create client for CRD watch: %w", err)
 	}
+	// Store as the reusable CRD client so refreshUUIDMap doesn't create another one.
+	r.crdClient = cli
 
-	// List existing CRDs to initialize the known CRD UUIDs
+	// List existing CRDs to initialize the known CRD UUIDs.
 	// This will be used to filter ADDED events in the watch and skip running
 	// expensive operations (like API resource collection) for "non-events". Watch always
 	// sends an ADDED event for existing objects when the watch is created.
@@ -168,9 +232,13 @@ func (r *ResourceTracker) initUUIDMap(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	// Build the complete map and swap it in once to reduce lock contention.
+	uuids := make(map[string]struct{}, len(crdList.Items))
 	for _, crd := range crdList.Items {
-		r.crdsUUIDs[string(crd.UID)] = struct{}{}
+		uuids[string(crd.UID)] = struct{}{}
 	}
+	r.setCRDUUIDs(uuids)
 	return nil
 }
 
@@ -220,7 +288,8 @@ func (r *ResourceTracker) GetAPIResources() (APIResourcesByGroupVersion, error) 
 
 // collectAPIResources collects the API resources from the Kubernetes API server
 // and updates the internal cache if there are changes.
-// It returns true if the cache was updated, false otherwise.
+// It returns (true, nil) if the cache was updated, (false, nil) if unchanged or
+// skipped due to another collection in progress.
 // It uses a mutex to ensure only one collection is in progress at a time.
 // It runs the collection with higher QPS and Burst to speed up the process.
 // It collects resources concurrently for each API group version.
@@ -349,6 +418,83 @@ func (r *ResourceTracker) periodicCollection(ctx context.Context) {
 	}
 }
 
+// periodicFullRescan performs a full rescan of the cluster to account for missed events.
+// This refreshes the CRD UUID map and triggers an API resources collection independent
+// of watch-event rate limiting (collectAPIResources still serialises via its own mutex).
+func (r *ResourceTracker) periodicFullRescan(ctx context.Context) {
+	logger := log.FromContext(ctx).WithName("ResourceTracker.periodicFullRescan")
+	logger.Info("starting periodic full rescan", "interval", r.fullRescanInterval())
+
+	ticker := time.NewTicker(r.fullRescanInterval())
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			logger.Info("performing full rescan to account for missed events")
+
+			// Reinitialize the UUID map to pick up any CRDs we may have missed
+			if err := r.refreshUUIDMap(ctx); err != nil {
+				logger.Error(err, "failed to refresh CRD UUID map during full rescan")
+				// Continue with collection anyway
+			}
+
+			// Trigger collection (not rate-limited, but still serialised by collectAPIResources)
+			changed, err := r.collectAPIResources(ctx)
+			if err != nil {
+				logger.Error(err, "failed to collect API resources during full rescan")
+				continue
+			}
+			if !changed {
+				logger.V(1).Info("full rescan completed, no changes detected (or concurrent collection in progress)")
+				continue
+			}
+			for _, f := range r.signalFuncs {
+				if err := f(); err != nil {
+					logger.Error(err, "failed to send signal after full rescan")
+					continue
+				}
+			}
+			logger.Info("full rescan completed with changes, signals sent")
+		case <-ctx.Done():
+			logger.Info("stopping periodic full rescan due to context done")
+			return
+		}
+	}
+}
+
+// refreshUUIDMap refreshes the CRD UUID map by listing all current CRDs.
+// This ensures the tracker doesn't skip legitimately new CRDs that may have been
+// added while the watch was disconnected.
+func (r *ResourceTracker) refreshUUIDMap(ctx context.Context) error {
+	logger := log.FromContext(ctx).WithName("ResourceTracker.refreshUUIDMap")
+
+	if r.crdClient == nil {
+		cli, err := client.New(r.config, client.Options{Scheme: r.scheme})
+		if err != nil {
+			return fmt.Errorf("unable to create client for CRD list: %w", err)
+		}
+		r.crdClient = cli
+	}
+
+	var crdList apiextensionsv1.CustomResourceDefinitionList
+	err := r.crdClient.List(ctx, &crdList)
+	if err != nil {
+		return fmt.Errorf("unable to list CRDs: %w", err)
+	}
+
+	// Build new UUID map
+	newUUIDs := make(map[string]struct{}, len(crdList.Items))
+	for _, crd := range crdList.Items {
+		newUUIDs[string(crd.UID)] = struct{}{}
+	}
+
+	// Replace the old map atomically (thread-safe)
+	r.setCRDUUIDs(newUUIDs)
+
+	logger.V(1).Info("refreshed CRD UUID map", "crdCount", len(newUUIDs))
+	return nil
+}
+
 func (r *ResourceTracker) launchWatch(ctx context.Context) error {
 	watchBackoff := NewForeverWatchBackoff()
 	if err := ExponentialBackoffWithContext(ctx, watchBackoff, r.watchAPIResources); err != nil {
@@ -393,12 +539,25 @@ func (r *ResourceTracker) watchAPIResources(ctx context.Context) {
 			crd := event.Object.(*apiextensionsv1.CustomResourceDefinition)
 
 			logger.V(2).Info("CRD watch event received", "eventType", event.Type, "name", crd.Name, "uid", crd.UID)
-			if event.Type == watch.Added {
-				if _, exists := r.crdsUUIDs[string(crd.UID)]; exists {
+			switch event.Type {
+			case watch.Added:
+				if r.hasCRDUUID(string(crd.UID)) {
 					// already exists, skip
 					continue
 				}
-				r.crdsUUIDs[string(crd.UID)] = struct{}{}
+				r.addCRDUUID(string(crd.UID))
+			case watch.Deleted:
+				r.removeCRDUUID(string(crd.UID))
+			}
+
+			// Skip re-collection for CRDs that are being deleted (have deletionTimestamp).
+			// This ensures resources from terminating CRDs remain in generated roles until
+			// the CRD is fully deleted (DELETED event), preventing premature removal of
+			// permissions during CRD cleanup.
+			if shouldSkipTerminatingCRD(crd, event.Type) {
+				logger.V(1).Info("skipping API resource collection for terminating CRD",
+					"name", crd.Name, "deletionTimestamp", crd.DeletionTimestamp)
+				continue
 			}
 
 			// Trigger rate-limited collection
