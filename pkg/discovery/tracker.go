@@ -264,7 +264,8 @@ func (r *ResourceTracker) GetAPIResources() (APIResourcesByGroupVersion, error) 
 
 // collectAPIResources collects the API resources from the Kubernetes API server
 // and updates the internal cache if there are changes.
-// It returns true if the cache was updated, false otherwise.
+// It returns (true, nil) if the cache was updated, (false, nil) if unchanged or
+// skipped due to another collection in progress.
 // It uses a mutex to ensure only one collection is in progress at a time.
 // It runs the collection with higher QPS and Burst to speed up the process.
 // It collects resources concurrently for each API group version.
@@ -419,7 +420,7 @@ func (r *ResourceTracker) periodicFullRescan(ctx context.Context) {
 				continue
 			}
 			if !changed {
-				logger.V(1).Info("full rescan completed, no changes detected")
+				logger.V(1).Info("full rescan completed, no changes detected (or concurrent collection in progress)")
 				continue
 			}
 			for _, f := range r.signalFuncs {

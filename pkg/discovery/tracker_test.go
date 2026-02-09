@@ -28,6 +28,7 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -138,7 +139,7 @@ var _ = Describe("ResourceTracker CRD Deletion Handling", func() {
 			// Wait for CRD to be fully deleted
 			Eventually(func() bool {
 				err := k8sClient.Get(context.Background(), client.ObjectKeyFromObject(testCRD), &apiextensionsv1.CustomResourceDefinition{})
-				return client.IgnoreNotFound(err) == nil && err != nil
+				return apierrors.IsNotFound(err)
 			}, "30s", "1s").Should(BeTrue(), "CRD should be deleted")
 		}
 	})
@@ -192,7 +193,7 @@ var _ = Describe("ResourceTracker CRD Deletion Handling", func() {
 			By("waiting for CRD to be fully deleted")
 			Eventually(func() bool {
 				err := k8sClient.Get(ctx, client.ObjectKeyFromObject(testCRD), &apiextensionsv1.CustomResourceDefinition{})
-				return client.IgnoreNotFound(err) == nil && err != nil
+				return apierrors.IsNotFound(err)
 			}, "30s", "1s").Should(BeTrue(), "CRD should be fully deleted")
 
 			By("verifying resources are removed from cache after CRD deletion")
@@ -450,6 +451,11 @@ var _ = Describe("ResourceTracker Integration - CRD Lifecycle", Ordered, func() 
 		}, "30s", "1s").Should(BeTrue(), "CRD should be in terminating state")
 
 		By("verifying resources are STILL in cache while CRD is terminating")
+		// Note: 10s is sufficient because the watch handler (which is the only path that
+		// skips collection for terminating CRDs) processes events within seconds.
+		// periodicCollection (30s) and periodicFullRescan (15m) call collectAPIResources
+		// which queries the API server directly — the API server still serves resources
+		// for terminating CRDs, so they won't be dropped from the cache.
 		Consistently(func() bool {
 			resources, err := resourceTracker.GetAPIResources()
 			if err != nil {
@@ -464,13 +470,20 @@ var _ = Describe("ResourceTracker Integration - CRD Lifecycle", Ordered, func() 
 		By("removing the finalizer to allow full deletion")
 		crd := &apiextensionsv1.CustomResourceDefinition{}
 		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(lifecycleCRD), crd)).To(Succeed())
-		crd.Finalizers = nil
+		// Only remove the test finalizer, preserving any Kubernetes-managed finalizers
+		updatedFinalizers := make([]string, 0, len(crd.Finalizers))
+		for _, f := range crd.Finalizers {
+			if f != "test.example.com/lifecycle-test" {
+				updatedFinalizers = append(updatedFinalizers, f)
+			}
+		}
+		crd.Finalizers = updatedFinalizers
 		Expect(k8sClient.Update(ctx, crd)).To(Succeed())
 
 		By("waiting for CRD to be fully deleted")
 		Eventually(func() bool {
 			err := k8sClient.Get(ctx, client.ObjectKeyFromObject(lifecycleCRD), &apiextensionsv1.CustomResourceDefinition{})
-			return client.IgnoreNotFound(err) == nil && err != nil
+			return apierrors.IsNotFound(err)
 		}, "30s", "1s").Should(BeTrue(), "CRD should be fully deleted")
 
 		By("verifying resources are removed from cache after full deletion")
