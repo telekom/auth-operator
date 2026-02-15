@@ -12,8 +12,6 @@ hack/
 test/
 chart/
 *.md
-LICENSE
-NOTICE
 CODEOWNERS
 PROJECT
 Makefile
@@ -28,4 +26,6 @@ tilt-*.yaml
 kind-with-registry.sh
 versions.env
 REUSE.toml
-LICENSES/
+
+# Keep license files available for Dockerfile COPY
+# (LICENSE, NOTICE, LICENSES/ are needed in the image)
