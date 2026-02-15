@@ -1,14 +1,14 @@
 # Default owners for everything in the repo
-* @telekom/t-caas-maintainers
+* @telekom/t-caas
 
 # API definitions require additional review
-/api/ @telekom/t-caas-maintainers
+/api/ @telekom/t-caas
 
 # Helm chart changes
-/chart/ @telekom/t-caas-maintainers
+/chart/ @telekom/t-caas
 
 # CI/CD changes
-/.github/ @telekom/t-caas-maintainers
+/.github/ @telekom/t-caas
 
 # Documentation
-/docs/ @telekom/t-caas-maintainers
+/docs/ @telekom/t-caas
