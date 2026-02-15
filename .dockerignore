@@ -1,1 +1,31 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: CC0-1.0
+
+.git
+.github
 bin/
+out/
+config/
+docs/
+hack/
+test/
+chart/
+*.md
+LICENSE
+NOTICE
+CODEOWNERS
+PROJECT
+Makefile
+Tiltfile
+tilt-*.yaml
+.golangci.yml
+.yamllint.yml
+.editorconfig
+.dockerignore
+.gitignore
+.vscode/
+kind-with-registry.sh
+versions.env
+REUSE.toml
+LICENSES/
