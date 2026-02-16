@@ -9,9 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- OpenSSF Scorecard workflow for security posture tracking (#79)
+- OpenSSF Scorecard workflow for security posture tracking (#77)
 - `gosec` static security analysis in CI (#80)
-- SHA-pinned `dependency-review-action` for supply-chain integrity (#80)
+- `dependency-review-action` workflow for supply-chain integrity (#80)
 - Copilot reusable prompt for Helm chart changes (#81)
 - Package-level `doc.go` documentation for all packages (#82)
 

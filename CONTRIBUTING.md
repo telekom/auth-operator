@@ -166,13 +166,13 @@ Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`, `ci`
 
 This project provides AI coding guidance via [`.github/copilot-instructions.md`](.github/copilot-instructions.md). These instructions are loaded automatically by GitHub Copilot and compatible AI assistants.
 
-Key conventions documented there include:
+Key project conventions (see `.github/copilot-instructions.md` and the documentation above) include:
 
 - **Import alias patterns** (e.g., `authorizationv1alpha1` for API types)
 - **Error wrapping** with `fmt.Errorf("context: %w", err)`
 - **Testing patterns**: envtest, Ginkgo/Gomega, table-driven tests
-- **REUSE compliance**: SPDX headers required in all new files
-- **Helm chart conventions**: naming, CRD sync, RBAC generation
+- **REUSE compliance**: ensure SPDX headers or REUSE.toml annotations cover new files
+- **Helm chart conventions**: CRD sync with `make helm`, chart linting
 
 When using AI tools, ensure generated code follows these conventions. Review the instructions file before your first contribution.
 
