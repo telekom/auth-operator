@@ -30,6 +30,7 @@ SPDX-License-Identifier = "Apache-2.0"
 # Configuration files - CC0-1.0
 [[annotations]]
 path = [
+  ".copilotignore",
   ".dockerignore",
   ".gitignore",
   ".golangci.yml",
@@ -93,6 +94,7 @@ SPDX-License-Identifier = "CC0-1.0"
 # Documentation - CC0-1.0
 [[annotations]]
 path = [
+  "AGENTS.md",
   "README.md",
   "CHANGELOG.md",
   "CONTRIBUTING.md",

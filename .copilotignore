@@ -1,0 +1,34 @@
+# Auto-generated files (never edit these directly)
+config/crd/bases/
+config/rbac/role.yaml
+config/webhook/manifests.yaml
+api/**/zz_generated.deepcopy.go
+chart/auth-operator/crds/
+
+# Build artifacts and binaries
+bin/
+cover.out
+coverage.out
+
+# Secrets and credentials
+*.pem
+*.key
+*.p12
+*.pfx
+*.env
+kubeconfig
+kubeconfig.*
+
+# External documentation (large, not useful for code context)
+docs/generated/
+
+# Helm chart dependencies
+chart/auth-operator/charts/
+
+# IDE and editor configuration
+.idea/
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
