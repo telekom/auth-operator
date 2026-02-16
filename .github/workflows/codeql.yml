@@ -12,6 +12,7 @@ on:
   schedule:
     # Run CodeQL analysis weekly on Monday at 7:00 UTC (offset from security-scan)
     - cron: '0 7 * * 1'
+  workflow_dispatch:
 
 permissions:
   contents: read
