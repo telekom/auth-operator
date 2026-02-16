@@ -392,7 +392,7 @@ func (r *RoleDefinitionReconciler) filterAPIResourcesForRoleDefinition(
 
 		// NOTE: Currently filters by API group name only. The Versions field in metav1.APIGroup
 		// is accepted but ignored - specifying a group restricts ALL versions of that group.
-		// TODO(#75): Implement version-specific filtering to respect the Versions field in RestrictedAPIs.
+		// TODO(#46): Implement version-specific filtering to respect the Versions field in RestrictedAPIs.
 		// When Versions is empty, restrict all versions; when specified, restrict only those versions.
 		apiIsRestricted := slices.ContainsFunc(roleDefinition.Spec.RestrictedAPIs, func(ag metav1.APIGroup) bool { return ag.Name == groupVersion.Group })
 		// Skip restricted API groups
