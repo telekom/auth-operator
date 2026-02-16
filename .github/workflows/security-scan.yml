@@ -63,7 +63,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Run Trivy vulnerability scanner (filesystem)
-        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
+        uses: aquasecurity/trivy-action@c1824fd6edce30d7ab345a9989de00bbd46ef284 # v0.34.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -93,7 +93,7 @@ jobs:
           docker build -t auth-operator:scan .
 
       - name: Run Trivy vulnerability scanner (image)
-        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
+        uses: aquasecurity/trivy-action@c1824fd6edce30d7ab345a9989de00bbd46ef284 # v0.34.0
         with:
           image-ref: 'auth-operator:scan'
           format: 'sarif'
@@ -129,7 +129,7 @@ jobs:
             > /tmp/helm-rendered.yaml
 
       - name: Run Trivy on Helm templates
-        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
+        uses: aquasecurity/trivy-action@c1824fd6edce30d7ab345a9989de00bbd46ef284 # v0.34.0
         with:
           scan-type: 'config'
           scan-ref: '/tmp/helm-rendered.yaml'
