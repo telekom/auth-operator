@@ -35,7 +35,7 @@ test/e2e/                      Ginkgo E2E tests
    - `rbacv1` for `k8s.io/api/rbac/v1`
 5. **Error wrapping**: Always use `fmt.Errorf("context: %w", err)` — never `fmt.Errorf("context: %v", err)`.
 6. **Standard library constants**: Use `http.MethodGet` not `"GET"`, `rbacv1.GroupName` not `"rbac.authorization.k8s.io"`.
-7. **REUSE compliance**: All new files must have SPDX headers. Check `REUSE.toml` for glob rules.
+7. **REUSE compliance**: All new files must have SPDX headers or be covered by a glob in `REUSE.toml`.
 8. **Test patterns**: Use Ginkgo/Gomega for controller tests, standard `testing` for unit tests. Target >70% coverage.
 9. **Condition management**: Use `pkg/conditions.SetCondition()` — never set conditions manually on status.
 10. **Server-Side Apply**: Use `pkg/ssa` helpers for RBAC resources — never use `Update()` for managed objects.

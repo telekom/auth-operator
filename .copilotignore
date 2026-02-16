@@ -10,6 +10,15 @@ bin/
 cover.out
 coverage.out
 
+# Secrets and credentials
+*.pem
+*.key
+*.p12
+*.pfx
+*.env
+kubeconfig
+kubeconfig.*
+
 # External documentation (large, not useful for code context)
 docs/generated/
 
