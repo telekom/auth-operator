@@ -67,3 +67,5 @@ jobs:
         uses: github/codeql-action/analyze@9e907b5e64f6b83e7804b09294d44122997950d6 # v4.32.3
         with:
           category: '/language:${{ matrix.language }}'
+          # Only upload SARIF on push/schedule — the default setup handles PR scanning.
+          upload: ${{ github.event_name != 'pull_request' }}
