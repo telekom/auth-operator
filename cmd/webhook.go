@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync/atomic"
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	authorizationwebhook "github.com/telekom/auth-operator/internal/webhook/authorization"
@@ -100,11 +101,11 @@ ensuring authorization policies are enforced at creation time.`,
 		}
 
 		startListeners := make(chan struct{})
-		ready := false
+		var ready atomic.Bool
 
 		//+kubebuilder:scaffold:builder
 		if err := mgr.AddReadyzCheck("readyz", func(req *http.Request) error {
-			if ready {
+			if ready.Load() {
 				return nil
 			}
 			return errors.New("webhook server not ready: waiting for certificate setup")
@@ -122,7 +123,7 @@ ensuring authorization policies are enforced at creation time.`,
 				return
 			}
 			setupLog.Info("webhooks configured successfully, server is ready")
-			ready = true
+			ready.Store(true)
 		}()
 
 		webhooks := []rotator.WebhookInfo{}
