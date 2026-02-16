@@ -138,6 +138,69 @@ All new features must include tests (target >70% coverage):
 - Controller tests: `internal/controller/authorization/*_test.go`
 - E2E tests: `test/e2e/` (use Ginkgo labels)
 
+#### Envtest Patterns
+Controller tests use envtest (real API server + etcd, no kubelet):
+```go
+var testEnv *envtest.Environment
+
+func TestControllers(t *testing.T) {
+    RegisterFailHandler(Fail)
+    RunSpecs(t, "Controller Suite")
+}
+
+var _ = BeforeSuite(func() {
+    testEnv = &envtest.Environment{
+        CRDDirectoryPaths: []string{filepath.Join("..", "..", "..", "config", "crd", "bases")},
+    }
+    cfg, err := testEnv.Start()
+    Expect(err).NotTo(HaveOccurred())
+    // ... setup manager, client, scheme
+})
+```
+
+#### Table-Driven Tests
+```go
+DescribeTable("validation",
+    func(input string, expectErr bool) {
+        err := validate(input)
+        if expectErr {
+            Expect(err).To(HaveOccurred())
+        } else {
+            Expect(err).NotTo(HaveOccurred())
+        }
+    },
+    Entry("valid input", "good", false),
+    Entry("empty input", "", true),
+)
+```
+
+### Import Alias Convention
+Use descriptive, consistent aliases throughout the codebase:
+```go
+import (
+    authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+    ctrl "sigs.k8s.io/controller-runtime"
+    rbacv1 "k8s.io/api/rbac/v1"
+    metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+```
+
+### Error Wrapping
+Always wrap errors with `%w` for proper error chain support:
+```go
+// Good — enables errors.Is/As
+return fmt.Errorf("unable to get resource: %w", err)
+
+// Bad — breaks error chain
+return fmt.Errorf("unable to get resource: %v", err)
+```
+
+### REUSE / Licensing Compliance
+- All new files **must** have SPDX headers or be covered by a glob in `REUSE.toml`.
+- Standard header: `// SPDX-FileCopyrightText: 2026 Deutsche Telekom AG` + `// SPDX-License-Identifier: Apache-2.0`
+- CI runs `reuse lint` on every PR — ensure compliance before committing.
+- See `REUSE.toml` for glob-based license annotations on auto-generated and binary files.
+
 ### E2E Tests Require Isolated Kind Cluster
 Run E2E tests against a dedicated kind cluster, not dev/prod clusters.
 
