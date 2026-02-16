@@ -39,7 +39,7 @@ jobs:
           version: ${{ env.HELM_VERSION }}
 
       - name: Setup chart-testing
-        uses: helm/chart-testing-action@e6669bcd63d7cb57cb4380c33043eebe5d111992 # v2.7.0
+        uses: helm/chart-testing-action@6ec842c01de15ebb84c8627d2744a0c2f2755c9f # v2.7.0
 
       - name: List changed charts
         id: list-changed
@@ -127,7 +127,7 @@ jobs:
           version: ${{ env.HELM_VERSION }}
 
       - name: Setup chart-testing
-        uses: helm/chart-testing-action@e6669bcd63d7cb57cb4380c33043eebe5d111992 # v2.7.0
+        uses: helm/chart-testing-action@6ec842c01de15ebb84c8627d2744a0c2f2755c9f # v2.7.0
 
       - name: Install kind
         run: |
