@@ -24,16 +24,16 @@ chart/auth-operator/
 1. **values.yaml** — add new values with sensible defaults and a YAML comment
 2. **templates/** — use `{{ include "auth-operator.fullname" . }}` for names,
    follow existing label/annotation helpers
-3. **CRD sync** — if a CRD changed, run `make manifests` then copy the output
-   into `chart/auth-operator/crds/`
+3. **CRD sync** — if a CRD or `*_types.go` changed, run `make helm` which
+   rebuilds `chart/auth-operator/crds/` from `config/crd/` automatically
 4. **Chart.yaml** — bump `version` (chart version) for every chart change;
    bump `appVersion` only on operator releases
-5. **README.md** — regenerate with `helm-docs` if value descriptions changed
+5. **README.md** — update manually when value descriptions change
 6. **Lint & test** — run:
    ```bash
-   helm lint chart/auth-operator
+   helm lint chart/auth-operator --strict
    helm template auth-operator chart/auth-operator --debug
-   make helm-chart-test        # runs ct lint + ct install in CI-like mode
+   make helm-lint               # same as above, via Makefile
    ```
 7. **RBAC** — if the operator needs new permissions, update both
    `config/rbac/` (kubebuilder markers) and the chart's RBAC templates
@@ -48,6 +48,6 @@ chart/auth-operator/
 
 ## Testing
 
-- `make helm-chart-test` runs chart-testing (`ct`) with schema validation
-- The CI workflow `.github/workflows/helm-chart-test.yml` installs the chart
-  into a kind cluster — make sure it passes before merging
+- `make helm-lint` runs `helm lint chart/auth-operator --strict`
+- The CI workflow `.github/workflows/helm-chart-test.yml` runs chart-testing
+  (`ct lint` / `ct install`) in a kind cluster — make sure it passes before merging
