@@ -2,7 +2,9 @@
 # Go version is read from go.mod via GO_VERSION build arg
 # Default fallback if not provided (should match go.mod)
 ARG GO_VERSION=1.25
-FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine AS build
+# Digest pinned for supply-chain integrity; update with:
+#   docker buildx imagetools inspect golang:<version>-alpine
+FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine@sha256:f6751d823c26342f9506c03797d2527668d095b0a15f1862cddb4d927a7a4ced AS build
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -30,7 +32,9 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
 	-o /out/auth-operator ./main.go
 
 # Runtime stage (distroless)
-FROM gcr.io/distroless/static-debian12
+# Digest pinned for supply-chain integrity; update with:
+#   docker buildx imagetools inspect gcr.io/distroless/static-debian12
+FROM gcr.io/distroless/static-debian12@sha256:20bc6c0bc4d625a22a8fde3e55f6515709b32055ef8fb9cfbddaa06d1760f838
 
 # OCI image labels (may be overridden by docker/metadata-action in CI)
 LABEL org.opencontainers.image.title="auth-operator" \
