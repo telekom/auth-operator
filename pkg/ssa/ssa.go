@@ -2,9 +2,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-// Package ssa provides Server-Side Apply (SSA) helpers for RBAC resources.
-// It wraps the client-go ApplyConfiguration types to provide a convenient
-// API for applying ClusterRoles, Roles, and other RBAC resources.
 package ssa
 
 import (
