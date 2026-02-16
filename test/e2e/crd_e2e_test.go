@@ -570,7 +570,7 @@ func ensureTestNamespace() {
 
 func cleanupCRDE2ETestState() {
 	const e2eLabelSelector = "app.kubernetes.io/component=e2e-test"
-	const createdByLabelSelector = "app.kubernetes.io/managed-by=auth-operator"
+	const managedByLabelSelector = "app.kubernetes.io/managed-by=auth-operator"
 
 	cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "-k", fixturesPath, "--ignore-not-found=true", "--wait=false", "--timeout=30s")
 	_, _ = utils.Run(cmd)
@@ -582,10 +582,10 @@ func cleanupCRDE2ETestState() {
 	utils.RemoveFinalizersForAll("clusterrolebinding")
 	utils.RemoveFinalizersForAll("role")
 
-	utils.CleanupClusterResources(createdByLabelSelector)
-	utils.CleanupResourcesByLabel("role", createdByLabelSelector, testNamespace)
-	utils.CleanupResourcesByLabel("rolebinding", createdByLabelSelector, testNamespace)
-	utils.CleanupResourcesByLabel("serviceaccount", createdByLabelSelector, testNamespace)
+	utils.CleanupClusterResources(managedByLabelSelector)
+	utils.CleanupResourcesByLabel("role", managedByLabelSelector, testNamespace)
+	utils.CleanupResourcesByLabel("rolebinding", managedByLabelSelector, testNamespace)
+	utils.CleanupResourcesByLabel("serviceaccount", managedByLabelSelector, testNamespace)
 	utils.CleanupResourcesByLabel("role", e2eLabelSelector, testNamespace)
 	utils.CleanupResourcesByLabel("rolebinding", e2eLabelSelector, testNamespace)
 	utils.CleanupResourcesByLabel("serviceaccount", e2eLabelSelector, testNamespace)

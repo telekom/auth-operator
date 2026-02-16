@@ -414,7 +414,7 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 			Eventually(func() error {
 				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "rolebinding",
 					"-n", "complex-e2e-test-ns",
-					"-l", "app.kubernetes.io/managed-by=auth-operator"))
+					"-l", "app.kubernetes.io/managed-by=auth-operator")
 				output, err := utils.Run(cmd)
 				if err != nil {
 					return err
