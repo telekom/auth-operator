@@ -135,7 +135,7 @@ var _ = Describe("Edge Case - Deletion and Shared Resources", Ordered, Label("co
 
 		// Clean up cluster-scoped RBAC resources created by this operator instance
 		cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "clusterrolebinding",
-			"-l", "app.kubernetes.io/created-by=auth-operator", "--ignore-not-found=true")
+			"-l", "app.kubernetes.io/managed-by=auth-operator", "--ignore-not-found=true")
 		_, _ = utils.Run(cmd)
 
 		// Brief pause to let the operator process CRB deletions before Helm uninstall.

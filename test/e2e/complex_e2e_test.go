@@ -150,7 +150,7 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 			"complex-filtered-role", "--ignore-not-found=true")
 		_, _ = utils.Run(cmd)
 		cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "clusterrolebinding",
-			"-l", "app.kubernetes.io/created-by=auth-operator", "--ignore-not-found=true")
+			"-l", "app.kubernetes.io/managed-by=auth-operator", "--ignore-not-found=true")
 		_, _ = utils.Run(cmd)
 	})
 
@@ -399,7 +399,7 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 			Eventually(func() error {
 				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "rolebinding",
 					"-n", "complex-e2e-ns-team-a",
-					"-l", "app.kubernetes.io/created-by=auth-operator")
+					"-l", "app.kubernetes.io/managed-by=auth-operator")
 				output, err := utils.Run(cmd)
 				if err != nil {
 					return err
@@ -414,7 +414,7 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 			Eventually(func() error {
 				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "rolebinding",
 					"-n", "complex-e2e-test-ns",
-					"-l", "app.kubernetes.io/created-by=auth-operator")
+					"-l", "app.kubernetes.io/managed-by=auth-operator"))
 				output, err := utils.Run(cmd)
 				if err != nil {
 					return err
@@ -467,7 +467,7 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 			Eventually(func() error {
 				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "rolebinding",
 					"-n", "complex-e2e-ns-team-b",
-					"-l", "app.kubernetes.io/created-by=auth-operator")
+					"-l", "app.kubernetes.io/managed-by=auth-operator")
 				output, err := utils.Run(cmd)
 				if err != nil {
 					return err

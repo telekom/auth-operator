@@ -45,7 +45,7 @@ func TakeSnapshot() (*ResourceSnapshot, error) {
 
 	// Capture ClusterRoles (only auth-operator created)
 	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "clusterroles",
-		"-l", "app.kubernetes.io/created-by=auth-operator",
+		"-l", "app.kubernetes.io/managed-by=auth-operator",
 		"-o", "jsonpath={.items[*].metadata.name}")
 	output, err = utils.Run(cmd)
 	if err == nil {
@@ -54,7 +54,7 @@ func TakeSnapshot() (*ResourceSnapshot, error) {
 
 	// Capture ClusterRoleBindings (only auth-operator created)
 	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "clusterrolebindings",
-		"-l", "app.kubernetes.io/created-by=auth-operator",
+		"-l", "app.kubernetes.io/managed-by=auth-operator",
 		"-o", "jsonpath={.items[*].metadata.name}")
 	output, err = utils.Run(cmd)
 	if err == nil {

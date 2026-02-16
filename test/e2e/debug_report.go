@@ -201,14 +201,14 @@ func collectResourceSummary() resourceSummary {
 	}
 
 	// Count generated ClusterRoles (labeled by auth-operator)
-	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "clusterroles", "-l", "app.kubernetes.io/created-by=auth-operator", "-o", "jsonpath={.items[*].metadata.name}")
+	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "clusterroles", "-l", "app.kubernetes.io/managed-by=auth-operator", "-o", "jsonpath={.items[*].metadata.name}")
 	output, _ = utils.Run(cmd)
 	if strings.TrimSpace(string(output)) != "" {
 		summary.GeneratedClusterRoles = len(strings.Fields(string(output)))
 	}
 
 	// Count generated Roles (labeled by auth-operator)
-	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "roles", "-A", "-l", "app.kubernetes.io/created-by=auth-operator", "-o", "jsonpath={.items[*].metadata.name}")
+	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "roles", "-A", "-l", "app.kubernetes.io/managed-by=auth-operator", "-o", "jsonpath={.items[*].metadata.name}")
 	output, _ = utils.Run(cmd)
 	if strings.TrimSpace(string(output)) != "" {
 		summary.GeneratedRoles = len(strings.Fields(string(output)))

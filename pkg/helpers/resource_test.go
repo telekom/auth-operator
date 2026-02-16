@@ -144,7 +144,6 @@ func TestBuildResourceLabels(t *testing.T) {
 			name:         "nil source labels",
 			sourceLabels: nil,
 			wantLabels: map[string]string{
-				ManagedByLabel:         ManagedByValue,
 				ManagedByLabelStandard: ManagedByValue,
 				AppNameLabel:           ManagedByValue,
 			},
@@ -153,7 +152,6 @@ func TestBuildResourceLabels(t *testing.T) {
 			name:         "empty source labels",
 			sourceLabels: map[string]string{},
 			wantLabels: map[string]string{
-				ManagedByLabel:         ManagedByValue,
 				ManagedByLabelStandard: ManagedByValue,
 				AppNameLabel:           ManagedByValue,
 			},
@@ -167,18 +165,16 @@ func TestBuildResourceLabels(t *testing.T) {
 			wantLabels: map[string]string{
 				"app":                  "test",
 				"version":              "v1",
-				ManagedByLabel:         ManagedByValue,
 				ManagedByLabelStandard: ManagedByValue,
 				AppNameLabel:           ManagedByValue,
 			},
 		},
 		{
-			name: "managed-by label is overwritten",
+			name: "managed-by-standard label is overwritten",
 			sourceLabels: map[string]string{
-				ManagedByLabel: "other-controller",
+				ManagedByLabelStandard: "other-controller",
 			},
 			wantLabels: map[string]string{
-				ManagedByLabel:         ManagedByValue,
 				ManagedByLabelStandard: ManagedByValue,
 				AppNameLabel:           ManagedByValue,
 			},
@@ -209,8 +205,8 @@ func TestBuildResourceLabelsDoesNotMutateInput(t *testing.T) {
 	if source["app"] != original["app"] {
 		t.Error("BuildResourceLabels mutated the source map")
 	}
-	if _, exists := source[ManagedByLabel]; exists {
-		t.Error("BuildResourceLabels added ManagedByLabel to the source map")
+	if _, exists := source[ManagedByLabelStandard]; exists {
+		t.Error("BuildResourceLabels added ManagedByLabelStandard to the source map")
 	}
 }
 

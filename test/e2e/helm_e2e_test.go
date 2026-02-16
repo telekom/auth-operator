@@ -27,7 +27,7 @@ const (
 	helmStatusRunning = "Running"
 
 	// Common label for auth-operator resources
-	authOperatorLabel = "app.kubernetes.io/created-by=auth-operator"
+	authOperatorLabel = "app.kubernetes.io/managed-by=auth-operator"
 )
 
 var _ = Describe("Helm Chart E2E", Ordered, Label("helm"), func() {
@@ -707,23 +707,23 @@ func dumpAllGeneratedResources() {
 	dumpResource("webhookauthorizers", "", fmt.Sprintf("webhookauthorizers-%s.yaml", timestamp))
 
 	// Dump generated ClusterRoles (with auth-operator label)
-	dumpResourceWithLabel("clusterroles", "", "app.kubernetes.io/created-by=auth-operator",
+	dumpResourceWithLabel("clusterroles", "", "app.kubernetes.io/managed-by=auth-operator",
 		fmt.Sprintf("generated-clusterroles-%s.yaml", timestamp))
 
 	// Dump generated Roles
-	dumpResourceWithLabel("roles", "", "app.kubernetes.io/created-by=auth-operator",
+	dumpResourceWithLabel("roles", "", "app.kubernetes.io/managed-by=auth-operator",
 		fmt.Sprintf("generated-roles-%s.yaml", timestamp))
 
 	// Dump generated ClusterRoleBindings
-	dumpResourceWithLabel("clusterrolebindings", "", "app.kubernetes.io/created-by=auth-operator",
+	dumpResourceWithLabel("clusterrolebindings", "", "app.kubernetes.io/managed-by=auth-operator",
 		fmt.Sprintf("generated-clusterrolebindings-%s.yaml", timestamp))
 
 	// Dump generated RoleBindings
-	dumpResourceWithLabel("rolebindings", "", "app.kubernetes.io/created-by=auth-operator",
+	dumpResourceWithLabel("rolebindings", "", "app.kubernetes.io/managed-by=auth-operator",
 		fmt.Sprintf("generated-rolebindings-%s.yaml", timestamp))
 
 	// Dump generated ServiceAccounts
-	dumpResourceWithLabel("serviceaccounts", "", "app.kubernetes.io/created-by=auth-operator",
+	dumpResourceWithLabel("serviceaccounts", "", "app.kubernetes.io/managed-by=auth-operator",
 		fmt.Sprintf("generated-serviceaccounts-%s.yaml", timestamp))
 
 	// Dump operator resources from Helm namespace

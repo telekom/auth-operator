@@ -115,10 +115,10 @@ var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 		// Use centralized cleanup
 		clusterRoles := []string{"e2e-cluster-reader"}
 		CleanupForDevTests(operatorNamespace, clusterRoles)
-		utils.CleanupClusterResources("app.kubernetes.io/created-by=auth-operator")
-		utils.CleanupResourcesByLabel("role", "app.kubernetes.io/created-by=auth-operator", testNamespace)
-		utils.CleanupResourcesByLabel("rolebinding", "app.kubernetes.io/created-by=auth-operator", testNamespace)
-		utils.CleanupResourcesByLabel("serviceaccount", "app.kubernetes.io/created-by=auth-operator", testNamespace)
+		utils.CleanupClusterResources("app.kubernetes.io/managed-by=auth-operator")
+		utils.CleanupResourcesByLabel("role", "app.kubernetes.io/managed-by=auth-operator", testNamespace)
+		utils.CleanupResourcesByLabel("rolebinding", "app.kubernetes.io/managed-by=auth-operator", testNamespace)
+		utils.CleanupResourcesByLabel("serviceaccount", "app.kubernetes.io/managed-by=auth-operator", testNamespace)
 		utils.CleanupNamespace(testNamespace)
 
 		if utils.ShouldTeardown() {
@@ -278,7 +278,7 @@ var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 			Eventually(func() error {
 				// RoleBinding should be created in the e2e-test-ns namespace (labeled with e2e-test=true)
 				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "rolebinding",
-					"-l", "app.kubernetes.io/created-by=auth-operator",
+					"-l", "app.kubernetes.io/managed-by=auth-operator",
 					"-n", testNamespace,
 					"-o", "name")
 				output, err := utils.Run(cmd)
@@ -570,7 +570,7 @@ func ensureTestNamespace() {
 
 func cleanupCRDE2ETestState() {
 	const e2eLabelSelector = "app.kubernetes.io/component=e2e-test"
-	const createdByLabelSelector = "app.kubernetes.io/created-by=auth-operator"
+	const createdByLabelSelector = "app.kubernetes.io/managed-by=auth-operator"
 
 	cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "-k", fixturesPath, "--ignore-not-found=true", "--wait=false", "--timeout=30s")
 	_, _ = utils.Run(cmd)

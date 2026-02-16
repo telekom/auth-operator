@@ -785,7 +785,7 @@ func CollectClusterDebugInfo(contextName string) {
 	})
 
 	// Generated RBAC resources
-	authOpLabel := "app.kubernetes.io/created-by=auth-operator"
+	authOpLabel := "app.kubernetes.io/managed-by=auth-operator"
 	collectSection("Generated RBAC Resources", func() {
 		runDebugCommand("kubectl", "get", "clusterroles", "-l", authOpLabel, "-o", "wide")
 		runDebugCommand("kubectl", "get", "clusterrolebindings", "-l", authOpLabel, "-o", "wide")
