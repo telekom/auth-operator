@@ -408,6 +408,13 @@ jobs:
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
         run: |
           set -euo pipefail
+
+          # Guard: skip if Artifactory credentials are not configured
+          if [ -z "${{ secrets.AF_USER }}" ] || [ -z "${{ secrets.AF_TOKEN }}" ]; then
+            echo "::warning::AF_USER or AF_TOKEN secret not set — skipping Artifactory mirror"
+            exit 0
+          fi
+
           echo "Logging in to Artifactory OCI at ${ARTIFACTORY_URL}"
           echo "${{ secrets.AF_TOKEN }}" | docker login --username ${{ secrets.AF_USER }} --password-stdin https://${ARTIFACTORY_URL}
 
@@ -462,6 +469,7 @@ jobs:
     permissions:
       contents: write
       attestations: write
+      id-token: write  # Required for actions/attest-build-provenance OIDC token
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
