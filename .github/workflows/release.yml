@@ -86,7 +86,7 @@ jobs:
         run: |
           go install github.com/google/go-licenses/v2@v2.0.1
           go-licenses save ./... --save_path=/tmp/third-party-notices --force
-          tar --sort=name --mtime='1970-01-01' --owner=0 --group=0 --numeric-owner -cf - -C /tmp third-party-notices | gzip -n > /tmp/third-party-notices.tar.gz
+          tar --sort=name --mtime='1970-01-01' --owner=0 --group=0 --numeric-owner -cf - -C /tmp third-party-notices | gzip -n > third-party-notices.tar.gz
 
       - name: Generate install manifest
         if: github.event_name != 'pull_request'
@@ -104,7 +104,7 @@ jobs:
           name: prepare-artifacts
           path: |
             install.yaml
-            /tmp/third-party-notices.tar.gz
+            third-party-notices.tar.gz
           retention-days: 1
 
   # ---------------------------------------------------------------------------
@@ -113,6 +113,7 @@ jobs:
   build-image:
     name: Build Image (${{ matrix.arch }})
     needs: [prepare]
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -189,6 +190,7 @@ jobs:
   assemble:
     name: Assemble Multi-Arch Manifest
     needs: [prepare, build-image]
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     permissions:
       contents: read
       packages: write
@@ -288,23 +290,32 @@ jobs:
           set -euo pipefail
           IMG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.image_tag }}"
 
-          RAW_MANIFEST_DIGEST="sha256:$(docker buildx imagetools inspect "${IMG}" --raw | sha256sum | awk '{print $1}')"
-
-          if ! printf '%s\n' "${RAW_MANIFEST_DIGEST}" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
-            echo "Error: Computed manifest digest has unexpected format: ${RAW_MANIFEST_DIGEST}" >&2
-            exit 1
-          fi
-
           INSPECT_OUTPUT="$(docker buildx imagetools inspect "${IMG}")"
           echo "${INSPECT_OUTPUT}"
 
+          # Prefer the registry-reported digest (immutable, authoritative).
+          # Fall back to computing the digest from the raw manifest only if
+          # the registry output does not include a Digest line.
           REGISTRY_DIGEST="$(echo "${INSPECT_OUTPUT}" | awk '/^Digest:/ {print $2; exit}')" || true
-          if [ -n "${REGISTRY_DIGEST}" ] && [ "${REGISTRY_DIGEST}" != "${RAW_MANIFEST_DIGEST}" ]; then
-            echo "::warning::Digest cross-check mismatch: computed=${RAW_MANIFEST_DIGEST} registry=${REGISTRY_DIGEST}"
+          RAW_MANIFEST_DIGEST="sha256:$(docker buildx imagetools inspect "${IMG}" --raw | sha256sum | awk '{print $1}')"
+
+          if [ -n "${REGISTRY_DIGEST}" ]; then
+            DIGEST="${REGISTRY_DIGEST}"
+            if [ "${REGISTRY_DIGEST}" != "${RAW_MANIFEST_DIGEST}" ]; then
+              echo "::warning::Digest cross-check: registry=${REGISTRY_DIGEST} computed=${RAW_MANIFEST_DIGEST} — using registry digest"
+            fi
+          else
+            DIGEST="${RAW_MANIFEST_DIGEST}"
+            echo "::warning::Registry did not report a digest — using computed digest"
           fi
 
-          echo "digest=${RAW_MANIFEST_DIGEST}" >> "$GITHUB_OUTPUT"
-          echo "Multi-arch manifest digest: ${RAW_MANIFEST_DIGEST}"
+          if ! printf '%s\n' "${DIGEST}" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
+            echo "Error: Manifest digest has unexpected format: ${DIGEST}" >&2
+            exit 1
+          fi
+
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "Multi-arch manifest digest: ${DIGEST}"
 
       # Release-only steps (scanning, signing, attestation)
       - name: Scan image for vulnerabilities
@@ -370,6 +381,7 @@ jobs:
     name: Push to Artifactory
     needs: [prepare, assemble]
     if: github.event_name != 'pull_request'
+    continue-on-error: true  # Artifactory mirror is best-effort; must not block releases
     permissions:
       packages: read
       id-token: write
@@ -481,7 +493,6 @@ jobs:
       - name: Generate checksums
         run: |
           tar --sort=name --mtime='1970-01-01' --owner=0 --group=0 --numeric-owner -cf - LICENSE LICENSES/ | gzip -n > licenses.tar.gz
-          cp third-party-notices.tar.gz . 2>/dev/null || true
           sha256sum sbom.spdx.json install.yaml licenses.tar.gz third-party-notices.tar.gz > checksums.txt 2>/dev/null || \
           sha256sum sbom.spdx.json install.yaml licenses.tar.gz > checksums.txt
           echo "Checksums:"
