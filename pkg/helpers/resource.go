@@ -19,7 +19,9 @@ const (
 
 	// ManagedByLabel is the legacy label for backwards compatibility.
 	//
-	// Deprecated: use ManagedByLabelStandard instead.
+	// Deprecated: No longer set on new resources. Retained as a constant
+	// for migration tooling and cleanup of resources created by older
+	// operator versions. Will be removed in a future release.
 	ManagedByLabel = "app.kubernetes.io/created-by"
 	// ManagedByLabelStandard is the standard Kubernetes recommended label identifying the managing tool.
 	ManagedByLabelStandard = "app.kubernetes.io/managed-by"
@@ -69,7 +71,6 @@ func BuildResourceLabels(sourceLabels map[string]string) map[string]string {
 	for k, v := range sourceLabels {
 		labels[k] = v
 	}
-	labels[ManagedByLabel] = ManagedByValue
 	labels[ManagedByLabelStandard] = ManagedByValue
 	labels[AppNameLabel] = ManagedByValue
 	return labels

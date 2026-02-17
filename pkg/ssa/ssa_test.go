@@ -427,7 +427,7 @@ var _ = Describe("SSA Apply Functions (envtest)", Label("integration"), func() {
 	Context("ApplyClusterRole", func() {
 		It("should create a new ClusterRole via SSA", func() {
 			labels := map[string]string{
-				"app.kubernetes.io/created-by": "auth-operator",
+				"app.kubernetes.io/managed-by": "auth-operator",
 				"test":                         "value",
 			}
 			rules := []rbacv1.PolicyRule{
@@ -446,7 +446,7 @@ var _ = Describe("SSA Apply Functions (envtest)", Label("integration"), func() {
 			var cr rbacv1.ClusterRole
 			err = k8sClient.Get(testCtx, types.NamespacedName{Name: "ssa-test-clusterrole"}, &cr)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(cr.Labels).To(HaveKeyWithValue("app.kubernetes.io/created-by", "auth-operator"))
+			Expect(cr.Labels).To(HaveKeyWithValue("app.kubernetes.io/managed-by", "auth-operator"))
 			Expect(cr.Labels).To(HaveKeyWithValue("test", "value"))
 			Expect(cr.Rules).To(HaveLen(1))
 			Expect(cr.Rules[0].Resources).To(ContainElement("pods"))
@@ -509,7 +509,7 @@ var _ = Describe("SSA Apply Functions (envtest)", Label("integration"), func() {
 
 	Context("ApplyRole", func() {
 		It("should create a new Role via SSA", func() {
-			labels := map[string]string{"app.kubernetes.io/created-by": "auth-operator"}
+			labels := map[string]string{"app.kubernetes.io/managed-by": "auth-operator"}
 			rules := []rbacv1.PolicyRule{
 				{
 					APIGroups: []string{""},
@@ -525,7 +525,7 @@ var _ = Describe("SSA Apply Functions (envtest)", Label("integration"), func() {
 			var r rbacv1.Role
 			err = k8sClient.Get(testCtx, types.NamespacedName{Name: "ssa-test-role", Namespace: "default"}, &r)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(r.Labels).To(HaveKeyWithValue("app.kubernetes.io/created-by", "auth-operator"))
+			Expect(r.Labels).To(HaveKeyWithValue("app.kubernetes.io/managed-by", "auth-operator"))
 			Expect(r.Rules).To(HaveLen(1))
 			Expect(r.Rules[0].Resources).To(ContainElement("secrets"))
 		})

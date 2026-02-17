@@ -238,7 +238,7 @@ var _ = Describe("RoleDefinition Drift Detection and Rollback", func() {
 			By("simulating label drift")
 			cr.Labels = map[string]string{
 				"drifted-label":                "drifted-value",
-				"app.kubernetes.io/created-by": "someone-else",
+				"app.kubernetes.io/managed-by": "someone-else",
 			}
 			Expect(k8sClient.Update(ctx, cr)).To(Succeed())
 
@@ -250,7 +250,7 @@ var _ = Describe("RoleDefinition Drift Detection and Rollback", func() {
 
 			By("verifying labels are restored")
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "drift-clusterrole"}, cr)).To(Succeed())
-			Expect(cr.Labels["app.kubernetes.io/created-by"]).To(Equal("auth-operator"))
+			Expect(cr.Labels["app.kubernetes.io/managed-by"]).To(Equal("auth-operator"))
 		})
 	})
 
@@ -495,7 +495,7 @@ var _ = Describe("RoleDefinition Drift Detection and Rollback", func() {
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "recreate-clusterrole"}, cr)).To(Succeed())
 			Expect(cr.Rules).ToNot(BeEmpty())
 			Expect(cr.Rules).To(HaveLen(originalRulesCount), "ClusterRole should have the same rules as before")
-			Expect(cr.Labels["app.kubernetes.io/created-by"]).To(Equal("auth-operator"))
+			Expect(cr.Labels["app.kubernetes.io/managed-by"]).To(Equal("auth-operator"))
 		})
 	})
 
@@ -592,7 +592,7 @@ var _ = Describe("RoleDefinition Drift Detection and Rollback", func() {
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "recreate-role", Namespace: testNamespace.Name}, role)).To(Succeed())
 			Expect(role.Rules).ToNot(BeEmpty())
 			Expect(role.Rules).To(HaveLen(originalRulesCount), "Role should have the same rules as before")
-			Expect(role.Labels["app.kubernetes.io/created-by"]).To(Equal("auth-operator"))
+			Expect(role.Labels["app.kubernetes.io/managed-by"]).To(Equal("auth-operator"))
 		})
 	})
 

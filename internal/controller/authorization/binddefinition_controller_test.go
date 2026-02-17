@@ -661,7 +661,7 @@ func TestBindDefinitionDriftDetection(t *testing.T) {
 		// Verify labels restored
 		err = c.Get(ctx, types.NamespacedName{Name: crbName}, crb)
 		g.Expect(err).NotTo(HaveOccurred())
-		g.Expect(crb.Labels["app.kubernetes.io/created-by"]).To(Equal("auth-operator"))
+		g.Expect(crb.Labels["app.kubernetes.io/managed-by"]).To(Equal("auth-operator"))
 	})
 
 	t.Run("RoleBinding subjects drift rollback", func(t *testing.T) {
@@ -1189,7 +1189,7 @@ func TestResourceRecreationOnExternalDeletion(t *testing.T) {
 		g.Expect(crb.Subjects).To(HaveLen(1))
 		g.Expect(crb.Subjects[0].Name).To(Equal("crb-recreate-user"))
 		g.Expect(crb.RoleRef.Name).To(Equal("view"))
-		g.Expect(crb.Labels["app.kubernetes.io/created-by"]).To(Equal("auth-operator"))
+		g.Expect(crb.Labels["app.kubernetes.io/managed-by"]).To(Equal("auth-operator"))
 	})
 
 	t.Run("should recreate RoleBinding when deleted externally", func(t *testing.T) {
@@ -1264,7 +1264,7 @@ func TestResourceRecreationOnExternalDeletion(t *testing.T) {
 		g.Expect(rb.Subjects).To(HaveLen(1))
 		g.Expect(rb.Subjects[0].Name).To(Equal("rb-recreate-user"))
 		g.Expect(rb.RoleRef.Name).To(Equal("edit"))
-		g.Expect(rb.Labels["app.kubernetes.io/created-by"]).To(Equal("auth-operator"))
+		g.Expect(rb.Labels["app.kubernetes.io/managed-by"]).To(Equal("auth-operator"))
 	})
 
 	t.Run("should recreate ServiceAccount when deleted externally", func(t *testing.T) {
@@ -1332,7 +1332,7 @@ func TestResourceRecreationOnExternalDeletion(t *testing.T) {
 		err = c.Get(ctx, types.NamespacedName{Name: "recreated-sa", Namespace: ns.Name}, sa)
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(*sa.AutomountServiceAccountToken).To(BeFalse())
-		g.Expect(sa.Labels["app.kubernetes.io/created-by"]).To(Equal("auth-operator"))
+		g.Expect(sa.Labels["app.kubernetes.io/managed-by"]).To(Equal("auth-operator"))
 	})
 
 	t.Run("should recreate multiple ClusterRoleBindings when deleted externally", func(t *testing.T) {
@@ -2039,7 +2039,7 @@ func TestSANotOwnedByThisBindDef(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "contested-sa",
 				Namespace: "test-ns",
-				Labels:    map[string]string{"app.kubernetes.io/created-by": "auth-operator"},
+				Labels:    map[string]string{helpers.ManagedByLabelStandard: helpers.ManagedByValue},
 				OwnerReferences: []metav1.OwnerReference{
 					{
 						APIVersion: authorizationv1alpha1.GroupVersion.String(),
