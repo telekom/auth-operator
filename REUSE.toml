@@ -111,6 +111,15 @@ precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
 SPDX-License-Identifier = "CC0-1.0"
 
+# Proposals - CC-BY-4.0 (design documents)
+# Uses 'closest' precedence so in-file SPDX headers take priority,
+# while files without headers fall back to this annotation.
+[[annotations]]
+path = ["docs/proposals/**/*.md"]
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
+SPDX-License-Identifier = "CC-BY-4.0"
+
 # Hack scripts - Apache-2.0
 [[annotations]]
 path = ["hack/**/*.sh"]
