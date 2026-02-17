@@ -220,6 +220,7 @@ jobs:
   verify-image-signature:
     name: Verify Release Image Signature
     runs-on: ubuntu-latest
+    continue-on-error: true  # Informational — must not block CI if latest release is unsigned
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout

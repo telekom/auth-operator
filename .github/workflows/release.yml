@@ -406,15 +406,24 @@ jobs:
           ARTIFACTORY_REPO: cit-t-caas-oci/images/t-caas
           REGISTRY: ${{ env.REGISTRY }}
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          AF_USER: ${{ secrets.AF_USER }}
+          AF_TOKEN: ${{ secrets.AF_TOKEN }}
         run: |
           set -euo pipefail
+
+          # Guard: skip if Artifactory credentials are not configured
+          if [ -z "${AF_USER}" ] || [ -z "${AF_TOKEN}" ]; then
+            echo "::warning::AF_USER or AF_TOKEN secrets not set, skipping Artifactory push"
+            exit 0
+          fi
+
           echo "Logging in to Artifactory OCI at ${ARTIFACTORY_URL}"
-          echo "${{ secrets.AF_TOKEN }}" | docker login --username ${{ secrets.AF_USER }} --password-stdin https://${ARTIFACTORY_URL}
+          echo "${AF_TOKEN}" | docker login --username "${AF_USER}" --password-stdin https://${ARTIFACTORY_URL}
 
           # Diagnose Artifactory repo accessibility
           REPO_KEY=$(echo "${ARTIFACTORY_REPO}" | cut -d'/' -f1)
           echo "Checking Artifactory storage API for repo key: ${REPO_KEY}"
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -u "${{ secrets.AF_USER }}:${{ secrets.AF_TOKEN }}" "https://${ARTIFACTORY_URL}/artifactory/api/storage/${REPO_KEY}" ) || true
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -u "${AF_USER}:${AF_TOKEN}" "https://${ARTIFACTORY_URL}/artifactory/api/storage/${REPO_KEY}" ) || true
           echo "Artifactory storage API HTTP status: ${HTTP_STATUS}"
           if [ "${HTTP_STATUS}" != "200" ]; then
             echo "::warning::Artifactory repo ${REPO_KEY} not accessible (HTTP ${HTTP_STATUS}). Ensure AF_USER/AF_TOKEN are valid and have deploy permissions."
@@ -439,7 +448,7 @@ jobs:
           echo "Checking storage for path: ${CHECK_PATH}"
           for attempt in 1 2 3; do
             sleep $((attempt * 2))
-            HTTP_STATUS_AFTER=$(curl -s -o /dev/null -w "%{http_code}" -u "${{ secrets.AF_USER }}:${{ secrets.AF_TOKEN }}" "https://${ARTIFACTORY_URL}/artifactory/api/storage/${CHECK_PATH}?list" ) || true
+            HTTP_STATUS_AFTER=$(curl -s -o /dev/null -w "%{http_code}" -u "${AF_USER}:${AF_TOKEN}" "https://${ARTIFACTORY_URL}/artifactory/api/storage/${CHECK_PATH}?list" ) || true
             echo "Attempt ${attempt}: HTTP status ${HTTP_STATUS_AFTER}"
             if [ "${HTTP_STATUS_AFTER}" = "200" ]; then
               echo "Artifact path appears present in Artifactory."
@@ -462,6 +471,7 @@ jobs:
     permissions:
       contents: write
       attestations: write
+      id-token: write  # Required by actions/attest-build-provenance for OIDC token
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
