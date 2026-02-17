@@ -2039,7 +2039,7 @@ func TestSANotOwnedByThisBindDef(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "contested-sa",
 				Namespace: "test-ns",
-				Labels:    map[string]string{"app.kubernetes.io/managed-by": "auth-operator"},
+				Labels:    map[string]string{helpers.ManagedByLabelStandard: helpers.ManagedByValue},
 				OwnerReferences: []metav1.OwnerReference{
 					{
 						APIVersion: authorizationv1alpha1.GroupVersion.String(),
