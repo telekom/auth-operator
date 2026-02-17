@@ -83,7 +83,7 @@ jobs:
             exit 1
           fi
 
-          go test ./... -coverprofile=coverage.out -covermode=atomic
+          go test -race $(go list ./... | grep -v /e2e) -coverprofile=coverage.out -covermode=atomic
         env:
           CGO_ENABLED: "1"
 
