@@ -1,0 +1,72 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Run CodeQL analysis weekly on Monday at 7:00 UTC (offset from security-scan)
+    - cron: '0 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  # actions: read is required by codeql-action/upload-sarif to resolve
+  # the workflow run context (ref, sha) for SARIF result correlation.
+  actions: read
+
+# Cancel in-progress runs when a new run is triggered for the same branch/PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze Go
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['go']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Extract Go version from toolchain or go directive
+        id: go-version
+        run: |
+          VERSION=$(grep -E '^toolchain go' go.mod | sed 's/toolchain go//' || true)
+          if [ -z "$VERSION" ]; then
+            VERSION=$(grep -E '^go [0-9]' go.mod | awk '{print $2}')
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Setup Go
+        uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
+        with:
+          go-version: ${{ steps.go-version.outputs.version }}
+          cache: true
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@9e907b5e64f6b83e7804b09294d44122997950d6 # v4.32.3
+        with:
+          languages: ${{ matrix.language }}
+          # Use the extended query suite for more comprehensive analysis
+          queries: security-extended
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@9e907b5e64f6b83e7804b09294d44122997950d6 # v4.32.3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@9e907b5e64f6b83e7804b09294d44122997950d6 # v4.32.3
+        with:
+          category: '/language:${{ matrix.language }}'
+          # Only upload SARIF on push/schedule — the default setup handles PR scanning.
+          upload: ${{ github.event_name != 'pull_request' }}
