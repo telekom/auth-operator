@@ -23,11 +23,13 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build-and-push:
-    name: Build and Push Container Image
+  # ---------------------------------------------------------------------------
+  # Prepare: version detection, license notices, install manifest
+  # ---------------------------------------------------------------------------
+  prepare:
+    name: Prepare Release Artifacts
     runs-on: ubuntu-latest
     outputs:
-      digest: ${{ steps.build.outputs.digest }}
       version: ${{ steps.version.outputs.version }}
       image_tag: ${{ steps.version.outputs.image_tag }}
       chart_version: ${{ steps.version.outputs.chart_version }}
@@ -37,26 +39,21 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
-          # For PRs, checkout the exact commit that will be built (not the merge commit)
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
       - name: Determine version
         id: version
         run: |
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            # PR: use pr<number>-<short-sha> format for image tag
             SHORT_SHA=$(echo "${{ github.event.pull_request.head.sha }}" | cut -c1-7)
             VERSION="pr${{ github.event.pull_request.number }}-${SHORT_SHA}"
             IMAGE_TAG="${VERSION}"
-            # Helm chart version must be valid semver - use 0.0.0-pr<num>.<sha> format
             CHART_VERSION="0.0.0-pr${{ github.event.pull_request.number }}.${SHORT_SHA}"
             IS_PRERELEASE="true"
           else
-            # Release: use tag without 'v' prefix for version
             VERSION="${GITHUB_REF_NAME#v}"
             IMAGE_TAG="${GITHUB_REF_NAME#v}"
             CHART_VERSION="${VERSION}"
-            # Detect pre-release (semver: -rc, -alpha, -beta suffixes)
             if [[ "$VERSION" =~ -(rc|alpha|beta)[0-9.]* ]]; then
               IS_PRERELEASE="true"
             else
@@ -67,10 +64,7 @@ jobs:
           echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
           echo "chart_version=${CHART_VERSION}" >> $GITHUB_OUTPUT
           echo "is_prerelease=${IS_PRERELEASE}" >> $GITHUB_OUTPUT
-          echo "Determined version: ${VERSION}"
-          echo "Image tag: ${IMAGE_TAG}"
-          echo "Chart version: ${CHART_VERSION}"
-          echo "Is pre-release: ${IS_PRERELEASE}"
+          echo "Determined version: ${VERSION}, Image tag: ${IMAGE_TAG}, Chart version: ${CHART_VERSION}, Pre-release: ${IS_PRERELEASE}"
 
       - name: Extract Go version from toolchain or go directive
         id: go-version
@@ -87,15 +81,55 @@ jobs:
           go-version: ${{ steps.go-version.outputs.version }}
           cache: true
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
-
       - name: Generate third-party license notices
         if: github.event_name != 'pull_request'
         run: |
           go install github.com/google/go-licenses/v2@v2.0.1
           go-licenses save ./... --save_path=/tmp/third-party-notices --force
           tar --sort=name --mtime='1970-01-01' --owner=0 --group=0 --numeric-owner -cf - -C /tmp third-party-notices | gzip -n > /tmp/third-party-notices.tar.gz
+
+      - name: Generate install manifest
+        if: github.event_name != 'pull_request'
+        run: |
+          make kustomize
+          cd config/manager && ${{ github.workspace }}/bin/kustomize edit set image controller=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.image_tag }}
+          cd ${{ github.workspace }}
+          bin/kustomize build config/default > install.yaml
+          echo "Generated install.yaml with $(wc -l < install.yaml) lines"
+
+      - name: Upload prepare artifacts
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: prepare-artifacts
+          path: |
+            install.yaml
+            /tmp/third-party-notices.tar.gz
+          retention-days: 1
+
+  # ---------------------------------------------------------------------------
+  # Build per-arch images on native runners (no QEMU emulation)
+  # ---------------------------------------------------------------------------
+  build-image:
+    name: Build Image (${{ matrix.arch }})
+    needs: [prepare]
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
@@ -110,18 +144,90 @@ jobs:
       - name: Extract metadata for Docker
         id: meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          platforms: linux/${{ matrix.arch }}
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+          build-args: |
+            VERSION=${{ needs.prepare.outputs.version }}
+            COMMIT=${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+            REPOSITORY=https://github.com/${{ github.repository }}
+
+      - name: Set digest artifact name
+        id: set-digest
+        run: |
+          ARCH_FULL="linux-${{ matrix.arch }}"
+          echo "arch-full=${ARCH_FULL}" >> "$GITHUB_OUTPUT"
+          echo "artifact-name=digest-${ARCH_FULL}" >> "$GITHUB_OUTPUT"
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          echo "${{ steps.build.outputs.digest }}" > "/tmp/digests/${{ steps.set-digest.outputs.arch-full }}"
+          echo "Exported digest for ${{ matrix.arch }}: ${{ steps.build.outputs.digest }}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: ${{ steps.set-digest.outputs.artifact-name }}
+          path: /tmp/digests/${{ steps.set-digest.outputs.arch-full }}
+          retention-days: 1
+
+  # ---------------------------------------------------------------------------
+  # Assemble multi-arch manifest, sign, attest, generate SBOM
+  # ---------------------------------------------------------------------------
+  assemble:
+    name: Assemble Multi-Arch Manifest
+    needs: [prepare, build-image]
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      security-events: write
+      attestations: write
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.inspect.outputs.digest }}
+    steps:
+      - name: Download all digests
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: digest-*
+          merge-multiple: true
+          path: /tmp/digests
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         env:
           DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,manifest-descriptor,index
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            # For releases: semver tags
             type=semver,pattern={{version}},enable=${{ github.event_name != 'pull_request' }}
             type=semver,pattern={{major}}.{{minor}},enable=${{ github.event_name != 'pull_request' }}
             type=semver,pattern={{major}},enable=${{ github.event_name != 'pull_request' }}
-            # For PRs: pr<number>-<sha>
-            type=raw,value=${{ steps.version.outputs.image_tag }},enable=${{ github.event_name == 'pull_request' }}
-            # Always add sha
+            type=raw,value=${{ needs.prepare.outputs.image_tag }},enable=${{ github.event_name == 'pull_request' }}
             type=sha
           labels: |
             org.opencontainers.image.title=auth-operator
@@ -135,34 +241,80 @@ jobs:
             io.artifacthub.package.maintainers=[{"name":"T-CaaS Team","email":"t-caas@telekom.de"}]
             slsa.dev/buildType=https://github.com/slsa-framework/slsa-github-generator/container@v1
 
-      - name: Build and push Docker image
-        id: build
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          # Only push for releases and non-fork PRs (forks don't have package write permission)
-          push: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          annotations: ${{ steps.meta.outputs.annotations }}
-          provenance: mode=max
-          sbom: true
-          build-args: |
-            VERSION=${{ steps.version.outputs.version }}
-            COMMIT=${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-            REPOSITORY=https://github.com/${{ github.repository }}
+      - name: Create and push multi-arch manifest
+        run: |
+          set -euo pipefail
 
-      # Release-only steps (SBOM, signing, scanning)
+          # Verify digest files exist
+          if [ -z "$(ls -A /tmp/digests 2>/dev/null)" ]; then
+            echo "Error: No digest files found in /tmp/digests." >&2
+            exit 1
+          fi
+
+          for expected in linux-amd64 linux-arm64; do
+            if [ ! -f "/tmp/digests/${expected}" ]; then
+              echo "Error: Missing digest for platform ${expected}." >&2
+              exit 1
+            fi
+          done
+
+          echo "Digest files found:"
+          ls -la /tmp/digests/
+
+          DIGESTS=()
+          for f in /tmp/digests/*; do
+            d=$(cat "$f")
+            echo "  $(basename "$f"): ${d}"
+            DIGESTS+=("${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${d}")
+          done
+          echo "Assembling multi-arch manifest from ${#DIGESTS[@]} platform(s)"
+
+          TAGS=()
+          while IFS= read -r tag; do
+            [ -z "${tag}" ] && continue
+            TAGS+=("--tag" "$tag")
+          done <<< "${{ steps.meta.outputs.tags }}"
+
+          if [ ${#TAGS[@]} -eq 0 ]; then
+            echo "Error: No tags were generated." >&2
+            exit 1
+          fi
+
+          docker buildx imagetools create "${TAGS[@]}" "${DIGESTS[@]}"
+
+      - name: Inspect final image
+        id: inspect
+        run: |
+          set -euo pipefail
+          IMG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.image_tag }}"
+
+          RAW_MANIFEST_DIGEST="sha256:$(docker buildx imagetools inspect "${IMG}" --raw | sha256sum | awk '{print $1}')"
+
+          if ! printf '%s\n' "${RAW_MANIFEST_DIGEST}" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
+            echo "Error: Computed manifest digest has unexpected format: ${RAW_MANIFEST_DIGEST}" >&2
+            exit 1
+          fi
+
+          INSPECT_OUTPUT="$(docker buildx imagetools inspect "${IMG}")"
+          echo "${INSPECT_OUTPUT}"
+
+          REGISTRY_DIGEST="$(echo "${INSPECT_OUTPUT}" | awk '/^Digest:/ {print $2; exit}')" || true
+          if [ -n "${REGISTRY_DIGEST}" ] && [ "${REGISTRY_DIGEST}" != "${RAW_MANIFEST_DIGEST}" ]; then
+            echo "::warning::Digest cross-check mismatch: computed=${RAW_MANIFEST_DIGEST} registry=${REGISTRY_DIGEST}"
+          fi
+
+          echo "digest=${RAW_MANIFEST_DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "Multi-arch manifest digest: ${RAW_MANIFEST_DIGEST}"
+
+      # Release-only steps (scanning, signing, attestation)
       - name: Scan image for vulnerabilities
         if: github.event_name != 'pull_request'
         uses: aquasecurity/trivy-action@c1824fd6edce30d7ab345a9989de00bbd46ef284 # v0.34.0
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.inspect.outputs.digest }}
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
-          # Don't fail on vulnerabilities for now, just report
           exit-code: '0'
 
       - name: Upload Trivy scan results to GitHub Security
@@ -170,17 +322,15 @@ jobs:
         uses: github/codeql-action/upload-sarif@9e907b5e64f6b83e7804b09294d44122997950d6 # v4.32.3
         with:
           sarif_file: 'trivy-results.sarif'
-        continue-on-error: true  # Don't fail if security tab isn't enabled
+        continue-on-error: true
 
       - name: Generate SBOM (SPDX)
         if: github.event_name != 'pull_request'
         uses: anchore/sbom-action@28d71544de8eaf1b958d335707167c5f783590ad # v0.22.2
         with:
-          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.inspect.outputs.digest }}
           format: spdx-json
           output-file: sbom.spdx.json
-          # Disable built-in upload due to permission issues with the action's artifact handling
-          # We upload via gh CLI in a separate step instead
           upload-release-assets: false
 
       - name: Install cosign
@@ -190,100 +340,201 @@ jobs:
       - name: Sign container image (keyless)
         if: github.event_name != 'pull_request'
         run: |
-          cosign sign --yes ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          cosign sign --yes ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.inspect.outputs.digest }}
 
       - name: Attest SBOM (keyless)
         if: github.event_name != 'pull_request'
         run: |
-          cosign attest --yes --type spdxjson --predicate sbom.spdx.json ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          cosign attest --yes --type spdxjson --predicate sbom.spdx.json ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.inspect.outputs.digest }}
 
-      # GitHub-native attestations (visible in GitHub UI and verifiable with `gh attestation verify`)
       - name: Attest container image provenance (GitHub)
         if: github.event_name != 'pull_request'
         uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          subject-digest: ${{ steps.build.outputs.digest }}
+          subject-digest: ${{ steps.inspect.outputs.digest }}
           push-to-registry: true
 
-      - name: Generate install manifest
+      - name: Upload SBOM artifact
         if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: sbom
+          path: sbom.spdx.json
+          retention-days: 1
+
+  # ---------------------------------------------------------------------------
+  # Push multi-arch image to Artifactory OCI mirror
+  # ---------------------------------------------------------------------------
+  artifactory:
+    name: Push to Artifactory
+    needs: [prepare, assemble]
+    if: github.event_name != 'pull_request'
+    permissions:
+      packages: read
+      id-token: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Login to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
+
+      - name: Tag and push image to Artifactory OCI
+        env:
+          ARTIFACTORY_URL: artifactory.devops.telekom.de
+          ARTIFACTORY_REPO: cit-t-caas-oci/images/t-caas
+          REGISTRY: ${{ env.REGISTRY }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
         run: |
-          # Install kustomize
+          set -euo pipefail
+          echo "Logging in to Artifactory OCI at ${ARTIFACTORY_URL}"
+          echo "${{ secrets.AF_TOKEN }}" | docker login --username ${{ secrets.AF_USER }} --password-stdin https://${ARTIFACTORY_URL}
+
+          # Diagnose Artifactory repo accessibility
+          REPO_KEY=$(echo "${ARTIFACTORY_REPO}" | cut -d'/' -f1)
+          echo "Checking Artifactory storage API for repo key: ${REPO_KEY}"
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -u "${{ secrets.AF_USER }}:${{ secrets.AF_TOKEN }}" "https://${ARTIFACTORY_URL}/artifactory/api/storage/${REPO_KEY}" ) || true
+          echo "Artifactory storage API HTTP status: ${HTTP_STATUS}"
+          if [ "${HTTP_STATUS}" != "200" ]; then
+            echo "::warning::Artifactory repo ${REPO_KEY} not accessible (HTTP ${HTTP_STATUS}). Ensure AF_USER/AF_TOKEN are valid and have deploy permissions."
+          fi
+
+          IMAGE=$(echo "${IMAGE_NAME}" | awk -F/ '{print $NF}')
+          TAG=${{ github.ref_name }}
+          SRC=${REGISTRY}/${IMAGE_NAME}:${TAG#v}
+          DST=${ARTIFACTORY_URL}/${ARTIFACTORY_REPO}/${IMAGE}:${TAG#v}
+
+          echo "Copying multi-arch manifest ${SRC} -> ${DST}"
+          docker buildx imagetools create --tag "${DST}" "${SRC}"
+
+          # Copy cosign signatures and attestations to Artifactory using digest-based
+          # source reference to ensure we copy artifacts for the exact signed manifest.
+          SRC_DIGEST=${REGISTRY}/${IMAGE_NAME}@${{ needs.assemble.outputs.digest }}
+          echo "Copying cosign artifacts (signatures + attestations) to Artifactory"
+          cosign copy "${SRC_DIGEST}" "${DST}" --only=sig,att || echo "::warning::cosign copy failed — Artifactory image will not be verifiable via cosign"
+
+          # Verify the pushed image is indexed in Artifactory (retry with backoff)
+          CHECK_PATH=$(echo "${ARTIFACTORY_REPO}/${IMAGE}" | sed 's@//*@/@g')
+          echo "Checking storage for path: ${CHECK_PATH}"
+          for attempt in 1 2 3; do
+            sleep $((attempt * 2))
+            HTTP_STATUS_AFTER=$(curl -s -o /dev/null -w "%{http_code}" -u "${{ secrets.AF_USER }}:${{ secrets.AF_TOKEN }}" "https://${ARTIFACTORY_URL}/artifactory/api/storage/${CHECK_PATH}?list" ) || true
+            echo "Attempt ${attempt}: HTTP status ${HTTP_STATUS_AFTER}"
+            if [ "${HTTP_STATUS_AFTER}" = "200" ]; then
+              echo "Artifact path appears present in Artifactory."
+              break
+            fi
+          done
+          if [ "${HTTP_STATUS_AFTER}" != "200" ]; then
+            echo "::warning::Artifact path not confirmed after retries (HTTP ${HTTP_STATUS_AFTER})."
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Create GitHub Release with install manifest, SBOM, and license bundles
+  # ---------------------------------------------------------------------------
+  release:
+    name: Create GitHub Release
+    # NOTE: Does not depend on `artifactory` intentionally — Artifactory is a
+    # best-effort mirror and should not block GitHub Release creation.
+    needs: [prepare, assemble]
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: write
+      attestations: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Download prepare artifacts
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: prepare-artifacts
+
+      - name: Download SBOM
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: sbom
+
+      - name: Update install manifest with digest reference
+        run: |
           make kustomize
-          # Update image reference in kustomization
-          cd config/manager && ${{ github.workspace }}/bin/kustomize edit set image controller=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          cd config/manager && ${{ github.workspace }}/bin/kustomize edit set image controller=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.assemble.outputs.digest }}
           cd ${{ github.workspace }}
-          # Generate consolidated install manifest
           bin/kustomize build config/default > install.yaml
-          echo "Generated install.yaml with $(wc -l < install.yaml) lines"
+          echo "Updated install.yaml with digest reference (${{ needs.assemble.outputs.digest }})"
 
       - name: Attest install manifest provenance (GitHub)
-        if: github.event_name != 'pull_request'
         uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
         with:
           subject-path: install.yaml
 
       - name: Generate checksums
-        if: github.event_name != 'pull_request'
         run: |
-          # Bundle all license files into a single archive for the release (deterministic)
           tar --sort=name --mtime='1970-01-01' --owner=0 --group=0 --numeric-owner -cf - LICENSE LICENSES/ | gzip -n > licenses.tar.gz
-          sha256sum sbom.spdx.json install.yaml licenses.tar.gz /tmp/third-party-notices.tar.gz > checksums.txt
-          cp /tmp/third-party-notices.tar.gz third-party-notices.tar.gz
+          cp third-party-notices.tar.gz . 2>/dev/null || true
+          sha256sum sbom.spdx.json install.yaml licenses.tar.gz third-party-notices.tar.gz > checksums.txt 2>/dev/null || \
+          sha256sum sbom.spdx.json install.yaml licenses.tar.gz > checksums.txt
           echo "Checksums:"
           cat checksums.txt
 
       - name: Create or update release with artifacts
-        if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          IS_PRERELEASE="${{ steps.version.outputs.is_prerelease }}"
+          VERSION="${{ needs.prepare.outputs.version }}"
+          IS_PRERELEASE="${{ needs.prepare.outputs.is_prerelease }}"
           IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
-          DIGEST="${{ steps.build.outputs.digest }}"
+          DIGEST="${{ needs.assemble.outputs.digest }}"
           CHART_REPO="oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/auth-operator"
           CHART_REF="${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/auth-operator:${VERSION}"
-          
-          # Build release notes with verification instructions
+
           cat > release-notes.md << EOF
           ## Installation
-          
+
           ### Using kubectl
           \`\`\`bash
           kubectl apply -f https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/install.yaml
           \`\`\`
-          
+
           ### Using Helm (OCI)
           \`\`\`bash
           helm install auth-operator ${CHART_REPO} --version ${VERSION}
           \`\`\`
-          
+
           ## Container Image
-          
+
           \`\`\`
           ${IMAGE}:${VERSION}
           ${IMAGE}@${DIGEST}
           \`\`\`
-          
+
           ## Helm Chart
-          
+
           \`\`\`
           ${CHART_REPO} --version ${VERSION}
           \`\`\`
-          
+
           ## Verification
-          
+
           ### Container Image
-          
+
           Verify the container image signature:
           \`\`\`bash
           cosign verify ${IMAGE}@${DIGEST} \\
             --certificate-identity-regexp="https://github.com/${{ github.repository }}/.github/workflows/release.yml@.*" \\
             --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
           \`\`\`
-          
+
           Verify the SBOM attestation:
           \`\`\`bash
           cosign verify-attestation ${IMAGE}@${DIGEST} \\
@@ -291,48 +542,47 @@ jobs:
             --certificate-identity-regexp="https://github.com/${{ github.repository }}/.github/workflows/release.yml@.*" \\
             --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
           \`\`\`
-          
+
           Verify with GitHub CLI (SLSA provenance):
           \`\`\`bash
           gh attestation verify oci://${IMAGE}@${DIGEST} --repo ${{ github.repository }}
           \`\`\`
-          
+
           ### Helm Chart
-          
+
           Verify the Helm chart signature:
           \`\`\`bash
           cosign verify ${CHART_REF} \\
             --certificate-identity-regexp="https://github.com/${{ github.repository }}/.github/workflows/release.yml@.*" \\
             --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
           \`\`\`
-          
+
           ### Release Artifacts
-          
+
           Verify checksums:
           \`\`\`bash
           sha256sum -c checksums.txt
           \`\`\`
-          
+
           Verify install manifest with GitHub CLI:
           \`\`\`bash
           gh attestation verify install.yaml --repo ${{ github.repository }}
           \`\`\`
-          
+
           ### License & Notices
-          
+
           | Artifact | Description |
           |----------|-------------|
           | \`licenses.tar.gz\` | Project license files (Apache-2.0, CC-BY-4.0, CC0-1.0) |
           | \`third-party-notices.tar.gz\` | Licenses for all Go dependencies |
           | \`sbom.spdx.json\` | Software Bill of Materials (SPDX) |
           EOF
-          
-          # Create or update release
+
           PRERELEASE_FLAG=""
           if [[ "${IS_PRERELEASE}" == "true" ]]; then
             PRERELEASE_FLAG="--prerelease"
           fi
-          
+
           if ! gh release view "${{ github.ref_name }}" > /dev/null 2>&1; then
             echo "Creating release ${{ github.ref_name }}..."
             gh release create "${{ github.ref_name }}" \
@@ -343,19 +593,15 @@ jobs:
             echo "Release ${{ github.ref_name }} already exists, updating..."
             gh release edit "${{ github.ref_name }}" --notes-file release-notes.md ${PRERELEASE_FLAG} || true
           fi
-          
+
+          UPLOAD_FILES=(sbom.spdx.json install.yaml licenses.tar.gz checksums.txt)
+          [ -f third-party-notices.tar.gz ] && UPLOAD_FILES+=(third-party-notices.tar.gz)
           echo "Uploading artifacts to release ${{ github.ref_name }}..."
-          gh release upload "${{ github.ref_name }}" \
-            sbom.spdx.json \
-            install.yaml \
-            licenses.tar.gz \
-            third-party-notices.tar.gz \
-            checksums.txt \
-            --clobber
+          gh release upload "${{ github.ref_name }}" "${UPLOAD_FILES[@]}" --clobber
 
   helm-release:
     name: Release Helm Chart
-    needs: build-and-push
+    needs: [prepare, assemble]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -391,7 +637,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION="${{ needs.build-and-push.outputs.version }}"
+          VERSION="${{ needs.prepare.outputs.version }}"
           
           # Find previous tag for changelog diff
           PREV_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]' | head -2 | tail -1)
@@ -449,10 +695,10 @@ jobs:
 
       - name: Update Chart version and image
         run: |
-          VERSION="${{ needs.build-and-push.outputs.version }}"
-          CHART_VERSION="${{ needs.build-and-push.outputs.chart_version }}"
-          DIGEST="${{ needs.build-and-push.outputs.digest }}"
-          IS_PRERELEASE="${{ needs.build-and-push.outputs.is_prerelease }}"
+          VERSION="${{ needs.prepare.outputs.version }}"
+          CHART_VERSION="${{ needs.prepare.outputs.chart_version }}"
+          DIGEST="${{ needs.assemble.outputs.digest }}"
+          IS_PRERELEASE="${{ needs.prepare.outputs.is_prerelease }}"
           
           echo "Setting chart version to: ${CHART_VERSION}"
           echo "Setting appVersion to: ${VERSION}"
@@ -517,14 +763,14 @@ jobs:
           helm push "${CHART_FILE}" oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts
           
           # Output chart reference (note: helm push doesn't return a digest, only logs success)
-          CHART_VERSION="${{ needs.build-and-push.outputs.chart_version }}"
+          CHART_VERSION="${{ needs.prepare.outputs.chart_version }}"
           echo "chart_ref=oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/auth-operator:${CHART_VERSION}" >> $GITHUB_OUTPUT
           echo "Pushed chart to: oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/auth-operator:${CHART_VERSION}"
 
       - name: Sign Helm chart (keyless)
         if: github.event_name != 'pull_request'
         run: |
-          CHART_VERSION="${{ needs.build-and-push.outputs.chart_version }}"
+          CHART_VERSION="${{ needs.prepare.outputs.chart_version }}"
           CHART_REF="${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/auth-operator:${CHART_VERSION}"
           echo "Signing Helm chart: ${CHART_REF}"
           cosign sign --yes "${CHART_REF}"

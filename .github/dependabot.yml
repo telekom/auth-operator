@@ -8,8 +8,7 @@ updates:
   - package-ecosystem: "gomod"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "daily"
     open-pull-requests-limit: 10
     commit-message:
       prefix: "deps"
@@ -25,42 +24,96 @@ updates:
         patterns:
           - "github.com/onsi/*"
           - "github.com/stretchr/testify"
+      go-major:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "k8s.io/*"
+          - "sigs.k8s.io/*"
+          - "github.com/onsi/*"
+          - "github.com/stretchr/testify"
+        update-types:
+          - "major"
+      go-minor-patch:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "k8s.io/*"
+          - "sigs.k8s.io/*"
+          - "github.com/onsi/*"
+          - "github.com/stretchr/testify"
+        update-types:
+          - "minor"
+          - "patch"
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "daily"
     open-pull-requests-limit: 5
     commit-message:
       prefix: "ci"
     labels:
       - "dependencies"
       - "github-actions"
+    groups:
+      actions-major:
+        patterns:
+          - "*"
+        update-types:
+          - "major"
+      actions-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   # Docker
   - package-ecosystem: "docker"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "daily"
     open-pull-requests-limit: 3
     commit-message:
       prefix: "docker"
     labels:
       - "dependencies"
       - "docker"
+    groups:
+      docker-major:
+        patterns:
+          - "*"
+        update-types:
+          - "major"
+      docker-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   # Helm Charts (auth-operator chart dependencies)
   - package-ecosystem: "helm"
     directory: "/chart/auth-operator"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "daily"
     open-pull-requests-limit: 3
     commit-message:
       prefix: "helm"
     labels:
       - "dependencies"
       - "helm"
+    groups:
+      helm-major:
+        patterns:
+          - "*"
+        update-types:
+          - "major"
+      helm-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
