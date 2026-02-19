@@ -150,7 +150,7 @@ test-e2e-full: ## Run full e2e test suite (fresh cluster each run, configurable 
 	@set -e; \
 	if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e; fi; \
 	$(MAKE) test-e2e-setup KIND_CLUSTER_NAME=auth-operator-e2e; \
-	if $(MAKE) test-e2e KIND_CLUSTER_NAME=auth-operator-e2e; then \
+	if SKIP_CLUSTER_SETUP=true $(MAKE) test-e2e KIND_CLUSTER_NAME=auth-operator-e2e; then \
 		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e; fi; \
 	else \
 		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e; fi; exit 1; \
