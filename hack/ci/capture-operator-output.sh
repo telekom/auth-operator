@@ -57,7 +57,7 @@ YQ_STRIP_CRD='del(
   .items[].metadata.ownerReferences[].uid,
   .items[].status.observedGeneration,
   .items[].status.conditions[].lastTransitionTime
-)'
+) | (.items[].status.conditions |= sort_by(.type))'
 
 # --- RBAC resources ---
 LABEL="app.kubernetes.io/created-by=auth-operator"

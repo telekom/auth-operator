@@ -51,26 +51,30 @@ var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 			_, _ = utils.Run(cmd)
 		}
 
-		// Always deploy fresh operator in dedicated cluster (no reuse)
-		By("Building the operator image")
-		cmd = exec.CommandContext(context.Background(), "make", "docker-build", fmt.Sprintf("IMG=%s", projectImage))
-		_, err := utils.Run(cmd)
-		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build operator image")
+		if skipClusterSetup {
+			By("Skipping operator build/deploy (SKIP_CLUSTER_SETUP=true, expecting pre-deployed operator)")
+		} else {
+			// Always deploy fresh operator in dedicated cluster (no reuse)
+			By("Building the operator image")
+			cmd = exec.CommandContext(context.Background(), "make", "docker-build", fmt.Sprintf("IMG=%s", projectImage))
+			_, err := utils.Run(cmd)
+			ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build operator image")
 
-		By("Loading image into kind cluster")
-		cmd = exec.CommandContext(context.Background(), "kind", "load", "docker-image", projectImage, "--name", kindClusterName)
-		_, err = utils.Run(cmd)
-		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load image into kind cluster")
+			By("Loading image into kind cluster")
+			cmd = exec.CommandContext(context.Background(), "kind", "load", "docker-image", projectImage, "--name", kindClusterName)
+			_, err = utils.Run(cmd)
+			ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load image into kind cluster")
 
-		By("Installing CRDs")
-		cmd = exec.CommandContext(context.Background(), "make", "install")
-		_, err = utils.Run(cmd)
-		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to install CRDs")
+			By("Installing CRDs")
+			cmd = exec.CommandContext(context.Background(), "make", "install")
+			_, err = utils.Run(cmd)
+			ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to install CRDs")
 
-		By("Deploying the controller-manager")
-		cmd = exec.CommandContext(context.Background(), "make", "deploy", fmt.Sprintf("IMG=%s", projectImage))
-		_, err = utils.Run(cmd)
-		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to deploy controller-manager")
+			By("Deploying the controller-manager")
+			cmd = exec.CommandContext(context.Background(), "make", "deploy", fmt.Sprintf("IMG=%s", projectImage))
+			_, err = utils.Run(cmd)
+			ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to deploy controller-manager")
+		}
 	})
 
 	BeforeEach(func() {
@@ -115,10 +119,10 @@ var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 		// Use centralized cleanup
 		clusterRoles := []string{"e2e-cluster-reader"}
 		CleanupForDevTests(operatorNamespace, clusterRoles)
-		utils.CleanupClusterResources("app.kubernetes.io/managed-by=auth-operator")
-		utils.CleanupResourcesByLabel("role", "app.kubernetes.io/managed-by=auth-operator", testNamespace)
-		utils.CleanupResourcesByLabel("rolebinding", "app.kubernetes.io/managed-by=auth-operator", testNamespace)
-		utils.CleanupResourcesByLabel("serviceaccount", "app.kubernetes.io/managed-by=auth-operator", testNamespace)
+		utils.CleanupClusterResources("app.kubernetes.io/created-by=auth-operator")
+		utils.CleanupResourcesByLabel("role", "app.kubernetes.io/created-by=auth-operator", testNamespace)
+		utils.CleanupResourcesByLabel("rolebinding", "app.kubernetes.io/created-by=auth-operator", testNamespace)
+		utils.CleanupResourcesByLabel("serviceaccount", "app.kubernetes.io/created-by=auth-operator", testNamespace)
 		utils.CleanupNamespace(testNamespace)
 
 		if utils.ShouldTeardown() {
@@ -278,7 +282,7 @@ var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 			Eventually(func() error {
 				// RoleBinding should be created in the e2e-test-ns namespace (labeled with e2e-test=true)
 				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "rolebinding",
-					"-l", "app.kubernetes.io/managed-by=auth-operator",
+					"-l", "app.kubernetes.io/created-by=auth-operator",
 					"-n", testNamespace,
 					"-o", "name")
 				output, err := utils.Run(cmd)
@@ -570,7 +574,7 @@ func ensureTestNamespace() {
 
 func cleanupCRDE2ETestState() {
 	const e2eLabelSelector = "app.kubernetes.io/component=e2e-test"
-	const managedByLabelSelector = "app.kubernetes.io/managed-by=auth-operator"
+	const createdByLabelSelector = "app.kubernetes.io/created-by=auth-operator"
 
 	cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "-k", fixturesPath, "--ignore-not-found=true", "--wait=false", "--timeout=30s")
 	_, _ = utils.Run(cmd)
@@ -582,10 +586,10 @@ func cleanupCRDE2ETestState() {
 	utils.RemoveFinalizersForAll("clusterrolebinding")
 	utils.RemoveFinalizersForAll("role")
 
-	utils.CleanupClusterResources(managedByLabelSelector)
-	utils.CleanupResourcesByLabel("role", managedByLabelSelector, testNamespace)
-	utils.CleanupResourcesByLabel("rolebinding", managedByLabelSelector, testNamespace)
-	utils.CleanupResourcesByLabel("serviceaccount", managedByLabelSelector, testNamespace)
+	utils.CleanupClusterResources(createdByLabelSelector)
+	utils.CleanupResourcesByLabel("role", createdByLabelSelector, testNamespace)
+	utils.CleanupResourcesByLabel("rolebinding", createdByLabelSelector, testNamespace)
+	utils.CleanupResourcesByLabel("serviceaccount", createdByLabelSelector, testNamespace)
 	utils.CleanupResourcesByLabel("role", e2eLabelSelector, testNamespace)
 	utils.CleanupResourcesByLabel("rolebinding", e2eLabelSelector, testNamespace)
 	utils.CleanupResourcesByLabel("serviceaccount", e2eLabelSelector, testNamespace)
