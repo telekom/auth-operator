@@ -59,6 +59,11 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 		// This prevents ownership type switches (e.g. platform -> tenant) even by
 		// trusted migration accounts. Only initial label adoption and non-label
 		// changes are allowed through the bypass.
+		//
+		// For Create and Delete operations, bypass users skip all validation
+		// including the BindDefinition authorization check. This is intentional:
+		// bypass users (e.g. helm-controller) are trusted to create namespaces
+		// with appropriate labels as part of GitOps-driven cluster management.
 		if req.Operation != admissionv1.Update {
 			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
 			return admission.Allowed("")
@@ -130,8 +135,11 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 			oldOwner := oldNs.Labels[authzv1alpha1.LabelKeyOwner]
 			newOwner := ns.Labels[authzv1alpha1.LabelKeyOwner]
 			if oldOwner != newOwner {
-				// Only tenant↔thirdparty is allowed; platform is always immutable
-				if oldOwner != authzv1alpha1.OwnerPlatform && newOwner != authzv1alpha1.OwnerPlatform {
+				// Only tenant↔thirdparty is allowed; platform is always immutable.
+				// Both old and new must be non-empty to prevent label removal from
+				// being treated as a reclassification.
+				if oldOwner != authzv1alpha1.OwnerPlatform && newOwner != authzv1alpha1.OwnerPlatform &&
+					oldOwner != "" && newOwner != "" {
 					ownerReclassification = true
 					logger.V(1).Info("AUDIT: tenant/thirdparty reclassification allowed",
 						"namespace", req.Name, "oldOwner", oldOwner, "newOwner", newOwner)

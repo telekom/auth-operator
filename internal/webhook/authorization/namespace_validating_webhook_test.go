@@ -78,6 +78,32 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 	}
 
+	bindDefThirdparty := authzv1alpha1.BindDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "thirdparty-binddefinition",
+		},
+		Spec: authzv1alpha1.BindDefinitionSpec{
+			TargetName: "bd-thirdparty",
+			Subjects: []rbacv1.Subject{
+				{
+					Kind:      "ServiceAccount",
+					Name:      "thirdparty-sa",
+					Namespace: "thirdparty-system",
+				},
+			},
+			RoleBindings: []authzv1alpha1.NamespaceBinding{{
+				ClusterRoleRefs: []string{"thirdparty-admin"},
+				NamespaceSelector: []metav1.LabelSelector{
+					{
+						MatchLabels: map[string]string{
+							"t-caas.telekom.com/thirdparty": "tp-a",
+						},
+					},
+				},
+			}},
+		},
+	}
+
 	tests := []struct {
 		name           string
 		bindDefs       []authzv1alpha1.BindDefinition
@@ -752,6 +778,84 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 			},
 			expectedAllow: false,
 		},
+		{
+			name:         "deny bypass user removing tenant owner label",
+			bindDefs:     []authzv1alpha1.BindDefinition{bindDefTenant},
+			tdgMigration: true,
+			request: crAdmission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
+					Name:      "tenant-ns",
+					Operation: admissionv1.Update,
+					UserInfo: authenticationv1.UserInfo{
+						Username: "system:serviceaccount:flux-system:helm-controller",
+					},
+					Object: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "tenant-ns",
+								Labels: map[string]string{
+									"kubernetes.io/metadata.name": "tenant-ns",
+									// owner label removed
+								},
+							},
+						}),
+					},
+					OldObject: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "tenant-ns",
+								Labels: map[string]string{
+									"kubernetes.io/metadata.name": "tenant-ns",
+									"t-caas.telekom.com/owner":    "tenant",
+									"t-caas.telekom.com/tenant":   "tenant-a",
+								},
+							},
+						}),
+					},
+				},
+			},
+			expectedAllow: false,
+		},
+		{
+			name:         "deny bypass user removing thirdparty owner label",
+			bindDefs:     []authzv1alpha1.BindDefinition{bindDefThirdparty},
+			tdgMigration: true,
+			request: crAdmission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
+					Name:      "thirdparty-ns",
+					Operation: admissionv1.Update,
+					UserInfo: authenticationv1.UserInfo{
+						Username: "system:serviceaccount:flux-system:helm-controller",
+					},
+					Object: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "thirdparty-ns",
+								Labels: map[string]string{
+									"kubernetes.io/metadata.name": "thirdparty-ns",
+									// owner label removed
+								},
+							},
+						}),
+					},
+					OldObject: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "thirdparty-ns",
+								Labels: map[string]string{
+									"kubernetes.io/metadata.name":   "thirdparty-ns",
+									"t-caas.telekom.com/owner":      "thirdparty",
+									"t-caas.telekom.com/thirdparty": "tp-a",
+								},
+							},
+						}),
+					},
+				},
+			},
+			expectedAllow: false,
+		},
 		// === Tenant ↔ thirdparty reclassification (allowed for bypass users) ===
 		// The legacy system had no thirdparty concept. Everything non-platform was
 		// "tenant". During TDG migration, bypass users may reclassify between
@@ -1251,7 +1355,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 			expectedAllow: true,
 		},
 		{
-			name:         "allow bypass user adopting labels on namespace without existing t-caas labels",
+			name:         "deny bypass user adopting platform label on legacy non-platform namespace",
 			bindDefs:     []authzv1alpha1.BindDefinition{bindDefPlatform},
 			tdgMigration: true,
 			request: crAdmission.Request{
@@ -1597,7 +1701,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 			expectedAllow: true,
 		},
 		{
-			name:         "deny legacy schiff label removal when TDGMigration is disabled",
+			name:         "allow legacy schiff label removal when TDGMigration is disabled",
 			bindDefs:     []authzv1alpha1.BindDefinition{bindDefPlatform},
 			tdgMigration: false,
 			request: crAdmission.Request{
