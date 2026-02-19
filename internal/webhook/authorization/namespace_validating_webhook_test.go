@@ -365,7 +365,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 					Name:      "legacy-ns",
 					Operation: admissionv1.Update,
 					UserInfo: authenticationv1.UserInfo{
-						Username: "david.heppner@telekom.de",
+						Username: "test-user@example.com",
 						Groups:   []string{"oidc:platform-admins"},
 					},
 					Object: runtime.RawExtension{
@@ -442,7 +442,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 					Name:      "legacy-3p-ns",
 					Operation: admissionv1.Update,
 					UserInfo: authenticationv1.UserInfo{
-						Username: "thirdparty-user@telekom.de",
+						Username: "thirdparty-user@example.com",
 						Groups:   []string{"oidc:platform-admins"},
 					},
 					Object: runtime.RawExtension{
@@ -984,7 +984,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 					Name:      "ocas-ns",
 					Operation: admissionv1.Update,
 					UserInfo: authenticationv1.UserInfo{
-						Username: "david.heppner@telekom.de",
+						Username: "test-user@example.com",
 						Groups:   []string{"oidc:platform-admins"},
 					},
 					Object: runtime.RawExtension{
