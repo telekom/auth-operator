@@ -160,7 +160,10 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 			oldValue, oldExists := oldNs.Labels[key]
 			newValue, newExists := ns.Labels[key]
 
-			// Allow initial label adoption: label didn't exist before, now being added
+			// Allow initial label adoption: label didn't exist before, now being added.
+			// This applies to ALL users (bypass and non-bypass). Non-bypass users are
+			// still subject to the BindDefinition authorization check (below) which
+			// verifies the user has permission for the namespace with the new labels.
 			if !oldExists && newExists {
 				logger.V(2).Info("label adoption allowed",
 					"namespace", req.Name, "label", key, "newValue", newValue)
@@ -180,7 +183,9 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 			// Allow removal of the legacy schiff.telekom.de/owner label by bypass users
 			// once the new t-caas.telekom.com/owner label is established.
 			// This supports the final migration step: cleaning up legacy labels.
-			if v.TDGMigration && bypassResult.ShouldBypass &&
+			// Note: the v.TDGMigration guard is implicit — schiff.telekom.de/owner is
+			// only in labelKeys when TDGMigration is enabled (see above).
+			if bypassResult.ShouldBypass &&
 				key == "schiff.telekom.de/owner" && oldExists && !newExists {
 				_, newOwnerExists := ns.Labels[authzv1alpha1.LabelKeyOwner]
 				if newOwnerExists {
@@ -204,6 +209,10 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 		// ensure the new t-caas owner label is consistent:
 		// - Legacy "platform" or "schiff" must map to new "platform"
 		// - Legacy anything else must NOT map to new "platform" (can be tenant or thirdparty)
+		//
+		// This check runs for ALL users (bypass and non-bypass) during initial adoption.
+		// This is intentional: regardless of who performs the adoption, the legacy→new
+		// owner mapping must be consistent to prevent misclassification.
 		if v.TDGMigration {
 			legacyOwner := oldNs.Labels["schiff.telekom.de/owner"]
 			newOwner, newOwnerExists := ns.Labels[authzv1alpha1.LabelKeyOwner]

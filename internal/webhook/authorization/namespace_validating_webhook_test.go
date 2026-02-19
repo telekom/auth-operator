@@ -357,7 +357,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		// auth-operator was deployed) needs to be adopted into the auth-operator
 		// contract by adding t-caas labels for the first time.
 		{
-			name:     "deny adoption: adding owner label to namespace without any t-caas labels (thirdparty user)",
+			name:     "deny adoption: adding owner label to namespace without any t-caas labels (non-bypass user)",
 			bindDefs: []authzv1alpha1.BindDefinition{bindDefPlatform},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -1738,7 +1738,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 			expectedAllow: true,
 		},
 
-		// --- Edge case: thirdparty → platform switch (missing symmetric test) ---
+		// --- Edge case: thirdparty → platform switch ---
 		{
 			name:         "deny bypass user switching owner from thirdparty to platform",
 			bindDefs:     []authzv1alpha1.BindDefinition{bindDefPlatform},
