@@ -51,26 +51,30 @@ var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 			_, _ = utils.Run(cmd)
 		}
 
-		// Always deploy fresh operator in dedicated cluster (no reuse)
-		By("Building the operator image")
-		cmd = exec.CommandContext(context.Background(), "make", "docker-build", fmt.Sprintf("IMG=%s", projectImage))
-		_, err := utils.Run(cmd)
-		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build operator image")
+		if skipClusterSetup {
+			By("Skipping operator build/deploy (SKIP_CLUSTER_SETUP=true, expecting pre-deployed operator)")
+		} else {
+			// Always deploy fresh operator in dedicated cluster (no reuse)
+			By("Building the operator image")
+			cmd = exec.CommandContext(context.Background(), "make", "docker-build", fmt.Sprintf("IMG=%s", projectImage))
+			_, err := utils.Run(cmd)
+			ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build operator image")
 
-		By("Loading image into kind cluster")
-		cmd = exec.CommandContext(context.Background(), "kind", "load", "docker-image", projectImage, "--name", kindClusterName)
-		_, err = utils.Run(cmd)
-		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load image into kind cluster")
+			By("Loading image into kind cluster")
+			cmd = exec.CommandContext(context.Background(), "kind", "load", "docker-image", projectImage, "--name", kindClusterName)
+			_, err = utils.Run(cmd)
+			ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load image into kind cluster")
 
-		By("Installing CRDs")
-		cmd = exec.CommandContext(context.Background(), "make", "install")
-		_, err = utils.Run(cmd)
-		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to install CRDs")
+			By("Installing CRDs")
+			cmd = exec.CommandContext(context.Background(), "make", "install")
+			_, err = utils.Run(cmd)
+			ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to install CRDs")
 
-		By("Deploying the controller-manager")
-		cmd = exec.CommandContext(context.Background(), "make", "deploy", fmt.Sprintf("IMG=%s", projectImage))
-		_, err = utils.Run(cmd)
-		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to deploy controller-manager")
+			By("Deploying the controller-manager")
+			cmd = exec.CommandContext(context.Background(), "make", "deploy", fmt.Sprintf("IMG=%s", projectImage))
+			_, err = utils.Run(cmd)
+			ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to deploy controller-manager")
+		}
 	})
 
 	BeforeEach(func() {

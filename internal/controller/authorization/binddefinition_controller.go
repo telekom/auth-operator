@@ -1035,6 +1035,8 @@ func (r *BindDefinitionReconciler) validateRoleReferences(
 		}
 	}
 
+	slices.Sort(missingRoles)
+
 	return missingRoles
 }
 

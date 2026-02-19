@@ -54,8 +54,20 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 		logger.Info("AUDIT: webhook bypass granted",
 			"namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username,
 			"bypassReason", bypassResult.Reason, "webhook", "validator")
-		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
-		return admission.Allowed("")
+
+		// Even bypass users must go through label immutability checks on updates.
+		// This prevents ownership type switches (e.g. platform -> tenant) even by
+		// trusted migration accounts. Only initial label adoption and non-label
+		// changes are allowed through the bypass.
+		//
+		// For Create and Delete operations, bypass users skip all validation
+		// including the BindDefinition authorization check. This is intentional:
+		// bypass users (e.g. helm-controller) are trusted to create namespaces
+		// with appropriate labels as part of GitOps-driven cluster management.
+		if req.Operation != admissionv1.Update {
+			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
+			return admission.Allowed("")
+		}
 	}
 
 	var ns corev1.Namespace
@@ -113,19 +125,129 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 		if v.TDGMigration {
 			labelKeys = append(labelKeys, "schiff.telekom.de/owner")
 		}
-		// Compare the labels between old and new namespaces
+		// Determine if a tenant↔thirdparty reclassification is happening.
+		// In the legacy system (TDG), there was no thirdparty concept — everything
+		// non-platform was "tenant". During TDG migration, bypass users are allowed
+		// to reclassify between tenant and thirdparty, including changing the
+		// associated tenant/thirdparty name labels.
+		ownerReclassification := false
+		if v.TDGMigration && bypassResult.ShouldBypass {
+			oldOwner := oldNs.Labels[authzv1alpha1.LabelKeyOwner]
+			newOwner := ns.Labels[authzv1alpha1.LabelKeyOwner]
+			if oldOwner != newOwner {
+				// Only tenant↔thirdparty is allowed; platform is always immutable.
+				// Both old and new must be non-empty to prevent label removal from
+				// being treated as a reclassification.
+				if oldOwner != authzv1alpha1.OwnerPlatform && newOwner != authzv1alpha1.OwnerPlatform &&
+					oldOwner != "" && newOwner != "" {
+					ownerReclassification = true
+					logger.V(1).Info("AUDIT: tenant/thirdparty reclassification allowed",
+						"namespace", req.Name, "oldOwner", oldOwner, "newOwner", newOwner)
+				}
+			}
+		}
+
+		// Compare the labels between old and new namespaces.
+		// Initial adoption (adding a label that didn't exist before) is allowed,
+		// but modifying an existing label's value or removing an existing label is denied.
+		// This enables namespaces to be adopted into the auth-operator contract
+		// by setting t-caas labels for the first time.
+		//
+		// Exception: during TDG migration, bypass users may reclassify between
+		// tenant and thirdparty (including the associated name labels), since
+		// the thirdparty concept did not exist before.
 		for _, key := range labelKeys {
 			oldValue, oldExists := oldNs.Labels[key]
 			newValue, newExists := ns.Labels[key]
-			if oldExists != newExists || oldValue != newValue {
+
+			// Allow initial label adoption: label didn't exist before, now being added.
+			// This applies to ALL users (bypass and non-bypass). Non-bypass users are
+			// still subject to the BindDefinition authorization check (below) which
+			// verifies the user has permission for the namespace with the new labels.
+			if !oldExists && newExists {
+				logger.V(2).Info("label adoption allowed",
+					"namespace", req.Name, "label", key, "newValue", newValue)
+				continue
+			}
+
+			// During tenant↔thirdparty reclassification, allow changes to the
+			// owner, tenant, and thirdparty labels (but NOT schiff.telekom.de/owner)
+			if ownerReclassification && (key == authzv1alpha1.LabelKeyOwner ||
+				key == authzv1alpha1.LabelKeyTenant ||
+				key == authzv1alpha1.LabelKeyThirdParty) {
+				logger.V(2).Info("label change allowed during reclassification",
+					"namespace", req.Name, "label", key, "oldValue", oldValue, "newValue", newValue)
+				continue
+			}
+
+			// Allow removal of the legacy schiff.telekom.de/owner label by bypass users
+			// once the new t-caas.telekom.com/owner label is established.
+			// This supports the final migration step: cleaning up legacy labels.
+			// Note: the v.TDGMigration guard is implicit — schiff.telekom.de/owner is
+			// only in labelKeys when TDGMigration is enabled (see above).
+			if bypassResult.ShouldBypass &&
+				key == "schiff.telekom.de/owner" && oldExists && !newExists {
+				_, newOwnerExists := ns.Labels[authzv1alpha1.LabelKeyOwner]
+				if newOwnerExists {
+					logger.V(1).Info("AUDIT: legacy label removal allowed (new owner label exists)",
+						"namespace", req.Name, "removedLabel", key, "removedValue", oldValue)
+					continue
+				}
+			}
+
+			// Deny modification of existing label value or removal of existing label
+			if oldExists && (!newExists || oldValue != newValue) {
 				logger.V(2).Info("label modification denied",
 					"namespace", req.Name, "label", key, "oldValue", oldValue, "newValue", newValue)
 				metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultDenied).Inc()
 				return admission.Denied(fmt.Sprintf("Modification of label '%s' is not allowed", key))
 			}
 		}
-		logger.V(3).Info("namespace labels validated - no changes detected",
+
+		// Cross-validate legacy label consistency during adoption.
+		// If TDGMigration is enabled and the legacy schiff.telekom.de/owner label exists,
+		// ensure the new t-caas owner label is consistent:
+		// - Legacy "platform" or "schiff" must map to new "platform"
+		// - Legacy anything else must NOT map to new "platform" (can be tenant or thirdparty)
+		//
+		// This check runs for ALL users (bypass and non-bypass) during initial adoption.
+		// This is intentional: regardless of who performs the adoption, the legacy→new
+		// owner mapping must be consistent to prevent misclassification.
+		if v.TDGMigration {
+			legacyOwner := oldNs.Labels["schiff.telekom.de/owner"]
+			newOwner, newOwnerExists := ns.Labels[authzv1alpha1.LabelKeyOwner]
+			_, oldOwnerExists := oldNs.Labels[authzv1alpha1.LabelKeyOwner]
+
+			if legacyOwner != "" && newOwnerExists && !oldOwnerExists {
+				isLegacyPlatform := legacyOwner == "platform" || legacyOwner == "schiff"
+				isNewPlatform := newOwner == authzv1alpha1.OwnerPlatform
+
+				if isLegacyPlatform && !isNewPlatform {
+					logger.V(2).Info("adoption denied: legacy platform namespace cannot become non-platform",
+						"namespace", req.Name, "legacyOwner", legacyOwner, "newOwner", newOwner)
+					metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultDenied).Inc()
+					return admission.Denied(fmt.Sprintf("Legacy platform namespace (schiff.telekom.de/owner=%s) cannot be adopted as '%s'", legacyOwner, newOwner))
+				}
+				if !isLegacyPlatform && isNewPlatform {
+					logger.V(2).Info("adoption denied: legacy non-platform namespace cannot become platform",
+						"namespace", req.Name, "legacyOwner", legacyOwner, "newOwner", newOwner)
+					metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultDenied).Inc()
+					return admission.Denied(fmt.Sprintf("Legacy non-platform namespace (schiff.telekom.de/owner=%s) cannot be adopted as 'platform'", legacyOwner))
+				}
+			}
+		}
+
+		logger.V(3).Info("namespace labels validated",
 			"namespace", req.Name)
+	}
+
+	// Bypass users that passed the label immutability check above can skip
+	// the BindDefinition authorization check.
+	if bypassResult.ShouldBypass {
+		logger.V(2).Info("bypass user passed label immutability check - allowing",
+			"namespace", req.Name, "bypassReason", bypassResult.Reason)
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
+		return admission.Allowed("")
 	}
 
 	// Extract user information and parse service account

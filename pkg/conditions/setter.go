@@ -2,6 +2,7 @@ package conditions
 
 import (
 	"fmt"
+	"slices"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -41,6 +42,16 @@ func Set(to Setter, condition *metav1.Condition) {
 		}
 		conditions = append(conditions, *condition)
 	}
+
+	slices.SortFunc(conditions, func(a, b metav1.Condition) int {
+		if a.Type < b.Type {
+			return -1
+		}
+		if a.Type > b.Type {
+			return 1
+		}
+		return 0
+	})
 
 	to.SetConditions(conditions)
 }

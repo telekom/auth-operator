@@ -11,7 +11,7 @@
 #
 # The script captures:
 #   - ClusterRoles, Roles, ClusterRoleBindings, RoleBindings, ServiceAccounts
-#     (labelled app.kubernetes.io/created-by=auth-operator)
+#     (labelled app.kubernetes.io/managed-by=auth-operator)
 #   - RoleDefinition/BindDefinition status (for debugging)
 #   - Prometheus metrics (optional, from metrics-service port-forward)
 #
@@ -57,10 +57,10 @@ YQ_STRIP_CRD='del(
   .items[].metadata.ownerReferences[].uid,
   .items[].status.observedGeneration,
   .items[].status.conditions[].lastTransitionTime
-)'
+) | (.items[].status.conditions |= sort_by(.type))'
 
 # --- RBAC resources ---
-LABEL="app.kubernetes.io/created-by=auth-operator"
+LABEL="app.kubernetes.io/managed-by=auth-operator"
 
 capture_rbac() {
   local kind="$1" flags="$2" outfile="$3"

@@ -112,7 +112,11 @@ var _ = BeforeSuite(func() {
 	}, 2*time.Minute, 5*time.Second).Should(Succeed(), "Cannot connect to API server")
 
 	By("Cleaning up any pre-existing auth-operator installations")
-	cleanupPreExistingInstallations()
+	if skipClusterSetup {
+		_, _ = fmt.Fprintf(GinkgoWriter, "Skipping pre-existing cleanup (SKIP_CLUSTER_SETUP=true)\n")
+	} else {
+		cleanupPreExistingInstallations()
+	}
 
 	By("Printing initial cluster state")
 	printClusterState()
