@@ -32,7 +32,9 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       image_tag: ${{ steps.version.outputs.image_tag }}
+      image_tag_sha: ${{ steps.version.outputs.image_tag_sha }}
       chart_version: ${{ steps.version.outputs.chart_version }}
+      chart_version_sha: ${{ steps.version.outputs.chart_version_sha }}
       is_prerelease: ${{ steps.version.outputs.is_prerelease }}
     steps:
       - name: Checkout
@@ -46,14 +48,18 @@ jobs:
         run: |
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             SHORT_SHA=$(echo "${{ github.event.pull_request.head.sha }}" | cut -c1-7)
-            VERSION="pr${{ github.event.pull_request.number }}-${SHORT_SHA}"
+            VERSION="pr-${{ github.event.pull_request.number }}"
             IMAGE_TAG="${VERSION}"
-            CHART_VERSION="0.0.0-pr${{ github.event.pull_request.number }}.${SHORT_SHA}"
+            IMAGE_TAG_SHA="${VERSION}-${SHORT_SHA}"
+            CHART_VERSION="0.0.0-pr${{ github.event.pull_request.number }}"
+            CHART_VERSION_SHA="0.0.0-pr${{ github.event.pull_request.number }}.${SHORT_SHA}"
             IS_PRERELEASE="true"
           else
             VERSION="${GITHUB_REF_NAME#v}"
             IMAGE_TAG="${GITHUB_REF_NAME#v}"
+            IMAGE_TAG_SHA=""
             CHART_VERSION="${VERSION}"
+            CHART_VERSION_SHA=""
             if [[ "$VERSION" =~ -(rc|alpha|beta)[0-9.]* ]]; then
               IS_PRERELEASE="true"
             else
@@ -62,9 +68,11 @@ jobs:
           fi
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "image_tag_sha=${IMAGE_TAG_SHA}" >> $GITHUB_OUTPUT
           echo "chart_version=${CHART_VERSION}" >> $GITHUB_OUTPUT
+          echo "chart_version_sha=${CHART_VERSION_SHA}" >> $GITHUB_OUTPUT
           echo "is_prerelease=${IS_PRERELEASE}" >> $GITHUB_OUTPUT
-          echo "Determined version: ${VERSION}, Image tag: ${IMAGE_TAG}, Chart version: ${CHART_VERSION}, Pre-release: ${IS_PRERELEASE}"
+          echo "Determined version: ${VERSION}, Image tags: ${IMAGE_TAG} ${IMAGE_TAG_SHA}, Chart versions: ${CHART_VERSION} ${CHART_VERSION_SHA}, Pre-release: ${IS_PRERELEASE}"
 
       - name: Extract Go version from toolchain or go directive
         id: go-version
@@ -92,10 +100,24 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           make kustomize
-          cd config/manager && ${{ github.workspace }}/bin/kustomize edit set image controller=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.image_tag }}
+          # Set image at config/default level so it applies to ALL deployments
+          # (both controller-manager and webhook-server use image: controller:latest)
+          cd config/default && ${{ github.workspace }}/bin/kustomize edit set image controller=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.image_tag }}
           cd ${{ github.workspace }}
           bin/kustomize build config/default > install.yaml
           echo "Generated install.yaml with $(wc -l < install.yaml) lines"
+
+          # Verify no placeholder images remain
+          if grep -q 'image: controller:latest' install.yaml; then
+            echo "ERROR: install.yaml still contains placeholder image 'controller:latest'" >&2
+            exit 1
+          fi
+
+      - name: Generate CRDs-only manifest
+        if: github.event_name != 'pull_request'
+        run: |
+          bin/kustomize build config/crd > crds.yaml
+          echo "Generated crds.yaml with $(wc -l < crds.yaml) lines"
 
       - name: Upload prepare artifacts
         if: github.event_name != 'pull_request'
@@ -104,6 +126,7 @@ jobs:
           name: prepare-artifacts
           path: |
             install.yaml
+            crds.yaml
             third-party-notices.tar.gz
           retention-days: 1
 
@@ -230,6 +253,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}},enable=${{ github.event_name != 'pull_request' }}
             type=semver,pattern={{major}},enable=${{ github.event_name != 'pull_request' }}
             type=raw,value=${{ needs.prepare.outputs.image_tag }},enable=${{ github.event_name == 'pull_request' }}
+            type=raw,value=${{ needs.prepare.outputs.image_tag_sha }},enable=${{ github.event_name == 'pull_request' && needs.prepare.outputs.image_tag_sha != '' }}
             type=sha
           labels: |
             org.opencontainers.image.title=auth-operator
@@ -490,21 +514,31 @@ jobs:
       - name: Update install manifest with digest reference
         run: |
           make kustomize
-          cd config/manager && ${{ github.workspace }}/bin/kustomize edit set image controller=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.assemble.outputs.digest }}
+          # Set image at config/default level so it applies to ALL deployments
+          # (both controller-manager and webhook-server use image: controller:latest)
+          cd config/default && ${{ github.workspace }}/bin/kustomize edit set image controller=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.assemble.outputs.digest }}
           cd ${{ github.workspace }}
           bin/kustomize build config/default > install.yaml
           echo "Updated install.yaml with digest reference (${{ needs.assemble.outputs.digest }})"
 
+          # Verify no placeholder images remain
+          if grep -q 'image: controller:latest' install.yaml; then
+            echo "ERROR: install.yaml still contains placeholder image 'controller:latest'" >&2
+            exit 1
+          fi
+
       - name: Attest install manifest provenance (GitHub)
         uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
         with:
-          subject-path: install.yaml
+          subject-path: |
+            install.yaml
+            crds.yaml
 
       - name: Generate checksums
         run: |
           tar --sort=name --mtime='1970-01-01' --owner=0 --group=0 --numeric-owner -cf - LICENSE LICENSES/ | gzip -n > licenses.tar.gz
-          sha256sum sbom.spdx.json install.yaml licenses.tar.gz third-party-notices.tar.gz > checksums.txt 2>/dev/null || \
-          sha256sum sbom.spdx.json install.yaml licenses.tar.gz > checksums.txt
+          sha256sum sbom.spdx.json install.yaml crds.yaml licenses.tar.gz third-party-notices.tar.gz > checksums.txt 2>/dev/null || \
+          sha256sum sbom.spdx.json install.yaml crds.yaml licenses.tar.gz > checksums.txt
           echo "Checksums:"
           cat checksums.txt
 
@@ -525,6 +559,11 @@ jobs:
           ### Using kubectl
           \`\`\`bash
           kubectl apply -f https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/install.yaml
+          \`\`\`
+
+          ### CRDs only
+          \`\`\`bash
+          kubectl apply -f https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/crds.yaml
           \`\`\`
 
           ### Using Helm (OCI)
@@ -611,11 +650,19 @@ jobs:
               --notes-file release-notes.md \
               ${PRERELEASE_FLAG}
           else
-            echo "Release ${{ github.ref_name }} already exists, updating..."
-            gh release edit "${{ github.ref_name }}" --notes-file release-notes.md ${PRERELEASE_FLAG} || true
+            echo "Release ${{ github.ref_name }} already exists, appending notes..."
+            EXISTING_NOTES=$(gh release view "${{ github.ref_name }}" --json body --jq '.body')
+            {
+              echo "${EXISTING_NOTES}"
+              echo ""
+              echo "---"
+              echo ""
+              cat release-notes.md
+            } > combined-notes.md
+            gh release edit "${{ github.ref_name }}" --notes-file combined-notes.md ${PRERELEASE_FLAG} || true
           fi
 
-          UPLOAD_FILES=(sbom.spdx.json install.yaml licenses.tar.gz checksums.txt)
+          UPLOAD_FILES=(sbom.spdx.json install.yaml crds.yaml licenses.tar.gz checksums.txt)
           [ -f third-party-notices.tar.gz ] && UPLOAD_FILES+=(third-party-notices.tar.gz)
           echo "Uploading artifacts to release ${{ github.ref_name }}..."
           gh release upload "${{ github.ref_name }}" "${UPLOAD_FILES[@]}" --clobber
@@ -783,10 +830,22 @@ jobs:
           CHART_FILE=$(ls auth-operator-*.tgz)
           helm push "${CHART_FILE}" oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts
           
-          # Output chart reference (note: helm push doesn't return a digest, only logs success)
           CHART_VERSION="${{ needs.prepare.outputs.chart_version }}"
           echo "chart_ref=oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/auth-operator:${CHART_VERSION}" >> $GITHUB_OUTPUT
           echo "Pushed chart to: oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/auth-operator:${CHART_VERSION}"
+
+      - name: Push Helm chart with SHA tag
+        if: needs.prepare.outputs.chart_version_sha != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        run: |
+          CHART_VERSION="${{ needs.prepare.outputs.chart_version }}"
+          CHART_VERSION_SHA="${{ needs.prepare.outputs.chart_version_sha }}"
+          OCI_BASE="${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/auth-operator"
+          
+          # Re-tag the chart we just pushed with the SHA-suffixed version
+          docker buildx imagetools create \
+            --tag "${OCI_BASE}:${CHART_VERSION_SHA}" \
+            "${OCI_BASE}:${CHART_VERSION}"
+          echo "Also tagged chart as: ${OCI_BASE}:${CHART_VERSION_SHA}"
 
       - name: Sign Helm chart (keyless)
         if: github.event_name != 'pull_request'

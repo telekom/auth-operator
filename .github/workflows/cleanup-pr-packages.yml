@@ -60,7 +60,7 @@ jobs:
             -H "X-GitHub-Api-Version: 2022-11-28" \
             "/orgs/${OWNER}/packages/container/${PACKAGE_NAME}/versions" \
             --paginate \
-            --jq '.[] | select(.metadata.container.tags[] | test("^pr[0-9]+-")) | {id: .id, tags: .metadata.container.tags}' 2>/dev/null || echo "")
+            --jq '.[] | select(.metadata.container.tags[] | test("^pr-[0-9]+")) | {id: .id, tags: .metadata.container.tags}' 2>/dev/null || echo "")
           
           if [ -z "$VERSIONS" ]; then
             echo "No PR container images found."
@@ -75,16 +75,16 @@ jobs:
             VERSION_ID=$(echo "$version" | jq -r '.id')
             ALL_TAGS=$(echo "$version" | jq -r '.tags | join(",")')
             
-            # Find the PR tag from all tags (format: pr<number>-<sha>)
-            PR_TAG=$(echo "$version" | jq -r '.tags[]' | grep -E '^pr[0-9]+-' | head -1 || echo "")
+            # Find the PR tag from all tags (format: pr-<number> or pr-<number>-<sha>)
+            PR_TAG=$(echo "$version" | jq -r '.tags[]' | grep -E '^pr-[0-9]+' | head -1 || echo "")
             
             if [ -z "$PR_TAG" ]; then
               echo "No PR tag found in tags: $ALL_TAGS"
               continue
             fi
             
-            # Extract PR number from tag
-            PR_NUM=$(echo "$PR_TAG" | sed -n 's/^pr\([0-9]*\)-.*/\1/p')
+            # Extract PR number from tag (handles both pr-42 and pr-42-abc1234)
+            PR_NUM=$(echo "$PR_TAG" | sed -n 's/^pr-\([0-9]*\).*/\1/p')
             
             if [ -z "$PR_NUM" ]; then
               echo "Could not extract PR number from tag: $PR_TAG"
@@ -115,39 +115,97 @@ jobs:
           
           echo "Container image cleanup complete."
           
-          # Cleanup untagged images
+          # Cleanup untagged images — but preserve digests referenced by tagged
+          # manifest lists (multi-arch builds push per-arch images by digest only;
+          # deleting them breaks the parent manifest list).
           echo ""
-          echo "Fetching untagged container images..."
-          UNTAGGED=$(gh api \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "/orgs/${OWNER}/packages/container/${PACKAGE_NAME}/versions" \
-            --paginate \
-            --jq '.[] | select(.metadata.container.tags | length == 0) | .id' 2>/dev/null || echo "")
+          echo "Building protected digest set from tagged manifests..."
+          PROTECTED=$(mktemp)
           
-          if [ -z "$UNTAGGED" ]; then
-            echo "No untagged container images found."
+          # Obtain a read-only OCI token for manifest inspection
+          OCI_TOKEN=$(curl -sf \
+            -u "token:${GH_TOKEN}" \
+            "https://ghcr.io/token?service=ghcr.io&scope=repository:${OWNER,,}/${PACKAGE_NAME}:pull" \
+            | jq -r '.token') || true
+          
+          if [ -z "${OCI_TOKEN}" ] || [ "${OCI_TOKEN}" = "null" ]; then
+            echo "WARNING: Could not obtain OCI token — skipping untagged cleanup to avoid breaking manifest lists."
           else
-            echo "Found untagged images, cleaning up..."
-            echo "$UNTAGGED" | while read -r VERSION_ID; do
-              if [ -z "$VERSION_ID" ]; then
-                continue
-              fi
-              echo "Deleting untagged image version ${VERSION_ID}"
-              if [ "$DRY_RUN" = "true" ]; then
-                echo "[DRY RUN] Would delete untagged version ${VERSION_ID}"
-              else
-                gh api \
-                  --method DELETE \
-                  -H "Accept: application/vnd.github+json" \
-                  -H "X-GitHub-Api-Version: 2022-11-28" \
-                  "/orgs/${OWNER}/packages/container/${PACKAGE_NAME}/versions/${VERSION_ID}" \
-                  && echo "Deleted untagged version ${VERSION_ID}" \
-                  || echo "Failed to delete untagged version ${VERSION_ID}"
-              fi
+            # Collect digests of all tagged versions
+            TAGGED_DIGESTS=$(gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "/orgs/${OWNER}/packages/container/${PACKAGE_NAME}/versions" \
+              --paginate \
+              --jq '.[] | select(.metadata.container.tags | length > 0) | .name' 2>/dev/null || echo "")
+            
+            # For each tagged manifest, resolve child digests (level 1)
+            for DIGEST in $TAGGED_DIGESTS; do
+              MANIFEST=$(curl -sf \
+                -H "Authorization: Bearer ${OCI_TOKEN}" \
+                -H "Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json" \
+                "https://ghcr.io/v2/${OWNER,,}/${PACKAGE_NAME}/manifests/${DIGEST}" 2>/dev/null) || continue
+              echo "$MANIFEST" | jq -r '(.manifests // [])[]?.digest // empty' >> "$PROTECTED" 2>/dev/null || true
             done
-            echo "Untagged image cleanup complete."
+            
+            # Level 2: children of children (nested indices with attestations/provenance)
+            if [ -s "$PROTECTED" ]; then
+              for DIGEST in $(sort -u "$PROTECTED"); do
+                MANIFEST=$(curl -sf \
+                  -H "Authorization: Bearer ${OCI_TOKEN}" \
+                  -H "Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json" \
+                  "https://ghcr.io/v2/${OWNER,,}/${PACKAGE_NAME}/manifests/${DIGEST}" 2>/dev/null) || continue
+                echo "$MANIFEST" | jq -r '(.manifests // [])[]?.digest // empty' >> "$PROTECTED" 2>/dev/null || true
+              done
+            fi
+            
+            sort -u -o "$PROTECTED" "$PROTECTED"
+            PROTECTED_COUNT=$(wc -l < "$PROTECTED" | tr -d ' ')
+            echo "Found ${PROTECTED_COUNT} protected digests referenced by tagged manifests"
+            
+            # Now delete only truly orphaned untagged versions
+            echo ""
+            echo "Fetching untagged container images..."
+            UNTAGGED=$(gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "/orgs/${OWNER}/packages/container/${PACKAGE_NAME}/versions" \
+              --paginate \
+              --jq '.[] | select(.metadata.container.tags | length == 0) | "\(.id) \(.name)"' 2>/dev/null || echo "")
+            
+            if [ -z "$UNTAGGED" ]; then
+              echo "No untagged container images found."
+            else
+              DELETED=0
+              KEPT=0
+              while read -r VERSION_ID VERSION_NAME; do
+                if [ -z "$VERSION_ID" ]; then
+                  continue
+                fi
+                if grep -qF "$VERSION_NAME" "$PROTECTED" 2>/dev/null; then
+                  echo "Keeping ${VERSION_NAME} (referenced by tagged manifest)"
+                  KEPT=$((KEPT + 1))
+                  continue
+                fi
+                echo "Deleting orphaned ${VERSION_NAME} (id: ${VERSION_ID})"
+                if [ "$DRY_RUN" = "true" ]; then
+                  echo "[DRY RUN] Would delete untagged version ${VERSION_ID}"
+                else
+                  gh api \
+                    --method DELETE \
+                    -H "Accept: application/vnd.github+json" \
+                    -H "X-GitHub-Api-Version: 2022-11-28" \
+                    "/orgs/${OWNER}/packages/container/${PACKAGE_NAME}/versions/${VERSION_ID}" \
+                    && echo "Deleted untagged version ${VERSION_ID}" \
+                    || echo "Failed to delete untagged version ${VERSION_ID}"
+                fi
+                DELETED=$((DELETED + 1))
+              done <<< "$UNTAGGED"
+              echo "Untagged image cleanup complete. Deleted: ${DELETED}, Kept (protected): ${KEPT}"
+            fi
           fi
+          
+          rm -f "$PROTECTED"
 
   cleanup-helm-charts:
     name: Cleanup PR Helm Charts
@@ -175,7 +233,7 @@ jobs:
             -H "X-GitHub-Api-Version: 2022-11-28" \
             "/orgs/${OWNER}/packages/container/charts%2F${PACKAGE_NAME}/versions" \
             --paginate \
-            --jq '.[] | select(.metadata.container.tags[] | test("^0\\.0\\.0-pr[0-9]+\\.")) | {id: .id, tags: .metadata.container.tags}' 2>/dev/null || echo "")
+            --jq '.[] | select(.metadata.container.tags[] | test("^0\\.0\\.0-pr[0-9]+")) | {id: .id, tags: .metadata.container.tags}' 2>/dev/null || echo "")
           
           if [ -z "$VERSIONS" ]; then
             echo "No PR Helm charts found."
@@ -190,16 +248,16 @@ jobs:
             VERSION_ID=$(echo "$version" | jq -r '.id')
             ALL_TAGS=$(echo "$version" | jq -r '.tags | join(",")')
             
-            # Find the PR tag from all tags (format: 0.0.0-pr<number>.<sha>)
-            PR_TAG=$(echo "$version" | jq -r '.tags[]' | grep -E '^0\.0\.0-pr[0-9]+\.' | head -1 || echo "")
+            # Find the PR tag from all tags (format: 0.0.0-pr<number> or 0.0.0-pr<number>.<sha>)
+            PR_TAG=$(echo "$version" | jq -r '.tags[]' | grep -E '^0\.0\.0-pr[0-9]+' | head -1 || echo "")
             
             if [ -z "$PR_TAG" ]; then
               echo "No PR tag found in tags: $ALL_TAGS"
               continue
             fi
             
-            # Extract PR number from tag
-            PR_NUM=$(echo "$PR_TAG" | sed -n 's/^0\.0\.0-pr\([0-9]*\)\..*/\1/p')
+            # Extract PR number from tag (handles both 0.0.0-pr42 and 0.0.0-pr42.abc1234)
+            PR_NUM=$(echo "$PR_TAG" | sed -n 's/^0\.0\.0-pr\([0-9]*\).*/\1/p')
             
             if [ -z "$PR_NUM" ]; then
               echo "Could not extract PR number from tag: $PR_TAG"
@@ -230,36 +288,73 @@ jobs:
           
           echo "Helm chart cleanup complete."
           
-          # Cleanup untagged Helm charts
+          # Cleanup untagged Helm charts — protect digests referenced by tagged
+          # chart versions (cosign signatures, OCI referrers, etc.)
           echo ""
-          echo "Fetching untagged Helm charts..."
-          UNTAGGED=$(gh api \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "/orgs/${OWNER}/packages/container/charts%2F${PACKAGE_NAME}/versions" \
-            --paginate \
-            --jq '.[] | select(.metadata.container.tags | length == 0) | .id' 2>/dev/null || echo "")
+          echo "Building protected digest set from tagged Helm chart manifests..."
+          CHART_PROTECTED=$(mktemp)
           
-          if [ -z "$UNTAGGED" ]; then
-            echo "No untagged Helm charts found."
+          OCI_TOKEN=$(curl -sf \
+            -u "token:${GH_TOKEN}" \
+            "https://ghcr.io/token?service=ghcr.io&scope=repository:${OWNER,,}/charts/${PACKAGE_NAME}:pull" \
+            | jq -r '.token') || true
+          
+          if [ -z "${OCI_TOKEN}" ] || [ "${OCI_TOKEN}" = "null" ]; then
+            echo "WARNING: Could not obtain OCI token for Helm charts — skipping untagged cleanup."
           else
-            echo "Found untagged charts, cleaning up..."
-            echo "$UNTAGGED" | while read -r VERSION_ID; do
-              if [ -z "$VERSION_ID" ]; then
-                continue
-              fi
-              echo "Deleting untagged chart version ${VERSION_ID}"
-              if [ "$DRY_RUN" = "true" ]; then
-                echo "[DRY RUN] Would delete untagged version ${VERSION_ID}"
-              else
-                gh api \
-                  --method DELETE \
-                  -H "Accept: application/vnd.github+json" \
-                  -H "X-GitHub-Api-Version: 2022-11-28" \
-                  "/orgs/${OWNER}/packages/container/charts%2F${PACKAGE_NAME}/versions/${VERSION_ID}" \
-                  && echo "Deleted untagged version ${VERSION_ID}" \
-                  || echo "Failed to delete untagged version ${VERSION_ID}"
-              fi
+            TAGGED_CHART_DIGESTS=$(gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "/orgs/${OWNER}/packages/container/charts%2F${PACKAGE_NAME}/versions" \
+              --paginate \
+              --jq '.[] | select(.metadata.container.tags | length > 0) | .name' 2>/dev/null || echo "")
+            
+            for DIGEST in $TAGGED_CHART_DIGESTS; do
+              MANIFEST=$(curl -sf \
+                -H "Authorization: Bearer ${OCI_TOKEN}" \
+                -H "Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json" \
+                "https://ghcr.io/v2/${OWNER,,}/charts/${PACKAGE_NAME}/manifests/${DIGEST}" 2>/dev/null) || continue
+              echo "$MANIFEST" | jq -r '(.manifests // [])[]?.digest // empty' >> "$CHART_PROTECTED" 2>/dev/null || true
+              # Also protect config and layer digests
+              echo "$MANIFEST" | jq -r '.config.digest // empty' >> "$CHART_PROTECTED" 2>/dev/null || true
+              echo "$MANIFEST" | jq -r '(.layers // [])[]?.digest // empty' >> "$CHART_PROTECTED" 2>/dev/null || true
             done
-            echo "Untagged chart cleanup complete."
+            
+            sort -u -o "$CHART_PROTECTED" "$CHART_PROTECTED"
+            echo "Found $(wc -l < "$CHART_PROTECTED" | tr -d ' ') protected Helm chart digests"
+            
+            echo "Fetching untagged Helm charts..."
+            UNTAGGED=$(gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "/orgs/${OWNER}/packages/container/charts%2F${PACKAGE_NAME}/versions" \
+              --paginate \
+              --jq '.[] | select(.metadata.container.tags | length == 0) | "\(.id) \(.name)"' 2>/dev/null || echo "")
+            
+            if [ -z "$UNTAGGED" ]; then
+              echo "No untagged Helm charts found."
+            else
+              while read -r VERSION_ID VERSION_NAME; do
+                [ -z "$VERSION_ID" ] && continue
+                if grep -qF "$VERSION_NAME" "$CHART_PROTECTED" 2>/dev/null; then
+                  echo "Keeping ${VERSION_NAME} (referenced by tagged chart)"
+                else
+                  echo "Deleting orphaned chart ${VERSION_NAME} (id: ${VERSION_ID})"
+                  if [ "$DRY_RUN" = "true" ]; then
+                    echo "[DRY RUN] Would delete untagged version ${VERSION_ID}"
+                  else
+                    gh api \
+                      --method DELETE \
+                      -H "Accept: application/vnd.github+json" \
+                      -H "X-GitHub-Api-Version: 2022-11-28" \
+                      "/orgs/${OWNER}/packages/container/charts%2F${PACKAGE_NAME}/versions/${VERSION_ID}" \
+                      && echo "Deleted untagged version ${VERSION_ID}" \
+                      || echo "Failed to delete untagged version ${VERSION_ID}"
+                  fi
+                fi
+              done <<< "$UNTAGGED"
+              echo "Untagged chart cleanup complete."
+            fi
           fi
+          
+          rm -f "$CHART_PROTECTED"
