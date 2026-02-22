@@ -28,7 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	authnv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	conditions "github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/discovery"
 	"github.com/telekom/auth-operator/pkg/metrics"
@@ -310,19 +310,19 @@ func formatBlockingResourcesMessage(blockingResources []namespaceDeletionResourc
 
 func isOwnedByBindDefinition(ownerReferences []metav1.OwnerReference) bool {
 	for _, ownerRef := range ownerReferences {
-		if ownerRef.Kind == "BindDefinition" && ownerRef.APIVersion == authnv1alpha1.GroupVersion.String() {
+		if ownerRef.Kind == "BindDefinition" && ownerRef.APIVersion == authorizationv1alpha1.GroupVersion.String() {
 			return true
 		}
 	}
 	return false
 }
 
-func (r *RoleBindingTerminator) getOwningBindDefinition(ctx context.Context, ownerReferences []metav1.OwnerReference) (*authnv1alpha1.BindDefinition, error) {
+func (r *RoleBindingTerminator) getOwningBindDefinition(ctx context.Context, ownerReferences []metav1.OwnerReference) (*authorizationv1alpha1.BindDefinition, error) {
 	for _, ownerRef := range ownerReferences {
-		if ownerRef.Kind != "BindDefinition" || ownerRef.APIVersion != authnv1alpha1.GroupVersion.String() {
+		if ownerRef.Kind != "BindDefinition" || ownerRef.APIVersion != authorizationv1alpha1.GroupVersion.String() {
 			continue
 		}
-		bindDefinition := &authnv1alpha1.BindDefinition{}
+		bindDefinition := &authorizationv1alpha1.BindDefinition{}
 		err := r.client.Get(ctx, types.NamespacedName{Name: ownerRef.Name}, bindDefinition)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get BindDefinition %s: %w", ownerRef.Name, err)
@@ -365,7 +365,7 @@ func (r *RoleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request)
 	// ensure finalizer is there if RB is owned by a BindDefinition and the RoleBinding is not being deleted
 	if roleBinding.DeletionTimestamp.IsZero() {
 		old := roleBinding.DeepCopy()
-		if controllerutil.AddFinalizer(&roleBinding, authnv1alpha1.RoleBindingFinalizer) {
+		if controllerutil.AddFinalizer(&roleBinding, authorizationv1alpha1.RoleBindingFinalizer) {
 			if err := r.client.Patch(ctx, &roleBinding, client.MergeFromWithOptions(old, client.MergeFromWithOptimisticLock{})); err != nil {
 				logger.Error(err, "failed to add finalizer to RoleBinding")
 				metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleBindingTerminator, metrics.ResultError).Inc()
@@ -396,7 +396,7 @@ func (r *RoleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request)
 	namespaceIsTerminating := !namespace.GetDeletionTimestamp().IsZero() && namespace.Status.Phase == corev1.NamespaceTerminating
 	if !namespaceIsTerminating {
 		old := roleBinding.DeepCopy()
-		if controllerutil.RemoveFinalizer(&roleBinding, authnv1alpha1.RoleBindingFinalizer) {
+		if controllerutil.RemoveFinalizer(&roleBinding, authorizationv1alpha1.RoleBindingFinalizer) {
 			if err := r.client.Patch(ctx, &roleBinding, client.MergeFromWithOptions(old, client.MergeFromWithOptimisticLock{})); err != nil {
 				logger.Error(err, "failed to remove finalizer from RoleBinding")
 				metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleBindingTerminator, metrics.ResultError).Inc()
@@ -436,10 +436,10 @@ func (r *RoleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request)
 
 		conditions.MarkTrue(
 			conditions.NewNamespaceWrapper(&namespace),
-			authnv1alpha1.NamespaceTerminationBlockedCondition,
+			authorizationv1alpha1.NamespaceTerminationBlockedCondition,
 			0,
-			authnv1alpha1.NamespaceTerminationBlockedReason,
-			conditions.ConditionMessage(fmt.Sprintf("%s: %s", authnv1alpha1.NamespaceTerminationBlockedMessage, formatBlockingResourcesMessage(blockingResources))),
+			authorizationv1alpha1.NamespaceTerminationBlockedReason,
+			conditions.ConditionMessage(fmt.Sprintf("%s: %s", authorizationv1alpha1.NamespaceTerminationBlockedMessage, formatBlockingResourcesMessage(blockingResources))),
 		)
 		// Best-effort status update on Namespace (core type) — SSA migration deferred.
 		// Low conflict risk: runs only during namespace termination, errors are non-fatal.
@@ -463,7 +463,7 @@ func (r *RoleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request)
 
 	logger.V(1).Info("terminating namespace has no more resources - proceeding to remove RoleBinding finalizers")
 	old := roleBinding.DeepCopy()
-	if controllerutil.RemoveFinalizer(&roleBinding, authnv1alpha1.RoleBindingFinalizer) {
+	if controllerutil.RemoveFinalizer(&roleBinding, authorizationv1alpha1.RoleBindingFinalizer) {
 		logger.V(2).Info("removing finalizer from RoleBinding in terminating namespace")
 		if err := r.client.Patch(ctx, &roleBinding, client.MergeFromWithOptions(old, client.MergeFromWithOptimisticLock{})); err != nil {
 			logger.Error(err, "failed to remove finalizer from RoleBinding", "roleBindingName", roleBinding.Name, "roleBinding", roleBinding.Name, "namespace", namespace.Name)
@@ -471,7 +471,7 @@ func (r *RoleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request)
 			metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleBindingTerminator, metrics.ErrorTypeAPI).Inc()
 			return ctrl.Result{}, err
 		}
-		r.recorder.Eventf(bindDefinition, nil, corev1.EventTypeNormal, authnv1alpha1.EventReasonFinalizerRemoved, authnv1alpha1.EventActionFinalizerRemove, "Removed finalizer from RoleBinding %s in terminating namespace %s", roleBinding.Name, namespace.Name)
+		r.recorder.Eventf(bindDefinition, nil, corev1.EventTypeNormal, authorizationv1alpha1.EventReasonFinalizerRemoved, authorizationv1alpha1.EventActionFinalizerRemove, "Removed finalizer from RoleBinding %s in terminating namespace %s", roleBinding.Name, namespace.Name)
 		logger.V(1).Info("successfully removed finalizer from RoleBinding in terminating namespace")
 	} else {
 		logger.V(3).Info("RoleBinding does not have finalizer", "roleBindingName", roleBinding.Name)
@@ -479,10 +479,10 @@ func (r *RoleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request)
 
 	conditions.MarkFalse(
 		conditions.NewNamespaceWrapper(&namespace),
-		authnv1alpha1.NamespaceTerminationBlockedCondition,
+		authorizationv1alpha1.NamespaceTerminationBlockedCondition,
 		0,
-		authnv1alpha1.NamespaceTerminationAllowedReason,
-		authnv1alpha1.NamespaceTerminationAllowedMessage,
+		authorizationv1alpha1.NamespaceTerminationAllowedReason,
+		authorizationv1alpha1.NamespaceTerminationAllowedMessage,
 	)
 	// Best-effort status update on Namespace (core type) — SSA migration deferred.
 	// Low conflict risk: runs only during namespace termination, errors are non-fatal.

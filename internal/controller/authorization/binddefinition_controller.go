@@ -23,7 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	authnv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/api/authorization/v1alpha1/applyconfiguration/ssa"
 	conditions "github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/discovery"
@@ -114,7 +114,7 @@ func (r *BindDefinitionReconciler) SetupWithManager(mgr ctrl.Manager, concurrenc
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		// control BindDefinitions
-		For(&authnv1alpha1.BindDefinition{}).
+		For(&authorizationv1alpha1.BindDefinition{}).
 		WithOptions(controller.TypedOptions[reconcile.Request]{
 			MaxConcurrentReconciles: concurrency,
 		}).
@@ -132,7 +132,7 @@ func (r *BindDefinitionReconciler) SetupWithManager(mgr ctrl.Manager, concurrenc
 		// watch RoleBindings and enqueue BindDefinition owner
 		Watches(
 			&rbacv1.RoleBinding{},
-			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &authnv1alpha1.BindDefinition{}, handler.OnlyControllerOwner())).
+			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &authorizationv1alpha1.BindDefinition{}, handler.OnlyControllerOwner())).
 		Complete(r)
 }
 
@@ -154,7 +154,7 @@ func (r *BindDefinitionReconciler) namespaceToBindDefinitionRequests(ctx context
 	logger.V(2).Info("processing namespace event", "namespace", namespace.Name, "phase", namespace.Status.Phase)
 
 	// List all RoleDefinition resources
-	bindDefList := &authnv1alpha1.BindDefinitionList{}
+	bindDefList := &authorizationv1alpha1.BindDefinitionList{}
 	err := r.client.List(ctx, bindDefList)
 	if err != nil {
 		logger.Error(err, "failed to list BindDefinition resources", "namespace", namespace.Name)
@@ -181,7 +181,7 @@ func (r *BindDefinitionReconciler) namespaceToBindDefinitionRequests(ctx context
 // that other non-terminating BindDefinitions reference.
 func (r *BindDefinitionReconciler) isSAReferencedByOtherBindDefs(ctx context.Context, currentBindDefName, saName, saNamespace string) (bool, error) {
 	// List all BindDefinitions
-	bindDefList := &authnv1alpha1.BindDefinitionList{}
+	bindDefList := &authorizationv1alpha1.BindDefinitionList{}
 	err := r.client.List(ctx, bindDefList)
 	if err != nil {
 		return false, fmt.Errorf("list BindDefinitions: %w", err)
@@ -193,7 +193,7 @@ func (r *BindDefinitionReconciler) isSAReferencedByOtherBindDefs(ctx context.Con
 		}
 		// Check if any of the subjects in this BindDefinition reference the ServiceAccount
 		for _, subject := range bindDef.Spec.Subjects {
-			if subject.Kind == authnv1alpha1.BindSubjectServiceAccount &&
+			if subject.Kind == authorizationv1alpha1.BindSubjectServiceAccount &&
 				subject.Name == saName &&
 				subject.Namespace == saNamespace {
 				return true, nil
@@ -228,7 +228,7 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// Fetching the BindDefinition custom resource from Kubernetes API
 	logger.V(2).Info("Fetching BindDefinition from API",
 		"bindDefinition", req.Name)
-	bindDefinition := &authnv1alpha1.BindDefinition{}
+	bindDefinition := &authorizationv1alpha1.BindDefinition{}
 	err := r.client.Get(ctx, req.NamespacedName, bindDefinition)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
@@ -282,14 +282,14 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		"bindDefinition", bindDefinition.Name,
 		"generation", bindDefinition.Generation)
 	conditions.MarkReconciling(bindDefinition, bindDefinition.Generation,
-		authnv1alpha1.ReconcilingReasonProgressing, authnv1alpha1.ReconcilingMessageProgressing)
+		authorizationv1alpha1.ReconcilingReasonProgressing, authorizationv1alpha1.ReconcilingMessageProgressing)
 	bindDefinition.Status.ObservedGeneration = bindDefinition.Generation
 
-	if !controllerutil.ContainsFinalizer(bindDefinition, authnv1alpha1.BindDefinitionFinalizer) {
+	if !controllerutil.ContainsFinalizer(bindDefinition, authorizationv1alpha1.BindDefinitionFinalizer) {
 		logger.V(2).Info("Adding finalizer to BindDefinition",
 			"bindDefinition", bindDefinition.Name)
 		old := bindDefinition.DeepCopy()
-		controllerutil.AddFinalizer(bindDefinition, authnv1alpha1.BindDefinitionFinalizer)
+		controllerutil.AddFinalizer(bindDefinition, authorizationv1alpha1.BindDefinitionFinalizer)
 		if err := r.client.Patch(ctx, bindDefinition, client.MergeFromWithOptions(old, client.MergeFromWithOptimisticLock{})); err != nil {
 			logger.Error(err, "Failed to add finalizer",
 				"bindDefinition", bindDefinition.Name)
@@ -298,11 +298,11 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			metrics.ReconcileErrors.WithLabelValues(metrics.ControllerBindDefinition, metrics.ErrorTypeAPI).Inc()
 			return ctrl.Result{}, fmt.Errorf("add finalizer to BindDefinition %s: %w", bindDefinition.Name, err)
 		}
-		r.recorder.Eventf(bindDefinition, nil, corev1.EventTypeNormal, authnv1alpha1.EventReasonFinalizer, authnv1alpha1.EventActionFinalizerAdd, "Adding finalizer to BindDefinition %s", bindDefinition.Name)
+		r.recorder.Eventf(bindDefinition, nil, corev1.EventTypeNormal, authorizationv1alpha1.EventReasonFinalizer, authorizationv1alpha1.EventActionFinalizerAdd, "Adding finalizer to BindDefinition %s", bindDefinition.Name)
 	}
 
 	// Batch condition - finalizer set
-	conditions.MarkTrue(bindDefinition, authnv1alpha1.FinalizerCondition, bindDefinition.Generation, authnv1alpha1.FinalizerReason, authnv1alpha1.FinalizerMessage)
+	conditions.MarkTrue(bindDefinition, authorizationv1alpha1.FinalizerCondition, bindDefinition.Generation, authorizationv1alpha1.FinalizerReason, authorizationv1alpha1.FinalizerMessage)
 
 	// Collect namespaces once for both create and update paths.
 	// This avoids duplicate API calls to list namespaces.
@@ -390,7 +390,7 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 // requeue interval so the RoleRefsValid condition self-heals.
 func (r *BindDefinitionReconciler) reconcileResources(
 	ctx context.Context,
-	bindDefinition *authnv1alpha1.BindDefinition,
+	bindDefinition *authorizationv1alpha1.BindDefinition,
 	activeNamespaces []corev1.Namespace,
 ) (int, error) {
 	logger := log.FromContext(ctx)
@@ -413,13 +413,13 @@ func (r *BindDefinitionReconciler) reconcileResources(
 	if missingCount > 0 {
 		logger.Info("Some referenced roles do not exist - bindings will be created but may not be effective",
 			"bindDefinitionName", bindDefinition.Name, "missingRoles", missingRoles)
-		r.recorder.Eventf(bindDefinition, nil, corev1.EventTypeWarning, authnv1alpha1.EventReasonRoleRefNotFound, authnv1alpha1.EventActionValidate,
+		r.recorder.Eventf(bindDefinition, nil, corev1.EventTypeWarning, authorizationv1alpha1.EventReasonRoleRefNotFound, authorizationv1alpha1.EventActionValidate,
 			"Referenced roles not found: %v. Bindings will be created but ineffective until roles exist. Will requeue in %s.", missingRoles, RoleRefRequeueInterval)
-		conditions.MarkFalse(bindDefinition, authnv1alpha1.RoleRefValidCondition, bindDefinition.Generation,
-			authnv1alpha1.RoleRefInvalidReason, authnv1alpha1.RoleRefInvalidMessage, missingRoles)
+		conditions.MarkFalse(bindDefinition, authorizationv1alpha1.RoleRefValidCondition, bindDefinition.Generation,
+			authorizationv1alpha1.RoleRefInvalidReason, authorizationv1alpha1.RoleRefInvalidMessage, missingRoles)
 	} else {
-		conditions.MarkTrue(bindDefinition, authnv1alpha1.RoleRefValidCondition, bindDefinition.Generation,
-			authnv1alpha1.RoleRefValidReason, authnv1alpha1.RoleRefValidMessage)
+		conditions.MarkTrue(bindDefinition, authorizationv1alpha1.RoleRefValidCondition, bindDefinition.Generation,
+			authorizationv1alpha1.RoleRefValidReason, authorizationv1alpha1.RoleRefValidMessage)
 	}
 
 	// Ensure ServiceAccounts
@@ -464,8 +464,8 @@ func (r *BindDefinitionReconciler) reconcileResources(
 	logger.V(2).Info("reconcileResources: RoleBindings ensured",
 		"bindDefinition", bindDefinition.Name)
 
-	conditions.MarkTrue(bindDefinition, authnv1alpha1.CreateCondition, bindDefinition.Generation,
-		authnv1alpha1.CreateReason, authnv1alpha1.CreateMessage)
+	conditions.MarkTrue(bindDefinition, authorizationv1alpha1.CreateCondition, bindDefinition.Generation,
+		authorizationv1alpha1.CreateReason, authorizationv1alpha1.CreateMessage)
 
 	// Update managed resource gauges. These counts reflect the spec-declared
 	// resources that were applied during this reconciliation, not a live count.
@@ -492,7 +492,7 @@ func (r *BindDefinitionReconciler) reconcileResources(
 // This replaces the separate createClusterRoleBindings and updateClusterRoleBindings functions.
 func (r *BindDefinitionReconciler) ensureClusterRoleBindings(
 	ctx context.Context,
-	bindDef *authnv1alpha1.BindDefinition,
+	bindDef *authorizationv1alpha1.BindDefinition,
 ) error {
 	logger := log.FromContext(ctx)
 
@@ -519,8 +519,8 @@ func (r *BindDefinitionReconciler) ensureClusterRoleBindings(
 		if err := pkgssa.ApplyClusterRoleBinding(ctx, r.client, ac); err != nil {
 			logger.Error(err, "Failed to ensure ClusterRoleBinding",
 				"bindDefinitionName", bindDef.Name, "clusterRoleBindingName", crbName)
-			conditions.MarkFalse(bindDef, authnv1alpha1.CreateCondition, bindDef.Generation,
-				authnv1alpha1.CreateReason, authnv1alpha1.CreateMessage)
+			conditions.MarkFalse(bindDef, authorizationv1alpha1.CreateCondition, bindDef.Generation,
+				authorizationv1alpha1.CreateReason, authorizationv1alpha1.CreateMessage)
 			r.applyStatusNonFatal(ctx, bindDef)
 			return fmt.Errorf("ensure ClusterRoleBinding %s: %w", crbName, err)
 		}
@@ -537,7 +537,7 @@ func (r *BindDefinitionReconciler) ensureClusterRoleBindings(
 // Uses Server-Side Apply (SSA) to create or update bindings in a single operation.
 func (r *BindDefinitionReconciler) ensureRoleBindings(
 	ctx context.Context,
-	bindDef *authnv1alpha1.BindDefinition,
+	bindDef *authorizationv1alpha1.BindDefinition,
 ) error {
 	logger := log.FromContext(ctx)
 
@@ -579,7 +579,7 @@ func (r *BindDefinitionReconciler) ensureRoleBindings(
 // ensureSingleRoleBinding ensures a single RoleBinding exists and is up-to-date.
 func (r *BindDefinitionReconciler) ensureSingleRoleBinding(
 	ctx context.Context,
-	bindDef *authnv1alpha1.BindDefinition,
+	bindDef *authorizationv1alpha1.BindDefinition,
 	namespace, roleRef, roleKind string,
 ) error {
 	logger := log.FromContext(ctx)
@@ -606,8 +606,8 @@ func (r *BindDefinitionReconciler) ensureSingleRoleBinding(
 	if err := pkgssa.ApplyRoleBinding(ctx, r.client, ac); err != nil {
 		logger.Error(err, "Failed to ensure RoleBinding",
 			"bindDefinitionName", bindDef.Name, "roleBindingName", rbName, "namespace", namespace)
-		conditions.MarkFalse(bindDef, authnv1alpha1.CreateCondition, bindDef.Generation,
-			authnv1alpha1.CreateReason, authnv1alpha1.CreateMessage)
+		conditions.MarkFalse(bindDef, authorizationv1alpha1.CreateCondition, bindDef.Generation,
+			authorizationv1alpha1.CreateReason, authorizationv1alpha1.CreateMessage)
 		r.applyStatusNonFatal(ctx, bindDef)
 		return fmt.Errorf("ensure RoleBinding %s/%s: %w", namespace, rbName, err)
 	}
@@ -653,7 +653,7 @@ func (r *BindDefinitionReconciler) validateServiceAccountNamespace(
 // The source-names annotation tracks all BDs managing this SA (comma-separated).
 func (r *BindDefinitionReconciler) applyServiceAccount(
 	ctx context.Context,
-	bindDef *authnv1alpha1.BindDefinition,
+	bindDef *authorizationv1alpha1.BindDefinition,
 	subject rbacv1.Subject,
 	automountToken bool,
 ) error {
@@ -694,7 +694,7 @@ func (r *BindDefinitionReconciler) applyServiceAccount(
 		"bindDefinitionName", bindDef.Name, "serviceAccount", subject.Name, "namespace", subject.Namespace,
 		"sourceNames", sourceNames)
 	metrics.RBACResourcesApplied.WithLabelValues(metrics.ResourceServiceAccount).Inc()
-	r.recorder.Eventf(bindDef, nil, corev1.EventTypeNormal, authnv1alpha1.EventReasonUpdate, authnv1alpha1.EventActionReconcile,
+	r.recorder.Eventf(bindDef, nil, corev1.EventTypeNormal, authorizationv1alpha1.EventReasonUpdate, authorizationv1alpha1.EventActionReconcile,
 		"Applied resource ServiceAccount/%s in namespace %s", subject.Name, subject.Namespace)
 
 	return nil
@@ -709,7 +709,7 @@ func (r *BindDefinitionReconciler) applyServiceAccount(
 // Returns the list of generated/managed SAs and the list of external (pre-existing) SAs.
 func (r *BindDefinitionReconciler) ensureServiceAccounts(
 	ctx context.Context,
-	bindDef *authnv1alpha1.BindDefinition,
+	bindDef *authorizationv1alpha1.BindDefinition,
 ) ([]rbacv1.Subject, []string, error) {
 	logger := log.FromContext(ctx)
 	var generatedSAs []rbacv1.Subject
@@ -719,7 +719,7 @@ func (r *BindDefinitionReconciler) ensureServiceAccounts(
 	automountToken := ptr.Deref(bindDef.Spec.AutomountServiceAccountToken, true)
 
 	for _, subject := range bindDef.Spec.Subjects {
-		if subject.Kind != authnv1alpha1.BindSubjectServiceAccount {
+		if subject.Kind != authorizationv1alpha1.BindSubjectServiceAccount {
 			continue
 		}
 
@@ -753,7 +753,7 @@ func (r *BindDefinitionReconciler) ensureServiceAccounts(
 				"serviceAccount", subject.Name, "namespace", subject.Namespace)
 			metrics.ServiceAccountSkippedPreExisting.WithLabelValues(bindDef.Name).Inc()
 			r.recorder.Eventf(bindDef, nil, corev1.EventTypeNormal,
-				authnv1alpha1.EventReasonServiceAccountPreExisting, authnv1alpha1.EventActionReconcile,
+				authorizationv1alpha1.EventReasonServiceAccountPreExisting, authorizationv1alpha1.EventActionReconcile,
 				"Using pre-existing ServiceAccount %s/%s (not managed by any BindDefinition)",
 				subject.Namespace, subject.Name)
 			// Add tracking annotation to external SA
@@ -771,7 +771,7 @@ func (r *BindDefinitionReconciler) ensureServiceAccounts(
 				"bindDefinitionName", bindDef.Name,
 				"serviceAccount", subject.Name, "namespace", subject.Namespace)
 			r.recorder.Eventf(bindDef, nil, corev1.EventTypeNormal,
-				authnv1alpha1.EventReasonServiceAccountShared, authnv1alpha1.EventActionReconcile,
+				authorizationv1alpha1.EventReasonServiceAccountShared, authorizationv1alpha1.EventActionReconcile,
 				"Adding shared ownership to ServiceAccount %s/%s (already owned by another BindDefinition)",
 				subject.Namespace, subject.Name)
 		}
@@ -794,14 +794,14 @@ func (r *BindDefinitionReconciler) ensureServiceAccounts(
 
 // applyStatus applies status updates using Server-Side Apply (SSA).
 // This eliminates race conditions from stale object versions and batches all condition updates.
-func (r *BindDefinitionReconciler) applyStatus(ctx context.Context, bindDefinition *authnv1alpha1.BindDefinition) error {
+func (r *BindDefinitionReconciler) applyStatus(ctx context.Context, bindDefinition *authorizationv1alpha1.BindDefinition) error {
 	return ssa.ApplyBindDefinitionStatus(ctx, r.client, bindDefinition)
 }
 
 //nolint:unparam // result is intentionally always nil - requeue via error propagation
 func (r *BindDefinitionReconciler) reconcileDelete(
 	ctx context.Context,
-	bindDefinition *authnv1alpha1.BindDefinition,
+	bindDefinition *authorizationv1alpha1.BindDefinition,
 ) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	logger.V(1).Info("starting reconcileDelete",
@@ -816,8 +816,8 @@ func (r *BindDefinitionReconciler) reconcileDelete(
 	metrics.NamespacesActive.DeleteLabelValues(bindDefinition.Name)
 	metrics.ExternalSAsReferenced.DeleteLabelValues(bindDefinition.Name)
 
-	conditions.MarkTrue(bindDefinition, authnv1alpha1.DeleteCondition, bindDefinition.Generation,
-		authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
+	conditions.MarkTrue(bindDefinition, authorizationv1alpha1.DeleteCondition, bindDefinition.Generation,
+		authorizationv1alpha1.DeleteReason, authorizationv1alpha1.DeleteMessage)
 	if err := r.applyStatus(ctx, bindDefinition); err != nil {
 		return ctrl.Result{}, fmt.Errorf("apply delete condition for BindDefinition %s: %w", bindDefinition.Name, err)
 	}
@@ -841,8 +841,8 @@ func (r *BindDefinitionReconciler) reconcileDelete(
 	}
 
 	// Mark finalizer as removed (DeleteCondition already set at start of deletion)
-	conditions.MarkFalse(bindDefinition, authnv1alpha1.FinalizerCondition, bindDefinition.Generation,
-		authnv1alpha1.FinalizerReason, authnv1alpha1.FinalizerMessage)
+	conditions.MarkFalse(bindDefinition, authorizationv1alpha1.FinalizerCondition, bindDefinition.Generation,
+		authorizationv1alpha1.FinalizerReason, authorizationv1alpha1.FinalizerMessage)
 	if err := r.applyStatus(ctx, bindDefinition); err != nil {
 		return ctrl.Result{}, fmt.Errorf("apply status after cleanup for BindDefinition %s: %w", bindDefinition.Name, err)
 	}
@@ -854,7 +854,7 @@ func (r *BindDefinitionReconciler) reconcileDelete(
 		return ctrl.Result{}, fmt.Errorf("re-fetch BindDefinition %s before finalizer removal: %w", bindDefinition.Name, err)
 	}
 	old := bindDefinition.DeepCopy()
-	controllerutil.RemoveFinalizer(bindDefinition, authnv1alpha1.BindDefinitionFinalizer)
+	controllerutil.RemoveFinalizer(bindDefinition, authorizationv1alpha1.BindDefinitionFinalizer)
 	if err := r.client.Patch(ctx, bindDefinition, client.MergeFromWithOptions(old, client.MergeFromWithOptimisticLock{})); err != nil {
 		return ctrl.Result{}, fmt.Errorf("remove finalizer from BindDefinition %s: %w", bindDefinition.Name, err)
 	}
@@ -866,7 +866,7 @@ func (r *BindDefinitionReconciler) reconcileDelete(
 // deleteSubjectServiceAccounts deletes service accounts specified in subjects.
 func (r *BindDefinitionReconciler) deleteSubjectServiceAccounts(
 	ctx context.Context,
-	bindDef *authnv1alpha1.BindDefinition,
+	bindDef *authorizationv1alpha1.BindDefinition,
 ) error {
 	logger := log.FromContext(ctx)
 	logger.V(2).Info("processing subjects for deletion",
@@ -877,7 +877,7 @@ func (r *BindDefinitionReconciler) deleteSubjectServiceAccounts(
 			"bindDefinitionName", bindDef.Name, "index", idx,
 			"kind", subject.Kind, "name", subject.Name, "namespace", subject.Namespace)
 
-		if subject.Kind == authnv1alpha1.BindSubjectServiceAccount {
+		if subject.Kind == authorizationv1alpha1.BindSubjectServiceAccount {
 			if _, err := r.deleteServiceAccount(ctx, bindDef, subject.Name, subject.Namespace); err != nil {
 				return fmt.Errorf("deleteSubjectServiceAccounts: %w", err)
 			}
@@ -889,7 +889,7 @@ func (r *BindDefinitionReconciler) deleteSubjectServiceAccounts(
 // deleteAllClusterRoleBindings deletes all ClusterRoleBindings for the BindDefinition.
 func (r *BindDefinitionReconciler) deleteAllClusterRoleBindings(
 	ctx context.Context,
-	bindDef *authnv1alpha1.BindDefinition,
+	bindDef *authorizationv1alpha1.BindDefinition,
 ) error {
 	logger := log.FromContext(ctx)
 	logger.V(2).Info("processing ClusterRoleBindings for deletion",
@@ -902,8 +902,8 @@ func (r *BindDefinitionReconciler) deleteAllClusterRoleBindings(
 
 		result, err := r.deleteClusterRoleBinding(ctx, bindDef, clusterRoleRef)
 		if err != nil {
-			conditions.MarkFalse(bindDef, authnv1alpha1.DeleteCondition, bindDef.Generation,
-				authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
+			conditions.MarkFalse(bindDef, authorizationv1alpha1.DeleteCondition, bindDef.Generation,
+				authorizationv1alpha1.DeleteReason, authorizationv1alpha1.DeleteMessage)
 			if errStatus := r.applyStatus(ctx, bindDef); errStatus != nil {
 				return fmt.Errorf("apply status after ClusterRoleBinding %s deletion failure: %w", clusterRoleRef, errStatus)
 			}
@@ -918,7 +918,7 @@ func (r *BindDefinitionReconciler) deleteAllClusterRoleBindings(
 // deleteAllRoleBindings deletes all RoleBindings for the BindDefinition across all matching namespaces.
 func (r *BindDefinitionReconciler) deleteAllRoleBindings(
 	ctx context.Context,
-	bindDef *authnv1alpha1.BindDefinition,
+	bindDef *authorizationv1alpha1.BindDefinition,
 ) error {
 	logger := log.FromContext(ctx)
 
@@ -961,13 +961,13 @@ func (r *BindDefinitionReconciler) deleteAllRoleBindings(
 // deleteRoleBindingWithStatusUpdate deletes a RoleBinding and updates status on error.
 func (r *BindDefinitionReconciler) deleteRoleBindingWithStatusUpdate(
 	ctx context.Context,
-	bindDef *authnv1alpha1.BindDefinition,
+	bindDef *authorizationv1alpha1.BindDefinition,
 	roleRef, namespace string,
 ) error {
 	_, err := r.deleteRoleBinding(ctx, bindDef, roleRef, namespace)
 	if err != nil {
-		conditions.MarkFalse(bindDef, authnv1alpha1.DeleteCondition, bindDef.Generation,
-			authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
+		conditions.MarkFalse(bindDef, authorizationv1alpha1.DeleteCondition, bindDef.Generation,
+			authorizationv1alpha1.DeleteReason, authorizationv1alpha1.DeleteMessage)
 		if errStatus := r.applyStatus(ctx, bindDef); errStatus != nil {
 			return fmt.Errorf("apply status after RoleBinding deletion failure: %w", errStatus)
 		}
@@ -980,7 +980,7 @@ func (r *BindDefinitionReconciler) deleteRoleBindingWithStatusUpdate(
 // Returns a list of missing role names. Does not fail the reconciliation.
 func (r *BindDefinitionReconciler) validateRoleReferences(
 	ctx context.Context,
-	bindDef *authnv1alpha1.BindDefinition,
+	bindDef *authorizationv1alpha1.BindDefinition,
 	namespaces []corev1.Namespace,
 ) []string {
 	logger := log.FromContext(ctx)
@@ -1040,7 +1040,7 @@ func (r *BindDefinitionReconciler) validateRoleReferences(
 	return missingRoles
 }
 
-func (r *BindDefinitionReconciler) collectNamespaces(ctx context.Context, bindDefinition *authnv1alpha1.BindDefinition) (map[string]corev1.Namespace, error) {
+func (r *BindDefinitionReconciler) collectNamespaces(ctx context.Context, bindDefinition *authorizationv1alpha1.BindDefinition) (map[string]corev1.Namespace, error) {
 	// Construct namespace set from BindDefinition namespace selectors
 	namespaceSet := make(map[string]corev1.Namespace)
 	for _, roleBinding := range bindDefinition.Spec.RoleBindings {

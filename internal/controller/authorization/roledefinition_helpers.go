@@ -17,7 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	authnv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/api/authorization/v1alpha1/applyconfiguration/ssa"
 	"github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/helpers"
@@ -30,9 +30,9 @@ var ErrInvalidTargetRole = fmt.Errorf("invalid target role type: must be Cluster
 
 // ownerRefForRoleDefinition creates an OwnerReference ApplyConfiguration for a RoleDefinition.
 // This centralizes owner reference construction for consistency across create/update paths.
-func ownerRefForRoleDefinition(roleDefinition *authnv1alpha1.RoleDefinition) *metav1ac.OwnerReferenceApplyConfiguration {
+func ownerRefForRoleDefinition(roleDefinition *authorizationv1alpha1.RoleDefinition) *metav1ac.OwnerReferenceApplyConfiguration {
 	return pkgssa.OwnerReference(
-		authnv1alpha1.GroupVersion.String(),
+		authorizationv1alpha1.GroupVersion.String(),
 		"RoleDefinition",
 		roleDefinition.Name,
 		roleDefinition.UID,
@@ -45,13 +45,13 @@ func ownerRefForRoleDefinition(roleDefinition *authnv1alpha1.RoleDefinition) *me
 // Uses SSA to apply the stalled condition atomically.
 func (r *RoleDefinitionReconciler) markStalled(
 	ctx context.Context,
-	roleDefinition *authnv1alpha1.RoleDefinition,
+	roleDefinition *authorizationv1alpha1.RoleDefinition,
 	err error,
 ) {
 	logger := log.FromContext(ctx)
 	// Copy status and apply stalled condition
 	conditions.MarkStalled(roleDefinition, roleDefinition.Generation,
-		authnv1alpha1.StalledReasonError, authnv1alpha1.StalledMessageError, err.Error())
+		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, err.Error())
 	roleDefinition.Status.ObservedGeneration = roleDefinition.Generation
 	if updateErr := ssa.ApplyRoleDefinitionStatus(ctx, r.client, roleDefinition); updateErr != nil {
 		logger.Error(updateErr, "failed to apply Stalled status via SSA", "roleDefinitionName", roleDefinition.Name)
@@ -61,13 +61,13 @@ func (r *RoleDefinitionReconciler) markStalled(
 // buildRoleObject creates the initial role object (ClusterRole or Role) based on spec.
 // Returns an error if the target role type is not valid.
 func (r *RoleDefinitionReconciler) buildRoleObject(
-	roleDefinition *authnv1alpha1.RoleDefinition,
+	roleDefinition *authorizationv1alpha1.RoleDefinition,
 ) (client.Object, error) {
 	labels := helpers.BuildResourceLabels(roleDefinition.Labels)
 	annotations := helpers.BuildResourceAnnotations("RoleDefinition", roleDefinition.Name)
 
 	switch roleDefinition.Spec.TargetRole {
-	case authnv1alpha1.DefinitionClusterRole:
+	case authorizationv1alpha1.DefinitionClusterRole:
 		return &rbacv1.ClusterRole{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:        roleDefinition.Spec.TargetName,
@@ -75,7 +75,7 @@ func (r *RoleDefinitionReconciler) buildRoleObject(
 				Annotations: annotations,
 			},
 		}, nil
-	case authnv1alpha1.DefinitionNamespacedRole:
+	case authorizationv1alpha1.DefinitionNamespacedRole:
 		return &rbacv1.Role{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:        roleDefinition.Spec.TargetName,
@@ -92,22 +92,22 @@ func (r *RoleDefinitionReconciler) buildRoleObject(
 // ensureFinalizer ensures the RoleDefinition has a finalizer.
 func (r *RoleDefinitionReconciler) ensureFinalizer(
 	ctx context.Context,
-	roleDefinition *authnv1alpha1.RoleDefinition,
+	roleDefinition *authorizationv1alpha1.RoleDefinition,
 ) error {
 	logger := log.FromContext(ctx)
 
-	if controllerutil.ContainsFinalizer(roleDefinition, authnv1alpha1.RoleDefinitionFinalizer) {
+	if controllerutil.ContainsFinalizer(roleDefinition, authorizationv1alpha1.RoleDefinitionFinalizer) {
 		return nil
 	}
 
 	logger.V(2).Info("Adding finalizer to RoleDefinition", "roleDefinitionName", roleDefinition.Name)
 	old := roleDefinition.DeepCopy()
-	controllerutil.AddFinalizer(roleDefinition, authnv1alpha1.RoleDefinitionFinalizer)
+	controllerutil.AddFinalizer(roleDefinition, authorizationv1alpha1.RoleDefinitionFinalizer)
 	if err := r.client.Patch(ctx, roleDefinition, client.MergeFromWithOptions(old, client.MergeFromWithOptimisticLock{})); err != nil {
 		logger.Error(err, "Failed to add finalizer", "roleDefinitionName", roleDefinition.Name)
 		return err
 	}
-	r.recorder.Eventf(roleDefinition, nil, corev1.EventTypeNormal, authnv1alpha1.EventReasonFinalizer, authnv1alpha1.EventActionFinalizerAdd,
+	r.recorder.Eventf(roleDefinition, nil, corev1.EventTypeNormal, authorizationv1alpha1.EventReasonFinalizer, authorizationv1alpha1.EventActionFinalizerAdd,
 		"Adding finalizer to RoleDefinition %s", roleDefinition.Name)
 	return nil
 }
@@ -117,7 +117,7 @@ func (r *RoleDefinitionReconciler) ensureFinalizer(
 // Status updates use Server-Side Apply (SSA) to avoid race conditions.
 func (r *RoleDefinitionReconciler) handleDeletion(
 	ctx context.Context,
-	roleDefinition *authnv1alpha1.RoleDefinition,
+	roleDefinition *authorizationv1alpha1.RoleDefinition,
 	role client.Object,
 ) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -126,14 +126,14 @@ func (r *RoleDefinitionReconciler) handleDeletion(
 		"roleDefinitionName", roleDefinition.Name, "targetRole", roleDefinition.Spec.TargetRole,
 		"targetName", roleDefinition.Spec.TargetName)
 
-	conditions.MarkTrue(roleDefinition, authnv1alpha1.DeleteCondition, roleDefinition.Generation,
-		authnv1alpha1.DeleteReason, authnv1alpha1.DeleteMessage)
+	conditions.MarkTrue(roleDefinition, authorizationv1alpha1.DeleteCondition, roleDefinition.Generation,
+		authorizationv1alpha1.DeleteReason, authorizationv1alpha1.DeleteMessage)
 	if err := ssa.ApplyRoleDefinitionStatus(ctx, r.client, roleDefinition); err != nil {
 		logger.Error(err, "Failed to apply DeleteCondition status", "roleDefinitionName", roleDefinition.Name)
 		return ctrl.Result{}, err
 	}
 
-	r.recorder.Eventf(roleDefinition, nil, corev1.EventTypeWarning, authnv1alpha1.EventReasonDeletion, authnv1alpha1.EventActionDelete,
+	r.recorder.Eventf(roleDefinition, nil, corev1.EventTypeWarning, authorizationv1alpha1.EventReasonDeletion, authorizationv1alpha1.EventActionDelete,
 		"Deleting target resource %s %s", roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetName)
 
 	role.SetName(roleDefinition.Spec.TargetName)
@@ -150,7 +150,7 @@ func (r *RoleDefinitionReconciler) handleDeletion(
 			return ctrl.Result{}, fmt.Errorf("re-fetch RoleDefinition %s before finalizer removal: %w", roleDefinition.Name, err)
 		}
 		old := roleDefinition.DeepCopy()
-		controllerutil.RemoveFinalizer(roleDefinition, authnv1alpha1.RoleDefinitionFinalizer)
+		controllerutil.RemoveFinalizer(roleDefinition, authorizationv1alpha1.RoleDefinitionFinalizer)
 		if err := r.client.Patch(ctx, roleDefinition, client.MergeFromWithOptions(old, client.MergeFromWithOptimisticLock{})); err != nil {
 			logger.Error(err, "Failed to remove finalizer", "roleDefinitionName", roleDefinition.Name)
 			return ctrl.Result{}, err
@@ -160,8 +160,8 @@ func (r *RoleDefinitionReconciler) handleDeletion(
 	} else if err != nil {
 		logger.Error(err, "Failed to delete role",
 			"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
-		conditions.MarkFalse(roleDefinition, authnv1alpha1.DeleteCondition, roleDefinition.Generation,
-			authnv1alpha1.DeleteReason, "error deleting resource: %s", err.Error())
+		conditions.MarkFalse(roleDefinition, authorizationv1alpha1.DeleteCondition, roleDefinition.Generation,
+			authorizationv1alpha1.DeleteReason, "error deleting resource: %s", err.Error())
 		if updateErr := ssa.ApplyRoleDefinitionStatus(ctx, r.client, roleDefinition); updateErr != nil {
 			logger.Error(updateErr, "Failed to apply status after deletion error",
 				"roleDefinitionName", roleDefinition.Name)
@@ -177,7 +177,7 @@ func (r *RoleDefinitionReconciler) handleDeletion(
 
 // buildFinalRules builds the final policy rules from the filtered API resources.
 func (r *RoleDefinitionReconciler) buildFinalRules(
-	roleDefinition *authnv1alpha1.RoleDefinition,
+	roleDefinition *authorizationv1alpha1.RoleDefinition,
 	rulesByAPIGroupAndVerbs map[string]*rbacv1.PolicyRule,
 ) []rbacv1.PolicyRule {
 	finalRules := make([]rbacv1.PolicyRule, 0, len(rulesByAPIGroupAndVerbs))
@@ -186,7 +186,7 @@ func (r *RoleDefinitionReconciler) buildFinalRules(
 	}
 
 	// Add non-resource URL rule for ClusterRoles only (namespaced Roles cannot have NonResourceURLs)
-	if roleDefinition.Spec.TargetRole == authnv1alpha1.DefinitionClusterRole && !slices.Contains(roleDefinition.Spec.RestrictedVerbs, "get") {
+	if roleDefinition.Spec.TargetRole == authorizationv1alpha1.DefinitionClusterRole && !slices.Contains(roleDefinition.Spec.RestrictedVerbs, "get") {
 		finalRules = append(finalRules, rbacv1.PolicyRule{
 			NonResourceURLs: []string{"/metrics"},
 			Verbs:           []string{"get"},
@@ -240,7 +240,7 @@ func (r *RoleDefinitionReconciler) buildFinalRules(
 // to avoid silently taking over roles managed by other controllers.
 func (r *RoleDefinitionReconciler) ensureRole(
 	ctx context.Context,
-	roleDefinition *authnv1alpha1.RoleDefinition,
+	roleDefinition *authorizationv1alpha1.RoleDefinition,
 	finalRules []rbacv1.PolicyRule,
 ) error {
 	logger := log.FromContext(ctx)
@@ -249,8 +249,8 @@ func (r *RoleDefinitionReconciler) ensureRole(
 	// by a different owner. Kubernetes rejects multiple controller ownerReferences,
 	// and this check produces a clearer error/event than the raw API rejection.
 	if err := r.checkRoleOwnership(ctx, roleDefinition); err != nil {
-		conditions.MarkFalse(roleDefinition, authnv1alpha1.OwnerRefCondition, roleDefinition.Generation,
-			authnv1alpha1.OwnerRefReason, "ownership conflict: %s", err.Error())
+		conditions.MarkFalse(roleDefinition, authorizationv1alpha1.OwnerRefCondition, roleDefinition.Generation,
+			authorizationv1alpha1.OwnerRefReason, "ownership conflict: %s", err.Error())
 		return err
 	}
 
@@ -260,7 +260,7 @@ func (r *RoleDefinitionReconciler) ensureRole(
 
 	// Apply the role using SSA - handles both create and update
 	switch roleDefinition.Spec.TargetRole {
-	case authnv1alpha1.DefinitionClusterRole:
+	case authorizationv1alpha1.DefinitionClusterRole:
 		ac := pkgssa.ClusterRoleWithLabelsAndRules(
 			roleDefinition.Spec.TargetName,
 			labels,
@@ -272,7 +272,7 @@ func (r *RoleDefinitionReconciler) ensureRole(
 			return err
 		}
 		metrics.RBACResourcesApplied.WithLabelValues(metrics.ResourceClusterRole).Inc()
-	case authnv1alpha1.DefinitionNamespacedRole:
+	case authorizationv1alpha1.DefinitionNamespacedRole:
 		ac := pkgssa.RoleWithLabelsAndRules(
 			roleDefinition.Spec.TargetName,
 			roleDefinition.Spec.TargetNamespace,
@@ -293,14 +293,14 @@ func (r *RoleDefinitionReconciler) ensureRole(
 		"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
 
 	// Set conditions - SSA applied successfully
-	conditions.MarkTrue(roleDefinition, authnv1alpha1.OwnerRefCondition, roleDefinition.Generation,
-		authnv1alpha1.OwnerRefReason, authnv1alpha1.OwnerRefMessage)
-	conditions.MarkTrue(roleDefinition, authnv1alpha1.CreateCondition, roleDefinition.Generation,
-		authnv1alpha1.CreateReason, authnv1alpha1.CreateMessage)
+	conditions.MarkTrue(roleDefinition, authorizationv1alpha1.OwnerRefCondition, roleDefinition.Generation,
+		authorizationv1alpha1.OwnerRefReason, authorizationv1alpha1.OwnerRefMessage)
+	conditions.MarkTrue(roleDefinition, authorizationv1alpha1.CreateCondition, roleDefinition.Generation,
+		authorizationv1alpha1.CreateReason, authorizationv1alpha1.CreateMessage)
 	conditions.MarkReady(roleDefinition, roleDefinition.Generation,
-		authnv1alpha1.ReadyReasonReconciled, authnv1alpha1.ReadyMessageReconciled)
+		authorizationv1alpha1.ReadyReasonReconciled, authorizationv1alpha1.ReadyMessageReconciled)
 
-	r.recorder.Eventf(roleDefinition, nil, corev1.EventTypeNormal, authnv1alpha1.EventReasonCreation, authnv1alpha1.EventActionReconcile,
+	r.recorder.Eventf(roleDefinition, nil, corev1.EventTypeNormal, authorizationv1alpha1.EventReasonCreation, authorizationv1alpha1.EventActionReconcile,
 		"Ensured target resource %s %s", roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetName)
 
 	return nil
@@ -312,7 +312,7 @@ func (r *RoleDefinitionReconciler) ensureRole(
 // or cause unexpected behavior. If the role does not exist yet, this is a no-op.
 func (r *RoleDefinitionReconciler) checkRoleOwnership(
 	ctx context.Context,
-	roleDefinition *authnv1alpha1.RoleDefinition,
+	roleDefinition *authorizationv1alpha1.RoleDefinition,
 ) error {
 	logger := log.FromContext(ctx)
 
@@ -320,9 +320,9 @@ func (r *RoleDefinitionReconciler) checkRoleOwnership(
 	key := client.ObjectKey{Name: roleDefinition.Spec.TargetName}
 
 	switch roleDefinition.Spec.TargetRole {
-	case authnv1alpha1.DefinitionClusterRole:
+	case authorizationv1alpha1.DefinitionClusterRole:
 		existing = &rbacv1.ClusterRole{}
-	case authnv1alpha1.DefinitionNamespacedRole:
+	case authorizationv1alpha1.DefinitionNamespacedRole:
 		existing = &rbacv1.Role{}
 		key.Namespace = roleDefinition.Spec.TargetNamespace
 	default:
@@ -342,7 +342,7 @@ func (r *RoleDefinitionReconciler) checkRoleOwnership(
 				"roleName", roleDefinition.Spec.TargetName,
 				"existingOwnerKind", ref.Kind, "existingOwner", ref.Name, "existingOwnerUID", ref.UID)
 			r.recorder.Eventf(roleDefinition, nil, corev1.EventTypeWarning,
-				authnv1alpha1.EventReasonOwnership, authnv1alpha1.EventActionReconcile,
+				authorizationv1alpha1.EventReasonOwnership, authorizationv1alpha1.EventActionReconcile,
 				"Target %s %s is already controlled by %s %s (UID: %s)",
 				roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetName, ref.Kind, ref.Name, ref.UID)
 			return fmt.Errorf("target %s %s is already controlled by %s %s (UID: %s)",

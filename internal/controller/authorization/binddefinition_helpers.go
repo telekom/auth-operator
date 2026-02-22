@@ -14,7 +14,7 @@ import (
 	sigs_client "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	authnv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/api/authorization/v1alpha1/applyconfiguration/ssa"
 	"github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/helpers"
@@ -25,9 +25,9 @@ import (
 // ownerRefForBindDefinition creates an OwnerReference ApplyConfiguration for a BindDefinition.
 // Uses hardcoded GVK to avoid empty APIVersion/Kind after client.Get() (TypeMeta is not populated by the API server).
 // This creates a controller ownerRef — used for CRBs and RBs where each binding is owned by exactly one BD.
-func ownerRefForBindDefinition(bindDef *authnv1alpha1.BindDefinition) *metav1ac.OwnerReferenceApplyConfiguration {
+func ownerRefForBindDefinition(bindDef *authorizationv1alpha1.BindDefinition) *metav1ac.OwnerReferenceApplyConfiguration {
 	return pkgssa.OwnerReference(
-		authnv1alpha1.GroupVersion.String(),
+		authorizationv1alpha1.GroupVersion.String(),
 		"BindDefinition",
 		bindDef.Name,
 		bindDef.UID,
@@ -40,9 +40,9 @@ func ownerRefForBindDefinition(bindDef *authnv1alpha1.BindDefinition) *metav1ac.
 // Multiple BindDefinitions may reference the same SA, so we use controller=false to allow
 // shared ownership. With non-controller ownerRefs, Kubernetes GC only deletes the SA when
 // ALL owner BDs are gone — preventing premature deletion when one of several owners is removed.
-func saOwnerRefForBindDefinition(bindDef *authnv1alpha1.BindDefinition) *metav1ac.OwnerReferenceApplyConfiguration {
+func saOwnerRefForBindDefinition(bindDef *authorizationv1alpha1.BindDefinition) *metav1ac.OwnerReferenceApplyConfiguration {
 	return pkgssa.OwnerReference(
-		authnv1alpha1.GroupVersion.String(),
+		authorizationv1alpha1.GroupVersion.String(),
 		"BindDefinition",
 		bindDef.Name,
 		bindDef.UID,
@@ -73,7 +73,7 @@ func logStatusApplyError(ctx context.Context, err error, resourceName string) {
 
 // applyStatusNonFatal applies status via SSA and logs any error without failing.
 // This is used for helper functions that need to update status but shouldn't fail on status errors.
-func (r *BindDefinitionReconciler) applyStatusNonFatal(ctx context.Context, bindDef *authnv1alpha1.BindDefinition) {
+func (r *BindDefinitionReconciler) applyStatusNonFatal(ctx context.Context, bindDef *authorizationv1alpha1.BindDefinition) {
 	if err := ssa.ApplyBindDefinitionStatus(ctx, r.client, bindDef); err != nil {
 		logStatusApplyError(ctx, err, bindDef.Name)
 	}
@@ -83,12 +83,12 @@ func (r *BindDefinitionReconciler) applyStatusNonFatal(ctx context.Context, bind
 // Uses SSA to apply the stalled condition atomically.
 func (r *BindDefinitionReconciler) markStalled(
 	ctx context.Context,
-	bindDefinition *authnv1alpha1.BindDefinition,
+	bindDefinition *authorizationv1alpha1.BindDefinition,
 	err error,
 ) {
 	logger := log.FromContext(ctx)
 	conditions.MarkStalled(bindDefinition, bindDefinition.Generation,
-		authnv1alpha1.StalledReasonError, authnv1alpha1.StalledMessageError, err.Error())
+		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, err.Error())
 	bindDefinition.Status.ObservedGeneration = bindDefinition.Generation
 	if updateErr := ssa.ApplyBindDefinitionStatus(ctx, r.client, bindDefinition); updateErr != nil {
 		logger.Error(updateErr, "failed to apply Stalled status via SSA", "bindDefinitionName", bindDefinition.Name)
@@ -99,11 +99,11 @@ func (r *BindDefinitionReconciler) markStalled(
 // This only mutates conditions/fields; caller is responsible for applying status via SSA.
 func (r *BindDefinitionReconciler) markReady(
 	ctx context.Context,
-	bindDefinition *authnv1alpha1.BindDefinition,
+	bindDefinition *authorizationv1alpha1.BindDefinition,
 ) {
 	_ = ctx // unused but kept for consistent function signature
 	conditions.MarkReady(bindDefinition, bindDefinition.Generation,
-		authnv1alpha1.ReadyReasonReconciled, authnv1alpha1.ReadyMessageReconciled)
+		authorizationv1alpha1.ReadyReasonReconciled, authorizationv1alpha1.ReadyMessageReconciled)
 	bindDefinition.Status.ObservedGeneration = bindDefinition.Generation
 	bindDefinition.Status.BindReconciled = true
 }
@@ -121,7 +121,7 @@ const (
 // Returns the result of the deletion and any error encountered.
 func (r *BindDefinitionReconciler) deleteServiceAccount(
 	ctx context.Context,
-	bindDef *authnv1alpha1.BindDefinition,
+	bindDef *authorizationv1alpha1.BindDefinition,
 	saName, saNamespace string,
 ) (deleteResult, error) {
 	logger := log.FromContext(ctx)
@@ -173,14 +173,14 @@ func (r *BindDefinitionReconciler) deleteServiceAccount(
 		}
 
 		r.recorder.Eventf(bindDef, nil, corev1.EventTypeNormal,
-			authnv1alpha1.EventReasonServiceAccountRetained, authnv1alpha1.EventActionDelete,
+			authorizationv1alpha1.EventReasonServiceAccountRetained, authorizationv1alpha1.EventActionDelete,
 			"Retained ServiceAccount %s/%s (still referenced by other BindDefinitions)",
 			sa.Namespace, sa.Name)
 		return deleteResultNoOwnerRef, nil
 	}
 
 	if !hasOwnerRef(sa, bindDef) {
-		r.recorder.Eventf(bindDef, nil, corev1.EventTypeNormal, authnv1alpha1.EventReasonDeletion, authnv1alpha1.EventActionDelete,
+		r.recorder.Eventf(bindDef, nil, corev1.EventTypeNormal, authorizationv1alpha1.EventReasonDeletion, authorizationv1alpha1.EventActionDelete,
 			"Not deleting target resource ServiceAccount/%s in namespace %s because we do not have OwnerRef",
 			saName, saNamespace)
 		logger.V(1).Info("Cannot delete ServiceAccount - no OwnerRef",
@@ -188,7 +188,7 @@ func (r *BindDefinitionReconciler) deleteServiceAccount(
 		return deleteResultNoOwnerRef, nil
 	}
 
-	r.recorder.Eventf(bindDef, nil, corev1.EventTypeNormal, authnv1alpha1.EventReasonDeletion, authnv1alpha1.EventActionDelete,
+	r.recorder.Eventf(bindDef, nil, corev1.EventTypeNormal, authorizationv1alpha1.EventReasonDeletion, authorizationv1alpha1.EventActionDelete,
 		"Deleting target resource ServiceAccount/%s in namespace %s", saName, saNamespace)
 	logger.V(1).Info("Cleanup ServiceAccount",
 		"bindDefinitionName", bindDef.Name, "serviceAccount", saName, "namespace", saNamespace)
@@ -213,7 +213,7 @@ func (r *BindDefinitionReconciler) deleteServiceAccount(
 // deleteClusterRoleBinding attempts to delete a cluster role binding if it has a controller reference.
 func (r *BindDefinitionReconciler) deleteClusterRoleBinding(
 	ctx context.Context,
-	bindDef *authnv1alpha1.BindDefinition,
+	bindDef *authorizationv1alpha1.BindDefinition,
 	clusterRoleRef string,
 ) (deleteResult, error) {
 	logger := log.FromContext(ctx)
@@ -234,14 +234,14 @@ func (r *BindDefinitionReconciler) deleteClusterRoleBinding(
 	}
 
 	if !metav1.IsControlledBy(crb, bindDef) {
-		r.recorder.Eventf(bindDef, nil, corev1.EventTypeNormal, authnv1alpha1.EventReasonDeletion, authnv1alpha1.EventActionDelete,
+		r.recorder.Eventf(bindDef, nil, corev1.EventTypeNormal, authorizationv1alpha1.EventReasonDeletion, authorizationv1alpha1.EventActionDelete,
 			"Not deleting target resource ClusterRoleBinding/%s because we do not have OwnerRef", crbName)
 		logger.V(1).Info("Cannot delete ClusterRoleBinding - no OwnerRef",
 			"bindDefinitionName", bindDef.Name, "clusterRoleBindingName", crbName)
 		return deleteResultNoOwnerRef, nil
 	}
 
-	r.recorder.Eventf(bindDef, nil, corev1.EventTypeNormal, authnv1alpha1.EventReasonDeletion, authnv1alpha1.EventActionDelete,
+	r.recorder.Eventf(bindDef, nil, corev1.EventTypeNormal, authorizationv1alpha1.EventReasonDeletion, authorizationv1alpha1.EventActionDelete,
 		"Deleting target resource ClusterRoleBinding %s", crbName)
 	logger.V(1).Info("Cleanup ClusterRoleBinding",
 		"bindDefinitionName", bindDef.Name, "clusterRoleBindingName", crbName)
@@ -266,7 +266,7 @@ func (r *BindDefinitionReconciler) deleteClusterRoleBinding(
 // deleteRoleBinding attempts to delete a role binding if it has a controller reference.
 func (r *BindDefinitionReconciler) deleteRoleBinding(
 	ctx context.Context,
-	bindDef *authnv1alpha1.BindDefinition,
+	bindDef *authorizationv1alpha1.BindDefinition,
 	roleRef, namespace string,
 ) (deleteResult, error) {
 	logger := log.FromContext(ctx)
@@ -287,7 +287,7 @@ func (r *BindDefinitionReconciler) deleteRoleBinding(
 	}
 
 	if !metav1.IsControlledBy(rb, bindDef) {
-		r.recorder.Eventf(bindDef, nil, corev1.EventTypeNormal, authnv1alpha1.EventReasonDeletion, authnv1alpha1.EventActionDelete,
+		r.recorder.Eventf(bindDef, nil, corev1.EventTypeNormal, authorizationv1alpha1.EventReasonDeletion, authorizationv1alpha1.EventActionDelete,
 			"Not deleting target resource RoleBinding/%s in namespace %s because we do not have OwnerRef",
 			rbName, namespace)
 		logger.V(1).Info("Cannot delete RoleBinding - no OwnerRef",
@@ -295,7 +295,7 @@ func (r *BindDefinitionReconciler) deleteRoleBinding(
 		return deleteResultNoOwnerRef, nil
 	}
 
-	r.recorder.Eventf(bindDef, nil, corev1.EventTypeWarning, authnv1alpha1.EventReasonDeletion, authnv1alpha1.EventActionDelete,
+	r.recorder.Eventf(bindDef, nil, corev1.EventTypeWarning, authorizationv1alpha1.EventReasonDeletion, authorizationv1alpha1.EventActionDelete,
 		"Deleting target resource RoleBinding/%s in namespace %s", rbName, namespace)
 	logger.V(1).Info("Cleanup RoleBinding",
 		"bindDefinitionName", bindDef.Name, "roleBindingName", rbName, "namespace", namespace)
@@ -320,7 +320,7 @@ func (r *BindDefinitionReconciler) deleteRoleBinding(
 // filterActiveNamespaces returns namespaces that are not in terminating phase.
 func (r *BindDefinitionReconciler) filterActiveNamespaces(
 	ctx context.Context,
-	bindDef *authnv1alpha1.BindDefinition,
+	bindDef *authorizationv1alpha1.BindDefinition,
 	namespaceSet map[string]corev1.Namespace,
 ) []corev1.Namespace {
 	logger := log.FromContext(ctx)
@@ -334,7 +334,7 @@ func (r *BindDefinitionReconciler) filterActiveNamespaces(
 				"bindDefinitionName", bindDef.Name, "namespace", ns.Name)
 			nsObj := &corev1.Namespace{}
 			if err := r.client.Get(ctx, types.NamespacedName{Name: ns.Name}, nsObj); err == nil {
-				r.recorder.Eventf(nsObj, nil, corev1.EventTypeWarning, authnv1alpha1.EventReasonDeletionPending, authnv1alpha1.EventActionReconcile,
+				r.recorder.Eventf(nsObj, nil, corev1.EventTypeWarning, authorizationv1alpha1.EventReasonDeletionPending, authorizationv1alpha1.EventActionReconcile,
 					"Namespace deletion is waiting for resources to be deleted before auth-operator can complete cleanup")
 			}
 		}
@@ -345,7 +345,7 @@ func (r *BindDefinitionReconciler) filterActiveNamespaces(
 // resolveRoleBindingNamespaces returns the namespaces that match the roleBinding's selection criteria.
 func (r *BindDefinitionReconciler) resolveRoleBindingNamespaces(
 	ctx context.Context,
-	roleBinding authnv1alpha1.NamespaceBinding,
+	roleBinding authorizationv1alpha1.NamespaceBinding,
 ) ([]corev1.Namespace, error) {
 	var namespaces []corev1.Namespace
 
@@ -399,7 +399,7 @@ func (r *BindDefinitionReconciler) addExternalSAReference(
 	// Get current annotation value
 	current := ""
 	if sa.Annotations != nil {
-		current = sa.Annotations[authnv1alpha1.AnnotationKeyReferencedBy]
+		current = sa.Annotations[authorizationv1alpha1.AnnotationKeyReferencedBy]
 	}
 
 	// Parse existing references and check if already present
@@ -420,7 +420,7 @@ func (r *BindDefinitionReconciler) addExternalSAReference(
 	if sa.Annotations == nil {
 		sa.Annotations = make(map[string]string)
 	}
-	sa.Annotations[authnv1alpha1.AnnotationKeyReferencedBy] = newValue
+	sa.Annotations[authorizationv1alpha1.AnnotationKeyReferencedBy] = newValue
 
 	if err := r.client.Patch(ctx, sa, sigs_client.MergeFrom(old)); err != nil {
 		return fmt.Errorf("patch ServiceAccount %s/%s to add referenced-by annotation: %w",
@@ -430,7 +430,7 @@ func (r *BindDefinitionReconciler) addExternalSAReference(
 	logger.V(1).Info("Added referenced-by annotation to external ServiceAccount",
 		"serviceAccount", sa.Name, "namespace", sa.Namespace, "bindDefinition", bdName)
 	r.recorder.Eventf(sa, nil, corev1.EventTypeNormal,
-		authnv1alpha1.EventReasonExternalSATracked, authnv1alpha1.EventActionReconcile,
+		authorizationv1alpha1.EventReasonExternalSATracked, authorizationv1alpha1.EventActionReconcile,
 		"BindDefinition %s now references this ServiceAccount", bdName)
 
 	return nil
@@ -458,7 +458,7 @@ func (r *BindDefinitionReconciler) removeExternalSAReference(
 	if sa.Annotations == nil {
 		return nil // No annotations, nothing to remove
 	}
-	current, exists := sa.Annotations[authnv1alpha1.AnnotationKeyReferencedBy]
+	current, exists := sa.Annotations[authorizationv1alpha1.AnnotationKeyReferencedBy]
 	if !exists {
 		return nil // Annotation doesn't exist
 	}
@@ -482,9 +482,9 @@ func (r *BindDefinitionReconciler) removeExternalSAReference(
 	// Patch the ServiceAccount to update/remove the annotation
 	old := sa.DeepCopy()
 	if len(newRefs) == 0 {
-		delete(sa.Annotations, authnv1alpha1.AnnotationKeyReferencedBy)
+		delete(sa.Annotations, authorizationv1alpha1.AnnotationKeyReferencedBy)
 	} else {
-		sa.Annotations[authnv1alpha1.AnnotationKeyReferencedBy] = strings.Join(newRefs, ",")
+		sa.Annotations[authorizationv1alpha1.AnnotationKeyReferencedBy] = strings.Join(newRefs, ",")
 	}
 
 	if err := r.client.Patch(ctx, sa, sigs_client.MergeFrom(old)); err != nil {
@@ -495,7 +495,7 @@ func (r *BindDefinitionReconciler) removeExternalSAReference(
 	logger.V(1).Info("Removed referenced-by annotation from external ServiceAccount",
 		"serviceAccount", saName, "namespace", saNamespace, "bindDefinition", bdName)
 	r.recorder.Eventf(sa, nil, corev1.EventTypeNormal,
-		authnv1alpha1.EventReasonExternalSAUntracked, authnv1alpha1.EventActionDelete,
+		authorizationv1alpha1.EventReasonExternalSAUntracked, authorizationv1alpha1.EventActionDelete,
 		"BindDefinition %s no longer references this ServiceAccount", bdName)
 
 	return nil
@@ -522,7 +522,7 @@ func parseReferencedBy(value string) []string {
 // from all external ServiceAccounts it references. This is called during deletion.
 func (r *BindDefinitionReconciler) cleanupExternalSAReferences(
 	ctx context.Context,
-	bindDef *authnv1alpha1.BindDefinition,
+	bindDef *authorizationv1alpha1.BindDefinition,
 ) {
 	logger := log.FromContext(ctx)
 
@@ -544,7 +544,7 @@ func (r *BindDefinitionReconciler) cleanupExternalSAReferences(
 
 	// Also scan spec subjects in case status is out of date
 	for _, subject := range bindDef.Spec.Subjects {
-		if subject.Kind != authnv1alpha1.BindSubjectServiceAccount {
+		if subject.Kind != authorizationv1alpha1.BindSubjectServiceAccount {
 			continue
 		}
 		// Check if this SA is external (not owned by any BD)
