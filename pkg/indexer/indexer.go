@@ -11,6 +11,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	"github.com/telekom/auth-operator/pkg/helpers"
 )
 
 const (
@@ -19,6 +20,12 @@ const (
 
 	// BindDefinitionTargetNameField is the field index for BindDefinition.Spec.TargetName.
 	BindDefinitionTargetNameField = ".spec.targetName"
+
+	// WebhookAuthorizerHasNamespaceSelectorField indexes WebhookAuthorizer
+	// resources by whether they define a non-empty namespace selector.
+	// This allows the webhook handler to efficiently filter authorizers that
+	// need namespace matching versus those that apply globally.
+	WebhookAuthorizerHasNamespaceSelectorField = ".spec.hasNamespaceSelector"
 )
 
 // SetupIndexes registers field indexes on the manager's cache for efficient lookups.
@@ -56,5 +63,31 @@ func SetupIndexes(ctx context.Context, mgr manager.Manager) error {
 		return fmt.Errorf("failed to create index for BindDefinition.Spec.TargetName: %w", err)
 	}
 
+	// Index WebhookAuthorizer by whether a namespace selector is set.
+	// This enables the webhook handler to efficiently query only those
+	// authorizers that require namespace matching, avoiding full scans
+	// on every SubjectAccessReview evaluation.
+	if err := mgr.GetFieldIndexer().IndexField(
+		ctx,
+		&authorizationv1alpha1.WebhookAuthorizer{},
+		WebhookAuthorizerHasNamespaceSelectorField,
+		WebhookAuthorizerHasNamespaceSelectorFunc,
+	); err != nil {
+		return fmt.Errorf("failed to create index for WebhookAuthorizer.Spec.HasNamespaceSelector: %w", err)
+	}
+
 	return nil
+}
+
+// WebhookAuthorizerHasNamespaceSelectorFunc extracts the index value for
+// the hasNamespaceSelector field. Exported for testing and fake client setup.
+func WebhookAuthorizerHasNamespaceSelectorFunc(obj client.Object) []string {
+	wa, ok := obj.(*authorizationv1alpha1.WebhookAuthorizer)
+	if !ok {
+		return nil
+	}
+	if helpers.IsLabelSelectorEmpty(&wa.Spec.NamespaceSelector) {
+		return []string{"false"}
+	}
+	return []string{"true"}
 }

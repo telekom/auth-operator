@@ -22,6 +22,10 @@ func TestIndexerConstants(t *testing.T) {
 	if BindDefinitionTargetNameField != ".spec.targetName" {
 		t.Errorf("BindDefinitionTargetNameField = %q, want %q", BindDefinitionTargetNameField, ".spec.targetName")
 	}
+	if WebhookAuthorizerHasNamespaceSelectorField != ".spec.hasNamespaceSelector" {
+		t.Errorf("WebhookAuthorizerHasNamespaceSelectorField = %q, want %q",
+			WebhookAuthorizerHasNamespaceSelectorField, ".spec.hasNamespaceSelector")
+	}
 }
 
 // indexExtractorTest represents a test case for index extractor functions
@@ -234,5 +238,135 @@ func TestIndexerWithWrongObjectType(t *testing.T) {
 	result := indexFunc(bd)
 	if result != nil {
 		t.Errorf("expected nil for wrong object type, got %v", result)
+	}
+}
+
+func TestWebhookAuthorizerHasNamespaceSelectorFunc(t *testing.T) {
+	tests := []indexExtractorTest{
+		{
+			name: "with non-empty namespace selector returns true",
+			object: &authorizationv1alpha1.WebhookAuthorizer{
+				ObjectMeta: metav1.ObjectMeta{Name: "wa-scoped"},
+				Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+					NamespaceSelector: metav1.LabelSelector{
+						MatchLabels: map[string]string{"env": "prod"},
+					},
+				},
+			},
+			indexFunc:  WebhookAuthorizerHasNamespaceSelectorFunc,
+			wantValues: []string{"true"},
+		},
+		{
+			name: "with empty namespace selector returns false",
+			object: &authorizationv1alpha1.WebhookAuthorizer{
+				ObjectMeta: metav1.ObjectMeta{Name: "wa-global"},
+				Spec:       authorizationv1alpha1.WebhookAuthorizerSpec{},
+			},
+			indexFunc:  WebhookAuthorizerHasNamespaceSelectorFunc,
+			wantValues: []string{"false"},
+		},
+		{
+			name: "with match expressions returns true",
+			object: &authorizationv1alpha1.WebhookAuthorizer{
+				ObjectMeta: metav1.ObjectMeta{Name: "wa-expr"},
+				Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+					NamespaceSelector: metav1.LabelSelector{
+						MatchExpressions: []metav1.LabelSelectorRequirement{
+							{Key: "tier", Operator: metav1.LabelSelectorOpIn, Values: []string{"frontend"}},
+						},
+					},
+				},
+			},
+			indexFunc:  WebhookAuthorizerHasNamespaceSelectorFunc,
+			wantValues: []string{"true"},
+		},
+		{
+			name:       "wrong object type returns nil",
+			object:     &authorizationv1alpha1.RoleDefinition{ObjectMeta: metav1.ObjectMeta{Name: "rd"}},
+			indexFunc:  WebhookAuthorizerHasNamespaceSelectorFunc,
+			wantValues: nil,
+		},
+	}
+
+	runIndexExtractorTests(t, tests)
+}
+
+func TestWebhookAuthorizerIndexWithFakeClient(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := authorizationv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add scheme: %v", err)
+	}
+
+	waGlobal := &authorizationv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{Name: "wa-global"},
+		Spec:       authorizationv1alpha1.WebhookAuthorizerSpec{},
+	}
+	waScoped := &authorizationv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{Name: "wa-scoped"},
+		Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+			NamespaceSelector: metav1.LabelSelector{
+				MatchLabels: map[string]string{"env": "prod"},
+			},
+		},
+	}
+	waScoped2 := &authorizationv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{Name: "wa-scoped-2"},
+		Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+			NamespaceSelector: metav1.LabelSelector{
+				MatchExpressions: []metav1.LabelSelectorRequirement{
+					{Key: "tier", Operator: metav1.LabelSelectorOpExists},
+				},
+			},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(waGlobal, waScoped, waScoped2).
+		WithIndex(
+			&authorizationv1alpha1.WebhookAuthorizer{},
+			WebhookAuthorizerHasNamespaceSelectorField,
+			WebhookAuthorizerHasNamespaceSelectorFunc,
+		).
+		Build()
+
+	ctx := context.Background()
+
+	// Query global authorizers (no namespace selector).
+	var globalList authorizationv1alpha1.WebhookAuthorizerList
+	err := fakeClient.List(ctx, &globalList, client.MatchingFields{
+		WebhookAuthorizerHasNamespaceSelectorField: "false",
+	})
+	if err != nil {
+		t.Fatalf("failed to list global authorizers: %v", err)
+	}
+	if len(globalList.Items) != 1 {
+		t.Errorf("expected 1 global authorizer, got %d", len(globalList.Items))
+	} else if globalList.Items[0].Name != "wa-global" {
+		t.Errorf("expected wa-global, got %s", globalList.Items[0].Name)
+	}
+
+	// Query scoped authorizers (with namespace selector).
+	var scopedList authorizationv1alpha1.WebhookAuthorizerList
+	err = fakeClient.List(ctx, &scopedList, client.MatchingFields{
+		WebhookAuthorizerHasNamespaceSelectorField: "true",
+	})
+	if err != nil {
+		t.Fatalf("failed to list scoped authorizers: %v", err)
+	}
+	if len(scopedList.Items) != 2 {
+		t.Errorf("expected 2 scoped authorizers, got %d", len(scopedList.Items))
+	}
+
+	// Query non-existent index value returns empty.
+	var emptyList authorizationv1alpha1.WebhookAuthorizerList
+	err = fakeClient.List(ctx, &emptyList, client.MatchingFields{
+		WebhookAuthorizerHasNamespaceSelectorField: "invalid",
+	})
+	if err != nil {
+		t.Fatalf("failed to list with invalid index value: %v", err)
+	}
+	if len(emptyList.Items) != 0 {
+		t.Errorf("expected 0 authorizers for invalid index value, got %d", len(emptyList.Items))
 	}
 }

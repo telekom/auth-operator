@@ -18,6 +18,7 @@ import (
 
 	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/pkg/helpers"
+	"github.com/telekom/auth-operator/pkg/indexer"
 )
 
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=webhookauthorizers,verbs=get;list;watch
@@ -35,6 +36,9 @@ const (
 const maxRequestBodySize = 1 << 20 // 1MB
 
 // Authorizer implements an HTTP handler for SubjectAccessReview requests.
+// The Client field should be the cached client returned by manager.GetClient()
+// so that List and Get calls are served from the informer cache rather than
+// hitting the API server on every SubjectAccessReview evaluation.
 type Authorizer struct {
 	Client client.Client
 	Log    logr.Logger
@@ -80,14 +84,35 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"detail", "no resource or non-resource attributes")
 	}
 
-	var webhookAuthorizers authzv1alpha1.WebhookAuthorizerList
-	if err := wa.Client.List(ctx, &webhookAuthorizers); err != nil {
-		wa.Log.Error(err, "failed to list WebhookAuthorizers")
+	// Use field-indexed queries to efficiently categorize authorizers.
+	// Global authorizers (no namespace selector) always apply.
+	// Scoped authorizers (with namespace selector) only apply when the SAR
+	// targets a specific namespace, avoiding unnecessary namespace lookups.
+	var globalAuth authzv1alpha1.WebhookAuthorizerList
+	if err := wa.Client.List(ctx, &globalAuth, client.MatchingFields{
+		indexer.WebhookAuthorizerHasNamespaceSelectorField: "false",
+	}); err != nil {
+		wa.Log.Error(err, "failed to list global WebhookAuthorizers")
 		http.Error(w, "internal evaluation error", http.StatusInternalServerError)
 		return
 	}
 
-	verdict, reason := wa.evaluateSAR(ctx, &sar, &webhookAuthorizers)
+	items := globalAuth.Items
+
+	// Only query namespace-scoped authorizers when the SAR has a namespace target.
+	if sar.Spec.ResourceAttributes != nil && sar.Spec.ResourceAttributes.Namespace != "" {
+		var scopedAuth authzv1alpha1.WebhookAuthorizerList
+		if err := wa.Client.List(ctx, &scopedAuth, client.MatchingFields{
+			indexer.WebhookAuthorizerHasNamespaceSelectorField: "true",
+		}); err != nil {
+			wa.Log.Error(err, "failed to list scoped WebhookAuthorizers")
+			http.Error(w, "internal evaluation error", http.StatusInternalServerError)
+			return
+		}
+		items = append(items, scopedAuth.Items...)
+	}
+
+	verdict, reason := wa.evaluateSAR(ctx, &sar, items)
 
 	response := authzv1.SubjectAccessReview{
 		TypeMeta: metav1.TypeMeta{
@@ -109,8 +134,8 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAccessReview, waList *authzv1alpha1.WebhookAuthorizerList) (allowed bool, reason string) {
-	for _, webhookAuthorizer := range waList.Items {
+func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAccessReview, authorizers []authzv1alpha1.WebhookAuthorizer) (allowed bool, reason string) {
+	for _, webhookAuthorizer := range authorizers {
 		if sar.Spec.ResourceAttributes != nil && !helpers.IsLabelSelectorEmpty(&webhookAuthorizer.Spec.NamespaceSelector) && sar.Spec.ResourceAttributes.Namespace != "" {
 			if !wa.namespaceMatches(ctx, sar.Spec.ResourceAttributes.Namespace, &webhookAuthorizer.Spec.NamespaceSelector) {
 				continue
