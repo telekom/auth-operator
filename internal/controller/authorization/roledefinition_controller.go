@@ -25,7 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
-	authnv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/api/authorization/v1alpha1/applyconfiguration/ssa"
 	conditions "github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/discovery"
@@ -87,7 +87,7 @@ func (r *RoleDefinitionReconciler) SetupWithManager(ctx context.Context, mgr ctr
 
 	return ctrl.NewControllerManagedBy(mgr).
 		// Watch RoleDefinitions with generation predicate (skip status-only updates)
-		For(&authnv1alpha1.RoleDefinition{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		For(&authorizationv1alpha1.RoleDefinition{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		// Watch owned ClusterRoles and Roles to detect external drift.
 		// Note: GenerationChangedPredicate is NOT applied here because RBAC
 		// resources do not increment metadata.generation on spec changes.
@@ -103,7 +103,7 @@ func (r *RoleDefinitionReconciler) queueAll() handler.MapFunc {
 		logger := log.FromContext(ctx).WithName("roleDefinitionReconciler.queueAll")
 
 		// List all RoleDefinition resources
-		roleDefList := &authnv1alpha1.RoleDefinitionList{}
+		roleDefList := &authorizationv1alpha1.RoleDefinitionList{}
 		err := r.client.List(ctx, roleDefList)
 		if err != nil {
 			logger.Error(err, "failed to list RoleDefinition resources")
@@ -183,7 +183,7 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	// Initialize status for reconciliation
 	conditions.MarkReconciling(roleDefinition, roleDefinition.Generation,
-		authnv1alpha1.ReconcilingReasonProgressing, authnv1alpha1.ReconcilingMessageProgressing)
+		authorizationv1alpha1.ReconcilingReasonProgressing, authorizationv1alpha1.ReconcilingMessageProgressing)
 	roleDefinition.Status.ObservedGeneration = roleDefinition.Generation
 
 	// Build initial role object for validation and deletion handling
@@ -228,8 +228,8 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, err
 	}
-	conditions.MarkTrue(roleDefinition, authnv1alpha1.FinalizerCondition, roleDefinition.Generation,
-		authnv1alpha1.FinalizerReason, authnv1alpha1.FinalizerMessage)
+	conditions.MarkTrue(roleDefinition, authorizationv1alpha1.FinalizerCondition, roleDefinition.Generation,
+		authorizationv1alpha1.FinalizerReason, authorizationv1alpha1.FinalizerMessage)
 
 	// Step 4: Discover and filter resources to build policy rules
 	logger.V(2).Info("Discovering and filtering resources",
@@ -285,10 +285,10 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 func (r *RoleDefinitionReconciler) fetchRoleDefinition(
 	ctx context.Context,
 	namespacedName types.NamespacedName,
-) (*authnv1alpha1.RoleDefinition, error) {
+) (*authorizationv1alpha1.RoleDefinition, error) {
 	logger := log.FromContext(ctx)
 
-	roleDefinition := &authnv1alpha1.RoleDefinition{}
+	roleDefinition := &authorizationv1alpha1.RoleDefinition{}
 	if err := r.client.Get(ctx, namespacedName, roleDefinition); err != nil {
 		if apierrors.IsNotFound(err) {
 			logger.V(2).Info("RoleDefinition not found - already deleted", "roleDefinitionName", namespacedName.Name)
@@ -317,13 +317,13 @@ func (r *RoleDefinitionReconciler) fetchRoleDefinition(
 // Returns the policy rules, a requeue result (if the tracker is not ready), and any error.
 func (r *RoleDefinitionReconciler) discoverAndFilterResources(
 	ctx context.Context,
-	roleDefinition *authnv1alpha1.RoleDefinition,
+	roleDefinition *authorizationv1alpha1.RoleDefinition,
 ) ([]rbacv1.PolicyRule, ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	// Set API discovery condition
-	conditions.MarkTrue(roleDefinition, authnv1alpha1.APIDiscoveryCondition, roleDefinition.Generation,
-		authnv1alpha1.APIDiscoveryReason, authnv1alpha1.APIDiscoveryMessage)
+	conditions.MarkTrue(roleDefinition, authorizationv1alpha1.APIDiscoveryCondition, roleDefinition.Generation,
+		authorizationv1alpha1.APIDiscoveryReason, authorizationv1alpha1.APIDiscoveryMessage)
 
 	// Get API resources from tracker
 	apiResources, err := r.resourceTracker.GetAPIResources()
@@ -357,12 +357,12 @@ func (r *RoleDefinitionReconciler) discoverAndFilterResources(
 	finalRules := r.buildFinalRules(roleDefinition, rulesByAPIGroupAndVerbs)
 
 	// Mark discovery and filtering conditions as complete
-	conditions.MarkTrue(roleDefinition, authnv1alpha1.APIFilteredCondition, roleDefinition.Generation,
-		authnv1alpha1.APIFilteredReason, authnv1alpha1.APIFilteredMessage)
-	conditions.MarkTrue(roleDefinition, authnv1alpha1.ResourceDiscoveryCondition, roleDefinition.Generation,
-		authnv1alpha1.ResourceDiscoveryReason, authnv1alpha1.ResourceDiscoveryMessage)
-	conditions.MarkTrue(roleDefinition, authnv1alpha1.ResourceFilteredCondition, roleDefinition.Generation,
-		authnv1alpha1.ResourceFilteredReason, authnv1alpha1.ResourceFilteredMessage)
+	conditions.MarkTrue(roleDefinition, authorizationv1alpha1.APIFilteredCondition, roleDefinition.Generation,
+		authorizationv1alpha1.APIFilteredReason, authorizationv1alpha1.APIFilteredMessage)
+	conditions.MarkTrue(roleDefinition, authorizationv1alpha1.ResourceDiscoveryCondition, roleDefinition.Generation,
+		authorizationv1alpha1.ResourceDiscoveryReason, authorizationv1alpha1.ResourceDiscoveryMessage)
+	conditions.MarkTrue(roleDefinition, authorizationv1alpha1.ResourceFilteredCondition, roleDefinition.Generation,
+		authorizationv1alpha1.ResourceFilteredReason, authorizationv1alpha1.ResourceFilteredMessage)
 
 	logger.V(2).Info("resource discovery and filtering completed",
 		"roleDefinitionName", roleDefinition.Name, "rulesCount", len(finalRules))
@@ -372,13 +372,13 @@ func (r *RoleDefinitionReconciler) discoverAndFilterResources(
 
 // applyStatus applies status updates using Server-Side Apply (SSA).
 // This eliminates race conditions from stale object versions and batches all condition updates.
-func (r *RoleDefinitionReconciler) applyStatus(ctx context.Context, roleDefinition *authnv1alpha1.RoleDefinition) error {
+func (r *RoleDefinitionReconciler) applyStatus(ctx context.Context, roleDefinition *authorizationv1alpha1.RoleDefinition) error {
 	return ssa.ApplyRoleDefinitionStatus(ctx, r.client, roleDefinition)
 }
 
 func (r *RoleDefinitionReconciler) filterAPIResourcesForRoleDefinition(
 	_ context.Context,
-	roleDefinition *authnv1alpha1.RoleDefinition,
+	roleDefinition *authorizationv1alpha1.RoleDefinition,
 	apiResources discovery.APIResourcesByGroupVersion,
 ) (map[string]*rbacv1.PolicyRule, error) {
 	rulesByAPIGroupAndVerbs := make(map[string]*rbacv1.PolicyRule)

@@ -11,9 +11,9 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	pkgerrors "github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -498,7 +498,7 @@ func (r *ResourceTracker) refreshUUIDMap(ctx context.Context) error {
 func (r *ResourceTracker) launchWatch(ctx context.Context) error {
 	watchBackoff := NewForeverWatchBackoff()
 	if err := ExponentialBackoffWithContext(ctx, watchBackoff, r.watchAPIResources); err != nil {
-		return pkgerrors.Wrap(err, "failed to launch CRD watch with backoff")
+		return fmt.Errorf("failed to launch CRD watch with backoff: %w", err)
 	}
 
 	return nil
@@ -604,7 +604,7 @@ func (r *ResourceTracker) collectAPIResourcesForGroupVersion(
 
 		// for roles and rolebindings in rbac.authorization.k8s.io/v1,
 		// we need to add the bind verb explicitly, as they are not part of the API discovery
-		requiresExplicitBind := group == "rbac.authorization.k8s.io" && version == "v1" &&
+		requiresExplicitBind := group == rbacv1.GroupName && version == "v1" &&
 			(resource.Name == "roles" || resource.Name == "rolebindings")
 		if requiresExplicitBind {
 			resource.Verbs = append(resource.Verbs, "bind")
@@ -612,7 +612,7 @@ func (r *ResourceTracker) collectAPIResourcesForGroupVersion(
 
 		// for roles in rbac.authorization.k8s.io/v1,
 		// we need to add the escalate verb explicitly, as it is not part of the API discovery
-		requiresExplicitEscalate := group == "rbac.authorization.k8s.io" && version == "v1" &&
+		requiresExplicitEscalate := group == rbacv1.GroupName && version == "v1" &&
 			resource.Name == "roles"
 		if requiresExplicitEscalate {
 			resource.Verbs = append(resource.Verbs, "escalate")
