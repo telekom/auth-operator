@@ -30,6 +30,10 @@ const (
 	serviceAccountKind = "serviceaccount"
 )
 
+// maxRequestBodySize is the maximum allowed request body size (1MB).
+// This prevents denial-of-service attacks via oversized request bodies.
+const maxRequestBodySize = 1 << 20 // 1MB
+
 // Authorizer implements an HTTP handler for SubjectAccessReview requests.
 type Authorizer struct {
 	Client client.Client
@@ -40,6 +44,9 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Use request context for proper cancellation and deadline propagation
 	ctx := r.Context()
 
+	// Limit request body size to prevent OOM from oversized payloads
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+
 	// Ensure request body is closed to prevent resource leaks
 	defer func() { _ = r.Body.Close() }()
 
@@ -47,7 +54,7 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if err := json.NewDecoder(r.Body).Decode(&sar); err != nil {
 		wa.Log.Error(err, "failed to decode SubjectAccessReview request")
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -76,7 +83,7 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var webhookAuthorizers authzv1alpha1.WebhookAuthorizerList
 	if err := wa.Client.List(ctx, &webhookAuthorizers); err != nil {
 		wa.Log.Error(err, "failed to list WebhookAuthorizers")
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "internal evaluation error", http.StatusInternalServerError)
 		return
 	}
 
@@ -98,7 +105,7 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		wa.Log.Error(err, "failed to encode SubjectAccessReview response")
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "internal evaluation error", http.StatusInternalServerError)
 	}
 }
 
