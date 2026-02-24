@@ -112,6 +112,14 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		items = append(items, scopedAuth.Items...)
 	}
 
+	// Sort authorizers by name for deterministic evaluation order.
+	// This ensures deny-before-allow semantics are stable regardless of
+	// whether the client is backed by a cache (random map iteration) or
+	// the API server (alphabetical order).
+	slices.SortFunc(items, func(a, b authzv1alpha1.WebhookAuthorizer) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+
 	verdict, reason := wa.evaluateSAR(ctx, &sar, items)
 
 	response := authzv1.SubjectAccessReview{
