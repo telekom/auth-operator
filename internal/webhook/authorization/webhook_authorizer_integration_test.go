@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -71,6 +72,7 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 				},
 			}
 			Expect(envClient.Create(ctx, wa)).To(Succeed())
+			waitForCachedWA(ctx, wa.Name)
 			DeferCleanup(func() {
 				_ = envClient.Delete(ctx, wa)
 			})
@@ -131,6 +133,7 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 				},
 			}
 			Expect(envClient.Create(ctx, wa)).To(Succeed())
+			waitForCachedWA(ctx, wa.Name)
 			DeferCleanup(func() {
 				_ = envClient.Delete(ctx, wa)
 			})
@@ -192,6 +195,7 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 				},
 			}
 			Expect(envClient.Create(setupCtx, wa)).To(Succeed())
+			waitForCachedWA(setupCtx, wa.Name)
 			DeferCleanup(func() {
 				_ = envClient.Delete(setupCtx, wa)
 			})
@@ -263,6 +267,8 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 			}
 			Expect(envClient.Create(ctx, wa1)).To(Succeed())
 			Expect(envClient.Create(ctx, wa2)).To(Succeed())
+			waitForCachedWA(ctx, wa1.Name)
+			waitForCachedWA(ctx, wa2.Name)
 			DeferCleanup(func() {
 				_ = envClient.Delete(ctx, wa1)
 				_ = envClient.Delete(ctx, wa2)
@@ -309,6 +315,7 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 				},
 			}
 			Expect(envClient.Create(ctx, wa)).To(Succeed())
+			waitForCachedWA(ctx, wa.Name)
 			DeferCleanup(func() {
 				_ = envClient.Delete(ctx, wa)
 			})
@@ -356,6 +363,7 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 				},
 			}
 			Expect(envClient.Create(ctx, wa)).To(Succeed())
+			waitForCachedWA(ctx, wa.Name)
 			DeferCleanup(func() {
 				_ = envClient.Delete(ctx, wa)
 			})
@@ -415,6 +423,7 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 				},
 			}
 			Expect(envClient.Create(ctx, wa)).To(Succeed())
+			waitForCachedWA(ctx, wa.Name)
 			DeferCleanup(func() {
 				_ = envClient.Delete(ctx, wa)
 			})
@@ -459,6 +468,7 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 				},
 			}
 			Expect(envClient.Create(ctx, wa)).To(Succeed())
+			waitForCachedWA(ctx, wa.Name)
 			DeferCleanup(func() {
 				_ = envClient.Delete(ctx, wa)
 			})
@@ -481,16 +491,18 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 			}
 			Expect(envClient.Update(ctx, wa)).To(Succeed())
 
-			// After update, user should be denied.
-			resp = sendSAR(authorizer, authzv1.SubjectAccessReview{
-				Spec: authzv1.SubjectAccessReviewSpec{
-					User: "live-user",
-					ResourceAttributes: &authzv1.ResourceAttributes{
-						Verb: "get", Resource: "pods", Group: "",
+			// After update, user should be denied once the cache reflects the change.
+			Eventually(func() bool {
+				r := sendSAR(authorizer, authzv1.SubjectAccessReview{
+					Spec: authzv1.SubjectAccessReviewSpec{
+						User: "live-user",
+						ResourceAttributes: &authzv1.ResourceAttributes{
+							Verb: "get", Resource: "pods", Group: "",
+						},
 					},
-				},
-			})
-			Expect(resp.Status.Allowed).To(BeFalse())
+				})
+				return r.Status.Allowed
+			}, 5*time.Second, 50*time.Millisecond).Should(BeFalse())
 		})
 	})
 
@@ -508,6 +520,7 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 				},
 			}
 			Expect(envClient.Create(ctx, wa)).To(Succeed())
+			waitForCachedWA(ctx, wa.Name)
 			DeferCleanup(func() {
 				_ = envClient.Delete(ctx, wa)
 			})
