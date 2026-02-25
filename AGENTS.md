@@ -53,3 +53,58 @@ E2E test labels: `helm`, `complex`, `ha`, `leader-election`, `integration`, `gol
 ## CI Checks
 
 All PRs must pass: golangci-lint, go vet, go mod tidy check, unit tests (envtest), Docker build, Helm lint, govulncheck, Trivy scan, REUSE compliance.
+
+## Reusable Prompts (16 total)
+
+Prompts are in [`.github/prompts/`](.github/prompts/) and can be invoked by name:
+
+| Prompt | Category | Purpose |
+|--------|----------|---------|
+| **Task Prompts** | | |
+| `review-pr` | General | PR checklist (code quality, testing, security, docs) |
+| `add-crd-field` | Task | Step-by-step guide for adding a new CRD field |
+| `helm-chart-changes` | Task | Helm chart modification checklist |
+| `github-pr-management` | Workflow | GitHub PR workflows: review threads, rebasing, squashing, CI checks |
+| **Code Quality Reviewers** | | |
+| `review-go-style` | Lint | golangci-lint v2 compliance: `importas`, `errorlint`, `godot`, `revive`, `goconst`, strict lint |
+| `review-concurrency` | Safety | SSA ownership, condition management, cache staleness, webhook timeout, retry-on-conflict |
+| `review-k8s-patterns` | Ops | Error handling, idempotency, conditions via `pkg/conditions`, structured logging |
+| `review-performance` | Perf | Reconciler efficiency, namespace enumeration, SSA no-op detection, metrics cardinality |
+| `review-integration-wiring` | Wiring | Dead code, unwired fields, SSA apply completeness, RBAC marker→Helm propagation |
+| **API & Security Reviewers** | | |
+| `review-api-crd` | API | CRD schema, backwards compat, webhook validation, SSA apply configuration completeness |
+| `review-security` | Security | RBAC least privilege, privilege escalation prevention, SSA field ownership, DoS protection |
+| **Documentation & Testing Reviewers** | | |
+| `review-docs-consistency` | Docs | Documentation ↔ code alignment: field names, conditions, Helm values, API reference |
+| `review-ci-testing` | Testing | Test coverage, Ginkgo/Gomega patterns, assertion quality, CI workflow alignment |
+| `review-edge-cases` | Testing | Zero/nil/empty values, namespace lifecycle, SSA conflicts, webhook timing, fuzz properties |
+| `review-qa-regression` | QA | RBAC generation regression, condition regression, SSA ownership changes, rollback safety |
+| **User Experience Reviewers** | | |
+| `review-end-user` | UX | End-user experience: platform engineer, cluster admin, security auditor |
+
+### Running a Multi-Persona Review
+
+Invoke each review prompt in sequence against a code change and collect findings.
+The 13 reviewer personas cover every issue class found by automated reviewers
+(Copilot, etc.) and more:
+
+**Code quality** (4 personas):
+- **Go style** catches import alias violations, `%v` error wrapping, `godot` comment periods, `revive` naming
+- **Concurrency** catches SSA ownership conflicts, condition management bypasses, stale cache reads
+- **K8s patterns** catches missing context timeouts, non-idempotent reconcilers, condition mis-management
+- **Performance** catches unbounded namespace enumeration, SSA no-op waste, high-cardinality metrics
+
+**Correctness** (4 personas):
+- **Integration wiring** catches new code that is defined but never called, SSA apply gaps, RBAC drift
+- **API & CRD** catches missing validation markers, backwards-compatibility breaks, SSA completeness
+- **Edge cases** catches namespace lifecycle races, SSA conflicts, zero-value bugs, webhook timing
+- **QA regression** catches RBAC generation regressions, condition reason changes, rollback hazards
+
+**Security & documentation** (3 personas):
+- **Security** catches privilege escalation via RBAC generation, webhook bypass, DoS vectors
+- **Docs consistency** catches field name mismatches, stale condition references, Helm doc drift
+- **CI & testing** catches coverage gaps, Ginkgo/testify mixing, missing enum cases, golden staleness
+
+**User-facing** (2 personas):
+- **End-user** catches platform engineer confusion, admin upgrade friction, auditor visibility gaps
+- **Helm chart changes** catches values drift, CRD sync issues, RBAC template mismatches
