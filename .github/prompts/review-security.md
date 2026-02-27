@@ -74,6 +74,19 @@ and RoleBindings — it is a privilege-management system and security-critical.
 - Check that `Dockerfile` uses a pinned base image digest.
 - Verify `govulncheck` is clean.
 
+### 9. Error Response Sanitization
+
+- Webhook admission responses and error messages returned to kubectl
+  users must NOT expose internal implementation details:
+  - No Go struct field names, package paths, or stack traces
+  - No internal IP addresses, hostnames, or file paths
+  - No raw error messages from downstream dependencies
+- Validate that `admission.Denied()` / `admission.Errored()` messages
+  describe the problem in user-facing terms ("field X must be Y")
+  rather than leaking internals ("reflect: invalid pointer").
+- Error messages in CRD validation (CEL rules, webhook) should guide
+  the user toward a fix, not just state what went wrong.
+
 ## Output format
 
 For each finding:

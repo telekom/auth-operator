@@ -45,6 +45,18 @@ in the `authorization.t-caas.telekom.com` API group.
   migration path is documented.
 - New enum values must be additive.
 - Check CRD `storedVersions` if schema changes affect stored objects.
+- **Validation tightening is a breaking change**: Adding new
+  constraints (`MaxItems`, `MaxLength`, `Pattern`, CEL rules) to
+  existing fields may reject objects that were previously accepted and
+  are already stored in etcd. This breaks existing deployments on
+  upgrade. Tightening is safe ONLY if:
+  1. The constraint matches what the code already enforced (making
+     implicit validation explicit), OR
+  2. A migration webhook or conversion hook rejects/migrates non-
+     conforming objects during upgrade, OR
+  3. The field was added in the same PR (no existing stored objects).
+- Flag any `+kubebuilder:validation` change to an existing field that
+  could reject currently-valid values.
 
 ### 5. Webhook Validation
 
@@ -53,6 +65,13 @@ in the `authorization.t-caas.telekom.com` API group.
 - Immutable fields must be rejected on update.
 - Defaulting webhooks must be idempotent — applying defaults twice
   must produce the same result.
+- **Field path precision in list validation**: When validating elements in
+  a slice/list field, errors must use `fieldPath.Index(i)` to identify the
+  specific offending element, not just the parent list path. An error on
+  `spec.rules` without an index tells the user "something in the list is
+  wrong" but not which entry.
+  - **WRONG**: `field.Invalid(rulesPath, rule, "msg")` inside a `for _, r` loop.
+  - **RIGHT**: `field.Invalid(rulesPath.Index(i), rule, "msg")` inside a `for i, r` loop.
 
 ### 6. RBAC Resource Generation
 
@@ -67,6 +86,21 @@ in the `authorization.t-caas.telekom.com` API group.
 - Verify `chart/auth-operator/crds/` contains the latest generated CRDs.
 - `make helm` must have been run after any `*_types.go` change.
 - Check that `values.yaml` defaults align with CRD field defaults.
+
+### 8. Test-Object Compliance with Validation Rules
+
+- When adding or tightening a CRD validation rule (CEL `x-kubernetes-
+  validations`, webhook logic, or kubebuilder markers), verify that
+  existing test objects still satisfy it. This includes Go test helpers,
+  YAML fixture files, embedded YAML in shell scripts, and
+  `config/samples/` YAML.
+- Objects that pass Go-level unit tests but fail validation at admission
+  time indicate a gap between unit-test coverage and runtime behavior.
+- **Test comment enforcement attribution**: Test comments that describe
+  CEL or webhook validation behavior must explicitly state which layer
+  enforces the constraint. Write "rejected by CEL rule at admission
+  time" rather than vague "is now invalid" to avoid confusion about
+  which validation layer is responsible.
 
 ## Output format
 

@@ -109,6 +109,24 @@ that would slip past routine test coverage.
   match the final spec (eventual consistency).
 - Fuzz: random bytes in CRD spec fields must not panic the controller.
 
+### 11. SSA Field Ownership Edge Cases
+
+- **User-managed field surviving SSA**: If a user manually edits a label
+  or annotation on an operator-managed RBAC resource, and the operator's
+  SSA apply does NOT include that field, the user's change persists
+  silently. Verify the operator either:
+  1. Declares ownership of ALL label/annotation keys it cares about
+     (so SSA removes user changes), OR
+  2. Explicitly documents that certain fields are user-extensible.
+- **Owner reference garbage collection vs SSA**: If the operator uses
+  SSA to manage a ClusterRoleBinding but also sets ownerReference on it,
+  and the owner (a namespace-scoped CR) is deleted, the GC deletes the
+  cluster-scoped resource. Verify this interaction is intended and tested.
+- **ForceOwnership on shared fields**: Two controllers both applying
+  SSA to the same object with `ForceOwnership: true` causes a silent
+  war where the last writer wins. Flag any SSA apply with ForceOwnership
+  on an object that other controllers are known to manage.
+
 ## Output format
 
 For each finding:

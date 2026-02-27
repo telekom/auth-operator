@@ -21,9 +21,14 @@ apierrors "k8s.io/apimachinery/pkg/api/errors"
 metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 ctrl "sigs.k8s.io/controller-runtime"
 
+// PROJECT API aliases (must be consistent across ALL files):
+authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+
 // WRONG — will fail lint:
 "k8s.io/api/core/v1"  // unaliased
 v1 "k8s.io/api/core/v1"  // wrong alias
+authnv1alpha1 "..."  // wrong alias for project API (use authorizationv1alpha1)
+v1alpha1 "..."  // ambiguous — could be any v1alpha1
 ```
 
 ### 2. Error Handling (`errorlint`, `errcheck`, `nilerr`, `nilnil`)
