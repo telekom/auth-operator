@@ -1816,6 +1816,121 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 			},
 			expectedAllow: false,
 		},
+
+		// === Label-change rejection with existing BindDefinitions ===
+		// These tests verify that label immutability is enforced even when
+		// the user IS fully authorized by a matching BindDefinition.
+		{
+			name:     "deny authorized SA modifying tenant label on managed namespace",
+			bindDefs: []authzv1alpha1.BindDefinition{bindDefTenant},
+			request: crAdmission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
+					Name:      "tenant-ns",
+					Operation: admissionv1.Update,
+					UserInfo: authenticationv1.UserInfo{
+						Username: "system:serviceaccount:tenant-system:tenant-sa",
+					},
+					Object: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "tenant-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner":  "tenant",
+									"t-caas.telekom.com/tenant": "tenant-b", // Changed from tenant-a!
+								},
+							},
+						}),
+					},
+					OldObject: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "tenant-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner":  "tenant",
+									"t-caas.telekom.com/tenant": "tenant-a",
+								},
+							},
+						}),
+					},
+				},
+			},
+			expectedAllow: false,
+		},
+		{
+			name:     "deny authorized user removing thirdparty label from managed namespace",
+			bindDefs: []authzv1alpha1.BindDefinition{bindDefThirdparty},
+			request: crAdmission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
+					Name:      "thirdparty-ns",
+					Operation: admissionv1.Update,
+					UserInfo: authenticationv1.UserInfo{
+						Username: "system:serviceaccount:thirdparty-system:thirdparty-sa",
+					},
+					Object: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "thirdparty-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner": "thirdparty",
+									// thirdparty label removed!
+								},
+							},
+						}),
+					},
+					OldObject: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "thirdparty-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner":      "thirdparty",
+									"t-caas.telekom.com/thirdparty": "tp-a",
+								},
+							},
+						}),
+					},
+				},
+			},
+			expectedAllow: false,
+		},
+		{
+			name:     "deny authorized group member changing owner label on managed namespace",
+			bindDefs: []authzv1alpha1.BindDefinition{bindDefPlatform, bindDefTenant},
+			request: crAdmission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
+					Name:      "platform-ns",
+					Operation: admissionv1.Update,
+					UserInfo: authenticationv1.UserInfo{
+						Username: "platform-user",
+						Groups:   []string{"oidc:platform-admins"},
+					},
+					Object: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "platform-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner":  "tenant", // Changed from platform!
+									"t-caas.telekom.com/tenant": "tenant-a",
+								},
+							},
+						}),
+					},
+					OldObject: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "platform-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner": "platform",
+								},
+							},
+						}),
+					},
+				},
+			},
+			expectedAllow: false,
+		},
 	}
 
 	for _, tt := range tests {
