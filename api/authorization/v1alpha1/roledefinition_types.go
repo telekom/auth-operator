@@ -15,6 +15,8 @@ const (
 )
 
 // RoleDefinitionSpec defines the desired state of RoleDefinition.
+// +kubebuilder:validation:XValidation:rule="self.targetRole != 'Role' || (has(self.targetNamespace) && size(self.targetNamespace) > 0)",message="targetNamespace is required when targetRole is 'Role'"
+// +kubebuilder:validation:XValidation:rule="self.targetRole != 'ClusterRole' || !has(self.targetNamespace) || size(self.targetNamespace) == 0",message="targetNamespace must be empty when targetRole is 'ClusterRole'"
 type RoleDefinitionSpec struct {
 	// The target role that will be reconciled. This can be a ClusterRole or a namespaced Role
 	// +kubebuilder:validation:Required

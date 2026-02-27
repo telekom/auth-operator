@@ -17,18 +17,23 @@ const (
 type Principal struct {
 	// User is the requesting user in SubjectAccessReview request.
 	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MaxLength=253
 	User string `json:"user,omitempty"`
 
 	// Groups is the requesting user groups in SubjectAccessReview request.
 	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MaxItems=64
 	Groups []string `json:"groups,omitempty"`
 
 	// Namespace is the requesting user namespace in case the requesting user is a ServiceAccount.
 	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MaxLength=253
 	Namespace string `json:"namespace,omitempty"`
 }
 
 // WebhookAuthorizerSpec defines the desired state of WebhookAuthorizer.
+// +kubebuilder:validation:XValidation:rule="(has(self.resourceRules) && size(self.resourceRules) > 0) || (has(self.nonResourceRules) && size(self.nonResourceRules) > 0)",message="at least one resourceRules or nonResourceRules must be specified"
+// +kubebuilder:validation:XValidation:rule="(has(self.allowedPrincipals) && size(self.allowedPrincipals) > 0) || (has(self.deniedPrincipals) && size(self.deniedPrincipals) > 0)",message="at least one allowedPrincipals or deniedPrincipals must be specified"
 type WebhookAuthorizerSpec struct {
 	// Resources which will be used to evaluate the SubjectAccessReviewSpec.ResourceAttributes
 	// +kubebuilder:validation:Optional

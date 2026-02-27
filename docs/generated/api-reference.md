@@ -131,9 +131,9 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `user` _string_ | User is the requesting user in SubjectAccessReview request. |  | Optional: \{\} <br /> |
-| `groups` _string array_ | Groups is the requesting user groups in SubjectAccessReview request. |  | Optional: \{\} <br /> |
-| `namespace` _string_ | Namespace is the requesting user namespace in case the requesting user is a ServiceAccount. |  | Optional: \{\} <br /> |
+| `user` _string_ | User is the requesting user in SubjectAccessReview request. |  | MaxLength: 253 <br />Optional: \{\} <br /> |
+| `groups` _string array_ | Groups is the requesting user groups in SubjectAccessReview request. |  | MaxItems: 64 <br />Optional: \{\} <br /> |
+| `namespace` _string_ | Namespace is the requesting user namespace in case the requesting user is a ServiceAccount. |  | MaxLength: 253 <br />Optional: \{\} <br /> |
 
 
 #### RoleDefinition

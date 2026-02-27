@@ -60,14 +60,17 @@ spec:
                         request.
                       items:
                         type: string
+                      maxItems: 64
                       type: array
                     namespace:
                       description: Namespace is the requesting user namespace in case
                         the requesting user is a ServiceAccount.
+                      maxLength: 253
                       type: string
                     user:
                       description: User is the requesting user in SubjectAccessReview
                         request.
+                      maxLength: 253
                       type: string
                   type: object
                 type: array
@@ -83,14 +86,17 @@ spec:
                         request.
                       items:
                         type: string
+                      maxItems: 64
                       type: array
                     namespace:
                       description: Namespace is the requesting user namespace in case
                         the requesting user is a ServiceAccount.
+                      maxLength: 253
                       type: string
                     user:
                       description: User is the requesting user in SubjectAccessReview
                         request.
+                      maxLength: 253
                       type: string
                   type: object
                 type: array
@@ -211,6 +217,15 @@ spec:
                   type: object
                 type: array
             type: object
+            x-kubernetes-validations:
+            - message: at least one resourceRules or nonResourceRules must be specified
+              rule: (has(self.resourceRules) && size(self.resourceRules) > 0) || (has(self.nonResourceRules)
+                && size(self.nonResourceRules) > 0)
+            - message: at least one allowedPrincipals or deniedPrincipals must be
+                specified
+              rule: (has(self.allowedPrincipals) && size(self.allowedPrincipals) >
+                0) || (has(self.deniedPrincipals) && size(self.deniedPrincipals) >
+                0)
           status:
             description: WebhookAuthorizerStatus defines the observed state of WebhookAuthorizer.
             properties:

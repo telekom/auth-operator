@@ -199,6 +199,15 @@ spec:
             - subjects
             - targetName
             type: object
+            x-kubernetes-validations:
+            - message: at least one clusterRoleBindings or roleBindings must be specified
+              rule: (has(self.clusterRoleBindings.clusterRoleRefs) && size(self.clusterRoleBindings.clusterRoleRefs)
+                > 0) || (has(self.roleBindings) && size(self.roleBindings) > 0)
+            - message: at least one subject must be specified
+              rule: size(self.subjects) > 0
+            - message: ServiceAccount subjects must specify a namespace
+              rule: self.subjects.all(s, s.kind != 'ServiceAccount' || (has(s.namespace)
+                && size(s.namespace) > 0))
           status:
             description: BindDefinitionStatus defines the observed state of BindDefinition.
             properties:

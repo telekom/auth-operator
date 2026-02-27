@@ -65,6 +65,9 @@ var _ = Describe("BindDefinition Webhook", func() {
 				Spec: BindDefinitionSpec{
 					TargetName: "shared-bd-target",
 					Subjects:   validSubjects,
+					ClusterRoleBindings: ClusterBinding{
+						ClusterRoleRefs: []string{"some-clusterrole"},
+					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, bd1)).To(Succeed())
@@ -78,6 +81,9 @@ var _ = Describe("BindDefinition Webhook", func() {
 				Spec: BindDefinitionSpec{
 					TargetName: "shared-bd-target",
 					Subjects:   validSubjects,
+					ClusterRoleBindings: ClusterBinding{
+						ClusterRoleRefs: []string{"some-clusterrole"},
+					},
 				},
 			}
 			Eventually(func(g Gomega) {
