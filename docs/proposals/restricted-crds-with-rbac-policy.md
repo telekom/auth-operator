@@ -32,20 +32,20 @@ The policy CRD is currently called `RBACPolicy`, but alternatives worth consider
 
 - [Goals](#goals)
 - [Non-Goals](#non-goals)
-- [Design Principles](#design-principles)
-- [Architecture](#architecture)
-- [RBACPolicy Specification](#rbacpolicy-specification)
-- [RestrictedBindDefinition](#restrictedbinddefinition)
-- [RestrictedRoleDefinition](#restrictedroledefinition)
-- [Bindings (RestrictedBindDefinition)](#bindings-restrictedbinddefinition)
-- [Continuous Enforcement & Deprovisioning](#continuous-enforcement--deprovisioning)
-- [Policy Reference Enforcement](#policy-reference-enforcement)
-- [Conflict Handling with RoleDefinition/BindDefinition](#conflict-handling-with-roledefinitionbinddefinition)
-- [Multi-Tenancy Enforcement](#multi-tenancy-enforcement)
-- [Unified Selector Model](#unified-selector-model)
-- [Implementation Notes](#implementation-notes)
-- [Related](#related)
-- [Naming Alternatives](#naming-alternatives)
+- [Motivation](#motivation)
+- [Detailed Design](#detailed-design)
+  - [RBACPolicy CRD](#rbacpolicy-crd)
+  - [RestrictedRoleDefinition CRD](#restrictedroledefinition-crd)
+  - [RestrictedBindDefinition CRD](#restrictedbinddefinition-crd)
+  - [Privilege Escalation Prevention](#privilege-escalation-prevention)
+  - [Continuous Enforcement](#continuous-enforcement)
+- [Controller Design](#controller-design)
+- [Webhook Design](#webhook-design)
+- [Integration with Existing CRDs](#integration-with-existing-crds)
+- [Security Considerations](#security-considerations)
+- [Implementation Plan](#implementation-plan)
+- [Go Type Definitions](#go-type-definitions)
+- [Appendix: Naming Alternatives](#naming-alternatives)
 
 > **Note on Go type definitions:** The Go types in this proposal are
 > intentionally skeletal. During implementation, fields will be added as
@@ -62,13 +62,6 @@ The policy CRD is currently called `RBACPolicy`, but alternatives worth consider
 5. **Continuous enforcement** - validate on every reconcile, deprovision on violation
 6. **Explicit policy binding** - resources explicitly reference their governing policy
 7. **Full audit trail** - track who created/modified resources
-
-## Non-Goals
-
-1. **Replacing existing CRDs** — `RoleDefinition` and `BindDefinition` remain unchanged; restricted variants are additive
-2. **Regex-based matching** — only simple prefix/suffix wildcards are supported (see Design Principles)
-3. **Cross-cluster policy federation** — policies are scoped to a single cluster
-4. **Runtime authorization decisions** — this proposal covers RBAC resource generation, not webhook-based authorization (see CEL Authorization proposal)
 
 ## Design Principles
 
@@ -734,14 +727,14 @@ spec:
     - clusterRoleRefs:
         - edit
       namespaceSelector:
-        - matchLabels:
-            tenant: team-a
+        matchLabels:
+          tenant: team-a
     - roleRefs:
         - app-role  # Reference Roles in target namespaces
       namespaceSelector:
-        - matchLabels:
-            app: my-app
-            tenant: team-a
+        matchLabels:
+          app: my-app
+          tenant: team-a
 
 status:
   # ServiceAccounts created by this RestrictedBindDefinition
@@ -1175,19 +1168,19 @@ spec:
       - kube-public
       - default
     
-    # Forbidden source namespace prefixes (requires trailing "*")
+    # Forbidden source namespace prefixes (bare prefix, matches "prefix*")
     forbiddenSourcePrefixes:
-      - "kube-*"
-      - "team-b-*"  # Other tenant's namespaces
+      - "kube-"
+      - "team-b-"  # Other tenant's namespaces
     
     # Restrict which roles can be mirrored (by name prefix/suffix)
     allowedRolePrefixes:
-      - "team-a-*"
-      - "shared-*"
+      - "team-a-"
+      - "shared-"
     
     forbiddenRoleSuffixes:
-      - "*-admin"
-      - "*-privileged"
+      - "-admin"
+      - "-privileged"
     
     # Maximum number of target namespaces per RestrictedRoleDefinition
     maxMirrorTargets: 20
@@ -1480,7 +1473,7 @@ metadata:
     authorization.t-caas.telekom.com/rbac-policy: tenant-team-a-policy
 ```
 
-### 1. Recording Audit Information
+### Recording Audit Information
 
 Audit trail is implemented via two complementary mechanisms:
 
@@ -1521,22 +1514,8 @@ func (m *RestrictedBindDefinitionMutator) Handle(ctx context.Context,
         rbd.Annotations["authorization.t-caas.telekom.com/created-by"] = userInfo.Username
         rbd.Annotations["authorization.t-caas.telekom.com/created-at"] = now
     }
-    // Always overwrite from req.UserInfo to prevent client-supplied tampering.
     rbd.Annotations["authorization.t-caas.telekom.com/last-modified-by"] = userInfo.Username
     rbd.Annotations["authorization.t-caas.telekom.com/last-modified-at"] = now
-    // On UPDATE, re-assert the created-by annotation from the old object to
-    // prevent tenants from rewriting creator identity.
-    if req.Operation == admissionv1.Update {
-        oldRBD := &authorizationv1alpha1.RestrictedBindDefinition{}
-        if err := m.decoder.DecodeRaw(req.OldObject, oldRBD); err == nil {
-            if v, ok := oldRBD.Annotations["authorization.t-caas.telekom.com/created-by"]; ok {
-                rbd.Annotations["authorization.t-caas.telekom.com/created-by"] = v
-            }
-            if v, ok := oldRBD.Annotations["authorization.t-caas.telekom.com/created-at"]; ok {
-                rbd.Annotations["authorization.t-caas.telekom.com/created-at"] = v
-            }
-        }
-    }
 
     marshaledRBD, err := json.Marshal(rbd)
     if err != nil {
@@ -1573,7 +1552,7 @@ spec:
     groupLimits:
       # Allow groups starting with team-a- (simple prefix, NO regex)
       allowedPrefixes:
-        - "team-a-*"
+        - "team-a-"
       forbiddenGroups:
         - "team-a-admins"  # Admins handled separately
     
@@ -1757,20 +1736,25 @@ apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: BindDefinition
 metadata:
   name: team-a-rbac-applier-permissions
+  namespace: platform-system
 spec:
-  targetName: team-a-rbac-applier
+  # Create the ServiceAccount in tenant's system namespace
+  serviceAccountRef:
+    name: team-a-rbac-applier
+    namespace: team-a-system
+    create: true
 
-  subjects:
-    - kind: ServiceAccount
-      name: team-a-rbac-applier
-      namespace: team-a-system
+  # Grant limited RBAC permissions via RoleBindings in each tenant namespace
+  bindingType: RoleBinding
+  roleRef:
+    kind: ClusterRole
+    name: tenant-rbac-applier  # Pre-defined ClusterRole with limited permissions
 
-  roleBindings:
-    - clusterRoleRefs:
-        - tenant-rbac-applier  # Pre-defined ClusterRole with limited permissions
-      namespaceSelector:
-        - matchLabels:
-            tenant: team-a
+  # Only apply in tenant's namespaces
+  targetNamespaces:
+    selector:
+      matchLabels:
+        tenant: team-a
 ---
 # Step 2: The ClusterRole that defines max permissions for tenant
 apiVersion: rbac.authorization.k8s.io/v1
@@ -1948,20 +1932,19 @@ Platform admin creates base roles via RoleDefinition:
 
 ```yaml
 # Platform-managed base role (RoleDefinition)
-# Uses API discovery to dynamically generate a ClusterRole
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: RoleDefinition
 metadata:
   name: platform-base-role
 spec:
-  targetRole: ClusterRole
-  targetName: platform-base-role
-  # RoleDefinition uses restrictedApis/restrictedResources/restrictedVerbs
-  # to dynamically discover and generate RBAC rules
-  restrictedVerbs:
-    - get
-    - list
-    - watch
+  rules:
+    - apiGroups: [""]
+      resources: ["pods", "services"]
+      verbs: ["get", "list", "watch"]
+  targetNamespaces:
+    selector:
+      matchLabels:
+        platform.t-caas.telekom.com/managed: "true"
 ```
 
 Tenant extends with RestrictedRoleDefinition (different name, additive permissions):
@@ -2574,8 +2557,9 @@ type RBACPolicyStatus struct {
 // +kubebuilder:resource:path=restrictedbinddefinitions,scope=Namespaced,shortName=rbinddef
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status"
-// +kubebuilder:printcolumn:name="Policy",type="string",JSONPath=".spec.rbacPolicyRef.name"
+// +kubebuilder:printcolumn:name="Policy",type="string",JSONPath=".spec.policyRef.name"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:subresource:status
 
 // RestrictedBindDefinition creates bindings within policy limits.
 type RestrictedBindDefinition struct {
@@ -2628,18 +2612,6 @@ type RBACPolicyReference struct {
 	// Name of the cluster-scoped RBACPolicy.
 	// +kubebuilder:validation:Required
 	Name string `json:"name"`
-}
-
-// RestrictedBindDefinitionStatus defines the observed state of RestrictedBindDefinition.
-type RestrictedBindDefinitionStatus struct {
-	// ObservedGeneration is the most recent generation observed by the controller.
-	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-	// GeneratedServiceAccounts lists SAs created by this RestrictedBindDefinition.
-	GeneratedServiceAccounts []rbacv1.Subject `json:"generatedServiceAccounts,omitempty"`
-	// ExternalServiceAccounts lists pre-existing SAs used but not managed.
-	ExternalServiceAccounts []string `json:"externalServiceAccounts,omitempty"`
-	// Conditions represent the latest available observations.
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 ```
 
@@ -2699,30 +2671,9 @@ type NamespaceTarget struct {
 	Selector *metav1.LabelSelector `json:"selector,omitempty"`
 	Names    []string              `json:"names,omitempty"`
 }
-
-// RestrictedRoleDefinitionStatus defines the observed state of RestrictedRoleDefinition.
-type RestrictedRoleDefinitionStatus struct {
-	// ObservedGeneration is the most recent generation observed by the controller.
-	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-	// GeneratedRoles tracks Roles created by this RestrictedRoleDefinition.
-	GeneratedRoles []GeneratedRoleRef `json:"generatedRoles,omitempty"`
-	// Conditions represent the latest available observations.
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
-}
-
-// GeneratedRoleRef identifies a generated Role by namespace and name.
-type GeneratedRoleRef struct {
-	Namespace string `json:"namespace"`
-	Name      string `json:"name"`
-}
 ```
 
 ### Example: Namespace Selection with All Methods
-
-> **Note:** The following examples show the *full intended API surface*,
-> including fields (`allowedNamespacePrefixes`, `allowedNamespaceSuffixes`,
-> `forbiddenNamespaceSelector`, etc.) that are not yet reflected in the
-> skeletal Go types above. These fields will be added during implementation.
 
 ```yaml
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
@@ -2766,9 +2717,9 @@ spec:
         names:
           - kube-system
           - kube-public
-        prefixes:
-          - "kube-*"
-          - "istio-*"
+      forbiddenNamespacePrefixes:
+        - "kube-*"
+        - "istio-*"
       forbiddenNamespaceSelector:
         matchLabels:
           protected: "true"
@@ -2804,13 +2755,13 @@ spec:
       
       # Select SAs by name prefix (simple wildcard, NO regex)
       allowedServiceAccountPrefixes:
-        - "app-*"
-        - "svc-*"
+        - "app-"
+        - "svc-"
       
       # Forbid privileged SA names
       forbiddenServiceAccountPrefixes:
-        - "admin-*"
-        - "root-*"
+        - "admin-"
+        - "root-"
 ```
 
 ### Example: Role Reference Selection
@@ -2825,13 +2776,13 @@ spec:
     roleBindingLimits:
       # Allow roles by name prefix (simple wildcard, NO regex)
       allowedRoleRefPrefixes:
-        - "team-a-*"
-        - "shared-*"
+        - "team-a-"
+        - "shared-"
       
       # Forbid roles by suffix (simple wildcard, NO regex)
       forbiddenRoleRefSuffixes:
-        - "*-admin"
-        - "*-superuser"
+        - "-admin"
+        - "-superuser"
       
       # Forbid roles with specific labels (if ClusterRoles are labeled)
       forbiddenRoleRefSelector:
