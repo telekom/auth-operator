@@ -47,8 +47,8 @@ The controller watches for changes to authorization resources and ensures
 the corresponding ClusterRoles, Roles, ClusterRoleBindings, and RoleBindings
 are created and kept in sync.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if bindDefinitionConcurrency < 0 || roleDefinitionConcurrency < 0 {
-			return fmt.Errorf("concurrency values must be >= 0")
+		if err := validateConcurrency(bindDefinitionConcurrency, roleDefinitionConcurrency); err != nil {
+			return err
 		}
 
 		setupLog.Info("starting controller")
@@ -206,5 +206,13 @@ func waitForRequiredCRDs(ctx context.Context, cfg *rest.Config, timeout time.Dur
 	}
 
 	setupLog.Info("all required CRDs are established")
+	return nil
+}
+
+// validateConcurrency checks that both concurrency values are non-negative.
+func validateConcurrency(bdConcurrency, rdConcurrency int) error {
+	if bdConcurrency < 0 || rdConcurrency < 0 {
+		return fmt.Errorf("concurrency values must be >= 0, got bdConcurrency=%d, rdConcurrency=%d", bdConcurrency, rdConcurrency)
+	}
 	return nil
 }
