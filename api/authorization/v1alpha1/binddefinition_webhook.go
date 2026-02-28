@@ -156,6 +156,28 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 					}
 				}
 			}
+		} else if roleBinding.Namespace != "" {
+			// Validate RoleRefs in the explicitly specified namespace.
+			for _, roleRef := range roleBinding.RoleRefs {
+				role := &rbacv1.Role{}
+				key := client.ObjectKey{
+					Namespace: roleBinding.Namespace,
+					Name:      roleRef,
+				}
+				if err := v.Client.Get(ctx, key, role); err != nil {
+					if apierrors.IsNotFound(err) {
+						logger.Info("role not found",
+							"name", r.Name, "roleName", roleRef, "namespace", roleBinding.Namespace, "policy", string(policy))
+						ref := fmt.Sprintf("Role/%s/%s", roleBinding.Namespace, roleRef)
+						if !slices.Contains(missingRoles, ref) {
+							missingRoles = append(missingRoles, ref)
+						}
+					} else {
+						logger.Error(err, "failed to fetch role", "roleName", roleRef, "namespace", roleBinding.Namespace)
+						return warnings, apierrors.NewInternalError(fmt.Errorf("error fetching role '%s' in namespace '%s': %w", roleRef, roleBinding.Namespace, err))
+					}
+				}
+			}
 		}
 	}
 
@@ -185,8 +207,8 @@ func (v *BindDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 	logger.V(1).Info("validating update", "name", newObj.Name)
 
 	// Always validate when the policy annotation changes, even if the spec
-	// (and therefore Generation) is unchanged. This prevents downgrading
-	// the policy from 'error' to 'ignore' without re-validation.
+	// (and therefore Generation) is unchanged. When the new policy is "ignore",
+	// validateBindDefinitionSpec will skip role checks and return early.
 	oldPolicy := oldObj.GetMissingRolePolicy()
 	newPolicy := newObj.GetMissingRolePolicy()
 	if oldObj.Generation == newObj.Generation && oldPolicy == newPolicy {
