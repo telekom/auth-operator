@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/go-logr/logr"
 	authzv1 "k8s.io/api/authorization/v1"
@@ -35,6 +36,24 @@ const (
 // This prevents denial-of-service attacks via oversized request bodies.
 const maxRequestBodySize = 1 << 20 // 1MB
 
+// Decision values used in structured audit log entries.
+const (
+	decisionAllowed   = "allowed"
+	decisionDenied    = "denied"
+	decisionNoOpinion = "no-opinion"
+)
+
+// evaluationResult captures the full outcome of a SubjectAccessReview evaluation.
+type evaluationResult struct {
+	allowed        bool
+	reason         string
+	decision       string
+	authorizerName string
+	matchedRule    int    // -1 when no rule matched
+	matchedField   string // "deniedPrincipal", "resourceRule", "nonResourceRule", or ""
+	evaluatedCount int
+}
+
 // Authorizer implements an HTTP handler for SubjectAccessReview requests.
 // The Client field should be the cached client returned by manager.GetClient()
 // so that List and Get calls are served from the informer cache rather than
@@ -45,44 +64,24 @@ type Authorizer struct {
 }
 
 func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Use request context for proper cancellation and deadline propagation
 	ctx := r.Context()
+	start := time.Now()
+
+	defer func() { _ = r.Body.Close() }()
 
 	// Limit request body size to prevent OOM from oversized payloads
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 
-	// Ensure request body is closed to prevent resource leaks
-	defer func() { _ = r.Body.Close() }()
-
 	var sar authzv1.SubjectAccessReview
 
 	if err := json.NewDecoder(r.Body).Decode(&sar); err != nil {
-		wa.Log.Error(err, "failed to decode SubjectAccessReview request")
+		wa.Log.Error(err, "failed to decode SubjectAccessReview request",
+			"latency", time.Since(start).String())
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	switch {
-	case sar.Spec.ResourceAttributes != nil:
-		wa.Log.Info("received SubjectAccessReview",
-			"namespace", sar.Spec.ResourceAttributes.Namespace,
-			"user", sar.Spec.User,
-			"groups", sar.Spec.Groups,
-			"verb", sar.Spec.ResourceAttributes.Verb,
-			"apiGroup", sar.Spec.ResourceAttributes.Group,
-			"resource", sar.Spec.ResourceAttributes.Resource)
-	case sar.Spec.NonResourceAttributes != nil:
-		wa.Log.Info("received SubjectAccessReview",
-			"user", sar.Spec.User,
-			"groups", sar.Spec.Groups,
-			"verb", sar.Spec.NonResourceAttributes.Verb,
-			"path", sar.Spec.NonResourceAttributes.Path)
-	default:
-		wa.Log.Info("received SubjectAccessReview",
-			"user", sar.Spec.User,
-			"groups", sar.Spec.Groups,
-			"detail", "no resource or non-resource attributes")
-	}
+	wa.logReceivedSAR(&sar)
 
 	// Use field-indexed queries to efficiently categorize authorizers.
 	// Global authorizers (no namespace selector) always apply.
@@ -92,8 +91,10 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err := wa.Client.List(ctx, &globalAuth, client.MatchingFields{
 		indexer.WebhookAuthorizerHasNamespaceSelectorField: "false",
 	}); err != nil {
-		wa.Log.Error(err, "failed to list global WebhookAuthorizers")
-		http.Error(w, "internal evaluation error", http.StatusInternalServerError)
+		wa.Log.Error(err, "failed to list global WebhookAuthorizers",
+			"user", sar.Spec.User,
+			"latency", time.Since(start).String())
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -105,22 +106,24 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err := wa.Client.List(ctx, &scopedAuth, client.MatchingFields{
 			indexer.WebhookAuthorizerHasNamespaceSelectorField: "true",
 		}); err != nil {
-			wa.Log.Error(err, "failed to list scoped WebhookAuthorizers")
-			http.Error(w, "internal evaluation error", http.StatusInternalServerError)
+			wa.Log.Error(err, "failed to list scoped WebhookAuthorizers",
+				"user", sar.Spec.User,
+				"latency", time.Since(start).String())
+			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
 		items = append(items, scopedAuth.Items...)
 	}
 
 	// Sort authorizers by name for deterministic evaluation order.
-	// This ensures deny-before-allow semantics are stable regardless of
-	// whether the client is backed by a cache (random map iteration) or
-	// the API server (alphabetical order).
 	slices.SortFunc(items, func(a, b authzv1alpha1.WebhookAuthorizer) int {
 		return strings.Compare(a.Name, b.Name)
 	})
 
-	verdict, reason := wa.evaluateSAR(ctx, &sar, items)
+	webhookAuthorizers := authzv1alpha1.WebhookAuthorizerList{Items: items}
+	result := wa.evaluateSAR(ctx, &sar, &webhookAuthorizers)
+
+	wa.logDecision(&sar, &result, time.Since(start))
 
 	response := authzv1.SubjectAccessReview{
 		TypeMeta: metav1.TypeMeta{
@@ -128,46 +131,175 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Kind:       "SubjectAccessReview",
 		},
 		Status: authzv1.SubjectAccessReviewStatus{
-			Allowed: verdict,
-			Reason:  reason,
+			Allowed: result.allowed,
+			Reason:  result.reason,
 		},
 	}
 
-	wa.Log.V(1).Info("SubjectAccessReview decision", "allowed", verdict, "reason", reason)
-
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		wa.Log.Error(err, "failed to encode SubjectAccessReview response")
+		wa.Log.Error(err, "failed to encode SubjectAccessReview response",
+			"latency", time.Since(start).String())
 		http.Error(w, "internal evaluation error", http.StatusInternalServerError)
 	}
 }
 
-func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAccessReview, authorizers []authzv1alpha1.WebhookAuthorizer) (allowed bool, reason string) {
-	for _, webhookAuthorizer := range authorizers {
-		if sar.Spec.ResourceAttributes != nil && !helpers.IsLabelSelectorEmpty(&webhookAuthorizer.Spec.NamespaceSelector) && sar.Spec.ResourceAttributes.Namespace != "" {
+// maxLoggedGroups is the maximum number of group names emitted in audit log
+// lines. Keeping this bounded prevents log explosion for subjects that belong
+// to many groups.
+const maxLoggedGroups = 10
+
+// cappedGroups returns at most maxLoggedGroups elements from groups, appending a
+// truncation marker if the list was shortened. This prevents audit logs from
+// growing unbounded when subjects belong to many groups.
+func cappedGroups(groups []string) []string {
+	if len(groups) <= maxLoggedGroups {
+		return groups
+	}
+	out := make([]string, maxLoggedGroups+1)
+	copy(out, groups[:maxLoggedGroups])
+	out[maxLoggedGroups] = fmt.Sprintf("...and %d more", len(groups)-maxLoggedGroups)
+	return out
+}
+
+// logReceivedSAR logs the incoming SubjectAccessReview at V(2) for detailed tracing.
+func (wa *Authorizer) logReceivedSAR(sar *authzv1.SubjectAccessReview) {
+	switch {
+	case sar.Spec.ResourceAttributes != nil:
+		wa.Log.V(2).Info("received SubjectAccessReview",
+			"namespace", sar.Spec.ResourceAttributes.Namespace,
+			"user", sar.Spec.User,
+			"groups", cappedGroups(sar.Spec.Groups),
+			"verb", sar.Spec.ResourceAttributes.Verb,
+			"apiGroup", sar.Spec.ResourceAttributes.Group,
+			"resource", sar.Spec.ResourceAttributes.Resource)
+	case sar.Spec.NonResourceAttributes != nil:
+		wa.Log.V(2).Info("received SubjectAccessReview",
+			"user", sar.Spec.User,
+			"groups", cappedGroups(sar.Spec.Groups),
+			"verb", sar.Spec.NonResourceAttributes.Verb,
+			"path", sar.Spec.NonResourceAttributes.Path)
+	default:
+		wa.Log.V(2).Info("received SubjectAccessReview",
+			"user", sar.Spec.User,
+			"groups", cappedGroups(sar.Spec.Groups),
+			"detail", "no resource or non-resource attributes")
+	}
+}
+
+// logDecision emits a structured audit log entry for the evaluation result.
+// Deny decisions are logged at V(0), allow and no-opinion at V(1).
+func (wa *Authorizer) logDecision(sar *authzv1.SubjectAccessReview, res *evaluationResult, latency time.Duration) {
+	fields := []any{
+		"decision", res.decision,
+		"user", sar.Spec.User,
+		"groups", cappedGroups(sar.Spec.Groups),
+		"authorizer", res.authorizerName,
+		"evaluatedCount", res.evaluatedCount,
+		"latency", latency.String(),
+	}
+
+	if sar.Spec.ResourceAttributes != nil {
+		fields = append(fields,
+			"verb", sar.Spec.ResourceAttributes.Verb,
+			"apiGroup", sar.Spec.ResourceAttributes.Group,
+			"resource", sar.Spec.ResourceAttributes.Resource,
+			"namespace", sar.Spec.ResourceAttributes.Namespace,
+		)
+	} else if sar.Spec.NonResourceAttributes != nil {
+		fields = append(fields,
+			"verb", sar.Spec.NonResourceAttributes.Verb,
+			"path", sar.Spec.NonResourceAttributes.Path,
+		)
+	}
+
+	if res.matchedField != "" {
+		fields = append(fields, "matchedField", res.matchedField)
+	}
+	if res.matchedRule >= 0 {
+		fields = append(fields, "matchedRule", res.matchedRule)
+	}
+
+	switch res.decision {
+	case decisionDenied, decisionNoOpinion:
+		wa.Log.Info("authorization decision", fields...)
+	default:
+		wa.Log.V(1).Info("authorization decision", fields...)
+	}
+}
+
+func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAccessReview, waList *authzv1alpha1.WebhookAuthorizerList) evaluationResult {
+	count := len(waList.Items)
+
+	for i, webhookAuthorizer := range waList.Items {
+		wa.Log.V(2).Info("evaluating WebhookAuthorizer",
+			"authorizer", webhookAuthorizer.Name,
+			"index", i,
+			"user", sar.Spec.User)
+
+		if sar.Spec.ResourceAttributes != nil &&
+			!helpers.IsLabelSelectorEmpty(&webhookAuthorizer.Spec.NamespaceSelector) &&
+			sar.Spec.ResourceAttributes.Namespace != "" {
 			if !wa.namespaceMatches(ctx, sar.Spec.ResourceAttributes.Namespace, &webhookAuthorizer.Spec.NamespaceSelector) {
+				wa.Log.V(2).Info("namespace selector did not match, skipping",
+					"authorizer", webhookAuthorizer.Name,
+					"namespace", sar.Spec.ResourceAttributes.Namespace)
 				continue
 			}
 		}
 
 		// Check DeniedPrincipals.
 		if wa.principalMatches(sar.Spec.User, sar.Spec.Groups, webhookAuthorizer.Spec.DeniedPrincipals) {
-			return false, fmt.Sprintf("Access denied by WebhookAuthorizer %s", webhookAuthorizer.Name)
+			return evaluationResult{
+				allowed:        false,
+				reason:         fmt.Sprintf("Access denied by WebhookAuthorizer %s", webhookAuthorizer.Name),
+				decision:       decisionDenied,
+				authorizerName: webhookAuthorizer.Name,
+				matchedRule:    -1,
+				matchedField:   "deniedPrincipal",
+				evaluatedCount: count,
+			}
 		}
 
 		// Check AllowedPrincipals.
 		if wa.principalMatches(sar.Spec.User, sar.Spec.Groups, webhookAuthorizer.Spec.AllowedPrincipals) {
-			// Check ResourceRules.
-			if sar.Spec.ResourceAttributes != nil && wa.resourceRulesMatch(webhookAuthorizer.Spec.ResourceRules, sar.Spec.ResourceAttributes) {
-				return true, fmt.Sprintf("Access granted by WebhookAuthorizer %s", webhookAuthorizer.Name)
+			if sar.Spec.ResourceAttributes != nil {
+				if ruleIdx := wa.resourceRuleIndex(webhookAuthorizer.Spec.ResourceRules, sar.Spec.ResourceAttributes); ruleIdx >= 0 {
+					return evaluationResult{
+						allowed:        true,
+						reason:         fmt.Sprintf("Access granted by WebhookAuthorizer %s", webhookAuthorizer.Name),
+						decision:       decisionAllowed,
+						authorizerName: webhookAuthorizer.Name,
+						matchedRule:    ruleIdx,
+						matchedField:   "resourceRule",
+						evaluatedCount: count,
+					}
+				}
 			}
-			// Check NonResourceRules.
-			if sar.Spec.NonResourceAttributes != nil && wa.nonResourceRulesMatch(webhookAuthorizer.Spec.NonResourceRules, sar.Spec.NonResourceAttributes) {
-				return true, fmt.Sprintf("Access granted by WebhookAuthorizer %s", webhookAuthorizer.Name)
+			if sar.Spec.NonResourceAttributes != nil {
+				if ruleIdx := wa.nonResourceRuleIndex(webhookAuthorizer.Spec.NonResourceRules, sar.Spec.NonResourceAttributes); ruleIdx >= 0 {
+					return evaluationResult{
+						allowed:        true,
+						reason:         fmt.Sprintf("Access granted by WebhookAuthorizer %s", webhookAuthorizer.Name),
+						decision:       decisionAllowed,
+						authorizerName: webhookAuthorizer.Name,
+						matchedRule:    ruleIdx,
+						matchedField:   "nonResourceRule",
+						evaluatedCount: count,
+					}
+				}
 			}
 		}
 	}
-	return false, "Access denied: no matching rules"
+
+	return evaluationResult{
+		allowed:        false,
+		reason:         "Access denied: no matching rules",
+		decision:       decisionNoOpinion,
+		authorizerName: "",
+		matchedRule:    -1,
+		evaluatedCount: count,
+	}
 }
 
 // namespaceMatches checks if the namespace matches the selector.
@@ -215,27 +347,27 @@ func intersects(slice1, slice2 []string) bool {
 	return false
 }
 
-// resourceRulesMatch checks if the resource attributes match any of the resource rules.
-func (wa *Authorizer) resourceRulesMatch(rules []authzv1.ResourceRule, attr *authzv1.ResourceAttributes) bool {
-	for _, rule := range rules {
+// resourceRuleIndex returns the index of the first matching resource rule, or -1.
+func (wa *Authorizer) resourceRuleIndex(rules []authzv1.ResourceRule, attr *authzv1.ResourceAttributes) int {
+	for i, rule := range rules {
 		if matchesRule(rule.Verbs, attr.Verb) &&
 			matchesRule(rule.APIGroups, attr.Group) &&
 			matchesRule(rule.Resources, attr.Resource) {
-			return true
+			return i
 		}
 	}
-	return false
+	return -1
 }
 
-// nonResourceRulesMatch checks if the non-resource attributes match any of the non-resource rules.
-func (wa *Authorizer) nonResourceRulesMatch(rules []authzv1.NonResourceRule, attr *authzv1.NonResourceAttributes) bool {
-	for _, rule := range rules {
+// nonResourceRuleIndex returns the index of the first matching non-resource rule, or -1.
+func (wa *Authorizer) nonResourceRuleIndex(rules []authzv1.NonResourceRule, attr *authzv1.NonResourceAttributes) int {
+	for i, rule := range rules {
 		if matchesRule(rule.Verbs, attr.Verb) &&
 			matchesRule(rule.NonResourceURLs, attr.Path) {
-			return true
+			return i
 		}
 	}
-	return false
+	return -1
 }
 
 // matchesRule checks if a value matches any pattern in the list.
