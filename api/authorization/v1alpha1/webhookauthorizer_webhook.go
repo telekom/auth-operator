@@ -131,16 +131,23 @@ func findPrincipalOverlaps(allowed, denied []Principal) []string {
 		}
 	}
 
+	seen := make(map[string]struct{})
 	var overlaps []string
 	for _, p := range denied {
 		if p.User != "" {
 			if _, ok := allowedUsers[p.User]; ok {
-				overlaps = append(overlaps, p.User)
+				if _, dup := seen[p.User]; !dup {
+					seen[p.User] = struct{}{}
+					overlaps = append(overlaps, p.User)
+				}
 			}
 		}
 		for _, g := range p.Groups {
 			if _, ok := allowedGroups[g]; ok {
-				overlaps = append(overlaps, g)
+				if _, dup := seen[g]; !dup {
+					seen[g] = struct{}{}
+					overlaps = append(overlaps, g)
+				}
 			}
 		}
 	}
