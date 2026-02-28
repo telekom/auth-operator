@@ -163,6 +163,56 @@ var (
 		},
 		[]string{"binddefinition"},
 	)
+
+	// AuthorizerRequestsTotal counts the total number of SubjectAccessReview
+	// requests processed by the WebhookAuthorizer, labeled by decision and
+	// authorizer name.
+	AuthorizerRequestsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Name:      "authorizer_requests_total",
+			Help:      "Total SubjectAccessReview requests processed by the WebhookAuthorizer",
+		},
+		[]string{"decision", "authorizer"},
+	)
+
+	// AuthorizerRequestDuration measures the end-to-end latency of
+	// SubjectAccessReview evaluations in seconds, labeled by decision.
+	AuthorizerRequestDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: Namespace,
+			Name:      "authorizer_request_duration_seconds",
+			Help:      "Duration of SubjectAccessReview evaluations in seconds",
+			// Tuned for sub-ms in-memory evaluations (informer cache, not apiserver round-trips).
+			Buckets: []float64{0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 5},
+		},
+		[]string{"decision"},
+	)
+
+	// AuthorizerActiveRules is a gauge tracking the total number of active
+	// WebhookAuthorizer resources observed during the most recent request.
+	AuthorizerActiveRules = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: Namespace,
+			Name:      "authorizer_active_rules",
+			Help:      "Number of active WebhookAuthorizer resources",
+		},
+	)
+
+	// AuthorizerDeniedPrincipalHitsTotal counts the number of times a request
+	// was denied because the subject matched a DeniedPrincipals entry.
+	// NOTE: The authorizer label is set to the WebhookAuthorizer CR name.
+	// Cardinality is bounded because the expected number of WebhookAuthorizer
+	// CRs is small and stable (single-digit, cluster-scoped). If CRs are
+	// deleted, call DeleteAuthorizerSeries to prune stale series.
+	AuthorizerDeniedPrincipalHitsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Name:      "authorizer_denied_principal_hits_total",
+			Help:      "Total requests denied due to DeniedPrincipals match",
+		},
+		[]string{"authorizer"},
+	)
 )
 
 func init() {
@@ -181,6 +231,10 @@ func init() {
 		WebhookRequestsTotal,
 		ServiceAccountSkippedPreExisting,
 		ExternalSAsReferenced,
+		AuthorizerRequestsTotal,
+		AuthorizerRequestDuration,
+		AuthorizerActiveRules,
+		AuthorizerDeniedPrincipalHitsTotal,
 	)
 }
 
@@ -230,6 +284,16 @@ const (
 	WebhookResultErrored = "errored"
 )
 
+// AuthorizerDecision constants for labeling authorizer request outcomes.
+const (
+	AuthorizerDecisionAllowed = "allowed"
+	AuthorizerDecisionDenied  = "denied"
+	AuthorizerDecisionError   = "error"
+)
+
+// AuthorizerNameNone is the fallback label value when no specific authorizer matched.
+const AuthorizerNameNone = "none"
+
 // DeleteManagedResourceSeries removes all ManagedResources gauge series for a
 // specific source resource (e.g. a BindDefinition being deleted). This prevents
 // stale zero-value series from lingering after the resource is removed.
@@ -237,4 +301,13 @@ func DeleteManagedResourceSeries(controller, name string) {
 	for _, rt := range []string{ResourceClusterRoleBinding, ResourceRoleBinding, ResourceServiceAccount} {
 		ManagedResources.DeleteLabelValues(controller, rt, name)
 	}
+}
+
+// DeleteAuthorizerSeries removes all metrics series for a deleted
+// WebhookAuthorizer CR to prevent stale zero-value series from lingering.
+func DeleteAuthorizerSeries(authorizerName string) {
+	for _, decision := range []string{AuthorizerDecisionAllowed, AuthorizerDecisionDenied, AuthorizerDecisionError} {
+		AuthorizerRequestsTotal.DeleteLabelValues(decision, authorizerName)
+	}
+	AuthorizerDeniedPrincipalHitsTotal.DeleteLabelValues(authorizerName)
 }

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/go-logr/logr"
 	authzv1 "k8s.io/api/authorization/v1"
@@ -18,7 +19,7 @@ import (
 
 	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/pkg/helpers"
-	"github.com/telekom/auth-operator/pkg/indexer"
+	"github.com/telekom/auth-operator/pkg/metrics"
 )
 
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=webhookauthorizers,verbs=get;list;watch
@@ -44,9 +45,24 @@ type Authorizer struct {
 	Log    logr.Logger
 }
 
+// evaluationResult captures the outcome of a SubjectAccessReview evaluation.
+type evaluationResult struct {
+	// allowed is true when the request should be permitted.
+	allowed bool
+	// reason is a human-readable explanation of the decision.
+	reason string
+	// authorizerName is the name of the WebhookAuthorizer that matched, or
+	// metrics.AuthorizerNameNone if no authorizer matched.
+	authorizerName string
+	// deniedByPrincipal is true when the denial was caused by a
+	// DeniedPrincipals match rather than the default "no matching rules".
+	deniedByPrincipal bool
+}
+
 func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Use request context for proper cancellation and deadline propagation
 	ctx := r.Context()
+	start := time.Now()
 
 	// Limit request body size to prevent OOM from oversized payloads
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
@@ -58,7 +74,9 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if err := json.NewDecoder(r.Body).Decode(&sar); err != nil {
 		wa.Log.Error(err, "failed to decode SubjectAccessReview request")
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		metrics.AuthorizerRequestsTotal.WithLabelValues(metrics.AuthorizerDecisionError, metrics.AuthorizerNameNone).Inc()
+		metrics.AuthorizerRequestDuration.WithLabelValues(metrics.AuthorizerDecisionError).Observe(time.Since(start).Seconds())
+		http.Error(w, "failed to decode request body", http.StatusBadRequest)
 		return
 	}
 
@@ -84,43 +102,43 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"detail", "no resource or non-resource attributes")
 	}
 
-	// Use field-indexed queries to efficiently categorize authorizers.
-	// Global authorizers (no namespace selector) always apply.
-	// Scoped authorizers (with namespace selector) only apply when the SAR
-	// targets a specific namespace, avoiding unnecessary namespace lookups.
-	var globalAuth authzv1alpha1.WebhookAuthorizerList
-	if err := wa.Client.List(ctx, &globalAuth, client.MatchingFields{
-		indexer.WebhookAuthorizerHasNamespaceSelectorField: "false",
-	}); err != nil {
-		wa.Log.Error(err, "failed to list global WebhookAuthorizers")
-		http.Error(w, "internal evaluation error", http.StatusInternalServerError)
+	// Fetch all WebhookAuthorizers in a single unindexed List call.
+	//
+	// An earlier implementation split this into two indexed queries (global +
+	// namespace-scoped) using MatchingFields on the hasNamespaceSelector
+	// field index. The metrics branch intentionally consolidated to a single
+	// list so that AuthorizerActiveRules reflects the true total count
+	// without double-fetching or race conditions between the two queries.
+	//
+	// Performance note: this is an in-memory informer-cache list, so the
+	// cost is O(n) over cached objects — not an API-server round trip per
+	// query. For deployments with very large numbers of WebhookAuthorizer
+	// CRs (hundreds+), consider restoring the indexed split and summing
+	// the counts, or adding a dedicated cache-level metric.
+	var webhookAuthorizers authzv1alpha1.WebhookAuthorizerList
+	if err := wa.Client.List(ctx, &webhookAuthorizers); err != nil {
+		wa.Log.Error(err, "failed to list WebhookAuthorizers")
+		metrics.AuthorizerRequestsTotal.WithLabelValues(metrics.AuthorizerDecisionError, metrics.AuthorizerNameNone).Inc()
+		metrics.AuthorizerRequestDuration.WithLabelValues(metrics.AuthorizerDecisionError).Observe(time.Since(start).Seconds())
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	items := globalAuth.Items
+	metrics.AuthorizerActiveRules.Set(float64(len(webhookAuthorizers.Items)))
 
-	// Only query namespace-scoped authorizers when the SAR has a namespace target.
-	if sar.Spec.ResourceAttributes != nil && sar.Spec.ResourceAttributes.Namespace != "" {
-		var scopedAuth authzv1alpha1.WebhookAuthorizerList
-		if err := wa.Client.List(ctx, &scopedAuth, client.MatchingFields{
-			indexer.WebhookAuthorizerHasNamespaceSelectorField: "true",
-		}); err != nil {
-			wa.Log.Error(err, "failed to list scoped WebhookAuthorizers")
-			http.Error(w, "internal evaluation error", http.StatusInternalServerError)
-			return
-		}
-		items = append(items, scopedAuth.Items...)
+	result := wa.evaluateSAR(ctx, &sar, &webhookAuthorizers)
+
+	// Record metrics based on the evaluation result.
+	decision := metrics.AuthorizerDecisionDenied
+	if result.allowed {
+		decision = metrics.AuthorizerDecisionAllowed
 	}
+	metrics.AuthorizerRequestsTotal.WithLabelValues(decision, result.authorizerName).Inc()
+	metrics.AuthorizerRequestDuration.WithLabelValues(decision).Observe(time.Since(start).Seconds())
 
-	// Sort authorizers by name for deterministic evaluation order.
-	// This ensures deny-before-allow semantics are stable regardless of
-	// whether the client is backed by a cache (random map iteration) or
-	// the API server (alphabetical order).
-	slices.SortFunc(items, func(a, b authzv1alpha1.WebhookAuthorizer) int {
-		return strings.Compare(a.Name, b.Name)
-	})
-
-	verdict, reason := wa.evaluateSAR(ctx, &sar, items)
+	if result.deniedByPrincipal {
+		metrics.AuthorizerDeniedPrincipalHitsTotal.WithLabelValues(result.authorizerName).Inc()
+	}
 
 	response := authzv1.SubjectAccessReview{
 		TypeMeta: metav1.TypeMeta{
@@ -128,12 +146,12 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Kind:       "SubjectAccessReview",
 		},
 		Status: authzv1.SubjectAccessReviewStatus{
-			Allowed: verdict,
-			Reason:  reason,
+			Allowed: result.allowed,
+			Reason:  result.reason,
 		},
 	}
 
-	wa.Log.V(1).Info("SubjectAccessReview decision", "allowed", verdict, "reason", reason)
+	wa.Log.V(1).Info("SubjectAccessReview decision", "allowed", result.allowed, "reason", result.reason)
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
@@ -142,9 +160,13 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAccessReview, authorizers []authzv1alpha1.WebhookAuthorizer) (allowed bool, reason string) {
-	for _, webhookAuthorizer := range authorizers {
-		if sar.Spec.ResourceAttributes != nil && !helpers.IsLabelSelectorEmpty(&webhookAuthorizer.Spec.NamespaceSelector) && sar.Spec.ResourceAttributes.Namespace != "" {
+func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAccessReview, waList *authzv1alpha1.WebhookAuthorizerList) evaluationResult {
+	for _, webhookAuthorizer := range waList.Items {
+		if sar.Spec.ResourceAttributes != nil && !helpers.IsLabelSelectorEmpty(&webhookAuthorizer.Spec.NamespaceSelector) {
+			// Skip namespace-scoped authorizers for cluster-scoped resources (no namespace in SAR)
+			if sar.Spec.ResourceAttributes.Namespace == "" {
+				continue
+			}
 			if !wa.namespaceMatches(ctx, sar.Spec.ResourceAttributes.Namespace, &webhookAuthorizer.Spec.NamespaceSelector) {
 				continue
 			}
@@ -152,22 +174,39 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 
 		// Check DeniedPrincipals.
 		if wa.principalMatches(sar.Spec.User, sar.Spec.Groups, webhookAuthorizer.Spec.DeniedPrincipals) {
-			return false, fmt.Sprintf("Access denied by WebhookAuthorizer %s", webhookAuthorizer.Name)
+			return evaluationResult{
+				allowed:           false,
+				reason:            fmt.Sprintf("Access denied by WebhookAuthorizer %s", webhookAuthorizer.Name),
+				authorizerName:    webhookAuthorizer.Name,
+				deniedByPrincipal: true,
+			}
 		}
 
 		// Check AllowedPrincipals.
 		if wa.principalMatches(sar.Spec.User, sar.Spec.Groups, webhookAuthorizer.Spec.AllowedPrincipals) {
 			// Check ResourceRules.
 			if sar.Spec.ResourceAttributes != nil && wa.resourceRulesMatch(webhookAuthorizer.Spec.ResourceRules, sar.Spec.ResourceAttributes) {
-				return true, fmt.Sprintf("Access granted by WebhookAuthorizer %s", webhookAuthorizer.Name)
+				return evaluationResult{
+					allowed:        true,
+					reason:         fmt.Sprintf("Access granted by WebhookAuthorizer %s", webhookAuthorizer.Name),
+					authorizerName: webhookAuthorizer.Name,
+				}
 			}
 			// Check NonResourceRules.
 			if sar.Spec.NonResourceAttributes != nil && wa.nonResourceRulesMatch(webhookAuthorizer.Spec.NonResourceRules, sar.Spec.NonResourceAttributes) {
-				return true, fmt.Sprintf("Access granted by WebhookAuthorizer %s", webhookAuthorizer.Name)
+				return evaluationResult{
+					allowed:        true,
+					reason:         fmt.Sprintf("Access granted by WebhookAuthorizer %s", webhookAuthorizer.Name),
+					authorizerName: webhookAuthorizer.Name,
+				}
 			}
 		}
 	}
-	return false, "Access denied: no matching rules"
+	return evaluationResult{
+		allowed:        false,
+		reason:         "Access denied: no matching rules",
+		authorizerName: metrics.AuthorizerNameNone,
+	}
 }
 
 // namespaceMatches checks if the namespace matches the selector.
