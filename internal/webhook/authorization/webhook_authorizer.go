@@ -192,6 +192,8 @@ func (wa *Authorizer) logReceivedSAR(sar *authzv1.SubjectAccessReview) {
 func (wa *Authorizer) logDecision(sar *authzv1.SubjectAccessReview, res *evaluationResult, latency time.Duration) {
 	fields := []any{
 		"decision", res.decision,
+		"allowed", res.allowed,
+		"reason", res.reason,
 		"user", sar.Spec.User,
 		"groups", cappedGroups(sar.Spec.Groups),
 		"authorizer", res.authorizerName,
@@ -221,9 +223,10 @@ func (wa *Authorizer) logDecision(sar *authzv1.SubjectAccessReview, res *evaluat
 	}
 
 	switch res.decision {
-	case decisionDenied, decisionNoOpinion:
+	case decisionDenied:
 		wa.Log.Info("authorization decision", fields...)
 	default:
+		// noOpinion and allow are verbose — only visible at V(1).
 		wa.Log.V(1).Info("authorization decision", fields...)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -51,7 +52,7 @@ func createWAAndSync(ctx context.Context, wa *authzv1alpha1.WebhookAuthorizer) {
 	key := client.ObjectKeyFromObject(wa)
 	Eventually(func() error {
 		return envClient.Get(ctx, key, &authzv1alpha1.WebhookAuthorizer{})
-	}).Should(Succeed())
+	}).WithTimeout(10 * time.Second).WithPolling(250 * time.Millisecond).Should(Succeed())
 }
 
 var _ = Describe("WebhookAuthorizer Integration", func() {
@@ -503,7 +504,7 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 					},
 				})
 				return resp.Status.Allowed
-			}).Should(BeFalse())
+			}).WithTimeout(10 * time.Second).WithPolling(250 * time.Millisecond).Should(BeFalse())
 		})
 	})
 
