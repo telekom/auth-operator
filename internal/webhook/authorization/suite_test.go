@@ -79,6 +79,7 @@ var _ = BeforeSuite(func() {
 		Metrics: metricsserver.Options{
 			BindAddress: "0", // disable metrics server in tests
 		},
+		HealthProbeBindAddress: "0", // disable health probe listener in tests
 	})
 	Expect(err).NotTo(HaveOccurred())
 
