@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+//
+// SPDX-License-Identifier: Apache-2.0
+
 package v1alpha1
 
 import "github.com/telekom/auth-operator/pkg/conditions"
@@ -156,4 +160,101 @@ const (
 	// RoleRefInvalidMessage is the format string when role references are missing.
 	// Use with the list of missing role names (accepts any type via %v).
 	RoleRefInvalidMessage AuthZConditionMessage = "Missing role references: %v"
+)
+
+// WebhookAuthorizer condition types.
+const (
+	// WebhookAuthorizerReadyCondition indicates overall readiness of the WebhookAuthorizer.
+	WebhookAuthorizerReadyCondition AuthZConditionType = "Ready"
+	// WebhookAuthorizerRulesValidCondition indicates whether resource and non-resource rules are valid.
+	WebhookAuthorizerRulesValidCondition AuthZConditionType = "RulesValid"
+	// WebhookAuthorizerNamespaceSelectorValidCondition indicates whether the namespace selector is parseable.
+	WebhookAuthorizerNamespaceSelectorValidCondition AuthZConditionType = "NamespaceSelectorValid"
+	// WebhookAuthorizerPrincipalConfiguredCondition indicates whether principals are defined.
+	WebhookAuthorizerPrincipalConfiguredCondition AuthZConditionType = "PrincipalConfigured"
+)
+
+// WebhookAuthorizer Ready condition reasons.
+const (
+	// WAReadyReasonAuthorizerReady indicates the authorizer is processing requests.
+	WAReadyReasonAuthorizerReady AuthZConditionReason = "AuthorizerReady"
+	// WAReadyReasonInvalidRules indicates one or more rules are malformed.
+	WAReadyReasonInvalidRules AuthZConditionReason = "InvalidRules"
+	// WAReadyReasonInvalidNamespaceSelector indicates the namespace selector cannot be parsed.
+	WAReadyReasonInvalidNamespaceSelector AuthZConditionReason = "InvalidNamespaceSelector"
+	// WAReadyReasonNoPrincipals indicates neither allowed nor denied principals are defined.
+	WAReadyReasonNoPrincipals AuthZConditionReason = "NoPrincipals"
+)
+
+// WebhookAuthorizer Ready condition messages.
+const (
+	// WAReadyMessageAuthorizerReady is the message when the authorizer is healthy.
+	WAReadyMessageAuthorizerReady AuthZConditionMessage = "All rules are valid and the authorizer is actively processing requests"
+	// WAReadyMessageInvalidRules is the message when rules are invalid.
+	WAReadyMessageInvalidRules AuthZConditionMessage = "One or more resource/non-resource rules are malformed: %s"
+	// WAReadyMessageInvalidSelector is the message when the namespace selector is invalid.
+	WAReadyMessageInvalidSelector AuthZConditionMessage = "The namespace selector cannot be parsed: %s"
+	// WAReadyMessageNoPrincipals is the message when no principals are defined.
+	WAReadyMessageNoPrincipals AuthZConditionMessage = "Neither allowedPrincipals nor deniedPrincipals are defined"
+)
+
+// WebhookAuthorizer RulesValid condition reasons.
+const (
+	// WARulesValidReasonAllValid indicates all rules are syntactically valid.
+	WARulesValidReasonAllValid AuthZConditionReason = "AllRulesValid"
+	// WARulesValidReasonInvalidResourceRule indicates a resourceRule is invalid.
+	WARulesValidReasonInvalidResourceRule AuthZConditionReason = "InvalidResourceRule"
+	// WARulesValidReasonInvalidNonResourceRule indicates a nonResourceRule is invalid.
+	WARulesValidReasonInvalidNonResourceRule AuthZConditionReason = "InvalidNonResourceRule"
+)
+
+// WebhookAuthorizer RulesValid condition messages.
+const (
+	// WARulesValidMessageAllValid is the message when all rules are valid.
+	WARulesValidMessageAllValid AuthZConditionMessage = "All resourceRules and nonResourceRules are syntactically valid"
+	// WARulesValidMessageInvalidResource is the message when a resource rule is invalid.
+	WARulesValidMessageInvalidResource AuthZConditionMessage = "A resourceRule contains invalid API groups, resources, or verbs: %s"
+	// WARulesValidMessageInvalidNonResource is the message when a non-resource rule is invalid.
+	WARulesValidMessageInvalidNonResource AuthZConditionMessage = "A nonResourceRule contains invalid paths or verbs: %s"
+)
+
+// WebhookAuthorizer NamespaceSelectorValid condition reasons.
+const (
+	// WANSSelectorValidReasonValid indicates the namespace selector is parseable.
+	WANSSelectorValidReasonValid AuthZConditionReason = "SelectorValid"
+	// WANSSelectorValidReasonEmpty indicates no namespace selector is defined.
+	WANSSelectorValidReasonEmpty AuthZConditionReason = "SelectorEmpty"
+	// WANSSelectorValidReasonInvalid indicates the namespace selector cannot be parsed.
+	WANSSelectorValidReasonInvalid AuthZConditionReason = "SelectorInvalid"
+)
+
+// WebhookAuthorizer NamespaceSelectorValid condition messages.
+const (
+	// WANSSelectorValidMessageValid is the message when the selector is valid.
+	WANSSelectorValidMessageValid AuthZConditionMessage = "Namespace selector is parseable and matches namespaces"
+	// WANSSelectorValidMessageEmpty is the message when no selector is defined.
+	WANSSelectorValidMessageEmpty AuthZConditionMessage = "No namespace selector defined (matches all namespaces)"
+	// WANSSelectorValidMessageInvalid is the message when the selector is invalid.
+	WANSSelectorValidMessageInvalid AuthZConditionMessage = "Namespace selector cannot be parsed: %s"
+)
+
+// WebhookAuthorizer PrincipalConfigured condition reasons.
+const (
+	// WAPrincipalReasonConfigured indicates principals are defined.
+	WAPrincipalReasonConfigured AuthZConditionReason = "PrincipalsConfigured"
+	// WAPrincipalReasonNotConfigured indicates no principals are defined.
+	WAPrincipalReasonNotConfigured AuthZConditionReason = "NoPrincipalsConfigured"
+	// WAPrincipalReasonOverlap indicates a principal appears in both allowed and denied lists.
+	// Expected status: metav1.ConditionUnknown (warning — authorizer will still function).
+	WAPrincipalReasonOverlap AuthZConditionReason = "PrincipalOverlap"
+)
+
+// WebhookAuthorizer PrincipalConfigured condition messages.
+const (
+	// WAPrincipalMessageConfigured is the message when principals are defined.
+	WAPrincipalMessageConfigured AuthZConditionMessage = "AllowedPrincipals and/or DeniedPrincipals are defined"
+	// WAPrincipalMessageNotConfigured is the message when no principals are defined.
+	WAPrincipalMessageNotConfigured AuthZConditionMessage = "No principals defined — authorizer will never match"
+	// WAPrincipalMessageOverlap is the message when principals overlap.
+	WAPrincipalMessageOverlap AuthZConditionMessage = "A principal appears in both allowed and denied lists: %s"
 )
