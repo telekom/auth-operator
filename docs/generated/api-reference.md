@@ -99,6 +99,8 @@ _Appears in:_
 | `clusterRoleRefs` _string array_ | ClusterRoleRefs references an existing ClusterRole |  | Optional: \{\} <br /> |
 
 
+
+
 #### NamespaceBinding
 
 
