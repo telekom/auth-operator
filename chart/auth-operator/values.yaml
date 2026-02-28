@@ -123,5 +123,6 @@ tracing:
   endpoint: ""
   # Trace sampling rate (0.0 to 1.0); 0.1 = 10% of traces
   samplingRate: 0.1
-  # Use insecure (non-TLS) connection to the collector
-  insecure: true
+  # Use insecure (non-TLS) connection to the collector.
+  # Set to true only for development; production should use TLS.
+  insecure: false

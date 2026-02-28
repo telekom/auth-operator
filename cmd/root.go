@@ -124,7 +124,7 @@ func init() {
 
 	// Tracing flags
 	rootCmd.PersistentFlags().BoolVar(&tracingEnabled, "tracing-enabled", false,
-		"Enable OpenTelemetry tracing. Requires --tracing-endpoint to be set.")
+		"Enable OpenTelemetry tracing. Requires --tracing-endpoint (or OTEL_EXPORTER_OTLP_ENDPOINT env) to be set.")
 	rootCmd.PersistentFlags().StringVar(&tracingEndpoint, "tracing-endpoint", "",
 		"OTLP collector endpoint for tracing (e.g. otel-collector:4317). "+
 			"Can also be set via OTEL_EXPORTER_OTLP_ENDPOINT environment variable.")
