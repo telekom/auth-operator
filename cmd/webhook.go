@@ -15,6 +15,8 @@ import (
 	authorizationwebhook "github.com/telekom/auth-operator/internal/webhook/authorization"
 	"github.com/telekom/auth-operator/internal/webhook/certrotator"
 	"github.com/telekom/auth-operator/pkg/indexer"
+	"github.com/telekom/auth-operator/pkg/system"
+	"github.com/telekom/auth-operator/pkg/tracing"
 
 	"github.com/open-policy-agent/cert-controller/pkg/rotator"
 	"github.com/spf13/cobra"
@@ -58,6 +60,22 @@ ensuring authorization policies are enforced at creation time.`,
 		)
 		ctx, cancel := context.WithCancelCause(ctrl.SetupSignalHandler())
 		defer cancel(nil)
+
+		// Initialize tracing
+		tracingProvider, err := tracing.Setup(ctx, tracingConfig(), system.Version)
+		if err != nil {
+			return fmt.Errorf("unable to setup tracing: %w", err)
+		}
+		defer func() {
+			if shutdownErr := tracingProvider.Shutdown(ctx); shutdownErr != nil {
+				setupLog.Error(shutdownErr, "error shutting down tracing provider")
+			}
+		}()
+		if tracingEnabled {
+			setupLog.Info("tracing enabled",
+				"endpoint", tracingEndpoint,
+				"samplingRate", tracingSamplingRate)
+		}
 
 		disableHTTP2 := func(c *tls.Config) {
 			setupLog.Info("disabling http/2")
@@ -117,7 +135,7 @@ ensuring authorization policies are enforced at creation time.`,
 			setupLog.Info("waiting for certificate rotation to complete before configuring webhooks")
 			<-startListeners
 			setupLog.Info("certificate rotation complete, configuring webhooks")
-			if err := configureWebhooks(mgr); err != nil {
+			if err := configureWebhooks(mgr, tracingProvider); err != nil {
 				setupLog.Error(err, "failed to configure webhooks")
 				cancel(fmt.Errorf("error configuring webhooks: %w", err))
 				return
@@ -173,13 +191,17 @@ ensuring authorization policies are enforced at creation time.`,
 	},
 }
 
-func configureWebhooks(mgr manager.Manager) error {
+func configureWebhooks(mgr manager.Manager, tp *tracing.Provider) error {
 	log := ctrl.Log.WithName("webhook-setup")
 
 	log.Info("registering authorization webhook at /authorize")
+	// The tracer may be a noop when tracing is disabled. Span attribute logic
+	// is guarded by span.IsRecording(), so the overhead of a noop tracer is
+	// negligible (no allocations, no exports).
 	authorizer := &authorizationwebhook.Authorizer{
 		Client: mgr.GetClient(),
 		Log:    ctrl.Log.WithName("Authorizer"),
+		Tracer: tp.Tracer(),
 	}
 	mgr.GetWebhookServer().Register("/authorize", authorizer)
 

@@ -11,6 +11,7 @@ import (
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/pkg/system"
+	"github.com/telekom/auth-operator/pkg/tracing"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 
@@ -33,6 +34,12 @@ var (
 	probeAddr   string
 	metricsAddr string
 	namespace   string
+
+	// Tracing flags.
+	tracingEnabled      bool
+	tracingEndpoint     string
+	tracingSamplingRate float64
+	tracingInsecure     bool
 )
 
 // redactSensitiveFlags returns a map of flags with sensitive values redacted.
@@ -113,6 +120,17 @@ func init() {
 		"The address the probe endpoint binds to.")
 	rootCmd.PersistentFlags().StringVar(&metricsAddr, "metrics-bind-address", ":8080",
 		"The address the metrics endpoint binds to. Use \"0\" to disable metrics serving.")
+
+	// Tracing flags
+	rootCmd.PersistentFlags().BoolVar(&tracingEnabled, "tracing-enabled", false,
+		"Enable OpenTelemetry tracing. Requires --tracing-endpoint to be set.")
+	rootCmd.PersistentFlags().StringVar(&tracingEndpoint, "tracing-endpoint", "",
+		"OTLP collector endpoint for tracing (e.g. otel-collector:4317). "+
+			"Can also be set via OTEL_EXPORTER_OTLP_ENDPOINT environment variable.")
+	rootCmd.PersistentFlags().Float64Var(&tracingSamplingRate, "tracing-sampling-rate", 0.1,
+		"Trace sampling rate (0.0 to 1.0). Default is 0.1 (10%% sampling).")
+	rootCmd.PersistentFlags().BoolVar(&tracingInsecure, "tracing-insecure", false,
+		"Use insecure (non-TLS) connection to the OTLP collector.")
 }
 
 func initScheme() {
@@ -121,4 +139,20 @@ func initScheme() {
 
 	utilruntime.Must(authorizationv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(apiextensionsv1.AddToScheme(scheme))
+}
+
+// tracingConfig returns the tracing configuration derived from CLI flags
+// and environment variables. Environment variables take precedence for
+// the endpoint if the flag is not explicitly set.
+func tracingConfig() tracing.Config {
+	endpoint := tracingEndpoint
+	if endpoint == "" {
+		endpoint = os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	}
+	return tracing.Config{
+		Enabled:      tracingEnabled,
+		Endpoint:     endpoint,
+		SamplingRate: tracingSamplingRate,
+		Insecure:     tracingInsecure,
+	}
 }
