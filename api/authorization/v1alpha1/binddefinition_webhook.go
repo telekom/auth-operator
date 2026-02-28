@@ -3,6 +3,7 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -33,9 +34,10 @@ func (r *BindDefinition) SetupWebhookWithManager(mgr ctrl.Manager) error {
 // +kubebuilder:webhook:path=/validate-authorization-t-caas-telekom-com-v1alpha1-binddefinition,mutating=false,failurePolicy=fail,sideEffects=None,groups=authorization.t-caas.telekom.com,resources=binddefinitions,verbs=create;update,versions=v1alpha1,name=binddefinition.validating.webhook.auth.t-caas.telekom.de,admissionReviewVersions=v1
 
 // validateBindDefinitionSpec validates the BindDefinition spec for duplicate targetName.
-// Role existence is checked but only returns warnings (not errors) to allow applying
-// BindDefinitions before the referenced roles exist. The controller will handle
-// missing roles during reconciliation and set appropriate error conditions.
+// Role existence is checked. With the default "warn" policy, missing roles only return
+// warnings. With the "error" policy, missing roles cause admission rejection. With
+// "ignore", role checks are skipped entirely. The controller will also handle missing
+// roles during reconciliation and set appropriate conditions.
 func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context, r *BindDefinition) (admission.Warnings, error) {
 	logger := log.FromContext(ctx).WithName("binddefinition-webhook")
 	var warnings admission.Warnings
@@ -59,14 +61,25 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 		}
 	}
 
-	// Validate ClusterRoleRefs in cluster-scoped bindings - warn if not found
+	// Determine the missing-role policy from annotation.
+	policy := r.GetMissingRolePolicy()
+	if policy == MissingRolePolicyIgnore {
+		return warnings, nil
+	}
+	blockOnMissing := policy == MissingRolePolicyError
+	var missingRoles []string
+
+	// Validate ClusterRoleRefs in cluster-scoped bindings
 	for _, clusterRoleRef := range r.Spec.ClusterRoleBindings.ClusterRoleRefs {
 		clusterRole := &rbacv1.ClusterRole{}
 		if err := v.Client.Get(ctx, client.ObjectKey{Name: clusterRoleRef}, clusterRole); err != nil {
 			if apierrors.IsNotFound(err) {
-				logger.Info("warning: clusterrole not found (will be checked during reconciliation)",
-					"name", r.Name, "clusterRoleName", clusterRoleRef)
-				warnings = append(warnings, fmt.Sprintf("ClusterRole '%s' not found - binding will fail during reconciliation until the role exists", clusterRoleRef))
+				logger.Info("clusterrole not found",
+					"name", r.Name, "clusterRoleName", clusterRoleRef, "policy", string(policy))
+				ref := fmt.Sprintf("ClusterRole/%s", clusterRoleRef)
+				if !slices.Contains(missingRoles, ref) {
+					missingRoles = append(missingRoles, ref)
+				}
 			} else {
 				logger.Error(err, "failed to fetch clusterrole", "clusterRoleName", clusterRoleRef)
 				return warnings, apierrors.NewInternalError(fmt.Errorf("error fetching clusterrole '%s': %w", clusterRoleRef, err))
@@ -75,14 +88,17 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 	}
 
 	for _, roleBinding := range r.Spec.RoleBindings {
-		// Validate ClusterRoleRefs in namespaced bindings - warn if not found
+		// Validate ClusterRoleRefs in namespaced bindings
 		for _, clusterRoleRef := range roleBinding.ClusterRoleRefs {
 			clusterRole := &rbacv1.ClusterRole{}
 			if err := v.Client.Get(ctx, client.ObjectKey{Name: clusterRoleRef}, clusterRole); err != nil {
 				if apierrors.IsNotFound(err) {
-					logger.Info("warning: clusterrole not found (will be checked during reconciliation)",
-						"name", r.Name, "clusterRoleName", clusterRoleRef)
-					warnings = append(warnings, fmt.Sprintf("ClusterRole '%s' not found - binding will fail during reconciliation until the role exists", clusterRoleRef))
+					logger.Info("clusterrole not found",
+						"name", r.Name, "clusterRoleName", clusterRoleRef, "policy", string(policy))
+					ref := fmt.Sprintf("ClusterRole/%s", clusterRoleRef)
+					if !slices.Contains(missingRoles, ref) {
+						missingRoles = append(missingRoles, ref)
+					}
 				} else {
 					logger.Error(err, "failed to fetch clusterrole", "clusterRoleName", clusterRoleRef)
 					return warnings, apierrors.NewInternalError(fmt.Errorf("error fetching clusterrole '%s': %w", clusterRoleRef, err))
@@ -127,9 +143,9 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 					}
 					if err := v.Client.Get(ctx, key, role); err != nil {
 						if apierrors.IsNotFound(err) {
-							logger.Info("warning: role not found (will be checked during reconciliation)",
-								"name", r.Name, "roleName", roleRef, "namespace", ns.Name)
-							warnings = append(warnings, fmt.Sprintf("Role '%s' not found in namespace '%s' - binding will fail during reconciliation until the role exists", roleRef, ns.Name))
+							logger.Info("role not found",
+								"name", r.Name, "roleName", roleRef, "namespace", ns.Name, "policy", string(policy))
+							missingRoles = append(missingRoles, fmt.Sprintf("Role/%s/%s", ns.Name, roleRef))
 						} else {
 							logger.Error(err, "failed to fetch role", "roleName", roleRef, "namespace", ns.Name)
 							return warnings, apierrors.NewInternalError(fmt.Errorf("error fetching role '%s' in namespace '%s': %w", roleRef, ns.Name, err))
@@ -137,6 +153,16 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 					}
 				}
 			}
+		}
+	}
+
+	if len(missingRoles) > 0 {
+		if blockOnMissing {
+			return warnings, apierrors.NewBadRequest(
+				fmt.Sprintf("missing-role-policy is 'error': referenced roles do not exist: %v", missingRoles))
+		}
+		for _, ref := range missingRoles {
+			warnings = append(warnings, fmt.Sprintf("%s not found - binding will be created but ineffective until the role exists", ref))
 		}
 	}
 
@@ -155,7 +181,12 @@ func (v *BindDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 	logger := log.FromContext(ctx).WithName("binddefinition-webhook")
 	logger.V(1).Info("validating update", "name", newObj.Name)
 
-	if oldObj.Generation == newObj.Generation {
+	// Always validate when the policy annotation changes, even if the spec
+	// (and therefore Generation) is unchanged. This prevents downgrading
+	// the policy from 'error' to 'ignore' without re-validation.
+	oldPolicy := oldObj.GetMissingRolePolicy()
+	newPolicy := newObj.GetMissingRolePolicy()
+	if oldObj.Generation == newObj.Generation && oldPolicy == newPolicy {
 		return nil, nil
 	}
 
