@@ -28,12 +28,13 @@ import (
 )
 
 var (
-	enableLeaderElection      bool
-	bindDefinitionConcurrency int
-	roleDefinitionConcurrency int
-	cacheSyncTimeout          time.Duration
-	gracefulShutdownTimeout   time.Duration
-	waitForCRDs               bool
+	enableLeaderElection         bool
+	bindDefinitionConcurrency    int
+	roleDefinitionConcurrency    int
+	webhookAuthorizerConcurrency int
+	cacheSyncTimeout             time.Duration
+	gracefulShutdownTimeout      time.Duration
+	waitForCRDs                  bool
 )
 
 // controllerCmd represents the controller command.
@@ -47,7 +48,7 @@ The controller watches for changes to authorization resources and ensures
 the corresponding ClusterRoles, Roles, ClusterRoleBindings, and RoleBindings
 are created and kept in sync.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if bindDefinitionConcurrency < 0 || roleDefinitionConcurrency < 0 {
+		if bindDefinitionConcurrency < 0 || roleDefinitionConcurrency < 0 || webhookAuthorizerConcurrency < 0 {
 			return fmt.Errorf("concurrency values must be >= 0")
 		}
 
@@ -56,6 +57,7 @@ are created and kept in sync.`,
 			"enableLeaderElection", enableLeaderElection,
 			"bindDefinitionConcurrency", bindDefinitionConcurrency,
 			"roleDefinitionConcurrency", roleDefinitionConcurrency,
+			"webhookAuthorizerConcurrency", webhookAuthorizerConcurrency,
 			"cacheSyncTimeout", cacheSyncTimeout,
 			"gracefulShutdownTimeout", gracefulShutdownTimeout,
 			"namespace", namespace,
@@ -148,6 +150,21 @@ are created and kept in sync.`,
 			setupLog.Info("BindDefinition reconciler is disabled")
 		}
 
+		if webhookAuthorizerConcurrency > 0 {
+			setupLog.Info("creating WebhookAuthorizer reconciler", "concurrency", webhookAuthorizerConcurrency)
+			webhookAuthorizerController := authorizationcontroller.NewWebhookAuthorizerReconciler(
+				mgr.GetClient(),
+				mgr.GetScheme(),
+				mgr.GetEventRecorder("WebhookAuthorizerReconciler"),
+			)
+			if err := webhookAuthorizerController.SetupWithManager(mgr, webhookAuthorizerConcurrency); err != nil {
+				return fmt.Errorf("unable to setup controller WebhookAuthorizer with manager: %w", err)
+			}
+			setupLog.Info("WebhookAuthorizer reconciler configured successfully")
+		} else {
+			setupLog.Info("WebhookAuthorizer reconciler is disabled")
+		}
+
 		setupLog.Info("starting manager - waiting for cache sync", "timeout", cacheSyncTimeout)
 		if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 			return fmt.Errorf("unable to set up health check: %w", err)
@@ -172,6 +189,8 @@ func init() {
 		"Number of concurrent workers for BindDefinition reconciler. Default is 5. Use 0 to disable the reconciler.")
 	controllerCmd.Flags().IntVar(&roleDefinitionConcurrency, "roledefinition-concurrency", 5,
 		"Number of concurrent workers for RoleDefinition reconciler. Default is 5. Use 0 to disable the reconciler.")
+	controllerCmd.Flags().IntVar(&webhookAuthorizerConcurrency, "webhookauthorizer-concurrency", 1,
+		"Number of concurrent workers for WebhookAuthorizer reconciler. Default is 1. Use 0 to disable the reconciler.")
 	controllerCmd.Flags().DurationVar(&cacheSyncTimeout, "cache-sync-timeout", 2*time.Minute,
 		"Timeout for waiting for CRDs to become available. "+
 			"Increase this if CRDs take time to become available. Default is 2 minutes.")
@@ -198,6 +217,7 @@ func waitForRequiredCRDs(ctx context.Context, cfg *rest.Config, timeout time.Dur
 	requiredGVKs := []schema.GroupVersionKind{
 		authorizationv1alpha1.GroupVersion.WithKind("RoleDefinition"),
 		authorizationv1alpha1.GroupVersion.WithKind("BindDefinition"),
+		authorizationv1alpha1.GroupVersion.WithKind("WebhookAuthorizer"),
 	}
 
 	waiter := discovery.NewCRDWaiter(c, setupLog)

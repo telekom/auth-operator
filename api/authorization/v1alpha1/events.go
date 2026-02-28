@@ -47,6 +47,9 @@ const (
 	// because other BindDefinitions still reference it.
 	EventReasonServiceAccountRetained = "ServiceAccountRetained"
 
+	// EventReasonReconciled indicates a resource was successfully reconciled.
+	EventReasonReconciled = "Reconciled"
+
 	// EventReasonExternalSATracked indicates a BindDefinition now references
 	// an external (pre-existing) ServiceAccount.
 	EventReasonExternalSATracked = "ExternalSATracked"
