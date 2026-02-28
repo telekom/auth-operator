@@ -12,10 +12,11 @@ import (
 )
 
 func TestEnable_EmptyNamespace(t *testing.T) {
+	certDir := t.TempDir()
 	err := Enable(
 		nil, // mgr (not reached due to early validation)
 		"",  // namespace — empty triggers error
-		"/tmp/certs",
+		certDir,
 		"webhook.example.svc",
 		"webhook-certs",
 		[]rotator.WebhookInfo{},
@@ -52,10 +53,11 @@ func TestEnable_EmptyDir(t *testing.T) {
 // Note: Full integration testing of certificate rotation requires a running manager
 // and is covered by E2E tests; this unit test validates the nil-guard behavior.
 func TestEnable_NilManager(t *testing.T) {
+	certDir := t.TempDir()
 	err := Enable(
 		nil, // nil manager — causes rotator.AddRotator to fail
 		"test-ns",
-		"/tmp/certs",
+		certDir,
 		"webhook.example.svc",
 		"webhook-certs",
 		[]rotator.WebhookInfo{},

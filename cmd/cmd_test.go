@@ -65,8 +65,12 @@ func TestRedactSensitiveFlags(t *testing.T) {
 	if flag.Lookup("test-namespace-redact") == nil {
 		flag.String("test-namespace-redact", "default", "test flag for non-redaction")
 	}
-	_ = flag.Set("test-secret-redact", "my-sensitive-value")
-	_ = flag.Set("test-namespace-redact", "default")
+	if err := flag.Set("test-secret-redact", "my-sensitive-value"); err != nil {
+		t.Fatalf("failed to set test-secret-redact: %v", err)
+	}
+	if err := flag.Set("test-namespace-redact", "default"); err != nil {
+		t.Fatalf("failed to set test-namespace-redact: %v", err)
+	}
 
 	result := redactSensitiveFlags()
 
