@@ -83,6 +83,17 @@ fields, unused interfaces, and incomplete plumbing.
 - Flag components added to the manager without proper lifecycle
   management (`mgr.Add()` for runnables).
 
+### 11. OTEL / gRPC Endpoint Scheme Stripping
+
+- `otlptracegrpc.WithEndpoint()` expects a bare `host:port` string.
+  The `OTEL_EXPORTER_OTLP_ENDPOINT` environment variable may include
+  `http://` or `https://` scheme prefixes (per OpenTelemetry spec).
+- Flag any code that passes an OTEL endpoint directly to a gRPC dialer
+  without stripping the scheme prefix (`strings.TrimPrefix` for both
+  `https://` and `http://`).
+- The scheme should instead control TLS configuration
+  (`WithInsecure()` for `http://`, default TLS for `https://`).
+
 ### 11. PR Description ↔ Implementation Alignment
 
 - When the PR description claims a specific feature is implemented,

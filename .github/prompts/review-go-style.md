@@ -103,6 +103,14 @@ rbacv1.GroupName  // not "rbac.authorization.k8s.io"
   not `Expect().Should()`).
 - Test helper functions must call `t.Helper()`.
 - Parallel tests must use `t.Parallel()` correctly.
+- **Temp dirs**: Use `t.TempDir()` instead of hardcoded paths like
+  `/tmp/certs`. `t.TempDir()` auto-cleans and avoids cross-test
+  pollution.
+- **Error-checked helpers**: `flag.Set()` and similar stdlib functions
+  that return an error must be checked in tests:
+  `if err := flag.Set(...); err != nil { t.Fatalf(...) }`.
+  Do not use `_ = flag.Set(...)` — a silent failure hides broken
+  test assumptions.
 
 ### 10. Line Length (`lll`)
 

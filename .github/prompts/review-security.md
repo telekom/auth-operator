@@ -51,6 +51,16 @@ and RoleBindings — it is a privilege-management system and security-critical.
   level, including Debug.
 - Check that TLS configuration uses secure defaults (TLS 1.2+).
 
+### 9. Audit Log Completeness
+
+- Authorization decision audit logs must include **all** decision-relevant
+  fields: `decision`, `allowed`, `reason`, `user`, `resource`, and
+  `evaluatedCount`.
+- Flag audit log calls that omit `allowed` or `reason` — these fields
+  are essential for forensic analysis after a security incident.
+- Verify that no-opinion and deny decisions are logged at appropriate
+  verbosity (deny at V(0), no-opinion at V(1), allow trace at V(2)).
+
 ### 6. Input Validation
 
 - All user-supplied strings (role names, namespace names, group names,

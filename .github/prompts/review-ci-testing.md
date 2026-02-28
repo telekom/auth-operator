@@ -60,6 +60,20 @@ actually assert what they claim, and that CI configuration is correct.
   match what is being tested.
 - Cross-check test names referenced in docs against actual test names.
 - Table-driven test cases must have descriptive names.
+- **Test-code semantic fidelity**: When production code changes behavior
+  (e.g., log level moves from V(0) to V(1)), corresponding tests must
+  be updated. A test named `TestFoo_AtV0` that still asserts V(0)
+  behavior after the code moved to V(1) is a false-positive test.
+
+### 5a. Eventually / Polling Assertions
+
+- All Gomega `Eventually` assertions in integration tests must specify
+  explicit `.WithTimeout()` and `.WithPolling()` durations.
+- The default `Eventually` timeout (1s) is too short for envtest and
+  causes flaky tests. Use at least `10 * time.Second` timeout with
+  `250 * time.Millisecond` polling.
+- Flag bare `Eventually(func() { ... }).Should(Succeed())` without
+  timeout configuration.
 - **Comment-code semantic fidelity**: Verify that comments inside test
   functions accurately describe the test's behavior. Flag comments that
   say "allows" or "permits" when the test actually denies or expects

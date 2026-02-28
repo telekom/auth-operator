@@ -97,6 +97,33 @@ that would slip past routine test coverage.
 - Leader election failover mid-reconcile — does the new leader redo
   the work or miss it?
 
+### 10. Non-Deterministic Evaluation Order
+
+- When multiple items are fetched from an informer cache (e.g., a list
+  of `WebhookAuthorizer` objects) and evaluated in a first-match pattern,
+  the list **must be sorted** before evaluation. Unsorted lists produce
+  non-deterministic results across reconciles.
+- Flag any `range` over a list result that feeds a "first match wins"
+  or "first deny wins" decision without a preceding `slices.SortFunc`
+  or equivalent.
+
+### 11. Scope Mismatch — Namespace vs Non-Resource
+
+- When a SubjectAccessReview has `NonResourceAttributes` (not
+  `ResourceAttributes`), any authorizer scoped to a specific namespace
+  must be skipped. Evaluating a namespace-scoped rule against a
+  non-resource request is semantically meaningless and can produce
+  incorrect denials.
+- Flag evaluation loops that do not distinguish between resource and
+  non-resource SARs when filtering namespace-scoped items.
+
+### 12. Duplicate Output from Overlapping Sets
+
+- Functions that compare two lists for overlaps (e.g., denied principals
+  vs. allowed principals) can produce duplicate results when the same
+  item appears in multiple denied entries. Use a `seen` map or
+  `slices.Compact` after sorting to deduplicate output.
+
 ### 10. Fuzz & Property Testing
 
 - Property: for any valid `RoleDefinition` spec, the generated ClusterRole
