@@ -22,7 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
-	authnv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/api/authorization/v1alpha1/applyconfiguration/ssa"
 	"github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/metrics"
@@ -57,7 +57,7 @@ func NewWebhookAuthorizerReconciler(
 // SetupWithManager sets up the controller with the Manager.
 func (r *WebhookAuthorizerReconciler) SetupWithManager(mgr ctrl.Manager, concurrency int) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&authnv1alpha1.WebhookAuthorizer{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		For(&authorizationv1alpha1.WebhookAuthorizer{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		WithOptions(controller.Options{MaxConcurrentReconciles: concurrency}).
 		Complete(r)
 }
@@ -88,7 +88,7 @@ func (r *WebhookAuthorizerReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}()
 
 	// Step 1: Fetch the WebhookAuthorizer
-	wa := &authnv1alpha1.WebhookAuthorizer{}
+	wa := &authorizationv1alpha1.WebhookAuthorizer{}
 	if err := r.client.Get(ctx, req.NamespacedName, wa); err != nil {
 		if apierrors.IsNotFound(err) {
 			logger.V(1).Info("WebhookAuthorizer not found (deleted), skipping reconcile",
@@ -105,7 +105,7 @@ func (r *WebhookAuthorizerReconciler) Reconcile(ctx context.Context, req ctrl.Re
 
 	// Step 2: Mark as Reconciling
 	conditions.MarkReconciling(wa, wa.Generation,
-		authnv1alpha1.ReconcilingReasonProgressing, authnv1alpha1.ReconcilingMessageProgressing)
+		authorizationv1alpha1.ReconcilingReasonProgressing, authorizationv1alpha1.ReconcilingMessageProgressing)
 	wa.Status.ObservedGeneration = wa.Generation
 
 	// Step 3: Validate NamespaceSelector
@@ -124,7 +124,7 @@ func (r *WebhookAuthorizerReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	// Step 4: Mark as configured and ready
 	wa.Status.AuthorizerConfigured = true
 	conditions.MarkReady(wa, wa.Generation,
-		authnv1alpha1.ReadyReasonReconciled, authnv1alpha1.ReadyMessageReconciled)
+		authorizationv1alpha1.ReadyReasonReconciled, authorizationv1alpha1.ReadyMessageReconciled)
 
 	// Step 5: Apply status via SSA
 	if err := ssa.ApplyWebhookAuthorizerStatus(ctx, r.client, wa); err != nil {
@@ -136,7 +136,7 @@ func (r *WebhookAuthorizerReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	r.recorder.Eventf(wa, nil, corev1.EventTypeNormal,
-		authnv1alpha1.EventReasonReconciled, authnv1alpha1.EventActionReconcile,
+		authorizationv1alpha1.EventReasonReconciled, authorizationv1alpha1.EventActionReconcile,
 		"WebhookAuthorizer %s reconciled successfully", wa.Name)
 
 	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerWebhookAuthorizer, metrics.ResultSuccess).Inc()
@@ -148,10 +148,11 @@ func (r *WebhookAuthorizerReconciler) Reconcile(ctx context.Context, req ctrl.Re
 }
 
 // validateNamespaceSelector validates that the NamespaceSelector can be parsed
-// and optionally checks that at least one matching namespace exists.
+// and checks that at least one matching namespace exists (logging a warning if
+// no namespaces match).
 func (r *WebhookAuthorizerReconciler) validateNamespaceSelector(
 	ctx context.Context,
-	wa *authnv1alpha1.WebhookAuthorizer,
+	wa *authorizationv1alpha1.WebhookAuthorizer,
 ) error {
 	logger := log.FromContext(ctx)
 
@@ -190,12 +191,12 @@ func convertLabelSelector(ls *metav1.LabelSelector) (labels.Selector, error) {
 // markStalled marks the WebhookAuthorizer as stalled with the given error.
 func (r *WebhookAuthorizerReconciler) markStalled(
 	ctx context.Context,
-	wa *authnv1alpha1.WebhookAuthorizer,
+	wa *authorizationv1alpha1.WebhookAuthorizer,
 	err error,
 ) {
 	logger := log.FromContext(ctx)
 	conditions.MarkStalled(wa, wa.Generation,
-		authnv1alpha1.StalledReasonError, authnv1alpha1.StalledMessageError, err.Error())
+		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, err.Error())
 	wa.Status.ObservedGeneration = wa.Generation
 	wa.Status.AuthorizerConfigured = false
 	if updateErr := ssa.ApplyWebhookAuthorizerStatus(ctx, r.client, wa); updateErr != nil {
