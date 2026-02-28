@@ -94,7 +94,11 @@ var _ = BeforeSuite(func() {
 	DeferCleanup(func() { cacheCancel() })
 
 	// Wait for the cache to sync before running tests.
-	Expect(envCache.WaitForCacheSync(ctx)).To(BeTrue())
+	// Use a bounded timeout to prevent indefinite hangs in CI if the
+	// API server or CRDs fail to initialize.
+	syncCtx, syncCancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer syncCancel()
+	Expect(envCache.WaitForCacheSync(syncCtx)).To(BeTrue())
 
 	// Create a delegating client: reads go through the indexed cache,
 	// writes go directly to the API server.
