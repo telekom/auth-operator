@@ -1045,3 +1045,56 @@ func TestEnsureRoleWithAggregateFrom(t *testing.T) {
 		HaveKeyWithValue("t-caas.telekom.com/aggregate-to-tenant-admin", "true"),
 	)
 }
+
+// TestEnsureRole_TransitionFromRulesToAggregateFrom verifies that switching
+// a RoleDefinition from rule-based to aggregateFrom correctly clears the old
+// rules and sets the aggregation rule on the existing ClusterRole.
+func TestEnsureRole_TransitionFromRulesToAggregateFrom(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+
+	s := scheme.Scheme
+	_ = authorizationv1alpha1.AddToScheme(s)
+
+	// Start with a rule-based ClusterRole.
+	existingCR := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "transition-role",
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "auth-operator",
+			},
+		},
+		Rules: []rbacv1.PolicyRule{
+			{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods"}},
+		},
+	}
+
+	// Now the RoleDefinition switches to aggregateFrom.
+	rd := &authorizationv1alpha1.RoleDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "transition-role",
+		},
+		Spec: authorizationv1alpha1.RoleDefinitionSpec{
+			TargetRole:      authorizationv1alpha1.DefinitionClusterRole,
+			TargetName:      "transition-role",
+			ScopeNamespaced: false,
+			AggregateFrom: &rbacv1.AggregationRule{
+				ClusterRoleSelectors: []metav1.LabelSelector{
+					{MatchLabels: map[string]string{"custom/aggregate-to-transition": "true"}},
+				},
+			},
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(existingCR, rd).Build()
+	r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	err := r.ensureRole(ctx, rd, nil)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	cr := &rbacv1.ClusterRole{}
+	g.Expect(c.Get(ctx, client.ObjectKeyFromObject(existingCR), cr)).To(Succeed())
+	g.Expect(cr.Rules).To(BeEmpty(), "rules should be cleared after transition to aggregateFrom")
+	g.Expect(cr.AggregationRule).NotTo(BeNil(), "aggregation rule should be set")
+	g.Expect(cr.AggregationRule.ClusterRoleSelectors).To(HaveLen(1))
+}
