@@ -12,6 +12,9 @@ const (
 	DefinitionClusterRole = "ClusterRole"
 	// DefinitionNamespacedRole indicates a namespaced Role type.
 	DefinitionNamespacedRole = "Role"
+	// BreakglassCompatibleLabel is the label key applied to ClusterRoles that are
+	// eligible for temporary privilege escalation via k8s-breakglass.
+	BreakglassCompatibleLabel = "t-caas.telekom.com/breakglass-compatible"
 )
 
 // RoleDefinitionSpec defines the desired state of RoleDefinition.
@@ -57,6 +60,15 @@ type RoleDefinitionSpec struct {
 	// The RBAC operator discovers all resource verbs available and removes those listed here.
 	// +kubebuilder:validation:Optional
 	RestrictedVerbs []string `json:"restrictedVerbs,omitempty"`
+
+	// BreakglassAllowed marks generated ClusterRoles as eligible for temporary
+	// privilege escalation via k8s-breakglass. The generated ClusterRole always
+	// receives the label t-caas.telekom.com/breakglass-compatible set to "true"
+	// or "false" based on this field's value.
+	// Only applicable when TargetRole is ClusterRole. Defaults to false.
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:default=false
+	BreakglassAllowed bool `json:"breakglassAllowed,omitempty"`
 }
 
 // RoleDefinitionStatus defines the observed state of RoleDefinition.

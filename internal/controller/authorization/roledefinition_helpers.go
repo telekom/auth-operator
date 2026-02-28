@@ -68,6 +68,14 @@ func (r *RoleDefinitionReconciler) buildRoleObject(
 
 	switch roleDefinition.Spec.TargetRole {
 	case authorizationv1alpha1.DefinitionClusterRole:
+		// Always include breakglass label for ClusterRoles so SSA retains
+		// ownership. When toggled false→true→false, omitting the key would
+		// leave the stale "true" value on the resource.
+		if roleDefinition.Spec.BreakglassAllowed {
+			labels[authorizationv1alpha1.BreakglassCompatibleLabel] = "true"
+		} else {
+			labels[authorizationv1alpha1.BreakglassCompatibleLabel] = "false"
+		}
 		return &rbacv1.ClusterRole{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:        roleDefinition.Spec.TargetName,
@@ -257,6 +265,17 @@ func (r *RoleDefinitionReconciler) ensureRole(
 	ownerRef := ownerRefForRoleDefinition(roleDefinition)
 	labels := helpers.BuildResourceLabels(roleDefinition.Labels)
 	annotations := helpers.BuildResourceAnnotations("RoleDefinition", roleDefinition.Name)
+
+	// Ensure the breakglass-compatible label is always managed via SSA for
+	// ClusterRoles so that toggling the flag false→true→false correctly
+	// sets the label to "false" (SSA retains field ownership).
+	if roleDefinition.Spec.TargetRole == authorizationv1alpha1.DefinitionClusterRole {
+		if roleDefinition.Spec.BreakglassAllowed {
+			labels[authorizationv1alpha1.BreakglassCompatibleLabel] = "true"
+		} else {
+			labels[authorizationv1alpha1.BreakglassCompatibleLabel] = "false"
+		}
+	}
 
 	// Apply the role using SSA - handles both create and update
 	switch roleDefinition.Spec.TargetRole {

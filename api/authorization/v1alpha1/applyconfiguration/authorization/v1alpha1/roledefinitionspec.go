@@ -49,6 +49,11 @@ type RoleDefinitionSpecApplyConfiguration struct {
 	// RestrictedVerbs holds all verbs which will *NOT* be reconciled into the "TargetRole".
 	// The RBAC operator discovers all resource verbs available and removes those listed here.
 	RestrictedVerbs []string `json:"restrictedVerbs,omitempty"`
+	// BreakglassAllowed marks generated ClusterRoles as eligible for temporary
+	// privilege escalation via k8s-breakglass. When true, the generated role
+	// receives the label t-caas.telekom.com/breakglass-compatible: "true".
+	// Only applicable when TargetRole is ClusterRole. Defaults to false.
+	BreakglassAllowed *bool `json:"breakglassAllowed,omitempty"`
 }
 
 // RoleDefinitionSpecApplyConfiguration constructs a declarative configuration of the RoleDefinitionSpec type for use with
@@ -116,5 +121,13 @@ func (b *RoleDefinitionSpecApplyConfiguration) WithRestrictedVerbs(values ...str
 	for i := range values {
 		b.RestrictedVerbs = append(b.RestrictedVerbs, values[i])
 	}
+	return b
+}
+
+// WithBreakglassAllowed sets the BreakglassAllowed field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the BreakglassAllowed field is set to the value of the last call.
+func (b *RoleDefinitionSpecApplyConfiguration) WithBreakglassAllowed(value bool) *RoleDefinitionSpecApplyConfiguration {
+	b.BreakglassAllowed = &value
 	return b
 }

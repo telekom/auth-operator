@@ -53,6 +53,12 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 	logger := log.FromContext(ctx).WithName("roledefinition-webhook")
 	logger.V(1).Info("validating create", "name", obj.Name)
 
+	// breakglassAllowed is only meaningful for ClusterRoles — Roles are
+	// namespace-scoped and not eligible for breakglass escalation.
+	if obj.Spec.BreakglassAllowed && obj.Spec.TargetRole == DefinitionNamespacedRole {
+		return nil, apierrors.NewBadRequest("breakglassAllowed may only be set when targetRole is 'ClusterRole'")
+	}
+
 	// Validate version format in RestrictedAPIs
 	if err := validateRestrictedAPIsVersions(obj); err != nil {
 		return nil, apierrors.NewBadRequest(err.Error())
@@ -95,6 +101,11 @@ func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 
 	if oldObj.Generation == newObj.Generation {
 		return nil, nil
+	}
+
+	// breakglassAllowed is only meaningful for ClusterRoles.
+	if newObj.Spec.BreakglassAllowed && newObj.Spec.TargetRole == DefinitionNamespacedRole {
+		return nil, apierrors.NewBadRequest("breakglassAllowed may only be set when targetRole is 'ClusterRole'")
 	}
 
 	// Validate version format in RestrictedAPIs
