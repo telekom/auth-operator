@@ -321,6 +321,30 @@ networkPolicy:
           cidr: 10.0.0.0/8
 ```
 
+> **Security note:** The default webhook ingress rule uses `namespaceSelector: {}`
+> (all namespaces). This is required because kube-apiserver typically runs on the
+> host network and cannot be matched by namespace labels. Override
+> `webhookServer.ingressFrom` with an `ipBlock` rule if your CNI supports
+> host-network policies.
+
+#### Egress Rules
+
+When deploying into a namespace with a default-deny egress policy, enable
+egress rules so the operator can reach DNS and the Kubernetes API server:
+
+```yaml
+networkPolicy:
+  egress:
+    enabled: true
+    dnsNamespace: kube-system        # Namespace where CoreDNS runs
+    apiServerCIDR: "10.96.0.1/32"    # Restrict API server egress by CIDR
+    additionalRules: []              # Custom egress rules (e.g., cert-manager)
+```
+
+> **Warning:** When `apiServerCIDR` is empty, egress to **any** destination on
+> ports 443/6443 is allowed. Always set `apiServerCIDR` to your cluster's
+> API server IP for proper isolation.
+
 ---
 
 ## Upgrades

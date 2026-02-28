@@ -98,7 +98,7 @@ spec:
         {{- else }}
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ .Values.networkPolicy.metricsNamespace }}
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.metricsNamespace | default "monitoring" }}
         {{- end }}
     # Health-probe port — kubelet liveness/readiness probes.
     - ports:
