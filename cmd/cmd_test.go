@@ -2,6 +2,9 @@
 Copyright © 2026 Deutsche Telekom AG.
 */
 
+// NOTE: These tests access package-level cobra command singletons (rootCmd,
+// controllerCmd, webhookCmd) and the global flag.CommandLine. They are NOT
+// safe for t.Parallel().
 package cmd
 
 import (
@@ -106,6 +109,8 @@ func TestControllerCmdFlagValidation(t *testing.T) {
 	}{
 		{"both positive", 5, 5, false},
 		{"both zero (disabled)", 0, 0, false},
+		{"bd zero rd positive", 0, 5, false},
+		{"bd positive rd zero", 5, 0, false},
 		{"bd negative", -1, 5, true},
 		{"rd negative", 5, -1, true},
 		{"both negative", -1, -1, true},

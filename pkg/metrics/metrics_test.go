@@ -2,6 +2,8 @@
 Copyright © 2026 Deutsche Telekom AG.
 */
 
+// NOTE: These tests mutate global Prometheus metric singletons and are NOT
+// safe for t.Parallel(). Do not add t.Parallel() to any test in this file.
 package metrics
 
 import (
@@ -247,7 +249,14 @@ func TestWebhookRequestsCounter(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to get metric: %v", err)
 			}
+
+			before := getCounterValue(t, counter)
 			counter.Inc()
+			after := getCounterValue(t, counter)
+
+			if after != before+1 {
+				t.Errorf("expected counter to increment by 1, got delta %f", after-before)
+			}
 		})
 	}
 }
