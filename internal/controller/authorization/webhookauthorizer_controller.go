@@ -144,8 +144,8 @@ func (r *WebhookAuthorizerReconciler) Reconcile(ctx context.Context, req ctrl.Re
 }
 
 // validateNamespaceSelector validates that the NamespaceSelector can be parsed
-// and checks that at least one matching namespace exists (logging a warning if
-// no namespaces match).
+// and checks at debug level (V(2)) whether at least one matching namespace
+// exists.
 func (r *WebhookAuthorizerReconciler) validateNamespaceSelector(
 	ctx context.Context,
 	wa *authorizationv1alpha1.WebhookAuthorizer,
@@ -175,7 +175,7 @@ func (r *WebhookAuthorizerReconciler) validateNamespaceSelector(
 	}
 
 	logger.V(2).Info("NamespaceSelector validation",
-		"matchingNamespaces", len(nsList.Items),
+		"hasMatchingNamespace", len(nsList.Items) > 0,
 		"selector", selector.String())
 
 	return nil
