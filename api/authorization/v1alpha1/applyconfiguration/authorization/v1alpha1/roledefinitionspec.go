@@ -27,24 +27,28 @@ import (
 //
 // RoleDefinitionSpec defines the desired state of RoleDefinition.
 type RoleDefinitionSpecApplyConfiguration struct {
-	// The target role that will be reconciled. This can be a ClusterRole or a namespaced Role
+	// TargetRole is the role type that will be reconciled. This can be a ClusterRole or a namespaced Role.
 	TargetRole *string `json:"targetRole,omitempty"`
-	// The name of the target role. This can be any name that accurately describes the ClusterRole/Role.
+	// TargetName is the name of the target role. This can be any name that accurately describes the ClusterRole/Role.
 	// Must be a valid Kubernetes name (max 63 characters for most resources).
 	TargetName *string `json:"targetName,omitempty"`
-	// The target namespace for the Role. This value is necessary when the "TargetRole" is "Role"
+	// TargetNamespace is the target namespace for the Role. Required when "TargetRole" is "Role".
 	TargetNamespace *string `json:"targetNamespace,omitempty"`
-	// The scope controls whether the API resource is namespaced or not. This can also be checked by
-	// running `kubectl api-resources --namespaced=true/false`
+	// ScopeNamespaced controls whether the API resource is namespaced or not. This can also be checked by
+	// running `kubectl api-resources --namespaced=true/false`.
 	ScopeNamespaced *bool `json:"scopeNamespaced,omitempty"`
-	// The restricted APIs field holds all API groups which will *NOT* be reconciled into the "TargetRole"
-	// The RBAC operator discovers all API groups available and removes those which are defined by "RestrictedAPIs"
+	// RestrictedAPIs holds all API groups which will *NOT* be reconciled into the "TargetRole".
+	// The RBAC operator discovers all API groups available and removes those which are defined here.
+	// When Versions is empty (versions: []), all versions of that group are restricted.
+	// When Versions is specified, only those API versions are excluded from resource discovery.
+	// Note: Kubernetes RBAC PolicyRules are version-agnostic. If the same resource exists in
+	// a non-restricted version of the same group, it will still appear in the generated role.
 	RestrictedAPIs []v1.APIGroup `json:"restrictedApis,omitempty"`
-	// The restricted resources field holds all resources which will *NOT* be reconciled into the "TargetRole"
-	// The RBAC operator discovers all API resources available and removes those which are defined by "RestrictedResources"
+	// RestrictedResources holds all resources which will *NOT* be reconciled into the "TargetRole".
+	// The RBAC operator discovers all API resources available and removes those listed here.
 	RestrictedResources []v1.APIResource `json:"restrictedResources,omitempty"`
-	// The restricted verbs field holds all verbs which will *NOT* be reconciled into the "TargetRole"
-	// The RBAC operator discovers all resource verbs available and removes those which are defined by "RestrictedVerbs"
+	// RestrictedVerbs holds all verbs which will *NOT* be reconciled into the "TargetRole".
+	// The RBAC operator discovers all resource verbs available and removes those listed here.
 	RestrictedVerbs []string `json:"restrictedVerbs,omitempty"`
 	// AggregationLabels are additional labels applied to the generated ClusterRole so that
 	// it participates in Kubernetes' built-in ClusterRole aggregation mechanism.

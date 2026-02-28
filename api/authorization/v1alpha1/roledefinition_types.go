@@ -17,12 +17,12 @@ const (
 
 // RoleDefinitionSpec defines the desired state of RoleDefinition.
 type RoleDefinitionSpec struct {
-	// The target role that will be reconciled. This can be a ClusterRole or a namespaced Role
+	// TargetRole is the role type that will be reconciled. This can be a ClusterRole or a namespaced Role.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Enum=ClusterRole;Role
 	TargetRole string `json:"targetRole"`
 
-	// The name of the target role. This can be any name that accurately describes the ClusterRole/Role.
+	// TargetName is the name of the target role. This can be any name that accurately describes the ClusterRole/Role.
 	// Must be a valid Kubernetes name (max 63 characters for most resources).
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=5
@@ -30,27 +30,32 @@ type RoleDefinitionSpec struct {
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	TargetName string `json:"targetName"`
 
-	// The target namespace for the Role. This value is necessary when the "TargetRole" is "Role"
+	// TargetNamespace is the target namespace for the Role. Required when "TargetRole" is "Role".
 	// +kubebuilder:validation:Optional
 	TargetNamespace string `json:"targetNamespace,omitempty"`
 
-	// The scope controls whether the API resource is namespaced or not. This can also be checked by
-	// running `kubectl api-resources --namespaced=true/false`
+	// ScopeNamespaced controls whether the API resource is namespaced or not. This can also be checked by
+	// running `kubectl api-resources --namespaced=true/false`.
 	// +kubebuilder:validation:Required
 	ScopeNamespaced bool `json:"scopeNamespaced"`
 
-	// The restricted APIs field holds all API groups which will *NOT* be reconciled into the "TargetRole"
-	// The RBAC operator discovers all API groups available and removes those which are defined by "RestrictedAPIs"
+	// RestrictedAPIs holds all API groups which will *NOT* be reconciled into the "TargetRole".
+	// The RBAC operator discovers all API groups available and removes those which are defined here.
+	// When Versions is empty (versions: []), all versions of that group are restricted.
+	// When Versions is specified, only those API versions are excluded from resource discovery.
+	// Note: Kubernetes RBAC PolicyRules are version-agnostic. If the same resource exists in
+	// a non-restricted version of the same group, it will still appear in the generated role.
 	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MaxItems=64
 	RestrictedAPIs []metav1.APIGroup `json:"restrictedApis,omitempty"`
 
-	// The restricted resources field holds all resources which will *NOT* be reconciled into the "TargetRole"
-	// The RBAC operator discovers all API resources available and removes those which are defined by "RestrictedResources"
+	// RestrictedResources holds all resources which will *NOT* be reconciled into the "TargetRole".
+	// The RBAC operator discovers all API resources available and removes those listed here.
 	// +kubebuilder:validation:Optional
 	RestrictedResources []metav1.APIResource `json:"restrictedResources,omitempty"`
 
-	// The restricted verbs field holds all verbs which will *NOT* be reconciled into the "TargetRole"
-	// The RBAC operator discovers all resource verbs available and removes those which are defined by "RestrictedVerbs"
+	// RestrictedVerbs holds all verbs which will *NOT* be reconciled into the "TargetRole".
+	// The RBAC operator discovers all resource verbs available and removes those listed here.
 	// +kubebuilder:validation:Optional
 	RestrictedVerbs []string `json:"restrictedVerbs,omitempty"`
 
@@ -79,7 +84,7 @@ type RoleDefinitionStatus struct {
 	// +kubebuilder:validation:Optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
-	// Not extremely important as most status updates are driven by Conditions. We read the JSONPath from this status field to signify completed reconciliation.
+	// RoleReconciled indicates whether the target role has been successfully reconciled.
 	// +kubebuilder:validation:Optional
 	RoleReconciled bool `json:"roleReconciled,omitempty"`
 

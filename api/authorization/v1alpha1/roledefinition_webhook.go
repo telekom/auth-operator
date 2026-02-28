@@ -3,6 +3,7 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -35,6 +36,20 @@ func (r *RoleDefinition) SetupWebhookWithManager(mgr ctrl.Manager) error {
 }
 
 // +kubebuilder:webhook:path=/validate-authorization-t-caas-telekom-com-v1alpha1-roledefinition,mutating=false,failurePolicy=fail,sideEffects=None,groups=authorization.t-caas.telekom.com,resources=roledefinitions,verbs=create;update,versions=v1alpha1,name=roledefinition.validating.webhook.auth.t-caas.telekom.de,admissionReviewVersions=v1
+
+// validateRestrictedAPIsVersions ensures every version entry starts with 'v'
+// and is at most 20 characters. This was previously a CEL XValidation rule but
+// the nested iteration over upstream metav1.APIGroup exceeded the CEL cost budget.
+func validateRestrictedAPIsVersions(obj *RoleDefinition) error {
+	for i, group := range obj.Spec.RestrictedAPIs {
+		for j, gv := range group.Versions {
+			if !strings.HasPrefix(gv.Version, "v") || len(gv.Version) > 20 {
+				return fmt.Errorf("restrictedApis[%d].versions[%d].version %q: must start with 'v' and be at most 20 characters", i, j, gv.Version)
+			}
+		}
+	}
+	return nil
+}
 
 // ValidateCreate implements admission.Validator for RoleDefinition.
 func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleDefinition) (admission.Warnings, error) {
@@ -107,6 +122,11 @@ func (v *RoleDefinitionValidator) ValidateDelete(ctx context.Context, obj *RoleD
 
 // validateRoleDefinitionSpec validates the RoleDefinition spec fields.
 func validateRoleDefinitionSpec(obj *RoleDefinition) error {
+	// Validate version format in RestrictedAPIs
+	if err := validateRestrictedAPIsVersions(obj); err != nil {
+		return apierrors.NewBadRequest(err.Error())
+	}
+
 	// Validate TargetNamespace is required when TargetRole is Role
 	if obj.Spec.TargetRole == DefinitionNamespacedRole && obj.Spec.TargetNamespace == "" {
 		return apierrors.NewBadRequest("targetNamespace is required when targetRole is 'Role'")
