@@ -1819,7 +1819,9 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 
 		// === Label-change rejection with existing BindDefinitions ===
 		// These tests verify that label immutability is enforced even when
-		// the user IS fully authorized by a matching BindDefinition.
+		// the user is authorized by a BindDefinition matching the *old* namespace labels.
+		// The updated labels no longer match the BindDefinition selector, but even if
+		// they did, changing immutable labels should still be denied.
 		{
 			name:     "deny authorized SA modifying tenant label on managed namespace",
 			bindDefs: []authzv1alpha1.BindDefinition{bindDefTenant},
