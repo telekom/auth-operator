@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/pkg/system"
@@ -142,13 +143,19 @@ func initScheme() {
 }
 
 // tracingConfig returns the tracing configuration derived from CLI flags
-// and environment variables. Environment variables take precedence for
-// the endpoint if the flag is not explicitly set.
+// and environment variables. The flag value takes precedence; the
+// OTEL_EXPORTER_OTLP_ENDPOINT environment variable is used as fallback.
+// Any scheme prefix (http:// or https://) is stripped because the gRPC
+// client expects a bare host:port.
 func tracingConfig() tracing.Config {
 	endpoint := tracingEndpoint
 	if endpoint == "" {
 		endpoint = os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
 	}
+	// Strip scheme prefix — otlptracegrpc.WithEndpoint expects host:port.
+	endpoint = strings.TrimPrefix(endpoint, "https://")
+	endpoint = strings.TrimPrefix(endpoint, "http://")
+
 	return tracing.Config{
 		Enabled:      tracingEnabled,
 		Endpoint:     endpoint,
