@@ -234,7 +234,8 @@ func waitForRequiredCRDs(ctx context.Context, cfg *rest.Config, timeout time.Dur
 // validateConcurrency checks that all concurrency values are non-negative.
 func validateConcurrency(bdConcurrency, rdConcurrency, waConcurrency int) error {
 	if bdConcurrency < 0 || rdConcurrency < 0 || waConcurrency < 0 {
-		return fmt.Errorf("concurrency values must be >= 0, got bdConcurrency=%d, rdConcurrency=%d, waConcurrency=%d", bdConcurrency, rdConcurrency, waConcurrency)
+		return fmt.Errorf("concurrency values must be >= 0, got bdConcurrency=%d, rdConcurrency=%d, waConcurrency=%d",
+			bdConcurrency, rdConcurrency, waConcurrency)
 	}
 	return nil
 }
