@@ -119,7 +119,11 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"detail", "no resource or non-resource attributes")
 	}
 
-	globalItems, err := wa.listGlobalAuthorizers(ctx)
+	// Pre-fetch all authorizers in case the field index is unavailable,
+	// so global and scoped queries share a single fallback API call.
+	var fallbackCache []authzv1alpha1.WebhookAuthorizer
+
+	globalItems, err := wa.listGlobalAuthorizers(ctx, &fallbackCache)
 	if err != nil {
 		wa.Log.Error(err, "failed to list global WebhookAuthorizers")
 		if span := trace.SpanFromContext(ctx); span.IsRecording() {
@@ -134,7 +138,7 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Only query namespace-scoped authorizers when the SAR has a namespace target.
 	if sar.Spec.ResourceAttributes != nil && sar.Spec.ResourceAttributes.Namespace != "" {
-		scopedItems, err := wa.listScopedAuthorizers(ctx)
+		scopedItems, err := wa.listScopedAuthorizers(ctx, &fallbackCache)
 		if err != nil {
 			wa.Log.Error(err, "failed to list scoped WebhookAuthorizers")
 			if span := trace.SpanFromContext(ctx); span.IsRecording() {
@@ -198,7 +202,7 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (wa *Authorizer) listGlobalAuthorizers(ctx context.Context) ([]authzv1alpha1.WebhookAuthorizer, error) {
+func (wa *Authorizer) listGlobalAuthorizers(ctx context.Context, cachedAll *[]authzv1alpha1.WebhookAuthorizer) ([]authzv1alpha1.WebhookAuthorizer, error) {
 	var globalAuth authzv1alpha1.WebhookAuthorizerList
 	if err := wa.Client.List(ctx, &globalAuth, client.MatchingFields{
 		indexer.WebhookAuthorizerHasNamespaceSelectorField: "false",
@@ -212,13 +216,25 @@ func (wa *Authorizer) listGlobalAuthorizers(ctx context.Context) ([]authzv1alpha
 
 	// Field index not registered — fall back to filtering a full list.
 	wa.Log.V(1).Info("field index unavailable, falling back to unindexed list for global authorizers")
-	allAuth, err := wa.listAllAuthorizers(ctx)
-	if err != nil {
-		return nil, err
+	if cachedAll == nil || *cachedAll == nil {
+		all, err := wa.listAllAuthorizers(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if cachedAll != nil {
+			*cachedAll = all
+		}
+		globalItems := make([]authzv1alpha1.WebhookAuthorizer, 0, len(all))
+		for _, candidate := range all {
+			if helpers.IsLabelSelectorEmpty(&candidate.Spec.NamespaceSelector) {
+				globalItems = append(globalItems, candidate)
+			}
+		}
+		return globalItems, nil
 	}
 
-	globalItems := make([]authzv1alpha1.WebhookAuthorizer, 0, len(allAuth))
-	for _, candidate := range allAuth {
+	globalItems := make([]authzv1alpha1.WebhookAuthorizer, 0, len(*cachedAll))
+	for _, candidate := range *cachedAll {
 		if helpers.IsLabelSelectorEmpty(&candidate.Spec.NamespaceSelector) {
 			globalItems = append(globalItems, candidate)
 		}
@@ -227,7 +243,7 @@ func (wa *Authorizer) listGlobalAuthorizers(ctx context.Context) ([]authzv1alpha
 	return globalItems, nil
 }
 
-func (wa *Authorizer) listScopedAuthorizers(ctx context.Context) ([]authzv1alpha1.WebhookAuthorizer, error) {
+func (wa *Authorizer) listScopedAuthorizers(ctx context.Context, cachedAll *[]authzv1alpha1.WebhookAuthorizer) ([]authzv1alpha1.WebhookAuthorizer, error) {
 	var scopedAuth authzv1alpha1.WebhookAuthorizerList
 	if err := wa.Client.List(ctx, &scopedAuth, client.MatchingFields{
 		indexer.WebhookAuthorizerHasNamespaceSelectorField: "true",
@@ -241,13 +257,25 @@ func (wa *Authorizer) listScopedAuthorizers(ctx context.Context) ([]authzv1alpha
 
 	// Field index not registered — fall back to filtering a full list.
 	wa.Log.V(1).Info("field index unavailable, falling back to unindexed list for scoped authorizers")
-	allAuth, err := wa.listAllAuthorizers(ctx)
-	if err != nil {
-		return nil, err
+	if cachedAll == nil || *cachedAll == nil {
+		all, err := wa.listAllAuthorizers(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if cachedAll != nil {
+			*cachedAll = all
+		}
+		scopedItems := make([]authzv1alpha1.WebhookAuthorizer, 0, len(all))
+		for _, candidate := range all {
+			if !helpers.IsLabelSelectorEmpty(&candidate.Spec.NamespaceSelector) {
+				scopedItems = append(scopedItems, candidate)
+			}
+		}
+		return scopedItems, nil
 	}
 
-	scopedItems := make([]authzv1alpha1.WebhookAuthorizer, 0, len(allAuth))
-	for _, candidate := range allAuth {
+	scopedItems := make([]authzv1alpha1.WebhookAuthorizer, 0, len(*cachedAll))
+	for _, candidate := range *cachedAll {
 		if !helpers.IsLabelSelectorEmpty(&candidate.Spec.NamespaceSelector) {
 			scopedItems = append(scopedItems, candidate)
 		}
