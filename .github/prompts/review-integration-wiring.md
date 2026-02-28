@@ -83,6 +83,31 @@ fields, unused interfaces, and incomplete plumbing.
 - Flag components added to the manager without proper lifecycle
   management (`mgr.Add()` for runnables).
 
+### 11. OTEL / gRPC Endpoint Scheme Stripping
+
+- `otlptracegrpc.WithEndpoint()` expects a bare `host:port` string.
+  The `OTEL_EXPORTER_OTLP_ENDPOINT` environment variable may include
+  `http://` or `https://` scheme prefixes (per OpenTelemetry spec).
+- Flag any code that passes an OTEL endpoint directly to a gRPC dialer
+  without stripping the scheme prefix (`strings.TrimPrefix` for both
+  `https://` and `http://`).
+- The scheme should instead control TLS configuration
+  (`WithInsecure()` for `http://`, default TLS for `https://`).
+
+### 12. PR Description ↔ Implementation Alignment
+
+- When the PR description claims a specific feature is implemented,
+  verify the code actually delivers it. Common gaps:
+  - Description says "adds validation for X" but no webhook or CEL
+    rule actually validates X.
+  - Description says "adds metrics for Y" but no `prometheus.Gauge`
+    or `Counter` is registered.
+  - Description references a config option that exists in `values.yaml`
+    but is never read by the Go code.
+- Conversely, do NOT flag implementation details that the description
+  intentionally omits (e.g., internal refactoring, helper extractions).
+  Only flag semantic gaps where user-visible behavior doesn't match.
+
 ## Output format
 
 For each finding:

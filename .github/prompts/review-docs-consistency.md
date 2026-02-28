@@ -48,6 +48,25 @@ is accurate, internally consistent, and synchronized with the actual code.
   the current behavior, not a previous iteration.
 - Flag TODO / FIXME comments that reference completed work.
 - Verify that kubebuilder markers have accurate descriptions.
+- **Enforcement-mechanism attribution**: Comments describing validation
+  or rejection must name the specific mechanism — "rejected by CEL
+  rule", "rejected by webhook validation", or "enforced by kubebuilder
+  markers". Vague phrasing like "is now invalid" without stating which
+  layer enforces it is misleading.
+- **Variable scoping precision**: Comments referencing variables must
+  distinguish between Make variables (from `include` files), shell
+  environment variables, and Go constants. Write "Make variable defined
+  in X" rather than "set in X".
+- **CI dependency graph accuracy**: Comments in CI workflow files about
+  job dependencies must reflect the actual `needs` topology. Saying
+  "no dependency on quality gates" is misleading if downstream jobs
+  enforce those gates transitively.
+- **Test comment fidelity**: In `_test.go` files, comments describing
+  what a test case does must match the actual test logic. Flag comments
+  that say "allows X" when the test denies or expects rejection, or
+  "rejects invalid Y" when the test never asserts an error. This applies
+  to inline comments, `t.Run()`/`It()`/`Describe()` description strings,
+  and table-driven test case `name` fields.
 
 ### 7. Cross-Reference Integrity
 
@@ -55,6 +74,17 @@ is accurate, internally consistent, and synchronized with the actual code.
   files or headings.
 - Check that import alias references in docs match the convention:
   `authorizationv1alpha1`, `ctrl`, `rbacv1`, `metav1`.
+
+### 8. PR Description ↔ Code Accuracy
+
+- PR descriptions often diverge from the actual implementation over the
+  course of development. Check that:
+  - Function/method names cited in the PR body exist in the diff.
+  - Metric names, label keys, and API paths match the code.
+  - Flow descriptions ("step 1, step 2, ...") match the actual
+    sequence in the reconciler or handler.
+  - URL paths (e.g., `/api/metrics` vs `/metrics`) are correct.
+  - Scheme references (http vs https) match the actual listener.
 
 ## Output format
 

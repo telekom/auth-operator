@@ -92,6 +92,19 @@ the change introduces, and whether the change is safe to ship.
 - Flag one-way schema migrations.
 - SSA ownership changes may not be cleanly reversible — flag these.
 
+### 11. Verification Discipline
+
+- **Before flagging a missing feature**, search the full codebase (not
+  just the diff) for the function, method, or pattern. It may be
+  implemented in a helper, a different file, or a separate package.
+- **Before claiming a test is insufficient**, read the full test
+  function — assertions may use helpers or table-driven patterns that
+  cover the concern.
+- **Before flagging a documentation error**, read the surrounding
+  context. Sentences may be accurate when read in full paragraph scope.
+- Only flag an issue if you can cite the specific file and line where
+  the bug would manifest, not just where you expected to see code.
+
 ## Output format
 
 For each finding:

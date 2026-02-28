@@ -70,6 +70,12 @@ reliability, observability, and production behavior.
 - Sensitive data (tokens, credentials) must never be logged.
 - Log the resource name, namespace, and relevant identifiers on every
   operation.
+- **V-level conventions for authorization decisions**:
+  - V(0): deny decisions (security-relevant, always visible)
+  - V(1): no-opinion decisions (routine, no authorizer matched)
+  - V(2)+: per-authorizer trace logs (debugging)
+  Flag code that logs no-opinion at V(0) — it floods operator logs
+  in clusters with many non-matching requests.
 
 ## Output format
 
