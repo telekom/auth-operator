@@ -44,3 +44,23 @@ webhooks:
     resources:
     - roledefinitions
   sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-authorization-t-caas-telekom-com-v1alpha1-webhookauthorizer
+  failurePolicy: Fail
+  name: webhookauthorizer.validating.webhook.auth.t-caas.telekom.de
+  rules:
+  - apiGroups:
+    - authorization.t-caas.telekom.com
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - webhookauthorizers
+  sideEffects: None
