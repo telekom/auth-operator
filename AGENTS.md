@@ -88,7 +88,10 @@ Invoke each review prompt in sequence against a code change and collect findings
 The 12 reviewer personas (out of 16 total prompts; the remaining 4 are
 task and workflow guides: `review-pr`, `add-crd-field`, `helm-chart-changes`,
 `github-pr-management`) cover every issue class found by automated reviewers
-(Copilot, etc.) and more:
+(Copilot, etc.) and more.
+
+Grouped below by the *class of bug* each persona catches (the table
+above groups by domain):
 
 **Code quality** (4 personas):
 - **Go style** catches import alias violations (`authorizationv1alpha1` enforcement), `%v` error wrapping, `godot` comment periods, `revive` naming

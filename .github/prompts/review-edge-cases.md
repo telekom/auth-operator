@@ -120,8 +120,8 @@ that would slip past routine test coverage.
   2. Explicitly documents that certain fields are user-extensible.
 - **Owner reference garbage collection vs SSA**: If the operator uses
   SSA to manage a ClusterRoleBinding but also sets ownerReference on it,
-  and the owner (a namespace-scoped CR) is deleted, the GC deletes the
-  cluster-scoped resource. Verify this interaction is intended and tested.
+  and the owning CR is deleted, the GC deletes the cluster-scoped
+  resource. Verify this interaction is intended and tested.
 - **ForceOwnership on shared fields**: Two controllers both applying
   SSA to the same object with `ForceOwnership: true` causes a silent
   war where the last writer wins. Flag any SSA apply with ForceOwnership
