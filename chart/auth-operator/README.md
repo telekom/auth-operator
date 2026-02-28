@@ -109,6 +109,19 @@ Image reference precedence: `digest` > `tag` > `Chart.AppVersion`
 For the full list of exposed metrics and recommended alert rules, see the
 [Metrics and Alerting documentation](https://github.com/telekom/auth-operator/blob/main/docs/metrics-and-alerting.md).
 
+### Network Policy
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `networkPolicy.enabled` | Create NetworkPolicy resources for pod-level ingress isolation | `false` |
+| `networkPolicy.metricsNamespace` | Namespace hosting the monitoring stack (Prometheus) | `"monitoring"` |
+| `networkPolicy.webhookServer.ingressFrom` | Custom ingress `from` rules for the webhook port (9443) | `[]` |
+| `networkPolicy.controllerManager.ingressFrom` | Custom ingress `from` rules for the metrics port (8080) | `[]` |
+| `networkPolicy.egress.enabled` | Enable egress rules (for default-deny egress environments) | `false` |
+| `networkPolicy.egress.dnsNamespace` | Namespace where CoreDNS runs (for UDP/TCP 53) | `"kube-system"` |
+| `networkPolicy.egress.apiServerCIDR` | API server CIDR for egress restriction (empty = allow any on 443/6443) | `""` |
+| `networkPolicy.egress.additionalRules` | Additional custom egress rules | `[]` |
+
 ## High Availability
 
 For production deployments, enable high availability with digest-based image reference:

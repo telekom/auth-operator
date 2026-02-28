@@ -280,9 +280,8 @@ Helm values to create them.
 
 > **Note:** The generated NetworkPolicy uses the built-in
 > `kubernetes.io/metadata.name` namespace label for namespace selectors.
-> This label is automatically set by the API server since **Kubernetes 1.21+**.
-> Clusters running older versions will need to label namespaces manually
-> or disable the network policy.
+> This label is automatically set by the API server (available since Kubernetes 1.21;
+> this operator requires Kubernetes 1.28+).
 
 **Webhook server** — Only allows ingress on port 9443 (webhook) from all
 namespaces (required for kube-apiserver on host network) and port 8081
