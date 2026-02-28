@@ -108,18 +108,8 @@ func validateWebhookAuthorizer(wa *WebhookAuthorizer) (admission.Warnings, error
 
 	// Warn about never-matching principals: Namespace set but User and Groups
 	// are both empty, so the principal can never match any request.
-	for i, p := range wa.Spec.AllowedPrincipals {
-		if p.Namespace != "" && p.User == "" && len(p.Groups) == 0 {
-			warnings = append(warnings,
-				fmt.Sprintf("spec.allowedPrincipals[%d] has namespace %q but empty user and groups; it can never match", i, p.Namespace))
-		}
-	}
-	for i, p := range wa.Spec.DeniedPrincipals {
-		if p.Namespace != "" && p.User == "" && len(p.Groups) == 0 {
-			warnings = append(warnings,
-				fmt.Sprintf("spec.deniedPrincipals[%d] has namespace %q but empty user and groups; it can never match", i, p.Namespace))
-		}
-	}
+	warnings = append(warnings, findNeverMatchingPrincipals("allowedPrincipals", wa.Spec.AllowedPrincipals)...)
+	warnings = append(warnings, findNeverMatchingPrincipals("deniedPrincipals", wa.Spec.DeniedPrincipals)...)
 
 	// Note on spec.allowedPrincipals[].namespace (see Issue #96):
 	// The Namespace field on Principal is used only as a namespace filter for
@@ -129,6 +119,19 @@ func validateWebhookAuthorizer(wa *WebhookAuthorizer) (admission.Warnings, error
 	// any ServiceAccount-style naming pattern on Principal.Namespace here.
 
 	return warnings, nil
+}
+
+// findNeverMatchingPrincipals returns warnings for principals that specify a
+// Namespace but have empty User and Groups — they can never match any request.
+func findNeverMatchingPrincipals(fieldName string, principals []Principal) admission.Warnings {
+	var warnings admission.Warnings
+	for i, p := range principals {
+		if p.Namespace != "" && p.User == "" && len(p.Groups) == 0 {
+			warnings = append(warnings,
+				fmt.Sprintf("spec.%s[%d] has namespace %q but empty user and groups; it can never match", fieldName, i, p.Namespace))
+		}
+	}
+	return warnings
 }
 
 // findPrincipalOverlaps returns all overlapping users or groups between
