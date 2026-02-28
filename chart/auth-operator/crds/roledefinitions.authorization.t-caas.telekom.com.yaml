@@ -68,8 +68,10 @@ spec:
                 description: |-
                   RestrictedAPIs holds all API groups which will *NOT* be reconciled into the "TargetRole".
                   The RBAC operator discovers all API groups available and removes those which are defined here.
-                  When Versions is empty for an entry, all versions of that group are restricted.
-                  When Versions is specified, only those versions are restricted; other versions remain available.
+                  When Versions is empty (versions: []), all versions of that group are restricted.
+                  When Versions is specified, only those API versions are excluded from resource discovery.
+                  Note: Kubernetes RBAC PolicyRules are version-agnostic. If the same resource exists in
+                  a non-restricted version of the same group, it will still appear in the generated role.
                 items:
                   description: |-
                     APIGroup contains the name, the supported versions, and the preferred version
@@ -169,10 +171,6 @@ spec:
                   type: object
                 maxItems: 64
                 type: array
-                x-kubernetes-validations:
-                - message: version must start with 'v' and be at most 20 characters
-                  rule: self.all(g, g.versions.all(v, v.version.startsWith('v') &&
-                    v.version.size() <= 20))
               restrictedResources:
                 description: |-
                   RestrictedResources holds all resources which will *NOT* be reconciled into the "TargetRole".

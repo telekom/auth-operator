@@ -40,8 +40,10 @@ type RoleDefinitionSpec struct {
 
 	// RestrictedAPIs holds all API groups which will *NOT* be reconciled into the "TargetRole".
 	// The RBAC operator discovers all API groups available and removes those which are defined here.
-	// When Versions is empty for an entry, all versions of that group are restricted.
-	// When Versions is specified, only those versions are restricted; other versions remain available.
+	// When Versions is empty (versions: []), all versions of that group are restricted.
+	// When Versions is specified, only those API versions are excluded from resource discovery.
+	// Note: Kubernetes RBAC PolicyRules are version-agnostic. If the same resource exists in
+	// a non-restricted version of the same group, it will still appear in the generated role.
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=64
 	RestrictedAPIs []metav1.APIGroup `json:"restrictedApis,omitempty"`

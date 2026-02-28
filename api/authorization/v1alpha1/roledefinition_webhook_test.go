@@ -160,4 +160,102 @@ var _ = Describe("RoleDefinition Webhook", func() {
 			Expect(k8sClient.Delete(ctx, rd2)).To(Succeed())
 		})
 	})
+
+	Context("RestrictedAPIs version validation", func() {
+
+		It("Should admit a RoleDefinition with valid API version strings", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-valid-versions",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-valid-versions",
+					ScopeNamespaced: false,
+					RestrictedAPIs: []metav1.APIGroup{
+						{
+							Name: "apps",
+							Versions: []metav1.GroupVersionForDiscovery{
+								{GroupVersion: "apps/v1", Version: "v1"},
+								{GroupVersion: "apps/v1beta1", Version: "v1beta1"},
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, rd)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, rd)).To(Succeed())
+		})
+
+		It("Should deny a version missing the 'v' prefix", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-bad-version-prefix",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-bad-version-prefix",
+					ScopeNamespaced: false,
+					RestrictedAPIs: []metav1.APIGroup{
+						{
+							Name: "apps",
+							Versions: []metav1.GroupVersionForDiscovery{
+								{GroupVersion: "apps/1.0", Version: "1.0"},
+							},
+						},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, rd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("must start with 'v'"))
+		})
+
+		It("Should deny a version exceeding 20 characters", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-version-too-long",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-version-too-long",
+					ScopeNamespaced: false,
+					RestrictedAPIs: []metav1.APIGroup{
+						{
+							Name: "apps",
+							Versions: []metav1.GroupVersionForDiscovery{
+								{GroupVersion: "apps/v12345678901234567890", Version: "v12345678901234567890"},
+							},
+						},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, rd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("must start with 'v' and be at most 20 characters"))
+		})
+
+		It("Should admit a version at exactly 20 characters", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-version-boundary",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-version-boundary",
+					ScopeNamespaced: false,
+					RestrictedAPIs: []metav1.APIGroup{
+						{
+							Name: "apps",
+							Versions: []metav1.GroupVersionForDiscovery{
+								{GroupVersion: "apps/v1234567890123456789", Version: "v1234567890123456789"},
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, rd)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, rd)).To(Succeed())
+		})
+	})
 })
