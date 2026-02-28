@@ -50,7 +50,7 @@ var _ = Describe("RoleDefinition Controller", func() {
 
 					Spec: authorizationv1alpha1.RoleDefinitionSpec{
 						TargetName: "lorem",
-						TargetRole: "ClusterRole",
+						TargetRole: authorizationv1alpha1.DefinitionClusterRole,
 					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
@@ -852,6 +852,249 @@ func TestFilterAPIResourcesAdditionalCases(t *testing.T) {
 		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(rules).To(BeEmpty())
+	})
+
+	t.Run("restricts all versions when Versions is empty", func(t *testing.T) {
+		g := NewWithT(t)
+
+		rd := &authorizationv1alpha1.RoleDefinition{
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				RestrictedAPIs: []metav1.APIGroup{{Name: "apps"}},
+			},
+		}
+
+		apiResources := discovery.APIResourcesByGroupVersion{
+			"apps/v1": []metav1.APIResource{
+				{Name: "deployments", Verbs: metav1.Verbs{"get"}},
+			},
+			"apps/v1beta1": []metav1.APIResource{
+				{Name: "deployments", Verbs: metav1.Verbs{"get"}},
+			},
+		}
+
+		r := &RoleDefinitionReconciler{}
+		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(rules).To(BeEmpty(), "all versions of apps should be restricted")
+	})
+
+	t.Run("restricts only specified version when Versions is set", func(t *testing.T) {
+		g := NewWithT(t)
+
+		rd := &authorizationv1alpha1.RoleDefinition{
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				RestrictedAPIs: []metav1.APIGroup{
+					{
+						Name: "apps",
+						Versions: []metav1.GroupVersionForDiscovery{
+							{GroupVersion: "apps/v1beta1", Version: "v1beta1"},
+						},
+					},
+				},
+			},
+		}
+
+		apiResources := discovery.APIResourcesByGroupVersion{
+			"apps/v1": []metav1.APIResource{
+				{Name: "deployments", Verbs: metav1.Verbs{"get"}},
+			},
+			"apps/v1beta1": []metav1.APIResource{
+				{Name: "deployments", Verbs: metav1.Verbs{"get"}},
+			},
+		}
+
+		r := &RoleDefinitionReconciler{}
+		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
+		g.Expect(err).NotTo(HaveOccurred())
+		// apps/v1beta1 should be restricted, apps/v1 should remain
+		g.Expect(rules).To(HaveLen(1))
+		for _, rule := range rules {
+			g.Expect(rule.APIGroups).To(ContainElement("apps"))
+			g.Expect(rule.Resources).To(ContainElement("deployments"))
+		}
+	})
+
+	t.Run("allows non-matching version of restricted group", func(t *testing.T) {
+		g := NewWithT(t)
+
+		rd := &authorizationv1alpha1.RoleDefinition{
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				RestrictedAPIs: []metav1.APIGroup{
+					{
+						Name: "batch",
+						Versions: []metav1.GroupVersionForDiscovery{
+							{GroupVersion: "batch/v1beta1", Version: "v1beta1"},
+						},
+					},
+				},
+			},
+		}
+
+		apiResources := discovery.APIResourcesByGroupVersion{
+			"batch/v1": []metav1.APIResource{
+				{Name: "jobs", Verbs: metav1.Verbs{"get", "list"}},
+			},
+			"batch/v1beta1": []metav1.APIResource{
+				{Name: "cronjobs", Verbs: metav1.Verbs{"get"}},
+			},
+		}
+
+		r := &RoleDefinitionReconciler{}
+		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
+		g.Expect(err).NotTo(HaveOccurred())
+		// batch/v1 should remain, batch/v1beta1 should be restricted
+		hasJobs := false
+		hasCronjobs := false
+		for _, rule := range rules {
+			for _, res := range rule.Resources {
+				if res == "jobs" {
+					hasJobs = true
+				}
+				if res == "cronjobs" {
+					hasCronjobs = true
+				}
+			}
+		}
+		g.Expect(hasJobs).To(BeTrue(), "batch/v1 jobs should not be restricted")
+		g.Expect(hasCronjobs).To(BeFalse(), "batch/v1beta1 cronjobs should be restricted")
+	})
+
+	t.Run("restricts multiple specified versions", func(t *testing.T) {
+		g := NewWithT(t)
+
+		rd := &authorizationv1alpha1.RoleDefinition{
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				RestrictedAPIs: []metav1.APIGroup{
+					{
+						Name: "apps",
+						Versions: []metav1.GroupVersionForDiscovery{
+							{GroupVersion: "apps/v1beta1", Version: "v1beta1"},
+							{GroupVersion: "apps/v1beta2", Version: "v1beta2"},
+						},
+					},
+				},
+			},
+		}
+
+		apiResources := discovery.APIResourcesByGroupVersion{
+			"apps/v1": []metav1.APIResource{
+				{Name: "deployments", Verbs: metav1.Verbs{"get"}},
+			},
+			"apps/v1beta1": []metav1.APIResource{
+				{Name: "deployments", Verbs: metav1.Verbs{"get"}},
+			},
+			"apps/v1beta2": []metav1.APIResource{
+				{Name: "deployments", Verbs: metav1.Verbs{"get"}},
+			},
+		}
+
+		r := &RoleDefinitionReconciler{}
+		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
+		g.Expect(err).NotTo(HaveOccurred())
+		// Only apps/v1 should remain
+		g.Expect(rules).To(HaveLen(1))
+		for _, rule := range rules {
+			g.Expect(rule.Resources).To(ContainElement("deployments"))
+		}
+	})
+
+	t.Run("invalid version string does not match any real API version", func(t *testing.T) {
+		g := NewWithT(t)
+
+		rd := &authorizationv1alpha1.RoleDefinition{
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				RestrictedAPIs: []metav1.APIGroup{
+					{
+						Name: "apps",
+						Versions: []metav1.GroupVersionForDiscovery{
+							{GroupVersion: "apps/not-a-real-version", Version: "not-a-real-version"},
+						},
+					},
+				},
+			},
+		}
+
+		apiResources := discovery.APIResourcesByGroupVersion{
+			"apps/v1": []metav1.APIResource{
+				{Name: "deployments", Verbs: metav1.Verbs{"get"}},
+			},
+		}
+
+		r := &RoleDefinitionReconciler{}
+		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
+		g.Expect(err).NotTo(HaveOccurred())
+		// Invalid version should not match apps/v1, so deployments should remain
+		g.Expect(rules).To(HaveLen(1))
+		for _, rule := range rules {
+			g.Expect(rule.Resources).To(ContainElement("deployments"))
+		}
+	})
+
+	t.Run("empty restricted API list does not filter anything", func(t *testing.T) {
+		g := NewWithT(t)
+
+		rd := &authorizationv1alpha1.RoleDefinition{
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				RestrictedAPIs: []metav1.APIGroup{},
+			},
+		}
+
+		apiResources := discovery.APIResourcesByGroupVersion{
+			"apps/v1": []metav1.APIResource{
+				{Name: "deployments", Verbs: metav1.Verbs{"get", "list"}},
+			},
+			"v1": []metav1.APIResource{
+				{Name: "pods", Verbs: metav1.Verbs{"get"}},
+			},
+		}
+
+		r := &RoleDefinitionReconciler{}
+		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
+		g.Expect(err).NotTo(HaveOccurred())
+		// Nothing is restricted, so all resources should remain
+		allResources := make([]string, 0, len(rules))
+		for _, rule := range rules {
+			allResources = append(allResources, rule.Resources...)
+		}
+		g.Expect(allResources).To(ContainElement("deployments"))
+		g.Expect(allResources).To(ContainElement("pods"))
+	})
+
+	t.Run("duplicate entries in restricted list are handled gracefully", func(t *testing.T) {
+		g := NewWithT(t)
+
+		rd := &authorizationv1alpha1.RoleDefinition{
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				RestrictedAPIs: []metav1.APIGroup{
+					{Name: "apps"},
+					{Name: "apps"}, // duplicate
+				},
+			},
+		}
+
+		apiResources := discovery.APIResourcesByGroupVersion{
+			"apps/v1": []metav1.APIResource{
+				{Name: "deployments", Verbs: metav1.Verbs{"get"}},
+			},
+			"v1": []metav1.APIResource{
+				{Name: "pods", Verbs: metav1.Verbs{"get"}},
+			},
+		}
+
+		r := &RoleDefinitionReconciler{}
+		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
+		g.Expect(err).NotTo(HaveOccurred())
+		// apps should still be restricted despite duplicate entry
+		for _, rule := range rules {
+			g.Expect(rule.Resources).NotTo(ContainElement("deployments"),
+				"duplicate restricted API entries should still filter correctly")
+		}
+		// core API group should remain
+		allResources := make([]string, 0, len(rules))
+		for _, rule := range rules {
+			allResources = append(allResources, rule.Resources...)
+		}
+		g.Expect(allResources).To(ContainElement("pods"))
 	})
 }
 
