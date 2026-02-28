@@ -94,9 +94,7 @@ var _ = BeforeSuite(func() {
 	DeferCleanup(func() { cacheCancel() })
 
 	// Wait for the cache to sync before running tests.
-	syncCtx, syncCancel := context.WithTimeout(ctx, 30*time.Second)
-	defer syncCancel()
-	Expect(envCache.WaitForCacheSync(syncCtx)).To(BeTrue())
+	Expect(envCache.WaitForCacheSync(ctx)).To(BeTrue())
 
 	// Create a delegating client: reads go through the indexed cache,
 	// writes go directly to the API server.
