@@ -5,6 +5,22 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// MissingRolePolicy controls how the controller handles missing role references.
+type MissingRolePolicy string
+
+const (
+	// MissingRolePolicyIgnore skips role-reference validation entirely.
+	MissingRolePolicyIgnore MissingRolePolicy = "ignore"
+	// MissingRolePolicyWarn creates bindings but emits events and sets a warning condition.
+	MissingRolePolicyWarn MissingRolePolicy = "warn"
+	// MissingRolePolicyError blocks reconciliation until all referenced roles exist.
+	MissingRolePolicyError MissingRolePolicy = "error"
+)
+
+// MissingRolePolicyAnnotation is the annotation key that controls the missing-role policy.
+// Accepted values: "ignore", "warn" (default), "error".
+const MissingRolePolicyAnnotation = "authorization.t-caas.telekom.com/missing-role-policy"
+
 // BindDefinition-related constants for finalizers and binding types.
 const (
 	// BindDefinitionFinalizer is the finalizer used to prevent orphaned resources.
@@ -136,6 +152,23 @@ type BindDefinitionList struct {
 
 func init() {
 	SchemeBuilder.Register(&BindDefinition{}, &BindDefinitionList{})
+}
+
+// GetMissingRolePolicy returns the missing-role policy configured via annotation.
+// Defaults to MissingRolePolicyWarn if the annotation is absent or has an
+// unrecognised value.
+func (bd *BindDefinition) GetMissingRolePolicy() MissingRolePolicy {
+	v, ok := bd.Annotations[MissingRolePolicyAnnotation]
+	if !ok {
+		return MissingRolePolicyWarn
+	}
+
+	switch MissingRolePolicy(v) {
+	case MissingRolePolicyIgnore, MissingRolePolicyWarn, MissingRolePolicyError:
+		return MissingRolePolicy(v)
+	default:
+		return MissingRolePolicyWarn
+	}
 }
 
 // GetConditions returns the conditions of the BindDefinition.

@@ -4055,3 +4055,218 @@ func TestReconcileDeleteCleansUpGaugeMetrics(t *testing.T) {
 	nsGauge, _ := metrics.NamespacesActive.GetMetricWithLabelValues(bdName)
 	g.Expect(nsGauge).NotTo(BeNil())
 }
+
+// ---------------------------------------------------------------------------
+// Missing-role policy tests (#52)
+// ---------------------------------------------------------------------------
+
+// newBDWithPolicy creates a BindDefinition with the given missing-role policy
+// annotation and a reference to a non-existent ClusterRole.
+func newBDWithPolicy(name string, policy authorizationv1alpha1.MissingRolePolicy) *authorizationv1alpha1.BindDefinition {
+	bd := &authorizationv1alpha1.BindDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: authorizationv1alpha1.GroupVersion.String(),
+			Kind:       "BindDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       name,
+			UID:        "policy-uid",
+			Finalizers: []string{authorizationv1alpha1.BindDefinitionFinalizer},
+		},
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
+			TargetName: name,
+			Subjects: []rbacv1.Subject{
+				{Kind: "User", Name: "test-user", APIGroup: rbacv1.GroupName},
+			},
+			ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+				ClusterRoleRefs: []string{"nonexistent-role"},
+			},
+		},
+	}
+	if policy != "" {
+		bd.Annotations = map[string]string{
+			authorizationv1alpha1.MissingRolePolicyAnnotation: string(policy),
+		}
+	}
+	return bd
+}
+
+func TestReconcile_MissingRolePolicy_Warn(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+	_ = corev1.AddToScheme(s)
+
+	bd := newBDWithPolicy("policy-warn-bd", authorizationv1alpha1.MissingRolePolicyWarn)
+
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(bd).
+		WithStatusSubresource(bd).
+		Build()
+	r := &BindDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	result, err := r.Reconcile(ctx, reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: bd.Name},
+	})
+	// warn mode still succeeds (no error), but requeues with short interval.
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(result.RequeueAfter).To(Equal(RoleRefRequeueInterval))
+}
+
+func TestReconcile_MissingRolePolicy_Error(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+	_ = corev1.AddToScheme(s)
+
+	bd := newBDWithPolicy("policy-error-bd", authorizationv1alpha1.MissingRolePolicyError)
+
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(bd).
+		WithStatusSubresource(bd).
+		Build()
+	r := &BindDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	result, err := r.Reconcile(ctx, reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: bd.Name},
+	})
+	// error mode does NOT propagate the error (we use RequeueAfter instead of
+	// returning an error to prevent exponential backoff), but the BD is Stalled.
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(result.RequeueAfter).To(Equal(RoleRefRequeueInterval))
+
+	// Verify the BD was marked as Stalled
+	var updated authorizationv1alpha1.BindDefinition
+	g.Expect(c.Get(ctx, types.NamespacedName{Name: bd.Name}, &updated)).To(Succeed())
+	stalledCond := findCondition(updated.Status.Conditions, "Stalled")
+	g.Expect(stalledCond).NotTo(BeNil(), "expected Stalled condition to be set")
+	g.Expect(stalledCond.Status).To(Equal(metav1.ConditionTrue))
+	g.Expect(stalledCond.Message).To(ContainSubstring("policy=error"))
+}
+
+func TestReconcile_MissingRolePolicy_Ignore(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+	_ = corev1.AddToScheme(s)
+
+	bd := newBDWithPolicy("policy-ignore-bd", authorizationv1alpha1.MissingRolePolicyIgnore)
+
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(bd).
+		WithStatusSubresource(bd).
+		Build()
+	r := &BindDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	result, err := r.Reconcile(ctx, reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: bd.Name},
+	})
+	// ignore mode succeeds and uses the default interval (no degradation).
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(result.RequeueAfter).To(Equal(DefaultRequeueInterval))
+
+	// Verify MissingRoleRefs is empty in status
+	var updated authorizationv1alpha1.BindDefinition
+	g.Expect(c.Get(ctx, types.NamespacedName{Name: bd.Name}, &updated)).To(Succeed())
+	g.Expect(updated.Status.MissingRoleRefs).To(BeEmpty())
+
+	// RoleRefsValid condition should be True
+	roleRefCond := findCondition(updated.Status.Conditions, string(authorizationv1alpha1.RoleRefValidCondition))
+	g.Expect(roleRefCond).NotTo(BeNil())
+	g.Expect(roleRefCond.Status).To(Equal(metav1.ConditionTrue))
+}
+
+func TestReconcile_MissingRolePolicy_Default(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+	_ = corev1.AddToScheme(s)
+
+	// No annotation at all — should default to "warn"
+	bd := newBDWithPolicy("policy-default-bd", "")
+
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(bd).
+		WithStatusSubresource(bd).
+		Build()
+	r := &BindDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	result, err := r.Reconcile(ctx, reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: bd.Name},
+	})
+	// Default (warn) mode succeeds with short requeue
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(result.RequeueAfter).To(Equal(RoleRefRequeueInterval))
+}
+
+func TestReconcile_MissingRolePolicy_ErrorWithAllRefsValid(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+	_ = corev1.AddToScheme(s)
+
+	cr := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "existing-role"},
+	}
+	bd := &authorizationv1alpha1.BindDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: authorizationv1alpha1.GroupVersion.String(),
+			Kind:       "BindDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "policy-error-ok-bd",
+			UID:        "policy-uid",
+			Finalizers: []string{authorizationv1alpha1.BindDefinitionFinalizer},
+			Annotations: map[string]string{
+				authorizationv1alpha1.MissingRolePolicyAnnotation: string(authorizationv1alpha1.MissingRolePolicyError),
+			},
+		},
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
+			TargetName: "policy-error-ok",
+			Subjects: []rbacv1.Subject{
+				{Kind: "User", Name: "test-user", APIGroup: rbacv1.GroupName},
+			},
+			ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+				ClusterRoleRefs: []string{"existing-role"},
+			},
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(bd, cr).
+		WithStatusSubresource(bd).
+		Build()
+	r := &BindDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	result, err := r.Reconcile(ctx, reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: bd.Name},
+	})
+	// error mode with all refs valid succeeds normally.
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(result.RequeueAfter).To(Equal(DefaultRequeueInterval))
+}
+
+// findCondition returns the condition with the given type from the list.
+func findCondition(conditions []metav1.Condition, condType string) *metav1.Condition {
+	for i := range conditions {
+		if conditions[i].Type == condType {
+			return &conditions[i]
+		}
+	}
+	return nil
+}
