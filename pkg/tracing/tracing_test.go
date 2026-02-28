@@ -80,9 +80,10 @@ func TestSetup_EnabledWithEndpoint(t *testing.T) {
 }
 
 func TestProvider_Shutdown_Noop(t *testing.T) {
+	tp := noop.NewTracerProvider()
 	p := &Provider{
-		tp:     noop.NewTracerProvider(),
-		tracer: noop.NewTracerProvider().Tracer("test"),
+		tp:     tp,
+		tracer: tp.Tracer("test"),
 	}
 	// Shutdown on noop should be a no-op
 	if err := p.Shutdown(context.Background()); err != nil {
