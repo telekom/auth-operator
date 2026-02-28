@@ -126,6 +126,12 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	metrics.AuthorizerActiveRules.Set(float64(len(webhookAuthorizers.Items)))
 
+	// Sort authorizers by name for deterministic evaluation order.
+	// evaluateSAR returns on the first match, so ordering matters.
+	slices.SortFunc(webhookAuthorizers.Items, func(a, b authzv1alpha1.WebhookAuthorizer) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+
 	result := wa.evaluateSAR(ctx, &sar, &webhookAuthorizers)
 
 	// Record metrics based on the evaluation result.
@@ -162,9 +168,15 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAccessReview, waList *authzv1alpha1.WebhookAuthorizerList) evaluationResult {
 	for _, webhookAuthorizer := range waList.Items {
-		if sar.Spec.ResourceAttributes != nil && !helpers.IsLabelSelectorEmpty(&webhookAuthorizer.Spec.NamespaceSelector) {
-			// Skip namespace-scoped authorizers for cluster-scoped resources (no namespace in SAR)
+		// Skip namespace-scoped authorizers when the SAR has no namespace context:
+		// non-resource SARs and cluster-scoped resource SARs don't belong to any namespace.
+		if !helpers.IsLabelSelectorEmpty(&webhookAuthorizer.Spec.NamespaceSelector) {
+			if sar.Spec.ResourceAttributes == nil {
+				// Non-resource SAR — namespace-scoped authorizer does not apply.
+				continue
+			}
 			if sar.Spec.ResourceAttributes.Namespace == "" {
+				// Cluster-scoped resource — namespace-scoped authorizer does not apply.
 				continue
 			}
 			if !wa.namespaceMatches(ctx, sar.Spec.ResourceAttributes.Namespace, &webhookAuthorizer.Spec.NamespaceSelector) {
