@@ -329,3 +329,73 @@ func TestEvaluateSAR_ReturnsResult(t *testing.T) {
 		}
 	})
 }
+
+func TestServeHTTP_OversizedBody(t *testing.T) {
+	resetAuthorizerMetrics()
+
+	scheme := runtime.NewScheme()
+	_ = authzv1alpha1.AddToScheme(scheme)
+
+	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+	handler := &Authorizer{Client: cl, Log: logr.Discard()}
+
+	// Create a body larger than 1MB.
+	oversizedBody := make([]byte, 1<<20+1)
+	for i := range oversizedBody {
+		oversizedBody[i] = 'A'
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(oversizedBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+}
+
+func TestServeHTTP_ErrorResponseDoesNotLeakInternals(t *testing.T) {
+	resetAuthorizerMetrics()
+
+	scheme := runtime.NewScheme()
+	_ = authzv1alpha1.AddToScheme(scheme)
+
+	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+	handler := &Authorizer{Client: cl, Log: logr.Discard()}
+
+	malformedInputs := []struct {
+		name string
+		body string
+	}{
+		{"truncated json", `{"spec": {"user": `},
+		{"wrong type", `{"spec": "not an object"}`},
+		{"array instead of object", `[1,2,3]`},
+	}
+
+	internalPatterns := []string{
+		"json:",
+		"cannot unmarshal",
+		"unexpected end",
+		"invalid character",
+		".go:",
+		"runtime error",
+	}
+
+	for _, tt := range malformedInputs {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader([]byte(tt.body)))
+			rec := httptest.NewRecorder()
+
+			handler.ServeHTTP(rec, req)
+
+			body := rec.Body.String()
+			for _, pattern := range internalPatterns {
+				if bytes.Contains([]byte(body), []byte(pattern)) {
+					t.Errorf("error response leaks internal details (contains %q): %q", pattern, body)
+				}
+			}
+		})
+	}
+}
