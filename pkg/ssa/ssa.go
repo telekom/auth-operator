@@ -11,6 +11,7 @@ import (
 	"fmt"
 
 	rbacv1 "k8s.io/api/rbac/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	corev1ac "k8s.io/client-go/applyconfigurations/core/v1"
 	metav1ac "k8s.io/client-go/applyconfigurations/meta/v1"
@@ -129,6 +130,52 @@ func ClusterRoleWithLabelsAndRules(
 	}
 
 	return ac
+}
+
+// ClusterRoleWithAggregation creates a ClusterRole ApplyConfiguration with an aggregation rule
+// and optional labels. Aggregated ClusterRoles have empty rules (managed by the aggregation controller).
+func ClusterRoleWithAggregation(
+	name string,
+	labels map[string]string,
+	aggregationRule *rbacv1.AggregationRule,
+) *rbacv1ac.ClusterRoleApplyConfiguration {
+	ac := rbacv1ac.ClusterRole(name)
+
+	if len(labels) > 0 {
+		ac.WithLabels(labels)
+	}
+
+	if aggregationRule != nil {
+		aggAC := rbacv1ac.AggregationRule()
+		for i := range aggregationRule.ClusterRoleSelectors {
+			sel := &aggregationRule.ClusterRoleSelectors[i]
+			selAC := LabelSelectorFrom(sel)
+			aggAC.WithClusterRoleSelectors(selAC)
+		}
+		ac.WithAggregationRule(aggAC)
+	}
+
+	return ac
+}
+
+// LabelSelectorFrom converts a metav1.LabelSelector to its ApplyConfiguration.
+func LabelSelectorFrom(sel *metav1.LabelSelector) *metav1ac.LabelSelectorApplyConfiguration {
+	if sel == nil {
+		return nil
+	}
+	selAC := metav1ac.LabelSelector()
+	if len(sel.MatchLabels) > 0 {
+		selAC.WithMatchLabels(sel.MatchLabels)
+	}
+	for i := range sel.MatchExpressions {
+		expr := &sel.MatchExpressions[i]
+		exprAC := metav1ac.LabelSelectorRequirement().
+			WithKey(expr.Key).
+			WithOperator(expr.Operator).
+			WithValues(expr.Values...)
+		selAC.WithMatchExpressions(exprAC)
+	}
+	return selAC
 }
 
 // RoleWithLabelsAndRules creates a Role ApplyConfiguration with the specified

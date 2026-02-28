@@ -9,6 +9,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -158,6 +159,170 @@ var _ = Describe("RoleDefinition Webhook", func() {
 			// Cleanup
 			Expect(k8sClient.Delete(ctx, rd1)).To(Succeed())
 			Expect(k8sClient.Delete(ctx, rd2)).To(Succeed())
+		})
+
+		It("Should admit a ClusterRole with aggregationLabels", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-agg-labels",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-agg-labels",
+					ScopeNamespaced: false,
+					AggregationLabels: map[string]string{
+						"custom.example.com/aggregate-to-monitoring": "true",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, rd)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, rd)).To(Succeed())
+		})
+
+		It("Should deny aggregationLabels on a namespaced Role", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-agg-labels-role",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionNamespacedRole,
+					TargetName:      "test-agg-labels-role",
+					TargetNamespace: "default",
+					ScopeNamespaced: true,
+					AggregationLabels: map[string]string{
+						"rbac.authorization.k8s.io/aggregate-to-view": "true",
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, rd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("aggregationLabels can only be used when targetRole is 'ClusterRole'"))
+		})
+
+		It("Should admit a ClusterRole with aggregateFrom", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-agg-from",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-agg-from",
+					ScopeNamespaced: false,
+					AggregateFrom: &rbacv1.AggregationRule{
+						ClusterRoleSelectors: []metav1.LabelSelector{
+							{MatchLabels: map[string]string{"aggregate-to-admin": "true"}},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, rd)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, rd)).To(Succeed())
+		})
+
+		It("Should deny aggregateFrom on a namespaced Role", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-agg-from-role",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionNamespacedRole,
+					TargetName:      "test-agg-from-role",
+					TargetNamespace: "default",
+					ScopeNamespaced: true,
+					AggregateFrom: &rbacv1.AggregationRule{
+						ClusterRoleSelectors: []metav1.LabelSelector{
+							{MatchLabels: map[string]string{"aggregate-to-admin": "true"}},
+						},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, rd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("aggregateFrom can only be used when targetRole is 'ClusterRole'"))
+		})
+
+		It("Should deny aggregateFrom with restrictedVerbs", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-agg-restricted",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-agg-restricted",
+					ScopeNamespaced: false,
+					AggregateFrom: &rbacv1.AggregationRule{
+						ClusterRoleSelectors: []metav1.LabelSelector{
+							{MatchLabels: map[string]string{"aggregate-to-admin": "true"}},
+						},
+					},
+					RestrictedVerbs: []string{"delete"},
+				},
+			}
+			err := k8sClient.Create(ctx, rd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("aggregateFrom is mutually exclusive"))
+		})
+
+		It("Should deny aggregateFrom with empty selectors", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-agg-empty-sel",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-agg-empty-sel",
+					ScopeNamespaced: false,
+					AggregateFrom: &rbacv1.AggregationRule{
+						ClusterRoleSelectors: []metav1.LabelSelector{},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, rd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("must have at least one clusterRoleSelector"))
+		})
+
+		It("Should deny aggregation labels targeting built-in ClusterRoles", func() {
+			for _, target := range []string{"admin", "edit", "view", "cluster-admin"} {
+				rd := &RoleDefinition{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-agg-builtin-" + target,
+					},
+					Spec: RoleDefinitionSpec{
+						TargetRole:      DefinitionClusterRole,
+						TargetName:      "test-agg-builtin-" + target,
+						ScopeNamespaced: false,
+						AggregationLabels: map[string]string{
+							"rbac.authorization.k8s.io/aggregate-to-" + target: "true",
+						},
+					},
+				}
+				err := k8sClient.Create(ctx, rd)
+				Expect(err).To(HaveOccurred(), "expected rejection for aggregate-to-%s", target)
+				Expect(err.Error()).To(ContainSubstring("Forbidden"), "expected Forbidden for aggregate-to-%s", target)
+				Expect(err.Error()).To(ContainSubstring("built-in ClusterRole"), "expected built-in ClusterRole in error for aggregate-to-%s", target)
+			}
+		})
+
+		It("Should deny aggregateFrom with empty selector criteria", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-agg-empty-criteria",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-agg-empty-criteria",
+					ScopeNamespaced: false,
+					AggregateFrom: &rbacv1.AggregationRule{
+						ClusterRoleSelectors: []metav1.LabelSelector{
+							{}, // empty selector — no matchLabels, no matchExpressions
+						},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, rd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("empty selector would match all ClusterRoles"))
 		})
 	})
 })

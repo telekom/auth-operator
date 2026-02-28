@@ -18,6 +18,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	rbacv1 "k8s.io/api/rbac/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -45,6 +46,19 @@ type RoleDefinitionSpecApplyConfiguration struct {
 	// The restricted verbs field holds all verbs which will *NOT* be reconciled into the "TargetRole"
 	// The RBAC operator discovers all resource verbs available and removes those which are defined by "RestrictedVerbs"
 	RestrictedVerbs []string `json:"restrictedVerbs,omitempty"`
+	// AggregationLabels are additional labels applied to the generated ClusterRole so that
+	// it participates in Kubernetes' built-in ClusterRole aggregation mechanism.
+	// For example, setting `rbac.authorization.k8s.io/aggregate-to-view: "true"` causes the
+	// generated ClusterRole's rules to be aggregated into the default "view" ClusterRole.
+	// Only applicable when targetRole is ClusterRole.
+	AggregationLabels map[string]string `json:"aggregationLabels,omitempty"`
+	// AggregateFrom generates an aggregating ClusterRole that uses label selectors
+	// to compose rules from other ClusterRoles, instead of specifying rules directly.
+	// When set, the controller skips API discovery and filtering; the generated ClusterRole
+	// has an aggregationRule and empty rules[] (rules are managed by the aggregation controller).
+	// Mutually exclusive with RestrictedAPIs, RestrictedResources, and RestrictedVerbs.
+	// Only applicable when targetRole is ClusterRole.
+	AggregateFrom *rbacv1.AggregationRule `json:"aggregateFrom,omitempty"`
 }
 
 // RoleDefinitionSpecApplyConfiguration constructs a declarative configuration of the RoleDefinitionSpec type for use with
@@ -112,5 +126,27 @@ func (b *RoleDefinitionSpecApplyConfiguration) WithRestrictedVerbs(values ...str
 	for i := range values {
 		b.RestrictedVerbs = append(b.RestrictedVerbs, values[i])
 	}
+	return b
+}
+
+// WithAggregationLabels puts the entries into the AggregationLabels field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, the entries provided by each call will be put on the AggregationLabels field,
+// overwriting an existing map entries in AggregationLabels field with the same key.
+func (b *RoleDefinitionSpecApplyConfiguration) WithAggregationLabels(entries map[string]string) *RoleDefinitionSpecApplyConfiguration {
+	if b.AggregationLabels == nil && len(entries) > 0 {
+		b.AggregationLabels = make(map[string]string, len(entries))
+	}
+	for k, v := range entries {
+		b.AggregationLabels[k] = v
+	}
+	return b
+}
+
+// WithAggregateFrom sets the AggregateFrom field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the AggregateFrom field is set to the value of the last call.
+func (b *RoleDefinitionSpecApplyConfiguration) WithAggregateFrom(value rbacv1.AggregationRule) *RoleDefinitionSpecApplyConfiguration {
+	b.AggregateFrom = &value
 	return b
 }

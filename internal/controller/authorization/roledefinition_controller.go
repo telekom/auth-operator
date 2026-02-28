@@ -231,25 +231,35 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	conditions.MarkTrue(roleDefinition, authorizationv1alpha1.FinalizerCondition, roleDefinition.Generation,
 		authorizationv1alpha1.FinalizerReason, authorizationv1alpha1.FinalizerMessage)
 
-	// Step 4: Discover and filter resources to build policy rules
-	logger.V(2).Info("Discovering and filtering resources",
-		"roleDefinition", roleDefinition.Name)
-	finalRules, result, err := r.discoverAndFilterResources(ctx, roleDefinition)
-	if err != nil || result.RequeueAfter > 0 {
-		logger.V(2).Info("Discovery phase returned early",
+	// Step 4: Discover and filter resources, or skip for aggregating roles
+	var finalRules []rbacv1.PolicyRule
+	if roleDefinition.Spec.AggregateFrom != nil {
+		// Aggregating ClusterRole: skip discovery — rules are managed by the K8s aggregation controller
+		logger.V(2).Info("Skipping discovery for aggregating ClusterRole",
 			"roleDefinition", roleDefinition.Name,
-			"error", err,
-			"requeueAfter", result.RequeueAfter)
-		return result, err
+			"selectorCount", len(roleDefinition.Spec.AggregateFrom.ClusterRoleSelectors))
+	} else {
+		logger.V(2).Info("Discovering and filtering resources",
+			"roleDefinition", roleDefinition.Name)
+		var result ctrl.Result
+		finalRules, result, err = r.discoverAndFilterResources(ctx, roleDefinition)
+		if err != nil || result.RequeueAfter > 0 {
+			logger.V(2).Info("Discovery phase returned early",
+				"roleDefinition", roleDefinition.Name,
+				"error", err,
+				"requeueAfter", result.RequeueAfter)
+			return result, err
+		}
+		logger.V(2).Info("Discovery complete",
+			"roleDefinition", roleDefinition.Name,
+			"ruleCount", len(finalRules))
 	}
-	logger.V(2).Info("Discovery complete",
-		"roleDefinition", roleDefinition.Name,
-		"ruleCount", len(finalRules))
 
-	// Step 5: Ensure the target role exists with computed rules
-	logger.V(2).Info("Ensuring role with computed rules",
+	// Step 5: Ensure the target role exists with computed rules (or aggregation rule)
+	logger.V(2).Info("Ensuring role",
 		"roleDefinition", roleDefinition.Name,
-		"ruleCount", len(finalRules))
+		"ruleCount", len(finalRules),
+		"isAggregating", roleDefinition.Spec.AggregateFrom != nil)
 	if err := r.ensureRole(ctx, roleDefinition, finalRules); err != nil {
 		logger.Error(err, "Failed to ensure role",
 			"roleDefinition", roleDefinition.Name)

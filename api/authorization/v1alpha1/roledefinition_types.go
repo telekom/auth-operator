@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -52,6 +53,23 @@ type RoleDefinitionSpec struct {
 	// The RBAC operator discovers all resource verbs available and removes those which are defined by "RestrictedVerbs"
 	// +kubebuilder:validation:Optional
 	RestrictedVerbs []string `json:"restrictedVerbs,omitempty"`
+
+	// AggregationLabels are additional labels applied to the generated ClusterRole so that
+	// it participates in Kubernetes' built-in ClusterRole aggregation mechanism.
+	// For example, setting `rbac.authorization.k8s.io/aggregate-to-view: "true"` causes the
+	// generated ClusterRole's rules to be aggregated into the default "view" ClusterRole.
+	// Only applicable when targetRole is ClusterRole.
+	// +kubebuilder:validation:Optional
+	AggregationLabels map[string]string `json:"aggregationLabels,omitempty"`
+
+	// AggregateFrom generates an aggregating ClusterRole that uses label selectors
+	// to compose rules from other ClusterRoles, instead of specifying rules directly.
+	// When set, the controller skips API discovery and filtering; the generated ClusterRole
+	// has an aggregationRule and empty rules[] (rules are managed by the aggregation controller).
+	// Mutually exclusive with RestrictedAPIs, RestrictedResources, and RestrictedVerbs.
+	// Only applicable when targetRole is ClusterRole.
+	// +kubebuilder:validation:Optional
+	AggregateFrom *rbacv1.AggregationRule `json:"aggregateFrom,omitempty"`
 }
 
 // RoleDefinitionStatus defines the observed state of RoleDefinition.
