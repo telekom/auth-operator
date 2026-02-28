@@ -236,8 +236,8 @@ Overall readiness of the WebhookAuthorizer.
 | Status | Reason | Message |
 |--------|--------|---------|
 | `True` | `AuthorizerReady` | All rules are valid and the authorizer is actively processing requests |
-| `False` | `InvalidRules` | One or more resource/non-resource rules are malformed |
-| `False` | `InvalidNamespaceSelector` | The namespace selector cannot be parsed |
+| `False` | `InvalidRules` | One or more resource/non-resource rules are malformed: *\<detail\>* |
+| `False` | `InvalidNamespaceSelector` | The namespace selector cannot be parsed: *\<detail\>* |
 | `False` | `NoPrincipals` | Neither allowedPrincipals nor deniedPrincipals are defined |
 
 ### RulesValid
@@ -247,8 +247,8 @@ Validation status of resource and non-resource rules.
 | Status | Reason | Message |
 |--------|--------|---------|
 | `True` | `AllRulesValid` | All resourceRules and nonResourceRules are syntactically valid |
-| `False` | `InvalidResourceRule` | A resourceRule contains invalid API groups, resources, or verbs |
-| `False` | `InvalidNonResourceRule` | A nonResourceRule contains invalid paths or verbs |
+| `False` | `InvalidResourceRule` | A resourceRule contains invalid API groups, resources, or verbs: *\<detail\>* |
+| `False` | `InvalidNonResourceRule` | A nonResourceRule contains invalid paths or verbs: *\<detail\>* |
 
 ### NamespaceSelectorValid
 
@@ -258,7 +258,7 @@ Status of the namespace selector.
 |--------|--------|---------|
 | `True` | `SelectorValid` | Namespace selector is parseable and matches namespaces |
 | `True` | `SelectorEmpty` | No namespace selector defined (matches all namespaces) |
-| `False` | `SelectorInvalid` | Namespace selector cannot be parsed |
+| `False` | `SelectorInvalid` | Namespace selector cannot be parsed: *\<detail\>* |
 
 ### PrincipalConfigured
 
@@ -268,7 +268,7 @@ Status of principal configuration.
 |--------|--------|---------|
 | `True` | `PrincipalsConfigured` | AllowedPrincipals and/or DeniedPrincipals are defined |
 | `False` | `NoPrincipalsConfigured` | No principals defined — authorizer will never match |
-| `Unknown` | `PrincipalOverlap` | A principal appears in both allowed and denied lists (warning) |
+| `Unknown` | `PrincipalOverlap` | A principal appears in both allowed and denied lists: *\<detail\>* |
 
 ### Reconciliation Sequence (WebhookAuthorizer)
 

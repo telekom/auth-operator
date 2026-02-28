@@ -153,7 +153,7 @@ func TestWebhookAuthorizerConditionTypesDoNotCollideWithExisting(t *testing.T) {
 	for _, ct := range waTypes {
 		// "Ready" is expected to collide since it's the kstatus standard —
 		// every CRD uses the same Ready type.
-		if ct == "Ready" {
+		if ct == WebhookAuthorizerReadyCondition {
 			continue
 		}
 		if existingSet[ct] {
