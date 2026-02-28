@@ -175,6 +175,7 @@ _Appears in:_
 | `restrictedApis` _[APIGroup](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#apigroup-v1-meta) array_ | The restricted APIs field holds all API groups which will *NOT* be reconciled into the "TargetRole"<br />The RBAC operator discovers all API groups available and removes those which are defined by "RestrictedAPIs" |  | Optional: \{\} <br /> |
 | `restrictedResources` _[APIResource](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#apiresource-v1-meta) array_ | The restricted resources field holds all resources which will *NOT* be reconciled into the "TargetRole"<br />The RBAC operator discovers all API resources available and removes those which are defined by "RestrictedResources" |  | Optional: \{\} <br /> |
 | `restrictedVerbs` _string array_ | The restricted verbs field holds all verbs which will *NOT* be reconciled into the "TargetRole"<br />The RBAC operator discovers all resource verbs available and removes those which are defined by "RestrictedVerbs" |  | Optional: \{\} <br /> |
+| `breakglassAllowed` _boolean_ | BreakglassAllowed marks generated ClusterRoles as eligible for temporary<br />privilege escalation via k8s-breakglass. When true, the generated role<br />receives the label t-caas.telekom.com/breakglass-compatible: "true".<br />Only applicable when TargetRole is ClusterRole. Defaults to false. | false | Optional: \{\} <br /> |
 
 
 #### RoleDefinitionStatus
