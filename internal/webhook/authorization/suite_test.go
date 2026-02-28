@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -93,7 +94,11 @@ var _ = BeforeSuite(func() {
 	}()
 
 	// Wait for the informer cache to sync before running tests.
-	synced := mgr.GetCache().WaitForCacheSync(setupCtx)
+	// Use a bounded timeout to prevent indefinite hangs in CI if the
+	// API server or CRDs fail to initialize.
+	syncCtx, syncCancel := context.WithTimeout(setupCtx, 2*time.Minute)
+	defer syncCancel()
+	synced := mgr.GetCache().WaitForCacheSync(syncCtx)
 	Expect(synced).To(BeTrue())
 
 	envClient = mgr.GetClient()
