@@ -145,7 +145,10 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 						if apierrors.IsNotFound(err) {
 							logger.Info("role not found",
 								"name", r.Name, "roleName", roleRef, "namespace", ns.Name, "policy", string(policy))
-							missingRoles = append(missingRoles, fmt.Sprintf("Role/%s/%s", ns.Name, roleRef))
+							ref := fmt.Sprintf("Role/%s/%s", ns.Name, roleRef)
+							if !slices.Contains(missingRoles, ref) {
+								missingRoles = append(missingRoles, ref)
+							}
 						} else {
 							logger.Error(err, "failed to fetch role", "roleName", roleRef, "namespace", ns.Name)
 							return warnings, apierrors.NewInternalError(fmt.Errorf("error fetching role '%s' in namespace '%s': %w", roleRef, ns.Name, err))

@@ -2,6 +2,7 @@ package authorization
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -57,6 +58,9 @@ const (
 	// once the missing roles are created (e.g. by a RoleDefinition).
 	RoleRefRequeueInterval = 10 * time.Second
 )
+
+// ErrMissingRoleRefs indicates that one or more referenced roles do not exist in the cluster.
+var ErrMissingRoleRefs = errors.New("missing role references")
 
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions/status,verbs=get;update;patch
@@ -339,7 +343,7 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		// apply status (which includes the RoleRefsValid=False condition) and
 		// requeue with the short interval so we retry quickly once the roles
 		// appear. We do NOT use the default exponential backoff here.
-		if bindDefinition.GetMissingRolePolicy() == authorizationv1alpha1.MissingRolePolicyError && missingRoleRefCount > 0 {
+		if errors.Is(err, ErrMissingRoleRefs) {
 			logger.Info("Reconciliation blocked by missing-role-policy=error",
 				"bindDefinition", bindDefinition.Name,
 				"missingCount", missingRoleRefCount)
@@ -439,7 +443,7 @@ func (r *BindDefinitionReconciler) reconcileResources(
 				// Error mode: block reconciliation entirely.
 				r.recorder.Eventf(bindDefinition, nil, corev1.EventTypeWarning, authorizationv1alpha1.EventReasonRoleRefNotFound, authorizationv1alpha1.EventActionValidate,
 					"Reconciliation blocked (missing-role-policy=error): referenced roles not found: %v. Will retry in %s.", missingRoles, RoleRefRequeueInterval)
-				return missingCount, fmt.Errorf("missing role references (policy=error): %v", missingRoles)
+				return missingCount, fmt.Errorf("%w (policy=error): %v", ErrMissingRoleRefs, missingRoles)
 			}
 
 			// Warn mode (default): log, emit event, and continue creating bindings.
