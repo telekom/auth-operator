@@ -13,6 +13,7 @@ import (
 	authzv1 "k8s.io/api/authorization/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
@@ -40,7 +41,7 @@ func TestServeHTTPMetrics_Allowed(t *testing.T) {
 	resetAuthorizerMetrics()
 
 	scheme := runtime.NewScheme()
-	_ = authzv1alpha1.AddToScheme(scheme)
+	utilruntime.Must(authzv1alpha1.AddToScheme(scheme))
 
 	wa := authzv1alpha1.WebhookAuthorizer{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-authorizer"},
@@ -110,7 +111,7 @@ func TestServeHTTPMetrics_DeniedByPrincipal(t *testing.T) {
 	resetAuthorizerMetrics()
 
 	scheme := runtime.NewScheme()
-	_ = authzv1alpha1.AddToScheme(scheme)
+	utilruntime.Must(authzv1alpha1.AddToScheme(scheme))
 
 	wa := authzv1alpha1.WebhookAuthorizer{
 		ObjectMeta: metav1.ObjectMeta{Name: "deny-authorizer"},
@@ -153,23 +154,29 @@ func TestServeHTTPMetrics_DeniedByPrincipal(t *testing.T) {
 	}
 
 	var resp authzv1.SubjectAccessReview
-	_ = json.NewDecoder(rec.Body).Decode(&resp)
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
 	if resp.Status.Allowed {
 		t.Fatal("expected denied, got allowed")
 	}
 
 	// Verify denied counter.
 	m := &dto.Metric{}
-	_ = metrics.AuthorizerRequestsTotal.WithLabelValues(
+	if err := metrics.AuthorizerRequestsTotal.WithLabelValues(
 		metrics.AuthorizerDecisionDenied, "deny-authorizer",
-	).Write(m)
+	).Write(m); err != nil {
+		t.Fatalf("failed to write metric: %v", err)
+	}
 	if counterValue(m) != 1 {
 		t.Errorf("expected authorizer_requests_total{denied,deny-authorizer}=1, got %v", counterValue(m))
 	}
 
 	// Verify denied-principal-hits counter.
 	m2 := &dto.Metric{}
-	_ = metrics.AuthorizerDeniedPrincipalHitsTotal.WithLabelValues("deny-authorizer").Write(m2)
+	if err := metrics.AuthorizerDeniedPrincipalHitsTotal.WithLabelValues("deny-authorizer").Write(m2); err != nil {
+		t.Fatalf("failed to write metric: %v", err)
+	}
 	if counterValue(m2) != 1 {
 		t.Errorf("expected authorizer_denied_principal_hits_total{deny-authorizer}=1, got %v", counterValue(m2))
 	}
@@ -179,7 +186,7 @@ func TestServeHTTPMetrics_DecodeError(t *testing.T) {
 	resetAuthorizerMetrics()
 
 	scheme := runtime.NewScheme()
-	_ = authzv1alpha1.AddToScheme(scheme)
+	utilruntime.Must(authzv1alpha1.AddToScheme(scheme))
 
 	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
 	handler := &Authorizer{Client: cl, Log: logr.Discard()}
@@ -195,9 +202,11 @@ func TestServeHTTPMetrics_DecodeError(t *testing.T) {
 
 	// Error counter should be incremented.
 	m := &dto.Metric{}
-	_ = metrics.AuthorizerRequestsTotal.WithLabelValues(
+	if err := metrics.AuthorizerRequestsTotal.WithLabelValues(
 		metrics.AuthorizerDecisionError, metrics.AuthorizerNameNone,
-	).Write(m)
+	).Write(m); err != nil {
+		t.Fatalf("failed to write metric: %v", err)
+	}
 	if counterValue(m) != 1 {
 		t.Errorf("expected authorizer_requests_total{error,none}=1, got %v", counterValue(m))
 	}
@@ -207,7 +216,7 @@ func TestServeHTTPMetrics_ActiveRules(t *testing.T) {
 	resetAuthorizerMetrics()
 
 	scheme := runtime.NewScheme()
-	_ = authzv1alpha1.AddToScheme(scheme)
+	utilruntime.Must(authzv1alpha1.AddToScheme(scheme))
 
 	wa1 := authzv1alpha1.WebhookAuthorizer{
 		ObjectMeta: metav1.ObjectMeta{Name: "rule-1"},
@@ -245,7 +254,9 @@ func TestServeHTTPMetrics_ActiveRules(t *testing.T) {
 
 	// Verify active-rules gauge reflects the two authorizer objects.
 	m := &dto.Metric{}
-	_ = metrics.AuthorizerActiveRules.Write(m)
+	if err := metrics.AuthorizerActiveRules.Write(m); err != nil {
+		t.Fatalf("failed to write metric: %v", err)
+	}
 	if m.Gauge == nil || m.Gauge.GetValue() != 2 {
 		got := float64(0)
 		if m.Gauge != nil {
@@ -257,7 +268,7 @@ func TestServeHTTPMetrics_ActiveRules(t *testing.T) {
 
 func TestEvaluateSAR_ReturnsResult(t *testing.T) {
 	scheme := runtime.NewScheme()
-	_ = authzv1alpha1.AddToScheme(scheme)
+	utilruntime.Must(authzv1alpha1.AddToScheme(scheme))
 
 	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
 	handler := &Authorizer{Client: cl, Log: logr.Discard()}
@@ -334,7 +345,7 @@ func TestServeHTTP_OversizedBody(t *testing.T) {
 	resetAuthorizerMetrics()
 
 	scheme := runtime.NewScheme()
-	_ = authzv1alpha1.AddToScheme(scheme)
+	utilruntime.Must(authzv1alpha1.AddToScheme(scheme))
 
 	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
 	handler := &Authorizer{Client: cl, Log: logr.Discard()}
@@ -360,7 +371,7 @@ func TestServeHTTP_ErrorResponseDoesNotLeakInternals(t *testing.T) {
 	resetAuthorizerMetrics()
 
 	scheme := runtime.NewScheme()
-	_ = authzv1alpha1.AddToScheme(scheme)
+	utilruntime.Must(authzv1alpha1.AddToScheme(scheme))
 
 	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
 	handler := &Authorizer{Client: cl, Log: logr.Discard()}
@@ -389,6 +400,10 @@ func TestServeHTTP_ErrorResponseDoesNotLeakInternals(t *testing.T) {
 			rec := httptest.NewRecorder()
 
 			handler.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+			}
 
 			body := rec.Body.String()
 			for _, pattern := range internalPatterns {
