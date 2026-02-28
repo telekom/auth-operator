@@ -274,35 +274,75 @@ kubectl get clusterrole auth-operator-manager-role -o yaml
 
 ### Network Policies
 
-Consider restricting operator network access:
+The Helm chart includes `NetworkPolicy` resources that restrict ingress
+traffic to the operator pods. Set `networkPolicy.enabled: true` in your
+Helm values to create them.
+
+> **Note:** The generated NetworkPolicy uses the built-in
+> `kubernetes.io/metadata.name` namespace label for namespace selectors.
+> This label is automatically set by the API server (available since Kubernetes 1.21;
+> this operator requires Kubernetes 1.28+).
+
+**Webhook server** — Only allows ingress on port 9443 (webhook) from all
+namespaces (required for kube-apiserver on host network) and port 8081
+(health probes).
+
+**Controller manager** — Only allows ingress on port 8080 (metrics) from
+the monitoring namespace and port 8081 (health probes).
+
+Configure via `values.yaml`:
 
 ```yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: auth-operator-network-policy
-  namespace: auth-operator-system
-spec:
-  podSelector:
-    matchLabels:
-      control-plane: controller-manager
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    - from:
-        - namespaceSelector: {}
-      ports:
-        - port: 8080  # Metrics
-        - port: 8081  # Probes
-        - port: 9443  # Webhooks
-  egress:
-    - to:
-        - namespaceSelector: {}
-      ports:
-        - port: 443   # API server
-        - port: 6443
+networkPolicy:
+  enabled: true               # Toggle NetworkPolicy creation
+  metricsNamespace: monitoring # Namespace allowed to scrape metrics
+  webhookServer:
+    ingressFrom: []            # Override webhook-server ingress rules
+  controllerManager:
+    ingressFrom: []            # Override controller-manager ingress rules
 ```
+
+To disable network policies:
+
+```bash
+helm install auth-operator oci://ghcr.io/telekom/charts/auth-operator \
+  --set networkPolicy.enabled=false
+```
+
+To allow a custom CIDR for the webhook (e.g., restricting to a known
+kube-apiserver range):
+
+```yaml
+networkPolicy:
+  webhookServer:
+    ingressFrom:
+      - ipBlock:
+          cidr: 10.0.0.0/8
+```
+
+> **Security note:** The default webhook ingress rule uses `namespaceSelector: {}`
+> (all namespaces). This is required because kube-apiserver typically runs on the
+> host network and cannot be matched by namespace labels. Override
+> `webhookServer.ingressFrom` with an `ipBlock` rule if your CNI supports
+> host-network policies.
+
+#### Egress Rules
+
+When deploying into a namespace with a default-deny egress policy, enable
+egress rules so the operator can reach DNS and the Kubernetes API server:
+
+```yaml
+networkPolicy:
+  egress:
+    enabled: true
+    dnsNamespace: kube-system        # Namespace where CoreDNS runs
+    apiServerCIDR: "10.96.0.1/32"    # Restrict API server egress by CIDR
+    additionalRules: []              # Custom egress rules (e.g., cert-manager)
+```
+
+> **Warning:** When `apiServerCIDR` is empty, egress to **any** destination on
+> ports 443/6443 is allowed. Always set `apiServerCIDR` to your cluster's
+> API server IP for proper isolation.
 
 ---
 

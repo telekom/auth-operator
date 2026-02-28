@@ -114,3 +114,50 @@ containerSecurityContext:
   capabilities:
     drop:
       - ALL
+
+# Network policies for restricting pod-level ingress
+networkPolicy:
+  # Enable NetworkPolicy resources for webhook and metrics port isolation
+  enabled: false
+  # Namespace that hosts the monitoring stack (Prometheus)
+  # Used to restrict metrics port (8080) access on the controller-manager
+  metricsNamespace: monitoring
+  webhookServer:
+    # Custom ingress `from` rules for the webhook port (9443).
+    # By default, allows all namespaces (required for kube-apiserver on host network).
+    # Override to restrict further if your CNI supports host-network policies.
+    # Example:
+    #   ingressFrom:
+    #     - ipBlock:
+    #         cidr: 10.0.0.0/8
+    ingressFrom: []
+  controllerManager:
+    # Custom ingress `from` rules for the metrics port (8080).
+    # By default, restricts to metricsNamespace only.
+    # Override to allow additional namespaces.
+    ingressFrom: []
+  # Egress rules — required when a default-deny egress policy exists in the namespace.
+  # When enabled, allows the operator pods to reach DNS, the Kubernetes API server,
+  # and optionally webhook callback endpoints.
+  egress:
+    enabled: false
+    # dnsNamespace is the namespace where CoreDNS runs (for UDP/TCP 53).
+    dnsNamespace: kube-system
+    # apiServerCIDR restricts egress to the API server by IP range.
+    # WARNING: When empty, egress to ANY destination on ports 443/6443 is allowed,
+    # which may undermine default-deny egress policies. Set this to your cluster's
+    # API server CIDR for proper isolation.
+    # Example: "10.96.0.1/32" for the default Kubernetes service IP.
+    apiServerCIDR: ""
+    # additionalRules allows injecting custom egress rules (e.g., webhook callbacks).
+    # Each entry follows the standard NetworkPolicy egress rule schema.
+    # Example:
+    #   additionalRules:
+    #     - ports:
+    #         - port: 443
+    #           protocol: TCP
+    #       to:
+    #         - namespaceSelector:
+    #             matchLabels:
+    #               kubernetes.io/metadata.name: cert-manager
+    additionalRules: []

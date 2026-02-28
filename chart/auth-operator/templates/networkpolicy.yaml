@@ -1,0 +1,134 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+{{- if .Values.networkPolicy.enabled }}
+---
+# NetworkPolicy for webhook-server pods.
+# Restricts ingress to the webhook port (kube-apiserver) and health-probe port.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "auth-operator.fullname" . }}-webhook-server
+  labels:
+    {{- include "auth-operator.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      control-plane: webhook-server
+      {{- include "auth-operator.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    {{- if .Values.networkPolicy.egress.enabled }}
+    - Egress
+    {{- end }}
+  ingress:
+    # Webhook port — kube-apiserver sends admission and authorization requests.
+    # kube-apiserver typically runs on the host network, so namespaceSelector: {}
+    # (all namespaces) is the standard approach. Override with webhookServer.ingressFrom
+    # to restrict further if your CNI supports host-network policies.
+    - ports:
+        - port: 9443
+          protocol: TCP
+      from:
+        {{- if .Values.networkPolicy.webhookServer.ingressFrom }}
+        {{- toYaml .Values.networkPolicy.webhookServer.ingressFrom | nindent 8 }}
+        {{- else }}
+        - namespaceSelector: {}
+        {{- end }}
+    # Health-probe port — kubelet liveness/readiness probes.
+    # Open to all sources; kubelet uses host network on most CNIs.
+    - ports:
+        - port: 8081
+          protocol: TCP
+  {{- if .Values.networkPolicy.egress.enabled }}
+  egress:
+    # DNS — allow CoreDNS resolution (UDP + TCP 53)
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+      to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.egress.dnsNamespace | default "kube-system" }}
+    # Kubernetes API server (TCP 443 and 6443)
+    - ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+      {{- if .Values.networkPolicy.egress.apiServerCIDR }}
+      to:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.egress.apiServerCIDR | quote }}
+      {{- end }}
+    {{- if .Values.networkPolicy.egress.additionalRules }}
+    {{- toYaml .Values.networkPolicy.egress.additionalRules | nindent 4 }}
+    {{- end }}
+  {{- end }}
+---
+# NetworkPolicy for controller-manager pods.
+# Restricts metrics ingress to the monitoring namespace and allows health probes.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "auth-operator.fullname" . }}-controller-manager
+  labels:
+    {{- include "auth-operator.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      control-plane: controller-manager
+      {{- include "auth-operator.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    {{- if .Values.networkPolicy.egress.enabled }}
+    - Egress
+    {{- end }}
+  ingress:
+    # Metrics port — only the monitoring namespace should scrape metrics.
+    - ports:
+        - port: 8080
+          protocol: TCP
+      from:
+        {{- if .Values.networkPolicy.controllerManager.ingressFrom }}
+        {{- toYaml .Values.networkPolicy.controllerManager.ingressFrom | nindent 8 }}
+        {{- else }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.metricsNamespace | default "monitoring" }}
+        {{- end }}
+    # Health-probe port — kubelet liveness/readiness probes.
+    - ports:
+        - port: 8081
+          protocol: TCP
+  {{- if .Values.networkPolicy.egress.enabled }}
+  egress:
+    # DNS — allow CoreDNS resolution (UDP + TCP 53)
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+      to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.egress.dnsNamespace | default "kube-system" }}
+    # Kubernetes API server (TCP 443 and 6443)
+    - ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+      {{- if .Values.networkPolicy.egress.apiServerCIDR }}
+      to:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.egress.apiServerCIDR | quote }}
+      {{- end }}
+    {{- if .Values.networkPolicy.egress.additionalRules }}
+    {{- toYaml .Values.networkPolicy.egress.additionalRules | nindent 4 }}
+    {{- end }}
+  {{- end }}
+{{- end }}
