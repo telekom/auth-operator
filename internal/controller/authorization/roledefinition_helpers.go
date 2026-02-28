@@ -268,7 +268,7 @@ func (r *RoleDefinitionReconciler) ensureRole(
 
 	// Ensure the breakglass-compatible label is always managed via SSA for
 	// ClusterRoles so that toggling the flag false→true→false correctly
-	// removes the label (SSA retains field ownership).
+	// sets the label to "false" (SSA retains field ownership).
 	if roleDefinition.Spec.TargetRole == authorizationv1alpha1.DefinitionClusterRole {
 		if roleDefinition.Spec.BreakglassAllowed {
 			labels[authorizationv1alpha1.BreakglassCompatibleLabel] = "true"
