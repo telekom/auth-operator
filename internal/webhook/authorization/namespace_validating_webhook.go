@@ -20,6 +20,10 @@ import (
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions,verbs=get;list;watch
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions/status,verbs=get;update;patch
 
+// legacyOwnerLabel is the label key from the legacy schiff.telekom.de CRDs
+// used for namespace ownership before the t-caas migration.
+const legacyOwnerLabel = "schiff.telekom.de/owner"
+
 // NamespaceValidator is a validating webhook that validates namespace operations based on BindDefinitions.
 type NamespaceValidator struct {
 	Client       client.Client
@@ -150,7 +154,7 @@ func (v *NamespaceValidator) validateLabelImmutability(logger logr.Logger, req a
 		authzv1alpha1.LabelKeyThirdParty,
 	}
 	if v.TDGMigration {
-		labelKeys = append(labelKeys, "schiff.telekom.de/owner")
+		labelKeys = append(labelKeys, legacyOwnerLabel)
 	}
 
 	ownerReclassification := v.detectOwnerReclassification(logger, req, ns, oldNs, bypassResult)
@@ -180,7 +184,7 @@ func (v *NamespaceValidator) validateLabelImmutability(logger logr.Logger, req a
 		// Allow removal of the legacy schiff.telekom.de/owner label by bypass users
 		// once the new t-caas.telekom.com/owner label is established.
 		if bypassResult.ShouldBypass &&
-			key == "schiff.telekom.de/owner" && oldExists && !newExists {
+			key == legacyOwnerLabel && oldExists && !newExists {
 			_, newOwnerExists := ns.Labels[authzv1alpha1.LabelKeyOwner]
 			if newOwnerExists {
 				logger.V(1).Info("AUDIT: legacy label removal allowed (new owner label exists)",
@@ -232,7 +236,7 @@ func (v *NamespaceValidator) crossValidateLegacyLabels(logger logr.Logger, req a
 		return nil
 	}
 
-	legacyOwner := oldNs.Labels["schiff.telekom.de/owner"]
+	legacyOwner := oldNs.Labels[legacyOwnerLabel]
 	newOwner, newOwnerExists := ns.Labels[authzv1alpha1.LabelKeyOwner]
 	_, oldOwnerExists := oldNs.Labels[authzv1alpha1.LabelKeyOwner]
 
@@ -248,14 +252,14 @@ func (v *NamespaceValidator) crossValidateLegacyLabels(logger logr.Logger, req a
 		logger.V(2).Info("adoption denied: legacy platform namespace cannot become non-platform",
 			"namespace", req.Name, "legacyOwner", legacyOwner, "newOwner", newOwner)
 		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultDenied).Inc()
-		resp := admission.Denied(fmt.Sprintf("Legacy platform namespace (schiff.telekom.de/owner=%s) cannot be adopted as '%s'", legacyOwner, newOwner))
+		resp := admission.Denied(fmt.Sprintf("Legacy platform namespace (%s=%s) cannot be adopted as '%s'", legacyOwnerLabel, legacyOwner, newOwner))
 		return &resp
 	}
 	if !isLegacyPlatform && isNewPlatform {
 		logger.V(2).Info("adoption denied: legacy non-platform namespace cannot become platform",
 			"namespace", req.Name, "legacyOwner", legacyOwner, "newOwner", newOwner)
 		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultDenied).Inc()
-		resp := admission.Denied(fmt.Sprintf("Legacy non-platform namespace (schiff.telekom.de/owner=%s) cannot be adopted as 'platform'", legacyOwner))
+		resp := admission.Denied(fmt.Sprintf("Legacy non-platform namespace (%s=%s) cannot be adopted as 'platform'", legacyOwnerLabel, legacyOwner))
 		return &resp
 	}
 

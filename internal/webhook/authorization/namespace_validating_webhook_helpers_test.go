@@ -26,6 +26,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
+// NOTE: TestMain is defined in this file and applies to ALL *_test.go files in
+// package webhooks that use the standard testing package (not Ginkgo). It
+// configures a discard logger to suppress log noise during unit tests.
+// Do NOT define a second TestMain in this package — it will cause a compile error.
+//
+// These tests intentionally do NOT use t.Parallel() because they share global
+// Prometheus metric state via metrics.WebhookRequestsTotal.
+
 func TestMain(m *testing.M) {
 	logf.SetLogger(zap.New(zap.WriteTo(io.Discard)))
 	os.Exit(m.Run())
@@ -323,7 +331,7 @@ func TestValidateLabelImmutability(t *testing.T) {
 			tdg:    true,
 			bypass: BypassCheckResult{ShouldBypass: true},
 			oldLabels: map[string]string{
-				"schiff.telekom.de/owner":    "tenant",
+				legacyOwnerLabel:             "tenant",
 				authzv1alpha1.LabelKeyOwner:  "tenant",
 				authzv1alpha1.LabelKeyTenant: "team-a",
 			},
@@ -338,11 +346,11 @@ func TestValidateLabelImmutability(t *testing.T) {
 			tdg:    true,
 			bypass: BypassCheckResult{ShouldBypass: true},
 			oldLabels: map[string]string{
-				"schiff.telekom.de/owner": "tenant",
+				legacyOwnerLabel: "tenant",
 			},
 			newLabels:  map[string]string{},
 			expectDeny: true,
-			denySubstr: "schiff.telekom.de/owner",
+			denySubstr: legacyOwnerLabel,
 		},
 	}
 
@@ -392,7 +400,7 @@ func TestCrossValidateLegacyLabels(t *testing.T) {
 		{
 			name:       "TDG disabled - always passes",
 			tdg:        false,
-			oldLabels:  map[string]string{"schiff.telekom.de/owner": "platform"},
+			oldLabels:  map[string]string{legacyOwnerLabel: "platform"},
 			newLabels:  map[string]string{authzv1alpha1.LabelKeyOwner: "tenant"},
 			expectDeny: false,
 		},
@@ -406,50 +414,50 @@ func TestCrossValidateLegacyLabels(t *testing.T) {
 		{
 			name:       "old owner already exists - skip validation",
 			tdg:        true,
-			oldLabels:  map[string]string{"schiff.telekom.de/owner": "platform", authzv1alpha1.LabelKeyOwner: "platform"},
-			newLabels:  map[string]string{"schiff.telekom.de/owner": "platform", authzv1alpha1.LabelKeyOwner: "platform"},
+			oldLabels:  map[string]string{legacyOwnerLabel: "platform", authzv1alpha1.LabelKeyOwner: "platform"},
+			newLabels:  map[string]string{legacyOwnerLabel: "platform", authzv1alpha1.LabelKeyOwner: "platform"},
 			expectDeny: false,
 		},
 		{
 			name:       "legacy platform to new platform - allowed",
 			tdg:        true,
-			oldLabels:  map[string]string{"schiff.telekom.de/owner": "platform"},
-			newLabels:  map[string]string{"schiff.telekom.de/owner": "platform", authzv1alpha1.LabelKeyOwner: "platform"},
+			oldLabels:  map[string]string{legacyOwnerLabel: "platform"},
+			newLabels:  map[string]string{legacyOwnerLabel: "platform", authzv1alpha1.LabelKeyOwner: "platform"},
 			expectDeny: false,
 		},
 		{
 			name:       "legacy schiff to new platform - allowed",
 			tdg:        true,
-			oldLabels:  map[string]string{"schiff.telekom.de/owner": "schiff"},
-			newLabels:  map[string]string{"schiff.telekom.de/owner": "schiff", authzv1alpha1.LabelKeyOwner: "platform"},
+			oldLabels:  map[string]string{legacyOwnerLabel: "schiff"},
+			newLabels:  map[string]string{legacyOwnerLabel: "schiff", authzv1alpha1.LabelKeyOwner: "platform"},
 			expectDeny: false,
 		},
 		{
 			name:       "legacy platform to new tenant - denied",
 			tdg:        true,
-			oldLabels:  map[string]string{"schiff.telekom.de/owner": "platform"},
-			newLabels:  map[string]string{"schiff.telekom.de/owner": "platform", authzv1alpha1.LabelKeyOwner: "tenant"},
+			oldLabels:  map[string]string{legacyOwnerLabel: "platform"},
+			newLabels:  map[string]string{legacyOwnerLabel: "platform", authzv1alpha1.LabelKeyOwner: "tenant"},
 			expectDeny: true,
 		},
 		{
 			name:       "legacy tenant to new platform - denied",
 			tdg:        true,
-			oldLabels:  map[string]string{"schiff.telekom.de/owner": "tenant"},
-			newLabels:  map[string]string{"schiff.telekom.de/owner": "tenant", authzv1alpha1.LabelKeyOwner: "platform"},
+			oldLabels:  map[string]string{legacyOwnerLabel: "tenant"},
+			newLabels:  map[string]string{legacyOwnerLabel: "tenant", authzv1alpha1.LabelKeyOwner: "platform"},
 			expectDeny: true,
 		},
 		{
 			name:       "legacy tenant to new tenant - allowed",
 			tdg:        true,
-			oldLabels:  map[string]string{"schiff.telekom.de/owner": "tenant"},
-			newLabels:  map[string]string{"schiff.telekom.de/owner": "tenant", authzv1alpha1.LabelKeyOwner: "tenant"},
+			oldLabels:  map[string]string{legacyOwnerLabel: "tenant"},
+			newLabels:  map[string]string{legacyOwnerLabel: "tenant", authzv1alpha1.LabelKeyOwner: "tenant"},
 			expectDeny: false,
 		},
 		{
 			name:       "legacy tenant to new thirdparty - allowed",
 			tdg:        true,
-			oldLabels:  map[string]string{"schiff.telekom.de/owner": "tenant"},
-			newLabels:  map[string]string{"schiff.telekom.de/owner": "tenant", authzv1alpha1.LabelKeyOwner: "thirdparty"},
+			oldLabels:  map[string]string{legacyOwnerLabel: "tenant"},
+			newLabels:  map[string]string{legacyOwnerLabel: "tenant", authzv1alpha1.LabelKeyOwner: "thirdparty"},
 			expectDeny: false,
 		},
 	}
