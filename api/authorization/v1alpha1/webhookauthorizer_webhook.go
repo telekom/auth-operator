@@ -106,6 +106,21 @@ func validateWebhookAuthorizer(wa *WebhookAuthorizer) (admission.Warnings, error
 		}
 	}
 
+	// Warn about never-matching principals: Namespace set but User and Groups
+	// are both empty, so the principal can never match any request.
+	for i, p := range wa.Spec.AllowedPrincipals {
+		if p.Namespace != "" && p.User == "" && len(p.Groups) == 0 {
+			warnings = append(warnings,
+				fmt.Sprintf("spec.allowedPrincipals[%d] has namespace %q but empty user and groups; it can never match", i, p.Namespace))
+		}
+	}
+	for i, p := range wa.Spec.DeniedPrincipals {
+		if p.Namespace != "" && p.User == "" && len(p.Groups) == 0 {
+			warnings = append(warnings,
+				fmt.Sprintf("spec.deniedPrincipals[%d] has namespace %q but empty user and groups; it can never match", i, p.Namespace))
+		}
+	}
+
 	// Note on spec.allowedPrincipals[].namespace (see Issue #96):
 	// The Namespace field on Principal is used only as a namespace filter for
 	// ServiceAccounts and is not a full ServiceAccount reference. The
@@ -117,14 +132,23 @@ func validateWebhookAuthorizer(wa *WebhookAuthorizer) (admission.Warnings, error
 }
 
 // findPrincipalOverlaps returns all overlapping users or groups between
-// allowed and denied principal lists.
+// allowed and denied principal lists. When a Principal specifies a Namespace,
+// the overlap key is qualified as "namespace/user" to distinguish principals
+// scoped to different namespaces.
 func findPrincipalOverlaps(allowed, denied []Principal) []string {
 	allowedUsers := make(map[string]struct{})
 	allowedGroups := make(map[string]struct{})
 
+	principalKey := func(user, ns string) string {
+		if ns != "" {
+			return ns + "/" + user
+		}
+		return user
+	}
+
 	for _, p := range allowed {
 		if p.User != "" {
-			allowedUsers[p.User] = struct{}{}
+			allowedUsers[principalKey(p.User, p.Namespace)] = struct{}{}
 		}
 		for _, g := range p.Groups {
 			allowedGroups[g] = struct{}{}
@@ -135,10 +159,11 @@ func findPrincipalOverlaps(allowed, denied []Principal) []string {
 	var overlaps []string
 	for _, p := range denied {
 		if p.User != "" {
-			if _, ok := allowedUsers[p.User]; ok {
-				if _, dup := seen[p.User]; !dup {
-					seen[p.User] = struct{}{}
-					overlaps = append(overlaps, p.User)
+			key := principalKey(p.User, p.Namespace)
+			if _, ok := allowedUsers[key]; ok {
+				if _, dup := seen[key]; !dup {
+					seen[key] = struct{}{}
+					overlaps = append(overlaps, key)
 				}
 			}
 		}
