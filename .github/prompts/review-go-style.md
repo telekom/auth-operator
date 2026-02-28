@@ -41,6 +41,11 @@ v1alpha1 "..."  // ambiguous — could be any v1alpha1
 - Flag returning `nil` instead of an actual error (`nilerr`)
 - `nolintlint` requires `//nolint` directives to have explanations:
   `//nolint:errcheck // error is intentionally ignored because...`
+- **Duplicate error wrapping**: When a helper function wraps an error
+  (`fmt.Errorf("failed to X: %w", err)`) and the caller also wraps
+  the same error with a similar message, the final error contains
+  redundant context. Either the helper or the caller should wrap, not
+  both. Flag `fmt.Errorf("failed to X: %w", helperThatAlsoWraps())`.
 
 ### 3. Standard Library Variables (`usestdlibvars`)
 

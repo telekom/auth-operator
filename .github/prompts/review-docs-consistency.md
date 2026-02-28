@@ -75,6 +75,17 @@ is accurate, internally consistent, and synchronized with the actual code.
 - Check that import alias references in docs match the convention:
   `authorizationv1alpha1`, `ctrl`, `rbacv1`, `metav1`.
 
+### 8. PR Description ↔ Code Accuracy
+
+- PR descriptions often diverge from the actual implementation over the
+  course of development. Check that:
+  - Function/method names cited in the PR body exist in the diff.
+  - Metric names, label keys, and API paths match the code.
+  - Flow descriptions ("step 1, step 2, ...") match the actual
+    sequence in the reconciler or handler.
+  - URL paths (e.g., `/api/metrics` vs `/metrics`) are correct.
+  - Scheme references (http vs https) match the actual listener.
+
 ## Output format
 
 For each finding:

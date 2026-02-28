@@ -125,6 +125,18 @@ actually assert what they claim, and that CI configuration is correct.
   code changes (`-update` flag).
 - Flag stale golden files that would cause CI failures.
 
+### 9a. Health Probe & Port Conflicts in envtest
+
+- Controller-runtime's `ctrl.NewManager` starts a health-probe HTTP
+  listener by default (`:8081`). In envtest suites that run managers
+  in-process, this causes port conflicts when multiple test suites
+  run in parallel or when the test doesn't need health probes.
+- Set `HealthProbeBindAddress: "0"` (disable) or `":0"` (random port)
+  in manager options for envtest suites.
+- Similarly, set `Metrics.BindAddress: "0"` when metrics are not under
+  test. Flag any envtest manager construction that uses default bind
+  addresses.
+
 ### 10. Test-Object Compliance with Validation Rules
 
 - When CRD validation rules change (new CEL rules, stricter webhook

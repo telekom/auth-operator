@@ -68,6 +68,17 @@ and RoleBindings — it is a privilege-management system and security-critical.
 - Check for Kubernetes label/annotation injection via unsanitized input.
 - Verify CRD validation markers catch malicious input at admission time.
 
+### 6a. Namespace-Qualified Identity Comparisons
+
+- When comparing principals, subjects, or identities for overlap or
+  conflict (e.g., allowed vs denied principals), the comparison key
+  must include the namespace scope when the principal is namespace-scoped.
+  Comparing only `user` without `namespace` treats
+  `system:serviceaccount:kube-system:foo` and
+  `system:serviceaccount:default:foo` as the same principal.
+- Flag any overlap-detection function that builds a map keyed by user
+  or group name alone when the data model includes a namespace field.
+
 ### 7. DoS Protection
 
 - Flag any reconciler that could be triggered into an infinite loop by

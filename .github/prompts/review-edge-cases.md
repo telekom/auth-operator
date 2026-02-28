@@ -124,6 +124,16 @@ that would slip past routine test coverage.
   item appears in multiple denied entries. Use a `seen` map or
   `slices.Compact` after sorting to deduplicate output.
 
+### 13. Dead / Never-Matching Configuration
+
+- Flag configuration objects that can never match any runtime input.
+  Common pattern: a `Principal` (or similar matcher) that sets a scope
+  field (e.g., `Namespace`) but leaves all matching fields (e.g., `User`,
+  `Groups`) empty. The scope field alone is not a matching criterion —
+  without at least one matching field, the entry silently does nothing.
+- Webhook validators should detect these patterns at admission time and
+  return a warning, not silently accept them.
+
 ### 10. Fuzz & Property Testing
 
 - Property: for any valid `RoleDefinition` spec, the generated ClusterRole
