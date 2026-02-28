@@ -41,8 +41,8 @@ func TestMain(m *testing.M) {
 
 func mustMarshal(t *testing.T, obj runtime.Object) []byte {
 	t.Helper()
-	scheme := runtime.NewScheme()
-	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	// clientgoscheme.Codecs is backed by the global clientgoscheme.Scheme,
+	// so no additional local scheme registration is needed.
 	data, err := runtime.Encode(clientgoscheme.Codecs.LegacyCodec(corev1.SchemeGroupVersion), obj)
 	if err != nil {
 		t.Fatalf("failed to marshal object: %v", err)
