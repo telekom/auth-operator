@@ -166,17 +166,25 @@ func (r *WebhookAuthorizerReconciler) validateNamespaceSelector(
 
 	// Check that at least one namespace matches (using Limit:1 to avoid
 	// loading potentially large lists just for a debug message).
-	nsList := &corev1.NamespaceList{}
-	if err := r.client.List(ctx, nsList, &client.ListOptions{
-		LabelSelector: selector,
-		Limit:         1,
-	}); err != nil {
-		return fmt.Errorf("list namespaces for selector validation: %w", err)
+	// Only perform this List call when debug logging is enabled, since the
+	// result is purely informational.
+	if logger.V(2).Enabled() {
+		nsList := &corev1.NamespaceList{}
+		if err := r.client.List(ctx, nsList, &client.ListOptions{
+			LabelSelector: selector,
+			Limit:         1,
+		}); err != nil {
+			// List failure is transient (API/RBAC issue), not a user error.
+			// Log and continue — the selector syntax is already validated above.
+			logger.V(1).Info("could not list namespaces for selector validation",
+				"error", err.Error(),
+				"selector", selector.String())
+		} else {
+			logger.V(2).Info("NamespaceSelector validation",
+				"hasMatchingNamespace", len(nsList.Items) > 0,
+				"selector", selector.String())
+		}
 	}
-
-	logger.V(2).Info("NamespaceSelector validation",
-		"hasMatchingNamespace", len(nsList.Items) > 0,
-		"selector", selector.String())
 
 	return nil
 }
