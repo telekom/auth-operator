@@ -275,6 +275,13 @@ spec:
             - targetName
             - targetRole
             type: object
+            x-kubernetes-validations:
+            - message: targetNamespace is required when targetRole is 'Role'
+              rule: self.targetRole != 'Role' || (has(self.targetNamespace) && size(self.targetNamespace)
+                > 0)
+            - message: targetNamespace must be empty when targetRole is 'ClusterRole'
+              rule: self.targetRole != 'ClusterRole' || !has(self.targetNamespace)
+                || size(self.targetNamespace) == 0
           status:
             description: RoleDefinitionStatus defines the observed state of RoleDefinition.
             properties:

@@ -65,6 +65,9 @@ var _ = Describe("BindDefinition Webhook", func() {
 				Spec: BindDefinitionSpec{
 					TargetName: "shared-bd-target",
 					Subjects:   validSubjects,
+					ClusterRoleBindings: ClusterBinding{
+						ClusterRoleRefs: []string{"some-clusterrole"},
+					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, bd1)).To(Succeed())
@@ -78,6 +81,9 @@ var _ = Describe("BindDefinition Webhook", func() {
 				Spec: BindDefinitionSpec{
 					TargetName: "shared-bd-target",
 					Subjects:   validSubjects,
+					ClusterRoleBindings: ClusterBinding{
+						ClusterRoleRefs: []string{"some-clusterrole"},
+					},
 				},
 			}
 			Eventually(func(g Gomega) {
@@ -109,6 +115,62 @@ var _ = Describe("BindDefinition Webhook", func() {
 
 			// Cleanup
 			Expect(k8sClient.Delete(ctx, bd)).To(Succeed())
+		})
+	})
+
+	Context("When CEL validation rejects invalid BindDefinitions", func() {
+
+		It("should deny a BindDefinition without clusterRoleBindings or roleBindings", func() {
+			bd := &BindDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-cel-no-bindings",
+				},
+				Spec: BindDefinitionSpec{
+					TargetName: "test-cel-no-bindings",
+					Subjects:   validSubjects,
+				},
+			}
+			err := k8sClient.Create(ctx, bd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("at least one clusterRoleBindings or roleBindings must be specified"))
+		})
+
+		It("should deny a BindDefinition with empty subjects", func() {
+			bd := &BindDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-cel-no-subjects",
+				},
+				Spec: BindDefinitionSpec{
+					TargetName: "test-cel-no-subjects",
+					Subjects:   []rbacv1.Subject{},
+					ClusterRoleBindings: ClusterBinding{
+						ClusterRoleRefs: []string{"view"},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, bd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("at least one subject must be specified"))
+		})
+
+		It("should deny a BindDefinition with ServiceAccount subject missing namespace", func() {
+			bd := &BindDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-cel-sa-no-ns",
+				},
+				Spec: BindDefinitionSpec{
+					TargetName: "test-cel-sa-no-ns",
+					Subjects: []rbacv1.Subject{
+						{Kind: rbacv1.ServiceAccountKind, Name: "my-sa"},
+					},
+					ClusterRoleBindings: ClusterBinding{
+						ClusterRoleRefs: []string{"view"},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, bd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("ServiceAccount subjects must specify a namespace"))
 		})
 	})
 })

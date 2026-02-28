@@ -16,6 +16,7 @@ const (
 	// BindRoleBinding indicates a RoleBinding type.
 	BindRoleBinding = "RoleBinding"
 	// BindSubjectServiceAccount indicates a ServiceAccount subject type.
+	// NOTE: Also referenced as string literal 'ServiceAccount' in XValidation CEL rules on BindDefinitionSpec.
 	BindSubjectServiceAccount = "ServiceAccount"
 )
 
@@ -23,6 +24,7 @@ const (
 type ClusterBinding struct {
 	// ClusterRoleRefs references an existing ClusterRole
 	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MaxItems=64
 	ClusterRoleRefs []string `json:"clusterRoleRefs,omitempty"`
 }
 
@@ -30,10 +32,12 @@ type ClusterBinding struct {
 type NamespaceBinding struct {
 	// ClusterRoleRefs references an existing ClusterRole
 	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MaxItems=64
 	ClusterRoleRefs []string `json:"clusterRoleRefs,omitempty"`
 
 	// RoleRefs references a specific Role that has to exist in the target namespaces
 	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MaxItems=64
 	RoleRefs []string `json:"roleRefs,omitempty"`
 
 	// Namespace of the Role that should be bound to the subjects.
@@ -42,10 +46,14 @@ type NamespaceBinding struct {
 
 	// NamespaceSelector is a label selector which will match namespaces that should have the RoleBinding/s.
 	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MaxItems=16
 	NamespaceSelector []metav1.LabelSelector `json:"namespaceSelector,omitempty"`
 }
 
 // BindDefinitionSpec defines the desired state of BindDefinition.
+// +kubebuilder:validation:XValidation:rule="(has(self.clusterRoleBindings) && has(self.clusterRoleBindings.clusterRoleRefs) && size(self.clusterRoleBindings.clusterRoleRefs) > 0) || (has(self.roleBindings) && size(self.roleBindings) > 0)",message="at least one clusterRoleBindings or roleBindings must be specified"
+// +kubebuilder:validation:XValidation:rule="size(self.subjects) > 0",message="at least one subject must be specified"
+// +kubebuilder:validation:XValidation:rule="self.subjects.all(s, s.kind != 'ServiceAccount' || (has(s.namespace) && size(s.namespace) > 0))",message="ServiceAccount subjects must specify a namespace"
 type BindDefinitionSpec struct {
 	// Name that will be prefixed to the concatenated string which is the name of the binding. Follows format "targetName-clusterrole/role-binding" where clusterrole/role is the in-cluster existing ClusterRole or Role.
 	// +kubebuilder:validation:Required
@@ -56,6 +64,7 @@ type BindDefinitionSpec struct {
 
 	// List of subjects that will be bound to a target ClusterRole/Role. Can be "User", "Group" or "ServiceAccount".
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MaxItems=256
 	Subjects []rbacv1.Subject `json:"subjects"`
 
 	// List of ClusterRoles to which subjects will be bound to. The list is a RoleRef which means we have to specify the full rbacv1.RoleRef schema. The result of specifying this field are ClusterRoleBindings.
@@ -64,6 +73,7 @@ type BindDefinitionSpec struct {
 
 	// List of ClusterRoles/Roles to which subjects will be bound to. The list is a RoleRef which means we have to specify the full rbacv1.RoleRef schema. The result of specifying the field are RoleBindings.
 	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MaxItems=64
 	RoleBindings []NamespaceBinding `json:"roleBindings,omitempty"`
 
 	// AutomountServiceAccountToken controls whether to automount API credentials for ServiceAccounts

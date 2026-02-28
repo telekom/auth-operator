@@ -9,12 +9,16 @@ const (
 	// RoleDefinitionFinalizer is the finalizer used to prevent orphaned resources.
 	RoleDefinitionFinalizer = "roledefinition.authorization.t-caas.telekom.com/finalizer"
 	// DefinitionClusterRole indicates a ClusterRole type.
+	// NOTE: Also referenced as string literal 'ClusterRole' in XValidation CEL rules on RoleDefinitionSpec.
 	DefinitionClusterRole = "ClusterRole"
 	// DefinitionNamespacedRole indicates a namespaced Role type.
+	// NOTE: Also referenced as string literal 'Role' in XValidation CEL rules on RoleDefinitionSpec.
 	DefinitionNamespacedRole = "Role"
 )
 
 // RoleDefinitionSpec defines the desired state of RoleDefinition.
+// +kubebuilder:validation:XValidation:rule="self.targetRole != 'Role' || (has(self.targetNamespace) && size(self.targetNamespace) > 0)",message="targetNamespace is required when targetRole is 'Role'"
+// +kubebuilder:validation:XValidation:rule="self.targetRole != 'ClusterRole' || !has(self.targetNamespace) || size(self.targetNamespace) == 0",message="targetNamespace must be empty when targetRole is 'ClusterRole'"
 type RoleDefinitionSpec struct {
 	// The target role that will be reconciled. This can be a ClusterRole or a namespaced Role
 	// +kubebuilder:validation:Required

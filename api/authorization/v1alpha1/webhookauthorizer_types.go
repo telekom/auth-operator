@@ -17,33 +17,42 @@ const (
 type Principal struct {
 	// User is the requesting user in SubjectAccessReview request.
 	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MaxLength=253
 	User string `json:"user,omitempty"`
 
 	// Groups is the requesting user groups in SubjectAccessReview request.
 	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MaxItems=256
 	Groups []string `json:"groups,omitempty"`
 
 	// Namespace is the requesting user namespace in case the requesting user is a ServiceAccount.
 	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MaxLength=253
 	Namespace string `json:"namespace,omitempty"`
 }
 
 // WebhookAuthorizerSpec defines the desired state of WebhookAuthorizer.
+// +kubebuilder:validation:XValidation:rule="(has(self.resourceRules) && size(self.resourceRules) > 0) || (has(self.nonResourceRules) && size(self.nonResourceRules) > 0)",message="at least one resourceRules or nonResourceRules must be specified"
+// +kubebuilder:validation:XValidation:rule="(has(self.allowedPrincipals) && size(self.allowedPrincipals) > 0) || (has(self.deniedPrincipals) && size(self.deniedPrincipals) > 0)",message="at least one allowedPrincipals or deniedPrincipals must be specified"
 type WebhookAuthorizerSpec struct {
 	// Resources which will be used to evaluate the SubjectAccessReviewSpec.ResourceAttributes
 	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MaxItems=64
 	ResourceRules []authzv1.ResourceRule `json:"resourceRules,omitempty"`
 
 	// Resources which will be used to evaluate the SubjectAccessReviewSpec.NonResourceAttributes
 	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MaxItems=64
 	NonResourceRules []authzv1.NonResourceRule `json:"nonResourceRules,omitempty"`
 
 	// AllowedPrincipals is a slice of principals this authorizer should allow.
 	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MaxItems=256
 	AllowedPrincipals []Principal `json:"allowedPrincipals,omitempty"`
 
 	// DeniedPrincipals is a slice of principals this authorizer should deny.
 	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MaxItems=256
 	DeniedPrincipals []Principal `json:"deniedPrincipals,omitempty"`
 
 	// NamespaceSelector is a label selector to match namespaces that should allow the specified API calls.
