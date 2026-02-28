@@ -32,19 +32,19 @@ The policy CRD is currently called `RBACPolicy`, but alternatives worth consider
 
 - [Goals](#goals)
 - [Non-Goals](#non-goals)
-- [Motivation](#motivation)
-- [Detailed Design](#detailed-design)
-  - [RBACPolicy CRD](#rbacpolicy-crd)
-  - [RestrictedRoleDefinition CRD](#restrictedroledefinition-crd)
-  - [RestrictedBindDefinition CRD](#restrictedbinddefinition-crd)
-  - [Privilege Escalation Prevention](#privilege-escalation-prevention)
-  - [Continuous Enforcement](#continuous-enforcement)
-- [Controller Design](#controller-design)
-- [Webhook Design](#webhook-design)
-- [Integration with Existing CRDs](#integration-with-existing-crds)
-- [Security Considerations](#security-considerations)
-- [Implementation Plan](#implementation-plan)
-- [Go Type Definitions](#go-type-definitions)
+- [Design Principles](#design-principles)
+- [Architecture](#architecture)
+- [RBACPolicy Specification](#rbacpolicy-specification)
+- [RestrictedBindDefinition](#restrictedbinddefinition)
+- [RestrictedRoleDefinition](#restrictedroledefinition)
+- [Bindings (RestrictedBindDefinition)](#bindings-restrictedbinddefinition)
+- [Continuous Enforcement & Deprovisioning](#continuous-enforcement--deprovisioning)
+- [Policy Reference Enforcement](#policy-reference-enforcement)
+- [Conflict Handling with RoleDefinition/BindDefinition](#conflict-handling-with-roledefinitionbinddefinition)
+- [Multi-Tenancy Enforcement](#multi-tenancy-enforcement)
+- [Unified Selector Model](#unified-selector-model)
+- [Implementation Notes](#implementation-notes)
+- [Related](#related)
 - [Appendix: Naming Alternatives](#naming-alternatives)
 
 > **Note on Go type definitions:** The Go types in this proposal are
@@ -2557,9 +2557,8 @@ type RBACPolicyStatus struct {
 // +kubebuilder:resource:path=restrictedbinddefinitions,scope=Namespaced,shortName=rbinddef
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status"
-// +kubebuilder:printcolumn:name="Policy",type="string",JSONPath=".spec.policyRef.name"
+// +kubebuilder:printcolumn:name="Policy",type="string",JSONPath=".spec.rbacPolicyRef.name"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
-// +kubebuilder:subresource:status
 
 // RestrictedBindDefinition creates bindings within policy limits.
 type RestrictedBindDefinition struct {
@@ -2612,6 +2611,16 @@ type RBACPolicyReference struct {
 	// Name of the cluster-scoped RBACPolicy.
 	// +kubebuilder:validation:Required
 	Name string `json:"name"`
+}
+
+// RestrictedBindDefinitionStatus defines the observed state of RestrictedBindDefinition.
+type RestrictedBindDefinitionStatus struct {
+	// GeneratedServiceAccounts lists SAs created by this RestrictedBindDefinition.
+	GeneratedServiceAccounts []rbacv1.Subject `json:"generatedServiceAccounts,omitempty"`
+	// ExternalServiceAccounts lists pre-existing SAs used but not managed.
+	ExternalServiceAccounts []string `json:"externalServiceAccounts,omitempty"`
+	// Conditions represent the latest available observations.
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 ```
 
@@ -2671,9 +2680,28 @@ type NamespaceTarget struct {
 	Selector *metav1.LabelSelector `json:"selector,omitempty"`
 	Names    []string              `json:"names,omitempty"`
 }
+
+// RestrictedRoleDefinitionStatus defines the observed state of RestrictedRoleDefinition.
+type RestrictedRoleDefinitionStatus struct {
+	// GeneratedRoles tracks Roles created by this RestrictedRoleDefinition.
+	GeneratedRoles []GeneratedRoleRef `json:"generatedRoles,omitempty"`
+	// Conditions represent the latest available observations.
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
+// GeneratedRoleRef identifies a generated Role by namespace and name.
+type GeneratedRoleRef struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+}
 ```
 
 ### Example: Namespace Selection with All Methods
+
+> **Note:** The following examples show the *full intended API surface*,
+> including fields (`allowedNamespacePrefixes`, `allowedNamespaceSuffixes`,
+> `forbiddenNamespaceSelector`, etc.) that are not yet reflected in the
+> skeletal Go types above. These fields will be added during implementation.
 
 ```yaml
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
@@ -2685,10 +2713,9 @@ spec:
     targetNamespaceLimits:
       # Method 1: Explicit allowed namespaces (exact match)
       allowedNamespaces:
-        names:
-          - team-a-dev
-          - team-a-staging
-          - team-a-prod
+        - team-a-dev
+        - team-a-staging
+        - team-a-prod
     
       # Method 2: Prefix-based (simple wildcard, NO regex)
       # Matches: team-a-dev, team-a-staging, team-a-anything
@@ -2714,9 +2741,8 @@ spec:
     
       # Forbidden always takes precedence
       forbiddenNamespaces:
-        names:
-          - kube-system
-          - kube-public
+        - kube-system
+        - kube-public
       forbiddenNamespacePrefixes:
         - "kube-*"
         - "istio-*"
