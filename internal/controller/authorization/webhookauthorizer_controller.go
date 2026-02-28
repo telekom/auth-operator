@@ -66,12 +66,10 @@ func (r *WebhookAuthorizerReconciler) SetupWithManager(mgr ctrl.Manager, concurr
 //
 // The reconciliation flow:
 //  1. Fetch the WebhookAuthorizer (return early if not found)
-//  2. Mark as Reconciling
-//  3. Validate NamespaceSelector can be parsed
-//  4. Optionally validate that matching namespaces exist
-//  5. Update status.observedGeneration
-//  6. Set status.authorizerConfigured = true
-//  7. Mark Ready and apply status via SSA
+//  2. Mark as Reconciling and set status.observedGeneration
+//  3. Validate NamespaceSelector can be parsed (stall on error)
+//  4. Set status.authorizerConfigured = true and mark Ready
+//  5. Apply status via SSA
 func (r *WebhookAuthorizerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	startTime := time.Now()
 	logger := log.FromContext(ctx)
@@ -132,7 +130,7 @@ func (r *WebhookAuthorizerReconciler) Reconcile(ctx context.Context, req ctrl.Re
 			"webhookAuthorizer", wa.Name)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerWebhookAuthorizer, metrics.ResultError).Inc()
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerWebhookAuthorizer, metrics.ErrorTypeAPI).Inc()
-		return ctrl.Result{}, fmt.Errorf("apply WebhookAuthorizer %s status: %w", wa.Name, err)
+		return ctrl.Result{}, fmt.Errorf("reconcile WebhookAuthorizer %s: %w", wa.Name, err)
 	}
 
 	r.recorder.Eventf(wa, nil, corev1.EventTypeNormal,
@@ -148,8 +146,7 @@ func (r *WebhookAuthorizerReconciler) Reconcile(ctx context.Context, req ctrl.Re
 }
 
 // validateNamespaceSelector validates that the NamespaceSelector can be parsed
-// and checks that at least one matching namespace exists (logging a warning if
-// no namespaces match).
+// and lists matching namespaces for diagnostics (logged at V(2)).
 func (r *WebhookAuthorizerReconciler) validateNamespaceSelector(
 	ctx context.Context,
 	wa *authorizationv1alpha1.WebhookAuthorizer,

@@ -46,8 +46,9 @@ BindDefinition, and WebhookAuthorizer custom resources to manage Kubernetes RBAC
 and authorization webhook resources.
 
 The controller watches for changes to authorization resources and ensures
-the corresponding ClusterRoles, Roles, ClusterRoleBindings, RoleBindings,
-and WebhookAuthorizer configurations are created and kept in sync.`,
+the corresponding ClusterRoles, Roles, ClusterRoleBindings, and RoleBindings
+are created and kept in sync. For WebhookAuthorizer resources, it validates
+the configuration and manages status conditions.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if bindDefinitionConcurrency < 0 || roleDefinitionConcurrency < 0 || webhookAuthorizerConcurrency < 0 {
 			return fmt.Errorf("concurrency values must be >= 0")
