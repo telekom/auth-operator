@@ -135,23 +135,17 @@ func findNeverMatchingPrincipals(fieldName string, principals []Principal) admis
 }
 
 // findPrincipalOverlaps returns all overlapping users or groups between
-// allowed and denied principal lists. When a Principal specifies a Namespace,
-// the overlap key is qualified as "namespace/user" to distinguish principals
-// scoped to different namespaces.
+// allowed and denied principal lists. User overlap keys are NOT
+// namespace-qualified because the runtime matching logic
+// (principalMatches) checks principal.User == SAR.User directly,
+// ignoring the Namespace field on the Principal struct.
 func findPrincipalOverlaps(allowed, denied []Principal) []string {
 	allowedUsers := make(map[string]struct{})
 	allowedGroups := make(map[string]struct{})
 
-	principalKey := func(user, ns string) string {
-		if ns != "" {
-			return ns + "/" + user
-		}
-		return user
-	}
-
 	for _, p := range allowed {
 		if p.User != "" {
-			allowedUsers[principalKey(p.User, p.Namespace)] = struct{}{}
+			allowedUsers[p.User] = struct{}{}
 		}
 		for _, g := range p.Groups {
 			allowedGroups[g] = struct{}{}
@@ -162,11 +156,10 @@ func findPrincipalOverlaps(allowed, denied []Principal) []string {
 	var overlaps []string
 	for _, p := range denied {
 		if p.User != "" {
-			key := principalKey(p.User, p.Namespace)
-			if _, ok := allowedUsers[key]; ok {
-				if _, dup := seen[key]; !dup {
-					seen[key] = struct{}{}
-					overlaps = append(overlaps, key)
+			if _, ok := allowedUsers[p.User]; ok {
+				if _, dup := seen[p.User]; !dup {
+					seen[p.User] = struct{}{}
+					overlaps = append(overlaps, p.User)
 				}
 			}
 		}
