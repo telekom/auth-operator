@@ -161,7 +161,7 @@ var _ = Describe("BindDefinition Webhook", func() {
 				Spec: BindDefinitionSpec{
 					TargetName: "test-cel-sa-no-ns",
 					Subjects: []rbacv1.Subject{
-						{Kind: "ServiceAccount", Name: "my-sa"},
+						{Kind: rbacv1.ServiceAccountKind, Name: "my-sa"},
 					},
 					ClusterRoleBindings: ClusterBinding{
 						ClusterRoleRefs: []string{"view"},
