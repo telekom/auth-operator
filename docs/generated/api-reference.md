@@ -54,9 +54,9 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `targetName` _string_ | Name that will be prefixed to the concatenated string which is the name of the binding. Follows format "targetName-clusterrole/role-binding" where clusterrole/role is the in-cluster existing ClusterRole or Role. |  | MaxLength: 253 <br />MinLength: 1 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` <br />Required: \{\} <br /> |
-| `subjects` _[Subject](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#subject-v1-rbac) array_ | List of subjects that will be bound to a target ClusterRole/Role. Can be "User", "Group" or "ServiceAccount". |  | Required: \{\} <br /> |
+| `subjects` _[Subject](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#subject-v1-rbac) array_ | List of subjects that will be bound to a target ClusterRole/Role. Can be "User", "Group" or "ServiceAccount". |  | MaxItems: 256 <br />Required: \{\} <br /> |
 | `clusterRoleBindings` _[ClusterBinding](#clusterbinding)_ | List of ClusterRoles to which subjects will be bound to. The list is a RoleRef which means we have to specify the full rbacv1.RoleRef schema. The result of specifying this field are ClusterRoleBindings. |  | Optional: \{\} <br /> |
-| `roleBindings` _[NamespaceBinding](#namespacebinding) array_ | List of ClusterRoles/Roles to which subjects will be bound to. The list is a RoleRef which means we have to specify the full rbacv1.RoleRef schema. The result of specifying the field are RoleBindings. |  | Optional: \{\} <br /> |
+| `roleBindings` _[NamespaceBinding](#namespacebinding) array_ | List of ClusterRoles/Roles to which subjects will be bound to. The list is a RoleRef which means we have to specify the full rbacv1.RoleRef schema. The result of specifying the field are RoleBindings. |  | MaxItems: 64 <br />Optional: \{\} <br /> |
 | `automountServiceAccountToken` _boolean_ | AutomountServiceAccountToken controls whether to automount API credentials for ServiceAccounts<br />created by this BindDefinition. Defaults to true for backward compatibility with Kubernetes<br />native ServiceAccount behavior. Set to false to improve security by preventing automatic<br />token mounting.<br />Only applies when Subjects contain ServiceAccount entries that need to be auto-created. | true | Optional: \{\} <br /> |
 
 
@@ -96,7 +96,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `clusterRoleRefs` _string array_ | ClusterRoleRefs references an existing ClusterRole |  | Optional: \{\} <br /> |
+| `clusterRoleRefs` _string array_ | ClusterRoleRefs references an existing ClusterRole |  | MaxItems: 64 <br />Optional: \{\} <br /> |
 
 
 #### NamespaceBinding
@@ -112,10 +112,10 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `clusterRoleRefs` _string array_ | ClusterRoleRefs references an existing ClusterRole |  | Optional: \{\} <br /> |
-| `roleRefs` _string array_ | RoleRefs references a specific Role that has to exist in the target namespaces |  | Optional: \{\} <br /> |
+| `clusterRoleRefs` _string array_ | ClusterRoleRefs references an existing ClusterRole |  | MaxItems: 64 <br />Optional: \{\} <br /> |
+| `roleRefs` _string array_ | RoleRefs references a specific Role that has to exist in the target namespaces |  | MaxItems: 64 <br />Optional: \{\} <br /> |
 | `namespace` _string_ | Namespace of the Role that should be bound to the subjects. |  | Optional: \{\} <br /> |
-| `namespaceSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#labelselector-v1-meta) array_ | NamespaceSelector is a label selector which will match namespaces that should have the RoleBinding/s. |  | Optional: \{\} <br /> |
+| `namespaceSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#labelselector-v1-meta) array_ | NamespaceSelector is a label selector which will match namespaces that should have the RoleBinding/s. |  | MaxItems: 16 <br />Optional: \{\} <br /> |
 
 
 #### Principal
@@ -132,7 +132,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `user` _string_ | User is the requesting user in SubjectAccessReview request. |  | MaxLength: 253 <br />Optional: \{\} <br /> |
-| `groups` _string array_ | Groups is the requesting user groups in SubjectAccessReview request. |  | MaxItems: 64 <br />Optional: \{\} <br /> |
+| `groups` _string array_ | Groups is the requesting user groups in SubjectAccessReview request. |  | MaxItems: 256 <br />Optional: \{\} <br /> |
 | `namespace` _string_ | Namespace is the requesting user namespace in case the requesting user is a ServiceAccount. |  | MaxLength: 253 <br />Optional: \{\} <br /> |
 
 
@@ -229,10 +229,10 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `resourceRules` _[ResourceRule](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#resourcerule-v1-authorization) array_ | Resources which will be used to evaluate the SubjectAccessReviewSpec.ResourceAttributes |  | Optional: \{\} <br /> |
-| `nonResourceRules` _[NonResourceRule](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#nonresourcerule-v1-authorization) array_ | Resources which will be used to evaluate the SubjectAccessReviewSpec.NonResourceAttributes |  | Optional: \{\} <br /> |
-| `allowedPrincipals` _[Principal](#principal) array_ | AllowedPrincipals is a slice of principals this authorizer should allow. |  | Optional: \{\} <br /> |
-| `deniedPrincipals` _[Principal](#principal) array_ | DeniedPrincipals is a slice of principals this authorizer should deny. |  | Optional: \{\} <br /> |
+| `resourceRules` _[ResourceRule](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#resourcerule-v1-authorization) array_ | Resources which will be used to evaluate the SubjectAccessReviewSpec.ResourceAttributes |  | MaxItems: 64 <br />Optional: \{\} <br /> |
+| `nonResourceRules` _[NonResourceRule](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#nonresourcerule-v1-authorization) array_ | Resources which will be used to evaluate the SubjectAccessReviewSpec.NonResourceAttributes |  | MaxItems: 64 <br />Optional: \{\} <br /> |
+| `allowedPrincipals` _[Principal](#principal) array_ | AllowedPrincipals is a slice of principals this authorizer should allow. |  | MaxItems: 256 <br />Optional: \{\} <br /> |
+| `deniedPrincipals` _[Principal](#principal) array_ | DeniedPrincipals is a slice of principals this authorizer should deny. |  | MaxItems: 256 <br />Optional: \{\} <br /> |
 | `namespaceSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#labelselector-v1-meta)_ | NamespaceSelector is a label selector to match namespaces that should allow the specified API calls. |  | Optional: \{\} <br /> |
 
 

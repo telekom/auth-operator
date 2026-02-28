@@ -14,6 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `dependency-review-action` workflow for supply-chain integrity (#80)
 - Copilot reusable prompt for Helm chart changes (#81)
 - Package-level `doc.go` documentation for all packages (#82)
+- CEL `XValidation` rules for `BindDefinitionSpec`, `RoleDefinitionSpec`, and `WebhookAuthorizerSpec` for server-side schema validation (#50, #111)
+- OpenAPI `MaxLength`, `MaxItems` constraints on `Principal`, `BindDefinitionSpec`, `WebhookAuthorizerSpec`, `ClusterBinding`, and `NamespaceBinding` fields (#111)
+
+### Changed
+
+- **Breaking:** `BindDefinition` now requires at least one `clusterRoleBindings` or `roleBindings` and at least one `subject` — enforced by CEL validation on create/update (#111)
+- **Breaking:** `Principal.Groups` `MaxItems` increased from 64 to 256 to accommodate corporate OIDC/LDAP providers (#111)
 
 ### Fixed
 

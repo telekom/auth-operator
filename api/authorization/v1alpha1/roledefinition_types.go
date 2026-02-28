@@ -9,8 +9,10 @@ const (
 	// RoleDefinitionFinalizer is the finalizer used to prevent orphaned resources.
 	RoleDefinitionFinalizer = "roledefinition.authorization.t-caas.telekom.com/finalizer"
 	// DefinitionClusterRole indicates a ClusterRole type.
+	// NOTE: Also referenced as string literal 'ClusterRole' in XValidation CEL rules on RoleDefinitionSpec.
 	DefinitionClusterRole = "ClusterRole"
 	// DefinitionNamespacedRole indicates a namespaced Role type.
+	// NOTE: Also referenced as string literal 'Role' in XValidation CEL rules on RoleDefinitionSpec.
 	DefinitionNamespacedRole = "Role"
 )
 

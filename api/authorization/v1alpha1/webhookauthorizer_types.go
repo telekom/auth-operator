@@ -22,7 +22,7 @@ type Principal struct {
 
 	// Groups is the requesting user groups in SubjectAccessReview request.
 	// +kubebuilder:validation:Optional
-	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:MaxItems=256
 	Groups []string `json:"groups,omitempty"`
 
 	// Namespace is the requesting user namespace in case the requesting user is a ServiceAccount.
@@ -37,18 +37,22 @@ type Principal struct {
 type WebhookAuthorizerSpec struct {
 	// Resources which will be used to evaluate the SubjectAccessReviewSpec.ResourceAttributes
 	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MaxItems=64
 	ResourceRules []authzv1.ResourceRule `json:"resourceRules,omitempty"`
 
 	// Resources which will be used to evaluate the SubjectAccessReviewSpec.NonResourceAttributes
 	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MaxItems=64
 	NonResourceRules []authzv1.NonResourceRule `json:"nonResourceRules,omitempty"`
 
 	// AllowedPrincipals is a slice of principals this authorizer should allow.
 	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MaxItems=256
 	AllowedPrincipals []Principal `json:"allowedPrincipals,omitempty"`
 
 	// DeniedPrincipals is a slice of principals this authorizer should deny.
 	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MaxItems=256
 	DeniedPrincipals []Principal `json:"deniedPrincipals,omitempty"`
 
 	// NamespaceSelector is a label selector to match namespaces that should allow the specified API calls.

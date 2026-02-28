@@ -49,7 +49,7 @@ var _ = Describe("BindDefinition Controller", func() {
 					Spec: authorizationv1alpha1.BindDefinitionSpec{
 						TargetName:          "test-target",
 						ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{ClusterRoleRefs: []string{"view"}},
-						Subjects:            []rbacv1.Subject{{Kind: "User", Name: "test-user", APIGroup: "rbac.authorization.k8s.io"}},
+						Subjects:            []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "test-user", APIGroup: rbacv1.GroupName}},
 					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())

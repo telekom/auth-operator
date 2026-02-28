@@ -85,7 +85,7 @@ var _ = Describe("BindDefinition Helpers", func() {
 				Spec: authorizationv1alpha1.BindDefinitionSpec{
 					TargetName:          "test-sa",
 					ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{ClusterRoleRefs: []string{"view"}},
-					Subjects:            []rbacv1.Subject{{Kind: "User", Name: "test-user"}},
+					Subjects:            []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "test-user", APIGroup: rbacv1.GroupName}},
 				},
 			}
 			Expect(k8sClient.Create(ctx, bindDef)).To(Succeed())
@@ -121,7 +121,7 @@ var _ = Describe("BindDefinition Helpers", func() {
 				Spec: authorizationv1alpha1.BindDefinitionSpec{
 					TargetName:          "test-sa-no-owner",
 					ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{ClusterRoleRefs: []string{"view"}},
-					Subjects:            []rbacv1.Subject{{Kind: "User", Name: "test-user"}},
+					Subjects:            []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "test-user", APIGroup: rbacv1.GroupName}},
 				},
 			}
 			Expect(k8sClient.Create(ctx, bindDef)).To(Succeed())
@@ -150,7 +150,7 @@ var _ = Describe("BindDefinition Helpers", func() {
 				Spec: authorizationv1alpha1.BindDefinitionSpec{
 					TargetName:          "test-sa-delete",
 					ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{ClusterRoleRefs: []string{"view"}},
-					Subjects:            []rbacv1.Subject{{Kind: "User", Name: "test-user"}},
+					Subjects:            []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "test-user", APIGroup: rbacv1.GroupName}},
 				},
 			}
 			Expect(k8sClient.Create(ctx, bindDef)).To(Succeed())
@@ -193,7 +193,7 @@ var _ = Describe("BindDefinition Helpers", func() {
 				Spec: authorizationv1alpha1.BindDefinitionSpec{
 					TargetName:          "test-crb",
 					ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{ClusterRoleRefs: []string{"view"}},
-					Subjects:            []rbacv1.Subject{{Kind: "User", Name: "test-user"}},
+					Subjects:            []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "test-user", APIGroup: rbacv1.GroupName}},
 				},
 			}
 			Expect(k8sClient.Create(ctx, bindDef)).To(Succeed())
@@ -233,7 +233,7 @@ var _ = Describe("BindDefinition Helpers", func() {
 				Spec: authorizationv1alpha1.BindDefinitionSpec{
 					TargetName:          "test-crb-no-owner",
 					ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{ClusterRoleRefs: []string{"view"}},
-					Subjects:            []rbacv1.Subject{{Kind: "User", Name: "test-user"}},
+					Subjects:            []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "test-user", APIGroup: rbacv1.GroupName}},
 				},
 			}
 			Expect(k8sClient.Create(ctx, bindDef)).To(Succeed())
@@ -263,7 +263,7 @@ var _ = Describe("BindDefinition Helpers", func() {
 				Spec: authorizationv1alpha1.BindDefinitionSpec{
 					TargetName:          "test-rb",
 					ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{ClusterRoleRefs: []string{"view"}},
-					Subjects:            []rbacv1.Subject{{Kind: "User", Name: "test-user"}},
+					Subjects:            []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "test-user", APIGroup: rbacv1.GroupName}},
 				},
 			}
 			Expect(k8sClient.Create(ctx, bindDef)).To(Succeed())
@@ -304,7 +304,7 @@ var _ = Describe("BindDefinition Helpers", func() {
 				Spec: authorizationv1alpha1.BindDefinitionSpec{
 					TargetName:          "test-rb-no-owner",
 					ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{ClusterRoleRefs: []string{"view"}},
-					Subjects:            []rbacv1.Subject{{Kind: "User", Name: "test-user"}},
+					Subjects:            []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "test-user", APIGroup: rbacv1.GroupName}},
 				},
 			}
 			Expect(k8sClient.Create(ctx, bindDef)).To(Succeed())
@@ -333,7 +333,7 @@ var _ = Describe("BindDefinition Helpers", func() {
 				Spec: authorizationv1alpha1.BindDefinitionSpec{
 					TargetName:          "test-rb-delete",
 					ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{ClusterRoleRefs: []string{"view"}},
-					Subjects:            []rbacv1.Subject{{Kind: "User", Name: "test-user"}},
+					Subjects:            []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "test-user", APIGroup: rbacv1.GroupName}},
 				},
 			}
 			Expect(k8sClient.Create(ctx, bindDef)).To(Succeed())
@@ -1333,7 +1333,7 @@ var _ = Describe("BindDefinition Event Assertions", func() {
 				Spec: authorizationv1alpha1.BindDefinitionSpec{
 					TargetName:          "test-sa-event-no-owner",
 					ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{ClusterRoleRefs: []string{"view"}},
-					Subjects:            []rbacv1.Subject{{Kind: "User", Name: "test-user"}},
+					Subjects:            []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "test-user", APIGroup: rbacv1.GroupName}},
 				},
 			}
 			Expect(k8sClient.Create(ctx, bindDef)).To(Succeed())
@@ -1367,7 +1367,7 @@ var _ = Describe("BindDefinition Event Assertions", func() {
 				Spec: authorizationv1alpha1.BindDefinitionSpec{
 					TargetName:          "test-sa-event-delete",
 					ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{ClusterRoleRefs: []string{"view"}},
-					Subjects:            []rbacv1.Subject{{Kind: "User", Name: "test-user"}},
+					Subjects:            []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "test-user", APIGroup: rbacv1.GroupName}},
 				},
 			}
 			Expect(k8sClient.Create(ctx, bindDef)).To(Succeed())
@@ -1420,7 +1420,7 @@ var _ = Describe("BindDefinition Event Assertions", func() {
 				Spec: authorizationv1alpha1.BindDefinitionSpec{
 					TargetName:          "test-crb-event",
 					ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{ClusterRoleRefs: []string{"view"}},
-					Subjects:            []rbacv1.Subject{{Kind: "User", Name: "test-user"}},
+					Subjects:            []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "test-user", APIGroup: rbacv1.GroupName}},
 				},
 			}
 			Expect(k8sClient.Create(ctx, bindDef)).To(Succeed())

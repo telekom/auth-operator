@@ -60,7 +60,7 @@ spec:
                         request.
                       items:
                         type: string
-                      maxItems: 64
+                      maxItems: 256
                       type: array
                     namespace:
                       description: Namespace is the requesting user namespace in case
@@ -73,6 +73,7 @@ spec:
                       maxLength: 253
                       type: string
                   type: object
+                maxItems: 256
                 type: array
               deniedPrincipals:
                 description: DeniedPrincipals is a slice of principals this authorizer
@@ -86,7 +87,7 @@ spec:
                         request.
                       items:
                         type: string
-                      maxItems: 64
+                      maxItems: 256
                       type: array
                     namespace:
                       description: Namespace is the requesting user namespace in case
@@ -99,6 +100,7 @@ spec:
                       maxLength: 253
                       type: string
                   type: object
+                maxItems: 256
                 type: array
               namespaceSelector:
                 description: NamespaceSelector is a label selector to match namespaces
@@ -172,6 +174,7 @@ spec:
                   required:
                   - verbs
                   type: object
+                maxItems: 64
                 type: array
               resourceRules:
                 description: Resources which will be used to evaluate the SubjectAccessReviewSpec.ResourceAttributes
@@ -215,6 +218,7 @@ spec:
                   required:
                   - verbs
                   type: object
+                maxItems: 64
                 type: array
             type: object
             x-kubernetes-validations:
