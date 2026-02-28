@@ -109,23 +109,25 @@ func TestControllerCmdFlagValidation(t *testing.T) {
 		name        string
 		bdConc      int
 		rdConc      int
+		waConc      int
 		expectError bool
 	}{
-		{"both positive", 5, 5, false},
-		{"both zero (disabled)", 0, 0, false},
-		{"bd zero rd positive", 0, 5, false},
-		{"bd positive rd zero", 5, 0, false},
-		{"bd negative", -1, 5, true},
-		{"rd negative", 5, -1, true},
-		{"both negative", -1, -1, true},
+		{"all positive", 5, 5, 1, false},
+		{"all zero (disabled)", 0, 0, 0, false},
+		{"bd zero rd positive", 0, 5, 1, false},
+		{"bd positive rd zero", 5, 0, 1, false},
+		{"bd negative", -1, 5, 1, true},
+		{"rd negative", 5, -1, 1, true},
+		{"wa negative", 5, 5, -1, true},
+		{"all negative", -1, -1, -1, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateConcurrency(tt.bdConc, tt.rdConc)
+			err := validateConcurrency(tt.bdConc, tt.rdConc, tt.waConc)
 			if (err != nil) != tt.expectError {
-				t.Errorf("validateConcurrency(%d, %d): expected error=%v, got %v",
-					tt.bdConc, tt.rdConc, tt.expectError, err)
+				t.Errorf("validateConcurrency(%d, %d, %d): expected error=%v, got %v",
+					tt.bdConc, tt.rdConc, tt.waConc, tt.expectError, err)
 			}
 		})
 	}
