@@ -17,11 +17,12 @@ import (
 	. "github.com/onsi/gomega"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/pkg/indexer"
@@ -34,7 +35,7 @@ var (
 	envCfg     *rest.Config
 	envClient  client.Client
 	envTestEnv *envtest.Environment
-	envCache   cache.Cache
+	envCancel  context.CancelFunc
 )
 
 func TestWebhookIntegration(t *testing.T) {
@@ -71,47 +72,45 @@ var _ = BeforeSuite(func() {
 
 	// +kubebuilder:scaffold:scheme
 
-	// Build a cache-backed client with field indexes so that MatchingFields
-	// queries in the webhook handler work correctly during integration tests.
-	envCache, err = cache.New(envCfg, cache.Options{Scheme: scheme.Scheme})
-	Expect(err).NotTo(HaveOccurred())
-
-	// Register the WebhookAuthorizer hasNamespaceSelector field index on the cache.
-	ctx := context.Background()
-	err = envCache.IndexField(ctx,
-		&authorizationv1alpha1.WebhookAuthorizer{},
-		indexer.WebhookAuthorizerHasNamespaceSelectorField,
-		indexer.WebhookAuthorizerHasNamespaceSelectorFunc,
-	)
-	Expect(err).NotTo(HaveOccurred())
-
-	// Start the cache in the background so it syncs with the API server.
-	cacheCtx, cacheCancel := context.WithCancel(ctx)
-	go func() {
-		defer GinkgoRecover()
-		Expect(envCache.Start(cacheCtx)).To(Succeed())
-	}()
-	DeferCleanup(func() { cacheCancel() })
-
-	// Wait for the cache to sync before running tests.
-	syncCtx, syncCancel := context.WithTimeout(ctx, 30*time.Second)
-	defer syncCancel()
-	Expect(envCache.WaitForCacheSync(syncCtx)).To(BeTrue())
-
-	// Create a delegating client: reads go through the indexed cache,
-	// writes go directly to the API server.
-	envClient, err = client.New(envCfg, client.Options{
+	// Use a manager-backed cached client so that field-indexed queries
+	// (e.g. WebhookAuthorizerHasNamespaceSelector) work correctly.
+	mgr, err := ctrl.NewManager(envCfg, ctrl.Options{
 		Scheme: scheme.Scheme,
-		Cache: &client.CacheOptions{
-			Reader: envCache,
+		Metrics: metricsserver.Options{
+			BindAddress: "0", // disable metrics server in tests
 		},
+		HealthProbeBindAddress: "0", // disable health probe listener in tests
 	})
 	Expect(err).NotTo(HaveOccurred())
+
+	setupCtx, cancel := context.WithCancel(context.Background())
+	envCancel = cancel
+
+	err = indexer.SetupIndexes(setupCtx, mgr)
+	Expect(err).NotTo(HaveOccurred())
+
+	go func() {
+		defer GinkgoRecover()
+		Expect(mgr.Start(setupCtx)).To(Succeed())
+	}()
+
+	// Wait for the informer cache to sync before running tests.
+	// Use a bounded timeout to prevent indefinite hangs in CI if the
+	// API server or CRDs fail to initialize.
+	syncCtx, syncCancel := context.WithTimeout(setupCtx, 2*time.Minute)
+	defer syncCancel()
+	synced := mgr.GetCache().WaitForCacheSync(syncCtx)
+	Expect(synced).To(BeTrue())
+
+	envClient = mgr.GetClient()
 	Expect(envClient).NotTo(BeNil())
 })
 
 var _ = AfterSuite(func() {
 	By("tearing down envtest environment")
+	if envCancel != nil {
+		envCancel()
+	}
 	if envTestEnv != nil {
 		err := envTestEnv.Stop()
 		if err != nil {
@@ -119,13 +118,3 @@ var _ = AfterSuite(func() {
 		}
 	}
 })
-
-// waitForCachedWA polls the cache-backed client until the WebhookAuthorizer
-// with the given name is visible, ensuring cache propagation before
-// assertions. This prevents flaky failures caused by watch event latency.
-func waitForCachedWA(ctx context.Context, name string) {
-	GinkgoHelper()
-	Eventually(func() error {
-		return envClient.Get(ctx, client.ObjectKey{Name: name}, &authorizationv1alpha1.WebhookAuthorizer{})
-	}, 5*time.Second, 50*time.Millisecond).Should(Succeed(), "WebhookAuthorizer %q did not appear in cache", name)
-}

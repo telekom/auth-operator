@@ -44,6 +44,17 @@ func sendSAR(authorizer *webhooks.Authorizer, sar authzv1.SubjectAccessReview) a
 	return resp
 }
 
+// createWAAndSync creates a WebhookAuthorizer and waits for the informer cache
+// to reflect it, preventing race conditions between writes and cached reads.
+func createWAAndSync(ctx context.Context, wa *authzv1alpha1.WebhookAuthorizer) {
+	GinkgoHelper()
+	Expect(envClient.Create(ctx, wa)).To(Succeed())
+	key := client.ObjectKeyFromObject(wa)
+	Eventually(func() error {
+		return envClient.Get(ctx, key, &authzv1alpha1.WebhookAuthorizer{})
+	}).WithTimeout(10 * time.Second).WithPolling(250 * time.Millisecond).Should(Succeed())
+}
+
 var _ = Describe("WebhookAuthorizer Integration", func() {
 	var (
 		ctx        context.Context
@@ -71,8 +82,7 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 					},
 				},
 			}
-			Expect(envClient.Create(ctx, wa)).To(Succeed())
-			waitForCachedWA(ctx, wa.Name)
+			createWAAndSync(ctx, wa)
 			DeferCleanup(func() {
 				_ = envClient.Delete(ctx, wa)
 			})
@@ -132,8 +142,7 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 					},
 				},
 			}
-			Expect(envClient.Create(ctx, wa)).To(Succeed())
-			waitForCachedWA(ctx, wa.Name)
+			createWAAndSync(ctx, wa)
 			DeferCleanup(func() {
 				_ = envClient.Delete(ctx, wa)
 			})
@@ -194,8 +203,7 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 					},
 				},
 			}
-			Expect(envClient.Create(setupCtx, wa)).To(Succeed())
-			waitForCachedWA(setupCtx, wa.Name)
+			createWAAndSync(setupCtx, wa)
 			DeferCleanup(func() {
 				_ = envClient.Delete(setupCtx, wa)
 			})
@@ -265,10 +273,8 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 					},
 				},
 			}
-			Expect(envClient.Create(ctx, wa1)).To(Succeed())
-			Expect(envClient.Create(ctx, wa2)).To(Succeed())
-			waitForCachedWA(ctx, wa1.Name)
-			waitForCachedWA(ctx, wa2.Name)
+			createWAAndSync(ctx, wa1)
+			createWAAndSync(ctx, wa2)
 			DeferCleanup(func() {
 				_ = envClient.Delete(ctx, wa1)
 				_ = envClient.Delete(ctx, wa2)
@@ -314,8 +320,7 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 					},
 				},
 			}
-			Expect(envClient.Create(ctx, wa)).To(Succeed())
-			waitForCachedWA(ctx, wa.Name)
+			createWAAndSync(ctx, wa)
 			DeferCleanup(func() {
 				_ = envClient.Delete(ctx, wa)
 			})
@@ -362,8 +367,7 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 					},
 				},
 			}
-			Expect(envClient.Create(ctx, wa)).To(Succeed())
-			waitForCachedWA(ctx, wa.Name)
+			createWAAndSync(ctx, wa)
 			DeferCleanup(func() {
 				_ = envClient.Delete(ctx, wa)
 			})
@@ -422,8 +426,7 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 					},
 				},
 			}
-			Expect(envClient.Create(ctx, wa)).To(Succeed())
-			waitForCachedWA(ctx, wa.Name)
+			createWAAndSync(ctx, wa)
 			DeferCleanup(func() {
 				_ = envClient.Delete(ctx, wa)
 			})
@@ -467,8 +470,7 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 					},
 				},
 			}
-			Expect(envClient.Create(ctx, wa)).To(Succeed())
-			waitForCachedWA(ctx, wa.Name)
+			createWAAndSync(ctx, wa)
 			DeferCleanup(func() {
 				_ = envClient.Delete(ctx, wa)
 			})
@@ -491,9 +493,9 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 			}
 			Expect(envClient.Update(ctx, wa)).To(Succeed())
 
-			// After update, user should be denied once the cache reflects the change.
+			// After update, user should be denied (wait for cache sync).
 			Eventually(func() bool {
-				r := sendSAR(authorizer, authzv1.SubjectAccessReview{
+				resp = sendSAR(authorizer, authzv1.SubjectAccessReview{
 					Spec: authzv1.SubjectAccessReviewSpec{
 						User: "live-user",
 						ResourceAttributes: &authzv1.ResourceAttributes{
@@ -501,8 +503,8 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 						},
 					},
 				})
-				return r.Status.Allowed
-			}, 5*time.Second, 50*time.Millisecond).Should(BeFalse())
+				return resp.Status.Allowed
+			}).WithTimeout(10 * time.Second).WithPolling(250 * time.Millisecond).Should(BeFalse())
 		})
 	})
 
@@ -519,8 +521,7 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 					},
 				},
 			}
-			Expect(envClient.Create(ctx, wa)).To(Succeed())
-			waitForCachedWA(ctx, wa.Name)
+			createWAAndSync(ctx, wa)
 			DeferCleanup(func() {
 				_ = envClient.Delete(ctx, wa)
 			})
