@@ -170,12 +170,12 @@ func TestAuditLog_AllowDecisionAtV1(t *testing.T) {
 	}
 }
 
-func TestAuditLog_NoOpinionDecisionAtV0(t *testing.T) {
+func TestAuditLog_NoOpinionDecisionAtV1(t *testing.T) {
 	scheme := newScheme()
 	cl := newIndexedClient(scheme)
 
-	// no-opinion is operationally important (no authorizer matched) and should
-	// be visible at V(0) alongside deny decisions.
+	// no-opinion is routine (no authorizer matched) and logged at V(1) to
+	// reduce noise at V(0).
 	var buf0 strings.Builder
 	logger0 := capturingLogger(&buf0, 0)
 	handler0 := &Authorizer{Client: cl, Log: logger0}
@@ -191,11 +191,11 @@ func TestAuditLog_NoOpinionDecisionAtV0(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler0.ServeHTTP(rec, req)
 
-	if !strings.Contains(buf0.String(), `"decision"="no-opinion"`) {
-		t.Errorf("no-opinion should appear at V(0), got:\n%s", buf0.String())
+	if strings.Contains(buf0.String(), `"decision"="no-opinion"`) {
+		t.Errorf("no-opinion should NOT appear at V(0), got:\n%s", buf0.String())
 	}
 
-	// At V(1) no-opinion should also appear.
+	// At V(1) no-opinion should appear.
 	var buf1 strings.Builder
 	logger1 := capturingLogger(&buf1, 1)
 	handler1 := &Authorizer{Client: cl, Log: logger1}
