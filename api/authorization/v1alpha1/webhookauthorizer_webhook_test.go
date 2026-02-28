@@ -274,3 +274,67 @@ func TestValidateCreate_WildcardVerb(t *testing.T) {
 		t.Fatalf("expected no error for wildcard verb, got: %v", err)
 	}
 }
+
+func TestFindNeverMatchingPrincipals(t *testing.T) {
+	tests := []struct {
+		name       string
+		fieldName  string
+		principals []Principal
+		wantCount  int
+	}{
+		{
+			name:      "nil principals",
+			fieldName: "allowedPrincipals",
+			wantCount: 0,
+		},
+		{
+			name:       "user set, no warning",
+			fieldName:  "allowedPrincipals",
+			principals: []Principal{{User: "alice", Namespace: "ns-a"}},
+			wantCount:  0,
+		},
+		{
+			name:       "groups set, no warning",
+			fieldName:  "deniedPrincipals",
+			principals: []Principal{{Groups: []string{"devs"}, Namespace: "ns-a"}},
+			wantCount:  0,
+		},
+		{
+			name:       "namespace only, warns",
+			fieldName:  "allowedPrincipals",
+			principals: []Principal{{Namespace: "ns-a"}},
+			wantCount:  1,
+		},
+		{
+			name:      "multiple with mixed, warns for namespace-only",
+			fieldName: "deniedPrincipals",
+			principals: []Principal{
+				{User: "alice", Namespace: "ns-a"},
+				{Namespace: "ns-b"},
+				{Namespace: "ns-c"},
+			},
+			wantCount: 2,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			warnings := findNeverMatchingPrincipals(tt.fieldName, tt.principals)
+			if len(warnings) != tt.wantCount {
+				t.Errorf("expected %d warnings, got %d: %v", tt.wantCount, len(warnings), warnings)
+			}
+		})
+	}
+}
+
+func TestFindPrincipalOverlaps_CrossNamespace(t *testing.T) {
+	// Regression: overlap must be detected when the same User appears in
+	// allowed and denied with different Namespaces, because the runtime
+	// principalMatches checks principal.User == user without namespace.
+	overlaps := findPrincipalOverlaps(
+		[]Principal{{User: "alice", Namespace: "ns-a"}},
+		[]Principal{{User: "alice", Namespace: "ns-b"}},
+	)
+	if len(overlaps) != 1 || overlaps[0] != "alice" {
+		t.Errorf("expected overlap [alice], got: %v", overlaps)
+	}
+}
