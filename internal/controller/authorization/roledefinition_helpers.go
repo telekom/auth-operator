@@ -12,6 +12,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	metav1ac "k8s.io/client-go/applyconfigurations/meta/v1"
+	rbacv1ac "k8s.io/client-go/applyconfigurations/rbac/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -263,28 +264,48 @@ func (r *RoleDefinitionReconciler) ensureRole(
 	}
 
 	ownerRef := ownerRefForRoleDefinition(roleDefinition)
-	labels := helpers.BuildResourceLabels(roleDefinition.Labels)
 	annotations := helpers.BuildResourceAnnotations("RoleDefinition", roleDefinition.Name)
+
+	// Merge aggregation labels first, then apply operator-managed labels on top
+	// so that AggregationLabels cannot overwrite the operator identification keys.
+	mergedLabels := make(map[string]string, len(roleDefinition.Labels)+len(roleDefinition.Spec.AggregationLabels))
+	for k, v := range roleDefinition.Spec.AggregationLabels {
+		mergedLabels[k] = v
+	}
+	labels := helpers.BuildResourceLabels(roleDefinition.Labels)
+	for k, v := range labels {
+		mergedLabels[k] = v
+	}
 
 	// Ensure the breakglass-compatible label is always managed via SSA for
 	// ClusterRoles so that toggling the flag false→true→false correctly
 	// sets the label to "false" (SSA retains field ownership).
 	if roleDefinition.Spec.TargetRole == authorizationv1alpha1.DefinitionClusterRole {
 		if roleDefinition.Spec.BreakglassAllowed {
-			labels[authorizationv1alpha1.BreakglassCompatibleLabel] = "true"
+			mergedLabels[authorizationv1alpha1.BreakglassCompatibleLabel] = "true"
 		} else {
-			labels[authorizationv1alpha1.BreakglassCompatibleLabel] = "false"
+			mergedLabels[authorizationv1alpha1.BreakglassCompatibleLabel] = "false"
 		}
 	}
 
 	// Apply the role using SSA with cache-aware diffing — skip if unchanged.
 	switch roleDefinition.Spec.TargetRole {
 	case authorizationv1alpha1.DefinitionClusterRole:
-		ac := pkgssa.ClusterRoleWithLabelsAndRules(
-			roleDefinition.Spec.TargetName,
-			labels,
-			finalRules,
-		).WithOwnerReferences(ownerRef).WithAnnotations(annotations)
+		var ac *rbacv1ac.ClusterRoleApplyConfiguration
+		if roleDefinition.Spec.AggregateFrom != nil {
+			// Aggregating ClusterRole: use aggregation rule instead of policy rules
+			ac = pkgssa.ClusterRoleWithAggregation(
+				roleDefinition.Spec.TargetName,
+				mergedLabels,
+				roleDefinition.Spec.AggregateFrom,
+			).WithOwnerReferences(ownerRef).WithAnnotations(annotations)
+		} else {
+			ac = pkgssa.ClusterRoleWithLabelsAndRules(
+				roleDefinition.Spec.TargetName,
+				mergedLabels,
+				finalRules,
+			).WithOwnerReferences(ownerRef).WithAnnotations(annotations)
+		}
 		result, err := pkgssa.PatchApplyClusterRole(ctx, r.client, ac)
 		if err != nil {
 			logger.Error(err, "Failed to apply ClusterRole via SSA",
@@ -300,7 +321,7 @@ func (r *RoleDefinitionReconciler) ensureRole(
 		ac := pkgssa.RoleWithLabelsAndRules(
 			roleDefinition.Spec.TargetName,
 			roleDefinition.Spec.TargetNamespace,
-			labels,
+			mergedLabels,
 			finalRules,
 		).WithOwnerReferences(ownerRef).WithAnnotations(annotations)
 		result, err := pkgssa.PatchApplyRole(ctx, r.client, ac)
