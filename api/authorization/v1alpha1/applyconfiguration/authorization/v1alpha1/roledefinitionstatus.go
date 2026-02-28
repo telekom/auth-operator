@@ -29,7 +29,7 @@ type RoleDefinitionStatusApplyConfiguration struct {
 	// ObservedGeneration is the last observed generation of the resource.
 	// This is used by kstatus to determine if the resource is current.
 	ObservedGeneration *int64 `json:"observedGeneration,omitempty"`
-	// Not extremely important as most status updates are driven by Conditions. We read the JSONPath from this status field to signify completed reconciliation.
+	// RoleReconciled indicates whether the target role has been successfully reconciled.
 	RoleReconciled *bool `json:"roleReconciled,omitempty"`
 	// Conditions defines current service state of the Role definition. All conditions should evaluate to true to signify successful reconciliation.
 	Conditions []v1.ConditionApplyConfiguration `json:"conditions,omitempty"`

@@ -383,18 +383,36 @@ func (r *RoleDefinitionReconciler) filterAPIResourcesForRoleDefinition(
 ) (map[string]*rbacv1.PolicyRule, error) {
 	rulesByAPIGroupAndVerbs := make(map[string]*rbacv1.PolicyRule)
 
-	// Filter API Resources based on RoleDefinition spec
+	// Filter API Resources based on RoleDefinition spec.
+	//
+	// NOTE: K8s RBAC PolicyRules are version-agnostic (they use apiGroups,
+	// not apiVersions). Version-specific filtering here controls which API
+	// versions are used for resource discovery. If multiple versions of a
+	// group expose the same resource, restricting one version has no effect
+	// on RBAC enforcement — the generated PolicyRule will still grant
+	// access to that resource across all versions of the group.
 	for gv, apiResources := range apiResources {
 		groupVersion, err := schema.ParseGroupVersion(gv)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse GroupVersion %q: %w", gv, err)
 		}
 
-		// NOTE: Currently filters by API group name only. The Versions field in metav1.APIGroup
-		// is accepted but ignored - specifying a group restricts ALL versions of that group.
-		// TODO(#46): Implement version-specific filtering to respect the Versions field in RestrictedAPIs.
-		// When Versions is empty, restrict all versions; when specified, restrict only those versions.
-		apiIsRestricted := slices.ContainsFunc(roleDefinition.Spec.RestrictedAPIs, func(ag metav1.APIGroup) bool { return ag.Name == groupVersion.Group })
+		// Check if this group/version is restricted.
+		// When Versions is empty, restrict all versions of the group.
+		// When Versions is specified, restrict only the listed versions.
+		apiIsRestricted := slices.ContainsFunc(roleDefinition.Spec.RestrictedAPIs, func(ag metav1.APIGroup) bool {
+			if ag.Name != groupVersion.Group {
+				return false
+			}
+			// No versions specified means restrict all versions of this group.
+			if len(ag.Versions) == 0 {
+				return true
+			}
+			// Restrict only if the current version is in the specified list.
+			return slices.ContainsFunc(ag.Versions, func(v metav1.GroupVersionForDiscovery) bool {
+				return v.Version == groupVersion.Version
+			})
+		})
 		// Skip restricted API groups
 		if apiIsRestricted {
 			continue
