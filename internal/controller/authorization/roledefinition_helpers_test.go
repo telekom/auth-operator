@@ -966,3 +966,135 @@ func TestHandleDeletionDeleteError(t *testing.T) {
 	g.Expect(err).To(HaveOccurred())
 	g.Expect(err.Error()).To(ContainSubstring("injected delete error"))
 }
+
+func TestEnsureRoleWithAggregationLabels(t *testing.T) {
+	ctx := context.Background()
+	g := NewWithT(t)
+
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+
+	rd := &authorizationv1alpha1.RoleDefinition{
+		TypeMeta:   metav1.TypeMeta{APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: "RoleDefinition"},
+		ObjectMeta: metav1.ObjectMeta{Name: "agg-labels-rd", UID: "agg-labels-uid"},
+		Spec: authorizationv1alpha1.RoleDefinitionSpec{
+			TargetRole:      authorizationv1alpha1.DefinitionClusterRole,
+			TargetName:      "custom-viewer",
+			ScopeNamespaced: false,
+			AggregationLabels: map[string]string{
+				"rbac.authorization.k8s.io/aggregate-to-view": "true",
+			},
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(rd).Build()
+	r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	rules := []rbacv1.PolicyRule{
+		{APIGroups: []string{""}, Resources: []string{"configmaps"}, Verbs: []string{"get", "list"}},
+	}
+	err := r.ensureRole(ctx, rd, rules)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	// Verify the ClusterRole was created with aggregation labels merged in
+	cr := &rbacv1.ClusterRole{}
+	g.Expect(c.Get(ctx, client.ObjectKeyFromObject(&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "custom-viewer"}}), cr)).To(Succeed())
+	g.Expect(cr.Labels).To(HaveKeyWithValue("rbac.authorization.k8s.io/aggregate-to-view", "true"))
+	g.Expect(cr.Rules).To(HaveLen(1))
+	g.Expect(cr.AggregationRule).To(BeNil())
+}
+
+func TestEnsureRoleWithAggregateFrom(t *testing.T) {
+	ctx := context.Background()
+	g := NewWithT(t)
+
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+
+	rd := &authorizationv1alpha1.RoleDefinition{
+		TypeMeta:   metav1.TypeMeta{APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: "RoleDefinition"},
+		ObjectMeta: metav1.ObjectMeta{Name: "agg-from-rd", UID: "agg-from-uid"},
+		Spec: authorizationv1alpha1.RoleDefinitionSpec{
+			TargetRole:      authorizationv1alpha1.DefinitionClusterRole,
+			TargetName:      "tenant-admin",
+			ScopeNamespaced: false,
+			AggregateFrom: &rbacv1.AggregationRule{
+				ClusterRoleSelectors: []metav1.LabelSelector{
+					{MatchLabels: map[string]string{"t-caas.telekom.com/aggregate-to-tenant-admin": "true"}},
+				},
+			},
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(rd).Build()
+	r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	// No rules for aggregating ClusterRole
+	err := r.ensureRole(ctx, rd, nil)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	// Verify the ClusterRole was created with aggregation rule and no rules
+	cr := &rbacv1.ClusterRole{}
+	g.Expect(c.Get(ctx, client.ObjectKeyFromObject(&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "tenant-admin"}}), cr)).To(Succeed())
+	g.Expect(cr.Rules).To(BeEmpty())
+	g.Expect(cr.AggregationRule).NotTo(BeNil())
+	g.Expect(cr.AggregationRule.ClusterRoleSelectors).To(HaveLen(1))
+	g.Expect(cr.AggregationRule.ClusterRoleSelectors[0].MatchLabels).To(
+		HaveKeyWithValue("t-caas.telekom.com/aggregate-to-tenant-admin", "true"),
+	)
+}
+
+// TestEnsureRole_TransitionFromRulesToAggregateFrom verifies that switching
+// a RoleDefinition from rule-based to aggregateFrom correctly clears the old
+// rules and sets the aggregation rule on the existing ClusterRole.
+func TestEnsureRole_TransitionFromRulesToAggregateFrom(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+
+	s := scheme.Scheme
+	_ = authorizationv1alpha1.AddToScheme(s)
+
+	// Start with a rule-based ClusterRole.
+	existingCR := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "transition-role",
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "auth-operator",
+			},
+		},
+		Rules: []rbacv1.PolicyRule{
+			{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods"}},
+		},
+	}
+
+	// Now the RoleDefinition switches to aggregateFrom.
+	rd := &authorizationv1alpha1.RoleDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "transition-role",
+		},
+		Spec: authorizationv1alpha1.RoleDefinitionSpec{
+			TargetRole:      authorizationv1alpha1.DefinitionClusterRole,
+			TargetName:      "transition-role",
+			ScopeNamespaced: false,
+			AggregateFrom: &rbacv1.AggregationRule{
+				ClusterRoleSelectors: []metav1.LabelSelector{
+					{MatchLabels: map[string]string{"custom/aggregate-to-transition": "true"}},
+				},
+			},
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(existingCR, rd).Build()
+	r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	err := r.ensureRole(ctx, rd, nil)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	cr := &rbacv1.ClusterRole{}
+	g.Expect(c.Get(ctx, client.ObjectKeyFromObject(existingCR), cr)).To(Succeed())
+	g.Expect(cr.Rules).To(BeEmpty(), "rules should be cleared after transition to aggregateFrom")
+	g.Expect(cr.AggregationRule).NotTo(BeNil(), "aggregation rule should be set")
+	g.Expect(cr.AggregationRule.ClusterRoleSelectors).To(HaveLen(1))
+}

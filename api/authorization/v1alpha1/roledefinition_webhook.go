@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -53,19 +56,8 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 	logger := log.FromContext(ctx).WithName("roledefinition-webhook")
 	logger.V(1).Info("validating create", "name", obj.Name)
 
-	// Validate version format in RestrictedAPIs
-	if err := validateRestrictedAPIsVersions(obj); err != nil {
-		return nil, apierrors.NewBadRequest(err.Error())
-	}
-
-	// Validate TargetNamespace is required when TargetRole is Role
-	if obj.Spec.TargetRole == DefinitionNamespacedRole && obj.Spec.TargetNamespace == "" {
-		return nil, apierrors.NewBadRequest("targetNamespace is required when targetRole is 'Role'")
-	}
-
-	// Validate TargetNamespace must not be set when TargetRole is ClusterRole
-	if obj.Spec.TargetRole == DefinitionClusterRole && obj.Spec.TargetNamespace != "" {
-		return nil, apierrors.NewBadRequest("targetNamespace must not be set when targetRole is 'ClusterRole'")
+	if err := validateRoleDefinitionSpec(obj); err != nil {
+		return nil, err
 	}
 
 	// Use field index for efficient lookup by TargetName
@@ -97,19 +89,8 @@ func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 		return nil, nil
 	}
 
-	// Validate version format in RestrictedAPIs
-	if err := validateRestrictedAPIsVersions(newObj); err != nil {
-		return nil, apierrors.NewBadRequest(err.Error())
-	}
-
-	// Validate TargetNamespace is required when TargetRole is Role
-	if newObj.Spec.TargetRole == DefinitionNamespacedRole && newObj.Spec.TargetNamespace == "" {
-		return nil, apierrors.NewBadRequest("targetNamespace is required when targetRole is 'Role'")
-	}
-
-	// Validate TargetNamespace must not be set when TargetRole is ClusterRole
-	if newObj.Spec.TargetRole == DefinitionClusterRole && newObj.Spec.TargetNamespace != "" {
-		return nil, apierrors.NewBadRequest("targetNamespace must not be set when targetRole is 'ClusterRole'")
+	if err := validateRoleDefinitionSpec(newObj); err != nil {
+		return nil, err
 	}
 
 	// Use field index for efficient lookup by TargetName
@@ -137,4 +118,117 @@ func (v *RoleDefinitionValidator) ValidateDelete(ctx context.Context, obj *RoleD
 	logger := log.FromContext(ctx).WithName("roledefinition-webhook")
 	logger.V(1).Info("validating delete", "name", obj.Name)
 	return nil, nil
+}
+
+// validateRoleDefinitionSpec validates the RoleDefinition spec fields.
+func validateRoleDefinitionSpec(obj *RoleDefinition) error {
+	// Validate version format in RestrictedAPIs
+	if err := validateRestrictedAPIsVersions(obj); err != nil {
+		return apierrors.NewBadRequest(err.Error())
+	}
+
+	// Validate TargetNamespace is required when TargetRole is Role
+	if obj.Spec.TargetRole == DefinitionNamespacedRole && obj.Spec.TargetNamespace == "" {
+		return apierrors.NewBadRequest("targetNamespace is required when targetRole is 'Role'")
+	}
+
+	// Validate TargetNamespace must not be set when TargetRole is ClusterRole
+	if obj.Spec.TargetRole == DefinitionClusterRole && obj.Spec.TargetNamespace != "" {
+		return apierrors.NewBadRequest("targetNamespace must not be set when targetRole is 'ClusterRole'")
+	}
+
+	// Aggregation fields are only valid for ClusterRole targets
+	if obj.Spec.TargetRole != DefinitionClusterRole {
+		if len(obj.Spec.AggregationLabels) > 0 {
+			return apierrors.NewBadRequest("aggregationLabels can only be used when targetRole is 'ClusterRole'")
+		}
+		if obj.Spec.AggregateFrom != nil {
+			return apierrors.NewBadRequest("aggregateFrom can only be used when targetRole is 'ClusterRole'")
+		}
+	}
+
+	// Reject aggregation labels that target built-in ClusterRoles to prevent
+	// privilege escalation via ClusterRole aggregation.
+	// Only applies to ClusterRole targets since aggregation is a ClusterRole-only concept.
+	if obj.Spec.TargetRole == DefinitionClusterRole {
+		if err := rejectForbiddenAggregationLabels(obj); err != nil {
+			return err
+		}
+	}
+
+	// AggregateFrom is mutually exclusive with discovery-based fields
+	if obj.Spec.AggregateFrom != nil {
+		if err := validateAggregateFrom(obj); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// forbiddenAggregationTargets lists built-in ClusterRoles that must never be
+// recipients of aggregation — granting into cluster-admin is a privilege escalation.
+// admin/edit/view are intentionally allowed as they are the standard Kubernetes
+// aggregation targets (see issue #51 Use Case 1).
+var forbiddenAggregationTargets = []string{"cluster-admin"}
+
+// rejectForbiddenAggregationLabels checks both spec.aggregationLabels and
+// metadata.labels for aggregation keys targeting built-in ClusterRoles.
+func rejectForbiddenAggregationLabels(obj *RoleDefinition) error {
+	for key := range obj.Spec.AggregationLabels {
+		for _, target := range forbiddenAggregationTargets {
+			if key == rbacv1.GroupName+"/aggregate-to-"+target {
+				return apierrors.NewForbidden(
+					schema.GroupResource{Group: GroupVersion.Group, Resource: "roledefinitions"},
+					obj.Name,
+					field.Forbidden(
+						field.NewPath("spec", "aggregationLabels").Key(key),
+						fmt.Sprintf("must not aggregate into built-in ClusterRole %q", target),
+					),
+				)
+			}
+		}
+	}
+	for key := range obj.Labels {
+		for _, target := range forbiddenAggregationTargets {
+			if key == rbacv1.GroupName+"/aggregate-to-"+target {
+				return apierrors.NewForbidden(
+					schema.GroupResource{Group: GroupVersion.Group, Resource: "roledefinitions"},
+					obj.Name,
+					field.Forbidden(
+						field.NewPath("metadata", "labels").Key(key),
+						fmt.Sprintf("must not aggregate into built-in ClusterRole %q — label propagates to generated ClusterRole", target),
+					),
+				)
+			}
+		}
+	}
+	return nil
+}
+
+// validateAggregateFrom validates the AggregateFrom field constraints.
+func validateAggregateFrom(obj *RoleDefinition) error {
+	if len(obj.Spec.RestrictedAPIs) > 0 || len(obj.Spec.RestrictedResources) > 0 || len(obj.Spec.RestrictedVerbs) > 0 {
+		return apierrors.NewBadRequest(
+			"aggregateFrom is mutually exclusive with restrictedApis, restrictedResources, and restrictedVerbs",
+		)
+	}
+	if len(obj.Spec.AggregateFrom.ClusterRoleSelectors) == 0 {
+		return apierrors.NewBadRequest("aggregateFrom must have at least one clusterRoleSelector")
+	}
+	// Reject selectors with no criteria — an empty selector matches all ClusterRoles
+	// and would grant unbounded privilege aggregation.
+	for i, selector := range obj.Spec.AggregateFrom.ClusterRoleSelectors {
+		if len(selector.MatchLabels) == 0 && len(selector.MatchExpressions) == 0 {
+			return apierrors.NewForbidden(
+				schema.GroupResource{Group: GroupVersion.Group, Resource: "roledefinitions"},
+				obj.Name,
+				field.Forbidden(
+					field.NewPath("spec", "aggregateFrom", "clusterRoleSelectors").Index(i),
+					"empty selector would match all ClusterRoles; specify matchLabels or matchExpressions",
+				),
+			)
+		}
+	}
+	return nil
 }

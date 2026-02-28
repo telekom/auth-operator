@@ -63,6 +63,81 @@ spec:
           spec:
             description: RoleDefinitionSpec defines the desired state of RoleDefinition.
             properties:
+              aggregateFrom:
+                description: |-
+                  AggregateFrom generates an aggregating ClusterRole that uses label selectors
+                  to compose rules from other ClusterRoles, instead of specifying rules directly.
+                  When set, the controller skips API discovery and filtering; the generated ClusterRole
+                  has an aggregationRule and empty rules[] (rules are managed by the aggregation controller).
+                  Mutually exclusive with RestrictedAPIs, RestrictedResources, and RestrictedVerbs.
+                  Only applicable when targetRole is ClusterRole.
+                properties:
+                  clusterRoleSelectors:
+                    description: |-
+                      ClusterRoleSelectors holds a list of selectors which will be used to find ClusterRoles and create the rules.
+                      If any of the selectors match, then the ClusterRole's permissions will be added
+                    items:
+                      description: |-
+                        A label selector is a label query over a set of resources. The result of matchLabels and
+                        matchExpressions are ANDed. An empty label selector matches all objects. A null
+                        label selector matches no objects.
+                      properties:
+                        matchExpressions:
+                          description: matchExpressions is a list of label selector
+                            requirements. The requirements are ANDed.
+                          items:
+                            description: |-
+                              A label selector requirement is a selector that contains values, a key, and an operator that
+                              relates the key and values.
+                            properties:
+                              key:
+                                description: key is the label key that the selector
+                                  applies to.
+                                type: string
+                              operator:
+                                description: |-
+                                  operator represents a key's relationship to a set of values.
+                                  Valid operators are In, NotIn, Exists and DoesNotExist.
+                                type: string
+                              values:
+                                description: |-
+                                  values is an array of string values. If the operator is In or NotIn,
+                                  the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                  the values array must be empty. This array is replaced during a strategic
+                                  merge patch.
+                                items:
+                                  type: string
+                                type: array
+                                x-kubernetes-list-type: atomic
+                            required:
+                            - key
+                            - operator
+                            type: object
+                          type: array
+                          x-kubernetes-list-type: atomic
+                        matchLabels:
+                          additionalProperties:
+                            type: string
+                          description: |-
+                            matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                            map is equivalent to an element of matchExpressions, whose key field is "key", the
+                            operator is "In", and the values array contains only "value". The requirements are ANDed.
+                          type: object
+                      type: object
+                      x-kubernetes-map-type: atomic
+                    type: array
+                    x-kubernetes-list-type: atomic
+                type: object
+              aggregationLabels:
+                additionalProperties:
+                  type: string
+                description: |-
+                  AggregationLabels are additional labels applied to the generated ClusterRole so that
+                  it participates in Kubernetes' built-in ClusterRole aggregation mechanism.
+                  For example, setting `rbac.authorization.k8s.io/aggregate-to-view: "true"` causes the
+                  generated ClusterRole's rules to be aggregated into the default "view" ClusterRole.
+                  Only applicable when targetRole is ClusterRole.
+                type: object
               restrictedApis:
                 description: |-
                   RestrictedAPIs holds all API groups which will *NOT* be reconciled into the "TargetRole".
