@@ -30,6 +30,10 @@ import (
 	"github.com/telekom/auth-operator/pkg/helpers"
 	"github.com/telekom/auth-operator/pkg/metrics"
 	pkgssa "github.com/telekom/auth-operator/pkg/ssa"
+	"github.com/telekom/auth-operator/pkg/tracing"
+
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -77,7 +81,11 @@ type BindDefinitionReconciler struct {
 	scheme                *runtime.Scheme
 	RoleBindingTerminator *RoleBindingTerminator
 	recorder              events.EventRecorder
+	tracer                trace.Tracer
 }
+
+// setTracer implements tracerSetter.
+func (r *BindDefinitionReconciler) setTracer(t trace.Tracer) { r.tracer = t }
 
 // NewBindDefinitionReconciler creates a new BindDefinition reconciler.
 // Uses the manager's cached client for improved performance.
@@ -87,18 +95,23 @@ func NewBindDefinitionReconciler(
 	scheme *runtime.Scheme,
 	recorder events.EventRecorder,
 	resourceTracker *discovery.ResourceTracker,
+	opts ...ReconcilerOption,
 ) (*BindDefinitionReconciler, error) {
 	rbTerminator, err := NewRoleBindingTerminator(cachedClient, config, scheme, recorder, resourceTracker)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create rolebinding terminator: %w", err)
 	}
 
-	return &BindDefinitionReconciler{
+	r := &BindDefinitionReconciler{
 		client:                cachedClient,
 		scheme:                scheme,
 		recorder:              recorder,
 		RoleBindingTerminator: rbTerminator,
-	}, nil
+	}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -207,9 +220,27 @@ func (r *BindDefinitionReconciler) isSAReferencedByOtherBindDefs(ctx context.Con
 // Reconcile handles the reconciliation loop for BindDefinition resources.
 // It manages the lifecycle of role bindings based on the BindDefinition spec.
 // Status updates use Server-Side Apply (SSA) to avoid race conditions.
-func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, retErr error) {
 	startTime := time.Now()
 	logger := log.FromContext(ctx)
+
+	// Start tracing span
+	if r.tracer != nil {
+		var span trace.Span
+		ctx, span = r.tracer.Start(ctx, "reconcile.BindDefinition",
+			trace.WithAttributes(
+				tracing.AttrController.String("BindDefinition"),
+				tracing.AttrResource.String(req.Name),
+				tracing.AttrNamespace.String(req.Namespace),
+			))
+		defer func() {
+			if retErr != nil {
+				span.RecordError(retErr)
+				span.SetStatus(codes.Error, retErr.Error())
+			}
+			span.End()
+		}()
+	}
 
 	// === RECONCILE START ===
 	logger.V(1).Info("=== Reconcile START ===",

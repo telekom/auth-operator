@@ -38,6 +38,14 @@ spec:
         - --cert-rotation-validating-webhook={{ include "auth-operator.fullname" . }}-binder-validating-webhook-configuration
         - --tdg-migration={{ .Values.webhookServer.tdgMigration }}
         - --verbosity={{ .Values.global.logLevel }}
+        {{- if .Values.tracing.enabled }}
+        - --tracing-enabled
+        - --tracing-endpoint={{ .Values.tracing.endpoint }}
+        - --tracing-sampling-rate={{ .Values.tracing.samplingRate }}
+        {{- if .Values.tracing.insecure }}
+        - --tracing-insecure
+        {{- end }}
+        {{- end }}
         command:
         - /auth-operator
         env:
