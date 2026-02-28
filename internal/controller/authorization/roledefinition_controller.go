@@ -30,6 +30,10 @@ import (
 	conditions "github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/discovery"
 	"github.com/telekom/auth-operator/pkg/metrics"
+	"github.com/telekom/auth-operator/pkg/tracing"
+
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=roledefinitions,verbs=get;list;watch;update;patch
@@ -52,11 +56,15 @@ type RoleDefinitionReconciler struct {
 	recorder        events.EventRecorder
 	resourceTracker *discovery.ResourceTracker
 	trackerEvents   chan event.TypedGenericEvent[client.Object]
+	tracer          trace.Tracer
 }
+
+// setTracer implements tracerSetter.
+func (r *RoleDefinitionReconciler) setTracer(t trace.Tracer) { r.tracer = t }
 
 // NewRoleDefinitionReconciler creates a new RoleDefinition reconciler.
 // Uses the manager's cached client for improved performance.
-func NewRoleDefinitionReconciler(cachedClient client.Client, scheme *runtime.Scheme, recorder events.EventRecorder, resourceTracker *discovery.ResourceTracker) (*RoleDefinitionReconciler, error) {
+func NewRoleDefinitionReconciler(cachedClient client.Client, scheme *runtime.Scheme, recorder events.EventRecorder, resourceTracker *discovery.ResourceTracker, opts ...ReconcilerOption) (*RoleDefinitionReconciler, error) {
 	if resourceTracker == nil {
 		return nil, fmt.Errorf("resourceTracker cannot be nil")
 	}
@@ -68,13 +76,17 @@ func NewRoleDefinitionReconciler(cachedClient client.Client, scheme *runtime.Sch
 	}
 	resourceTracker.AddSignalFunc(trackerCallback)
 
-	return &RoleDefinitionReconciler{
+	r := &RoleDefinitionReconciler{
 		client:          cachedClient,
 		scheme:          scheme,
 		recorder:        recorder,
 		resourceTracker: resourceTracker,
 		trackerEvents:   trackerEvents,
-	}, nil
+	}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -138,9 +150,27 @@ func (r *RoleDefinitionReconciler) queueAll() handler.MapFunc {
 //  4. Discover and filter API resources to build policy rules
 //  5. Ensure the target role exists with computed rules
 //  6. Apply final status
-func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, retErr error) {
 	startTime := time.Now()
 	logger := log.FromContext(ctx)
+
+	// Start tracing span
+	if r.tracer != nil {
+		var span trace.Span
+		ctx, span = r.tracer.Start(ctx, "reconcile.RoleDefinition",
+			trace.WithAttributes(
+				tracing.AttrController.String("RoleDefinition"),
+				tracing.AttrResource.String(req.Name),
+				tracing.AttrNamespace.String(req.Namespace),
+			))
+		defer func() {
+			if retErr != nil {
+				span.RecordError(retErr)
+				span.SetStatus(codes.Error, retErr.Error())
+			}
+			span.End()
+		}()
+	}
 
 	// === RECONCILE START ===
 	logger.V(1).Info("=== Reconcile START ===",

@@ -16,6 +16,8 @@ import (
 	authorizationcontroller "github.com/telekom/auth-operator/internal/controller/authorization"
 	"github.com/telekom/auth-operator/pkg/discovery"
 	"github.com/telekom/auth-operator/pkg/indexer"
+	"github.com/telekom/auth-operator/pkg/system"
+	"github.com/telekom/auth-operator/pkg/tracing"
 
 	// Import metrics package to register custom Prometheus metrics.
 	_ "github.com/telekom/auth-operator/pkg/metrics"
@@ -62,6 +64,22 @@ are created and kept in sync.`,
 		)
 
 		ctx := ctrl.SetupSignalHandler()
+
+		// Initialize tracing
+		tracingProvider, err := tracing.Setup(ctx, tracingConfig(), system.Version)
+		if err != nil {
+			return fmt.Errorf("unable to setup tracing: %w", err)
+		}
+		defer func() {
+			if shutdownErr := tracingProvider.Shutdown(ctx); shutdownErr != nil {
+				setupLog.Error(shutdownErr, "error shutting down tracing provider")
+			}
+		}()
+		if tracingEnabled {
+			setupLog.Info("tracing enabled",
+				"endpoint", tracingEndpoint,
+				"samplingRate", tracingSamplingRate)
+		}
 
 		cfg, err := ctrl.GetConfig()
 		if err != nil {
@@ -110,13 +128,21 @@ are created and kept in sync.`,
 		}
 		setupLog.Info("field indexes configured for cached client")
 
+		// Build reconciler options (tracing)
+		var reconcilerOpts []authorizationcontroller.ReconcilerOption
+		if tracingEnabled {
+			reconcilerOpts = append(reconcilerOpts,
+				authorizationcontroller.WithTracer(tracingProvider.Tracer()))
+		}
+
 		if roleDefinitionConcurrency > 0 {
 			setupLog.Info("creating RoleDefinition reconciler", "concurrency", roleDefinitionConcurrency)
 			roleDefinitionController, err := authorizationcontroller.NewRoleDefinitionReconciler(
 				mgr.GetClient(),
 				mgr.GetScheme(),
 				mgr.GetEventRecorder("RoleDefinitionReconciler"),
-				resourceTracker)
+				resourceTracker,
+				reconcilerOpts...)
 			if err != nil {
 				return fmt.Errorf("unable to create RoleDefinition reconciler: %w", err)
 			}
@@ -136,7 +162,8 @@ are created and kept in sync.`,
 				mgr.GetConfig(),
 				mgr.GetScheme(),
 				mgr.GetEventRecorder("BindDefinitionReconciler"),
-				resourceTracker)
+				resourceTracker,
+				reconcilerOpts...)
 			if err != nil {
 				return fmt.Errorf("unable to create BindDefinition reconciler: %w", err)
 			}

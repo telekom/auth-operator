@@ -32,6 +32,14 @@ spec:
         - --binddefinition-concurrency={{ .Values.controller.bindDefinitionConcurrency }}
         - --roledefinition-concurrency={{ .Values.controller.roleDefinitionConcurrency }}
         - --verbosity={{ .Values.global.logLevel }}
+        {{- if .Values.tracing.enabled }}
+        - --tracing-enabled
+        - --tracing-endpoint={{ .Values.tracing.endpoint }}
+        - --tracing-sampling-rate={{ .Values.tracing.samplingRate }}
+        {{- if .Values.tracing.insecure }}
+        - --tracing-insecure
+        {{- end }}
+        {{- end }}
         command:
         - /auth-operator
         image: {{ include "auth-operator.image" . }}
