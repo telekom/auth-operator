@@ -129,10 +129,11 @@ func validateRoleDefinitionSpec(obj *RoleDefinition) error {
 
 	// Reject aggregation labels that target built-in ClusterRoles to prevent
 	// privilege escalation via ClusterRole aggregation.
-	// Check both spec.aggregationLabels and metadata labels, since the controller
-	// propagates both to the generated ClusterRole.
-	if err := rejectForbiddenAggregationLabels(obj); err != nil {
-		return err
+	// Only applies to ClusterRole targets since aggregation is a ClusterRole-only concept.
+	if obj.Spec.TargetRole == DefinitionClusterRole {
+		if err := rejectForbiddenAggregationLabels(obj); err != nil {
+			return err
+		}
 	}
 
 	// AggregateFrom is mutually exclusive with discovery-based fields
@@ -146,8 +147,10 @@ func validateRoleDefinitionSpec(obj *RoleDefinition) error {
 }
 
 // forbiddenAggregationTargets lists built-in ClusterRoles that must never be
-// recipients of aggregation — granting into these roles is a privilege escalation.
-var forbiddenAggregationTargets = []string{"admin", "edit", "view", "cluster-admin"}
+// recipients of aggregation — granting into cluster-admin is a privilege escalation.
+// admin/edit/view are intentionally allowed as they are the standard Kubernetes
+// aggregation targets (see issue #51 Use Case 1).
+var forbiddenAggregationTargets = []string{"cluster-admin"}
 
 // rejectForbiddenAggregationLabels checks both spec.aggregationLabels and
 // metadata.labels for aggregation keys targeting built-in ClusterRoles.

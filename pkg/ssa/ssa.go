@@ -145,6 +145,10 @@ func ClusterRoleWithAggregation(
 		ac.WithLabels(labels)
 	}
 
+	// Explicitly set rules to empty so SSA removes any previously-applied rules
+	// when transitioning from rule-based to aggregation-based reconciliation.
+	ac.WithRules()
+
 	if aggregationRule != nil {
 		aggAC := rbacv1ac.AggregationRule()
 		for i := range aggregationRule.ClusterRoleSelectors {

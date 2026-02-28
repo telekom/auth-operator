@@ -282,15 +282,35 @@ var _ = Describe("RoleDefinition Webhook", func() {
 			Expect(err.Error()).To(ContainSubstring("must have at least one clusterRoleSelector"))
 		})
 
-		It("Should deny aggregation labels targeting built-in ClusterRoles", func() {
-			for _, target := range []string{"admin", "edit", "view", "cluster-admin"} {
+		It("Should deny aggregation labels targeting cluster-admin", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-agg-builtin-cluster-admin",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-agg-builtin-cluster-admin",
+					ScopeNamespaced: false,
+					AggregationLabels: map[string]string{
+						"rbac.authorization.k8s.io/aggregate-to-cluster-admin": "true",
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, rd)
+			Expect(err).To(HaveOccurred(), "expected rejection for aggregate-to-cluster-admin")
+			Expect(err.Error()).To(ContainSubstring("Forbidden"))
+			Expect(err.Error()).To(ContainSubstring("built-in ClusterRole"))
+		})
+
+		It("Should allow aggregation labels targeting admin, edit, and view", func() {
+			for _, target := range []string{"admin", "edit", "view"} {
 				rd := &RoleDefinition{
 					ObjectMeta: metav1.ObjectMeta{
-						Name: "test-agg-builtin-" + target,
+						Name: "test-agg-allowed-" + target,
 					},
 					Spec: RoleDefinitionSpec{
 						TargetRole:      DefinitionClusterRole,
-						TargetName:      "test-agg-builtin-" + target,
+						TargetName:      "test-agg-allowed-" + target,
 						ScopeNamespaced: false,
 						AggregationLabels: map[string]string{
 							"rbac.authorization.k8s.io/aggregate-to-" + target: "true",
@@ -298,9 +318,7 @@ var _ = Describe("RoleDefinition Webhook", func() {
 					},
 				}
 				err := k8sClient.Create(ctx, rd)
-				Expect(err).To(HaveOccurred(), "expected rejection for aggregate-to-%s", target)
-				Expect(err.Error()).To(ContainSubstring("Forbidden"), "expected Forbidden for aggregate-to-%s", target)
-				Expect(err.Error()).To(ContainSubstring("built-in ClusterRole"), "expected built-in ClusterRole in error for aggregate-to-%s", target)
+				Expect(err).NotTo(HaveOccurred(), "aggregate-to-%s should be allowed per issue #51", target)
 			}
 		})
 
