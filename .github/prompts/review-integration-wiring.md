@@ -94,7 +94,7 @@ fields, unused interfaces, and incomplete plumbing.
 - The scheme should instead control TLS configuration
   (`WithInsecure()` for `http://`, default TLS for `https://`).
 
-### 11. PR Description ↔ Implementation Alignment
+### 12. PR Description ↔ Implementation Alignment
 
 - When the PR description claims a specific feature is implemented,
   verify the code actually delivers it. Common gaps:

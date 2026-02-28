@@ -51,7 +51,7 @@ and RoleBindings — it is a privilege-management system and security-critical.
   level, including Debug.
 - Check that TLS configuration uses secure defaults (TLS 1.2+).
 
-### 9. Audit Log Completeness
+### 6. Audit Log Completeness
 
 - Authorization decision audit logs must include **all** decision-relevant
   fields: `decision`, `allowed`, `reason`, `user`, `resource`, and
@@ -61,14 +61,14 @@ and RoleBindings — it is a privilege-management system and security-critical.
 - Verify that no-opinion and deny decisions are logged at appropriate
   verbosity (deny at V(0), no-opinion at V(1), allow trace at V(2)).
 
-### 6. Input Validation
+### 7. Input Validation
 
 - All user-supplied strings (role names, namespace names, group names,
   rule verbs, resource names) must be validated.
 - Check for Kubernetes label/annotation injection via unsanitized input.
 - Verify CRD validation markers catch malicious input at admission time.
 
-### 6a. Namespace-Qualified Identity Comparisons
+### 7a. Namespace-Qualified Identity Comparisons
 
 - When comparing principals, subjects, or identities for overlap or
   conflict (e.g., allowed vs denied principals), the comparison key
@@ -79,7 +79,7 @@ and RoleBindings — it is a privilege-management system and security-critical.
 - Flag any overlap-detection function that builds a map keyed by user
   or group name alone when the data model includes a namespace field.
 
-### 7. DoS Protection
+### 8. DoS Protection
 
 - Flag any reconciler that could be triggered into an infinite loop by
   a malicious CR (e.g., circular references, exponential expansion).
@@ -88,14 +88,14 @@ and RoleBindings — it is a privilege-management system and security-critical.
 - Check that list operations use label selectors to avoid listing all
   resources cluster-wide.
 
-### 8. Supply Chain
+### 9. Supply Chain
 
 - Verify `go.mod` dependencies are pinned to specific versions.
 - Flag `replace` directives pointing to forks or local paths.
 - Check that `Dockerfile` uses a pinned base image digest.
 - Verify `govulncheck` is clean.
 
-### 9. Error Response Sanitization
+### 10. Error Response Sanitization
 
 - Webhook admission responses and error messages returned to kubectl
   users must NOT expose internal implementation details:
