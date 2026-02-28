@@ -274,34 +274,51 @@ kubectl get clusterrole auth-operator-manager-role -o yaml
 
 ### Network Policies
 
-Consider restricting operator network access:
+The Helm chart includes `NetworkPolicy` resources that restrict ingress
+traffic to the operator pods. Set `networkPolicy.enabled: true` in your
+Helm values to create them.
+
+> **Note:** The generated NetworkPolicy uses the built-in
+> `kubernetes.io/metadata.name` namespace label for namespace selectors.
+> This label is automatically set by the API server since **Kubernetes 1.21+**.
+> Clusters running older versions will need to label namespaces manually
+> or disable the network policy.
+
+**Webhook server** — Only allows ingress on port 9443 (webhook) from all
+namespaces (required for kube-apiserver on host network) and port 8081
+(health probes).
+
+**Controller manager** — Only allows ingress on port 8080 (metrics) from
+the monitoring namespace and port 8081 (health probes).
+
+Configure via `values.yaml`:
 
 ```yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: auth-operator-network-policy
-  namespace: auth-operator-system
-spec:
-  podSelector:
-    matchLabels:
-      control-plane: controller-manager
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    - from:
-        - namespaceSelector: {}
-      ports:
-        - port: 8080  # Metrics
-        - port: 8081  # Probes
-        - port: 9443  # Webhooks
-  egress:
-    - to:
-        - namespaceSelector: {}
-      ports:
-        - port: 443   # API server
-        - port: 6443
+networkPolicy:
+  enabled: true               # Toggle NetworkPolicy creation
+  metricsNamespace: monitoring # Namespace allowed to scrape metrics
+  webhookServer:
+    ingressFrom: []            # Override webhook-server ingress rules
+  controllerManager:
+    ingressFrom: []            # Override controller-manager ingress rules
+```
+
+To disable network policies:
+
+```bash
+helm install auth-operator oci://ghcr.io/telekom/charts/auth-operator \
+  --set networkPolicy.enabled=false
+```
+
+To allow a custom CIDR for the webhook (e.g., restricting to a known
+kube-apiserver range):
+
+```yaml
+networkPolicy:
+  webhookServer:
+    ingressFrom:
+      - ipBlock:
+          cidr: 10.0.0.0/8
 ```
 
 ---
