@@ -1149,7 +1149,7 @@ func (r *BindDefinitionReconciler) validateRoleReferences(
 		// missing roles in namespaces where bindings intentionally aren't created.
 		for _, roleRef := range roleBinding.RoleRefs {
 			for _, ns := range targetNamespaces {
-				if ns.Status.Phase == corev1.NamespaceTerminating {
+				if conditions.IsNamespaceTerminating(&ns) {
 					continue
 				}
 				role := &rbacv1.Role{}

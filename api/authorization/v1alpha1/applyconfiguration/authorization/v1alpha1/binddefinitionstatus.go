@@ -37,9 +37,7 @@ type BindDefinitionStatusApplyConfiguration struct {
 	// MissingRoleRefs lists role references that could not be resolved during the
 	// last reconciliation. Format: "ClusterRole/<name>" or "Role/<namespace>/<name>".
 	// Empty when all referenced roles exist.
-	// NOTE: omitempty is intentionally omitted so that SSA can clear a previously
-	// populated list by applying an explicit empty array.
-	MissingRoleRefs []string `json:"missingRoleRefs"`
+	MissingRoleRefs []string `json:"missingRoleRefs,omitempty"`
 	// ExternalServiceAccounts lists ServiceAccounts referenced by this BindDefinition
 	// that already existed and are not owned by any BindDefinition. These SAs are used
 	// in bindings but not managed (created/deleted) by the controller.
