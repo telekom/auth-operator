@@ -475,7 +475,10 @@ func (r *BindDefinitionReconciler) reconcileResources(
 	if policy != authorizationv1alpha1.MissingRolePolicyIgnore {
 		logger.V(3).Info("reconcileResources: Validating role references",
 			"bindDefinition", bindDefinition.Name)
-		missingRoles := r.validateRoleReferences(ctx, bindDefinition)
+		missingRoles, err := r.validateRoleReferences(ctx, bindDefinition)
+		if err != nil {
+			return 0, fmt.Errorf("validate role references for %s: %w", bindDefinition.Name, err)
+		}
 		missingCount = len(missingRoles)
 		metrics.RoleRefsMissing.WithLabelValues(bindDefinition.Name).Set(float64(missingCount))
 		bindDefinition.Status.MissingRoleRefs = missingRoles // Store names in status
@@ -1091,11 +1094,11 @@ func (r *BindDefinitionReconciler) deleteRoleBindingWithStatusUpdate(
 }
 
 // validateRoleReferences checks if all referenced ClusterRoles and Roles exist.
-// Returns a list of missing role names. Does not fail the reconciliation.
+// Returns a list of missing role names and an error if namespace resolution fails.
 func (r *BindDefinitionReconciler) validateRoleReferences(
 	ctx context.Context,
 	bindDef *authorizationv1alpha1.BindDefinition,
-) []string {
+) ([]string, error) {
 	logger := log.FromContext(ctx)
 	var missingRoles []string
 
@@ -1137,8 +1140,7 @@ func (r *BindDefinitionReconciler) validateRoleReferences(
 		// Resolve namespaces for this specific roleBinding (same logic as ensureRoleBindings).
 		targetNamespaces, err := r.resolveRoleBindingNamespaces(ctx, roleBinding)
 		if err != nil {
-			logger.Error(err, "Failed to resolve namespaces for roleBinding during validation")
-			continue
+			return missingRoles, fmt.Errorf("resolve namespaces for roleBinding during validation: %w", err)
 		}
 
 		// Check RoleRefs only in the resolved namespaces for this roleBinding
@@ -1162,7 +1164,7 @@ func (r *BindDefinitionReconciler) validateRoleReferences(
 
 	slices.Sort(missingRoles)
 
-	return missingRoles
+	return missingRoles, nil
 }
 
 func (r *BindDefinitionReconciler) collectNamespaces(ctx context.Context, bindDefinition *authorizationv1alpha1.BindDefinition) (map[string]corev1.Namespace, error) {

@@ -1695,7 +1695,8 @@ func TestValidateRoleReferences(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cr).Build()
 		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
-		missing := r.validateRoleReferences(ctx, bindDef)
+		missing, err := r.validateRoleReferences(ctx, bindDef)
+		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(missing).To(BeEmpty())
 	})
 
@@ -1716,7 +1717,8 @@ func TestValidateRoleReferences(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(scheme).Build()
 		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
-		missing := r.validateRoleReferences(ctx, bindDef)
+		missing, err := r.validateRoleReferences(ctx, bindDef)
+		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(missing).To(ContainElement("ClusterRole/nonexistent-cr"))
 	})
 
@@ -1740,7 +1742,8 @@ func TestValidateRoleReferences(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(scheme).Build()
 		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
-		missing := r.validateRoleReferences(ctx, bindDef)
+		missing, err := r.validateRoleReferences(ctx, bindDef)
+		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(missing).To(ContainElement("ClusterRole/missing-cr"))
 	})
 
@@ -1768,7 +1771,8 @@ func TestValidateRoleReferences(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ns).Build()
 		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
-		missing := r.validateRoleReferences(ctx, bindDef)
+		missing, err := r.validateRoleReferences(ctx, bindDef)
+		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(missing).To(ContainElement("Role/test-ns/missing-role"))
 	})
 
@@ -1795,7 +1799,8 @@ func TestValidateRoleReferences(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(scheme).Build()
 		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
-		missing := r.validateRoleReferences(ctx, bindDef)
+		missing, err := r.validateRoleReferences(ctx, bindDef)
+		g.Expect(err).NotTo(HaveOccurred())
 		// Should only appear once (deduplication)
 		count := 0
 		for _, m := range missing {
