@@ -43,12 +43,12 @@ var controllerCmd = &cobra.Command{
 	Short: "Run the auth-operator controller manager",
 	Long: `Run the auth-operator controller manager which reconciles RoleDefinition,
 BindDefinition, and WebhookAuthorizer custom resources to manage Kubernetes RBAC
-and authorization webhook resources.
+resources.
 
 The controller watches for changes to authorization resources and ensures
 the corresponding ClusterRoles, Roles, ClusterRoleBindings, and RoleBindings
 are created and kept in sync. For WebhookAuthorizer resources, it validates
-the configuration and manages status conditions.`,
+the spec and manages status conditions to reflect readiness.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := validateConcurrency(bindDefinitionConcurrency, roleDefinitionConcurrency, webhookAuthorizerConcurrency); err != nil {
 			return err
