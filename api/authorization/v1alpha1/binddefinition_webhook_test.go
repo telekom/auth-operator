@@ -132,7 +132,7 @@ var _ = Describe("BindDefinition Webhook", func() {
 			}
 			err := k8sClient.Create(ctx, bd)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("at least one clusterRoleBindings or roleBindings must be specified"))
+			Expect(err.Error()).To(ContainSubstring("at least one binding with a referenced role must be specified"))
 		})
 
 		It("should deny a BindDefinition with empty subjects", func() {
