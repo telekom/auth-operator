@@ -103,10 +103,20 @@ func (r *WebhookAuthorizerReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, fmt.Errorf("fetch WebhookAuthorizer %s: %w", req.Name, err)
 	}
 
-	// Step 2: Mark as Reconciling
+	// Step 2: Mark as Reconciling and persist via SSA so that users see
+	// progress even when subsequent steps fail transiently (e.g. API errors
+	// during namespace listing). Without this early apply, a transient error
+	// in Step 3 would return without updating the status.
 	conditions.MarkReconciling(wa, wa.Generation,
 		authorizationv1alpha1.ReconcilingReasonProgressing, authorizationv1alpha1.ReconcilingMessageProgressing)
 	wa.Status.ObservedGeneration = wa.Generation
+	if err := ssa.ApplyWebhookAuthorizerStatus(ctx, r.client, wa); err != nil {
+		logger.Error(err, "failed to apply Reconciling status via SSA",
+			"webhookAuthorizer", wa.Name)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerWebhookAuthorizer, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerWebhookAuthorizer, metrics.ErrorTypeAPI).Inc()
+		return ctrl.Result{}, fmt.Errorf("apply reconciling status for %s: %w", wa.Name, err)
+	}
 
 	// Step 3: Validate NamespaceSelector
 	if err := r.validateNamespaceSelector(ctx, wa); err != nil {

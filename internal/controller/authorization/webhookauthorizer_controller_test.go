@@ -6,6 +6,7 @@ package authorization
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/go-logr/logr"
@@ -16,6 +17,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
@@ -358,4 +360,52 @@ func TestConvertLabelSelector(t *testing.T) {
 	g.Expect(err).NotTo(gomega.HaveOccurred())
 	g.Expect(selector).NotTo(gomega.BeNil())
 	g.Expect(selector.String()).To(gomega.Equal("env=prod"))
+}
+
+func TestReconcile_TransientNamespaceListError_ReturnsError(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	wa := &authorizationv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "transient-authorizer",
+			Generation: 1,
+		},
+		Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+			NamespaceSelector: metav1.LabelSelector{
+				MatchLabels: map[string]string{"env": "prod"},
+			},
+		},
+	}
+
+	scheme := newTestScheme()
+	listErr := fmt.Errorf("simulated API server error")
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(wa).
+		WithStatusSubresource(&authorizationv1alpha1.WebhookAuthorizer{}).
+		WithInterceptorFuncs(interceptor.Funcs{
+			List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+				if _, ok := list.(*corev1.NamespaceList); ok {
+					return listErr
+				}
+				return cl.List(ctx, list, opts...)
+			},
+		}).
+		Build()
+	recorder := events.NewFakeRecorder(10)
+	r := NewWebhookAuthorizerReconciler(c, scheme, recorder)
+
+	// Reconcile should return an error (transient, retryable)
+	_, err := r.Reconcile(ctxWithLogger(), reconcileRequest("transient-authorizer"))
+	g.Expect(err).To(gomega.HaveOccurred())
+	g.Expect(err.Error()).To(gomega.ContainSubstring("simulated API server error"))
+
+	// Verify status is NOT marked stalled — transient errors must not stall
+	var updated authorizationv1alpha1.WebhookAuthorizer
+	g.Expect(c.Get(ctxWithLogger(), types.NamespacedName{Name: "transient-authorizer"}, &updated)).To(gomega.Succeed())
+	g.Expect(conditions.IsStalled(&updated)).To(gomega.BeFalse(), "transient errors must not mark resource as stalled")
+
+	// Verify the Reconciling status was persisted (early SSA apply)
+	g.Expect(updated.Status.ObservedGeneration).To(gomega.Equal(int64(1)),
+		"observedGeneration should be set even on transient error")
 }
