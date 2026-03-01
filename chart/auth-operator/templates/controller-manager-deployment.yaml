@@ -35,7 +35,9 @@ spec:
         - --verbosity={{ .Values.global.logLevel }}
         {{- if .Values.tracing.enabled }}
         - --tracing-enabled
-        - --tracing-endpoint={{ .Values.tracing.endpoint }}
+        {{- with .Values.tracing.endpoint }}
+        - --tracing-endpoint={{ . }}
+        {{- end }}
         - --tracing-sampling-rate={{ .Values.tracing.samplingRate }}
         {{- if .Values.tracing.insecure }}
         - --tracing-insecure
