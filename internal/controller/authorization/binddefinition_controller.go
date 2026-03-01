@@ -475,7 +475,7 @@ func (r *BindDefinitionReconciler) reconcileResources(
 	if policy != authorizationv1alpha1.MissingRolePolicyIgnore {
 		logger.V(3).Info("reconcileResources: Validating role references",
 			"bindDefinition", bindDefinition.Name)
-		missingRoles := r.validateRoleReferences(ctx, bindDefinition, activeNamespaces)
+		missingRoles := r.validateRoleReferences(ctx, bindDefinition)
 		missingCount = len(missingRoles)
 		metrics.RoleRefsMissing.WithLabelValues(bindDefinition.Name).Set(float64(missingCount))
 		bindDefinition.Status.MissingRoleRefs = missingRoles // Store names in status
@@ -1095,7 +1095,6 @@ func (r *BindDefinitionReconciler) deleteRoleBindingWithStatusUpdate(
 func (r *BindDefinitionReconciler) validateRoleReferences(
 	ctx context.Context,
 	bindDef *authorizationv1alpha1.BindDefinition,
-	_ []corev1.Namespace,
 ) []string {
 	logger := log.FromContext(ctx)
 	var missingRoles []string
