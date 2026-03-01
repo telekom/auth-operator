@@ -58,11 +58,12 @@ func (p *Provider) Tracer() trace.Tracer {
 }
 
 // Shutdown gracefully shuts down the tracer provider, flushing any pending spans.
-// A fresh context with a bounded timeout is used instead of the caller's context
-// because the incoming context may already be canceled (e.g. after signal handling).
+// The caller's context is detached from its cancellation signal (via WithoutCancel)
+// so that shutdown can proceed even after signal handling cancels the parent, while
+// still preserving any request-scoped values. A bounded timeout is then applied.
 func (p *Provider) Shutdown(ctx context.Context) error {
 	if sdkTP, ok := p.tp.(*sdktrace.TracerProvider); ok {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
 		defer cancel()
 		return sdkTP.Shutdown(shutdownCtx)
 	}
