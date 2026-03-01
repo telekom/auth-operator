@@ -224,6 +224,60 @@ the operator has cleaned up dependent resources.
 
 ---
 
+## WebhookAuthorizer-Specific Conditions
+
+The WebhookAuthorizer controller (see issue #49) uses these conditions to
+report the health and validity of each WebhookAuthorizer resource.
+
+### Ready
+
+Overall readiness of the WebhookAuthorizer.
+
+| Status | Reason | Message |
+|--------|--------|---------|
+| `True` | `AuthorizerReady` | All rules are valid and the authorizer is actively processing requests |
+| `False` | `InvalidRules` | One or more resource/non-resource rules are malformed: *\<detail\>* |
+| `False` | `InvalidNamespaceSelector` | The namespace selector cannot be parsed: *\<detail\>* |
+| `False` | `NoPrincipals` | Neither allowedPrincipals nor deniedPrincipals are defined |
+
+### RulesValid
+
+Validation status of resource and non-resource rules.
+
+| Status | Reason | Message |
+|--------|--------|---------|
+| `True` | `AllRulesValid` | All resourceRules and nonResourceRules are syntactically valid |
+| `False` | `InvalidResourceRule` | A resourceRule contains invalid API groups, resources, or verbs: *\<detail\>* |
+| `False` | `InvalidNonResourceRule` | A nonResourceRule contains invalid paths or verbs: *\<detail\>* |
+
+### NamespaceSelectorValid
+
+Status of the namespace selector.
+
+| Status | Reason | Message |
+|--------|--------|---------|
+| `True` | `SelectorValid` | Namespace selector is parseable and matches namespaces |
+| `True` | `SelectorEmpty` | No namespace selector defined (matches all namespaces) |
+| `False` | `SelectorInvalid` | Namespace selector cannot be parsed: *\<detail\>* |
+
+### PrincipalConfigured
+
+Status of principal configuration.
+
+| Status | Reason | Message |
+|--------|--------|---------|
+| `True` | `PrincipalsConfigured` | AllowedPrincipals and/or DeniedPrincipals are defined |
+| `False` | `NoPrincipalsConfigured` | No principals defined — authorizer will never match |
+| `Unknown` | `PrincipalOverlap` | A principal appears in both allowed and denied lists: *\<detail\>* |
+
+### Reconciliation Sequence (WebhookAuthorizer)
+
+```
+NamespaceSelectorValid → RulesValid → PrincipalConfigured → Ready
+```
+
+---
+
 ## Condition Utilities
 
 The `pkg/conditions` package provides helpers for managing conditions:
