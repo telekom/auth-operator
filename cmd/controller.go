@@ -47,8 +47,8 @@ resources.
 
 The controller watches for changes to authorization resources and ensures
 the corresponding ClusterRoles, Roles, ClusterRoleBindings, and RoleBindings
-are created and kept in sync. For WebhookAuthorizer resources, it validates
-the spec and manages status conditions to reflect readiness.`,
+are created and kept in sync, and that WebhookAuthorizer resources are validated
+and their status is kept up to date.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := validateConcurrency(bindDefinitionConcurrency, roleDefinitionConcurrency, webhookAuthorizerConcurrency); err != nil {
 			return err
