@@ -450,7 +450,56 @@ func TestFindPrincipalOverlaps_CrossNamespace(t *testing.T) {
 		[]Principal{{User: "alice", Namespace: "ns-a"}},
 		[]Principal{{User: "alice", Namespace: "ns-b"}},
 	)
-	if len(overlaps) != 1 || overlaps[0] != "alice" {
-		t.Errorf("expected overlap [alice], got: %v", overlaps)
+	if len(overlaps) != 1 || overlaps[0] != "user:alice" {
+		t.Errorf("expected overlap [user:alice], got: %v", overlaps)
+	}
+}
+
+func TestValidateCreate_ResourceRuleNoAPIGroups(t *testing.T) {
+	v := &WebhookAuthorizerValidator{}
+	wa := newTestWebhookAuthorizer(func(wa *WebhookAuthorizer) {
+		wa.Spec.ResourceRules = []authzv1.ResourceRule{
+			{Verbs: []string{"get"}, APIGroups: []string{}, Resources: []string{"pods"}},
+		}
+	})
+	_, err := v.ValidateCreate(context.Background(), wa)
+	if err == nil {
+		t.Fatal("expected error for resource rule with no API groups")
+	}
+}
+
+func TestValidateCreate_ResourceRuleNoResources(t *testing.T) {
+	v := &WebhookAuthorizerValidator{}
+	wa := newTestWebhookAuthorizer(func(wa *WebhookAuthorizer) {
+		wa.Spec.ResourceRules = []authzv1.ResourceRule{
+			{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{}},
+		}
+	})
+	_, err := v.ValidateCreate(context.Background(), wa)
+	if err == nil {
+		t.Fatal("expected error for resource rule with no resources")
+	}
+}
+
+func TestFindPrincipalOverlaps_UserAndGroupDisambiguated(t *testing.T) {
+	// A user "admins" and a group "admins" should produce distinct overlap entries.
+	overlaps := findPrincipalOverlaps(
+		[]Principal{{User: "admins", Groups: []string{"admins"}}},
+		[]Principal{{User: "admins", Groups: []string{"admins"}}},
+	)
+	if len(overlaps) != 2 {
+		t.Fatalf("expected 2 overlaps (user + group), got %d: %v", len(overlaps), overlaps)
+	}
+	hasUser, hasGroup := false, false
+	for _, o := range overlaps {
+		if o == "user:admins" {
+			hasUser = true
+		}
+		if o == "group:admins" {
+			hasGroup = true
+		}
+	}
+	if !hasUser || !hasGroup {
+		t.Errorf("expected [user:admins, group:admins], got: %v", overlaps)
 	}
 }

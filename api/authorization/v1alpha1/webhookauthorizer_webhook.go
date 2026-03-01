@@ -72,11 +72,19 @@ func validateWebhookAuthorizer(wa *WebhookAuthorizer) (admission.Warnings, error
 			"at least one of spec.resourceRules or spec.nonResourceRules must be non-empty")
 	}
 
-	// Validate each resourceRule has at least one verb.
+	// Validate each resourceRule has at least one verb, apiGroup, and resource.
 	for i, rule := range wa.Spec.ResourceRules {
 		if len(rule.Verbs) == 0 {
 			return nil, apierrors.NewBadRequest(
 				fmt.Sprintf("spec.resourceRules[%d] must have at least one verb", i))
+		}
+		if len(rule.APIGroups) == 0 {
+			return nil, apierrors.NewBadRequest(
+				fmt.Sprintf("spec.resourceRules[%d] must have at least one apiGroup (use \"\" for core API group)", i))
+		}
+		if len(rule.Resources) == 0 {
+			return nil, apierrors.NewBadRequest(
+				fmt.Sprintf("spec.resourceRules[%d] must have at least one resource", i))
 		}
 	}
 
@@ -152,22 +160,23 @@ func findPrincipalOverlaps(allowed, denied []Principal) []string {
 		}
 	}
 
-	seen := make(map[string]struct{})
+	seenUsers := make(map[string]struct{})
+	seenGroups := make(map[string]struct{})
 	var overlaps []string
 	for _, p := range denied {
 		if p.User != "" {
 			if _, ok := allowedUsers[p.User]; ok {
-				if _, dup := seen[p.User]; !dup {
-					seen[p.User] = struct{}{}
-					overlaps = append(overlaps, p.User)
+				if _, dup := seenUsers[p.User]; !dup {
+					seenUsers[p.User] = struct{}{}
+					overlaps = append(overlaps, "user:"+p.User)
 				}
 			}
 		}
 		for _, g := range p.Groups {
 			if _, ok := allowedGroups[g]; ok {
-				if _, dup := seen[g]; !dup {
-					seen[g] = struct{}{}
-					overlaps = append(overlaps, g)
+				if _, dup := seenGroups[g]; !dup {
+					seenGroups[g] = struct{}{}
+					overlaps = append(overlaps, "group:"+g)
 				}
 			}
 		}
