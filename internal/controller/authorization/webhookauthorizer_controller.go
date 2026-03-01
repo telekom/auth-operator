@@ -108,10 +108,20 @@ func (r *WebhookAuthorizerReconciler) Reconcile(ctx context.Context, req ctrl.Re
 
 	// Step 3: Validate NamespaceSelector
 	if err := r.validateNamespaceSelector(ctx, wa); err != nil {
+		// Distinguish between permanent validation errors and transient API errors.
+		// Parse errors are permanent user mistakes — mark stalled and do not retry.
+		// API errors (e.g., failed to list namespaces) are transient — retry.
+		if apierrors.IsTimeout(err) || apierrors.IsServerTimeout(err) || apierrors.IsServiceUnavailable(err) || apierrors.IsTooManyRequests(err) || apierrors.IsInternalError(err) {
+			logger.Error(err, "transient API error during namespace selector validation, will retry",
+				"webhookAuthorizer", wa.Name)
+			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerWebhookAuthorizer, metrics.ResultError).Inc()
+			metrics.ReconcileErrors.WithLabelValues(metrics.ControllerWebhookAuthorizer, metrics.ErrorTypeAPI).Inc()
+			return ctrl.Result{}, fmt.Errorf("validate namespace selector for %s: %w", wa.Name, err)
+		}
 		r.markStalled(ctx, wa, err)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerWebhookAuthorizer, metrics.ResultError).Inc()
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerWebhookAuthorizer, metrics.ErrorTypeValidation).Inc()
-		// Return nil instead of the error — this is a permanent user error that
+		// Return nil — this is a permanent user error that
 		// will not self-heal. GenerationChangedPredicate ensures we re-reconcile
 		// only when the user fixes the spec.
 		logger.Error(err, "namespace selector validation failed",
