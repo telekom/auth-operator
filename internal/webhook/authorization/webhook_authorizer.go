@@ -134,16 +134,11 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	result := wa.evaluateSAR(ctx, &sar, &webhookAuthorizers)
 
-	// Record metrics based on the evaluation result.
+	// Build response before recording metrics, so that an encoding failure
+	// does not leave metrics in an inconsistent state.
 	decision := metrics.AuthorizerDecisionDenied
 	if result.allowed {
 		decision = metrics.AuthorizerDecisionAllowed
-	}
-	metrics.AuthorizerRequestsTotal.WithLabelValues(decision, result.authorizerName).Inc()
-	metrics.AuthorizerRequestDuration.WithLabelValues(decision).Observe(time.Since(start).Seconds())
-
-	if result.deniedByPrincipal {
-		metrics.AuthorizerDeniedPrincipalHitsTotal.WithLabelValues(result.authorizerName).Inc()
 	}
 
 	response := authzv1.SubjectAccessReview{
@@ -162,7 +157,18 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		wa.Log.Error(err, "failed to encode SubjectAccessReview response")
+		metrics.AuthorizerRequestsTotal.WithLabelValues(metrics.AuthorizerDecisionError, metrics.AuthorizerNameNone).Inc()
+		metrics.AuthorizerRequestDuration.WithLabelValues(metrics.AuthorizerDecisionError).Observe(time.Since(start).Seconds())
 		http.Error(w, "internal evaluation error", http.StatusInternalServerError)
+		return
+	}
+
+	// Record metrics only after successful response encoding.
+	metrics.AuthorizerRequestsTotal.WithLabelValues(decision, result.authorizerName).Inc()
+	metrics.AuthorizerRequestDuration.WithLabelValues(decision).Observe(time.Since(start).Seconds())
+
+	if result.deniedByPrincipal {
+		metrics.AuthorizerDeniedPrincipalHitsTotal.WithLabelValues(result.authorizerName).Inc()
 	}
 }
 
