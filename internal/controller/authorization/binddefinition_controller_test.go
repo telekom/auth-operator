@@ -4150,6 +4150,15 @@ func TestReconcile_MissingRolePolicy_Error(t *testing.T) {
 	g.Expect(stalledCond).NotTo(BeNil(), "expected Stalled condition to be set")
 	g.Expect(stalledCond.Status).To(Equal(metav1.ConditionTrue))
 	g.Expect(stalledCond.Message).To(ContainSubstring("policy=error"))
+
+	// Verify that no RBAC resources were created — error mode must block reconciliation entirely.
+	var crbList rbacv1.ClusterRoleBindingList
+	g.Expect(c.List(ctx, &crbList)).To(Succeed())
+	g.Expect(crbList.Items).To(BeEmpty(), "expected no ClusterRoleBindings to be created in error mode")
+
+	var rbList rbacv1.RoleBindingList
+	g.Expect(c.List(ctx, &rbList)).To(Succeed())
+	g.Expect(rbList.Items).To(BeEmpty(), "expected no RoleBindings to be created in error mode")
 }
 
 func TestReconcile_MissingRolePolicy_Ignore(t *testing.T) {

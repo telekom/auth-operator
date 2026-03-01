@@ -1095,7 +1095,7 @@ func (r *BindDefinitionReconciler) deleteRoleBindingWithStatusUpdate(
 func (r *BindDefinitionReconciler) validateRoleReferences(
 	ctx context.Context,
 	bindDef *authorizationv1alpha1.BindDefinition,
-	namespaces []corev1.Namespace,
+	_ []corev1.Namespace,
 ) []string {
 	logger := log.FromContext(ctx)
 	var missingRoles []string
@@ -1113,7 +1113,10 @@ func (r *BindDefinitionReconciler) validateRoleReferences(
 		}
 	}
 
-	// Check ClusterRoleRefs and RoleRefs in RoleBindings
+	// Check ClusterRoleRefs and RoleRefs in RoleBindings.
+	// Resolve namespaces per-roleBinding so that RoleRefs are only validated
+	// in the namespaces that the specific binding targets, not the union of
+	// all namespaces across all roleBindings.
 	for _, roleBinding := range bindDef.Spec.RoleBindings {
 		// Check ClusterRoleRefs
 		for _, clusterRoleRef := range roleBinding.ClusterRoleRefs {
@@ -1132,9 +1135,16 @@ func (r *BindDefinitionReconciler) validateRoleReferences(
 			}
 		}
 
-		// Check RoleRefs in each namespace
+		// Resolve namespaces for this specific roleBinding (same logic as ensureRoleBindings).
+		targetNamespaces, err := r.resolveRoleBindingNamespaces(ctx, roleBinding)
+		if err != nil {
+			logger.Error(err, "Failed to resolve namespaces for roleBinding during validation")
+			continue
+		}
+
+		// Check RoleRefs only in the resolved namespaces for this roleBinding
 		for _, roleRef := range roleBinding.RoleRefs {
-			for _, ns := range namespaces {
+			for _, ns := range targetNamespaces {
 				role := &rbacv1.Role{}
 				if err := r.client.Get(ctx, types.NamespacedName{Name: roleRef, Namespace: ns.Name}, role); err != nil {
 					if apierrors.IsNotFound(err) {
