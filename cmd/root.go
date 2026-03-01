@@ -147,8 +147,9 @@ func initScheme() {
 // and environment variables. The flag value takes precedence; the
 // OTEL_EXPORTER_OTLP_ENDPOINT environment variable is used as fallback.
 // If the endpoint contains a scheme (http:// or https://), it is parsed
-// as a URL to extract the host:port, and tracingInsecure is inferred
-// from the scheme (http → insecure) unless explicitly set via flag.
+// as a URL to extract the host:port. When --tracing-insecure was not
+// explicitly set, the insecure flag is inferred from the scheme
+// (http → insecure, https → secure).
 func tracingConfig() tracing.Config {
 	endpoint := strings.TrimSpace(tracingEndpoint)
 	if endpoint == "" {
@@ -156,13 +157,14 @@ func tracingConfig() tracing.Config {
 	}
 
 	insecure := tracingInsecure
+	insecureExplicitlySet := rootCmd.PersistentFlags().Changed("tracing-insecure")
 
 	// Parse as URL if it contains a scheme — otlptracegrpc.WithEndpoint
 	// expects a bare host:port.
 	if strings.Contains(endpoint, "://") {
 		if u, err := url.Parse(endpoint); err == nil {
-			// Infer insecure from scheme when the flag wasn't explicitly set.
-			if u.Scheme == "http" {
+			// Only infer insecure from scheme when the flag wasn't explicitly set.
+			if !insecureExplicitlySet && u.Scheme == "http" {
 				insecure = true
 			}
 			endpoint = u.Host
