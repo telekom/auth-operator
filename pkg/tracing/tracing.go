@@ -58,9 +58,9 @@ func (p *Provider) Tracer() trace.Tracer {
 }
 
 // Shutdown gracefully shuts down the tracer provider, flushing any pending spans.
-// Uses context.Background as parent because the incoming context may already be
-// canceled (e.g. after signal handling), which would cause an immediate timeout.
-func (p *Provider) Shutdown(_ context.Context) error {
+// A fresh context with a bounded timeout is used instead of the caller's context
+// because the incoming context may already be canceled (e.g. after signal handling).
+func (p *Provider) Shutdown(ctx context.Context) error {
 	if sdkTP, ok := p.tp.(*sdktrace.TracerProvider); ok {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
@@ -107,6 +107,7 @@ func Setup(ctx context.Context, cfg Config, version string) (*Provider, error) {
 		),
 	)
 	if err != nil {
+		_ = exporter.Shutdown(ctx)
 		return nil, fmt.Errorf("creating OTEL resource: %w", err)
 	}
 
