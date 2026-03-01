@@ -71,7 +71,7 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 
 	// Validate TargetNamespace must not be set when TargetRole is ClusterRole
 	if obj.Spec.TargetRole == DefinitionClusterRole && obj.Spec.TargetNamespace != "" {
-		return nil, apierrors.NewBadRequest("targetNamespace must not be set when targetRole is 'ClusterRole'")
+		return nil, apierrors.NewBadRequest("targetNamespace must be empty when targetRole is 'ClusterRole'")
 	}
 
 	// Use field index for efficient lookup by TargetName
@@ -120,7 +120,7 @@ func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 
 	// Validate TargetNamespace must not be set when TargetRole is ClusterRole
 	if newObj.Spec.TargetRole == DefinitionClusterRole && newObj.Spec.TargetNamespace != "" {
-		return nil, apierrors.NewBadRequest("targetNamespace must not be set when targetRole is 'ClusterRole'")
+		return nil, apierrors.NewBadRequest("targetNamespace must be empty when targetRole is 'ClusterRole'")
 	}
 
 	// Use field index for efficient lookup by TargetName

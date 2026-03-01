@@ -82,7 +82,7 @@ var _ = Describe("RoleDefinition Webhook", func() {
 			}
 			err := k8sClient.Create(ctx, rd)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("targetNamespace must not be set when targetRole is 'ClusterRole'"))
+			Expect(err.Error()).To(ContainSubstring("targetNamespace must be empty when targetRole is 'ClusterRole'"))
 		})
 
 		It("Should deny duplicate targetName for the same targetRole", func() {
