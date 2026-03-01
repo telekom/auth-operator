@@ -64,6 +64,15 @@ spec:
           spec:
             description: RoleDefinitionSpec defines the desired state of RoleDefinition.
             properties:
+              breakglassAllowed:
+                default: false
+                description: |-
+                  BreakglassAllowed marks generated ClusterRoles as eligible for temporary
+                  privilege escalation via k8s-breakglass. The generated ClusterRole always
+                  receives the label t-caas.telekom.com/breakglass-compatible set to "true"
+                  or "false" based on this field's value.
+                  Only applicable when TargetRole is ClusterRole. Defaults to false.
+                type: boolean
               restrictedApis:
                 description: |-
                   RestrictedAPIs holds all API groups which will *NOT* be reconciled into the "TargetRole".
