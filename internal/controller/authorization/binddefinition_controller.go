@@ -1149,8 +1149,10 @@ func (r *BindDefinitionReconciler) validateRoleReferences(
 				if err := r.client.Get(ctx, types.NamespacedName{Name: roleRef, Namespace: ns.Name}, role); err != nil {
 					if apierrors.IsNotFound(err) {
 						roleName := fmt.Sprintf("Role/%s/%s", ns.Name, roleRef)
-						logger.V(1).Info("Role not found", "role", roleRef, "namespace", ns.Name)
-						missingRoles = append(missingRoles, roleName)
+						if !slices.Contains(missingRoles, roleName) {
+							logger.V(1).Info("Role not found", "role", roleRef, "namespace", ns.Name)
+							missingRoles = append(missingRoles, roleName)
+						}
 					} else {
 						logger.Error(err, "Failed to check Role existence", "role", roleRef, "namespace", ns.Name)
 					}
