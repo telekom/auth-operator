@@ -7,6 +7,7 @@ package authorization
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -31,6 +32,7 @@ import (
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=webhookauthorizers,verbs=get;list;watch
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=webhookauthorizers/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=list
+// +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
 
 // WebhookAuthorizerReconciler reconciles a WebhookAuthorizer object.
 // It validates the spec, updates status.observedGeneration, sets
@@ -108,25 +110,29 @@ func (r *WebhookAuthorizerReconciler) Reconcile(ctx context.Context, req ctrl.Re
 
 	// Step 3: Validate NamespaceSelector
 	if err := r.validateNamespaceSelector(ctx, wa); err != nil {
-		// Distinguish between permanent validation errors and transient API errors.
-		// Parse errors are permanent user mistakes — mark stalled and do not retry.
-		// API errors (e.g., failed to list namespaces) are transient — retry.
-		if apierrors.IsTimeout(err) || apierrors.IsServerTimeout(err) || apierrors.IsServiceUnavailable(err) || apierrors.IsTooManyRequests(err) || apierrors.IsInternalError(err) {
-			logger.Error(err, "transient API error during namespace selector validation, will retry",
-				"webhookAuthorizer", wa.Name)
+		// Distinguish between permanent validation errors and transient errors.
+		// Only label selector parse errors are permanent user mistakes —
+		// mark stalled and do not retry. All other errors (API failures,
+		// network issues, context cancellation) are treated as transient.
+		if strings.Contains(err.Error(), "invalid NamespaceSelector:") {
+			if ssaErr := r.markStalled(ctx, wa, err); ssaErr != nil {
+				return ctrl.Result{}, fmt.Errorf("mark stalled after validation error: %w", ssaErr)
+			}
 			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerWebhookAuthorizer, metrics.ResultError).Inc()
-			metrics.ReconcileErrors.WithLabelValues(metrics.ControllerWebhookAuthorizer, metrics.ErrorTypeAPI).Inc()
-			return ctrl.Result{}, fmt.Errorf("validate namespace selector for %s: %w", wa.Name, err)
+			metrics.ReconcileErrors.WithLabelValues(metrics.ControllerWebhookAuthorizer, metrics.ErrorTypeValidation).Inc()
+			// Return nil — this is a permanent user error that
+			// will not self-heal. GenerationChangedPredicate ensures we re-reconcile
+			// only when the user fixes the spec.
+			logger.Error(err, "namespace selector validation failed",
+				"webhookAuthorizer", wa.Name)
+			return ctrl.Result{}, nil
 		}
-		r.markStalled(ctx, wa, err)
-		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerWebhookAuthorizer, metrics.ResultError).Inc()
-		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerWebhookAuthorizer, metrics.ErrorTypeValidation).Inc()
-		// Return nil — this is a permanent user error that
-		// will not self-heal. GenerationChangedPredicate ensures we re-reconcile
-		// only when the user fixes the spec.
-		logger.Error(err, "namespace selector validation failed",
+		// All other errors (API, network, context) are transient — retry.
+		logger.Error(err, "transient error during namespace selector validation, will retry",
 			"webhookAuthorizer", wa.Name)
-		return ctrl.Result{}, nil
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerWebhookAuthorizer, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerWebhookAuthorizer, metrics.ErrorTypeAPI).Inc()
+		return ctrl.Result{}, fmt.Errorf("validate namespace selector for %s: %w", wa.Name, err)
 	}
 
 	// Step 4: Mark as configured and ready
@@ -200,7 +206,7 @@ func (r *WebhookAuthorizerReconciler) markStalled(
 	ctx context.Context,
 	wa *authorizationv1alpha1.WebhookAuthorizer,
 	err error,
-) {
+) error {
 	logger := log.FromContext(ctx)
 	conditions.MarkStalled(wa, wa.Generation,
 		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, err.Error())
@@ -209,5 +215,7 @@ func (r *WebhookAuthorizerReconciler) markStalled(
 	if updateErr := ssa.ApplyWebhookAuthorizerStatus(ctx, r.client, wa); updateErr != nil {
 		logger.Error(updateErr, "failed to apply Stalled status via SSA",
 			"webhookAuthorizer", wa.Name)
+		return updateErr
 	}
+	return nil
 }
