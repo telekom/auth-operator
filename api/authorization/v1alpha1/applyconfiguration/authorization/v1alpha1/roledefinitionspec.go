@@ -50,8 +50,9 @@ type RoleDefinitionSpecApplyConfiguration struct {
 	// The RBAC operator discovers all resource verbs available and removes those listed here.
 	RestrictedVerbs []string `json:"restrictedVerbs,omitempty"`
 	// BreakglassAllowed marks generated ClusterRoles as eligible for temporary
-	// privilege escalation via k8s-breakglass. When true, the generated role
-	// receives the label t-caas.telekom.com/breakglass-compatible: "true".
+	// privilege escalation via k8s-breakglass. The generated ClusterRole always
+	// receives the label t-caas.telekom.com/breakglass-compatible set to "true"
+	// or "false" based on this field's value.
 	// Only applicable when TargetRole is ClusterRole. Defaults to false.
 	BreakglassAllowed *bool `json:"breakglassAllowed,omitempty"`
 }
