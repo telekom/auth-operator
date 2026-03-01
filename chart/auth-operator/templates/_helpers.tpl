@@ -92,7 +92,7 @@ limits the allowed ports.
   to:
     - namespaceSelector:
         matchLabels:
-          kubernetes.io/metadata.name: {{ .Values.networkPolicy.egress.dnsNamespace | default "kube-system" }}
+          kubernetes.io/metadata.name: {{ .Values.networkPolicy.egress.dnsNamespace | default "kube-system" | quote }}
 # Kubernetes API server (TCP 443 and 6443)
 - ports:
     - port: 443
