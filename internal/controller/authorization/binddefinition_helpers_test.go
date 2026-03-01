@@ -383,7 +383,7 @@ var _ = Describe("BindDefinition Helpers", func() {
 					ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{ClusterRoleRefs: []string{"view"}},
 					Subjects: []rbacv1.Subject{
 						{
-							Kind:      "ServiceAccount",
+							Kind:      rbacv1.ServiceAccountKind,
 							Name:      "test-sa-nil-automount",
 							Namespace: "default",
 						},
