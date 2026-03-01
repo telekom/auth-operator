@@ -206,10 +206,11 @@ spec:
             - targetName
             type: object
             x-kubernetes-validations:
-            - message: at least one clusterRoleBindings or roleBindings must be specified
+            - message: at least one binding with a referenced role must be specified
               rule: (has(self.clusterRoleBindings) && has(self.clusterRoleBindings.clusterRoleRefs)
                 && size(self.clusterRoleBindings.clusterRoleRefs) > 0) || (has(self.roleBindings)
-                && size(self.roleBindings) > 0)
+                && self.roleBindings.exists(rb, (has(rb.clusterRoleRefs) && size(rb.clusterRoleRefs)
+                > 0) || (has(rb.roleRefs) && size(rb.roleRefs) > 0)))
             - message: at least one subject must be specified
               rule: size(self.subjects) > 0
             - message: ServiceAccount subjects must specify a namespace

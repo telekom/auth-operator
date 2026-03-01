@@ -19,8 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Breaking:** `BindDefinition` now requires at least one `clusterRoleBindings` or `roleBindings` and at least one `subject` — enforced by CEL validation on create/update (#111)
-- **Breaking:** `Principal.Groups` `MaxItems` increased from 64 to 256 to accommodate corporate OIDC/LDAP providers (#111)
+- **Breaking:** `BindDefinition` now requires at least one `clusterRoleBindings` or `roleBindings` with a referenced role and at least one `subject` — enforced by CEL validation on create/update (#111)
+- `Principal.Groups` `MaxItems` increased from 64 to 256 to accommodate corporate OIDC/LDAP providers (backward-compatible schema relaxation) (#111)
 
 ### Fixed
 
