@@ -1143,9 +1143,15 @@ func (r *BindDefinitionReconciler) validateRoleReferences(
 			return missingRoles, fmt.Errorf("resolve namespaces for roleBinding during validation: %w", err)
 		}
 
-		// Check RoleRefs only in the resolved namespaces for this roleBinding
+		// Check RoleRefs only in the resolved namespaces for this roleBinding.
+		// Skip terminating namespaces to match ensureRoleBindings behavior,
+		// which also skips them — otherwise we'd report false-positive
+		// missing roles in namespaces where bindings intentionally aren't created.
 		for _, roleRef := range roleBinding.RoleRefs {
 			for _, ns := range targetNamespaces {
+				if ns.Status.Phase == corev1.NamespaceTerminating {
+					continue
+				}
 				role := &rbacv1.Role{}
 				if err := r.client.Get(ctx, types.NamespacedName{Name: roleRef, Namespace: ns.Name}, role); err != nil {
 					if apierrors.IsNotFound(err) {
