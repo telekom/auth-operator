@@ -43,30 +43,7 @@ spec:
           protocol: TCP
   {{- if .Values.networkPolicy.egress.enabled }}
   egress:
-    # DNS — allow CoreDNS resolution (UDP + TCP 53)
-    - ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
-      to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ .Values.networkPolicy.egress.dnsNamespace | default "kube-system" }}
-    # Kubernetes API server (TCP 443 and 6443)
-    - ports:
-        - port: 443
-          protocol: TCP
-        - port: 6443
-          protocol: TCP
-      {{- if .Values.networkPolicy.egress.apiServerCIDR }}
-      to:
-        - ipBlock:
-            cidr: {{ .Values.networkPolicy.egress.apiServerCIDR | quote }}
-      {{- end }}
-    {{- if .Values.networkPolicy.egress.additionalRules }}
-    {{- toYaml .Values.networkPolicy.egress.additionalRules | nindent 4 }}
-    {{- end }}
+    {{- include "auth-operator.egressRules" . | nindent 4 }}
   {{- end }}
 ---
 # NetworkPolicy for controller-manager pods.
@@ -106,29 +83,6 @@ spec:
           protocol: TCP
   {{- if .Values.networkPolicy.egress.enabled }}
   egress:
-    # DNS — allow CoreDNS resolution (UDP + TCP 53)
-    - ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
-      to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ .Values.networkPolicy.egress.dnsNamespace | default "kube-system" }}
-    # Kubernetes API server (TCP 443 and 6443)
-    - ports:
-        - port: 443
-          protocol: TCP
-        - port: 6443
-          protocol: TCP
-      {{- if .Values.networkPolicy.egress.apiServerCIDR }}
-      to:
-        - ipBlock:
-            cidr: {{ .Values.networkPolicy.egress.apiServerCIDR | quote }}
-      {{- end }}
-    {{- if .Values.networkPolicy.egress.additionalRules }}
-    {{- toYaml .Values.networkPolicy.egress.additionalRules | nindent 4 }}
-    {{- end }}
+    {{- include "auth-operator.egressRules" . | nindent 4 }}
   {{- end }}
 {{- end }}

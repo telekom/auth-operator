@@ -70,4 +70,43 @@ Image pull policy
 {{ .Values.image.pullPolicy | default "IfNotPresent" }}
 {{- end }}
 
+{{/*
+Standard egress rules for operator pods (DNS + kube-apiserver).
+Both the controller-manager and the webhook-server need DNS resolution
+and kube-apiserver access, so this helper avoids duplicating the block.
+
+NOTE: When the kube-apiserver runs outside the cluster (e.g. managed Kubernetes
+with an external control plane), the egress rules rely on
+networkPolicy.egress.apiServerCIDR being set explicitly.  Without it, the
+apiserver egress rule has no `to:` selector and defaults to "allow to all
+destinations on ports 443/6443", which is broader than ideal but still
+limits the allowed ports.
+*/}}
+{{- define "auth-operator.egressRules" -}}
+# DNS — allow CoreDNS resolution (UDP + TCP 53)
+- ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+  to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: {{ .Values.networkPolicy.egress.dnsNamespace | default "kube-system" }}
+# Kubernetes API server (TCP 443 and 6443)
+- ports:
+    - port: 443
+      protocol: TCP
+    - port: 6443
+      protocol: TCP
+  {{- if .Values.networkPolicy.egress.apiServerCIDR }}
+  to:
+    - ipBlock:
+        cidr: {{ .Values.networkPolicy.egress.apiServerCIDR | quote }}
+  {{- end }}
+{{- if .Values.networkPolicy.egress.additionalRules }}
+{{- toYaml .Values.networkPolicy.egress.additionalRules | nindent 0 }}
+{{- end }}
+{{- end }}
+
 
