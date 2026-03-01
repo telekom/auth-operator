@@ -319,6 +319,9 @@ var _ = Describe("RoleDefinition Webhook", func() {
 				}
 				err := k8sClient.Create(ctx, rd)
 				Expect(err).NotTo(HaveOccurred(), "aggregate-to-%s should be allowed per issue #51", target)
+				DeferCleanup(func() {
+					_ = k8sClient.Delete(ctx, rd)
+				})
 			}
 		})
 
