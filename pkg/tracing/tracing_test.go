@@ -123,8 +123,9 @@ func TestSetup_SamplingRateZero(t *testing.T) {
 	}
 	defer func() { _ = p.Shutdown(context.Background()) }()
 
-	// Even with 0 sampling, the tracer should still produce spans
-	// (they just won't be exported)
+	// With 0 sampling, the tracer should still be usable;
+	// root spans will be non-recording (not sampled), so they
+	// are never exported.
 	_, span := p.Tracer().Start(context.Background(), "zero-rate-span")
 	span.End()
 }
@@ -149,6 +150,9 @@ func TestSetup_SamplingRateFull(t *testing.T) {
 }
 
 func TestSetup_EnabledRegistersGlobalProvider(t *testing.T) {
+	previousTP := otel.GetTracerProvider()
+	t.Cleanup(func() { otel.SetTracerProvider(previousTP) })
+
 	p, err := Setup(context.Background(), Config{
 		Enabled:      true,
 		Endpoint:     "localhost:4317",
