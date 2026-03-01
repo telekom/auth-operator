@@ -247,16 +247,33 @@ the CEL error position and type mismatch details.
 
 ### Status & Conditions
 
-A new condition reason `CELCompilationFailed` is added for cases where a CR
-that bypassed webhook validation contains invalid CEL (e.g., migrated from
-backup). The reconciler re-validates CEL and sets this condition.
+New condition reasons extend the existing typed constant pattern from
+`conditions.go`. Each maps to a specific kstatus condition type:
+
+| Reason | Condition Type | Status | Set By |
+|--------|---------------|--------|--------|
+| `CELCompilationFailed` | `Stalled` | `True` | Reconciler (permanent — user must fix expression) |
+| `ParamRefNotFound` | `Reconciling` | `True` | Reconciler (transient — object may appear) |
+| `CELCostExceeded` | — | — | Webhook handler (deny + metric, not a condition) |
+
+The reconciler re-validates CEL for CRs that bypassed webhook validation
+(e.g., migrated from backup) and sets conditions accordingly.
 
 ```go
 const (
-    CELCompilationFailedReason  = "CELCompilationFailed"
-    CELCompilationFailedMessage = "one or more CEL expressions failed compilation"
+    // CEL compilation errors are permanent — the user must fix the expression.
+    StalledReasonCELCompilationFailed  AuthZConditionReason  = "CELCompilationFailed"
+    StalledMessageCELCompilationFailed AuthZConditionMessage = "one or more CEL expressions failed compilation: %s"
+
+    // paramRef target not found is transient — the object may appear.
+    ReconcilingReasonParamRefNotFound  AuthZConditionReason  = "ParamRefNotFound"
+    ReconcilingMessageParamRefNotFound AuthZConditionMessage = "paramRef target %s/%s not found in cache"
 )
 ```
+
+> **Note**: `CELCostExceeded` is a runtime event during SAR evaluation, not a
+> reconciler condition. It increments the `auth_operator_cel_cost_exceeded_total`
+> counter and is logged at Error level.
 
 ---
 
@@ -289,7 +306,7 @@ type WebhookAuthorizerSpec struct {
     CELRules []CELRule `json:"celRules,omitempty"`
 }
 
-// CELRule is a CEL expression paired with an authorization action.
+// CELRule defines a CEL expression paired with an authorization action.
 type CELRule struct {
     // Name is a human-readable identifier for this rule, used in
     // logging, metrics, and the SubjectAccessReview reason string.
@@ -311,12 +328,22 @@ type CELRule struct {
     // +kubebuilder:validation:Enum=Allow;Deny
     Action CELRuleAction `json:"action"`
 
-    // Message is an optional human-readable message included in the
-    // SubjectAccessReview reason when this rule matches. Supports CEL
-    // string interpolation using the same variables as Expression.
+    // Message is an optional human-readable literal string included in the
+    // SubjectAccessReview reason when this rule matches.
     // +kubebuilder:validation:Optional
     // +kubebuilder:validation:MaxLength=512
     Message string `json:"message,omitempty"`
+
+    // MessageExpression is an optional CEL expression that evaluates to a
+    // string, used as the SubjectAccessReview reason when this rule matches.
+    // Has access to the same variables as Expression. Takes precedence over
+    // Message when set. If evaluation fails, falls back to Message.
+    //
+    // This follows the ValidatingAdmissionPolicy messageExpression pattern.
+    //
+    // +kubebuilder:validation:Optional
+    // +kubebuilder:validation:MaxLength=512
+    MessageExpression string `json:"messageExpression,omitempty"`
 }
 
 // CELRuleAction defines the outcome when a CEL rule matches.
@@ -340,6 +367,9 @@ kind: WebhookAuthorizer
 metadata:
   name: ci-bot-scoped
 spec:
+  matchConditions:
+    - name: isResourceRequest
+      expression: "has(request.resourceAttributes)"
   celRules:
     - name: allowCiBotDeployments
       expression: >-
@@ -360,6 +390,9 @@ spec:
 
 ```yaml
 spec:
+  matchConditions:
+    - name: isResourceRequest
+      expression: "has(request.resourceAttributes)"
   celRules:
     - name: denyOutsideBusinessHours
       expression: >-
@@ -388,29 +421,51 @@ spec:
 For each WebhookAuthorizer (sorted by name):
   1. [Phase 0] If namespaceSelector set and NS doesn't match → skip
   2. [Phase 1] If any matchCondition evaluates to false → skip
-  3. [Phase 2] Evaluate celRules in order:
+  3. [Phase 0] If deniedPrincipals match → DENY (unchanged — deny-first preserved)
+  4. [Phase 2] Evaluate celRules in order:
      a. If expression is true AND action is Deny  → DENY (return immediately)
      b. If expression is true AND action is Allow → ALLOW (return immediately)
-  4. [Phase 0] If deniedPrincipals match → deny
   5. [Phase 0] If allowedPrincipals + rules match → allow
 ```
+
+> **Design invariant**: Static `deniedPrincipals` are always checked **before**
+> CEL rules. No CEL Allow rule can override an explicit `deniedPrincipals` entry.
+> This preserves the existing deny-before-allow security guarantee.
 
 CEL rules are evaluated **first-match**. If no CEL rule matches, evaluation
 falls through to the existing static logic, preserving backwards compatibility.
 
-### CEL Rule Message Interpolation
+### CEL Rule Message Expressions
 
-The `message` field optionally supports CEL string interpolation. When the
-message itself is a valid CEL string expression, it is evaluated with the same
-variables:
+The `message` field is a literal string. For dynamic messages, use the
+separate `messageExpression` field, which is a CEL expression that must
+evaluate to a `string`:
 
 ```yaml
-message: "'denied user ' + request.user + ' at ' + string(now)"
+celRules:
+  - name: denyAfterHours
+    expression: >-
+      has(request.resourceAttributes) &&
+      request.resourceAttributes.verb in ["delete"] &&
+      (now.getHours() < 8 || now.getHours() >= 18)
+    action: Deny
+    message: "destructive operations are only allowed during business hours"
+    messageExpression: >-
+      'denied user ' + request.user + ' at ' + string(now)
 ```
 
-If the message is not valid CEL or if evaluation fails, the literal string is
-used as-is. This makes simple messages zero-effort while enabling dynamic
-messages for advanced users.
+When `messageExpression` is set and evaluates successfully, its result is used.
+If evaluation fails, `message` is used as a fallback. When neither is set,
+a default reason including the authorizer and rule name is generated.
+
+This follows the `ValidatingAdmissionPolicy` pattern where `message` and
+`messageExpression` are separate fields, avoiding the ambiguity of implicit
+CEL detection.
+
+> **Security note**: `messageExpression` can expose paramRef data via SAR
+> response reason strings. Since the CR author has cluster-admin access
+> (Section 10.1), this is within the trust boundary. Auditors should review
+> `messageExpression` fields for unintended data exposure.
 
 ---
 
@@ -449,8 +504,11 @@ type WebhookAuthorizerSpec struct {
 // ParamRef binds an in-cluster object to a CEL variable.
 type ParamRef struct {
     // Name is the CEL variable name for this parameter. Must be a valid
-    // CEL identifier that does not collide with built-in variables
-    // (request, now, authorizer).
+    // CEL identifier that does not collide with reserved variable names.
+    //
+    // Reserved names (rejected by admission webhook):
+    //   request, now, authorizer, authz, object, oldObject, params
+    //
     // +kubebuilder:validation:Required
     // +kubebuilder:validation:MinLength=1
     // +kubebuilder:validation:MaxLength=64
@@ -466,24 +524,41 @@ type ParamResource struct {
     // APIVersion is the API group/version (e.g. "v1", "apps/v1").
     // +kubebuilder:validation:Required
     // +kubebuilder:validation:MinLength=1
+    // +kubebuilder:validation:MaxLength=64
     APIVersion string `json:"apiVersion"`
 
     // Kind is the resource kind (e.g. "ConfigMap", "Namespace").
     // +kubebuilder:validation:Required
     // +kubebuilder:validation:MinLength=1
+    // +kubebuilder:validation:MaxLength=64
     Kind string `json:"kind"`
 
     // Name is the resource name.
     // +kubebuilder:validation:Required
     // +kubebuilder:validation:MinLength=1
+    // +kubebuilder:validation:MaxLength=253
     Name string `json:"name"`
 
     // Namespace is the resource namespace. Required for namespaced
     // resources. Omit for cluster-scoped resources.
     // +kubebuilder:validation:Optional
+    // +kubebuilder:validation:MaxLength=63
     Namespace string `json:"namespace,omitempty"`
 }
 ```
+
+### Admission Validation Rules
+
+Beyond schema markers, the admission webhook enforces:
+
+1. **Reserved variable names**: paramRef names matching the set
+   `{request, now, authorizer, authz, object, oldObject, params}` are
+   rejected.
+2. **Allowed-kind list**: Only permitted GVKs (see below) are accepted.
+3. **Self-reference prohibition**: paramRefs referencing
+   `authorization.t-caas.telekom.com/WebhookAuthorizer` are rejected to
+   prevent reconciliation loops.
+4. **Duplicate names**: No two paramRefs may share the same `name`.
 
 ### Allowed Resource Kinds
 
@@ -531,6 +606,7 @@ spec:
   celRules:
     - name: checkAllowList
       expression: >-
+        has(allowList.data) && has(allowList.data["users"]) &&
         request.user in allowList.data["users"].split(",")
       action: Allow
       message: "user is in the authorized-deployers ConfigMap"
@@ -541,7 +617,9 @@ spec:
 ```
 
 **Namespace annotation-based rules** — allow only in namespaces with a
-specific annotation:
+specific annotation. The target namespace must be referenced by a
+statically-named paramRef (dynamic resolution is a future consideration,
+see Open Question #3):
 
 ```yaml
 spec:
@@ -550,8 +628,7 @@ spec:
       resource:
         apiVersion: v1
         kind: Namespace
-        # Special: when name is omitted, resolves to the SAR target namespace
-        name: "${request.resourceAttributes.namespace}"
+        name: production  # Static name — resolved at reconcile time
   celRules:
     - name: requireProductionTier
       expression: >-
@@ -561,20 +638,59 @@ spec:
       action: Allow
 ```
 
+> **Future consideration**: Dynamic namespace resolution (binding a paramRef
+> to the SAR’s target namespace at evaluation time) is deferred to a future
+> enhancement. See Open Question #3 for design considerations.
+
 ### paramRef Resolution
 
 1. **Cache-only**: paramRef objects are resolved from the informer cache, never
    via live API calls. This guarantees <1ms lookup latency.
-2. **Dynamic watches**: When a `WebhookAuthorizer` references a new
-   GVK/namespace/name, the reconciler registers a watch. Watches are cleaned
-   up when no `WebhookAuthorizer` references that GVK anymore.
-3. **Missing objects**: If a paramRef target doesn't exist:
+2. **Snapshot guarantee**: All paramRef objects for a given SAR evaluation are
+   resolved **once** at the start of evaluation and captured in an immutable
+   snapshot map. This snapshot is shared across all matchCondition and celRule
+   evaluations within that SAR, preventing mid-evaluation inconsistencies
+   (e.g., a ConfigMap being deleted between a `has()` guard and a data access).
+3. **Dynamic watches**: When a `WebhookAuthorizer` references a new
+   GVK/namespace/name, the reconciler registers a watch via a thread-safe
+   `watchManager` component (see Architecture below). Watches are cleaned up
+   when no `WebhookAuthorizer` references that GVK anymore.
+4. **Missing objects**: If a paramRef target doesn't exist:
    - During **reconciliation**: set condition `ParamRefNotFound` (transient, requeue with backoff).
-   - During **SAR evaluation**: the variable is `null`. CEL expressions should use `has()` guards.
-4. **Cache staleness**: paramRef data may be stale by up to the informer resync
+   - During **SAR evaluation**: the variable is `null` in the snapshot. CEL expressions must use `has()` guards.
+5. **Cache staleness**: paramRef data may be stale by up to the informer resync
    period (typically 10 minutes). This is acceptable for authorization
    decisions on data that changes infrequently (allow-lists, namespace metadata).
    The staleness window is documented and configurable.
+6. **ConfigMap without `.data`**: If a ConfigMap has only `.binaryData` and
+   no `.data` field, `has(param.data)` returns `false`. CEL expressions
+   must guard `.data` access accordingly.
+
+### Dynamic Watch Architecture
+
+The paramRef watch lifecycle is managed by a `watchManager` component:
+
+```go
+// watchManager tracks active GVK watches for paramRef resolution.
+// Thread-safe for concurrent reconciler access.
+type watchManager struct {
+    mu       sync.Mutex
+    watches  map[schema.GroupVersionKind]watchEntry
+    ctrl     controller.Controller
+}
+
+type watchEntry struct {
+    refCount int        // Number of WebhookAuthorizers referencing this GVK.
+    cancel   func()     // Cancels the watch source.
+}
+```
+
+- **Reconciler calls** `watchManager.EnsureWatch(gvk)` for each paramRef GVK.
+- **On CR deletion**, `watchManager.Release(gvk)` decrements the ref count;
+  when zero, the watch is cancelled.
+- **Reverse index**: An `EnqueueRequestsFromMapFunc` maps ConfigMap/Namespace
+  changes back to referencing `WebhookAuthorizer` CRs, triggering re-reconciliation.
+- **Location**: `internal/controller/authorization/watch_manager.go`
 
 ### RBAC Impact
 
@@ -586,8 +702,18 @@ has Namespace permissions. ConfigMap requires adding:
 # +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
 ```
 
+This marker goes on the `WebhookAuthorizerReconciler.Reconcile()` method and
+flows through `make manifests` → `config/rbac/role.yaml` → `make helm` →
+`chart/auth-operator/templates/clusterrole.yaml`.
+
 When the allowed-list is extended, the cluster operator must grant additional
-RBAC to the operator's ServiceAccount.
+RBAC to the operator’s ServiceAccount.
+
+> **⚠️ Security note**: This grants the operator **cluster-wide read access to
+> all ConfigMaps** in every namespace. ConfigMaps may contain sensitive data
+> (TLS certs, database URLs, cloud configs). Document this blast radius in
+> the Helm chart values. Consider using namespace-scoped `Role` + `RoleBinding`
+> if only specific namespaces contain paramRef targets. See Section 10.2.
 
 ---
 
@@ -646,6 +772,23 @@ const (
     EvaluationModeCEL    EvaluationMode = "CEL"
 )
 ```
+
+**Zero-value semantics**: Existing CRs stored in etcd before the `mode` field
+exists will have `mode: ""` (empty string). The evaluation code must treat
+`""` and `"Static"` identically: `if mode == "" || mode == EvaluationModeStatic`.
+The defaulting webhook sets `mode: Static` on create/update, but the evaluator
+must handle the empty case for CRs that bypass defaulting (backup restore, GitOps).
+
+**Cross-field CRD validation** (works even when the webhook is unavailable):
+
+```yaml
+# x-kubernetes-validations on WebhookAuthorizerSpec:
+- rule: "self.mode != 'CEL' || self.authorization != ''"
+  message: "authorization expression is required when mode is CEL"
+```
+
+The reconciler additionally validates: if `mode == CEL` and `authorization == ""`,
+it sets a `Stalled` condition with reason `InvalidConfiguration`.
 
 ### Example CRs
 
@@ -732,7 +875,7 @@ variable environment:
 | `request.resourceAttributes.name` | `string` | Resource requests | Object name (if applicable). |
 | `request.nonResourceAttributes.path` | `string` | Non-resource requests | URL path. |
 | `request.nonResourceAttributes.verb` | `string` | Non-resource requests | HTTP verb. |
-| `now` | `timestamp` | Always | Current UTC timestamp. |
+| `now` | `timestamp` | Always | Current UTC timestamp, captured once per SAR evaluation (immutable within a single request). |
 | `authorizer.name` | `string` | Always | Name of the `WebhookAuthorizer` CR. |
 | `authorizer.labels` | `map(string, string)` | Always | Labels of the `WebhookAuthorizer` CR. |
 | `authorizer.annotations` | `map(string, string)` | Always | Annotations of the `WebhookAuthorizer` CR. |
@@ -760,6 +903,10 @@ The CEL environment includes:
 The environment is constructed once at startup and shared across all
 evaluations (thread-safe, immutable after creation).
 
+> **Regex safety**: CEL's `matches()` function uses RE2, which guarantees
+> linear-time evaluation. There is no risk of ReDoS (regular expression
+> denial of service) attacks through CEL regex operations.
+
 ### CEL Cost Budget
 
 Every CEL expression is subject to a **cost budget** that limits computational
@@ -769,10 +916,17 @@ complexity:
 |-------|---------|------------|
 | Per-expression compilation cost | 100,000 | `--cel-compilation-cost-limit` |
 | Per-expression runtime cost | 1,000,000 | `--cel-runtime-cost-limit` |
+| **Per-authorizer aggregate runtime cost** | **5,000,000** | `--cel-aggregate-cost-limit` |
+| **Per-SAR total runtime cost** | **50,000,000** | No (hard limit) |
 | Max expression length | 4,096 chars | Kubebuilder validation |
 | Max matchConditions per CR | 16 | Kubebuilder validation |
 | Max celRules per CR | 32 | Kubebuilder validation |
 | Max paramRefs per CR | 8  | Kubebuilder validation |
+
+The **per-authorizer aggregate** limit (sum of all matchConditions + celRules
+for one CR) prevents a single CR from monopolizing the evaluation budget.
+The **per-SAR total** limit (sum across all authorizers evaluated for one
+SubjectAccessReview) prevents aggregate DoS across many CRs.
 
 Cost estimation occurs at **compile time** (admission webhook). Runtime cost
 tracking terminates long-running evaluations with a clear error.
@@ -846,14 +1000,40 @@ unauthorized access when the webhook is unavailable. This means:
 ### 11.1 CEL Compilation Cache
 
 CEL programs are **compiled once per expression per CR generation** and
-cached in an in-memory map keyed by `(CR UID, generation, expression hash)`.
-The cache is:
+cached using an `atomic.Pointer` to an immutable snapshot map, keyed by
+`(CR UID, CR generation)`. This design ensures:
 
+- **Lock-free reads**: SAR evaluation reads the cache via `atomic.Load()`
+  with zero contention. No mutex on the hot path.
+- **Safe writes**: The reconciler builds a new map, swaps it in via
+  `atomic.Store()`. In-flight evaluations continue using the old map.
 - **Populated during reconciliation**, not during SAR evaluation.
-- **Evicted** when a CR is deleted or its generation changes.
+- **Evicted** when a CR is deleted (reconciler removes entry) or its
+  generation changes (reconciler replaces entry).
+- **CR deletion cleanup**: The reconciler's finalizer (or `DeleteFunc`
+  watch predicate) removes the CR's entry from the cache.
 - **Bounded** by the total number of WebhookAuthorizer CRs × max expressions
   per CR (i.e. N × 48, where N is CR count). For typical deployments
   (10–100 CRs), this is negligible memory.
+
+```go
+type compilationCache struct {
+    programs atomic.Pointer[map[cacheKey]*compiledPrograms]
+}
+
+type cacheKey struct {
+    uid        types.UID
+    generation int64
+}
+```
+
+**Multi-replica behavior**: The reconciler only runs on the leader, so only
+the leader proactively compiles CEL during reconciliation. Non-leader replicas
+(which still serve webhook requests) compile lazily on first evaluation and
+cache the result. This lazy path uses a `sync.Once`-per-entry pattern to
+avoid duplicate compilations. The lazy compilation path is acceptable because
+it only occurs during leader failover and the compilation cost (<10ms per CR)
+is within the webhook timeout budget.
 
 ### 11.2 Evaluation Latency Budget
 
@@ -867,7 +1047,25 @@ timeout (default 10s, typically set to 3–5s). The CEL evaluation budget:
 | CEL matchCondition evaluation (per authorizer) | <1ms | Cached program, simple bool |
 | CEL rule evaluation (per rule) | <5ms | Cached program, cost-bounded |
 | paramRef resolution (per ref) | <1ms | Informer cache read |
-| **Total per-request (worst case, 100 authorizers × 32 rules)** | **<200ms** | Conservative estimate |
+| **Typical (10 authorizers × 5 rules each)** | **<10ms** | Realistic estimate |
+| **Worst case (100 authorizers × 32 rules)** | **~16s** | Theoretical maximum |
+
+> **⚠️ Worst case is unrealistic**: 100 authorizers × 32 rules each = 3,200
+> CEL evaluations per SAR. In practice, `matchConditions` filter out most
+> authorizers (Phase 1 exists for this purpose), and typical deployments
+> have 10-30 authorizers with 3-5 rules each.
+>
+> **Tiered analysis**:
+> - Small deployment (10 CRs, 3 rules avg): ~10 × 3 × 5ms = **<150ms** ✓
+> - Medium deployment (30 CRs, 5 rules avg): ~30 × 5 × 5ms = **<750ms** ⚠
+>   (mitigated by matchCondition filtering)
+> - Large deployment (100 CRs, 10 rules avg): 100 × 10 × 5ms = **5s** ❌
+>   (requires matchCondition filtering + evaluation timeout)
+>
+> The `--cel-evaluation-timeout` flag (default: `1s`) sets a hard deadline
+> for CEL evaluation across all authorizers for a single SAR. When exceeded,
+> the handler returns `NoOpinion` for remaining authorizers and logs a
+> warning. This prevents runaway evaluation from blocking the API server.
 
 ### 11.3 Metrics
 
@@ -890,9 +1088,16 @@ expression content or paramRef object values.
 | Component | Estimated Memory per CR | Notes |
 |-----------|------------------------|-------|
 | Compiled CEL programs (16 matchConditions + 32 rules) | ~50KB | Typical program ≈1KB |
-| paramRef cached objects (8 refs) | ~10KB | Metadata + data fields |
-| **Total per CR** | **~60KB** | |
-| **100 CRs** | **~6MB** | Acceptable for controller pods |
+| paramRef cached objects (8 refs) | ~10KB–8MB | ConfigMaps: up to 1MB each; Namespaces: ~1KB each |
+| **Total per CR (typical)** | **~60KB** | Assumes small ConfigMaps (<10KB each) |
+| **Total per CR (worst, 8×1MB CMs)** | **~8MB** | Rare; document ConfigMap size guidance |
+| **100 CRs (typical)** | **~6MB** | Acceptable for controller pods |
+| **100 CRs (8 large CMs each)** | **~800MB** | Requires memory limit tuning |
+
+> **Guidance**: paramRef ConfigMaps should be small (key-value allow-lists,
+> feature flags). The admission webhook should warn when a paramRef targets
+> a ConfigMap larger than 100KB. The operator's memory limit should account
+> for the worst-case paramRef memory footprint.
 
 ---
 
@@ -907,7 +1112,14 @@ expression content or paramRef object values.
 | paramRef not found | **Transient** (object may appear) | Set condition, requeue with backoff | `ParamRefNotFound` |
 | paramRef cache miss | **Transient** | Log warning, use null variable | — |
 | CEL runtime cost exceeded | **Permanent** (expression too complex) | Deny + log at Error | `CELCostExceeded` |
-| CEL runtime error (division by zero, null deref) | **Transient** (depends on input) | Deny + log at Warning | — |
+| CEL runtime error (division by zero, null deref) | **Input-dependent** (varies per request) | Deny + log at Error | — |
+
+> **Input-dependent errors**: CEL runtime errors like division by zero or
+> null dereference depend on the specific SAR request content, not the
+> expression itself. The same expression may succeed for one request and
+> fail for another. These are logged at Error level (not Warning) because
+> they indicate a missing `has()` guard in the CEL expression —
+> a bug in the CR, not a transient system issue.
 
 ### 12.2 Structured Logging
 
@@ -921,11 +1133,10 @@ logger.V(2).Info("CEL expression evaluated",
     "result", result,
     "duration", elapsed)
 
-// Warning — runtime error
-logger.Info("CEL runtime error, denying request",
+// Warning — runtime error (input-dependent, indicates missing has() guard)
+logger.Error(err, "CEL runtime error, denying request",
     "authorizer", wa.Name,
-    "rule", rule.Name,
-    "error", err.Error())
+    "rule", rule.Name)
 ```
 
 No CEL variable values are logged above V(3) to prevent sensitive data leakage.
@@ -950,14 +1161,16 @@ During a rolling update from a pre-CEL to a CEL-aware operator version:
   `+kubebuilder:pruning`, unknown fields are **pruned** — old replicas see
   the static fields only and evaluate them normally.
 - **Risk**: If a CR has `mode: CEL` with no static rules, old replicas see no
-  rules and deny everything. This is acceptable because:
+  rules and deny everything. During the rolling update window, requests
+  alternate between CEL evaluation (new replica) and deny-all (old replica),
+  causing **intermittent authorization failures** (approximately 50% of
+  requests denied during a 2-replica rollout). This is acceptable because:
   - `mode: CEL` CRs can only be created after the new CRD is applied.
   - CRD update is a prerequisite for operator update.
-  - During the rolling update window, both old and new replicas may handle
-    requests. The `mode: CEL` CR would alternate between CEL evaluation
-    (new) and deny-all (old) until the rollout completes.
+  - The migration sequence (below) prevents this scenario.
 - **Recommendation**: Apply CRD updates. Then roll the operator. Only then
-  create `mode: CEL` CRs. Document this sequence.
+  create `mode: CEL` CRs. **Never create `mode: CEL` CRs before the rollout
+  is complete.** Document this sequence prominently.
 
 ### 12.5 Rollback Safety
 
@@ -1065,6 +1278,27 @@ When a gate is disabled, the corresponding fields are accepted by the CRD
 reconciler sets a condition warning when gated fields are present but
 not processed.
 
+> **⚠️ Security warning — gate toggling with active deny rules**: If
+> `--feature-cel-rules=true` is later changed to `false` while CRs with
+> `celRules` deny entries exist, those deny rules stop being evaluated.
+> This **widens access** silently. The reconciler must detect this case
+> and set a `Stalled` condition with reason `FeatureGateDisabledWithDenyRules`
+> on affected CRs, and the Helm chart should include a pre-upgrade hook
+> that checks for active deny rules before disabling a gate.
+
+**Helm values mapping**:
+```yaml
+# values.yaml
+featureGates:
+  celMatchConditions: true   # → --feature-cel-match-conditions
+  celRules: false            # → --feature-cel-rules
+  celParamRef: false         # → --feature-cel-param-ref
+  celMode: false             # → --feature-cel-mode
+```
+
+These values flow through `chart/auth-operator/templates/deployment.yaml`
+into container args on the manager deployment.
+
 ---
 
 ## 15. Implementation Roadmap
@@ -1096,7 +1330,7 @@ not processed.
 | 2 | Add celRules evaluation between matchConditions and static logic |
 | 3 | Implement `now` variable injection with monotonic clock |
 | 4 | Implement `authorizer.*` variable injection |
-| 5 | Add message interpolation support |
+| 5 | Implement `messageExpression` support |
 | 6 | Tests + docs |
 
 ### Phase 3: Parameter References
@@ -1131,77 +1365,72 @@ not processed.
 
 ## 16. Open Questions
 
-| # | Question | Relevant Phase |
-|---|----------|----------------|
-| 1 | Should `now` use UTC or cluster-local time? Proposal assumes UTC. | Phase 2 |
-| 2 | Should the runtime cost limit be per-rule or per-authorizer (sum of all rules)? | Phase 2 |
-| 3 | Should paramRef support dynamic namespace resolution (e.g., `${request.resourceAttributes.namespace}`)? | Phase 3 |
-| 4 | Should we allow `paramRef` to reference CRDs (custom resources)? | Phase 3 |
-| 5 | Should `mode: CEL` expressions returning non-Authz types be a compilation error or a runtime deny? | Phase 4 |
-| 6 | Do we need a `dryRun` field to test CEL expressions without affecting authorization decisions? | All |
-| 7 | Should CEL evaluation failures (cost exceeded, runtime error) result in `Deny` or `NoOpinion`? Proposal assumes `Deny` (fail-closed). | All |
+| # | Question | Relevant Phase | Notes |
+|---|----------|----------------|-------|
+| 1 | Should `now` use UTC or cluster-local time? Proposal assumes UTC. | Phase 2 | UTC is simpler and avoids timezone ambiguity across nodes. |
+| 2 | ~~Should the runtime cost limit be per-rule or per-authorizer?~~ **Resolved**: Both. Per-expression (1M) + per-authorizer aggregate (5M) + per-SAR total (50M). | Phase 2 | See Section 9 cost budget table. |
+| 3 | Should paramRef support dynamic namespace resolution (binding to the SAR target namespace at evaluation time)? | Phase 3 | Deferred to future enhancement. Requires evaluation-time resolution, not reconcile-time. See paramRef section. |
+| 4 | Should we allow `paramRef` to reference CRDs (custom resources)? | Phase 3 | Requires dynamic GVK resolution. Start with core types only. |
+| 5 | Should `mode: CEL` expressions returning non-Authz types be a compilation error or a runtime deny? | Phase 4 | Compilation error preferred — caught at admission time. |
+| 6 | Should we add a `dryRun` field to test CEL expressions without affecting authorization decisions? | All | Could use a status field with last-evaluation result instead. |
+| 7 | ~~Should CEL evaluation failures result in Deny or NoOpinion?~~ **Resolved**: Deny (fail-closed). See Section 10.4. | All | Consistent with webhook `failurePolicy: Fail`. |
+| 8 | Should the admission webhook warn when a paramRef targets a ConfigMap larger than 100KB? | Phase 3 | See Section 11.4 memory guidance. |
+| 9 | Should `celStatus` be added to WebhookAuthorizer `.status` for auditors to inspect compiled CEL state (expression count, compilation time, last error)? | Phase 1+ | Useful for security auditors. Low implementation cost. |
 
 ---
 
 ## 17. Appendix: Review Persona Analysis
 
-This design was refined using the auth-operator's 13 review personas. Key
-concerns raised by each persona and how the design addresses them:
+This design was refined using the auth-operator's 13 review personas in a
+multi-pass subagent review. Below are the key findings and how each was
+addressed in the refined proposal.
 
-### Edge Cases & Boundary Testing
-- **Empty/nil CEL**: Empty `matchConditions` = always participates (current behavior). Empty `expression` rejected by MinLength=1 validation.
-- **Malformed CEL**: Compiled at admission time; type errors produce descriptive messages with position info.
-- **Missing paramRef targets**: Variable is `null`; expressions must use `has()` guards. Reconciler sets `ParamRefNotFound` condition.
-- **Extreme complexity**: MaxLength=4096 + compile-time cost estimation + runtime cost budget.
+### Critical Findings (addressed in this revision)
 
-### API & CRD Correctness
-- **Backwards compatible**: All new fields are `+optional`. Default `mode: Static` preserves existing behavior.
-- **Webhook validation**: CEL compiled and type-checked at admission — invalid expressions never reach the reconciler.
-- **Schema markers**: `MaxItems`, `MaxLength`, `MinLength`, `Pattern`, `Enum` on all new fields.
-- **SSA completeness**: New fields included in SSA apply configurations via `make generate`.
+| # | Persona | Finding | Resolution |
+|---|---------|---------|------------|
+| C1 | Security | CEL Allow rules could bypass static `deniedPrincipals`, breaking deny-first guarantee | Fixed: `deniedPrincipals` now evaluated **before** `celRules` in Phase 2 flow (Section 6) |
+| C2 | Edge Cases | Dynamic paramRef `${request...}` syntax contradicted cache-at-reconcile design | Fixed: Removed `${...}` syntax. Static names only. Dynamic resolution deferred (Open Question #3) |
+| C3 | Concurrency | Non-leader replicas have no compiled CEL (reconciler runs on leader only) | Fixed: Added lazy compilation on non-leaders via `sync.Once`-per-entry pattern (Section 11.1) |
+| C4 | Performance | Latency budget math wrong: 100×32×5ms = 16s, not <200ms | Fixed: Added tiered analysis (typical/medium/large) + `--cel-evaluation-timeout` flag (Section 11.2) |
+| C5 | Go Style | Condition naming inconsistent with existing `AuthZConditionReason` typed pattern | Fixed: Conditions now use `StalledReasonCELCompilationFailed` etc. with type table (Section 5) |
 
-### Security
-- **Escalation prevention**: WebhookAuthorizer is cluster-scoped, requires cluster-admin to edit. Consistent with ClusterRole trust model.
-- **Information disclosure**: paramRef allowed-list prevents Secret access. Logs redact paramRef data above V(3).
-- **Cost-based DoS**: Compile-time cost estimation + runtime cost tracking + webhook timeout backstop.
-- **Failure policy**: Fail-closed (deny on error). Panic recovery prevents operator crash.
+### High Findings (addressed in this revision)
 
-### Performance & Scalability
-- **Compilation cache**: Per-CR-generation, populated during reconciliation, not during SAR evaluation.
-- **paramRef from cache**: Informer cache only, never live API calls. Guaranteed <1ms.
-- **Metrics cardinality**: Labels use CR name + rule index, not expression content.
-- **Memory budget**: ~60KB per CR, ~6MB for 100 CRs.
+| # | Persona | Finding | Resolution |
+|---|---------|---------|------------|
+| H1 | Security | Implicit message interpolation (autodetect whether message is CEL) is fragile | Fixed: Replaced with explicit `messageExpression` field following K8s VAP pattern (Section 6) |
+| H2 | Security | Cluster-wide ConfigMap RBAC is a significant privilege expansion | Fixed: Added RBAC blast radius warning in paramRef section, documented namespace-scoped alternative |
+| H3 | Edge Cases | Example CRs missing `has()` null-safety guards | Fixed: Added `has(request.resourceAttributes)` matchConditions and `has(allowList.data)` guards |
+| H4 | Edge Cases | `now` variable semantics unclear (per-expression or per-SAR?) | Fixed: Documented as "captured once per SAR evaluation (immutable within a single request)" |
+| H5 | API/CRD | Mode field zero-value (`""`) behavior unspecified | Fixed: Added zero-value = Static semantics + x-kubernetes-validations for mode↔authorization |
+| H6 | API/CRD | ParamResource fields missing MaxLength markers | Fixed: Added MaxLength (64, 64, 253, 63) and MaxLength for Namespace field |
+| H7 | API/CRD | Reserved variable names only listed 3, should be comprehensive | Fixed: Expanded to 7 reserved names + explicit admission validation rules section |
+| H8 | Concurrency | Cache lacks concrete concurrency mechanism | Fixed: Specified `atomic.Pointer` for lock-free reads with immutable snapshot swap (Section 11.1) |
+| H9 | Concurrency | paramRef data could change mid-evaluation across rules | Fixed: Added snapshot guarantee — all paramRefs resolved once at SAR evaluation start |
+| H10 | K8s Patterns | Cache eviction mechanism missing for deleted CRs | Fixed: Documented finalizer/DeleteFunc cleanup in compilation cache section |
+| H11 | Integration | Watch lifecycle manager design missing | Fixed: Added `watchManager` component design with refCount tracking (paramRef section) |
+| H12 | Integration | Feature gate Helm values path unspecified | Fixed: Added Helm values mapping and deployment template flow (Section 14.2) |
+| H13 | QA | Toggling feature gates with active deny rules silently widens access | Fixed: Added security warning + `FeatureGateDisabledWithDenyRules` condition (Section 14.2) |
+| H14 | QA | Rolling update risk assessment underestimates intermittent failures | Fixed: Explicitly documented ~50% failure rate during rollout + migration sequence (Section 12.4) |
+| H15 | Ops | CEL runtime errors classified as "Transient" but they're input-dependent | Fixed: Reclassified as "Input-dependent" with explanation (Section 12.1) |
+| H16 | Ops | Runtime errors logged at Info level instead of Error | Fixed: Changed to `logger.Error(err, ...)` (Section 12.2) |
+| H17 | Security | Per-expression cost limit insufficient alone | Fixed: Added per-authorizer (5M) and per-SAR (50M) aggregate cost limits (Section 9) |
+| H18 | Performance | Memory estimate assumes 10KB per paramRef but ConfigMaps can be 1MB | Fixed: Added worst-case analysis (8×1MB CMs = 8MB/CR) + size guidance (Section 11.4) |
 
-### Concurrency & Safety
-- **Thread safety**: CEL environment is immutable. Compiled programs are read-only. Evaluation creates per-call activation.
-- **Cache staleness**: paramRef reads are eventually consistent (informer resync). Documented and acceptable.
-- **Evaluation timeout**: Runtime cost budget terminates long-running evaluations. HTTP handler has its own context deadline.
+### Medium Findings (noted for implementation phase)
 
-### End-User Experience
-- **Error messages**: CEL compilation errors include position, expected type, and actual type.
-- **Audit trail**: Authorization decision reasons include the authorizer name and rule name. V(2) logs show expression + result + duration.
-- **Progressive disclosure**: matchConditions (Phase 1) covers 80% of use cases with minimal YAML. Full CEL mode (Phase 4) is opt-in.
-- **Examples**: Four concrete examples in each phase section covering common scenarios.
-
-### Operational Patterns
-- **Error taxonomy**: Permanent (compilation) vs. transient (paramRef not found) vs. input-dependent (runtime error). Each has defined reconciler behavior.
-- **Conditions**: New reasons (`CELCompilationFailed`, `ParamRefNotFound`, `CELCostExceeded`) extend existing condition types. `ObservedGeneration` tracks re-evaluation.
-- **Graceful degradation**: Panic recovery → deny → log → continue. Operator never crashes on CEL errors.
-- **Rolling updates**: CRD pruning ensures old replicas ignore unknown fields. Migration sequence documented.
-
-### Integration Wiring
-- **New package**: `pkg/cel/` for environment setup, compilation, evaluation, caching.
-- **Webhook handler**: CEL evaluator injected via constructor, same as existing `Client` and `Log` fields.
-- **Helm chart**: New values for cost limits, feature gates, allowed paramRef kinds.
-- **RBAC**: ConfigMap permissions added via kubebuilder markers.
-- **Generation chain**: `make manifests generate docs helm` covers all aspects.
-
-### Testing
-- **Coverage**: Unit tests for `pkg/cel/`, admission tests for webhook, envtest integration tests for full flow.
-- **Fuzz**: CEL compilation fuzz-tested to ensure no panics on arbitrary input.
-- **CI impact**: `cel-go` is a transitive dependency of `k8s.io/apiextensions-apiserver` (already in `go.mod` via `apiextensions v0.35.1`), so no new binary size impact.
-
-### Documentation
-- **Variable reference**: Complete table in Section 9 with types, availability, and descriptions.
-- **Field names**: Consistent across Go types, API reference, operator guide, Helm values, and examples.
-- **Design doc as authority**: This document serves as the authoritative reference for CEL behavior.
+| # | Persona | Finding | Status |
+|---|---------|---------|--------|
+| M1 | Go Style | Import alias for `cel-go` packages not specified | Noted — will follow existing alias conventions during implementation |
+| M2 | Docs | Terminology inconsistency ("celRules" vs "CEL rules" in prose) | Acceptable — field names in backticks, English prose uses natural form |
+| M3 | Docs | Variable reference table should note RE2 regex guarantees | Fixed: Added RE2/ReDoS immunity note after CEL Libraries table |
+| M4 | Performance | Metrics labels `rule_index` may not be useful for debugging | Noted — consider `rule_name` instead during implementation |
+| M5 | CI/Testing | Fuzz test covers compilation but not evaluation with adversarial inputs | Noted — add evaluation fuzzing during Phase 2 implementation |
+| M6 | CI/Testing | Golden file tests for CEL evaluation results not mentioned | Noted — good idea for regression testing, add during implementation |
+| M7 | End-User | No way for auditors to inspect compiled CEL state in `.status` | Added as Open Question #9 (`celStatus` field) |
+| M8 | End-User | Progressive disclosure not clearly communicated | Phase 1 (matchConditions) designed for 80% of use cases; examples in each phase section |
+| M9 | K8s Patterns | Error at V(4)+ logging "sanitized variable dump" — define what sanitized means | Noted — implementation should redact `.data` fields, keep `.metadata` only |
+| M10 | API/CRD | Self-referential paramRef (CR referencing WebhookAuthorizer) could cause loops | Fixed: Added self-reference prohibition to admission validation rules |
+| M11 | Integration | CEL environment layering (base env vs paramRef-augmented env) not detailed | Noted — base env created at startup, paramRef vars injected per-evaluation via `cel.Variable()` |
+| M12 | QA | Rollback safety — CRD pruning is write-time only, etcd may retain fields | Noted — documentation should warn about etcd-stored fields surviving CRD downgrade until next write |
