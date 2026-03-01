@@ -903,6 +903,35 @@ The CEL environment includes:
 The environment is constructed once at startup and shared across all
 evaluations (thread-safe, immutable after creation).
 
+### CEL Environment Layering
+
+The CEL environment uses a two-layer architecture:
+
+1. **Base environment** (created once at startup):
+   - Standard CEL library + K8s extensions (`strings`, `sets`, `regex`, etc.)
+   - Fixed variable declarations: `request`, `now`, `authorizer`
+   - Immutable, shared by all compilations and evaluations.
+
+2. **Extended environment** (created per-CR during reconciliation):
+   - Extends the base environment with paramRef variable declarations
+     via `cel.Variable(paramName, cel.ObjectType(...))` for each paramRef.
+   - This extended environment is used for compiling the CR's CEL expressions.
+   - Cached alongside compiled programs (same cache key: CR UID + generation).
+
+At evaluation time, the compiled programs receive an `activation` that binds
+concrete values (`request` from the SAR, `now` from the clock, paramRef
+objects from the snapshot map). No environment construction occurs on the
+hot path.
+
+```go
+// Import aliases for cel-go packages follow auth-operator conventions:
+import (
+    celgo    "github.com/google/cel-go/cel"         // cel-go core
+    celext   "github.com/google/cel-go/ext"         // cel-go extensions
+    celtypes "github.com/google/cel-go/common/types" // cel-go types
+)
+```
+
 > **Regex safety**: CEL's `matches()` function uses RE2, which guarantees
 > linear-time evaluation. There is no risk of ReDoS (regular expression
 > denial of service) attacks through CEL regex operations.
@@ -1074,14 +1103,16 @@ New metrics for CEL evaluation:
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
 | `auth_operator_cel_compilation_duration_seconds` | Histogram | `authorizer` | CEL compilation time during reconciliation. |
-| `auth_operator_cel_evaluation_duration_seconds` | Histogram | `authorizer`, `rule_index` | Per-rule CEL evaluation time. |
+| `auth_operator_cel_evaluation_duration_seconds` | Histogram | `authorizer`, `rule_name` | Per-rule CEL evaluation time. |
 | `auth_operator_cel_evaluation_total` | Counter | `authorizer`, `result` | CEL evaluation outcomes (matched/unmatched/error). |
 | `auth_operator_cel_cost_exceeded_total` | Counter | `authorizer` | Times CEL cost limit was hit. |
 | `auth_operator_paramref_resolution_duration_seconds` | Histogram | `authorizer`, `param_name` | paramRef lookup time. |
 | `auth_operator_paramref_resolution_errors_total` | Counter | `authorizer`, `param_name`, `reason` | paramRef resolution failures (not_found, cache_miss). |
 
-**Cardinality control**: Labels use CR name and rule index (integer), never
-expression content or paramRef object values.
+**Cardinality control**: Labels use CR name and rule name (human-readable
+identifiers with MaxLength=64), never expression content or paramRef object
+values. The `rule_name` label is preferred over `rule_index` because it
+remains stable across rule reordering and is more meaningful in dashboards.
 
 ### 11.4 Memory Footprint
 
@@ -1140,8 +1171,15 @@ logger.Error(err, "CEL runtime error, denying request",
 ```
 
 No CEL variable values are logged above V(3) to prevent sensitive data leakage.
-At V(4)+, a sanitized variable dump is logged for debugging (paramRef objects
-have `.data` redacted).
+At V(4)+, a sanitized variable dump is logged for debugging. **Sanitized** is
+defined as:
+
+- paramRef objects: only `.metadata` (name, namespace, labels, annotations)
+  is included; `.data` and `.binaryData` fields are **redacted** and replaced
+  with `"<redacted, N keys>"`.
+- `request.extra`: keys are logged, values are replaced with `"<N items>"`.
+- All other variables (`request.user`, `request.groups`, `authorizer.*`,
+  `now`) are logged as-is.
 
 ### 12.3 Graceful Degradation
 
@@ -1182,6 +1220,16 @@ If the operator is rolled back after CEL CRDs and CRs are in place:
 - **Worst case**: A CR becomes no-static-rules, deny-all. This is fail-safe.
 - **Migration doc**: Before rollback, platform operators should delete or
   convert `mode: CEL` CRs to static equivalents.
+
+> **⚠️ CRD pruning caveat**: Kubernetes CRD pruning occurs at **write time**,
+> not retroactively. CRs in etcd retain unknown fields from the old schema
+> until they are next written (updated, patched, or re-applied). This means:
+> - After a CRD downgrade, `kubectl get` hides pruned fields (API server strips
+>   them on read), but the raw etcd data still contains them.
+> - If the CRD is upgraded again, the fields reappear without re-creation.
+> - **Recommendation**: After a rollback, run `kubectl annotate` (or similar
+>   no-op patch) on all `WebhookAuthorizer` CRs to force a write that triggers
+>   pruning and removes stale CEL fields from etcd storage.
 
 ---
 
@@ -1225,6 +1273,8 @@ If the operator is rolled back after CEL CRDs and CRs are in place:
 
 ### 13.4 Fuzz Tests
 
+**Compilation fuzzing** — ensures no panics on arbitrary input:
+
 ```go
 func FuzzCELCompilation(f *testing.F) {
     f.Add("request.user == 'test'")
@@ -1238,7 +1288,56 @@ func FuzzCELCompilation(f *testing.F) {
 }
 ```
 
-### 13.5 E2E Tests
+**Evaluation fuzzing** (Phase 2+) — ensures no panics on adversarial inputs
+to compiled programs:
+
+```go
+func FuzzCELEvaluation(f *testing.F) {
+    f.Add("admin", "system:masters", "get", "pods", "default")
+    f.Add("", "", "", "", "")
+    f.Add(strings.Repeat("x", 1000), "", "delete", "", "")
+    f.Fuzz(func(t *testing.T, user, group, verb, resource, ns string) {
+        sar := buildSAR(user, []string{group}, verb, resource, ns)
+        for _, prog := range testPrograms {
+            // Must never panic; errors are acceptable
+            _, _ = evaluateCELProgram(prog, sar, time.Now())
+        }
+    })
+}
+```
+
+### 13.5 Golden File Tests
+
+CEL evaluation results are tested against golden files for regression
+detection. Each golden test fixture contains:
+
+```yaml
+# testdata/cel-golden/cross-field-deny.yaml
+name: cross-field deny outside business hours
+expression: |
+  request.resourceAttributes.verb in ["delete"] &&
+  (now.getHours() < 8 || now.getHours() >= 18)
+action: Deny
+inputs:
+  - name: "delete at 07:00 UTC"
+    request: {user: "alice", resourceAttributes: {verb: "delete", resource: "pods"}}
+    now: "2026-03-01T07:00:00Z"
+    expected: {matched: true, action: "Deny"}
+  - name: "delete at 12:00 UTC"
+    request: {user: "alice", resourceAttributes: {verb: "delete", resource: "pods"}}
+    now: "2026-03-01T12:00:00Z"
+    expected: {matched: false}
+  - name: "get at 07:00 UTC"
+    request: {user: "alice", resourceAttributes: {verb: "get", resource: "pods"}}
+    now: "2026-03-01T07:00:00Z"
+    expected: {matched: false}
+```
+
+Golden files live in `pkg/cel/testdata/cel-golden/` and are loaded by a
+table-driven test runner. Updates to golden files require explicit
+`-update` flag to prevent accidental regression.
+
+### 13.6 E2E Tests
 
 - Deploy operator with CEL-enabled CRDs.
 - Create a matchCondition-only CR, verify filtering.
@@ -1418,19 +1517,19 @@ addressed in the refined proposal.
 | H17 | Security | Per-expression cost limit insufficient alone | Fixed: Added per-authorizer (5M) and per-SAR (50M) aggregate cost limits (Section 9) |
 | H18 | Performance | Memory estimate assumes 10KB per paramRef but ConfigMaps can be 1MB | Fixed: Added worst-case analysis (8×1MB CMs = 8MB/CR) + size guidance (Section 11.4) |
 
-### Medium Findings (noted for implementation phase)
+### Medium Findings (addressed in this revision)
 
-| # | Persona | Finding | Status |
-|---|---------|---------|--------|
-| M1 | Go Style | Import alias for `cel-go` packages not specified | Noted — will follow existing alias conventions during implementation |
-| M2 | Docs | Terminology inconsistency ("celRules" vs "CEL rules" in prose) | Acceptable — field names in backticks, English prose uses natural form |
-| M3 | Docs | Variable reference table should note RE2 regex guarantees | Fixed: Added RE2/ReDoS immunity note after CEL Libraries table |
-| M4 | Performance | Metrics labels `rule_index` may not be useful for debugging | Noted — consider `rule_name` instead during implementation |
-| M5 | CI/Testing | Fuzz test covers compilation but not evaluation with adversarial inputs | Noted — add evaluation fuzzing during Phase 2 implementation |
-| M6 | CI/Testing | Golden file tests for CEL evaluation results not mentioned | Noted — good idea for regression testing, add during implementation |
-| M7 | End-User | No way for auditors to inspect compiled CEL state in `.status` | Added as Open Question #9 (`celStatus` field) |
-| M8 | End-User | Progressive disclosure not clearly communicated | Phase 1 (matchConditions) designed for 80% of use cases; examples in each phase section |
-| M9 | K8s Patterns | Error at V(4)+ logging "sanitized variable dump" — define what sanitized means | Noted — implementation should redact `.data` fields, keep `.metadata` only |
-| M10 | API/CRD | Self-referential paramRef (CR referencing WebhookAuthorizer) could cause loops | Fixed: Added self-reference prohibition to admission validation rules |
-| M11 | Integration | CEL environment layering (base env vs paramRef-augmented env) not detailed | Noted — base env created at startup, paramRef vars injected per-evaluation via `cel.Variable()` |
-| M12 | QA | Rollback safety — CRD pruning is write-time only, etcd may retain fields | Noted — documentation should warn about etcd-stored fields surviving CRD downgrade until next write |
+| # | Persona | Finding | Resolution |
+|---|---------|---------|------------|
+| M1 | Go Style | Import alias for `cel-go` packages not specified | Fixed: Added import alias conventions (`celgo`, `celext`, `celtypes`) in CEL Environment Layering section (Section 9) |
+| M2 | Docs | Terminology inconsistency ("celRules" vs "CEL rules" in prose) | Acceptable — field names in backticks, English prose uses natural form. Consistent with K8s docs style. |
+| M3 | Docs | Variable reference table should note RE2 regex guarantees | Fixed: Added RE2/ReDoS immunity note after CEL Libraries table (Section 9) |
+| M4 | Performance | Metrics labels `rule_index` may not be useful for debugging | Fixed: Changed to `rule_name` with rationale (stable across reordering, meaningful in dashboards) (Section 11.3) |
+| M5 | CI/Testing | Fuzz test covers compilation but not evaluation with adversarial inputs | Fixed: Added `FuzzCELEvaluation` with adversarial SAR inputs (Section 13.4) |
+| M6 | CI/Testing | Golden file tests for CEL evaluation results not mentioned | Fixed: Added golden file testing section with example fixture and `-update` flag pattern (Section 13.5) |
+| M7 | End-User | No way for auditors to inspect compiled CEL state in `.status` | Fixed: Added as Open Question #9 (`celStatus` field) (Section 16) |
+| M8 | End-User | Progressive disclosure not clearly communicated | Fixed: Added Progressive Disclosure subsection with 80/15/4/1% breakdown and "you probably don't need this" guidance (Section 4) |
+| M9 | K8s Patterns | Error at V(4)+ logging "sanitized variable dump" — define what sanitized means | Fixed: Defined sanitized as: `.metadata` only for paramRefs (`.data`/`.binaryData` redacted as `"<redacted, N keys>"`), `request.extra` keys only (Section 12.2) |
+| M10 | API/CRD | Self-referential paramRef (CR referencing WebhookAuthorizer) could cause loops | Fixed: Added self-reference prohibition to admission validation rules (Section 7) |
+| M11 | Integration | CEL environment layering (base env vs paramRef-augmented env) not detailed | Fixed: Added CEL Environment Layering section with two-layer architecture (base at startup, extended per-CR at reconciliation, activation at evaluation) (Section 9) |
+| M12 | QA | Rollback safety — CRD pruning is write-time only, etcd may retain fields | Fixed: Added CRD pruning caveat with write-time-only warning and no-op patch recommendation (Section 12.5) |
