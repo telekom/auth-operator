@@ -12,6 +12,18 @@ import (
 	"go.opentelemetry.io/otel/trace/noop"
 )
 
+// saveAndRestoreGlobals saves the current global TracerProvider and
+// TextMapPropagator, then registers a Cleanup that restores them.
+func saveAndRestoreGlobals(t *testing.T) {
+	t.Helper()
+	prevTP := otel.GetTracerProvider()
+	prevProp := otel.GetTextMapPropagator()
+	t.Cleanup(func() {
+		otel.SetTracerProvider(prevTP)
+		otel.SetTextMapPropagator(prevProp)
+	})
+}
+
 func TestSetup_Disabled(t *testing.T) {
 	p, err := Setup(context.Background(), Config{Enabled: false}, "test")
 	if err != nil {
@@ -50,6 +62,8 @@ func TestSetup_EnabledNoEndpoint(t *testing.T) {
 }
 
 func TestSetup_EnabledWithEndpoint(t *testing.T) {
+	saveAndRestoreGlobals(t)
+
 	// Use a dummy endpoint; the exporter won't connect in this test
 	// but the provider should still be created successfully
 	p, err := Setup(context.Background(), Config{
@@ -112,6 +126,8 @@ func TestAttributes(t *testing.T) {
 }
 
 func TestSetup_SamplingRateZero(t *testing.T) {
+	saveAndRestoreGlobals(t)
+
 	p, err := Setup(context.Background(), Config{
 		Enabled:      true,
 		Endpoint:     "localhost:4317",
@@ -131,6 +147,8 @@ func TestSetup_SamplingRateZero(t *testing.T) {
 }
 
 func TestSetup_SamplingRateFull(t *testing.T) {
+	saveAndRestoreGlobals(t)
+
 	p, err := Setup(context.Background(), Config{
 		Enabled:      true,
 		Endpoint:     "localhost:4317",
@@ -150,8 +168,7 @@ func TestSetup_SamplingRateFull(t *testing.T) {
 }
 
 func TestSetup_EnabledRegistersGlobalProvider(t *testing.T) {
-	previousTP := otel.GetTracerProvider()
-	t.Cleanup(func() { otel.SetTracerProvider(previousTP) })
+	saveAndRestoreGlobals(t)
 
 	p, err := Setup(context.Background(), Config{
 		Enabled:      true,
