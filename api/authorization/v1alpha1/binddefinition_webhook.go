@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sort"
 
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -134,7 +135,19 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 				}
 			}
 
-			for _, ns := range namespaceSet {
+			// Sort namespace names for deterministic warning/error output.
+			nsNames := make([]string, 0, len(namespaceSet))
+			for name := range namespaceSet {
+				nsNames = append(nsNames, name)
+			}
+			sort.Strings(nsNames)
+
+			for _, nsName := range nsNames {
+				ns := namespaceSet[nsName]
+				// Skip terminating namespaces — roles may already be deleted.
+				if ns.Status.Phase == corev1.NamespaceTerminating {
+					continue
+				}
 				for _, roleRef := range roleBinding.RoleRefs {
 					role := &rbacv1.Role{}
 					key := client.ObjectKey{
@@ -158,6 +171,21 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 			}
 		} else if roleBinding.Namespace != "" {
 			// Validate RoleRefs in the explicitly specified namespace.
+			// First verify the namespace exists and is not terminating.
+			ns := &corev1.Namespace{}
+			if err := v.Client.Get(ctx, client.ObjectKey{Name: roleBinding.Namespace}, ns); err != nil {
+				if apierrors.IsNotFound(err) {
+					logger.Info("namespace not found, skipping role checks",
+						"name", r.Name, "namespace", roleBinding.Namespace)
+					warnings = append(warnings, fmt.Sprintf("namespace %q does not exist yet — role references will be validated once it is created", roleBinding.Namespace))
+					continue
+				}
+				logger.Error(err, "failed to get namespace", "namespace", roleBinding.Namespace)
+				return warnings, apierrors.NewInternalError(fmt.Errorf("error fetching namespace %q: %w", roleBinding.Namespace, err))
+			}
+			if ns.Status.Phase == corev1.NamespaceTerminating {
+				continue
+			}
 			for _, roleRef := range roleBinding.RoleRefs {
 				role := &rbacv1.Role{}
 				key := client.ObjectKey{
