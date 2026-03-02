@@ -302,10 +302,11 @@ networkPolicy:
     ingressFrom: []            # Override controller-manager ingress rules
 ```
 
-To disable network policies:
+Network policies are **disabled by default** (`networkPolicy.enabled: false`).
+To explicitly disable them after previously enabling:
 
 ```bash
-helm install auth-operator oci://ghcr.io/telekom/charts/auth-operator \
+helm upgrade auth-operator oci://ghcr.io/telekom/charts/auth-operator \
   --set networkPolicy.enabled=false
 ```
 

@@ -28,7 +28,7 @@ spec:
     # (all namespaces) is the standard approach. Override with webhookServer.ingressFrom
     # to restrict further if your CNI supports host-network policies.
     - ports:
-        - port: 9443
+        - port: webhook-server
           protocol: TCP
       from:
         {{- if .Values.networkPolicy.webhookServer.ingressFrom }}
@@ -39,7 +39,7 @@ spec:
     # Health-probe port — kubelet liveness/readiness probes.
     # Open to all sources; kubelet uses host network on most CNIs.
     - ports:
-        - port: 8081
+        - port: health-probe
           protocol: TCP
   {{- if .Values.networkPolicy.egress.enabled }}
   egress:
@@ -67,7 +67,7 @@ spec:
   ingress:
     # Metrics port — only the monitoring namespace should scrape metrics.
     - ports:
-        - port: 8080
+        - port: metrics
           protocol: TCP
       from:
         {{- if .Values.networkPolicy.controllerManager.ingressFrom }}
@@ -79,7 +79,7 @@ spec:
         {{- end }}
     # Health-probe port — kubelet liveness/readiness probes.
     - ports:
-        - port: 8081
+        - port: health-probe
           protocol: TCP
   {{- if .Values.networkPolicy.egress.enabled }}
   egress:
