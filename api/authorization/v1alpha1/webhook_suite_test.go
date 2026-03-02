@@ -114,6 +114,9 @@ var _ = BeforeSuite(func() {
 	err = (&BindDefinition{}).SetupWebhookWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
 
+	err = (&WebhookAuthorizer{}).SetupWebhookWithManager(mgr)
+	Expect(err).NotTo(HaveOccurred())
+
 	// Register field indexes required by webhook validation (duplicate targetName checks)
 	// Inlined here to avoid import cycle with pkg/indexer
 	err = mgr.GetFieldIndexer().IndexField(ctx, &RoleDefinition{}, TargetNameField,

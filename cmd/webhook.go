@@ -214,6 +214,12 @@ func configureWebhooks(mgr manager.Manager) error {
 	}
 	mgr.GetWebhookServer().Register("/validate-v1-namespace", &webhook.Admission{Handler: namespaceValidator})
 
+	// Setup WebhookAuthorizer validator
+	log.Info("setting up WebhookAuthorizer validating webhook")
+	if err := (&authorizationv1alpha1.WebhookAuthorizer{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook for WebhookAuthorizer: %w", err)
+	}
+
 	log.Info("all webhooks configured successfully")
 	return nil
 }
