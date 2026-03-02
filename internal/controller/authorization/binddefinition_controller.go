@@ -1107,8 +1107,11 @@ func (r *BindDefinitionReconciler) validateRoleReferences(
 		clusterRole := &rbacv1.ClusterRole{}
 		if err := r.client.Get(ctx, types.NamespacedName{Name: clusterRoleRef}, clusterRole); err != nil {
 			if apierrors.IsNotFound(err) {
-				logger.V(1).Info("ClusterRole not found", "clusterRole", clusterRoleRef)
-				missingRoles = append(missingRoles, fmt.Sprintf("ClusterRole/%s", clusterRoleRef))
+				roleName := fmt.Sprintf("ClusterRole/%s", clusterRoleRef)
+				if !slices.Contains(missingRoles, roleName) {
+					logger.V(1).Info("ClusterRole not found", "clusterRole", clusterRoleRef)
+					missingRoles = append(missingRoles, roleName)
+				}
 			} else {
 				logger.Error(err, "Failed to check ClusterRole existence", "clusterRole", clusterRoleRef)
 			}

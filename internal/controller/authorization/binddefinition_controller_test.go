@@ -4121,6 +4121,14 @@ func TestReconcile_MissingRolePolicy_Warn(t *testing.T) {
 	// warn mode still succeeds (no error), but requeues with short interval.
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(result.RequeueAfter).To(Equal(RoleRefRequeueInterval))
+
+	// Verify RoleRefsValid condition is False and missingRoleRefs is populated.
+	var updated authorizationv1alpha1.BindDefinition
+	g.Expect(c.Get(ctx, types.NamespacedName{Name: bd.Name}, &updated)).To(Succeed())
+	roleRefCond := findCondition(updated.Status.Conditions, "RoleRefsValid")
+	g.Expect(roleRefCond).NotTo(BeNil(), "expected RoleRefsValid condition to be set")
+	g.Expect(roleRefCond.Status).To(Equal(metav1.ConditionFalse))
+	g.Expect(updated.Status.MissingRoleRefs).To(ContainElement("ClusterRole/nonexistent-role"))
 }
 
 func TestReconcile_MissingRolePolicy_Error(t *testing.T) {
@@ -4155,6 +4163,12 @@ func TestReconcile_MissingRolePolicy_Error(t *testing.T) {
 	g.Expect(stalledCond).NotTo(BeNil(), "expected Stalled condition to be set")
 	g.Expect(stalledCond.Status).To(Equal(metav1.ConditionTrue))
 	g.Expect(stalledCond.Message).To(ContainSubstring("policy=error"))
+
+	// Verify RoleRefsValid condition and missingRoleRefs in status.
+	roleRefCond := findCondition(updated.Status.Conditions, "RoleRefsValid")
+	g.Expect(roleRefCond).NotTo(BeNil(), "expected RoleRefsValid condition to be set")
+	g.Expect(roleRefCond.Status).To(Equal(metav1.ConditionFalse))
+	g.Expect(updated.Status.MissingRoleRefs).To(ContainElement("ClusterRole/nonexistent-role"))
 
 	// Verify that no RBAC resources were created — error mode must block reconciliation entirely.
 	var crbList rbacv1.ClusterRoleBindingList
