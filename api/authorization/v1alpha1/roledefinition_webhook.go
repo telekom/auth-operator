@@ -85,6 +85,15 @@ func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 	logger := log.FromContext(ctx).WithName("roledefinition-webhook")
 	logger.V(1).Info("validating update", "name", newObj.Name)
 
+	// Always check forbidden aggregation labels, even on metadata-only
+	// updates (which don't bump generation), to prevent adding a forbidden
+	// label via kubectl label or similar tools.
+	if newObj.Spec.TargetRole == DefinitionClusterRole {
+		if err := rejectForbiddenAggregationLabels(newObj); err != nil {
+			return nil, err
+		}
+	}
+
 	if oldObj.Generation == newObj.Generation {
 		return nil, nil
 	}
@@ -140,7 +149,7 @@ func validateRoleDefinitionSpec(obj *RoleDefinition) error {
 
 	// Validate TargetNamespace must not be set when TargetRole is ClusterRole
 	if obj.Spec.TargetRole == DefinitionClusterRole && obj.Spec.TargetNamespace != "" {
-		return apierrors.NewBadRequest("targetNamespace must not be set when targetRole is 'ClusterRole'")
+		return apierrors.NewBadRequest("targetNamespace must be empty when targetRole is 'ClusterRole'")
 	}
 
 	// Aggregation fields are only valid for ClusterRole targets
