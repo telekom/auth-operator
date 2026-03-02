@@ -424,7 +424,7 @@ var _ = Describe("SSA Helper Functions", func() {
 var _ = Describe("SSA Apply Functions (envtest)", Label("integration"), func() {
 	// Use suite-level testCtx and k8sClient from BeforeSuite
 
-	Context("ApplyClusterRole", func() {
+	Context("PatchApplyClusterRole", func() {
 		It("should create a new ClusterRole via SSA", func() {
 			labels := map[string]string{
 				"app.kubernetes.io/managed-by": "auth-operator",
@@ -439,8 +439,9 @@ var _ = Describe("SSA Apply Functions (envtest)", Label("integration"), func() {
 			}
 			ac := ssa.ClusterRoleWithLabelsAndRules("ssa-test-clusterrole", labels, rules)
 
-			err := ssa.ApplyClusterRole(testCtx, k8sClient, ac)
+			result, err := ssa.PatchApplyClusterRole(testCtx, k8sClient, ac)
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultCreated))
 
 			// Verify the ClusterRole was created correctly
 			var cr rbacv1.ClusterRole
@@ -463,7 +464,7 @@ var _ = Describe("SSA Apply Functions (envtest)", Label("integration"), func() {
 				},
 			}
 			ac := ssa.ClusterRoleWithLabelsAndRules("ssa-update-clusterrole", nil, rules)
-			err := ssa.ApplyClusterRole(testCtx, k8sClient, ac)
+			_, err := ssa.PatchApplyClusterRole(testCtx, k8sClient, ac)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Update with new rules
@@ -476,8 +477,9 @@ var _ = Describe("SSA Apply Functions (envtest)", Label("integration"), func() {
 			}
 			newLabels := map[string]string{"updated": "true"}
 			ac = ssa.ClusterRoleWithLabelsAndRules("ssa-update-clusterrole", newLabels, newRules)
-			err = ssa.ApplyClusterRole(testCtx, k8sClient, ac)
+			result, err := ssa.PatchApplyClusterRole(testCtx, k8sClient, ac)
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
 
 			// Verify the update
 			var cr rbacv1.ClusterRole
@@ -495,7 +497,7 @@ var _ = Describe("SSA Apply Functions (envtest)", Label("integration"), func() {
 			ac := ssa.ClusterRoleWithLabelsAndRules("ssa-ownerref-clusterrole", nil, nil).
 				WithOwnerReferences(ownerRef)
 
-			err := ssa.ApplyClusterRole(testCtx, k8sClient, ac)
+			_, err := ssa.PatchApplyClusterRole(testCtx, k8sClient, ac)
 			Expect(err).NotTo(HaveOccurred())
 
 			var cr rbacv1.ClusterRole
@@ -507,7 +509,7 @@ var _ = Describe("SSA Apply Functions (envtest)", Label("integration"), func() {
 		})
 	})
 
-	Context("ApplyRole", func() {
+	Context("PatchApplyRole", func() {
 		It("should create a new Role via SSA", func() {
 			labels := map[string]string{"app.kubernetes.io/managed-by": "auth-operator"}
 			rules := []rbacv1.PolicyRule{
@@ -519,7 +521,7 @@ var _ = Describe("SSA Apply Functions (envtest)", Label("integration"), func() {
 			}
 			ac := ssa.RoleWithLabelsAndRules("ssa-test-role", "default", labels, rules)
 
-			err := ssa.ApplyRole(testCtx, k8sClient, ac)
+			_, err := ssa.PatchApplyRole(testCtx, k8sClient, ac)
 			Expect(err).NotTo(HaveOccurred())
 
 			var r rbacv1.Role
@@ -535,7 +537,7 @@ var _ = Describe("SSA Apply Functions (envtest)", Label("integration"), func() {
 				{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}},
 			}
 			ac := ssa.RoleWithLabelsAndRules("ssa-update-role", "default", nil, rules)
-			err := ssa.ApplyRole(testCtx, k8sClient, ac)
+			_, err := ssa.PatchApplyRole(testCtx, k8sClient, ac)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Update with new rules
@@ -543,8 +545,9 @@ var _ = Describe("SSA Apply Functions (envtest)", Label("integration"), func() {
 				{APIGroups: []string{""}, Resources: []string{"pods", "services"}, Verbs: []string{"get", "create"}},
 			}
 			ac = ssa.RoleWithLabelsAndRules("ssa-update-role", "default", map[string]string{"updated": "yes"}, newRules)
-			err = ssa.ApplyRole(testCtx, k8sClient, ac)
+			result, err := ssa.PatchApplyRole(testCtx, k8sClient, ac)
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
 
 			var r rbacv1.Role
 			err = k8sClient.Get(testCtx, types.NamespacedName{Name: "ssa-update-role", Namespace: "default"}, &r)
@@ -554,7 +557,7 @@ var _ = Describe("SSA Apply Functions (envtest)", Label("integration"), func() {
 		})
 	})
 
-	Context("ApplyClusterRoleBinding", func() {
+	Context("PatchApplyClusterRoleBinding", func() {
 		BeforeEach(func() {
 			// Create a ClusterRole for binding
 			cr := &rbacv1.ClusterRole{
@@ -575,7 +578,7 @@ var _ = Describe("SSA Apply Functions (envtest)", Label("integration"), func() {
 			}
 			ac := ssa.ClusterRoleBindingWithSubjectsAndRoleRef("ssa-test-crb", map[string]string{"test": "true"}, subjects, roleRef)
 
-			err := ssa.ApplyClusterRoleBinding(testCtx, k8sClient, ac)
+			_, err := ssa.PatchApplyClusterRoleBinding(testCtx, k8sClient, ac)
 			Expect(err).NotTo(HaveOccurred())
 
 			var crb rbacv1.ClusterRoleBinding
@@ -593,7 +596,7 @@ var _ = Describe("SSA Apply Functions (envtest)", Label("integration"), func() {
 			}
 			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "binding-target-cr"}
 			ac := ssa.ClusterRoleBindingWithSubjectsAndRoleRef("ssa-update-crb", nil, subjects, roleRef)
-			err := ssa.ApplyClusterRoleBinding(testCtx, k8sClient, ac)
+			_, err := ssa.PatchApplyClusterRoleBinding(testCtx, k8sClient, ac)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Update subjects
@@ -602,8 +605,9 @@ var _ = Describe("SSA Apply Functions (envtest)", Label("integration"), func() {
 				{Kind: "Group", Name: "admin-group", APIGroup: rbacv1.GroupName},
 			}
 			ac = ssa.ClusterRoleBindingWithSubjectsAndRoleRef("ssa-update-crb", nil, newSubjects, roleRef)
-			err = ssa.ApplyClusterRoleBinding(testCtx, k8sClient, ac)
+			result, err := ssa.PatchApplyClusterRoleBinding(testCtx, k8sClient, ac)
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
 
 			var crb rbacv1.ClusterRoleBinding
 			err = k8sClient.Get(testCtx, types.NamespacedName{Name: "ssa-update-crb"}, &crb)
@@ -612,7 +616,7 @@ var _ = Describe("SSA Apply Functions (envtest)", Label("integration"), func() {
 		})
 	})
 
-	Context("ApplyRoleBinding", func() {
+	Context("PatchApplyRoleBinding", func() {
 		BeforeEach(func() {
 			// Create a Role for binding
 			r := &rbacv1.Role{
@@ -633,7 +637,7 @@ var _ = Describe("SSA Apply Functions (envtest)", Label("integration"), func() {
 			}
 			ac := ssa.RoleBindingWithSubjectsAndRoleRef("ssa-test-rb", "default", map[string]string{"app": "test"}, subjects, roleRef)
 
-			err := ssa.ApplyRoleBinding(testCtx, k8sClient, ac)
+			_, err := ssa.PatchApplyRoleBinding(testCtx, k8sClient, ac)
 			Expect(err).NotTo(HaveOccurred())
 
 			var rb rbacv1.RoleBinding
@@ -647,77 +651,77 @@ var _ = Describe("SSA Apply Functions (envtest)", Label("integration"), func() {
 	})
 
 	Context("Edge cases", func() {
-		It("should fail when ApplyClusterRole is called with nil", func() {
-			err := ssa.ApplyClusterRole(testCtx, k8sClient, nil)
+		It("should fail when PatchApplyClusterRole is called with nil", func() {
+			_, err := ssa.PatchApplyClusterRole(testCtx, k8sClient, nil)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("must have a name"))
 		})
 
-		It("should fail when ApplyClusterRole is called with empty name", func() {
+		It("should fail when PatchApplyClusterRole is called with empty name", func() {
 			ac := ssa.ClusterRoleWithLabelsAndRules("", nil, nil)
-			err := ssa.ApplyClusterRole(testCtx, k8sClient, ac)
+			_, err := ssa.PatchApplyClusterRole(testCtx, k8sClient, ac)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("name must not be empty"))
 		})
 
-		It("should fail when ApplyRole is called without namespace", func() {
+		It("should fail when PatchApplyRole is called without namespace", func() {
 			// Create a RoleApplyConfiguration without namespace
 			roleAC := ssa.RoleWithLabelsAndRules("test", "", nil, nil)
 			// Set namespace to nil after creation
 			roleAC.Namespace = nil
-			err := ssa.ApplyRole(testCtx, k8sClient, roleAC)
+			_, err := ssa.PatchApplyRole(testCtx, k8sClient, roleAC)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("must have a namespace"))
 		})
 
-		It("should fail when ApplyRole is called with empty name", func() {
+		It("should fail when PatchApplyRole is called with empty name", func() {
 			ac := ssa.RoleWithLabelsAndRules("", "default", nil, nil)
-			err := ssa.ApplyRole(testCtx, k8sClient, ac)
+			_, err := ssa.PatchApplyRole(testCtx, k8sClient, ac)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("name must not be empty"))
 		})
 
-		It("should fail when ApplyRole is called with empty namespace", func() {
+		It("should fail when PatchApplyRole is called with empty namespace", func() {
 			ac := ssa.RoleWithLabelsAndRules("test", "", nil, nil)
-			err := ssa.ApplyRole(testCtx, k8sClient, ac)
+			_, err := ssa.PatchApplyRole(testCtx, k8sClient, ac)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("namespace must not be empty"))
+			Expect(err.Error()).To(ContainSubstring("must have a namespace"))
 		})
 
-		It("should fail when ApplyClusterRoleBinding is called with nil", func() {
-			err := ssa.ApplyClusterRoleBinding(testCtx, k8sClient, nil)
+		It("should fail when PatchApplyClusterRoleBinding is called with nil", func() {
+			_, err := ssa.PatchApplyClusterRoleBinding(testCtx, k8sClient, nil)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("must have a name"))
 		})
 
-		It("should fail when ApplyClusterRoleBinding is called with empty name", func() {
+		It("should fail when PatchApplyClusterRoleBinding is called with empty name", func() {
 			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "admin"}
 			ac := ssa.ClusterRoleBindingWithSubjectsAndRoleRef("", nil, nil, roleRef)
-			err := ssa.ApplyClusterRoleBinding(testCtx, k8sClient, ac)
+			_, err := ssa.PatchApplyClusterRoleBinding(testCtx, k8sClient, ac)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("name must not be empty"))
 		})
 
-		It("should fail when ApplyRoleBinding is called with nil", func() {
-			err := ssa.ApplyRoleBinding(testCtx, k8sClient, nil)
+		It("should fail when PatchApplyRoleBinding is called with nil", func() {
+			_, err := ssa.PatchApplyRoleBinding(testCtx, k8sClient, nil)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("must have a name"))
 		})
 
-		It("should fail when ApplyRoleBinding is called with empty name", func() {
+		It("should fail when PatchApplyRoleBinding is called with empty name", func() {
 			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: "developer"}
 			ac := ssa.RoleBindingWithSubjectsAndRoleRef("", "default", nil, nil, roleRef)
-			err := ssa.ApplyRoleBinding(testCtx, k8sClient, ac)
+			_, err := ssa.PatchApplyRoleBinding(testCtx, k8sClient, ac)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("name must not be empty"))
 		})
 
-		It("should fail when ApplyRoleBinding is called with empty namespace", func() {
+		It("should fail when PatchApplyRoleBinding is called with empty namespace", func() {
 			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: "developer"}
 			ac := ssa.RoleBindingWithSubjectsAndRoleRef("test-rb", "", nil, nil, roleRef)
-			err := ssa.ApplyRoleBinding(testCtx, k8sClient, ac)
+			_, err := ssa.PatchApplyRoleBinding(testCtx, k8sClient, ac)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("namespace must not be empty"))
+			Expect(err.Error()).To(ContainSubstring("must have a namespace"))
 		})
 	})
 })

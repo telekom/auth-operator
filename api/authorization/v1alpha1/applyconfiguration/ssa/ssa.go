@@ -35,63 +35,27 @@ func applyStatus(ctx context.Context, c client.Client, applyConfig runtime.Apply
 }
 
 // ApplyRoleDefinitionStatus applies a status update to a RoleDefinition using native SSA.
-// The target object must already exist; applying status to a non-existent object returns
-// NotFound from the API server (wrapped with a descriptive message).
+// It delegates to PatchApplyRoleDefinitionStatus which compares against the cache first
+// and skips the API call when the status is already up-to-date.
 func ApplyRoleDefinitionStatus(ctx context.Context, c client.Client, rd *authv1alpha1.RoleDefinition) error {
-	if rd == nil {
-		return fmt.Errorf("roleDefinition must not be nil")
-	}
-	if rd.Name == "" {
-		return fmt.Errorf("roleDefinition must have a name")
-	}
-
-	applyConfig := ac.RoleDefinition(rd.Name, rd.Namespace).
-		WithStatus(RoleDefinitionStatusFrom(&rd.Status))
-
-	if err := applyStatus(ctx, c, applyConfig); err != nil {
-		return fmt.Errorf("apply RoleDefinition %s status: %w", rd.Name, err)
-	}
-	return nil
+	_, err := PatchApplyRoleDefinitionStatus(ctx, c, rd)
+	return err
 }
 
 // ApplyBindDefinitionStatus applies a status update to a BindDefinition using native SSA.
-// The target object must already exist; applying status to a non-existent object returns
-// NotFound from the API server (wrapped with a descriptive message).
+// It delegates to PatchApplyBindDefinitionStatus which compares against the cache first
+// and skips the API call when the status is already up-to-date.
 func ApplyBindDefinitionStatus(ctx context.Context, c client.Client, bd *authv1alpha1.BindDefinition) error {
-	if bd == nil {
-		return fmt.Errorf("bindDefinition must not be nil")
-	}
-	if bd.Name == "" {
-		return fmt.Errorf("bindDefinition must have a name")
-	}
-
-	applyConfig := ac.BindDefinition(bd.Name, bd.Namespace).
-		WithStatus(BindDefinitionStatusFrom(&bd.Status))
-
-	if err := applyStatus(ctx, c, applyConfig); err != nil {
-		return fmt.Errorf("apply BindDefinition %s status: %w", bd.Name, err)
-	}
-	return nil
+	_, err := PatchApplyBindDefinitionStatus(ctx, c, bd)
+	return err
 }
 
 // ApplyWebhookAuthorizerStatus applies a status update to a WebhookAuthorizer using native SSA.
-// The target object must already exist; applying status to a non-existent object returns
-// NotFound from the API server (wrapped with a descriptive message).
+// It delegates to PatchApplyWebhookAuthorizerStatus which compares against the cache first
+// and skips the API call when the status is already up-to-date.
 func ApplyWebhookAuthorizerStatus(ctx context.Context, c client.Client, wa *authv1alpha1.WebhookAuthorizer) error {
-	if wa == nil {
-		return fmt.Errorf("webhookAuthorizer must not be nil")
-	}
-	if wa.Name == "" {
-		return fmt.Errorf("webhookAuthorizer must have a name")
-	}
-
-	applyConfig := ac.WebhookAuthorizer(wa.Name, wa.Namespace).
-		WithStatus(WebhookAuthorizerStatusFrom(&wa.Status))
-
-	if err := applyStatus(ctx, c, applyConfig); err != nil {
-		return fmt.Errorf("apply WebhookAuthorizer %s status: %w", wa.Name, err)
-	}
-	return nil
+	_, err := PatchApplyWebhookAuthorizerStatus(ctx, c, wa)
+	return err
 }
 
 // RoleDefinitionStatusFrom converts a RoleDefinitionStatus to its ApplyConfiguration.

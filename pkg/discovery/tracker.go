@@ -30,8 +30,12 @@ import (
 var ErrResourceTrackerNotStarted = fmt.Errorf("resource tracker not started")
 
 const (
-	// Duration between periodic API resource collections.
-	periodicCollectionInterval = 30 * time.Second
+	// Default duration between periodic API resource collections.
+	// In stable clusters, API resources change infrequently. The 30-second
+	// default was unnecessarily aggressive and generated a lot of no-op
+	// discovery calls. 5 minutes strikes a good balance between
+	// self-healing and API-server friendliness.
+	defaultCollectionInterval = 5 * time.Minute
 
 	// Default duration between full rescans to account for missed events.
 	// This refreshes both the CRD UUID map and the API resources cache.
@@ -90,6 +94,7 @@ type ResourceTracker struct {
 	crdsUUIDs          map[string]struct{}
 	crdClient          client.Client // reusable client for CRD list operations
 	FullRescanInterval time.Duration // interval between periodic full rescans (0 = use default)
+	CollectionInterval time.Duration // interval between periodic API collections (0 = use default)
 }
 
 // hasCRDUUID returns true if the given UID is in the CRD UUID map (thread-safe).
@@ -141,6 +146,14 @@ func (r *ResourceTracker) fullRescanInterval() time.Duration {
 		return r.FullRescanInterval
 	}
 	return defaultFullRescanInterval
+}
+
+// collectionInterval returns the configured collection interval or the default.
+func (r *ResourceTracker) collectionInterval() time.Duration {
+	if r.CollectionInterval > 0 {
+		return r.CollectionInterval
+	}
+	return defaultCollectionInterval
 }
 
 // NewResourceTracker creates a new ResourceTracker.
@@ -402,9 +415,9 @@ func (r *ResourceTracker) collectAPIResources(ctx context.Context) (bool, error)
 
 func (r *ResourceTracker) periodicCollection(ctx context.Context) {
 	logger := log.FromContext(ctx).WithName("ResourceTracker.periodicCollection")
-	logger.Info("starting periodic API resource collection", "interval", periodicCollectionInterval)
+	logger.Info("starting periodic API resource collection", "interval", r.collectionInterval())
 
-	ticker := time.NewTicker(periodicCollectionInterval)
+	ticker := time.NewTicker(r.collectionInterval())
 	defer ticker.Stop()
 	for {
 		select {
