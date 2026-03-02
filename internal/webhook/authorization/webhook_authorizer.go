@@ -125,7 +125,7 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"detail", "no resource or non-resource attributes")
 	}
 
-	// Pre-fetch all authorizers in case the field index is unavailable,
+	// Prepare a shared fallback cache in case the field index is unavailable,
 	// so global and scoped queries share a single fallback API call.
 	var fallbackCache []authzv1alpha1.WebhookAuthorizer
 
