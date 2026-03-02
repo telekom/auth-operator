@@ -163,7 +163,7 @@ func TestValidateRoleDefinitionSpec(t *testing.T) {
 					TargetNamespace: "default",
 				},
 			},
-			wantErr: "targetNamespace must not be set when targetRole is 'ClusterRole'",
+			wantErr: "targetNamespace must be empty when targetRole is 'ClusterRole'",
 		},
 	}
 
