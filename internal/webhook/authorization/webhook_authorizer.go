@@ -232,7 +232,7 @@ func (wa *Authorizer) logDecision(sar *authzv1.SubjectAccessReview, res *evaluat
 }
 
 func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAccessReview, waList *authzv1alpha1.WebhookAuthorizerList) evaluationResult {
-	count := len(waList.Items)
+	evaluated := 0
 
 	for i, webhookAuthorizer := range waList.Items {
 		if sar.Spec.ResourceAttributes != nil &&
@@ -245,6 +245,8 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 				continue
 			}
 		}
+
+		evaluated++
 
 		wa.Log.V(2).Info("evaluating WebhookAuthorizer",
 			"authorizer", webhookAuthorizer.Name,
@@ -260,7 +262,7 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 				authorizerName: webhookAuthorizer.Name,
 				matchedRule:    -1,
 				matchedField:   "deniedPrincipal",
-				evaluatedCount: count,
+				evaluatedCount: evaluated,
 			}
 		}
 
@@ -275,7 +277,7 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 						authorizerName: webhookAuthorizer.Name,
 						matchedRule:    ruleIdx,
 						matchedField:   "resourceRule",
-						evaluatedCount: count,
+						evaluatedCount: evaluated,
 					}
 				}
 			}
@@ -288,7 +290,7 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 						authorizerName: webhookAuthorizer.Name,
 						matchedRule:    ruleIdx,
 						matchedField:   "nonResourceRule",
-						evaluatedCount: count,
+						evaluatedCount: evaluated,
 					}
 				}
 			}
@@ -301,7 +303,7 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 		decision:       decisionNoOpinion,
 		authorizerName: "",
 		matchedRule:    -1,
-		evaluatedCount: count,
+		evaluatedCount: evaluated,
 	}
 }
 
