@@ -162,7 +162,7 @@ func tracingConfig() tracing.Config {
 	// Parse as URL if it contains a scheme — otlptracegrpc.WithEndpoint
 	// expects a bare host:port.
 	if strings.Contains(endpoint, "://") {
-		if u, err := url.Parse(endpoint); err == nil {
+		if u, err := url.Parse(endpoint); err == nil && u.Host != "" {
 			// Only infer insecure from scheme when the flag wasn't explicitly set.
 			if !insecureExplicitlySet && u.Scheme == "http" {
 				insecure = true
