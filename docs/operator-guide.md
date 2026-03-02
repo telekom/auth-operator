@@ -322,10 +322,12 @@ networkPolicy:
 ```
 
 > **Security note:** The default webhook ingress rule uses `namespaceSelector: {}`
-> (all namespaces). This is required because kube-apiserver typically runs on the
-> host network and cannot be matched by namespace labels. Override
-> `webhookServer.ingressFrom` with an `ipBlock` rule if your CNI supports
-> host-network policies.
+> (all namespaces). When kube-apiserver runs on the host network, its traffic
+> typically bypasses NetworkPolicy enforcement altogether (most CNIs do not
+> intercept host-network traffic). The broad selector ensures compatibility
+> with CNIs that **do** enforce policies on host-network pods. If your network
+> plugin supports host-network policies, override `webhookServer.ingressFrom`
+> with an `ipBlock` rule scoped to the API server's CIDR instead.
 
 #### Egress Rules
 
