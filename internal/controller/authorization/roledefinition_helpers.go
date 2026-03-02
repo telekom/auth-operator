@@ -266,16 +266,19 @@ func (r *RoleDefinitionReconciler) ensureRole(
 	ownerRef := ownerRefForRoleDefinition(roleDefinition)
 	annotations := helpers.BuildResourceAnnotations("RoleDefinition", roleDefinition.Name)
 
-	// Merge aggregation labels first, then apply operator-managed labels on top
-	// so that AggregationLabels cannot overwrite the operator identification keys.
-	mergedLabels := make(map[string]string, len(roleDefinition.Labels)+len(roleDefinition.Spec.AggregationLabels))
-	for k, v := range roleDefinition.Spec.AggregationLabels {
-		mergedLabels[k] = v
+	// Build labels: start with metadata + operator identification labels,
+	// then apply aggregation labels (ClusterRole-only) on top, and finally
+	// re-set operator identification labels so aggregationLabels can never
+	// overwrite them.
+	mergedLabels := helpers.BuildResourceLabels(roleDefinition.Labels)
+	if roleDefinition.Spec.TargetRole == authorizationv1alpha1.DefinitionClusterRole {
+		for k, v := range roleDefinition.Spec.AggregationLabels {
+			mergedLabels[k] = v
+		}
 	}
-	labels := helpers.BuildResourceLabels(roleDefinition.Labels)
-	for k, v := range labels {
-		mergedLabels[k] = v
-	}
+	// Ensure operator-managed identification labels are never overwritten.
+	mergedLabels[helpers.ManagedByLabelStandard] = helpers.ManagedByValue
+	mergedLabels[helpers.AppNameLabel] = helpers.ManagedByValue
 
 	// Ensure the breakglass-compatible label is always managed via SSA for
 	// ClusterRoles so that toggling the flag false→true→false correctly
