@@ -47,8 +47,8 @@ resources.
 
 The controller watches for changes to authorization resources and ensures
 the corresponding ClusterRoles, Roles, ClusterRoleBindings, and RoleBindings
-are created and kept in sync. For WebhookAuthorizer resources, it validates
-the spec and manages status conditions to reflect readiness.`,
+are created and kept in sync, and that WebhookAuthorizer resources are validated
+and their status is kept up to date.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := validateConcurrency(bindDefinitionConcurrency, roleDefinitionConcurrency, webhookAuthorizerConcurrency); err != nil {
 			return err
@@ -103,7 +103,7 @@ the spec and manages status conditions to reflect readiness.`,
 		// Wait for CRDs to be available before setting up controllers
 		// This prevents cache sync timeout errors when CRDs are not yet installed
 		if waitForCRDs {
-			if err := waitForRequiredCRDs(ctx, cfg, cacheSyncTimeout); err != nil {
+			if err := waitForRequiredCRDs(ctx, cfg, cacheSyncTimeout, webhookAuthorizerConcurrency > 0); err != nil {
 				return fmt.Errorf("failed waiting for required CRDs: %w", err)
 			}
 		}
@@ -206,7 +206,7 @@ func init() {
 // waitForRequiredCRDs waits for all required CRDs to be established before starting controllers.
 // This prevents the "timed out waiting for cache to be synced" errors that occur when
 // CRDs are not yet installed or not yet established.
-func waitForRequiredCRDs(ctx context.Context, cfg *rest.Config, timeout time.Duration) error {
+func waitForRequiredCRDs(ctx context.Context, cfg *rest.Config, timeout time.Duration, includeWebhookAuthorizer bool) error {
 	setupLog.Info("waiting for required CRDs to be established", "timeout", timeout)
 
 	// Create a client for CRD checking (uses direct API calls, not cached)
@@ -219,7 +219,10 @@ func waitForRequiredCRDs(ctx context.Context, cfg *rest.Config, timeout time.Dur
 	requiredGVKs := []schema.GroupVersionKind{
 		authorizationv1alpha1.GroupVersion.WithKind("RoleDefinition"),
 		authorizationv1alpha1.GroupVersion.WithKind("BindDefinition"),
-		authorizationv1alpha1.GroupVersion.WithKind("WebhookAuthorizer"),
+	}
+	if includeWebhookAuthorizer {
+		requiredGVKs = append(requiredGVKs,
+			authorizationv1alpha1.GroupVersion.WithKind("WebhookAuthorizer"))
 	}
 
 	waiter := discovery.NewCRDWaiter(c, setupLog)
@@ -234,7 +237,8 @@ func waitForRequiredCRDs(ctx context.Context, cfg *rest.Config, timeout time.Dur
 // validateConcurrency checks that all concurrency values are non-negative.
 func validateConcurrency(bdConcurrency, rdConcurrency, waConcurrency int) error {
 	if bdConcurrency < 0 || rdConcurrency < 0 || waConcurrency < 0 {
-		return fmt.Errorf("concurrency values must be >= 0, got bdConcurrency=%d, rdConcurrency=%d, waConcurrency=%d", bdConcurrency, rdConcurrency, waConcurrency)
+		return fmt.Errorf("concurrency values must be >= 0, got bdConcurrency=%d, rdConcurrency=%d, waConcurrency=%d",
+			bdConcurrency, rdConcurrency, waConcurrency)
 	}
 	return nil
 }

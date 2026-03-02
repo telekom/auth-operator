@@ -43,6 +43,8 @@ controller:
   bindDefinitionConcurrency: 10
   # Number of concurrent reconcilers for RoleDefinition controller
   roleDefinitionConcurrency: 10
+  # Number of concurrent reconcilers for WebhookAuthorizer controller (0 to disable)
+  webhookAuthorizerConcurrency: 1
   resources:
     limits:
       cpu: 500m

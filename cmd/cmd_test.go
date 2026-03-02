@@ -112,12 +112,12 @@ func TestControllerCmdFlagValidation(t *testing.T) {
 		waConc      int
 		expectError bool
 	}{
-		{"all positive", 5, 5, 1, false},
+		{"all positive", 5, 5, 5, false},
 		{"all zero (disabled)", 0, 0, 0, false},
-		{"bd zero rd positive", 0, 5, 1, false},
-		{"bd positive rd zero", 5, 0, 1, false},
-		{"bd negative", -1, 5, 1, true},
-		{"rd negative", 5, -1, 1, true},
+		{"bd zero others positive", 0, 5, 5, false},
+		{"bd positive others zero", 5, 0, 0, false},
+		{"bd negative", -1, 5, 5, true},
+		{"rd negative", 5, -1, 5, true},
 		{"wa negative", 5, 5, -1, true},
 		{"all negative", -1, -1, -1, true},
 	}
