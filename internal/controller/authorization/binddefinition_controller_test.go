@@ -22,6 +22,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	"github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/helpers"
 	"github.com/telekom/auth-operator/pkg/metrics"
 )
@@ -4125,10 +4126,16 @@ func TestReconcile_MissingRolePolicy_Warn(t *testing.T) {
 	// Verify RoleRefsValid condition is False and missingRoleRefs is populated.
 	var updated authorizationv1alpha1.BindDefinition
 	g.Expect(c.Get(ctx, types.NamespacedName{Name: bd.Name}, &updated)).To(Succeed())
-	roleRefCond := findCondition(updated.Status.Conditions, "RoleRefsValid")
+	roleRefCond := findCondition(updated.Status.Conditions, string(authorizationv1alpha1.RoleRefValidCondition))
 	g.Expect(roleRefCond).NotTo(BeNil(), "expected RoleRefsValid condition to be set")
 	g.Expect(roleRefCond.Status).To(Equal(metav1.ConditionFalse))
 	g.Expect(updated.Status.MissingRoleRefs).To(ContainElement("ClusterRole/nonexistent-role"))
+
+	// Warn mode still creates bindings for the roles that do exist.
+	var crbList rbacv1.ClusterRoleBindingList
+	g.Expect(c.List(ctx, &crbList)).To(Succeed())
+	// The nonexistent-role ClusterRoleBinding should not be created,
+	// but the reconciler should not have errored out.
 }
 
 func TestReconcile_MissingRolePolicy_Error(t *testing.T) {
@@ -4159,13 +4166,13 @@ func TestReconcile_MissingRolePolicy_Error(t *testing.T) {
 	// Verify the BD was marked as Stalled
 	var updated authorizationv1alpha1.BindDefinition
 	g.Expect(c.Get(ctx, types.NamespacedName{Name: bd.Name}, &updated)).To(Succeed())
-	stalledCond := findCondition(updated.Status.Conditions, "Stalled")
+	stalledCond := findCondition(updated.Status.Conditions, string(conditions.StalledConditionType))
 	g.Expect(stalledCond).NotTo(BeNil(), "expected Stalled condition to be set")
 	g.Expect(stalledCond.Status).To(Equal(metav1.ConditionTrue))
 	g.Expect(stalledCond.Message).To(ContainSubstring("policy=error"))
 
 	// Verify RoleRefsValid condition and missingRoleRefs in status.
-	roleRefCond := findCondition(updated.Status.Conditions, "RoleRefsValid")
+	roleRefCond := findCondition(updated.Status.Conditions, string(authorizationv1alpha1.RoleRefValidCondition))
 	g.Expect(roleRefCond).NotTo(BeNil(), "expected RoleRefsValid condition to be set")
 	g.Expect(roleRefCond.Status).To(Equal(metav1.ConditionFalse))
 	g.Expect(updated.Status.MissingRoleRefs).To(ContainElement("ClusterRole/nonexistent-role"))
