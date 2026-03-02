@@ -65,7 +65,7 @@ type RoleDefinitionSpecApplyConfiguration struct {
 	// AggregateFrom generates an aggregating ClusterRole that uses label selectors
 	// to compose rules from other ClusterRoles, instead of specifying rules directly.
 	// When set, the controller skips API discovery and filtering; the generated ClusterRole
-	// has an aggregationRule and empty rules[] (rules are managed by the aggregation controller).
+	// carries an aggregationRule and its rules[] are managed by the RBAC aggregation controller.
 	// Mutually exclusive with RestrictedAPIs, RestrictedResources, and RestrictedVerbs.
 	// Only applicable when targetRole is ClusterRole.
 	AggregateFrom *rbacv1.AggregationRule `json:"aggregateFrom,omitempty"`

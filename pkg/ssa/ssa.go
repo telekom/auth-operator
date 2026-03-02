@@ -100,7 +100,8 @@ func ClusterRoleWithLabelsAndRules(
 }
 
 // ClusterRoleWithAggregation creates a ClusterRole ApplyConfiguration with an aggregation rule
-// and optional labels. Aggregated ClusterRoles have empty rules (managed by the aggregation controller).
+// and optional labels. The generated ClusterRole carries an aggregationRule; its rules[] are
+// populated by the RBAC aggregation controller.
 func ClusterRoleWithAggregation(
 	name string,
 	labels map[string]string,
