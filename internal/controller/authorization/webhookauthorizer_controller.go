@@ -226,7 +226,7 @@ func (r *WebhookAuthorizerReconciler) markStalled(
 	if updateErr := ssa.ApplyWebhookAuthorizerStatus(ctx, r.client, wa); updateErr != nil {
 		logger.Error(updateErr, "failed to apply Stalled status via SSA",
 			"webhookAuthorizer", wa.Name)
-		return updateErr
+		return fmt.Errorf("mark stalled for WebhookAuthorizer %s: %w", wa.Name, updateErr)
 	}
 	return nil
 }
