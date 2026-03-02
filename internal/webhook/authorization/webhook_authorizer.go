@@ -304,6 +304,11 @@ func (wa *Authorizer) listAllAuthorizers(ctx context.Context) ([]authzv1alpha1.W
 // (e.g. in the standalone webhook binary), and justify falling back to an
 // unindexed full list. All other errors (RBAC, network, API server
 // unavailable) are NOT index errors and must be propagated.
+//
+// NOTE: controller-runtime returns an untyped fmt.Errorf for missing field
+// indexes (see cache/internal/informers_map.go), so there is no sentinel
+// error or typed error to use with errors.Is/errors.As. String matching is
+// the only reliable detection method available.
 func isFieldIndexError(err error) bool {
 	if err == nil {
 		return false
