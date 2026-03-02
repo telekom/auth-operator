@@ -41,6 +41,9 @@ const (
 	decisionAllowed   = "allowed"
 	decisionDenied    = "denied"
 	decisionNoOpinion = "no-opinion"
+
+	// authorizerNameNone is used when no WebhookAuthorizer matched.
+	authorizerNameNone = "none"
 )
 
 // evaluationResult captures the full outcome of a SubjectAccessReview evaluation.
@@ -301,7 +304,7 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 		allowed:        false,
 		reason:         "Access denied: no matching rules",
 		decision:       decisionNoOpinion,
-		authorizerName: "",
+		authorizerName: authorizerNameNone,
 		matchedRule:    -1,
 		evaluatedCount: evaluated,
 	}
