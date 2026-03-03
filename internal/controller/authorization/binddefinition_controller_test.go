@@ -4232,6 +4232,12 @@ func TestReconcile_MissingRolePolicy_Ignore(t *testing.T) {
 	roleRefCond := findCondition(updated.Status.Conditions, string(authorizationv1alpha1.RoleRefValidCondition))
 	g.Expect(roleRefCond).NotTo(BeNil())
 	g.Expect(roleRefCond.Status).To(Equal(metav1.ConditionTrue))
+
+	// Verify that RBAC resources are still created despite missing role refs.
+	// In ignore mode, the controller should proceed with creating bindings.
+	var crbList rbacv1.ClusterRoleBindingList
+	g.Expect(c.List(ctx, &crbList)).To(Succeed())
+	g.Expect(crbList.Items).NotTo(BeEmpty(), "ignore-policy should still create ClusterRoleBindings")
 }
 
 func TestReconcile_MissingRolePolicy_Default(t *testing.T) {

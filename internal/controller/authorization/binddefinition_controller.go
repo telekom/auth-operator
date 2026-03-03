@@ -1113,7 +1113,7 @@ func (r *BindDefinitionReconciler) validateRoleReferences(
 					missingRoles = append(missingRoles, roleName)
 				}
 			} else {
-				logger.Error(err, "Failed to check ClusterRole existence", "clusterRole", clusterRoleRef)
+				return missingRoles, fmt.Errorf("check ClusterRole %q existence: %w", clusterRoleRef, err)
 			}
 		}
 	}
@@ -1135,7 +1135,7 @@ func (r *BindDefinitionReconciler) validateRoleReferences(
 						missingRoles = append(missingRoles, roleName)
 					}
 				} else {
-					logger.Error(err, "Failed to check ClusterRole existence", "clusterRole", clusterRoleRef)
+					return missingRoles, fmt.Errorf("check ClusterRole %q existence: %w", clusterRoleRef, err)
 				}
 			}
 		}

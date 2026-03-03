@@ -250,9 +250,10 @@ func (v *BindDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 	logger := log.FromContext(ctx).WithName("binddefinition-webhook")
 	logger.V(1).Info("validating update", "name", newObj.Name)
 
-	// Always validate when the policy annotation changes, even if the spec
-	// (and therefore Generation) is unchanged. When the new policy is "ignore",
-	// validateBindDefinitionSpec will skip role checks and return early.
+	// Validate when the spec changes (Generation bump) or when the effective
+	// missing-role-policy annotation value changes, since a policy change can
+	// gate stricter validation even without a spec change. When the new policy
+	// is "ignore", validateBindDefinitionSpec will skip role checks.
 	oldPolicy := oldObj.GetMissingRolePolicy()
 	newPolicy := newObj.GetMissingRolePolicy()
 	if oldObj.Generation == newObj.Generation && oldPolicy == newPolicy {
