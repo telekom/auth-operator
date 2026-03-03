@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/go-logr/logr"
 	authzv1 "k8s.io/api/authorization/v1"
@@ -19,6 +20,7 @@ import (
 	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/pkg/helpers"
 	"github.com/telekom/auth-operator/pkg/indexer"
+	pkgmetrics "github.com/telekom/auth-operator/pkg/metrics"
 	"github.com/telekom/auth-operator/pkg/tracing"
 
 	"go.opentelemetry.io/otel"
@@ -165,14 +167,26 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return strings.Compare(a.Name, b.Name)
 	})
 
-	verdict, reason := wa.evaluateSAR(ctx, &sar, items)
+	// Record the number of active authorizer resources.
+	pkgmetrics.AuthorizerActiveRules.Set(float64(len(items)))
+
+	start := time.Now()
+	verdict, reason, authorizerName := wa.evaluateSAR(ctx, &sar, items)
+	duration := time.Since(start).Seconds()
+
+	// Record Prometheus metrics.
+	decision := pkgmetrics.AuthorizerDecisionDenied
+	if verdict {
+		decision = pkgmetrics.AuthorizerDecisionAllowed
+	}
+	pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(decision, authorizerName).Inc()
+	pkgmetrics.AuthorizerRequestDuration.WithLabelValues(decision).Observe(duration)
+	if !verdict && authorizerName != pkgmetrics.AuthorizerNameNone {
+		pkgmetrics.AuthorizerDeniedPrincipalHitsTotal.WithLabelValues(authorizerName).Inc()
+	}
 
 	// Record decision in the span
 	if span := trace.SpanFromContext(ctx); span.IsRecording() {
-		decision := "denied"
-		if verdict {
-			decision = "allowed"
-		}
 		ruleCount := 0
 		for _, a := range items {
 			ruleCount += len(a.Spec.ResourceRules) + len(a.Spec.NonResourceRules)
@@ -317,7 +331,7 @@ func isFieldIndexError(err error) bool {
 	return strings.Contains(msg, "does not exist") && strings.Contains(msg, "index")
 }
 
-func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAccessReview, authorizers []authzv1alpha1.WebhookAuthorizer) (allowed bool, reason string) {
+func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAccessReview, authorizers []authzv1alpha1.WebhookAuthorizer) (allowed bool, reason string, authorizerName string) {
 	for _, webhookAuthorizer := range authorizers {
 		if sar.Spec.ResourceAttributes != nil && !helpers.IsLabelSelectorEmpty(&webhookAuthorizer.Spec.NamespaceSelector) && sar.Spec.ResourceAttributes.Namespace != "" {
 			if !wa.namespaceMatches(ctx, sar.Spec.ResourceAttributes.Namespace, &webhookAuthorizer.Spec.NamespaceSelector) {
@@ -327,22 +341,22 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 
 		// Check DeniedPrincipals.
 		if wa.principalMatches(sar.Spec.User, sar.Spec.Groups, webhookAuthorizer.Spec.DeniedPrincipals) {
-			return false, fmt.Sprintf("Access denied by WebhookAuthorizer %s", webhookAuthorizer.Name)
+			return false, fmt.Sprintf("Access denied by WebhookAuthorizer %s", webhookAuthorizer.Name), webhookAuthorizer.Name
 		}
 
 		// Check AllowedPrincipals.
 		if wa.principalMatches(sar.Spec.User, sar.Spec.Groups, webhookAuthorizer.Spec.AllowedPrincipals) {
 			// Check ResourceRules.
 			if sar.Spec.ResourceAttributes != nil && wa.resourceRulesMatch(webhookAuthorizer.Spec.ResourceRules, sar.Spec.ResourceAttributes) {
-				return true, fmt.Sprintf("Access granted by WebhookAuthorizer %s", webhookAuthorizer.Name)
+				return true, fmt.Sprintf("Access granted by WebhookAuthorizer %s", webhookAuthorizer.Name), webhookAuthorizer.Name
 			}
 			// Check NonResourceRules.
 			if sar.Spec.NonResourceAttributes != nil && wa.nonResourceRulesMatch(webhookAuthorizer.Spec.NonResourceRules, sar.Spec.NonResourceAttributes) {
-				return true, fmt.Sprintf("Access granted by WebhookAuthorizer %s", webhookAuthorizer.Name)
+				return true, fmt.Sprintf("Access granted by WebhookAuthorizer %s", webhookAuthorizer.Name), webhookAuthorizer.Name
 			}
 		}
 	}
-	return false, "Access denied: no matching rules"
+	return false, "Access denied: no matching rules", pkgmetrics.AuthorizerNameNone
 }
 
 // namespaceMatches checks if the namespace matches the selector.
