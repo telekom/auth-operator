@@ -54,7 +54,8 @@ type evaluationResult struct {
 	authorizerName string
 	matchedRule    int    // -1 when no rule matched
 	matchedField   string // "deniedPrincipal", "resourceRule", "nonResourceRule", or ""
-	evaluatedCount int
+	evaluatedCount int    // authorizers that actively participated in evaluation
+	skippedCount   int    // authorizers skipped due to namespace selector mismatch
 }
 
 // Authorizer implements an HTTP handler for SubjectAccessReview requests.
@@ -201,6 +202,7 @@ func (wa *Authorizer) logDecision(sar *authzv1.SubjectAccessReview, res *evaluat
 		"groups", cappedGroups(sar.Spec.Groups),
 		"authorizer", res.authorizerName,
 		"evaluatedCount", res.evaluatedCount,
+		"skippedCount", res.skippedCount,
 		"latency", latency.String(),
 	}
 
@@ -236,6 +238,7 @@ func (wa *Authorizer) logDecision(sar *authzv1.SubjectAccessReview, res *evaluat
 
 func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAccessReview, waList *authzv1alpha1.WebhookAuthorizerList) evaluationResult {
 	evaluated := 0
+	skipped := 0
 
 	for i, webhookAuthorizer := range waList.Items {
 		if sar.Spec.ResourceAttributes != nil &&
@@ -245,6 +248,7 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 				wa.Log.V(2).Info("namespace selector did not match, skipping",
 					"authorizer", webhookAuthorizer.Name,
 					"namespace", sar.Spec.ResourceAttributes.Namespace)
+				skipped++
 				continue
 			}
 		}
@@ -266,6 +270,7 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 				matchedRule:    -1,
 				matchedField:   "deniedPrincipal",
 				evaluatedCount: evaluated,
+				skippedCount:   skipped,
 			}
 		}
 
@@ -281,6 +286,7 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 						matchedRule:    ruleIdx,
 						matchedField:   "resourceRule",
 						evaluatedCount: evaluated,
+						skippedCount:   skipped,
 					}
 				}
 			}
@@ -294,6 +300,7 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 						matchedRule:    ruleIdx,
 						matchedField:   "nonResourceRule",
 						evaluatedCount: evaluated,
+						skippedCount:   skipped,
 					}
 				}
 			}
@@ -307,6 +314,7 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 		authorizerName: authorizerNameNone,
 		matchedRule:    -1,
 		evaluatedCount: evaluated,
+		skippedCount:   skipped,
 	}
 }
 
