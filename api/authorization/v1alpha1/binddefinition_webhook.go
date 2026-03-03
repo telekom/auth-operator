@@ -64,6 +64,22 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 
 	// Determine the missing-role policy from annotation.
 	policy := r.GetMissingRolePolicy()
+
+	// Always validate namespace selector syntax, regardless of missing-role policy.
+	// Invalid selectors are a configuration error and must not be silently ignored.
+	for _, roleBinding := range r.Spec.RoleBindings {
+		for _, nsSelector := range roleBinding.NamespaceSelector {
+			if isLabelSelectorEmpty(&nsSelector) {
+				continue
+			}
+			if _, err := metav1.LabelSelectorAsSelector(&nsSelector); err != nil {
+				logger.Info("validation failed: invalid namespaceSelector",
+					"name", r.Name, "error", err.Error())
+				return warnings, apierrors.NewBadRequest(fmt.Sprintf("invalid namespaceSelector: %v", err))
+			}
+		}
+	}
+
 	if policy == MissingRolePolicyIgnore {
 		return warnings, nil
 	}

@@ -4119,7 +4119,8 @@ func TestReconcile_MissingRolePolicy_Warn(t *testing.T) {
 	result, err := r.Reconcile(ctx, reconcile.Request{
 		NamespacedName: types.NamespacedName{Name: bd.Name},
 	})
-	// warn mode still succeeds (no error), but requeues with short interval.
+	// warn mode still succeeds (no error), but requeues with exponential backoff
+	// (initial interval equals RoleRefRequeueInterval for the first occurrence).
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(result.RequeueAfter).To(Equal(RoleRefRequeueInterval))
 
