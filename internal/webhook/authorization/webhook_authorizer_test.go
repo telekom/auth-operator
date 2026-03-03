@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/go-logr/logr/funcr"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	authzv1 "k8s.io/api/authorization/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -19,6 +20,7 @@ import (
 
 	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/pkg/indexer"
+	pkgmetrics "github.com/telekom/auth-operator/pkg/metrics"
 )
 
 // capturingLogger returns a logr.Logger that appends every log line to buf.
@@ -537,5 +539,104 @@ func TestAuditLog_StructuredFieldsComprehensive(t *testing.T) {
 	}
 	if respSAR.Status.Reason == "" {
 		t.Errorf("expected non-empty denial reason in response, got %+v", respSAR.Status)
+	}
+}
+
+// TestMetrics_RecordedAfterServeHTTP verifies that Prometheus metrics are
+// correctly emitted after ServeHTTP processes a SubjectAccessReview. This
+// guards against regressions where refactoring might break metric recording.
+func TestMetrics_RecordedAfterServeHTTP(t *testing.T) {
+	scheme := newScheme()
+	wa := authzv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{Name: "metrics-wa"},
+		Spec: authzv1alpha1.WebhookAuthorizerSpec{
+			DeniedPrincipals:  []authzv1alpha1.Principal{{User: "blocked"}},
+			AllowedPrincipals: []authzv1alpha1.Principal{{User: "admin"}},
+			ResourceRules: []authzv1.ResourceRule{
+				{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods"}},
+				{Verbs: []string{"list"}, APIGroups: []string{""}, Resources: []string{"pods"}},
+			},
+		},
+	}
+	cl := newIndexedClient(scheme, &wa)
+
+	// Reset counters so prior tests don't pollute assertions.
+	pkgmetrics.AuthorizerRequestsTotal.Reset()
+	pkgmetrics.AuthorizerDeniedPrincipalHitsTotal.Reset()
+
+	// --- Deny decision ---
+	handler := &Authorizer{Client: cl, Log: logr.Discard()}
+	denySAR := authzv1.SubjectAccessReview{
+		Spec: authzv1.SubjectAccessReviewSpec{
+			User:               "blocked",
+			ResourceAttributes: &authzv1.ResourceAttributes{Verb: "get", Resource: "pods"},
+		},
+	}
+	body := marshalSAR(t, denySAR)
+	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("deny: expected 200, got %d", rec.Code)
+	}
+
+	// Verify denied counter incremented.
+	deniedCount := testutil.ToFloat64(pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(
+		pkgmetrics.AuthorizerDecisionDenied, "metrics-wa"))
+	if deniedCount != 1 {
+		t.Errorf("expected AuthorizerRequestsTotal{denied,metrics-wa}=1, got %v", deniedCount)
+	}
+
+	// Verify denied principal hits counter incremented.
+	deniedPrincipalCount := testutil.ToFloat64(pkgmetrics.AuthorizerDeniedPrincipalHitsTotal.WithLabelValues("metrics-wa"))
+	if deniedPrincipalCount != 1 {
+		t.Errorf("expected AuthorizerDeniedPrincipalHitsTotal{metrics-wa}=1, got %v", deniedPrincipalCount)
+	}
+
+	// Verify duration histogram was observed (at least 1 sample across all buckets).
+	if testutil.CollectAndCount(pkgmetrics.AuthorizerRequestDuration) == 0 {
+		t.Error("expected AuthorizerRequestDuration to have observations")
+	}
+
+	// --- Allow decision ---
+	allowSAR := authzv1.SubjectAccessReview{
+		Spec: authzv1.SubjectAccessReviewSpec{
+			User:               "admin",
+			ResourceAttributes: &authzv1.ResourceAttributes{Verb: "get", Group: "", Resource: "pods"},
+		},
+	}
+	body = marshalSAR(t, allowSAR)
+	req = httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("allow: expected 200, got %d", rec.Code)
+	}
+
+	allowedCount := testutil.ToFloat64(pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(
+		pkgmetrics.AuthorizerDecisionAllowed, "metrics-wa"))
+	if allowedCount != 1 {
+		t.Errorf("expected AuthorizerRequestsTotal{allowed,metrics-wa}=1, got %v", allowedCount)
+	}
+
+	// --- Active rules gauge ---
+	// The authorizer has 2 ResourceRules, so the gauge should reflect that.
+	activeRules := testutil.ToFloat64(pkgmetrics.AuthorizerActiveRules)
+	if activeRules != 2 {
+		t.Errorf("expected AuthorizerActiveRules=2, got %v", activeRules)
+	}
+
+	// --- Error decision (decode failure) ---
+	pkgmetrics.AuthorizerRequestsTotal.Reset()
+	req = httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader([]byte("not-json")))
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	errorCount := testutil.ToFloat64(pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(
+		pkgmetrics.AuthorizerDecisionError, pkgmetrics.AuthorizerNameNone))
+	if errorCount != 1 {
+		t.Errorf("expected AuthorizerRequestsTotal{error,none}=1, got %v", errorCount)
 	}
 }

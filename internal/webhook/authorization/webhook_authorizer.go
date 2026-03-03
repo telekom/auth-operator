@@ -147,7 +147,9 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Buffer the response before writing so that metrics and audit logs
-	// are only recorded when the response can actually be sent to the client.
+	// are not recorded when serialization fails. Note: metrics are recorded
+	// after successful marshal but before w.Write — a late write failure
+	// (e.g. client disconnect) will still have metrics emitted.
 	respBytes, err := json.Marshal(response)
 	if err != nil {
 		wa.Log.Error(err, "failed to encode SubjectAccessReview response",

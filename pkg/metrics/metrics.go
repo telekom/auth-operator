@@ -191,11 +191,15 @@ var (
 
 	// AuthorizerActiveRules is a gauge tracking the total number of active
 	// resource and non-resource rules across all WebhookAuthorizer resources.
+	// NOTE: This counts individual ResourceRules + NonResourceRules entries
+	// (not the number of WebhookAuthorizer CRs). The metric name says
+	// "rules" intentionally — use AuthorizerRequestsTotal for CR-level
+	// visibility.
 	AuthorizerActiveRules = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: Namespace,
 			Name:      "authorizer_active_rules",
-			Help:      "Total number of resource and non-resource rules across all WebhookAuthorizer resources",
+			Help:      "Total number of individual resource and non-resource rule entries across all WebhookAuthorizer resources",
 		},
 	)
 
