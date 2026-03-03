@@ -11,6 +11,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	metav1ac "k8s.io/client-go/applyconfigurations/meta/v1"
 	rbacv1ac "k8s.io/client-go/applyconfigurations/rbac/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -308,6 +309,14 @@ func (r *RoleDefinitionReconciler) ensureRole(
 				mergedLabels,
 				finalRules,
 			).WithOwnerReferences(ownerRef).WithAnnotations(annotations)
+
+			// Clear any leftover aggregation rule from a previous aggregation-based
+			// reconciliation. SSA cannot remove the field because
+			// AggregationRule uses omitempty, so a merge patch is needed for the
+			// transition back to rule-based.
+			if err := r.clearAggregationRuleIfSet(ctx, roleDefinition.Spec.TargetName); err != nil {
+				return err
+			}
 		}
 		result, err := pkgssa.PatchApplyClusterRole(ctx, r.client, ac)
 		if err != nil {
@@ -403,5 +412,23 @@ func (r *RoleDefinitionReconciler) checkRoleOwnership(
 		}
 	}
 
+	return nil
+}
+
+// clearAggregationRuleIfSet removes the aggregationRule from an existing ClusterRole using a
+// JSON merge patch. This is necessary when a RoleDefinition transitions from aggregation-based
+// to rule-based because SSA cannot clear the field (its ApplyConfiguration uses omitempty,
+// so a nil value simply releases field ownership without deleting the stale data).
+func (r *RoleDefinitionReconciler) clearAggregationRuleIfSet(ctx context.Context, name string) error {
+	existing := &rbacv1.ClusterRole{}
+	if err := r.client.Get(ctx, client.ObjectKey{Name: name}, existing); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	if existing.AggregationRule != nil {
+		patch := client.RawPatch(types.MergePatchType, []byte(`{"aggregationRule":null}`))
+		if err := r.client.Patch(ctx, existing, patch); err != nil {
+			return fmt.Errorf("clearing aggregation rule on transition to rule-based: %w", err)
+		}
+	}
 	return nil
 }
