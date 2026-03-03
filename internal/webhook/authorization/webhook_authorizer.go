@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -51,6 +52,10 @@ type Authorizer struct {
 	Client client.Client
 	Log    logr.Logger
 	Tracer trace.Tracer
+
+	// indexFallbackWarned ensures the "field index unavailable" warning is
+	// logged only once instead of on every request.
+	indexFallbackWarned sync.Once
 }
 
 func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -146,28 +151,10 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	verdict, reason, authorizerName := wa.evaluateSAR(ctx, &sar, items)
 	duration := time.Since(start).Seconds()
 
-	// Record Prometheus metrics.
+	// Determine decision label for metrics and tracing.
 	decision := pkgmetrics.AuthorizerDecisionDenied
 	if verdict {
 		decision = pkgmetrics.AuthorizerDecisionAllowed
-	}
-	pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(decision, authorizerName).Inc()
-	pkgmetrics.AuthorizerRequestDuration.WithLabelValues(decision).Observe(duration)
-	if !verdict && authorizerName != pkgmetrics.AuthorizerNameNone {
-		pkgmetrics.AuthorizerDeniedPrincipalHitsTotal.WithLabelValues(authorizerName).Inc()
-	}
-
-	// Record decision in the span
-	if span := trace.SpanFromContext(ctx); span.IsRecording() {
-		ruleCount := 0
-		for _, a := range items {
-			ruleCount += len(a.Spec.ResourceRules) + len(a.Spec.NonResourceRules)
-		}
-		span.SetAttributes(
-			tracing.AttrDecision.String(decision),
-			tracing.AttrReason.String(reason),
-			tracing.AttrRuleCount.Int(ruleCount),
-		)
 	}
 
 	response := authzv1.SubjectAccessReview{
@@ -181,16 +168,45 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	wa.Log.V(1).Info("SubjectAccessReview decision", "allowed", verdict, "reason", reason)
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
+	// Buffer the response before writing so that metrics and tracing are
+	// only recorded when the response can actually be sent to the client.
+	respBytes, err := json.Marshal(response)
+	if err != nil {
 		wa.Log.Error(err, "failed to encode SubjectAccessReview response")
 		if span := trace.SpanFromContext(ctx); span.IsRecording() {
 			span.RecordError(err)
 			span.SetStatus(codes.Error, "failed to encode response")
 		}
+		wa.recordErrorMetrics(start)
 		http.Error(w, "internal evaluation error", http.StatusInternalServerError)
+		return
+	}
+
+	// Record Prometheus metrics only after successful serialization.
+	pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(decision, authorizerName).Inc()
+	pkgmetrics.AuthorizerRequestDuration.WithLabelValues(decision).Observe(duration)
+	if !verdict && authorizerName != pkgmetrics.AuthorizerNameNone {
+		pkgmetrics.AuthorizerDeniedPrincipalHitsTotal.WithLabelValues(authorizerName).Inc()
+	}
+
+	// Record decision in the span.
+	if span := trace.SpanFromContext(ctx); span.IsRecording() {
+		ruleCount := 0
+		for _, a := range items {
+			ruleCount += len(a.Spec.ResourceRules) + len(a.Spec.NonResourceRules)
+		}
+		span.SetAttributes(
+			tracing.AttrDecision.String(decision),
+			tracing.AttrReason.String(reason),
+			tracing.AttrRuleCount.Int(ruleCount),
+		)
+	}
+
+	wa.Log.V(1).Info("SubjectAccessReview decision", "allowed", verdict, "reason", reason)
+
+	w.Header().Set("Content-Type", "application/json")
+	if _, err := w.Write(respBytes); err != nil {
+		wa.Log.Error(err, "failed to write SubjectAccessReview response")
 	}
 }
 
@@ -255,7 +271,9 @@ func (wa *Authorizer) listGlobalAuthorizers(ctx context.Context, cachedAll *[]au
 	}
 
 	// Field index not registered — fall back to filtering a full list.
-	wa.Log.V(1).Info("field index unavailable, falling back to unindexed list for global authorizers")
+	wa.indexFallbackWarned.Do(func() {
+		wa.Log.Info("field index unavailable for WebhookAuthorizers, falling back to unindexed list")
+	})
 	if cachedAll == nil || *cachedAll == nil {
 		all, err := wa.listAllAuthorizers(ctx)
 		if err != nil {
@@ -296,7 +314,7 @@ func (wa *Authorizer) listScopedAuthorizers(ctx context.Context, cachedAll *[]au
 	}
 
 	// Field index not registered — fall back to filtering a full list.
-	wa.Log.V(1).Info("field index unavailable, falling back to unindexed list for scoped authorizers")
+	// Warning is logged once via indexFallbackWarned in listGlobalAuthorizers.
 	if cachedAll == nil || *cachedAll == nil {
 		all, err := wa.listAllAuthorizers(ctx)
 		if err != nil {
