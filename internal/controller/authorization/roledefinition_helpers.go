@@ -11,7 +11,9 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	metav1ac "k8s.io/client-go/applyconfigurations/meta/v1"
+	rbacv1ac "k8s.io/client-go/applyconfigurations/rbac/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -263,28 +265,66 @@ func (r *RoleDefinitionReconciler) ensureRole(
 	}
 
 	ownerRef := ownerRefForRoleDefinition(roleDefinition)
-	labels := helpers.BuildResourceLabels(roleDefinition.Labels)
 	annotations := helpers.BuildResourceAnnotations("RoleDefinition", roleDefinition.Name)
+
+	// Build labels: start with metadata + operator identification labels,
+	// then apply aggregation labels (ClusterRole-only) on top, and finally
+	// re-set operator identification labels so aggregationLabels can never
+	// overwrite them.
+	mergedLabels := helpers.BuildResourceLabels(roleDefinition.Labels)
+	if roleDefinition.Spec.TargetRole == authorizationv1alpha1.DefinitionClusterRole {
+		for k, v := range roleDefinition.Spec.AggregationLabels {
+			mergedLabels[k] = v
+		}
+	}
+	// Ensure operator-managed identification labels are never overwritten.
+	mergedLabels[helpers.ManagedByLabelStandard] = helpers.ManagedByValue
+	mergedLabels[helpers.AppNameLabel] = helpers.ManagedByValue
 
 	// Ensure the breakglass-compatible label is always managed via SSA for
 	// ClusterRoles so that toggling the flag false→true→false correctly
 	// sets the label to "false" (SSA retains field ownership).
 	if roleDefinition.Spec.TargetRole == authorizationv1alpha1.DefinitionClusterRole {
 		if roleDefinition.Spec.BreakglassAllowed {
-			labels[authorizationv1alpha1.BreakglassCompatibleLabel] = "true"
+			mergedLabels[authorizationv1alpha1.BreakglassCompatibleLabel] = "true"
 		} else {
-			labels[authorizationv1alpha1.BreakglassCompatibleLabel] = "false"
+			mergedLabels[authorizationv1alpha1.BreakglassCompatibleLabel] = "false"
 		}
 	}
 
 	// Apply the role using SSA with cache-aware diffing — skip if unchanged.
 	switch roleDefinition.Spec.TargetRole {
 	case authorizationv1alpha1.DefinitionClusterRole:
-		ac := pkgssa.ClusterRoleWithLabelsAndRules(
-			roleDefinition.Spec.TargetName,
-			labels,
-			finalRules,
-		).WithOwnerReferences(ownerRef).WithAnnotations(annotations)
+		var ac *rbacv1ac.ClusterRoleApplyConfiguration
+		if roleDefinition.Spec.AggregateFrom != nil {
+			// Aggregating ClusterRole: use aggregation rule instead of policy rules
+			ac = pkgssa.ClusterRoleWithAggregation(
+				roleDefinition.Spec.TargetName,
+				mergedLabels,
+				roleDefinition.Spec.AggregateFrom,
+			).WithOwnerReferences(ownerRef).WithAnnotations(annotations)
+
+			// Clear any leftover .rules from a previous rule-based reconciliation.
+			// SSA cannot clear omitempty fields, so a merge patch is needed for
+			// the transition from rule-based to aggregation-based.
+			if err := r.clearRulesOnAggregationTransition(ctx, roleDefinition.Spec.TargetName); err != nil {
+				return err
+			}
+		} else {
+			ac = pkgssa.ClusterRoleWithLabelsAndRules(
+				roleDefinition.Spec.TargetName,
+				mergedLabels,
+				finalRules,
+			).WithOwnerReferences(ownerRef).WithAnnotations(annotations)
+
+			// Clear any leftover aggregation rule from a previous aggregation-based
+			// reconciliation. SSA cannot remove the field because
+			// AggregationRule uses omitempty, so a merge patch is needed for the
+			// transition back to rule-based.
+			if err := r.clearAggregationRuleIfSet(ctx, roleDefinition.Spec.TargetName); err != nil {
+				return err
+			}
+		}
 		result, err := pkgssa.PatchApplyClusterRole(ctx, r.client, ac)
 		if err != nil {
 			logger.Error(err, "Failed to apply ClusterRole via SSA",
@@ -300,7 +340,7 @@ func (r *RoleDefinitionReconciler) ensureRole(
 		ac := pkgssa.RoleWithLabelsAndRules(
 			roleDefinition.Spec.TargetName,
 			roleDefinition.Spec.TargetNamespace,
-			labels,
+			mergedLabels,
 			finalRules,
 		).WithOwnerReferences(ownerRef).WithAnnotations(annotations)
 		result, err := pkgssa.PatchApplyRole(ctx, r.client, ac)
@@ -379,5 +419,55 @@ func (r *RoleDefinitionReconciler) checkRoleOwnership(
 		}
 	}
 
+	return nil
+}
+
+// clearAggregationRuleIfSet removes the aggregationRule from an existing ClusterRole using a
+// JSON merge patch. This is necessary when a RoleDefinition transitions from aggregation-based
+// to rule-based because SSA cannot clear the field (its ApplyConfiguration uses omitempty,
+// so a nil value simply releases field ownership without deleting the stale data).
+//
+// The GET is served from the informer cache (the Authorizer.Client is the cached manager client),
+// so the overhead in steady state is a single in-memory lookup + nil-check with no API call.
+// The merge patch is only sent when the aggregation rule is actually present, i.e. during the
+// one-time transition from aggregation-based back to rule-based.
+func (r *RoleDefinitionReconciler) clearAggregationRuleIfSet(ctx context.Context, name string) error {
+	existing := &rbacv1.ClusterRole{}
+	if err := r.client.Get(ctx, client.ObjectKey{Name: name}, existing); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	if existing.AggregationRule != nil {
+		patch := client.RawPatch(types.MergePatchType, []byte(`{"aggregationRule":null}`))
+		if err := r.client.Patch(ctx, existing, patch); err != nil {
+			return fmt.Errorf("clearing aggregation rule on transition to rule-based: %w", err)
+		}
+	}
+	return nil
+}
+
+// clearRulesOnAggregationTransition removes the .rules field from an existing
+// ClusterRole using a JSON merge patch.  This is necessary when a RoleDefinition
+// transitions from rule-based to aggregation-based because SSA cannot clear
+// .rules (the ApplyConfiguration uses omitempty, so WithRules() with zero args
+// is a no-op and an empty slice is omitted from the JSON payload).
+//
+// Like clearAggregationRuleIfSet, the GET is served from the informer cache, so
+// steady-state cost is a single in-memory lookup.  The merge patch is only sent
+// when .rules is non-empty and .aggregationRule is nil (i.e. during the one-time
+// transition from rule-based to aggregation-based).
+func (r *RoleDefinitionReconciler) clearRulesOnAggregationTransition(ctx context.Context, name string) error {
+	existing := &rbacv1.ClusterRole{}
+	if err := r.client.Get(ctx, client.ObjectKey{Name: name}, existing); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	// Only clear if the role currently has rules but no aggregation rule yet
+	// (transition in progress). Once the aggregation controller takes over, we
+	// stop touching .rules entirely.
+	if len(existing.Rules) > 0 && existing.AggregationRule == nil {
+		patch := client.RawPatch(types.MergePatchType, []byte(`{"rules":null}`))
+		if err := r.client.Patch(ctx, existing, patch); err != nil {
+			return fmt.Errorf("clearing rules on transition to aggregation-based: %w", err)
+		}
+	}
 	return nil
 }

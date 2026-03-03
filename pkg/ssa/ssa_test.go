@@ -215,6 +215,95 @@ var _ = Describe("SSA Helper Functions", func() {
 		})
 	})
 
+	Context("ClusterRoleWithAggregation", func() {
+		It("should create a ClusterRole with aggregation rule and no labels", func() {
+			aggRule := &rbacv1.AggregationRule{
+				ClusterRoleSelectors: []metav1.LabelSelector{
+					{MatchLabels: map[string]string{"aggregate-to-admin": "true"}},
+				},
+			}
+			result := ssa.ClusterRoleWithAggregation("agg-role", nil, aggRule)
+
+			Expect(result).NotTo(BeNil())
+			Expect(*result.Name).To(Equal("agg-role"))
+			Expect(result.AggregationRule).NotTo(BeNil())
+			Expect(result.AggregationRule.ClusterRoleSelectors).To(HaveLen(1))
+			Expect(result.AggregationRule.ClusterRoleSelectors[0].MatchLabels).To(
+				HaveKeyWithValue("aggregate-to-admin", "true"),
+			)
+			Expect(result.Rules).To(BeEmpty())
+		})
+
+		It("should create a ClusterRole with aggregation rule and labels", func() {
+			labels := map[string]string{"app": "auth-operator"}
+			aggRule := &rbacv1.AggregationRule{
+				ClusterRoleSelectors: []metav1.LabelSelector{
+					{MatchLabels: map[string]string{"role": "viewer"}},
+					{MatchLabels: map[string]string{"role": "editor"}},
+				},
+			}
+			result := ssa.ClusterRoleWithAggregation("agg-role-labels", labels, aggRule)
+
+			Expect(result).NotTo(BeNil())
+			Expect(result.Labels).To(HaveKeyWithValue("app", "auth-operator"))
+			Expect(result.AggregationRule.ClusterRoleSelectors).To(HaveLen(2))
+		})
+
+		It("should handle nil aggregation rule", func() {
+			result := ssa.ClusterRoleWithAggregation("no-agg", nil, nil)
+
+			Expect(result).NotTo(BeNil())
+			Expect(*result.Name).To(Equal("no-agg"))
+			Expect(result.AggregationRule).To(BeNil())
+		})
+
+		It("should handle matchExpressions in selectors", func() {
+			aggRule := &rbacv1.AggregationRule{
+				ClusterRoleSelectors: []metav1.LabelSelector{
+					{
+						MatchExpressions: []metav1.LabelSelectorRequirement{
+							{Key: "tier", Operator: metav1.LabelSelectorOpIn, Values: []string{"frontend", "backend"}},
+						},
+					},
+				},
+			}
+			result := ssa.ClusterRoleWithAggregation("expr-role", nil, aggRule)
+
+			Expect(result).NotTo(BeNil())
+			Expect(result.AggregationRule.ClusterRoleSelectors).To(HaveLen(1))
+			Expect(result.AggregationRule.ClusterRoleSelectors[0].MatchExpressions).To(HaveLen(1))
+			Expect(*result.AggregationRule.ClusterRoleSelectors[0].MatchExpressions[0].Key).To(Equal("tier"))
+		})
+	})
+
+	Context("LabelSelectorFrom", func() {
+		It("should return nil for nil input", func() {
+			result := ssa.LabelSelectorFrom(nil)
+			Expect(result).To(BeNil())
+		})
+
+		It("should convert matchLabels", func() {
+			sel := &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "test"},
+			}
+			result := ssa.LabelSelectorFrom(sel)
+			Expect(result).NotTo(BeNil())
+			Expect(result.MatchLabels).To(HaveKeyWithValue("app", "test"))
+		})
+
+		It("should convert matchExpressions", func() {
+			sel := &metav1.LabelSelector{
+				MatchExpressions: []metav1.LabelSelectorRequirement{
+					{Key: "env", Operator: metav1.LabelSelectorOpNotIn, Values: []string{"prod"}},
+				},
+			}
+			result := ssa.LabelSelectorFrom(sel)
+			Expect(result).NotTo(BeNil())
+			Expect(result.MatchExpressions).To(HaveLen(1))
+			Expect(*result.MatchExpressions[0].Key).To(Equal("env"))
+		})
+	})
+
 	Context("RoleWithLabelsAndRules", func() {
 		It("should create a Role with no labels and no rules", func() {
 			result := ssa.RoleWithLabelsAndRules("test-role", "default", nil, nil)
