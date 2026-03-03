@@ -94,10 +94,9 @@ func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 		}
 	}
 
-	if oldObj.Generation == newObj.Generation {
-		return nil, nil
-	}
-
+	// Always run spec validation on update because Kubernetes increments
+	// generation after admission webhooks run, so old.Generation and
+	// new.Generation are always equal during the webhook call.
 	if err := validateRoleDefinitionSpec(newObj); err != nil {
 		return nil, err
 	}
