@@ -21,9 +21,14 @@ apierrors "k8s.io/apimachinery/pkg/api/errors"
 metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 ctrl "sigs.k8s.io/controller-runtime"
 
+// PROJECT API aliases (must be consistent across ALL files):
+authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+
 // WRONG — will fail lint:
 "k8s.io/api/core/v1"  // unaliased
 v1 "k8s.io/api/core/v1"  // wrong alias
+authnv1alpha1 "..."  // wrong alias for project API (use authorizationv1alpha1)
+v1alpha1 "..."  // ambiguous — could be any v1alpha1
 ```
 
 ### 2. Error Handling (`errorlint`, `errcheck`, `nilerr`, `nilnil`)
@@ -36,6 +41,11 @@ v1 "k8s.io/api/core/v1"  // wrong alias
 - Flag returning `nil` instead of an actual error (`nilerr`)
 - `nolintlint` requires `//nolint` directives to have explanations:
   `//nolint:errcheck // error is intentionally ignored because...`
+- **Duplicate error wrapping**: When a helper function wraps an error
+  (`fmt.Errorf("failed to X: %w", err)`) and the caller also wraps
+  the same error with a similar message, the final error contains
+  redundant context. Either the helper or the caller should wrap, not
+  both. Flag `fmt.Errorf("failed to X: %w", helperThatAlsoWraps())`.
 
 ### 3. Standard Library Variables (`usestdlibvars`)
 
@@ -98,6 +108,14 @@ rbacv1.GroupName  // not "rbac.authorization.k8s.io"
   not `Expect().Should()`).
 - Test helper functions must call `t.Helper()`.
 - Parallel tests must use `t.Parallel()` correctly.
+- **Temp dirs**: Use `t.TempDir()` instead of hardcoded paths like
+  `/tmp/certs`. `t.TempDir()` auto-cleans and avoids cross-test
+  pollution.
+- **Error-checked helpers**: `flag.Set()` and similar stdlib functions
+  that return an error must be checked in tests:
+  `if err := flag.Set(...); err != nil { t.Fatalf(...) }`.
+  Do not use `_ = flag.Set(...)` — a silent failure hides broken
+  test assumptions.
 
 ### 10. Line Length (`lll`)
 

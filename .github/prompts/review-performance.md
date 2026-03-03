@@ -55,6 +55,16 @@ RoleBindings across potentially hundreds of namespaces.
   disk I/O, unindexed lookups.
 - Verify that webhooks don't load all CRs to validate one.
 
+### 6a. Shared Fallback Cache
+
+- When field indexes are unavailable and multiple code paths fall back
+  to listing all resources (e.g., `listGlobalAuthorizers` and
+  `listScopedAuthorizers` both calling `listAllAuthorizers`), the
+  fallback result must be computed once and shared via a pointer
+  parameter or cached variable — not fetched independently by each
+  caller. Two identical unindexed `List` calls in the same request
+  path doubles API server load for zero benefit.
+
 ### 7. RBAC Resource Count
 
 - A single `RoleDefinition` can generate many RBAC resources (one per
@@ -63,13 +73,19 @@ RoleBindings across potentially hundreds of namespaces.
 - Check for quadratic behavior: e.g., comparing all existing bindings
   against all desired bindings without sorting or hashing.
 
-### 8. Metrics Cardinality
+### 8. Metrics Cardinality & Accuracy
 
 - Flag metrics with unbounded label values (namespace names, role names,
   binding UIDs).
 - Verify that metric series are cleaned up when resources are deleted.
 - Check that histogram buckets cover the expected range without
   excessive granularity.
+- **Counter accuracy on early returns**: Counters and gauges that track
+  "evaluated items" must reflect the actual number of items processed,
+  not the total list length set before a loop. If the loop can `break`
+  or `return` early, the counter must be incremented inside the loop
+  body or adjusted after the loop exits. Setting `count = len(items)`
+  before the loop and never decrementing on early exit inflates metrics.
 
 ### 9. Leader Election Overhead
 
