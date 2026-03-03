@@ -30,6 +30,7 @@ import (
 	conditions "github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/discovery"
 	"github.com/telekom/auth-operator/pkg/metrics"
+	pkgssa "github.com/telekom/auth-operator/pkg/ssa"
 )
 
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=roledefinitions,verbs=get;list;watch;update;patch
@@ -371,9 +372,17 @@ func (r *RoleDefinitionReconciler) discoverAndFilterResources(
 }
 
 // applyStatus applies status updates using Server-Side Apply (SSA).
-// This eliminates race conditions from stale object versions and batches all condition updates.
+// It compares the desired status against the informer cache and skips the
+// API call when nothing has changed, reducing API-server load.
 func (r *RoleDefinitionReconciler) applyStatus(ctx context.Context, roleDefinition *authorizationv1alpha1.RoleDefinition) error {
-	return ssa.ApplyRoleDefinitionStatus(ctx, r.client, roleDefinition)
+	result, err := ssa.PatchApplyRoleDefinitionStatus(ctx, r.client, roleDefinition)
+	if err != nil {
+		return err
+	}
+	if result == pkgssa.PatchApplyResultSkipped {
+		metrics.StatusResourcesSkipped.WithLabelValues("RoleDefinition").Inc()
+	}
+	return nil
 }
 
 func (r *RoleDefinitionReconciler) filterAPIResourcesForRoleDefinition(

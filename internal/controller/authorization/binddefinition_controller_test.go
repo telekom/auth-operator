@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -3946,8 +3947,8 @@ func TestReconcileReturnsShortRequeueOnMissingRoleRefs(t *testing.T) {
 		NamespacedName: types.NamespacedName{Name: "missing-refs-bd"},
 	})
 	g.Expect(err).NotTo(HaveOccurred())
-	g.Expect(result.RequeueAfter).To(Equal(RoleRefRequeueInterval),
-		"should use short requeue interval when role refs are missing")
+	g.Expect(result.RequeueAfter).To(BeNumerically("~", RoleRefRequeueInterval, time.Second),
+		"initial backoff should be close to the base requeue interval")
 }
 
 // TestReconcileReturnsDefaultRequeueWhenAllRefsValid verifies that Reconcile

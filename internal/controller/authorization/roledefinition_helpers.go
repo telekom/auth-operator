@@ -277,7 +277,7 @@ func (r *RoleDefinitionReconciler) ensureRole(
 		}
 	}
 
-	// Apply the role using SSA - handles both create and update
+	// Apply the role using SSA with cache-aware diffing — skip if unchanged.
 	switch roleDefinition.Spec.TargetRole {
 	case authorizationv1alpha1.DefinitionClusterRole:
 		ac := pkgssa.ClusterRoleWithLabelsAndRules(
@@ -285,12 +285,17 @@ func (r *RoleDefinitionReconciler) ensureRole(
 			labels,
 			finalRules,
 		).WithOwnerReferences(ownerRef).WithAnnotations(annotations)
-		if err := pkgssa.ApplyClusterRole(ctx, r.client, ac); err != nil {
+		result, err := pkgssa.PatchApplyClusterRole(ctx, r.client, ac)
+		if err != nil {
 			logger.Error(err, "Failed to apply ClusterRole via SSA",
 				"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
 			return err
 		}
-		metrics.RBACResourcesApplied.WithLabelValues(metrics.ResourceClusterRole).Inc()
+		if result == pkgssa.PatchApplyResultSkipped {
+			metrics.RBACResourcesSkipped.WithLabelValues(metrics.ResourceClusterRole).Inc()
+		} else {
+			metrics.RBACResourcesApplied.WithLabelValues(metrics.ResourceClusterRole).Inc()
+		}
 	case authorizationv1alpha1.DefinitionNamespacedRole:
 		ac := pkgssa.RoleWithLabelsAndRules(
 			roleDefinition.Spec.TargetName,
@@ -298,12 +303,17 @@ func (r *RoleDefinitionReconciler) ensureRole(
 			labels,
 			finalRules,
 		).WithOwnerReferences(ownerRef).WithAnnotations(annotations)
-		if err := pkgssa.ApplyRole(ctx, r.client, ac); err != nil {
+		result, err := pkgssa.PatchApplyRole(ctx, r.client, ac)
+		if err != nil {
 			logger.Error(err, "Failed to apply Role via SSA",
 				"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
 			return err
 		}
-		metrics.RBACResourcesApplied.WithLabelValues(metrics.ResourceRole).Inc()
+		if result == pkgssa.PatchApplyResultSkipped {
+			metrics.RBACResourcesSkipped.WithLabelValues(metrics.ResourceRole).Inc()
+		} else {
+			metrics.RBACResourcesApplied.WithLabelValues(metrics.ResourceRole).Inc()
+		}
 	default:
 		return fmt.Errorf("%w: got %q", ErrInvalidTargetRole, roleDefinition.Spec.TargetRole)
 	}

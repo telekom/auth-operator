@@ -50,12 +50,20 @@ const (
 	// Used by: RoleDefinitionReconciler, BindDefinitionReconciler.
 	DefaultRequeueInterval = 60 * time.Second
 
-	// RoleRefRequeueInterval is a shorter requeue used when one or more
-	// referenced Roles/ClusterRoles do not yet exist. The BindDefinition
-	// controller does not watch Roles directly (they are not owned resources),
-	// so a faster poll ensures the RoleRefsValid condition self-heals promptly
-	// once the missing roles are created (e.g. by a RoleDefinition).
+	// RoleRefRequeueInterval is exported for backwards compatibility and tests.
+	//
+	// Deprecated: The controller now uses exponential backoff via
+	// calculateMissingRoleRefBackoff() instead of a fixed interval.
 	RoleRefRequeueInterval = 10 * time.Second
+
+	// roleRefRequeueBase is the initial requeue interval when role references
+	// are missing. The interval grows exponentially until roleRefRequeueMax.
+	roleRefRequeueBase = 10 * time.Second
+
+	// roleRefRequeueMax caps the exponential backoff at 5 minutes so that
+	// permanently missing roles don't spin-loop endlessly yet still
+	// self-heal within a reasonable window once they appear.
+	roleRefRequeueMax = 5 * time.Minute
 )
 
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions,verbs=get;list;watch;update;patch
@@ -366,15 +374,17 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		"bindDefinition", bindDefinition.Name,
 		"observedGeneration", bindDefinition.Status.ObservedGeneration)
 
-	// Use a shorter requeue when role references are missing so the condition
-	// self-heals quickly once the referenced roles are created.
+	// Use exponential backoff when role references are missing so the condition
+	// self-heals quickly on first occurrence but doesn't waste API calls when
+	// references stay missing for a long time (e.g. misconfiguration).
 	if missingRoleRefs > 0 {
+		backoff := calculateMissingRoleRefBackoff(bindDefinition)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultDegraded).Inc()
-		logger.Info("Requeuing with shorter interval due to missing role references",
+		logger.Info("Requeuing with backoff due to missing role references",
 			"bindDefinition", bindDefinition.Name,
 			"missingCount", missingRoleRefs,
-			"requeueAfter", RoleRefRequeueInterval)
-		return ctrl.Result{RequeueAfter: RoleRefRequeueInterval}, nil
+			"requeueAfter", backoff)
+		return ctrl.Result{RequeueAfter: backoff}, nil
 	}
 
 	logger.V(1).Info("Reconcile completed successfully",
@@ -382,6 +392,44 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		"requeueAfter", DefaultRequeueInterval)
 	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultSuccess).Inc()
 	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
+}
+
+// calculateMissingRoleRefBackoff returns an exponential backoff duration for
+// missing role references. It derives the interval from how long the
+// RoleRefsValid condition has been False — the longer it's been False, the
+// longer the next retry. This avoids wasting API calls on permanently
+// misconfigured BindDefinitions while still self-healing quickly on transient
+// ordering issues.
+//
+// Formula: min(roleRefRequeueBase << floor(elapsed/60s), roleRefRequeueMax)
+// Examples: 0-59s → 10s, 60-119s → 20s, 120-179s → 40s, 180-239s → 80s, >~5min → 5min cap.
+func calculateMissingRoleRefBackoff(bd *authorizationv1alpha1.BindDefinition) time.Duration {
+	cond := conditions.Get(bd, authorizationv1alpha1.RoleRefValidCondition)
+	if cond == nil || cond.Status != metav1.ConditionFalse {
+		// First time condition goes False — use base interval.
+		return roleRefRequeueBase
+	}
+
+	elapsed := time.Since(cond.LastTransitionTime.Time)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+
+	// Number of doublings: one per 60 s elapsed, capped to prevent overflow.
+	doublings := int(elapsed.Seconds() / 60)
+	const maxDoublings = 5 // 2^5 * 10 s = 320 s > roleRefRequeueMax
+	if doublings > maxDoublings {
+		return roleRefRequeueMax
+	}
+
+	interval := roleRefRequeueBase << doublings
+	if interval > roleRefRequeueMax {
+		return roleRefRequeueMax
+	}
+	if interval < roleRefRequeueBase {
+		return roleRefRequeueBase
+	}
+	return interval
 }
 
 // reconcileResources ensures all resources managed by the BindDefinition exist
@@ -414,7 +462,7 @@ func (r *BindDefinitionReconciler) reconcileResources(
 		logger.Info("Some referenced roles do not exist - bindings will be created but may not be effective",
 			"bindDefinitionName", bindDefinition.Name, "missingRoles", missingRoles)
 		r.recorder.Eventf(bindDefinition, nil, corev1.EventTypeWarning, authorizationv1alpha1.EventReasonRoleRefNotFound, authorizationv1alpha1.EventActionValidate,
-			"Referenced roles not found: %v. Bindings will be created but ineffective until roles exist. Will requeue in %s.", missingRoles, RoleRefRequeueInterval)
+			"Referenced roles not found: %v. Bindings will be created but ineffective until roles exist. Will requeue with backoff.", missingRoles)
 		conditions.MarkFalse(bindDefinition, authorizationv1alpha1.RoleRefValidCondition, bindDefinition.Generation,
 			authorizationv1alpha1.RoleRefInvalidReason, authorizationv1alpha1.RoleRefInvalidMessage, missingRoles)
 	} else {
@@ -515,8 +563,9 @@ func (r *BindDefinitionReconciler) ensureClusterRoleBindings(
 		ac.WithOwnerReferences(ownerRefForBindDefinition(bindDef)).
 			WithAnnotations(helpers.BuildResourceAnnotations("BindDefinition", bindDef.Name))
 
-		// Apply using SSA - creates if not exists, updates if different
-		if err := pkgssa.ApplyClusterRoleBinding(ctx, r.client, ac); err != nil {
+		// Apply using SSA with cache-aware diffing — skip if unchanged.
+		result, err := pkgssa.PatchApplyClusterRoleBinding(ctx, r.client, ac)
+		if err != nil {
 			logger.Error(err, "Failed to ensure ClusterRoleBinding",
 				"bindDefinitionName", bindDef.Name, "clusterRoleBindingName", crbName)
 			conditions.MarkFalse(bindDef, authorizationv1alpha1.CreateCondition, bindDef.Generation,
@@ -526,8 +575,12 @@ func (r *BindDefinitionReconciler) ensureClusterRoleBindings(
 		}
 
 		logger.V(2).Info("Ensured ClusterRoleBinding",
-			"bindDefinitionName", bindDef.Name, "clusterRoleBindingName", crbName)
-		metrics.RBACResourcesApplied.WithLabelValues(metrics.ResourceClusterRoleBinding).Inc()
+			"bindDefinitionName", bindDef.Name, "clusterRoleBindingName", crbName, "result", result)
+		if result == pkgssa.PatchApplyResultSkipped {
+			metrics.RBACResourcesSkipped.WithLabelValues(metrics.ResourceClusterRoleBinding).Inc()
+		} else {
+			metrics.RBACResourcesApplied.WithLabelValues(metrics.ResourceClusterRoleBinding).Inc()
+		}
 	}
 
 	return nil
@@ -602,8 +655,9 @@ func (r *BindDefinitionReconciler) ensureSingleRoleBinding(
 	ac.WithOwnerReferences(ownerRefForBindDefinition(bindDef)).
 		WithAnnotations(helpers.BuildResourceAnnotations("BindDefinition", bindDef.Name))
 
-	// Apply using SSA - creates if not exists, updates if different
-	if err := pkgssa.ApplyRoleBinding(ctx, r.client, ac); err != nil {
+	// Apply using SSA with cache-aware diffing — skip if unchanged.
+	result, err := pkgssa.PatchApplyRoleBinding(ctx, r.client, ac)
+	if err != nil {
 		logger.Error(err, "Failed to ensure RoleBinding",
 			"bindDefinitionName", bindDef.Name, "roleBindingName", rbName, "namespace", namespace)
 		conditions.MarkFalse(bindDef, authorizationv1alpha1.CreateCondition, bindDef.Generation,
@@ -613,8 +667,12 @@ func (r *BindDefinitionReconciler) ensureSingleRoleBinding(
 	}
 
 	logger.V(2).Info("Ensured RoleBinding",
-		"bindDefinitionName", bindDef.Name, "roleBindingName", rbName, "namespace", namespace)
-	metrics.RBACResourcesApplied.WithLabelValues(metrics.ResourceRoleBinding).Inc()
+		"bindDefinitionName", bindDef.Name, "roleBindingName", rbName, "namespace", namespace, "result", result)
+	if result == pkgssa.PatchApplyResultSkipped {
+		metrics.RBACResourcesSkipped.WithLabelValues(metrics.ResourceRoleBinding).Inc()
+	} else {
+		metrics.RBACResourcesApplied.WithLabelValues(metrics.ResourceRoleBinding).Inc()
+	}
 	return nil
 }
 
@@ -684,18 +742,23 @@ func (r *BindDefinitionReconciler) applyServiceAccount(
 	// Use per-BD FieldOwner so each BD's ownerRef is tracked independently.
 	// Without this, SSA would remove BD-A's ownerRef when BD-B applies its ownerRef.
 	fieldOwner := pkgssa.FieldOwnerForBD(bindDef.Name)
-	if err := pkgssa.ApplyServiceAccountWithFieldOwner(ctx, r.client, ac, fieldOwner); err != nil {
-		logger.Error(err, "Failed to apply ServiceAccount",
+	result, patchErr := pkgssa.PatchApplyServiceAccount(ctx, r.client, ac, fieldOwner)
+	if patchErr != nil {
+		logger.Error(patchErr, "Failed to apply ServiceAccount",
 			"bindDefinitionName", bindDef.Name, "serviceAccount", subject.Name)
-		return fmt.Errorf("apply ServiceAccount %s/%s: %w", subject.Namespace, subject.Name, err)
+		return fmt.Errorf("apply ServiceAccount %s/%s: %w", subject.Namespace, subject.Name, patchErr)
 	}
 
-	logger.V(1).Info("Applied ServiceAccount",
+	logger.V(1).Info("Ensured ServiceAccount",
 		"bindDefinitionName", bindDef.Name, "serviceAccount", subject.Name, "namespace", subject.Namespace,
-		"sourceNames", sourceNames)
-	metrics.RBACResourcesApplied.WithLabelValues(metrics.ResourceServiceAccount).Inc()
-	r.recorder.Eventf(bindDef, nil, corev1.EventTypeNormal, authorizationv1alpha1.EventReasonUpdate, authorizationv1alpha1.EventActionReconcile,
-		"Applied resource ServiceAccount/%s in namespace %s", subject.Name, subject.Namespace)
+		"sourceNames", sourceNames, "result", result)
+	if result == pkgssa.PatchApplyResultSkipped {
+		metrics.RBACResourcesSkipped.WithLabelValues(metrics.ResourceServiceAccount).Inc()
+	} else {
+		metrics.RBACResourcesApplied.WithLabelValues(metrics.ResourceServiceAccount).Inc()
+		r.recorder.Eventf(bindDef, nil, corev1.EventTypeNormal, authorizationv1alpha1.EventReasonUpdate, authorizationv1alpha1.EventActionReconcile,
+			"Applied resource ServiceAccount/%s in namespace %s", subject.Name, subject.Namespace)
+	}
 
 	return nil
 }
@@ -793,9 +856,17 @@ func (r *BindDefinitionReconciler) ensureServiceAccounts(
 }
 
 // applyStatus applies status updates using Server-Side Apply (SSA).
-// This eliminates race conditions from stale object versions and batches all condition updates.
+// It compares the desired status against the informer cache and skips the
+// API call when nothing has changed, reducing API-server load.
 func (r *BindDefinitionReconciler) applyStatus(ctx context.Context, bindDefinition *authorizationv1alpha1.BindDefinition) error {
-	return ssa.ApplyBindDefinitionStatus(ctx, r.client, bindDefinition)
+	result, err := ssa.PatchApplyBindDefinitionStatus(ctx, r.client, bindDefinition)
+	if err != nil {
+		return err
+	}
+	if result == pkgssa.PatchApplyResultSkipped {
+		metrics.StatusResourcesSkipped.WithLabelValues("BindDefinition").Inc()
+	}
+	return nil
 }
 
 //nolint:unparam // result is intentionally always nil - requeue via error propagation

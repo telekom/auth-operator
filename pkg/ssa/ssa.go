@@ -5,17 +5,14 @@
 package ssa
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/types"
 	corev1ac "k8s.io/client-go/applyconfigurations/core/v1"
 	metav1ac "k8s.io/client-go/applyconfigurations/meta/v1"
 	rbacv1ac "k8s.io/client-go/applyconfigurations/rbac/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // FieldOwner is the field manager name for the auth-operator.
@@ -78,36 +75,6 @@ func ServiceAccountWith(
 	}
 
 	return ac
-}
-
-// ApplyServiceAccount applies a ServiceAccount using Server-Side Apply.
-func ApplyServiceAccount(
-	ctx context.Context,
-	c client.Client,
-	ac *corev1ac.ServiceAccountApplyConfiguration,
-) error {
-	return ApplyServiceAccountWithFieldOwner(ctx, c, ac, FieldOwner)
-}
-
-// ApplyServiceAccountWithFieldOwner applies a ServiceAccount using SSA with a custom field owner.
-// Use FieldOwnerForBD(bdName) for shared SAs to ensure each BD's ownerRef is tracked independently.
-func ApplyServiceAccountWithFieldOwner(
-	ctx context.Context,
-	c client.Client,
-	ac *corev1ac.ServiceAccountApplyConfiguration,
-	fieldOwner string,
-) error {
-	if ac == nil || ac.Name == nil {
-		return fmt.Errorf("serviceAccount ApplyConfiguration must have a name")
-	}
-	if *ac.Name == "" {
-		return fmt.Errorf("serviceAccount ApplyConfiguration name must not be empty")
-	}
-	if ac.Namespace == nil || *ac.Namespace == "" {
-		return fmt.Errorf("serviceAccount ApplyConfiguration must have a namespace")
-	}
-
-	return c.Apply(ctx, ac, client.FieldOwner(fieldOwner), client.ForceOwnership)
 }
 
 // ClusterRoleWithLabelsAndRules creates a ClusterRole ApplyConfiguration with the specified
@@ -177,44 +144,6 @@ func PolicyRuleFrom(rule *rbacv1.PolicyRule) *rbacv1ac.PolicyRuleApplyConfigurat
 	}
 
 	return ac
-}
-
-// ApplyClusterRole applies a ClusterRole using Server-Side Apply.
-func ApplyClusterRole(
-	ctx context.Context,
-	c client.Client,
-	ac *rbacv1ac.ClusterRoleApplyConfiguration,
-) error {
-	if ac == nil || ac.Name == nil {
-		return fmt.Errorf("clusterRole ApplyConfiguration must have a name")
-	}
-	if *ac.Name == "" {
-		return fmt.Errorf("clusterRole ApplyConfiguration name must not be empty")
-	}
-
-	return c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership)
-}
-
-// ApplyRole applies a Role using Server-Side Apply.
-func ApplyRole(
-	ctx context.Context,
-	c client.Client,
-	ac *rbacv1ac.RoleApplyConfiguration,
-) error {
-	if ac == nil || ac.Name == nil {
-		return fmt.Errorf("role ApplyConfiguration must have a name")
-	}
-	if *ac.Name == "" {
-		return fmt.Errorf("role ApplyConfiguration name must not be empty")
-	}
-	if ac.Namespace == nil {
-		return fmt.Errorf("role ApplyConfiguration must have a namespace")
-	}
-	if *ac.Namespace == "" {
-		return fmt.Errorf("role ApplyConfiguration namespace must not be empty")
-	}
-
-	return c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership)
 }
 
 // ClusterRoleBindingWithSubjectsAndRoleRef creates a ClusterRoleBinding ApplyConfiguration.
@@ -295,42 +224,4 @@ func RoleRefFrom(roleRef *rbacv1.RoleRef) *rbacv1ac.RoleRefApplyConfiguration {
 		WithAPIGroup(roleRef.APIGroup).
 		WithKind(roleRef.Kind).
 		WithName(roleRef.Name)
-}
-
-// ApplyClusterRoleBinding applies a ClusterRoleBinding using Server-Side Apply.
-func ApplyClusterRoleBinding(
-	ctx context.Context,
-	c client.Client,
-	ac *rbacv1ac.ClusterRoleBindingApplyConfiguration,
-) error {
-	if ac == nil || ac.Name == nil {
-		return fmt.Errorf("clusterRoleBinding ApplyConfiguration must have a name")
-	}
-	if *ac.Name == "" {
-		return fmt.Errorf("clusterRoleBinding ApplyConfiguration name must not be empty")
-	}
-
-	return c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership)
-}
-
-// ApplyRoleBinding applies a RoleBinding using Server-Side Apply.
-func ApplyRoleBinding(
-	ctx context.Context,
-	c client.Client,
-	ac *rbacv1ac.RoleBindingApplyConfiguration,
-) error {
-	if ac == nil || ac.Name == nil {
-		return fmt.Errorf("roleBinding ApplyConfiguration must have a name")
-	}
-	if *ac.Name == "" {
-		return fmt.Errorf("roleBinding ApplyConfiguration name must not be empty")
-	}
-	if ac.Namespace == nil {
-		return fmt.Errorf("roleBinding ApplyConfiguration must have a namespace")
-	}
-	if *ac.Namespace == "" {
-		return fmt.Errorf("roleBinding ApplyConfiguration namespace must not be empty")
-	}
-
-	return c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership)
 }

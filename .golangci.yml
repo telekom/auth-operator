@@ -152,6 +152,9 @@ linters:
           - dupl
         path: test/
       - linters:
+          - dupl
+        path: patchhelper\.go$
+      - linters:
           - lll
         path: internal/*
       - linters:

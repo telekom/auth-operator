@@ -90,6 +90,31 @@ var (
 		[]string{"resource_type"},
 	)
 
+	// RBACResourcesSkipped counts the total number of RBAC resources where SSA
+	// was skipped because the cache already contained the desired state. This
+	// metric quantifies how much API-server load the patchhelper saves.
+	RBACResourcesSkipped = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Name:      "rbac_resources_skipped_total",
+			Help:      "Total number of RBAC resources skipped (already up-to-date, no SSA patch sent)",
+		},
+		[]string{"resource_type"},
+	)
+
+	// StatusResourcesSkipped counts the total number of status subresource
+	// updates where SSA was skipped because the cached status already
+	// matched the desired state. This metric quantifies how much
+	// API-server load the status patchhelper saves.
+	StatusResourcesSkipped = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Name:      "status_resources_skipped_total",
+			Help:      "Total number of status updates skipped (already up-to-date, no SSA patch sent)",
+		},
+		[]string{"resource_type"},
+	)
+
 	// RoleRefsMissing tracks the number of BindDefinitions whose referenced
 	// Roles or ClusterRoles do not yet exist. The gauge is set to the count of
 	// missing references per BindDefinition during each reconciliation.
@@ -224,7 +249,9 @@ func init() {
 		APIDiscoveryDuration,
 		APIDiscoveryErrors,
 		RBACResourcesApplied,
+		RBACResourcesSkipped,
 		RBACResourcesDeleted,
+		StatusResourcesSkipped,
 		RoleRefsMissing,
 		NamespacesActive,
 		ManagedResources,
