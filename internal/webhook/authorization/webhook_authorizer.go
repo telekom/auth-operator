@@ -128,9 +128,18 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	webhookAuthorizers := authzv1alpha1.WebhookAuthorizerList{Items: items}
 	result := wa.evaluateSAR(ctx, &sar, &webhookAuthorizers)
 
-	// Count total rules across all authorizers (not just request-scoped ones)
-	// so the gauge reflects the full cluster state independent of SAR type.
-	totalRules := countTotalRules(items)
+	// Count total rules across ALL WebhookAuthorizers (global + scoped) so
+	// the gauge reflects the full cluster state regardless of SAR type.
+	// Fall back to the evaluated subset if the full list fails.
+	var totalRules int
+	var allAuthorizers authzv1alpha1.WebhookAuthorizerList
+	if err := wa.Client.List(ctx, &allAuthorizers); err != nil {
+		wa.Log.V(1).Info("failed to list all WebhookAuthorizers for active-rules gauge, using evaluated subset",
+			"error", err.Error())
+		totalRules = countTotalRules(items)
+	} else {
+		totalRules = countTotalRules(allAuthorizers.Items)
+	}
 
 	response := authzv1.SubjectAccessReview{
 		TypeMeta: metav1.TypeMeta{
