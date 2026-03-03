@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Example 1: AggregationLabels — contribute rules to the built-in "view" ClusterRole.
+# The generated ClusterRole receives the aggregation label so that its rules are
+# automatically merged into "view" by the Kubernetes RBAC aggregation controller.
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: custom-viewer-aggregation
+spec:
+  targetRole: ClusterRole
+  targetName: custom-viewer-aggregation
+  scopeNamespaced: false
+  aggregationLabels:
+    rbac.authorization.k8s.io/aggregate-to-view: "true"
+---
+# Example 2: AggregateFrom — create an aggregating ClusterRole that composes rules
+# from other ClusterRoles via label selectors. The controller skips API discovery;
+# the Kubernetes RBAC aggregation controller populates .rules automatically.
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: tenant-admin-aggregate
+spec:
+  targetRole: ClusterRole
+  targetName: tenant-admin-aggregate
+  scopeNamespaced: false
+  aggregateFrom:
+    clusterRoleSelectors:
+      - matchLabels:
+          t-caas.telekom.com/aggregate-to-tenant-admin: "true"

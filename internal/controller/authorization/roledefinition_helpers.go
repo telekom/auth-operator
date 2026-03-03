@@ -453,16 +453,21 @@ func (r *RoleDefinitionReconciler) clearAggregationRuleIfSet(ctx context.Context
 //
 // Like clearAggregationRuleIfSet, the GET is served from the informer cache, so
 // steady-state cost is a single in-memory lookup.  The merge patch is only sent
-// when .rules is non-empty and .aggregationRule is nil (i.e. during the one-time
-// transition from rule-based to aggregation-based).
+// when .rules is non-empty and .aggregationRule is nil — this guards against
+// clearing rules that were later populated by the K8s aggregation controller.
+// After the aggregation controller sets .aggregationRule and populates .rules
+// from matching ClusterRoles, this function becomes a no-op because the
+// condition (aggregationRule == nil) is no longer met.
 func (r *RoleDefinitionReconciler) clearRulesOnAggregationTransition(ctx context.Context, name string) error {
 	existing := &rbacv1.ClusterRole{}
 	if err := r.client.Get(ctx, client.ObjectKey{Name: name}, existing); err != nil {
 		return client.IgnoreNotFound(err)
 	}
-	// Only clear if the role currently has rules but no aggregation rule yet
-	// (transition in progress). Once the aggregation controller takes over, we
-	// stop touching .rules entirely.
+	// Only clear if the role currently has rules but no aggregation rule yet.
+	// This indicates the one-time transition from rule-based to aggregation-based.
+	// Once the SSA apply sets .aggregationRule (and the K8s aggregation controller
+	// subsequently populates .rules from matching ClusterRoles), this condition
+	// is no longer met, so we never touch .rules again.
 	if len(existing.Rules) > 0 && existing.AggregationRule == nil {
 		patch := client.RawPatch(types.MergePatchType, []byte(`{"rules":null}`))
 		if err := r.client.Patch(ctx, existing, patch); err != nil {

@@ -169,6 +169,38 @@ finalizers because it:
 
 ---
 
+## Aggregation Transition Merge Patches
+
+When a RoleDefinition transitions between rule-based and aggregation-based
+modes, SSA alone cannot clear the stale field because the generated
+ApplyConfigurations use `omitempty` — omitting a field from the SSA payload
+only releases field ownership without deleting the data.
+
+The controller uses targeted **JSON merge patches** for these one-time
+transitions:
+
+| Transition | Function | Patch |
+|-----------|----------|-------|
+| Rules → Aggregation | `clearRulesOnAggregationTransition` | `{"rules": null}` |
+| Aggregation → Rules | `clearAggregationRuleIfSet` | `{"aggregationRule": null}` |
+
+Both functions follow the same pattern:
+
+1. **Read from cache** — The `GET` is served by the informer cache (no API call).
+2. **Guard condition** — Only patch if the stale field is actually present.
+3. **Merge patch** — Send a single merge patch to null-out the stale field.
+4. **One-time cost** — After the transition, the guard condition is no longer met.
+
+### Cache Staleness
+
+The cache-aware diff in `clusterRoleMatches` includes a guard for the
+aggregation→rules transition: if the desired ApplyConfiguration has no
+aggregation rule but the cached ClusterRole still does, the match returns
+`false` (forcing an SSA apply). This handles the eventual-consistency window
+between the merge patch write and the cache update.
+
+---
+
 ## Field Ownership Summary
 
 The operator uses a single field owner identity: `"auth-operator"`.

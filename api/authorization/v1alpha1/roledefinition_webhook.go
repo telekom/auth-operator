@@ -13,6 +13,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
+
+	"github.com/telekom/auth-operator/pkg/helpers"
 )
 
 // TargetNameField is the field index for efficient lookups by Spec.TargetName.
@@ -188,7 +190,31 @@ var forbiddenAggregationTargets = []string{"cluster-admin"}
 
 // rejectForbiddenAggregationLabels checks both spec.aggregationLabels and
 // metadata.labels for aggregation keys targeting built-in ClusterRoles.
+// It also rejects aggregationLabels that collide with operator-managed labels
+// (e.g., app.kubernetes.io/managed-by) to prevent ownership conflicts.
 func rejectForbiddenAggregationLabels(obj *RoleDefinition) error {
+	// Reject operator-managed label keys in aggregationLabels to prevent
+	// overwriting labels the controller needs for identification/ownership.
+	reservedKeys := []string{
+		helpers.ManagedByLabelStandard,
+		helpers.AppNameLabel,
+		BreakglassCompatibleLabel,
+	}
+	for key := range obj.Spec.AggregationLabels {
+		for _, reserved := range reservedKeys {
+			if key == reserved {
+				return apierrors.NewForbidden(
+					schema.GroupResource{Group: GroupVersion.Group, Resource: "roledefinitions"},
+					obj.Name,
+					field.Forbidden(
+						field.NewPath("spec", "aggregationLabels").Key(key),
+						fmt.Sprintf("must not use operator-managed label key %q", reserved),
+					),
+				)
+			}
+		}
+	}
+
 	for key := range obj.Spec.AggregationLabels {
 		for _, target := range forbiddenAggregationTargets {
 			if key == rbacv1.GroupName+"/aggregate-to-"+target {

@@ -239,6 +239,18 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		logger.V(2).Info("Skipping discovery for aggregating ClusterRole",
 			"roleDefinition", roleDefinition.Name,
 			"selectorCount", len(roleDefinition.Spec.AggregateFrom.ClusterRoleSelectors))
+
+		// Mark discovery/filtering conditions as not applicable so that tooling
+		// and dashboards do not report a degraded state for aggregation-based
+		// RoleDefinitions that intentionally skip these phases.
+		conditions.MarkTrue(roleDefinition, authorizationv1alpha1.APIDiscoveryCondition, roleDefinition.Generation,
+			authorizationv1alpha1.APIDiscoveryReason, "API discovery skipped for aggregating ClusterRole")
+		conditions.MarkTrue(roleDefinition, authorizationv1alpha1.APIFilteredCondition, roleDefinition.Generation,
+			authorizationv1alpha1.APIFilteredReason, "API filtering skipped for aggregating ClusterRole")
+		conditions.MarkTrue(roleDefinition, authorizationv1alpha1.ResourceDiscoveryCondition, roleDefinition.Generation,
+			authorizationv1alpha1.ResourceDiscoveryReason, "Resource discovery skipped for aggregating ClusterRole")
+		conditions.MarkTrue(roleDefinition, authorizationv1alpha1.ResourceFilteredCondition, roleDefinition.Generation,
+			authorizationv1alpha1.ResourceFilteredReason, "Resource filtering skipped for aggregating ClusterRole")
 	} else {
 		logger.V(2).Info("Discovering and filtering resources",
 			"roleDefinition", roleDefinition.Name)

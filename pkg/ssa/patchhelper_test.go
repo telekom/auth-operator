@@ -112,6 +112,95 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("name must not be empty"))
 		})
+
+		It("should create an aggregating ClusterRole", func() {
+			aggRule := &rbacv1.AggregationRule{
+				ClusterRoleSelectors: []metav1.LabelSelector{
+					{MatchLabels: map[string]string{"aggregate-to-viewer": "true"}},
+				},
+			}
+			ac := ssa.ClusterRoleWithAggregation("ph-agg-create",
+				map[string]string{"app": "test"}, aggRule)
+
+			result, err := ssa.PatchApplyClusterRole(testCtx, k8sClient, ac)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultCreated))
+
+			var cr rbacv1.ClusterRole
+			Expect(k8sClient.Get(testCtx, types.NamespacedName{Name: "ph-agg-create"}, &cr)).To(Succeed())
+			Expect(cr.AggregationRule).NotTo(BeNil())
+			Expect(cr.AggregationRule.ClusterRoleSelectors).To(HaveLen(1))
+		})
+
+		It("should skip when aggregating ClusterRole already matches", func() {
+			aggRule := &rbacv1.AggregationRule{
+				ClusterRoleSelectors: []metav1.LabelSelector{
+					{MatchLabels: map[string]string{"aggregate-to-admin": "true"}},
+				},
+			}
+			ac := ssa.ClusterRoleWithAggregation("ph-agg-skip", nil, aggRule)
+
+			result, err := ssa.PatchApplyClusterRole(testCtx, k8sClient, ac)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultCreated))
+
+			// Apply again — should skip.
+			result, err = ssa.PatchApplyClusterRole(testCtx, k8sClient, ac)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultSkipped))
+		})
+
+		It("should patch when aggregation selectors change", func() {
+			aggRule := &rbacv1.AggregationRule{
+				ClusterRoleSelectors: []metav1.LabelSelector{
+					{MatchLabels: map[string]string{"tier": "frontend"}},
+				},
+			}
+			ac := ssa.ClusterRoleWithAggregation("ph-agg-patch", nil, aggRule)
+
+			_, err := ssa.PatchApplyClusterRole(testCtx, k8sClient, ac)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Change selectors.
+			newAggRule := &rbacv1.AggregationRule{
+				ClusterRoleSelectors: []metav1.LabelSelector{
+					{MatchLabels: map[string]string{"tier": "backend"}},
+				},
+			}
+			ac2 := ssa.ClusterRoleWithAggregation("ph-agg-patch", nil, newAggRule)
+
+			result, err := ssa.PatchApplyClusterRole(testCtx, k8sClient, ac2)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+		})
+
+		It("should force patch when transitioning from aggregation to rules", func() {
+			// Create an aggregating ClusterRole first.
+			aggRule := &rbacv1.AggregationRule{
+				ClusterRoleSelectors: []metav1.LabelSelector{
+					{MatchLabels: map[string]string{"aggregate-to-test": "true"}},
+				},
+			}
+			ac := ssa.ClusterRoleWithAggregation("ph-agg-to-rules",
+				map[string]string{"app": "test"}, aggRule)
+
+			result, err := ssa.PatchApplyClusterRole(testCtx, k8sClient, ac)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultCreated))
+
+			// Now apply a rule-based ClusterRole (no aggregation rule).
+			// The cache still shows the aggregation rule, so clusterRoleMatches
+			// should return false (force patch).
+			rules := []rbacv1.PolicyRule{
+				{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}},
+			}
+			ac2 := ssa.ClusterRoleWithLabelsAndRules("ph-agg-to-rules",
+				map[string]string{"app": "test"}, rules)
+
+			result, err = ssa.PatchApplyClusterRole(testCtx, k8sClient, ac2)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+		})
 	})
 
 	// -----------------------------------------------------------------------

@@ -255,6 +255,89 @@ descriptions and alerting rules.
 
 ---
 
+## ClusterRole Aggregation
+
+The operator supports two aggregation features for ClusterRoles, both
+leveraging the [Kubernetes RBAC aggregation mechanism](https://kubernetes.io/docs/reference/access-authn-authz/rbac/#aggregated-clusterroles).
+
+### AggregationLabels
+
+Use `spec.aggregationLabels` to add labels to the generated ClusterRole so
+that its rules are automatically included in an aggregating ClusterRole.
+
+```yaml
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: custom-viewer
+spec:
+  targetRole: ClusterRole
+  targetName: custom-viewer
+  scopeNamespaced: false
+  aggregationLabels:
+    rbac.authorization.k8s.io/aggregate-to-view: "true"
+```
+
+The generated ClusterRole receives the aggregation label alongside its
+normal policy rules. The Kubernetes aggregation controller in turn merges
+those rules into the `view` ClusterRole.
+
+**Restrictions:**
+
+- Only applicable when `targetRole` is `ClusterRole`.
+- Aggregation into `cluster-admin` is forbidden (privilege escalation).
+- Operator-managed label keys (`app.kubernetes.io/managed-by`,
+  `app.kubernetes.io/name`, `t-caas.telekom.com/breakglass-compatible`)
+  cannot be used as aggregation label keys.
+- Maximum 32 entries.
+
+### AggregateFrom
+
+Use `spec.aggregateFrom` to generate an *aggregating* ClusterRole that
+composes its rules from other ClusterRoles matching label selectors.
+
+```yaml
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: tenant-admin
+spec:
+  targetRole: ClusterRole
+  targetName: tenant-admin
+  scopeNamespaced: false
+  aggregateFrom:
+    clusterRoleSelectors:
+      - matchLabels:
+          t-caas.telekom.com/aggregate-to-tenant-admin: "true"
+```
+
+When `aggregateFrom` is set:
+
+- API discovery and filtering are **skipped** (conditions are set to
+  `True` with a "skipped" message).
+- The generated ClusterRole carries an `aggregationRule` and its `.rules`
+  field is populated automatically by the Kubernetes RBAC aggregation
+  controller.
+- Mutually exclusive with `restrictedApis`, `restrictedResources`,
+  and `restrictedVerbs`.
+- Empty selectors (matching all ClusterRoles) are rejected by the
+  admission webhook.
+
+> **Note:** `scopeNamespaced` has no effect when `aggregateFrom` is used
+> (discovery is skipped), but must still be set due to schema requirements.
+> Use `false` as a convention.
+
+### Transitions Between Modes
+
+The controller handles transitions between rule-based and aggregation-based
+modes transparently. When switching from rule-based to `aggregateFrom`, the
+old `.rules` are cleared via a merge patch (SSA cannot clear omitempty
+fields). When switching back, the `.aggregationRule` is cleared similarly.
+See [SSA Architecture](ssa-architecture.md) for details on the merge-patch
+transition pattern.
+
+---
+
 ## Security Considerations
 
 ### RBAC Permissions

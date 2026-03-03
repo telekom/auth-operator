@@ -72,6 +72,8 @@ spec:
                   carries an aggregationRule and its rules[] are managed by the RBAC aggregation controller.
                   Mutually exclusive with RestrictedAPIs, RestrictedResources, and RestrictedVerbs.
                   Only applicable when targetRole is ClusterRole.
+                  Note: when aggregateFrom is used, scopeNamespaced has no effect (discovery is skipped),
+                  but must still be set due to schema requirements. Use false as a convention.
                 properties:
                   clusterRoleSelectors:
                     description: |-
@@ -138,6 +140,7 @@ spec:
                   For example, setting `rbac.authorization.k8s.io/aggregate-to-view: "true"` causes the
                   generated ClusterRole's rules to be aggregated into the default "view" ClusterRole.
                   Only applicable when targetRole is ClusterRole.
+                maxProperties: 32
                 type: object
               breakglassAllowed:
                 default: false

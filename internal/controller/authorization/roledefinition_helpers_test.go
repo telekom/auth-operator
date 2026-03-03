@@ -1192,3 +1192,57 @@ func TestEnsureRole_TransitionFromRulesToAggregateFrom(t *testing.T) {
 	g.Expect(cr.AggregationRule).NotTo(BeNil(), "aggregation rule should be set")
 	g.Expect(cr.AggregationRule.ClusterRoleSelectors).To(HaveLen(1))
 }
+
+// TestEnsureRole_TransitionFromAggregateFromToRules verifies that switching
+// a RoleDefinition from aggregateFrom back to rule-based correctly clears the
+// aggregation rule and sets the policy rules on the existing ClusterRole.
+func TestEnsureRole_TransitionFromAggregateFromToRules(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+
+	s := runtime.NewScheme()
+	_ = rbacv1.AddToScheme(s)
+	_ = authorizationv1alpha1.AddToScheme(s)
+
+	// Start with an aggregation-based ClusterRole.
+	existingCR := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "reverse-transition-role",
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "auth-operator",
+			},
+		},
+		AggregationRule: &rbacv1.AggregationRule{
+			ClusterRoleSelectors: []metav1.LabelSelector{
+				{MatchLabels: map[string]string{"custom/aggregate-to-old": "true"}},
+			},
+		},
+	}
+
+	// Now the RoleDefinition switches back to rule-based.
+	rd := &authorizationv1alpha1.RoleDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "reverse-transition-role",
+		},
+		Spec: authorizationv1alpha1.RoleDefinitionSpec{
+			TargetRole:      authorizationv1alpha1.DefinitionClusterRole,
+			TargetName:      "reverse-transition-role",
+			ScopeNamespaced: false,
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(existingCR, rd).Build()
+	r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	rules := []rbacv1.PolicyRule{
+		{Verbs: []string{"get", "list"}, APIGroups: []string{""}, Resources: []string{"pods"}},
+	}
+	err := r.ensureRole(ctx, rd, rules)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	cr := &rbacv1.ClusterRole{}
+	g.Expect(c.Get(ctx, client.ObjectKeyFromObject(existingCR), cr)).To(Succeed())
+	g.Expect(cr.AggregationRule).To(BeNil(), "aggregation rule should be cleared after transition to rules")
+	g.Expect(cr.Rules).NotTo(BeEmpty(), "policy rules should be set")
+	g.Expect(cr.Rules).To(HaveLen(1))
+}

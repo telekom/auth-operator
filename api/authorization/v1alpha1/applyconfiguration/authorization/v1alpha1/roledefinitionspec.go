@@ -68,6 +68,8 @@ type RoleDefinitionSpecApplyConfiguration struct {
 	// carries an aggregationRule and its rules[] are managed by the RBAC aggregation controller.
 	// Mutually exclusive with RestrictedAPIs, RestrictedResources, and RestrictedVerbs.
 	// Only applicable when targetRole is ClusterRole.
+	// Note: when aggregateFrom is used, scopeNamespaced has no effect (discovery is skipped),
+	// but must still be set due to schema requirements. Use false as a convention.
 	AggregateFrom *rbacv1.AggregationRule `json:"aggregateFrom,omitempty"`
 }
 

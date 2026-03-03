@@ -294,6 +294,15 @@ func clusterRoleMatches(existing *rbacv1.ClusterRole, ac *rbacv1ac.ClusterRoleAp
 		return aggregationRuleMatches(existing.AggregationRule, ac.AggregationRule)
 	}
 
+	// Detect transition away from aggregation: if the existing ClusterRole still
+	// has an aggregation rule (possibly stale from the informer cache) but the
+	// desired state is rule-based (no aggregation rule), force a patch. This
+	// handles the eventual-consistency window between the merge patch that clears
+	// .aggregationRule and the cache catching up.
+	if ac.AggregationRule == nil && existing.AggregationRule != nil {
+		return false
+	}
+
 	return policyRulesMatch(existing.Rules, ac.Rules)
 }
 

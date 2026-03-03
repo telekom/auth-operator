@@ -81,6 +81,7 @@ type RoleDefinitionSpec struct {
 	// generated ClusterRole's rules to be aggregated into the default "view" ClusterRole.
 	// Only applicable when targetRole is ClusterRole.
 	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MaxProperties=32
 	AggregationLabels map[string]string `json:"aggregationLabels,omitempty"`
 
 	// AggregateFrom generates an aggregating ClusterRole that uses label selectors
@@ -89,6 +90,8 @@ type RoleDefinitionSpec struct {
 	// carries an aggregationRule and its rules[] are managed by the RBAC aggregation controller.
 	// Mutually exclusive with RestrictedAPIs, RestrictedResources, and RestrictedVerbs.
 	// Only applicable when targetRole is ClusterRole.
+	// Note: when aggregateFrom is used, scopeNamespaced has no effect (discovery is skipped),
+	// but must still be set due to schema requirements. Use false as a convention.
 	// +kubebuilder:validation:Optional
 	AggregateFrom *rbacv1.AggregationRule `json:"aggregateFrom,omitempty"`
 }
