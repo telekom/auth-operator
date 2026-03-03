@@ -48,13 +48,32 @@ type Config struct {
 
 // Provider wraps an OpenTelemetry TracerProvider and exposes a Tracer.
 type Provider struct {
-	tp     trace.TracerProvider
-	tracer trace.Tracer
+	tp      trace.TracerProvider
+	tracer  trace.Tracer
+	enabled bool
+}
+
+// Enabled reports whether tracing was configured as active.
+// Use this to decide whether to pass a Tracer to hot-path components
+// (e.g. webhook handlers) so that a nil check can gate span creation.
+func (p *Provider) Enabled() bool {
+	return p.enabled
 }
 
 // Tracer returns the provider's tracer instance for creating spans.
+// When tracing is disabled this returns a noop tracer.
 func (p *Provider) Tracer() trace.Tracer {
 	return p.tracer
+}
+
+// TracerIfEnabled returns the tracer when tracing is enabled, or nil when
+// disabled. This allows callers to use a simple nil-check guard to avoid
+// any overhead (header parsing, noop span creation) on the hot path.
+func (p *Provider) TracerIfEnabled() trace.Tracer {
+	if p.enabled {
+		return p.tracer
+	}
+	return nil
 }
 
 // Shutdown gracefully shuts down the tracer provider, flushing any pending spans.
@@ -76,8 +95,9 @@ func Setup(ctx context.Context, cfg Config, version string) (*Provider, error) {
 	if !cfg.Enabled {
 		tp := noop.NewTracerProvider()
 		return &Provider{
-			tp:     tp,
-			tracer: tp.Tracer(TracerName),
+			tp:      tp,
+			tracer:  tp.Tracer(TracerName),
+			enabled: false,
 		}, nil
 	}
 
@@ -128,7 +148,7 @@ func Setup(ctx context.Context, cfg Config, version string) (*Provider, error) {
 	))
 
 	tracer := tp.Tracer(TracerName)
-	return &Provider{tp: tp, tracer: tracer}, nil
+	return &Provider{tp: tp, tracer: tracer, enabled: true}, nil
 }
 
 // Span attribute keys used across the operator.

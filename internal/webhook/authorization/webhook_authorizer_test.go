@@ -518,9 +518,11 @@ func TestMetrics_RecordedAfterServeHTTP(t *testing.T) {
 	}
 	cl := newIndexedFakeClient(scheme, wa)
 
-	// Reset counters so prior tests don't pollute assertions.
+	// Reset counters, histogram, and gauge so prior tests don't pollute assertions.
 	pkgmetrics.AuthorizerRequestsTotal.Reset()
 	pkgmetrics.AuthorizerDeniedPrincipalHitsTotal.Reset()
+	pkgmetrics.AuthorizerRequestDuration.Reset()
+	pkgmetrics.AuthorizerActiveRules.Set(0)
 
 	// --- Deny decision ---
 	authorizer := &webhooks.Authorizer{

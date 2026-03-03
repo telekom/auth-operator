@@ -195,13 +195,13 @@ func configureWebhooks(mgr manager.Manager, tp *tracing.Provider) error {
 	log := ctrl.Log.WithName("webhook-setup")
 
 	log.Info("registering authorization webhook at /authorize")
-	// The tracer may be a noop when tracing is disabled. Span attribute logic
-	// is guarded by span.IsRecording(), so the overhead of a noop tracer is
-	// negligible (no allocations, no exports).
+	// Use TracerIfEnabled() so that the webhook handler receives nil when
+	// tracing is disabled, allowing its nil-check guard to skip header
+	// parsing and noop span creation entirely — true zero overhead.
 	authorizer := &authorizationwebhook.Authorizer{
 		Client: mgr.GetClient(),
 		Log:    ctrl.Log.WithName("Authorizer"),
-		Tracer: tp.Tracer(),
+		Tracer: tp.TracerIfEnabled(),
 	}
 	mgr.GetWebhookServer().Register("/authorize", authorizer)
 

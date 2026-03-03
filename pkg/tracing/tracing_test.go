@@ -31,6 +31,14 @@ func TestSetup_Disabled(t *testing.T) {
 	}
 	defer func() { _ = p.Shutdown(context.Background()) }()
 
+	if p.Enabled() {
+		t.Error("expected Enabled() to return false when tracing is disabled")
+	}
+
+	if p.TracerIfEnabled() != nil {
+		t.Error("expected TracerIfEnabled() to return nil when tracing is disabled")
+	}
+
 	// Should return a noop tracer - verify it's not an SDK provider
 	if p.tp == nil {
 		t.Fatal("expected non-nil tracer provider")
@@ -76,6 +84,14 @@ func TestSetup_EnabledWithEndpoint(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	defer func() { _ = p.Shutdown(context.Background()) }()
+
+	if !p.Enabled() {
+		t.Error("expected Enabled() to return true when tracing is enabled")
+	}
+
+	if p.TracerIfEnabled() == nil {
+		t.Error("expected TracerIfEnabled() to return non-nil tracer when enabled")
+	}
 
 	tracer := p.Tracer()
 	if tracer == nil {
