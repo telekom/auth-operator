@@ -86,46 +86,8 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Add SAR attributes to the span
-	if span := trace.SpanFromContext(ctx); span.IsRecording() {
-		span.SetAttributes(tracing.AttrUser.String(sar.Spec.User))
-		if sar.Spec.ResourceAttributes != nil {
-			span.SetAttributes(
-				tracing.AttrVerb.String(sar.Spec.ResourceAttributes.Verb),
-				tracing.AttrAPIGroup.String(sar.Spec.ResourceAttributes.Group),
-				tracing.AttrResourceType.String(sar.Spec.ResourceAttributes.Resource),
-				tracing.AttrNamespace.String(sar.Spec.ResourceAttributes.Namespace),
-			)
-		}
-		if sar.Spec.NonResourceAttributes != nil {
-			span.SetAttributes(
-				tracing.AttrVerb.String(sar.Spec.NonResourceAttributes.Verb),
-				tracing.AttrPath.String(sar.Spec.NonResourceAttributes.Path),
-			)
-		}
-	}
-
-	switch {
-	case sar.Spec.ResourceAttributes != nil:
-		wa.Log.Info("received SubjectAccessReview",
-			"namespace", sar.Spec.ResourceAttributes.Namespace,
-			"user", sar.Spec.User,
-			"groups", sar.Spec.Groups,
-			"verb", sar.Spec.ResourceAttributes.Verb,
-			"apiGroup", sar.Spec.ResourceAttributes.Group,
-			"resource", sar.Spec.ResourceAttributes.Resource)
-	case sar.Spec.NonResourceAttributes != nil:
-		wa.Log.Info("received SubjectAccessReview",
-			"user", sar.Spec.User,
-			"groups", sar.Spec.Groups,
-			"verb", sar.Spec.NonResourceAttributes.Verb,
-			"path", sar.Spec.NonResourceAttributes.Path)
-	default:
-		wa.Log.Info("received SubjectAccessReview",
-			"user", sar.Spec.User,
-			"groups", sar.Spec.Groups,
-			"detail", "no resource or non-resource attributes")
-	}
+	wa.annotateSARSpan(ctx, &sar)
+	wa.logSAR(&sar)
 
 	// Prepare a shared fallback cache in case the field index is unavailable,
 	// so global and scoped queries share a single fallback API call.
@@ -219,6 +181,54 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			span.SetStatus(codes.Error, "failed to encode response")
 		}
 		http.Error(w, "internal evaluation error", http.StatusInternalServerError)
+	}
+}
+
+// annotateSARSpan adds SAR attributes to the active tracing span.
+func (wa *Authorizer) annotateSARSpan(ctx context.Context, sar *authzv1.SubjectAccessReview) {
+	span := trace.SpanFromContext(ctx)
+	if !span.IsRecording() {
+		return
+	}
+	span.SetAttributes(tracing.AttrUser.String(sar.Spec.User))
+	if sar.Spec.ResourceAttributes != nil {
+		span.SetAttributes(
+			tracing.AttrVerb.String(sar.Spec.ResourceAttributes.Verb),
+			tracing.AttrAPIGroup.String(sar.Spec.ResourceAttributes.Group),
+			tracing.AttrResourceType.String(sar.Spec.ResourceAttributes.Resource),
+			tracing.AttrNamespace.String(sar.Spec.ResourceAttributes.Namespace),
+		)
+	}
+	if sar.Spec.NonResourceAttributes != nil {
+		span.SetAttributes(
+			tracing.AttrVerb.String(sar.Spec.NonResourceAttributes.Verb),
+			tracing.AttrPath.String(sar.Spec.NonResourceAttributes.Path),
+		)
+	}
+}
+
+// logSAR logs the incoming SubjectAccessReview at appropriate detail level.
+func (wa *Authorizer) logSAR(sar *authzv1.SubjectAccessReview) {
+	switch {
+	case sar.Spec.ResourceAttributes != nil:
+		wa.Log.Info("received SubjectAccessReview",
+			"namespace", sar.Spec.ResourceAttributes.Namespace,
+			"user", sar.Spec.User,
+			"groups", sar.Spec.Groups,
+			"verb", sar.Spec.ResourceAttributes.Verb,
+			"apiGroup", sar.Spec.ResourceAttributes.Group,
+			"resource", sar.Spec.ResourceAttributes.Resource)
+	case sar.Spec.NonResourceAttributes != nil:
+		wa.Log.Info("received SubjectAccessReview",
+			"user", sar.Spec.User,
+			"groups", sar.Spec.Groups,
+			"verb", sar.Spec.NonResourceAttributes.Verb,
+			"path", sar.Spec.NonResourceAttributes.Path)
+	default:
+		wa.Log.Info("received SubjectAccessReview",
+			"user", sar.Spec.User,
+			"groups", sar.Spec.Groups,
+			"detail", "no resource or non-resource attributes")
 	}
 }
 
@@ -331,7 +341,7 @@ func isFieldIndexError(err error) bool {
 	return strings.Contains(msg, "does not exist") && strings.Contains(msg, "index")
 }
 
-func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAccessReview, authorizers []authzv1alpha1.WebhookAuthorizer) (allowed bool, reason string, authorizerName string) {
+func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAccessReview, authorizers []authzv1alpha1.WebhookAuthorizer) (allowed bool, reason, authorizerName string) {
 	for _, webhookAuthorizer := range authorizers {
 		if sar.Spec.ResourceAttributes != nil && !helpers.IsLabelSelectorEmpty(&webhookAuthorizer.Spec.NamespaceSelector) && sar.Spec.ResourceAttributes.Namespace != "" {
 			if !wa.namespaceMatches(ctx, sar.Spec.ResourceAttributes.Namespace, &webhookAuthorizer.Spec.NamespaceSelector) {
