@@ -303,6 +303,13 @@ func (r *RoleDefinitionReconciler) ensureRole(
 				mergedLabels,
 				roleDefinition.Spec.AggregateFrom,
 			).WithOwnerReferences(ownerRef).WithAnnotations(annotations)
+
+			// Clear any leftover .rules from a previous rule-based reconciliation.
+			// SSA cannot clear omitempty fields, so a merge patch is needed for
+			// the transition from rule-based to aggregation-based.
+			if err := r.clearRulesOnAggregationTransition(ctx, roleDefinition.Spec.TargetName); err != nil {
+				return err
+			}
 		} else {
 			ac = pkgssa.ClusterRoleWithLabelsAndRules(
 				roleDefinition.Spec.TargetName,
@@ -433,6 +440,33 @@ func (r *RoleDefinitionReconciler) clearAggregationRuleIfSet(ctx context.Context
 		patch := client.RawPatch(types.MergePatchType, []byte(`{"aggregationRule":null}`))
 		if err := r.client.Patch(ctx, existing, patch); err != nil {
 			return fmt.Errorf("clearing aggregation rule on transition to rule-based: %w", err)
+		}
+	}
+	return nil
+}
+
+// clearRulesOnAggregationTransition removes the .rules field from an existing
+// ClusterRole using a JSON merge patch.  This is necessary when a RoleDefinition
+// transitions from rule-based to aggregation-based because SSA cannot clear
+// .rules (the ApplyConfiguration uses omitempty, so WithRules() with zero args
+// is a no-op and an empty slice is omitted from the JSON payload).
+//
+// Like clearAggregationRuleIfSet, the GET is served from the informer cache, so
+// steady-state cost is a single in-memory lookup.  The merge patch is only sent
+// when .rules is non-empty and .aggregationRule is nil (i.e. during the one-time
+// transition from rule-based to aggregation-based).
+func (r *RoleDefinitionReconciler) clearRulesOnAggregationTransition(ctx context.Context, name string) error {
+	existing := &rbacv1.ClusterRole{}
+	if err := r.client.Get(ctx, client.ObjectKey{Name: name}, existing); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	// Only clear if the role currently has rules but no aggregation rule yet
+	// (transition in progress). Once the aggregation controller takes over, we
+	// stop touching .rules entirely.
+	if len(existing.Rules) > 0 && existing.AggregationRule == nil {
+		patch := client.RawPatch(types.MergePatchType, []byte(`{"rules":null}`))
+		if err := r.client.Patch(ctx, existing, patch); err != nil {
+			return fmt.Errorf("clearing rules on transition to aggregation-based: %w", err)
 		}
 	}
 	return nil

@@ -113,9 +113,12 @@ func ClusterRoleWithAggregation(
 		ac.WithLabels(labels)
 	}
 
-	// Explicitly set rules to empty so SSA removes any previously-applied rules
-	// when transitioning from rule-based to aggregation-based reconciliation.
-	ac.WithRules()
+	// NOTE: WithRules() with zero arguments is a no-op (append over empty
+	// range), and even an explicit empty slice is omitted by omitempty during
+	// JSON marshaling.  Therefore SSA cannot clear previously-applied rules
+	// through the ApplyConfiguration alone.  Instead, the controller must
+	// send a merge patch to null-out .rules during the rule→aggregation
+	// transition (see clearRulesOnAggregationTransition in roledefinition_helpers.go).
 
 	if aggregationRule != nil {
 		aggAC := rbacv1ac.AggregationRule()
