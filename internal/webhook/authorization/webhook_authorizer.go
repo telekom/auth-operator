@@ -57,6 +57,10 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Use request context for proper cancellation and deadline propagation
 	ctx := r.Context()
 
+	// Track request start time for Prometheus duration metrics, including
+	// early error returns (decode failures, list failures).
+	start := time.Now()
+
 	// Extract trace context from incoming HTTP headers (e.g. traceparent/baggage)
 	// for distributed tracing correlation before starting a local span.
 	ctx = otel.GetTextMapPropagator().Extract(ctx, propagation.HeaderCarrier(r.Header))
@@ -82,6 +86,7 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			span.RecordError(err)
 			span.SetStatus(codes.Error, "invalid request body")
 		}
+		wa.recordErrorMetrics(start)
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -100,6 +105,7 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			span.RecordError(err)
 			span.SetStatus(codes.Error, "failed to list global WebhookAuthorizers")
 		}
+		wa.recordErrorMetrics(start)
 		http.Error(w, "internal evaluation error", http.StatusInternalServerError)
 		return
 	}
@@ -116,6 +122,7 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			span.RecordError(err)
 			span.SetStatus(codes.Error, "failed to list scoped WebhookAuthorizers")
 		}
+		wa.recordErrorMetrics(start)
 		http.Error(w, "internal evaluation error", http.StatusInternalServerError)
 		return
 	}
@@ -136,7 +143,6 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// stable gauge that matches the metric description.
 	pkgmetrics.AuthorizerActiveRules.Set(float64(len(globalItems) + len(scopedItems)))
 
-	start := time.Now()
 	verdict, reason, authorizerName := wa.evaluateSAR(ctx, &sar, items)
 	duration := time.Since(start).Seconds()
 
@@ -446,6 +452,15 @@ func (wa *Authorizer) nonResourceRulesMatch(rules []authzv1.NonResourceRule, att
 		}
 	}
 	return false
+}
+
+// recordErrorMetrics records Prometheus request counter and duration histogram
+// with decision=error for early-return error paths (decode failures, list
+// failures) so error rates and latency remain visible in dashboards.
+func (wa *Authorizer) recordErrorMetrics(start time.Time) {
+	duration := time.Since(start).Seconds()
+	pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(pkgmetrics.AuthorizerDecisionError, pkgmetrics.AuthorizerNameNone).Inc()
+	pkgmetrics.AuthorizerRequestDuration.WithLabelValues(pkgmetrics.AuthorizerDecisionError).Observe(duration)
 }
 
 // matchesRule checks if a value matches any pattern in the list.
