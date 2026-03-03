@@ -10,6 +10,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -298,7 +299,7 @@ var _ = Describe("RoleDefinition Webhook", func() {
 			}
 			err := k8sClient.Create(ctx, rd)
 			Expect(err).To(HaveOccurred(), "expected rejection for aggregate-to-cluster-admin")
-			Expect(err.Error()).To(ContainSubstring("Forbidden"))
+			Expect(apierrors.IsForbidden(err)).To(BeTrue(), "expected Forbidden status error")
 			Expect(err.Error()).To(ContainSubstring("built-in ClusterRole"))
 		})
 

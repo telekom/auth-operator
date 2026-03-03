@@ -419,6 +419,11 @@ func (r *RoleDefinitionReconciler) checkRoleOwnership(
 // JSON merge patch. This is necessary when a RoleDefinition transitions from aggregation-based
 // to rule-based because SSA cannot clear the field (its ApplyConfiguration uses omitempty,
 // so a nil value simply releases field ownership without deleting the stale data).
+//
+// The GET is served from the informer cache (the Authorizer.Client is the cached manager client),
+// so the overhead in steady state is a single in-memory lookup + nil-check with no API call.
+// The merge patch is only sent when the aggregation rule is actually present, i.e. during the
+// one-time transition from aggregation-based back to rule-based.
 func (r *RoleDefinitionReconciler) clearAggregationRuleIfSet(ctx context.Context, name string) error {
 	existing := &rbacv1.ClusterRole{}
 	if err := r.client.Get(ctx, client.ObjectKey{Name: name}, existing); err != nil {

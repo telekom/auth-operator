@@ -1146,7 +1146,8 @@ func TestEnsureRole_TransitionFromRulesToAggregateFrom(t *testing.T) {
 	g := NewWithT(t)
 	ctx := context.Background()
 
-	s := scheme.Scheme
+	s := runtime.NewScheme()
+	_ = rbacv1.AddToScheme(s)
 	_ = authorizationv1alpha1.AddToScheme(s)
 
 	// Start with a rule-based ClusterRole.
