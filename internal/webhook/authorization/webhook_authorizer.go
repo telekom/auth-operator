@@ -106,18 +106,20 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	items := globalItems
 
-	// Only query namespace-scoped authorizers when the SAR has a namespace target.
-	if sar.Spec.ResourceAttributes != nil && sar.Spec.ResourceAttributes.Namespace != "" {
-		scopedItems, err := wa.listScopedAuthorizers(ctx, &fallbackCache)
-		if err != nil {
-			wa.Log.Error(err, "failed to list scoped WebhookAuthorizers")
-			if span := trace.SpanFromContext(ctx); span.IsRecording() {
-				span.RecordError(err)
-				span.SetStatus(codes.Error, "failed to list scoped WebhookAuthorizers")
-			}
-			http.Error(w, "internal evaluation error", http.StatusInternalServerError)
-			return
+	// Always query scoped authorizers so the active-rules gauge reflects the
+	// full set regardless of request type. Scoped authorizers are only used
+	// for evaluation when the SAR targets a specific namespace.
+	scopedItems, err := wa.listScopedAuthorizers(ctx, &fallbackCache)
+	if err != nil {
+		wa.Log.Error(err, "failed to list scoped WebhookAuthorizers")
+		if span := trace.SpanFromContext(ctx); span.IsRecording() {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "failed to list scoped WebhookAuthorizers")
 		}
+		http.Error(w, "internal evaluation error", http.StatusInternalServerError)
+		return
+	}
+	if sar.Spec.ResourceAttributes != nil && sar.Spec.ResourceAttributes.Namespace != "" {
 		items = append(items, scopedItems...)
 	}
 
@@ -129,8 +131,10 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return strings.Compare(a.Name, b.Name)
 	})
 
-	// Record the number of active authorizer resources.
-	pkgmetrics.AuthorizerActiveRules.Set(float64(len(items)))
+	// Record the total number of active authorizer resources (global + scoped),
+	// independent of the current request's namespace scope, to provide a
+	// stable gauge that matches the metric description.
+	pkgmetrics.AuthorizerActiveRules.Set(float64(len(globalItems) + len(scopedItems)))
 
 	start := time.Now()
 	verdict, reason, authorizerName := wa.evaluateSAR(ctx, &sar, items)
