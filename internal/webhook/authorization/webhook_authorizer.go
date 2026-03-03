@@ -135,10 +135,9 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		items = append(items, scopedItems...)
 	}
 
-	// Sort authorizers by name for deterministic evaluation order.
-	// This ensures deny-before-allow semantics are stable regardless of
-	// whether the client is backed by a cache (random map iteration) or
-	// the API server (alphabetical order).
+	// Sort authorizers by name for deterministic first-match evaluation order
+	// regardless of whether the client is backed by a cache (random map
+	// iteration) or the API server (alphabetical order).
 	slices.SortFunc(items, func(a, b authzv1alpha1.WebhookAuthorizer) int {
 		return strings.Compare(a.Name, b.Name)
 	})
@@ -169,7 +168,9 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Buffer the response before writing so that metrics and tracing are
-	// only recorded when the response can actually be sent to the client.
+	// not recorded when serialization fails. Note: metrics are recorded
+	// after successful marshal but before w.Write — a late write failure
+	// (e.g. client disconnect) will still have metrics emitted.
 	respBytes, err := json.Marshal(response)
 	if err != nil {
 		wa.Log.Error(err, "failed to encode SubjectAccessReview response")
