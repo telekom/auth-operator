@@ -3,7 +3,6 @@ package authorization
 import (
 	"context"
 	"fmt"
-	"math"
 	"slices"
 	"time"
 
@@ -52,6 +51,7 @@ const (
 	DefaultRequeueInterval = 60 * time.Second
 
 	// RoleRefRequeueInterval is exported for backwards compatibility and tests.
+	//
 	// Deprecated: The controller now uses exponential backoff via
 	// calculateMissingRoleRefBackoff() instead of a fixed interval.
 	RoleRefRequeueInterval = 10 * time.Second
@@ -401,8 +401,8 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 // misconfigured BindDefinitions while still self-healing quickly on transient
 // ordering issues.
 //
-// Formula: min(roleRefRequeueBase * 2^(elapsed/60s), roleRefRequeueMax)
-// Examples: 0-60s → 10s, 60-120s → 20s, 120-180s → 40s, 180-240s → 80s, >5min → 5min cap.
+// Formula: min(roleRefRequeueBase << floor(elapsed/60s), roleRefRequeueMax)
+// Examples: 0-59s → 10s, 60-119s → 20s, 120-179s → 40s, 180-239s → 80s, >~5min → 5min cap.
 func calculateMissingRoleRefBackoff(bd *authorizationv1alpha1.BindDefinition) time.Duration {
 	cond := conditions.Get(bd, authorizationv1alpha1.RoleRefValidCondition)
 	if cond == nil || cond.Status != metav1.ConditionFalse {
@@ -415,10 +415,14 @@ func calculateMissingRoleRefBackoff(bd *authorizationv1alpha1.BindDefinition) ti
 		elapsed = 0
 	}
 
-	// Number of doublings: one per minute elapsed.
-	doublings := elapsed.Minutes()
-	interval := time.Duration(float64(roleRefRequeueBase) * math.Pow(2, doublings))
+	// Number of doublings: one per 60 s elapsed, capped to prevent overflow.
+	doublings := int(elapsed.Seconds() / 60)
+	const maxDoublings = 5 // 2^5 * 10 s = 320 s > roleRefRequeueMax
+	if doublings > maxDoublings {
+		return roleRefRequeueMax
+	}
 
+	interval := roleRefRequeueBase << doublings
 	if interval > roleRefRequeueMax {
 		return roleRefRequeueMax
 	}
@@ -745,16 +749,16 @@ func (r *BindDefinitionReconciler) applyServiceAccount(
 		return fmt.Errorf("apply ServiceAccount %s/%s: %w", subject.Namespace, subject.Name, patchErr)
 	}
 
-	logger.V(1).Info("Applied ServiceAccount",
+	logger.V(1).Info("Ensured ServiceAccount",
 		"bindDefinitionName", bindDef.Name, "serviceAccount", subject.Name, "namespace", subject.Namespace,
 		"sourceNames", sourceNames, "result", result)
 	if result == pkgssa.PatchApplyResultSkipped {
 		metrics.RBACResourcesSkipped.WithLabelValues(metrics.ResourceServiceAccount).Inc()
 	} else {
 		metrics.RBACResourcesApplied.WithLabelValues(metrics.ResourceServiceAccount).Inc()
+		r.recorder.Eventf(bindDef, nil, corev1.EventTypeNormal, authorizationv1alpha1.EventReasonUpdate, authorizationv1alpha1.EventActionReconcile,
+			"Applied resource ServiceAccount/%s in namespace %s", subject.Name, subject.Namespace)
 	}
-	r.recorder.Eventf(bindDef, nil, corev1.EventTypeNormal, authorizationv1alpha1.EventReasonUpdate, authorizationv1alpha1.EventActionReconcile,
-		"Applied resource ServiceAccount/%s in namespace %s", subject.Name, subject.Namespace)
 
 	return nil
 }

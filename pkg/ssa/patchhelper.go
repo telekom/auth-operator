@@ -58,8 +58,6 @@ func (r PatchApplyResult) String() string {
 	}
 }
 
-// --- ClusterRole ---
-
 // PatchApplyClusterRole reads the current ClusterRole from cache, compares it to
 // the desired ApplyConfiguration, and only sends an SSA Patch if there is a diff.
 // Returns the result (skipped/created/patched) and any error.
@@ -104,8 +102,6 @@ func PatchApplyClusterRole(
 	return PatchApplyResultPatched, nil
 }
 
-// --- Role ---
-
 // PatchApplyRole reads the current Role from cache, compares it to the desired
 // ApplyConfiguration, and only sends an SSA Patch if there is a diff.
 func PatchApplyRole(
@@ -149,8 +145,6 @@ func PatchApplyRole(
 	return PatchApplyResultPatched, nil
 }
 
-// --- ClusterRoleBinding ---
-
 // PatchApplyClusterRoleBinding reads the current CRB from cache, compares it to
 // the desired ApplyConfiguration, and only sends an SSA Patch if there is a diff.
 func PatchApplyClusterRoleBinding(
@@ -190,8 +184,6 @@ func PatchApplyClusterRoleBinding(
 	}
 	return PatchApplyResultPatched, nil
 }
-
-// --- RoleBinding ---
 
 // PatchApplyRoleBinding reads the current RB from cache, compares it to the
 // desired ApplyConfiguration, and only sends an SSA Patch if there is a diff.
@@ -235,8 +227,6 @@ func PatchApplyRoleBinding(
 	}
 	return PatchApplyResultPatched, nil
 }
-
-// --- ServiceAccount ---
 
 // PatchApplyServiceAccount reads the current SA from cache, compares it to the
 // desired ApplyConfiguration, and only sends an SSA Patch if there is a diff.
@@ -282,11 +272,8 @@ func PatchApplyServiceAccount(
 	return PatchApplyResultPatched, nil
 }
 
-// ---------------------------------------------------------------------------
-// Comparison helpers
-// ---------------------------------------------------------------------------
-// These compare only the fields we own via SSA and ignore server-managed fields
-// (resourceVersion, uid, creationTimestamp, managedFields, etc.).
+// Comparison helpers — these compare only the fields we own via SSA and ignore
+// server-managed fields (resourceVersion, uid, creationTimestamp, managedFields, etc.).
 
 // clusterRoleMatches returns true if the existing ClusterRole already matches
 // the desired ApplyConfiguration for all SSA-owned fields.
@@ -343,19 +330,17 @@ func serviceAccountMatches(existing *corev1.ServiceAccount, ac *corev1ac.Service
 	return true
 }
 
-// ---------------------------------------------------------------------------
-// Field-level comparators
-// ---------------------------------------------------------------------------
+// Field-level comparators.
 
 // labelsMatch checks that all desired labels are present in the existing object.
 // Extra labels on the existing object (set by other controllers or users) are ignored
 // since SSA only manages the fields we declare.
-func labelsMatch(existing map[string]string, desired map[string]string) bool {
+func labelsMatch(existing, desired map[string]string) bool {
 	return mapContains(existing, desired)
 }
 
 // annotationsMatch checks that all desired annotations are present in the existing object.
-func annotationsMatch(existing map[string]string, desired map[string]string) bool {
+func annotationsMatch(existing, desired map[string]string) bool {
 	return mapContains(existing, desired)
 }
 
