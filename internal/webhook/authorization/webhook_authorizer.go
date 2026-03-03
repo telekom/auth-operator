@@ -42,9 +42,6 @@ const (
 	decisionAllowed   = "allowed"
 	decisionDenied    = "denied"
 	decisionNoOpinion = "no-opinion"
-
-	// authorizerNameNone is used when no WebhookAuthorizer matched.
-	authorizerNameNone = "none"
 )
 
 // evaluationResult captures the full outcome of a SubjectAccessReview evaluation.
@@ -356,7 +353,7 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 		allowed:        false,
 		reason:         "Access denied: no matching rules",
 		decision:       decisionNoOpinion,
-		authorizerName: authorizerNameNone,
+		authorizerName: pkgmetrics.AuthorizerNameNone,
 		matchedRule:    -1,
 		evaluatedCount: evaluated,
 		skippedCount:   skipped,
@@ -440,17 +437,12 @@ func (wa *Authorizer) recordMetrics(result *evaluationResult, latency time.Durat
 		decision = pkgmetrics.AuthorizerDecisionAllowed
 	}
 
-	metricsName := result.authorizerName
-	if metricsName == authorizerNameNone {
-		metricsName = pkgmetrics.AuthorizerNameNone
-	}
-
-	pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(decision, metricsName).Inc()
+	pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(decision, result.authorizerName).Inc()
 	pkgmetrics.AuthorizerRequestDuration.WithLabelValues(decision).Observe(latency.Seconds())
 	pkgmetrics.AuthorizerActiveRules.Set(float64(activeRuleCount))
 
-	if !result.allowed && metricsName != pkgmetrics.AuthorizerNameNone {
-		pkgmetrics.AuthorizerDeniedPrincipalHitsTotal.WithLabelValues(metricsName).Inc()
+	if !result.allowed && result.authorizerName != pkgmetrics.AuthorizerNameNone {
+		pkgmetrics.AuthorizerDeniedPrincipalHitsTotal.WithLabelValues(result.authorizerName).Inc()
 	}
 }
 

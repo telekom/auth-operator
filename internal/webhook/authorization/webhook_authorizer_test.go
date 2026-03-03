@@ -33,9 +33,12 @@ func capturingLogger(buf *strings.Builder, verbosity int) logr.Logger {
 	}, funcr.Options{Verbosity: verbosity})
 }
 
-func newScheme() *runtime.Scheme {
+func newScheme(t *testing.T) *runtime.Scheme {
+	t.Helper()
 	s := runtime.NewScheme()
-	_ = authzv1alpha1.AddToScheme(s)
+	if err := authzv1alpha1.AddToScheme(s); err != nil {
+		t.Fatalf("failed to add authzv1alpha1 to scheme: %v", err)
+	}
 	return s
 }
 
@@ -67,7 +70,7 @@ func marshalSAR(t *testing.T, sar authzv1.SubjectAccessReview) []byte {
 func TestAuditLog_DenyDecisionAtV0(t *testing.T) {
 	var buf strings.Builder
 	logger := capturingLogger(&buf, 0)
-	scheme := newScheme()
+	scheme := newScheme(t)
 
 	wa := authzv1alpha1.WebhookAuthorizer{
 		ObjectMeta: metav1.ObjectMeta{Name: "deny-wa"},
@@ -120,7 +123,7 @@ func TestAuditLog_AllowDecisionAtV1(t *testing.T) {
 	// With verbosity=0 the allow decision should NOT appear.
 	var buf0 strings.Builder
 	logger0 := capturingLogger(&buf0, 0)
-	scheme := newScheme()
+	scheme := newScheme(t)
 
 	wa := authzv1alpha1.WebhookAuthorizer{
 		ObjectMeta: metav1.ObjectMeta{Name: "allow-wa"},
@@ -144,6 +147,10 @@ func TestAuditLog_AllowDecisionAtV1(t *testing.T) {
 	rec0 := httptest.NewRecorder()
 	handler0.ServeHTTP(rec0, req0)
 
+	if rec0.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec0.Code)
+	}
+
 	if strings.Contains(buf0.String(), "authorization decision") {
 		t.Errorf("at V(0) allow decisions should not be logged, got:\n%s", buf0.String())
 	}
@@ -156,6 +163,10 @@ func TestAuditLog_AllowDecisionAtV1(t *testing.T) {
 	req1 := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
 	rec1 := httptest.NewRecorder()
 	handler1.ServeHTTP(rec1, req1)
+
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec1.Code)
+	}
 
 	output := buf1.String()
 	if !strings.Contains(output, "authorization decision") {
@@ -173,7 +184,7 @@ func TestAuditLog_AllowDecisionAtV1(t *testing.T) {
 }
 
 func TestAuditLog_NoOpinionDecisionAtV1(t *testing.T) {
-	scheme := newScheme()
+	scheme := newScheme(t)
 	cl := newIndexedClient(scheme)
 
 	// no-opinion is routine (no authorizer matched) and logged at V(1) to
@@ -193,6 +204,10 @@ func TestAuditLog_NoOpinionDecisionAtV1(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler0.ServeHTTP(rec, req)
 
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
 	if strings.Contains(buf0.String(), `"decision"="no-opinion"`) {
 		t.Errorf("no-opinion should NOT appear at V(0), got:\n%s", buf0.String())
 	}
@@ -206,6 +221,10 @@ func TestAuditLog_NoOpinionDecisionAtV1(t *testing.T) {
 	rec = httptest.NewRecorder()
 	handler1.ServeHTTP(rec, req)
 
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
 	output := buf1.String()
 	if !strings.Contains(output, `"decision"="no-opinion"`) {
 		t.Errorf("expected decision=no-opinion in log, got:\n%s", output)
@@ -218,7 +237,7 @@ func TestAuditLog_NoOpinionDecisionAtV1(t *testing.T) {
 func TestAuditLog_V2TraceLogs(t *testing.T) {
 	var buf strings.Builder
 	logger := capturingLogger(&buf, 2)
-	scheme := newScheme()
+	scheme := newScheme(t)
 
 	wa := authzv1alpha1.WebhookAuthorizer{
 		ObjectMeta: metav1.ObjectMeta{Name: "trace-wa"},
@@ -241,6 +260,10 @@ func TestAuditLog_V2TraceLogs(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
 	output := buf.String()
 	if !strings.Contains(output, "received SubjectAccessReview") {
 		t.Errorf("expected V(2) received-SAR trace log, got:\n%s", output)
@@ -253,7 +276,7 @@ func TestAuditLog_V2TraceLogs(t *testing.T) {
 func TestAuditLog_DecodeError(t *testing.T) {
 	var buf strings.Builder
 	logger := capturingLogger(&buf, 0)
-	scheme := newScheme()
+	scheme := newScheme(t)
 
 	cl := newIndexedClient(scheme)
 	handler := &Authorizer{Client: cl, Log: logger}
@@ -278,7 +301,7 @@ func TestAuditLog_DecodeError(t *testing.T) {
 func TestAuditLog_NonResourceAttributes(t *testing.T) {
 	var buf strings.Builder
 	logger := capturingLogger(&buf, 1)
-	scheme := newScheme()
+	scheme := newScheme(t)
 
 	wa := authzv1alpha1.WebhookAuthorizer{
 		ObjectMeta: metav1.ObjectMeta{Name: "nonres-wa"},
@@ -301,6 +324,10 @@ func TestAuditLog_NonResourceAttributes(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
 	output := buf.String()
 	if !strings.Contains(output, `"decision"="allowed"`) {
 		t.Errorf("expected allowed decision for non-resource, got:\n%s", output)
@@ -314,7 +341,7 @@ func TestAuditLog_NonResourceAttributes(t *testing.T) {
 }
 
 func TestEvaluateSAR_ResultFields(t *testing.T) {
-	scheme := newScheme()
+	scheme := newScheme(t)
 	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
 	handler := &Authorizer{Client: cl, Log: logr.Discard()}
 
@@ -398,7 +425,7 @@ func TestEvaluateSAR_ResultFields(t *testing.T) {
 func TestServeHTTP_OversizedBody(t *testing.T) {
 	var buf strings.Builder
 	logger := capturingLogger(&buf, 0)
-	scheme := newScheme()
+	scheme := newScheme(t)
 
 	cl := newIndexedClient(scheme)
 	handler := &Authorizer{Client: cl, Log: logger}
@@ -426,7 +453,7 @@ func TestServeHTTP_OversizedBody(t *testing.T) {
 func TestServeHTTP_InvalidJSON(t *testing.T) {
 	var buf strings.Builder
 	logger := capturingLogger(&buf, 0)
-	scheme := newScheme()
+	scheme := newScheme(t)
 
 	cl := newIndexedClient(scheme)
 	handler := &Authorizer{Client: cl, Log: logger}
@@ -454,7 +481,7 @@ func TestServeHTTP_InvalidJSON(t *testing.T) {
 // If the log format changes (e.g., a field is renamed or removed), this test catches
 // the breakage before it reaches log parsers and SIEM integrations.
 func TestAuditLog_StructuredFieldsComprehensive(t *testing.T) {
-	scheme := newScheme()
+	scheme := newScheme(t)
 
 	// Set up a deny authorizer so we get a deny decision at V(0).
 	deny := authzv1alpha1.WebhookAuthorizer{
@@ -546,7 +573,7 @@ func TestAuditLog_StructuredFieldsComprehensive(t *testing.T) {
 // correctly emitted after ServeHTTP processes a SubjectAccessReview. This
 // guards against regressions where refactoring might break metric recording.
 func TestMetrics_RecordedAfterServeHTTP(t *testing.T) {
-	scheme := newScheme()
+	scheme := newScheme(t)
 	wa := authzv1alpha1.WebhookAuthorizer{
 		ObjectMeta: metav1.ObjectMeta{Name: "metrics-wa"},
 		Spec: authzv1alpha1.WebhookAuthorizerSpec{
@@ -560,9 +587,11 @@ func TestMetrics_RecordedAfterServeHTTP(t *testing.T) {
 	}
 	cl := newIndexedClient(scheme, &wa)
 
-	// Reset counters so prior tests don't pollute assertions.
+	// Reset counters, histogram and gauge so prior tests don't pollute assertions.
 	pkgmetrics.AuthorizerRequestsTotal.Reset()
 	pkgmetrics.AuthorizerDeniedPrincipalHitsTotal.Reset()
+	pkgmetrics.AuthorizerRequestDuration.Reset()
+	pkgmetrics.AuthorizerActiveRules.Set(0)
 
 	// --- Deny decision ---
 	handler := &Authorizer{Client: cl, Log: logr.Discard()}
