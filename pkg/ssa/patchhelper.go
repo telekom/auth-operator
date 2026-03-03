@@ -75,18 +75,18 @@ func PatchApplyClusterRole(
 
 	logger := log.FromContext(ctx)
 
-	// Read from cache (no API call).
+	// Read via client (cache-backed in controllers).
 	existing := &rbacv1.ClusterRole{}
 	err := c.Get(ctx, types.NamespacedName{Name: *ac.Name}, existing)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			// Resource does not exist — must apply.
 			if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership); applyErr != nil {
-				return 0, applyErr
+				return 0, fmt.Errorf("create ClusterRole %s: %w", *ac.Name, applyErr)
 			}
 			return PatchApplyResultCreated, nil
 		}
-		return 0, fmt.Errorf("get ClusterRole %s from cache: %w", *ac.Name, err)
+		return 0, fmt.Errorf("get ClusterRole %s: %w", *ac.Name, err)
 	}
 
 	// Compare managed fields: labels, annotations, rules.
@@ -97,7 +97,7 @@ func PatchApplyClusterRole(
 	}
 
 	if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership); applyErr != nil {
-		return 0, applyErr
+		return 0, fmt.Errorf("patch ClusterRole %s: %w", *ac.Name, applyErr)
 	}
 	return PatchApplyResultPatched, nil
 }
@@ -126,11 +126,11 @@ func PatchApplyRole(
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership); applyErr != nil {
-				return 0, applyErr
+				return 0, fmt.Errorf("create Role %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 			}
 			return PatchApplyResultCreated, nil
 		}
-		return 0, fmt.Errorf("get Role %s/%s from cache: %w", *ac.Namespace, *ac.Name, err)
+		return 0, fmt.Errorf("get Role %s/%s: %w", *ac.Namespace, *ac.Name, err)
 	}
 
 	if roleMatches(existing, ac) {
@@ -140,7 +140,7 @@ func PatchApplyRole(
 	}
 
 	if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership); applyErr != nil {
-		return 0, applyErr
+		return 0, fmt.Errorf("patch Role %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 	}
 	return PatchApplyResultPatched, nil
 }
@@ -166,11 +166,11 @@ func PatchApplyClusterRoleBinding(
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership); applyErr != nil {
-				return 0, applyErr
+				return 0, fmt.Errorf("create ClusterRoleBinding %s: %w", *ac.Name, applyErr)
 			}
 			return PatchApplyResultCreated, nil
 		}
-		return 0, fmt.Errorf("get ClusterRoleBinding %s from cache: %w", *ac.Name, err)
+		return 0, fmt.Errorf("get ClusterRoleBinding %s: %w", *ac.Name, err)
 	}
 
 	if clusterRoleBindingMatches(existing, ac) {
@@ -180,7 +180,7 @@ func PatchApplyClusterRoleBinding(
 	}
 
 	if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership); applyErr != nil {
-		return 0, applyErr
+		return 0, fmt.Errorf("patch ClusterRoleBinding %s: %w", *ac.Name, applyErr)
 	}
 	return PatchApplyResultPatched, nil
 }
@@ -209,11 +209,11 @@ func PatchApplyRoleBinding(
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership); applyErr != nil {
-				return 0, applyErr
+				return 0, fmt.Errorf("create RoleBinding %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 			}
 			return PatchApplyResultCreated, nil
 		}
-		return 0, fmt.Errorf("get RoleBinding %s/%s from cache: %w", *ac.Namespace, *ac.Name, err)
+		return 0, fmt.Errorf("get RoleBinding %s/%s: %w", *ac.Namespace, *ac.Name, err)
 	}
 
 	if roleBindingMatches(existing, ac) {
@@ -223,7 +223,7 @@ func PatchApplyRoleBinding(
 	}
 
 	if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership); applyErr != nil {
-		return 0, applyErr
+		return 0, fmt.Errorf("patch RoleBinding %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 	}
 	return PatchApplyResultPatched, nil
 }
@@ -245,6 +245,9 @@ func PatchApplyServiceAccount(
 	if ac.Namespace == nil || *ac.Namespace == "" {
 		return 0, fmt.Errorf("serviceAccount ApplyConfiguration must have a namespace")
 	}
+	if strings.TrimSpace(fieldOwner) == "" {
+		return 0, fmt.Errorf("fieldOwner must not be empty")
+	}
 
 	logger := log.FromContext(ctx)
 
@@ -253,11 +256,11 @@ func PatchApplyServiceAccount(
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			if applyErr := c.Apply(ctx, ac, client.FieldOwner(fieldOwner), client.ForceOwnership); applyErr != nil {
-				return 0, applyErr
+				return 0, fmt.Errorf("create ServiceAccount %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 			}
 			return PatchApplyResultCreated, nil
 		}
-		return 0, fmt.Errorf("get ServiceAccount %s/%s from cache: %w", *ac.Namespace, *ac.Name, err)
+		return 0, fmt.Errorf("get ServiceAccount %s/%s: %w", *ac.Namespace, *ac.Name, err)
 	}
 
 	if serviceAccountMatches(existing, ac) {
@@ -267,7 +270,7 @@ func PatchApplyServiceAccount(
 	}
 
 	if applyErr := c.Apply(ctx, ac, client.FieldOwner(fieldOwner), client.ForceOwnership); applyErr != nil {
-		return 0, applyErr
+		return 0, fmt.Errorf("patch ServiceAccount %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 	}
 	return PatchApplyResultPatched, nil
 }

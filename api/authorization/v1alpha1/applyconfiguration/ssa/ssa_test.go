@@ -20,6 +20,7 @@ import (
 
 	authv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/api/authorization/v1alpha1/applyconfiguration/ssa"
+	pkgssa "github.com/telekom/auth-operator/pkg/ssa"
 )
 
 func TestSSA(t *testing.T) {
@@ -379,6 +380,202 @@ var _ = Describe("SSA Status Apply Functions", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(updated.Status.AuthorizerConfigured).To(BeTrue())
 			Expect(updated.Status.Conditions).To(HaveLen(1))
+		})
+	})
+
+	Context("PatchApplyRoleDefinitionStatus skip path", func() {
+		It("should skip apply when status is unchanged", func() {
+			scheme := newTestScheme()
+
+			rd := &authv1alpha1.RoleDefinition{
+				TypeMeta: metav1.TypeMeta{
+					APIVersion: authv1alpha1.GroupVersion.String(),
+					Kind:       "RoleDefinition",
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rd-skip",
+				},
+				Spec: authv1alpha1.RoleDefinitionSpec{
+					TargetRole: authv1alpha1.DefinitionClusterRole,
+					TargetName: "skip-role",
+				},
+				Status: authv1alpha1.RoleDefinitionStatus{
+					RoleReconciled: true,
+					Conditions: []metav1.Condition{
+						{
+							Type:    "Ready",
+							Status:  metav1.ConditionTrue,
+							Reason:  "Reconciled",
+							Message: "done",
+						},
+					},
+				},
+			}
+
+			c := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(rd).
+				WithStatusSubresource(&authv1alpha1.RoleDefinition{}).
+				Build()
+
+			// Apply the same status — should be skipped.
+			result, err := ssa.PatchApplyRoleDefinitionStatus(context.Background(), c, rd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(pkgssa.PatchApplyResultSkipped))
+		})
+
+		It("should apply when status has changed", func() {
+			scheme := newTestScheme()
+
+			rd := &authv1alpha1.RoleDefinition{
+				TypeMeta: metav1.TypeMeta{
+					APIVersion: authv1alpha1.GroupVersion.String(),
+					Kind:       "RoleDefinition",
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rd-change",
+				},
+				Spec: authv1alpha1.RoleDefinitionSpec{
+					TargetRole: authv1alpha1.DefinitionClusterRole,
+					TargetName: "change-role",
+				},
+				Status: authv1alpha1.RoleDefinitionStatus{
+					RoleReconciled: false,
+				},
+			}
+
+			c := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(rd).
+				WithStatusSubresource(&authv1alpha1.RoleDefinition{}).
+				Build()
+
+			// Update status — should not be skipped.
+			rd.Status.RoleReconciled = true
+			result, err := ssa.PatchApplyRoleDefinitionStatus(context.Background(), c, rd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(pkgssa.PatchApplyResultPatched))
+		})
+	})
+
+	Context("PatchApplyBindDefinitionStatus skip path", func() {
+		It("should skip apply when status is unchanged", func() {
+			scheme := newTestScheme()
+
+			bd := &authv1alpha1.BindDefinition{
+				TypeMeta: metav1.TypeMeta{
+					APIVersion: authv1alpha1.GroupVersion.String(),
+					Kind:       "BindDefinition",
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-bd-skip",
+				},
+				Spec: authv1alpha1.BindDefinitionSpec{
+					TargetName: "skip-binding",
+					Subjects: []rbacv1.Subject{
+						{Kind: "User", Name: "u", APIGroup: rbacv1.GroupName},
+					},
+				},
+				Status: authv1alpha1.BindDefinitionStatus{
+					BindReconciled: true,
+					GeneratedServiceAccounts: []rbacv1.Subject{
+						{Kind: "ServiceAccount", Name: "sa1", Namespace: "ns1"},
+					},
+					Conditions: []metav1.Condition{
+						{
+							Type:    "Ready",
+							Status:  metav1.ConditionTrue,
+							Reason:  "Reconciled",
+							Message: "ok",
+						},
+					},
+				},
+			}
+
+			c := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(bd).
+				WithStatusSubresource(&authv1alpha1.BindDefinition{}).
+				Build()
+
+			result, err := ssa.PatchApplyBindDefinitionStatus(context.Background(), c, bd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(pkgssa.PatchApplyResultSkipped))
+		})
+
+		It("should apply when GeneratedServiceAccounts changed", func() {
+			scheme := newTestScheme()
+
+			bd := &authv1alpha1.BindDefinition{
+				TypeMeta: metav1.TypeMeta{
+					APIVersion: authv1alpha1.GroupVersion.String(),
+					Kind:       "BindDefinition",
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-bd-change",
+				},
+				Spec: authv1alpha1.BindDefinitionSpec{
+					TargetName: "change-binding",
+					Subjects: []rbacv1.Subject{
+						{Kind: "User", Name: "u", APIGroup: rbacv1.GroupName},
+					},
+				},
+				Status: authv1alpha1.BindDefinitionStatus{
+					BindReconciled: true,
+				},
+			}
+
+			c := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(bd).
+				WithStatusSubresource(&authv1alpha1.BindDefinition{}).
+				Build()
+
+			bd.Status.GeneratedServiceAccounts = []rbacv1.Subject{
+				{Kind: "ServiceAccount", Name: "new-sa", Namespace: "ns1"},
+			}
+
+			result, err := ssa.PatchApplyBindDefinitionStatus(context.Background(), c, bd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(pkgssa.PatchApplyResultPatched))
+		})
+	})
+
+	Context("PatchApplyWebhookAuthorizerStatus skip path", func() {
+		It("should skip apply when status is unchanged", func() {
+			scheme := newTestScheme()
+
+			wa := &authv1alpha1.WebhookAuthorizer{
+				TypeMeta: metav1.TypeMeta{
+					APIVersion: authv1alpha1.GroupVersion.String(),
+					Kind:       "WebhookAuthorizer",
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-wa-skip",
+				},
+				Spec: authv1alpha1.WebhookAuthorizerSpec{},
+				Status: authv1alpha1.WebhookAuthorizerStatus{
+					AuthorizerConfigured: true,
+					Conditions: []metav1.Condition{
+						{
+							Type:    "Ready",
+							Status:  metav1.ConditionTrue,
+							Reason:  "Configured",
+							Message: "ok",
+						},
+					},
+				},
+			}
+
+			c := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(wa).
+				WithStatusSubresource(&authv1alpha1.WebhookAuthorizer{}).
+				Build()
+
+			result, err := ssa.PatchApplyWebhookAuthorizerStatus(context.Background(), c, wa)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(pkgssa.PatchApplyResultSkipped))
 		})
 	})
 })
