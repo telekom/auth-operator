@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/events"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -4324,4 +4325,91 @@ func findCondition(conditions []metav1.Condition, condType string) *metav1.Condi
 		}
 	}
 	return nil
+}
+
+func TestCalculateMissingRoleRefBackoff(t *testing.T) {
+	tests := []struct {
+		name        string
+		condStatus  *metav1.ConditionStatus
+		elapsedSecs float64
+		want        time.Duration
+	}{
+		{
+			name:       "no condition yet — returns base",
+			condStatus: nil,
+			want:       roleRefRequeueBase,
+		},
+		{
+			name:       "condition True — returns base",
+			condStatus: ptr.To(metav1.ConditionTrue),
+			want:       roleRefRequeueBase,
+		},
+		{
+			name:        "condition False, 0s elapsed — returns base (10s)",
+			condStatus:  ptr.To(metav1.ConditionFalse),
+			elapsedSecs: 0,
+			want:        10 * time.Second,
+		},
+		{
+			name:        "condition False, 30s elapsed — still base (10s)",
+			condStatus:  ptr.To(metav1.ConditionFalse),
+			elapsedSecs: 30,
+			want:        10 * time.Second,
+		},
+		{
+			name:        "condition False, 60s elapsed — 1 doubling (20s)",
+			condStatus:  ptr.To(metav1.ConditionFalse),
+			elapsedSecs: 60,
+			want:        20 * time.Second,
+		},
+		{
+			name:        "condition False, 120s elapsed — 2 doublings (40s)",
+			condStatus:  ptr.To(metav1.ConditionFalse),
+			elapsedSecs: 120,
+			want:        40 * time.Second,
+		},
+		{
+			name:        "condition False, 180s elapsed — 3 doublings (80s)",
+			condStatus:  ptr.To(metav1.ConditionFalse),
+			elapsedSecs: 180,
+			want:        80 * time.Second,
+		},
+		{
+			name:        "condition False, 240s elapsed — 4 doublings (160s)",
+			condStatus:  ptr.To(metav1.ConditionFalse),
+			elapsedSecs: 240,
+			want:        160 * time.Second,
+		},
+		{
+			name:        "condition False, 300s elapsed — 5 doublings (320s) capped to 5min",
+			condStatus:  ptr.To(metav1.ConditionFalse),
+			elapsedSecs: 300,
+			want:        roleRefRequeueMax,
+		},
+		{
+			name:        "condition False, 600s elapsed — capped to 5min",
+			condStatus:  ptr.To(metav1.ConditionFalse),
+			elapsedSecs: 600,
+			want:        roleRefRequeueMax,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bd := &authorizationv1alpha1.BindDefinition{}
+
+			if tt.condStatus != nil {
+				bd.Status.Conditions = []metav1.Condition{{
+					Type:               string(authorizationv1alpha1.RoleRefValidCondition),
+					Status:             *tt.condStatus,
+					LastTransitionTime: metav1.NewTime(time.Now().Add(-time.Duration(tt.elapsedSecs) * time.Second)),
+				}}
+			}
+
+			got := calculateMissingRoleRefBackoff(bd)
+			if got != tt.want {
+				t.Errorf("calculateMissingRoleRefBackoff() = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }

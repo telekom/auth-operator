@@ -132,10 +132,11 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 					continue
 				}
 
+				// Namespace selector syntax was already validated above, so
+				// LabelSelectorAsSelector cannot fail here.
 				selector, err := metav1.LabelSelectorAsSelector(&nsSelector)
 				if err != nil {
-					logger.Info("validation failed: invalid namespaceSelector",
-						"name", r.Name, "error", err.Error())
+					// Unreachable: syntax was pre-validated, but guard defensively.
 					return warnings, apierrors.NewBadRequest(fmt.Sprintf("invalid namespaceSelector: %v", err))
 				}
 				namespaceList := &corev1.NamespaceList{}
