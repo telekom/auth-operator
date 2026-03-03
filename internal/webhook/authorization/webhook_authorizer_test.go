@@ -657,6 +657,29 @@ func TestMetrics_RecordedAfterServeHTTP(t *testing.T) {
 		t.Errorf("expected AuthorizerActiveRules=2, got %v", activeRules)
 	}
 
+	// --- No-opinion decision (no authorizer matched) ---
+	pkgmetrics.AuthorizerRequestsTotal.Reset()
+	noMatchSAR := authzv1.SubjectAccessReview{
+		Spec: authzv1.SubjectAccessReviewSpec{
+			User:               "unknown-user",
+			ResourceAttributes: &authzv1.ResourceAttributes{Verb: "get", Group: "other", Resource: "secrets"},
+		},
+	}
+	body = marshalSAR(t, noMatchSAR)
+	req = httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("no-opinion: expected 200, got %d", rec.Code)
+	}
+
+	noOpinionCount := testutil.ToFloat64(pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(
+		pkgmetrics.AuthorizerDecisionNoOpinion, pkgmetrics.AuthorizerNameNone))
+	if noOpinionCount != 1 {
+		t.Errorf("expected AuthorizerRequestsTotal{no-opinion,none}=1, got %v", noOpinionCount)
+	}
+
 	// --- Error decision (decode failure) ---
 	pkgmetrics.AuthorizerRequestsTotal.Reset()
 	req = httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader([]byte("not-json")))
@@ -667,5 +690,66 @@ func TestMetrics_RecordedAfterServeHTTP(t *testing.T) {
 		pkgmetrics.AuthorizerDecisionError, pkgmetrics.AuthorizerNameNone))
 	if errorCount != 1 {
 		t.Errorf("expected AuthorizerRequestsTotal{error,none}=1, got %v", errorCount)
+	}
+}
+
+func TestCappedGroups(t *testing.T) {
+	tests := []struct {
+		name   string
+		groups []string
+		want   int
+	}{
+		{"nil", nil, 0},
+		{"empty", []string{}, 0},
+		{"under-limit", []string{"a", "b"}, 2},
+		{"at-limit", make([]string, maxLoggedGroups), maxLoggedGroups},
+		{"over-limit", make([]string, maxLoggedGroups+5), maxLoggedGroups + 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := cappedGroups(tt.groups)
+			if len(got) != tt.want {
+				t.Errorf("cappedGroups(%d groups) returned %d elements, want %d", len(tt.groups), len(got), tt.want)
+			}
+			if tt.want > maxLoggedGroups {
+				last := got[len(got)-1]
+				if !strings.Contains(last, "more") {
+					t.Errorf("expected trailing '...and N more' element, got %q", last)
+				}
+			}
+		})
+	}
+}
+
+func TestCountTotalRules(t *testing.T) {
+	tests := []struct {
+		name        string
+		authorizers []authzv1alpha1.WebhookAuthorizer
+		want        int
+	}{
+		{"nil", nil, 0},
+		{"empty", []authzv1alpha1.WebhookAuthorizer{}, 0},
+		{"single with rules", []authzv1alpha1.WebhookAuthorizer{
+			{Spec: authzv1alpha1.WebhookAuthorizerSpec{
+				ResourceRules:    []authzv1.ResourceRule{{Verbs: []string{"get"}}},
+				NonResourceRules: []authzv1.NonResourceRule{{Verbs: []string{"get"}, NonResourceURLs: []string{"/healthz"}}},
+			}},
+		}, 2},
+		{"multiple", []authzv1alpha1.WebhookAuthorizer{
+			{Spec: authzv1alpha1.WebhookAuthorizerSpec{
+				ResourceRules: []authzv1.ResourceRule{{Verbs: []string{"get"}}, {Verbs: []string{"list"}}},
+			}},
+			{Spec: authzv1alpha1.WebhookAuthorizerSpec{
+				NonResourceRules: []authzv1.NonResourceRule{{Verbs: []string{"get"}, NonResourceURLs: []string{"/healthz"}}},
+			}},
+		}, 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := countTotalRules(tt.authorizers)
+			if got != tt.want {
+				t.Errorf("countTotalRules() = %d, want %d", got, tt.want)
+			}
+		})
 	}
 }

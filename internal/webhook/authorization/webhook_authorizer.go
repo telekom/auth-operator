@@ -128,18 +128,8 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	webhookAuthorizers := authzv1alpha1.WebhookAuthorizerList{Items: items}
 	result := wa.evaluateSAR(ctx, &sar, &webhookAuthorizers)
 
-	// Count total rules across ALL WebhookAuthorizers (global + scoped) so
-	// the gauge reflects the full cluster state regardless of SAR type.
-	// Fall back to the evaluated subset if the full list fails.
-	var totalRules int
-	var allAuthorizers authzv1alpha1.WebhookAuthorizerList
-	if err := wa.Client.List(ctx, &allAuthorizers); err != nil {
-		wa.Log.V(1).Info("failed to list all WebhookAuthorizers for active-rules gauge, using evaluated subset",
-			"error", err.Error())
-		totalRules = countTotalRules(items)
-	} else {
-		totalRules = countTotalRules(allAuthorizers.Items)
-	}
+	// Count total rules across all evaluated authorizers for the gauge.
+	totalRules := countTotalRules(items)
 
 	response := authzv1.SubjectAccessReview{
 		TypeMeta: metav1.TypeMeta{
@@ -166,8 +156,9 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Record audit log and metrics only after successful serialization.
-	wa.logDecision(&sar, &result, time.Since(start))
-	wa.recordMetrics(&result, time.Since(start), totalRules)
+	latency := time.Since(start)
+	wa.logDecision(&sar, &result, latency)
+	wa.recordMetrics(&result, latency, totalRules)
 
 	w.Header().Set("Content-Type", "application/json")
 	if _, err := w.Write(respBytes); err != nil {
@@ -441,16 +432,21 @@ func (wa *Authorizer) nonResourceRuleIndex(rules []authzv1.NonResourceRule, attr
 // completed SAR evaluation. This is called alongside audit logging to ensure
 // Prometheus metrics stay in sync with the structured audit trail.
 func (wa *Authorizer) recordMetrics(result *evaluationResult, latency time.Duration, activeRuleCount int) {
-	decision := pkgmetrics.AuthorizerDecisionDenied
-	if result.allowed {
+	var decision string
+	switch result.decision {
+	case decisionAllowed:
 		decision = pkgmetrics.AuthorizerDecisionAllowed
+	case decisionDenied:
+		decision = pkgmetrics.AuthorizerDecisionDenied
+	default:
+		decision = pkgmetrics.AuthorizerDecisionNoOpinion
 	}
 
 	pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(decision, result.authorizerName).Inc()
 	pkgmetrics.AuthorizerRequestDuration.WithLabelValues(decision).Observe(latency.Seconds())
 	pkgmetrics.AuthorizerActiveRules.Set(float64(activeRuleCount))
 
-	if !result.allowed && result.authorizerName != pkgmetrics.AuthorizerNameNone {
+	if result.matchedField == "deniedPrincipal" {
 		pkgmetrics.AuthorizerDeniedPrincipalHitsTotal.WithLabelValues(result.authorizerName).Inc()
 	}
 }

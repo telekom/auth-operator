@@ -291,9 +291,10 @@ const (
 
 // AuthorizerDecision constants for labeling authorizer request outcomes.
 const (
-	AuthorizerDecisionAllowed = "allowed"
-	AuthorizerDecisionDenied  = "denied"
-	AuthorizerDecisionError   = "error"
+	AuthorizerDecisionAllowed   = "allowed"
+	AuthorizerDecisionDenied    = "denied"
+	AuthorizerDecisionNoOpinion = "no-opinion"
+	AuthorizerDecisionError     = "error"
 )
 
 // AuthorizerNameNone is the fallback label value when no specific authorizer matched.
@@ -311,7 +312,7 @@ func DeleteManagedResourceSeries(controller, name string) {
 // DeleteAuthorizerSeries removes all metrics series for a deleted
 // WebhookAuthorizer CR to prevent stale zero-value series from lingering.
 func DeleteAuthorizerSeries(authorizerName string) {
-	for _, decision := range []string{AuthorizerDecisionAllowed, AuthorizerDecisionDenied, AuthorizerDecisionError} {
+	for _, decision := range []string{AuthorizerDecisionAllowed, AuthorizerDecisionDenied, AuthorizerDecisionNoOpinion, AuthorizerDecisionError} {
 		AuthorizerRequestsTotal.DeleteLabelValues(decision, authorizerName)
 	}
 	AuthorizerDeniedPrincipalHitsTotal.DeleteLabelValues(authorizerName)
