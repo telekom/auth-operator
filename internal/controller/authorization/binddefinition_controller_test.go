@@ -4132,11 +4132,22 @@ func TestReconcile_MissingRolePolicy_Warn(t *testing.T) {
 	g.Expect(roleRefCond.Status).To(Equal(metav1.ConditionFalse))
 	g.Expect(updated.Status.MissingRoleRefs).To(ContainElement("ClusterRole/nonexistent-role"))
 
-	// Warn mode still creates bindings for the roles that do exist.
+	// Warn mode still creates bindings even for missing roles; the binding
+	// references the non-existent ClusterRole and becomes effective once the
+	// role is created.
 	var crbList rbacv1.ClusterRoleBindingList
 	g.Expect(c.List(ctx, &crbList)).To(Succeed())
-	// The nonexistent-role ClusterRoleBinding should not be created,
-	// but the reconciler should not have errored out.
+	g.Expect(crbList.Items).NotTo(BeEmpty(), "expected ClusterRoleBindings to be created in warn mode")
+
+	foundMissingRoleBinding := false
+	for _, crb := range crbList.Items {
+		if crb.RoleRef.Kind == "ClusterRole" && crb.RoleRef.Name == "nonexistent-role" {
+			foundMissingRoleBinding = true
+			break
+		}
+	}
+	g.Expect(foundMissingRoleBinding).To(BeTrue(),
+		"expected ClusterRoleBinding referencing missing ClusterRole 'nonexistent-role' to be created in warn mode")
 }
 
 func TestReconcile_MissingRolePolicy_Error(t *testing.T) {
