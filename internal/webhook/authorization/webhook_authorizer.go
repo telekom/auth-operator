@@ -20,6 +20,7 @@ import (
 	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/pkg/helpers"
 	"github.com/telekom/auth-operator/pkg/indexer"
+	pkgmetrics "github.com/telekom/auth-operator/pkg/metrics"
 )
 
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=webhookauthorizers,verbs=get;list;watch
@@ -81,6 +82,7 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&sar); err != nil {
 		wa.Log.Error(err, "failed to decode SubjectAccessReview request",
 			"latency", time.Since(start).String())
+		wa.recordErrorMetrics(start)
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -98,6 +100,7 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		wa.Log.Error(err, "failed to list global WebhookAuthorizers",
 			"user", sar.Spec.User,
 			"latency", time.Since(start).String())
+		wa.recordErrorMetrics(start)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -113,6 +116,7 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			wa.Log.Error(err, "failed to list scoped WebhookAuthorizers",
 				"user", sar.Spec.User,
 				"latency", time.Since(start).String())
+			wa.recordErrorMetrics(start)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -128,6 +132,9 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	result := wa.evaluateSAR(ctx, &sar, &webhookAuthorizers)
 
 	wa.logDecision(&sar, &result, time.Since(start))
+
+	// Record Prometheus metrics alongside the audit log.
+	wa.recordMetrics(&result, time.Since(start), len(items))
 
 	response := authzv1.SubjectAccessReview{
 		TypeMeta: metav1.TypeMeta{
@@ -384,6 +391,38 @@ func (wa *Authorizer) nonResourceRuleIndex(rules []authzv1.NonResourceRule, attr
 		}
 	}
 	return -1
+}
+
+// recordMetrics records Prometheus counters, histogram, and gauge for a
+// completed SAR evaluation. This is called alongside audit logging to ensure
+// Prometheus metrics stay in sync with the structured audit trail.
+func (wa *Authorizer) recordMetrics(result *evaluationResult, latency time.Duration, activeRuleCount int) {
+	decision := pkgmetrics.AuthorizerDecisionDenied
+	if result.allowed {
+		decision = pkgmetrics.AuthorizerDecisionAllowed
+	}
+
+	metricsName := result.authorizerName
+	if metricsName == authorizerNameNone {
+		metricsName = pkgmetrics.AuthorizerNameNone
+	}
+
+	pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(decision, metricsName).Inc()
+	pkgmetrics.AuthorizerRequestDuration.WithLabelValues(decision).Observe(latency.Seconds())
+	pkgmetrics.AuthorizerActiveRules.Set(float64(activeRuleCount))
+
+	if !result.allowed && metricsName != pkgmetrics.AuthorizerNameNone {
+		pkgmetrics.AuthorizerDeniedPrincipalHitsTotal.WithLabelValues(metricsName).Inc()
+	}
+}
+
+// recordErrorMetrics records Prometheus request counter and duration histogram
+// with decision=error for early-return error paths (decode failures, list
+// failures) so error rates and latency remain visible in dashboards.
+func (wa *Authorizer) recordErrorMetrics(start time.Time) {
+	duration := time.Since(start).Seconds()
+	pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(pkgmetrics.AuthorizerDecisionError, pkgmetrics.AuthorizerNameNone).Inc()
+	pkgmetrics.AuthorizerRequestDuration.WithLabelValues(pkgmetrics.AuthorizerDecisionError).Observe(duration)
 }
 
 // matchesRule checks if a value matches any pattern in the list.
