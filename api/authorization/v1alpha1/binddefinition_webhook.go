@@ -226,6 +226,9 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 	}
 
 	if len(missingRoles) > 0 {
+		// Sort for deterministic admission output across runs.
+		slices.Sort(missingRoles)
+
 		if blockOnMissing {
 			return warnings, apierrors.NewBadRequest(
 				fmt.Sprintf("missing-role-policy is 'error': referenced roles do not exist: %v", missingRoles))
