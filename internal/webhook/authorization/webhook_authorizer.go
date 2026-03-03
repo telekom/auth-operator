@@ -131,10 +131,9 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	webhookAuthorizers := authzv1alpha1.WebhookAuthorizerList{Items: items}
 	result := wa.evaluateSAR(ctx, &sar, &webhookAuthorizers)
 
-	wa.logDecision(&sar, &result, time.Since(start))
-
-	// Record Prometheus metrics alongside the audit log.
-	wa.recordMetrics(&result, time.Since(start), len(items))
+	// Count total rules across all authorizers (not just request-scoped ones)
+	// so the gauge reflects the full cluster state independent of SAR type.
+	totalRules := countTotalRules(items)
 
 	response := authzv1.SubjectAccessReview{
 		TypeMeta: metav1.TypeMeta{
@@ -147,11 +146,25 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
+	// Buffer the response before writing so that metrics and audit logs
+	// are only recorded when the response can actually be sent to the client.
+	respBytes, err := json.Marshal(response)
+	if err != nil {
 		wa.Log.Error(err, "failed to encode SubjectAccessReview response",
 			"latency", time.Since(start).String())
+		wa.recordErrorMetrics(start)
 		http.Error(w, "internal evaluation error", http.StatusInternalServerError)
+		return
+	}
+
+	// Record audit log and metrics only after successful serialization.
+	wa.logDecision(&sar, &result, time.Since(start))
+	wa.recordMetrics(&result, time.Since(start), totalRules)
+
+	w.Header().Set("Content-Type", "application/json")
+	if _, err := w.Write(respBytes); err != nil {
+		wa.Log.Error(err, "failed to write SubjectAccessReview response",
+			"latency", time.Since(start).String())
 	}
 }
 
@@ -243,18 +256,41 @@ func (wa *Authorizer) logDecision(sar *authzv1.SubjectAccessReview, res *evaluat
 	}
 }
 
+// countTotalRules returns the total number of resource and non-resource rules
+// across all provided authorizers. This gives a stable, request-independent
+// count suitable for the AuthorizerActiveRules gauge.
+func countTotalRules(authorizers []authzv1alpha1.WebhookAuthorizer) int {
+	total := 0
+	for i := range authorizers {
+		total += len(authorizers[i].Spec.ResourceRules) + len(authorizers[i].Spec.NonResourceRules)
+	}
+	return total
+}
+
 func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAccessReview, waList *authzv1alpha1.WebhookAuthorizerList) evaluationResult {
 	evaluated := 0
 	skipped := 0
 
 	for i, webhookAuthorizer := range waList.Items {
-		if sar.Spec.ResourceAttributes != nil &&
-			!helpers.IsLabelSelectorEmpty(&webhookAuthorizer.Spec.NamespaceSelector) &&
-			sar.Spec.ResourceAttributes.Namespace != "" {
-			if !wa.namespaceMatches(ctx, sar.Spec.ResourceAttributes.Namespace, &webhookAuthorizer.Spec.NamespaceSelector) {
+		// Skip namespace-scoped authorizers for non-resource or cluster-scoped SARs
+		// that have no namespace target. This is a defensive guard — the list query
+		// already excludes scoped authorizers for these cases, but this ensures
+		// correct behavior regardless of how items were assembled.
+		if !helpers.IsLabelSelectorEmpty(&webhookAuthorizer.Spec.NamespaceSelector) {
+			resourceNS := ""
+			if sar.Spec.ResourceAttributes != nil {
+				resourceNS = sar.Spec.ResourceAttributes.Namespace
+			}
+			if resourceNS == "" {
+				wa.Log.V(2).Info("skipping namespace-scoped authorizer for non-namespaced SAR",
+					"authorizer", webhookAuthorizer.Name)
+				skipped++
+				continue
+			}
+			if !wa.namespaceMatches(ctx, resourceNS, &webhookAuthorizer.Spec.NamespaceSelector) {
 				wa.Log.V(2).Info("namespace selector did not match, skipping",
 					"authorizer", webhookAuthorizer.Name,
-					"namespace", sar.Spec.ResourceAttributes.Namespace)
+					"namespace", resourceNS)
 				skipped++
 				continue
 			}
