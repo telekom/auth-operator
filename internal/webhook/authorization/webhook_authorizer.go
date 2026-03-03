@@ -66,12 +66,11 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// early error returns (decode failures, list failures).
 	start := time.Now()
 
-	// Extract trace context from incoming HTTP headers (e.g. traceparent/baggage)
-	// for distributed tracing correlation before starting a local span.
-	ctx = otel.GetTextMapPropagator().Extract(ctx, propagation.HeaderCarrier(r.Header))
-
-	// Start a tracing span for the full SAR evaluation
+	// Extract trace context and start a tracing span only when tracing is
+	// enabled (non-nil Tracer). When disabled, this avoids header parsing and
+	// noop span creation on every request — true zero overhead.
 	if wa.Tracer != nil {
+		ctx = otel.GetTextMapPropagator().Extract(ctx, propagation.HeaderCarrier(r.Header))
 		var span trace.Span
 		ctx, span = wa.Tracer.Start(ctx, "webhook.SubjectAccessReview")
 		defer span.End()
