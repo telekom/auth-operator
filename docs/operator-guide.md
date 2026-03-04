@@ -499,12 +499,12 @@ The operator supports distributed tracing via OpenTelemetry (OTLP/gRPC).
 
 ### Configuration
 
-| Flag | Env Variable | Default | Description |
-|------|-------------|---------|-------------|
-| `--tracing-enabled` | `TRACING_ENABLED` | `false` | Enable OTLP trace export |
-| `--tracing-endpoint` | `TRACING_ENDPOINT` | (required when enabled) | OTLP collector endpoint (e.g. `otel-collector:4317`) |
-| `--tracing-insecure` | `TRACING_INSECURE` | `false` | Disable TLS for OTLP connection |
-| `--tracing-sampling-rate` | `TRACING_SAMPLING_RATE` | `1.0` | Sampling rate (0.0–1.0) |
+| Flag | Env Variable Fallback | Default | Description |
+|------|----------------------|---------|-------------|
+| `--tracing-enabled` | — | `false` | Enable OTLP trace export |
+| `--tracing-endpoint` | `OTEL_EXPORTER_OTLP_ENDPOINT` | (required when enabled) | OTLP collector endpoint (e.g. `otel-collector:4317`) |
+| `--tracing-insecure` | — | `false` | Disable TLS for OTLP connection (auto-inferred from `http://` scheme) |
+| `--tracing-sampling-rate` | — | `0.1` | Sampling rate (0.0–1.0) |
 
 ### Helm Values
 
@@ -513,16 +513,16 @@ tracing:
   enabled: false
   endpoint: ""
   insecure: false
-  samplingRate: 1.0
+  samplingRate: 0.1  # 10% of traces; use 1.0 for full tracing
 ```
 
 ### Instrumented Components
 
 | Component | Span Name | Description |
 |-----------|-----------|-------------|
-| RoleDefinition Reconciler | `RoleDefinition.Reconcile` | Full reconciliation cycle |
-| BindDefinition Reconciler | `BindDefinition.Reconcile` | Full reconciliation cycle |
+| RoleDefinition Reconciler | `reconcile.RoleDefinition` | Full reconciliation cycle |
 | WebhookAuthorizer | `webhook.SubjectAccessReview` | SAR evaluation including rule matching |
+| WebhookAuthorizer | `webhook.NamespaceMatch` | Namespace selector evaluation |
 
 When tracing is disabled, the Tracer is set to `nil` and all tracing code
 paths are skipped entirely — header parsing and span creation have zero

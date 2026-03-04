@@ -7,6 +7,7 @@ package tracing
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -105,6 +106,9 @@ func Setup(ctx context.Context, cfg Config, version string) (*Provider, error) {
 		return nil, fmt.Errorf("tracing endpoint must be set when tracing is enabled")
 	}
 
+	if math.IsNaN(cfg.SamplingRate) || math.IsInf(cfg.SamplingRate, 0) {
+		return nil, fmt.Errorf("sampling rate must be a finite number, got %f", cfg.SamplingRate)
+	}
 	if cfg.SamplingRate < 0 || cfg.SamplingRate > 1 {
 		return nil, fmt.Errorf("sampling rate must be between 0.0 and 1.0, got %f", cfg.SamplingRate)
 	}

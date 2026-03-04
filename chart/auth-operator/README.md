@@ -170,7 +170,7 @@ tracing:
   enabled: true
   endpoint: "otel-collector.observability:4317"
   insecure: false
-  samplingRate: 1.0
+  samplingRate: 0.1  # 10% of traces; chart default
 ```
 
 When disabled (default), tracing has zero overhead — no headers are parsed
