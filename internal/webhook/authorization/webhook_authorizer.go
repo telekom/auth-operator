@@ -128,8 +128,25 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	webhookAuthorizers := authzv1alpha1.WebhookAuthorizerList{Items: items}
 	result := wa.evaluateSAR(ctx, &sar, &webhookAuthorizers)
 
-	// Count total rules across all evaluated authorizers for the gauge.
-	totalRules := countTotalRules(items)
+	// Count total rules across ALL WebhookAuthorizer resources (global + scoped)
+	// for the gauge. This is request-independent: even if a namespace-scoped
+	// authorizer was not evaluated for this SAR, it still contributes to the
+	// total rule count.
+	allRules := countTotalRules(globalAuth.Items)
+	if sar.Spec.ResourceAttributes != nil && sar.Spec.ResourceAttributes.Namespace != "" {
+		// Scoped authorizers were already listed above; reuse that slice.
+		allRules = countTotalRules(items)
+	} else {
+		// List scoped authorizers separately — they weren't queried above.
+		var allScoped authzv1alpha1.WebhookAuthorizerList
+		if err := wa.Client.List(ctx, &allScoped, client.MatchingFields{
+			indexer.WebhookAuthorizerHasNamespaceSelectorField: "true",
+		}); err != nil {
+			wa.Log.V(1).Info("failed to list scoped authorizers for gauge", "error", err)
+		} else {
+			allRules += countTotalRules(allScoped.Items)
+		}
+	}
 
 	response := authzv1.SubjectAccessReview{
 		TypeMeta: metav1.TypeMeta{
@@ -158,7 +175,7 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Record audit log and metrics only after successful serialization.
 	latency := time.Since(start)
 	wa.logDecision(&sar, &result, latency)
-	wa.recordMetrics(&result, latency, totalRules)
+	wa.recordMetrics(&result, latency, allRules)
 
 	w.Header().Set("Content-Type", "application/json")
 	if _, err := w.Write(respBytes); err != nil {
@@ -256,8 +273,9 @@ func (wa *Authorizer) logDecision(sar *authzv1.SubjectAccessReview, res *evaluat
 }
 
 // countTotalRules returns the total number of resource and non-resource rules
-// across all provided authorizers. This gives a stable, request-independent
-// count suitable for the AuthorizerActiveRules gauge.
+// across the provided authorizers. The caller is responsible for passing the
+// complete set of authorizers to get a request-independent count suitable for
+// the AuthorizerActiveRules gauge.
 func countTotalRules(authorizers []authzv1alpha1.WebhookAuthorizer) int {
 	total := 0
 	for i := range authorizers {
