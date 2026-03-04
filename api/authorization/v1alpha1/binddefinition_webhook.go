@@ -128,12 +128,9 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 			namespaceSet := make(map[string]corev1.Namespace)
 
 			for _, nsSelector := range roleBinding.NamespaceSelector {
-				if isLabelSelectorEmpty(&nsSelector) {
-					continue
-				}
-
-				// Namespace selector syntax was already validated above, so
-				// LabelSelectorAsSelector cannot fail here.
+				// An empty label selector ({}) matches all namespaces in Kubernetes.
+				// Convert it to a proper selector so we can list and validate the
+				// resulting namespace set, rather than silently skipping it.
 				selector, err := metav1.LabelSelectorAsSelector(&nsSelector)
 				if err != nil {
 					// Unreachable: syntax was pre-validated, but guard defensively.
