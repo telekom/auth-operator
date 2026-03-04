@@ -156,7 +156,7 @@ func Setup(ctx context.Context, cfg Config, version string) (*Provider, error) {
 }
 
 // Span attribute keys used across the operator.
-var (
+const (
 	AttrController   = attribute.Key("auth_operator.controller")
 	AttrResource     = attribute.Key("auth_operator.resource")
 	AttrNamespace    = attribute.Key("auth_operator.namespace")
