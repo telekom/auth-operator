@@ -37,12 +37,10 @@ const (
 // This prevents denial-of-service attacks via oversized request bodies.
 const maxRequestBodySize = 1 << 20 // 1MB
 
-// Decision values used in structured audit log entries.
-const (
-	decisionAllowed   = "allowed"
-	decisionDenied    = "denied"
-	decisionNoOpinion = "no-opinion"
-)
+// Decision values used in structured audit log entries are defined in
+// pkg/metrics (AuthorizerDecisionAllowed, AuthorizerDecisionDenied,
+// AuthorizerDecisionNoOpinion) to keep audit logs and Prometheus labels
+// consistent.
 
 // evaluationResult captures the full outcome of a SubjectAccessReview evaluation.
 type evaluationResult struct {
@@ -264,7 +262,7 @@ func (wa *Authorizer) logDecision(sar *authzv1.SubjectAccessReview, res *evaluat
 	}
 
 	switch res.decision {
-	case decisionDenied:
+	case pkgmetrics.AuthorizerDecisionDenied:
 		wa.Log.Info("authorization decision", fields...)
 	default:
 		// noOpinion and allow are verbose — only visible at V(1).
@@ -325,7 +323,7 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 			return evaluationResult{
 				allowed:        false,
 				reason:         fmt.Sprintf("Access denied by WebhookAuthorizer %s", webhookAuthorizer.Name),
-				decision:       decisionDenied,
+				decision:       pkgmetrics.AuthorizerDecisionDenied,
 				authorizerName: webhookAuthorizer.Name,
 				matchedRule:    -1,
 				matchedField:   "deniedPrincipal",
@@ -341,7 +339,7 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 					return evaluationResult{
 						allowed:        true,
 						reason:         fmt.Sprintf("Access granted by WebhookAuthorizer %s", webhookAuthorizer.Name),
-						decision:       decisionAllowed,
+						decision:       pkgmetrics.AuthorizerDecisionAllowed,
 						authorizerName: webhookAuthorizer.Name,
 						matchedRule:    ruleIdx,
 						matchedField:   "resourceRule",
@@ -355,7 +353,7 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 					return evaluationResult{
 						allowed:        true,
 						reason:         fmt.Sprintf("Access granted by WebhookAuthorizer %s", webhookAuthorizer.Name),
-						decision:       decisionAllowed,
+						decision:       pkgmetrics.AuthorizerDecisionAllowed,
 						authorizerName: webhookAuthorizer.Name,
 						matchedRule:    ruleIdx,
 						matchedField:   "nonResourceRule",
@@ -370,7 +368,7 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 	return evaluationResult{
 		allowed:        false,
 		reason:         "Access denied: no matching rules",
-		decision:       decisionNoOpinion,
+		decision:       pkgmetrics.AuthorizerDecisionNoOpinion,
 		authorizerName: pkgmetrics.AuthorizerNameNone,
 		matchedRule:    -1,
 		evaluatedCount: evaluated,
@@ -450,18 +448,8 @@ func (wa *Authorizer) nonResourceRuleIndex(rules []authzv1.NonResourceRule, attr
 // completed SAR evaluation. This is called alongside audit logging to ensure
 // Prometheus metrics stay in sync with the structured audit trail.
 func (wa *Authorizer) recordMetrics(result *evaluationResult, latency time.Duration, activeRuleCount int) {
-	var decision string
-	switch result.decision {
-	case decisionAllowed:
-		decision = pkgmetrics.AuthorizerDecisionAllowed
-	case decisionDenied:
-		decision = pkgmetrics.AuthorizerDecisionDenied
-	default:
-		decision = pkgmetrics.AuthorizerDecisionNoOpinion
-	}
-
-	pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(decision, result.authorizerName).Inc()
-	pkgmetrics.AuthorizerRequestDuration.WithLabelValues(decision).Observe(latency.Seconds())
+	pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(result.decision, result.authorizerName).Inc()
+	pkgmetrics.AuthorizerRequestDuration.WithLabelValues(result.decision).Observe(latency.Seconds())
 	pkgmetrics.AuthorizerActiveRules.Set(float64(activeRuleCount))
 
 	if result.matchedField == "deniedPrincipal" {

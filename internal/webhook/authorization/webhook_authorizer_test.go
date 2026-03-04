@@ -372,7 +372,7 @@ func TestEvaluateSAR_ResultFields(t *testing.T) {
 		if res.matchedRule != 1 {
 			t.Errorf("expected matchedRule=1, got %d", res.matchedRule)
 		}
-		if res.decision != decisionAllowed {
+		if res.decision != pkgmetrics.AuthorizerDecisionAllowed {
 			t.Errorf("expected decision=allowed, got %s", res.decision)
 		}
 	})
@@ -394,7 +394,7 @@ func TestEvaluateSAR_ResultFields(t *testing.T) {
 		if res.authorizerName != "eval-wa" {
 			t.Errorf("expected authorizerName=eval-wa, got %s", res.authorizerName)
 		}
-		if res.decision != decisionDenied {
+		if res.decision != pkgmetrics.AuthorizerDecisionDenied {
 			t.Errorf("expected decision=denied, got %s", res.decision)
 		}
 	})
@@ -410,7 +410,7 @@ func TestEvaluateSAR_ResultFields(t *testing.T) {
 		if res.allowed {
 			t.Fatal("expected denied")
 		}
-		if res.decision != decisionNoOpinion {
+		if res.decision != pkgmetrics.AuthorizerDecisionNoOpinion {
 			t.Errorf("expected decision=no-opinion, got %s", res.decision)
 		}
 		if res.evaluatedCount != 1 {
