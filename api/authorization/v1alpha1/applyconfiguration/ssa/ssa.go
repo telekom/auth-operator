@@ -99,7 +99,9 @@ func BindDefinitionStatusFrom(status *authv1alpha1.BindDefinitionStatus) *ac.Bin
 		result.WithGeneratedServiceAccounts(sa)
 	}
 
-	// Set MissingRoleRefs
+	// Set MissingRoleRefs — always initialise the slice (even when empty) so
+	// that SSA retains field ownership and can clear a previously populated list.
+	result.MissingRoleRefs = make([]string, 0, len(status.MissingRoleRefs))
 	for _, ref := range status.MissingRoleRefs {
 		result.WithMissingRoleRefs(ref)
 	}

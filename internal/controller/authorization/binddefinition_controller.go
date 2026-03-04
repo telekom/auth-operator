@@ -2,6 +2,7 @@ package authorization
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -65,6 +66,9 @@ const (
 	// self-heal within a reasonable window once they appear.
 	roleRefRequeueMax = 5 * time.Minute
 )
+
+// ErrMissingRoleRefs indicates that one or more referenced roles do not exist in the cluster.
+var ErrMissingRoleRefs = errors.New("missing role references")
 
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions/status,verbs=get;update;patch
@@ -341,8 +345,21 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		"subjects", len(bindDefinition.Spec.Subjects),
 		"clusterRoleRefs", len(bindDefinition.Spec.ClusterRoleBindings.ClusterRoleRefs),
 		"roleBindings", len(bindDefinition.Spec.RoleBindings))
-	missingRoleRefs, err := r.reconcileResources(ctx, bindDefinition, activeNamespaces)
+	missingRoleRefCount, err := r.reconcileResources(ctx, bindDefinition, activeNamespaces)
 	if err != nil {
+		// When the error policy blocks reconciliation due to missing roles,
+		// apply status (which includes the RoleRefsValid=False condition) and
+		// requeue with the short interval so we retry quickly once the roles
+		// appear. We do NOT use the default exponential backoff here.
+		if errors.Is(err, ErrMissingRoleRefs) {
+			logger.Info("Reconciliation blocked by missing-role-policy=error",
+				"bindDefinition", bindDefinition.Name,
+				"missingCount", missingRoleRefCount)
+			r.markStalled(ctx, bindDefinition, err)
+			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultDegraded).Inc()
+			return ctrl.Result{RequeueAfter: RoleRefRequeueInterval}, nil
+		}
+
 		logger.Error(err, "Error occurred in reconcileResources",
 			"bindDefinition", bindDefinition.Name)
 		r.markStalled(ctx, bindDefinition, err)
@@ -352,13 +369,13 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 	logger.V(2).Info("Resource reconciliation completed",
 		"bindDefinition", bindDefinition.Name,
-		"missingRoleRefCount", missingRoleRefs)
+		"missingRoleRefCount", missingRoleRefCount)
 
 	// Mark Ready and apply final status via SSA (kstatus)
 	logger.V(2).Info("Marking BindDefinition as Ready and applying status",
 		"bindDefinition", bindDefinition.Name,
 		"generation", bindDefinition.Generation,
-		"missingRoleRefs", missingRoleRefs)
+		"missingRoleRefCount", missingRoleRefCount)
 	bindDefinition.Status.BindReconciled = true
 	r.markReady(ctx, bindDefinition)
 
@@ -377,12 +394,12 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// Use exponential backoff when role references are missing so the condition
 	// self-heals quickly on first occurrence but doesn't waste API calls when
 	// references stay missing for a long time (e.g. misconfiguration).
-	if missingRoleRefs > 0 {
+	if missingRoleRefCount > 0 {
 		backoff := calculateMissingRoleRefBackoff(bindDefinition)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultDegraded).Inc()
 		logger.Info("Requeuing with backoff due to missing role references",
 			"bindDefinition", bindDefinition.Name,
-			"missingCount", missingRoleRefs,
+			"missingCount", missingRoleRefCount,
 			"requeueAfter", backoff)
 		return ctrl.Result{RequeueAfter: backoff}, nil
 	}
@@ -447,25 +464,54 @@ func (r *BindDefinitionReconciler) reconcileResources(
 		"bindDefinition", bindDefinition.Name,
 		"activeNamespaceCount", len(activeNamespaces))
 
-	// Validate role references exist - set condition but continue processing
-	logger.V(3).Info("reconcileResources: Validating role references",
-		"bindDefinition", bindDefinition.Name)
-	missingRoles := r.validateRoleReferences(ctx, bindDefinition, activeNamespaces)
-	missingCount := len(missingRoles)
-	metrics.RoleRefsMissing.WithLabelValues(bindDefinition.Name).Set(float64(missingCount))
-	bindDefinition.Status.MissingRoleRefs = missingRoles // Store names in status
-	logger.V(2).Info("reconcileResources: Role reference validation complete",
+	// Determine the missing-role-ref policy from the annotation.
+	policy := bindDefinition.GetMissingRolePolicy()
+	logger.V(2).Info("reconcileResources: Using missing-role policy",
 		"bindDefinition", bindDefinition.Name,
-		"missingCount", missingCount,
-		"missingRoles", missingRoles)
-	if missingCount > 0 {
-		logger.Info("Some referenced roles do not exist - bindings will be created but may not be effective",
-			"bindDefinitionName", bindDefinition.Name, "missingRoles", missingRoles)
-		r.recorder.Eventf(bindDefinition, nil, corev1.EventTypeWarning, authorizationv1alpha1.EventReasonRoleRefNotFound, authorizationv1alpha1.EventActionValidate,
-			"Referenced roles not found: %v. Bindings will be created but ineffective until roles exist. Will requeue with backoff.", missingRoles)
-		conditions.MarkFalse(bindDefinition, authorizationv1alpha1.RoleRefValidCondition, bindDefinition.Generation,
-			authorizationv1alpha1.RoleRefInvalidReason, authorizationv1alpha1.RoleRefInvalidMessage, missingRoles)
+		"policy", string(policy))
+
+	// Validate role references exist - behaviour depends on the configured policy.
+	missingCount := 0
+	if policy != authorizationv1alpha1.MissingRolePolicyIgnore {
+		logger.V(3).Info("reconcileResources: Validating role references",
+			"bindDefinition", bindDefinition.Name)
+		missingRoles, err := r.validateRoleReferences(ctx, bindDefinition)
+		if err != nil {
+			return 0, fmt.Errorf("validate role references for %s: %w", bindDefinition.Name, err)
+		}
+		missingCount = len(missingRoles)
+		metrics.RoleRefsMissing.WithLabelValues(bindDefinition.Name).Set(float64(missingCount))
+		bindDefinition.Status.MissingRoleRefs = missingRoles // Store names in status
+		logger.V(2).Info("reconcileResources: Role reference validation complete",
+			"bindDefinition", bindDefinition.Name,
+			"missingCount", missingCount,
+			"missingRoles", missingRoles)
+		if missingCount > 0 {
+			conditions.MarkFalse(bindDefinition, authorizationv1alpha1.RoleRefValidCondition, bindDefinition.Generation,
+				authorizationv1alpha1.RoleRefInvalidReason, authorizationv1alpha1.RoleRefInvalidMessage, missingRoles)
+
+			if policy == authorizationv1alpha1.MissingRolePolicyError {
+				// Error mode: block reconciliation entirely.
+				r.recorder.Eventf(bindDefinition, nil, corev1.EventTypeWarning, authorizationv1alpha1.EventReasonRoleRefNotFound, authorizationv1alpha1.EventActionValidate,
+					"Reconciliation blocked (missing-role-policy=error): referenced roles not found: %v. Will retry in %s.", missingRoles, RoleRefRequeueInterval)
+				return missingCount, fmt.Errorf("%w (policy=error): %v", ErrMissingRoleRefs, missingRoles)
+			}
+
+			// Warn mode (default): log, emit event, and continue creating bindings.
+			logger.Info("Some referenced roles do not exist - bindings will be created but may not be effective",
+				"bindDefinitionName", bindDefinition.Name, "missingRoles", missingRoles)
+			r.recorder.Eventf(bindDefinition, nil, corev1.EventTypeWarning, authorizationv1alpha1.EventReasonRoleRefNotFound, authorizationv1alpha1.EventActionValidate,
+				"Referenced roles not found: %v. Bindings will be created but ineffective until roles exist. Will requeue with backoff.", missingRoles)
+		} else {
+			conditions.MarkTrue(bindDefinition, authorizationv1alpha1.RoleRefValidCondition, bindDefinition.Generation,
+				authorizationv1alpha1.RoleRefValidReason, authorizationv1alpha1.RoleRefValidMessage)
+		}
 	} else {
+		// Ignore mode: skip validation, clear status, mark condition true.
+		logger.V(2).Info("reconcileResources: Skipping role reference validation (policy=ignore)",
+			"bindDefinition", bindDefinition.Name)
+		bindDefinition.Status.MissingRoleRefs = nil
+		metrics.RoleRefsMissing.WithLabelValues(bindDefinition.Name).Set(0)
 		conditions.MarkTrue(bindDefinition, authorizationv1alpha1.RoleRefValidCondition, bindDefinition.Generation,
 			authorizationv1alpha1.RoleRefValidReason, authorizationv1alpha1.RoleRefValidMessage)
 	}
@@ -528,7 +574,7 @@ func (r *BindDefinitionReconciler) reconcileResources(
 		"crbCount", crbCount,
 		"rbCount", rbCount,
 		"generatedSACount", len(generatedSAs),
-		"missingRoleRefs", missingCount)
+		"missingRoleRefCount", missingCount)
 	metrics.ManagedResources.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResourceRoleBinding, bindDefinition.Name).Set(float64(rbCount))
 	metrics.ManagedResources.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResourceServiceAccount, bindDefinition.Name).Set(float64(len(generatedSAs)))
 
@@ -1048,12 +1094,11 @@ func (r *BindDefinitionReconciler) deleteRoleBindingWithStatusUpdate(
 }
 
 // validateRoleReferences checks if all referenced ClusterRoles and Roles exist.
-// Returns a list of missing role names. Does not fail the reconciliation.
+// Returns a list of missing role names and an error if namespace resolution fails.
 func (r *BindDefinitionReconciler) validateRoleReferences(
 	ctx context.Context,
 	bindDef *authorizationv1alpha1.BindDefinition,
-	namespaces []corev1.Namespace,
-) []string {
+) ([]string, error) {
 	logger := log.FromContext(ctx)
 	var missingRoles []string
 
@@ -1062,15 +1107,21 @@ func (r *BindDefinitionReconciler) validateRoleReferences(
 		clusterRole := &rbacv1.ClusterRole{}
 		if err := r.client.Get(ctx, types.NamespacedName{Name: clusterRoleRef}, clusterRole); err != nil {
 			if apierrors.IsNotFound(err) {
-				logger.V(1).Info("ClusterRole not found", "clusterRole", clusterRoleRef)
-				missingRoles = append(missingRoles, fmt.Sprintf("ClusterRole/%s", clusterRoleRef))
+				roleName := fmt.Sprintf("ClusterRole/%s", clusterRoleRef)
+				if !slices.Contains(missingRoles, roleName) {
+					logger.V(1).Info("ClusterRole not found", "clusterRole", clusterRoleRef)
+					missingRoles = append(missingRoles, roleName)
+				}
 			} else {
-				logger.Error(err, "Failed to check ClusterRole existence", "clusterRole", clusterRoleRef)
+				return missingRoles, fmt.Errorf("check ClusterRole %q existence: %w", clusterRoleRef, err)
 			}
 		}
 	}
 
-	// Check ClusterRoleRefs and RoleRefs in RoleBindings
+	// Check ClusterRoleRefs and RoleRefs in RoleBindings.
+	// Resolve namespaces per-roleBinding so that RoleRefs are only validated
+	// in the namespaces that the specific binding targets, not the union of
+	// all namespaces across all roleBindings.
 	for _, roleBinding := range bindDef.Spec.RoleBindings {
 		// Check ClusterRoleRefs
 		for _, clusterRoleRef := range roleBinding.ClusterRoleRefs {
@@ -1084,20 +1135,34 @@ func (r *BindDefinitionReconciler) validateRoleReferences(
 						missingRoles = append(missingRoles, roleName)
 					}
 				} else {
-					logger.Error(err, "Failed to check ClusterRole existence", "clusterRole", clusterRoleRef)
+					return missingRoles, fmt.Errorf("check ClusterRole %q existence: %w", clusterRoleRef, err)
 				}
 			}
 		}
 
-		// Check RoleRefs in each namespace
+		// Resolve namespaces for this specific roleBinding (same logic as ensureRoleBindings).
+		targetNamespaces, err := r.resolveRoleBindingNamespaces(ctx, roleBinding)
+		if err != nil {
+			return missingRoles, fmt.Errorf("resolve namespaces for roleBinding during validation: %w", err)
+		}
+
+		// Check RoleRefs only in the resolved namespaces for this roleBinding.
+		// Skip terminating namespaces to match ensureRoleBindings behavior,
+		// which also skips them — otherwise we'd report false-positive
+		// missing roles in namespaces where bindings intentionally aren't created.
 		for _, roleRef := range roleBinding.RoleRefs {
-			for _, ns := range namespaces {
+			for _, ns := range targetNamespaces {
+				if conditions.IsNamespaceTerminating(&ns) {
+					continue
+				}
 				role := &rbacv1.Role{}
 				if err := r.client.Get(ctx, types.NamespacedName{Name: roleRef, Namespace: ns.Name}, role); err != nil {
 					if apierrors.IsNotFound(err) {
 						roleName := fmt.Sprintf("Role/%s/%s", ns.Name, roleRef)
-						logger.V(1).Info("Role not found", "role", roleRef, "namespace", ns.Name)
-						missingRoles = append(missingRoles, roleName)
+						if !slices.Contains(missingRoles, roleName) {
+							logger.V(1).Info("Role not found", "role", roleRef, "namespace", ns.Name)
+							missingRoles = append(missingRoles, roleName)
+						}
 					} else {
 						logger.Error(err, "Failed to check Role existence", "role", roleRef, "namespace", ns.Name)
 					}
@@ -1108,7 +1173,7 @@ func (r *BindDefinitionReconciler) validateRoleReferences(
 
 	slices.Sort(missingRoles)
 
-	return missingRoles
+	return missingRoles, nil
 }
 
 func (r *BindDefinitionReconciler) collectNamespaces(ctx context.Context, bindDefinition *authorizationv1alpha1.BindDefinition) (map[string]corev1.Namespace, error) {
