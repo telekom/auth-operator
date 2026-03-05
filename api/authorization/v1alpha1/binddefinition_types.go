@@ -94,8 +94,13 @@ type BindDefinitionSpec struct {
 
 	// AutomountServiceAccountToken controls whether to automount API credentials for ServiceAccounts
 	// created by this BindDefinition. Defaults to true for backward compatibility with Kubernetes
-	// native ServiceAccount behavior. Set to false to improve security by preventing automatic
-	// token mounting.
+	// native ServiceAccount behavior.
+	//
+	// Security: When enabled (default), pods using ServiceAccounts created by this BindDefinition
+	// receive a projected token that grants access to the Kubernetes API with the permissions
+	// defined by the associated ClusterRoleBindings/RoleBindings. Set to false for workloads that
+	// do not require in-cluster API access to follow the principle of least privilege.
+	//
 	// Only applies when Subjects contain ServiceAccount entries that need to be auto-created.
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:default=true

@@ -51,9 +51,10 @@ func (r *RoleDefinitionReconciler) markStalled(
 	err error,
 ) {
 	logger := log.FromContext(ctx)
+	logger.Error(err, "RoleDefinition stalled", "roleDefinitionName", roleDefinition.Name)
 	// Copy status and apply stalled condition
 	conditions.MarkStalled(roleDefinition, roleDefinition.Generation,
-		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, err.Error())
+		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, "reconciliation error (check operator logs for details)")
 	roleDefinition.Status.ObservedGeneration = roleDefinition.Generation
 	if updateErr := ssa.ApplyRoleDefinitionStatus(ctx, r.client, roleDefinition); updateErr != nil {
 		logger.Error(updateErr, "failed to apply Stalled status via SSA", "roleDefinitionName", roleDefinition.Name)
@@ -170,8 +171,12 @@ func (r *RoleDefinitionReconciler) handleDeletion(
 	} else if err != nil {
 		logger.Error(err, "Failed to delete role",
 			"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
+		// Use a generic message in the condition to avoid leaking internal
+		// error details (e.g. server responses, resource paths) to CRD
+		// consumers who may not have elevated RBAC. The full error is
+		// logged above for operator administrators.
 		conditions.MarkFalse(roleDefinition, authorizationv1alpha1.DeleteCondition, roleDefinition.Generation,
-			authorizationv1alpha1.DeleteReason, "error deleting resource: %s", err.Error())
+			authorizationv1alpha1.DeleteReason, "failed to delete managed resource (check operator logs for details)")
 		if updateErr := ssa.ApplyRoleDefinitionStatus(ctx, r.client, roleDefinition); updateErr != nil {
 			logger.Error(updateErr, "Failed to apply status after deletion error",
 				"roleDefinitionName", roleDefinition.Name)
@@ -260,7 +265,7 @@ func (r *RoleDefinitionReconciler) ensureRole(
 	// and this check produces a clearer error/event than the raw API rejection.
 	if err := r.checkRoleOwnership(ctx, roleDefinition); err != nil {
 		conditions.MarkFalse(roleDefinition, authorizationv1alpha1.OwnerRefCondition, roleDefinition.Generation,
-			authorizationv1alpha1.OwnerRefReason, "ownership conflict: %s", err.Error())
+			authorizationv1alpha1.OwnerRefReason, "ownership conflict (check operator logs for details)")
 		return err
 	}
 
