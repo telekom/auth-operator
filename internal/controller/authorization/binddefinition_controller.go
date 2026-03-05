@@ -1207,40 +1207,15 @@ func (r *BindDefinitionReconciler) validateRoleReferences(
 }
 
 func (r *BindDefinitionReconciler) collectNamespaces(ctx context.Context, bindDefinition *authorizationv1alpha1.BindDefinition) (map[string]corev1.Namespace, error) {
-	// Construct namespace set from BindDefinition namespace selectors
+	// Aggregate namespaces from all RoleBindings using the shared resolution logic.
 	namespaceSet := make(map[string]corev1.Namespace)
 	for _, roleBinding := range bindDefinition.Spec.RoleBindings {
-		if roleBinding.Namespace != "" {
-			ns := &corev1.Namespace{}
-			err := r.client.Get(ctx, types.NamespacedName{Name: roleBinding.Namespace}, ns)
-			if err != nil {
-				if apierrors.IsNotFound(err) {
-					continue
-				}
-				return nil, fmt.Errorf("get namespace %s: %w", roleBinding.Namespace, err)
-			}
-			namespaceSet[ns.Name] = *ns
+		resolved, err := r.resolveRoleBindingNamespaces(ctx, roleBinding)
+		if err != nil {
+			return nil, err
 		}
-		for _, nsSelector := range roleBinding.NamespaceSelector {
-			if len(nsSelector.MatchLabels) == 0 && len(nsSelector.MatchExpressions) == 0 {
-				continue
-			}
-			selector, err := metav1.LabelSelectorAsSelector(&nsSelector)
-			if err != nil {
-				return nil, fmt.Errorf("parse namespace selector: %w", err)
-			}
-			namespaceList := &corev1.NamespaceList{}
-			listOpts := []client.ListOption{
-				&client.ListOptions{LabelSelector: selector},
-			}
-			err = r.client.List(ctx, namespaceList, listOpts...)
-			if err != nil {
-				return nil, fmt.Errorf("list namespaces with selector %s: %w", selector.String(), err)
-			}
-			// Add namespaces to the set.
-			for _, ns := range namespaceList.Items {
-				namespaceSet[ns.Name] = ns
-			}
+		for _, ns := range resolved {
+			namespaceSet[ns.Name] = ns
 		}
 	}
 
