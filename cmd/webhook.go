@@ -20,6 +20,7 @@ import (
 
 	"github.com/open-policy-agent/cert-controller/pkg/rotator"
 	"github.com/spf13/cobra"
+	"golang.org/x/time/rate"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -38,6 +39,8 @@ var (
 	certRotationValidatingWebhooks []string
 	certRotationMutatingWebhooks   []string
 	enableTDGMigration             bool
+	authorizeRateLimit             float64
+	authorizeRateBurst             int
 )
 
 // webhookCmd represents the webhook command.
@@ -203,6 +206,12 @@ func configureWebhooks(mgr manager.Manager, tp *tracing.Provider) error {
 		Log:    ctrl.Log.WithName("Authorizer"),
 		Tracer: tp.TracerIfEnabled(),
 	}
+	if authorizeRateLimit > 0 {
+		authorizer.Limiter = rate.NewLimiter(rate.Limit(authorizeRateLimit), authorizeRateBurst)
+		log.Info("rate limiting enabled for /authorize",
+			"rateLimit", authorizeRateLimit,
+			"burst", authorizeRateBurst)
+	}
 	mgr.GetWebhookServer().Register("/authorize", authorizer)
 
 	log.Info("setting up RoleDefinition webhook")
@@ -264,4 +273,8 @@ func init() {
 
 	webhookCmd.Flags().BoolVar(&enableTDGMigration, "tdg-migration", false,
 		"If set, the legacy labels and behavior for TDG migration will be enabled.")
+	webhookCmd.Flags().Float64Var(&authorizeRateLimit, "authorize-rate-limit", 100,
+		"Maximum sustained requests per second for the /authorize endpoint. Set to 0 to disable rate limiting.")
+	webhookCmd.Flags().IntVar(&authorizeRateBurst, "authorize-rate-burst", 200,
+		"Maximum burst size for the /authorize endpoint rate limiter.")
 }

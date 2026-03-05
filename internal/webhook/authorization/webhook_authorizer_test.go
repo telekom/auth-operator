@@ -12,6 +12,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/go-logr/logr/funcr"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	"golang.org/x/time/rate"
 	authzv1 "k8s.io/api/authorization/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -751,5 +752,114 @@ func TestCountTotalRules(t *testing.T) {
 				t.Errorf("countTotalRules() = %d, want %d", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestServeHTTP_RateLimiting(t *testing.T) {
+	var buf strings.Builder
+	logger := capturingLogger(&buf, 2)
+	scheme := newScheme(t)
+	cl := newIndexedClient(scheme)
+
+	// Limiter with burst=1: first request allowed, second rejected.
+	handler := &Authorizer{
+		Client:  cl,
+		Log:     logger,
+		Limiter: rate.NewLimiter(rate.Limit(0), 1), // 0 rps, burst 1
+	}
+
+	sar := authzv1.SubjectAccessReview{
+		Spec: authzv1.SubjectAccessReviewSpec{
+			User:   "test-user",
+			Groups: []string{"test-group"},
+			ResourceAttributes: &authzv1.ResourceAttributes{
+				Namespace: "default",
+				Verb:      "get",
+				Resource:  "pods",
+			},
+		},
+	}
+	body := marshalSAR(t, sar)
+
+	// Ensure the counter series exists so we can measure the delta.
+	pkgmetrics.AuthorizerRateLimitedTotal.Add(0)
+	initialCount := testutil.ToFloat64(pkgmetrics.AuthorizerRateLimitedTotal)
+
+	// First request should succeed (uses the burst token).
+	req1 := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	rec1 := httptest.NewRecorder()
+	handler.ServeHTTP(rec1, req1)
+
+	if rec1.Code == http.StatusTooManyRequests {
+		t.Error("first request should not be rate limited (burst=1)")
+	}
+
+	// Second request should be rate limited (no tokens left, 0 rps).
+	req2 := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+
+	if rec2.Code != http.StatusTooManyRequests {
+		t.Errorf("expected status %d, got %d", http.StatusTooManyRequests, rec2.Code)
+	}
+
+	// Verify the response is a valid denied SubjectAccessReview.
+	var response authzv1.SubjectAccessReview
+	if err := json.NewDecoder(rec2.Body).Decode(&response); err != nil {
+		t.Fatalf("failed to decode rate-limited response: %v", err)
+	}
+	if response.Status.Allowed {
+		t.Error("rate-limited response should have Allowed=false")
+	}
+	if response.Status.Reason != "rate limit exceeded" {
+		t.Errorf("expected reason %q, got %q", "rate limit exceeded", response.Status.Reason)
+	}
+
+	// Verify Retry-After header.
+	if rec2.Header().Get("Retry-After") != "1" {
+		t.Errorf("expected Retry-After=1, got %q", rec2.Header().Get("Retry-After"))
+	}
+
+	// Verify the rate-limited metric incremented.
+	afterCount := testutil.ToFloat64(pkgmetrics.AuthorizerRateLimitedTotal)
+	if afterCount-initialCount < 1 {
+		t.Errorf("AuthorizerRateLimitedTotal did not increment: before=%v, after=%v", initialCount, afterCount)
+	}
+}
+
+func TestServeHTTP_NoRateLimiter(t *testing.T) {
+	var buf strings.Builder
+	logger := capturingLogger(&buf, 0)
+	scheme := newScheme(t)
+	cl := newIndexedClient(scheme)
+
+	// No Limiter set — rate limiting should be disabled.
+	handler := &Authorizer{
+		Client: cl,
+		Log:    logger,
+	}
+
+	sar := authzv1.SubjectAccessReview{
+		Spec: authzv1.SubjectAccessReviewSpec{
+			User:   "test-user",
+			Groups: []string{"test-group"},
+			ResourceAttributes: &authzv1.ResourceAttributes{
+				Namespace: "default",
+				Verb:      "get",
+				Resource:  "pods",
+			},
+		},
+	}
+	body := marshalSAR(t, sar)
+
+	// Multiple requests should all succeed when limiter is nil.
+	for i := range 5 {
+		req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code == http.StatusTooManyRequests {
+			t.Errorf("request %d should not be rate limited when Limiter is nil", i)
+		}
 	}
 }
