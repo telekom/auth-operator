@@ -65,6 +65,10 @@ controller:
 webhookServer:
   replicas: 1
   tdgMigration: "false"
+  # Maximum sustained requests per second for the /authorize endpoint
+  authorizeRateLimit: 100
+  # Maximum burst size for the /authorize rate limiter
+  authorizeRateBurst: 200
   podDisruptionBudget:
     # Enable PodDisruptionBudget for high availability
     enabled: false
