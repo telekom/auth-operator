@@ -25,12 +25,6 @@ type NamespaceMutator struct {
 	TDGMigration bool
 }
 
-// InjectDecoder injects the decoder into the NamespaceMutator.
-func (m *NamespaceMutator) InjectDecoder(d admission.Decoder) error {
-	m.Decoder = d
-	return nil
-}
-
 // Handle mutates the Namespace by adding a label based on user groups or ServiceAccount.
 func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) admission.Response {
 	logger := logf.FromContext(ctx).WithName("namespace-mutator")

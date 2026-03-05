@@ -216,12 +216,11 @@ func configureWebhooks(mgr manager.Manager, tp *tracing.Provider) error {
 	}
 	// Setup Namespace mutator
 	log.Info("setting up Namespace mutator webhook", "tdgMigration", enableTDGMigration)
+	decoder := admission.NewDecoder(mgr.GetScheme())
 	namespaceMutator := &authorizationwebhook.NamespaceMutator{
 		Client:       mgr.GetClient(),
+		Decoder:      decoder,
 		TDGMigration: enableTDGMigration,
-	}
-	if err := namespaceMutator.InjectDecoder(admission.NewDecoder(mgr.GetScheme())); err != nil {
-		return fmt.Errorf("unable to inject decoder for NamespaceMutator: %w", err)
 	}
 	mgr.GetWebhookServer().Register("/mutate-v1-namespace", &webhook.Admission{Handler: namespaceMutator})
 
@@ -229,10 +228,8 @@ func configureWebhooks(mgr manager.Manager, tp *tracing.Provider) error {
 	log.Info("setting up Namespace validator webhook", "tdgMigration", enableTDGMigration)
 	namespaceValidator := &authorizationwebhook.NamespaceValidator{
 		Client:       mgr.GetClient(),
+		Decoder:      decoder,
 		TDGMigration: enableTDGMigration,
-	}
-	if err := namespaceValidator.InjectDecoder(admission.NewDecoder(mgr.GetScheme())); err != nil {
-		return fmt.Errorf("unable to inject decoder for NamespaceValidator: %w", err)
 	}
 	mgr.GetWebhookServer().Register("/validate-v1-namespace", &webhook.Admission{Handler: namespaceValidator})
 

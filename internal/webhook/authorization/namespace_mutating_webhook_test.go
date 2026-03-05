@@ -120,12 +120,8 @@ func TestNamespaceMutatorHandle(t *testing.T) {
 	// 4. Create our NamespaceMutator with the fake client
 	// ----------------------------------------------------------------------
 	mutator := &webhooks.NamespaceMutator{
-		Client: fakeClient,
-	}
-
-	dec := crAdmission.NewDecoder(scheme)
-	if err := mutator.InjectDecoder(dec); err != nil {
-		t.Fatalf("failed to inject decoder: %v", err)
+		Client:  fakeClient,
+		Decoder: crAdmission.NewDecoder(scheme),
 	}
 
 	// ----------------------------------------------------------------------
@@ -523,11 +519,8 @@ func TestNamespaceMutatorPerformance(t *testing.T) {
 		Build()
 
 	mutator := &webhooks.NamespaceMutator{
-		Client: fakeClient,
-	}
-	dec := crAdmission.NewDecoder(scheme)
-	if err := mutator.InjectDecoder(dec); err != nil {
-		t.Fatalf("failed to inject decoder: %v", err)
+		Client:  fakeClient,
+		Decoder: crAdmission.NewDecoder(scheme),
 	}
 
 	// 2) Define concurrency and total requests

@@ -31,12 +31,6 @@ type NamespaceValidator struct {
 	TDGMigration bool
 }
 
-// InjectDecoder injects the decoder into the NamespaceValidator.
-func (v *NamespaceValidator) InjectDecoder(d admission.Decoder) error {
-	v.Decoder = d
-	return nil
-}
-
 // Handle validates namespace operations based on BindDefinition configurations.
 func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) admission.Response {
 	logger := logf.FromContext(ctx).WithName("namespace-validator")
