@@ -47,7 +47,7 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 		"namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username)
 
 	// Check for bypass conditions
-	bypassResult := CheckMutatorBypass(req.UserInfo.Username, req.Operation, req.Name, m.TDGMigration)
+	bypassResult := CheckBypass(req.UserInfo.Username, req.Operation, req.Name, m.TDGMigration)
 	if bypassResult.ShouldBypass {
 		// Log bypass at Info level for security auditing
 		logger.Info("AUDIT: webhook bypass granted",
@@ -163,10 +163,9 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 	}
 
 	// If no labels to add, deny the request with a warning
-	denialMsg := "The user does not have any OIDC attributes assigned to this cluster and the user is not a Kubernetes admin. Namespace creation is not allowed."
 	logger.V(1).Info("namespace mutation denied - no labels matched", "namespace", req.Name, "username", req.UserInfo.Username)
 	metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultDenied).Inc()
-	return admission.Denied(denialMsg)
+	return admission.Denied(DenialNoOIDCAttributes)
 }
 
 // Extract labels from NamespaceSelector.
