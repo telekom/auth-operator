@@ -71,6 +71,7 @@ path = [
   "chart/**/*.yml",
   "chart/**/*.tpl",
   "chart/**/*.txt",
+  "chart/**/*.json",
   "chart/**/.helmignore"
 ]
 precedence = "aggregate"
