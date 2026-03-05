@@ -115,7 +115,7 @@ func (r *RoleDefinitionReconciler) ensureFinalizer(
 	controllerutil.AddFinalizer(roleDefinition, authorizationv1alpha1.RoleDefinitionFinalizer)
 	if err := r.client.Patch(ctx, roleDefinition, client.MergeFromWithOptions(old, client.MergeFromWithOptimisticLock{})); err != nil {
 		logger.Error(err, "Failed to add finalizer", "roleDefinitionName", roleDefinition.Name)
-		return err
+		return fmt.Errorf("add finalizer to RoleDefinition %s: %w", roleDefinition.Name, err)
 	}
 	r.recorder.Eventf(roleDefinition, nil, corev1.EventTypeNormal, authorizationv1alpha1.EventReasonFinalizer, authorizationv1alpha1.EventActionFinalizerAdd,
 		"Adding finalizer to RoleDefinition %s", roleDefinition.Name)

@@ -3,6 +3,7 @@ package authorization
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -15,6 +16,7 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
@@ -910,6 +912,35 @@ func TestDeleteServiceAccountUnit(t *testing.T) {
 		result, err := r.deleteServiceAccount(ctx, bindDef, "gone-sa", "gone-ns")
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(result).To(Equal(deleteResultNotFound))
+	})
+
+	t.Run("returns deleteResultUnknown on Get error", func(t *testing.T) {
+		g := NewWithT(t)
+
+		bindDef := &authorizationv1alpha1.BindDefinition{
+			TypeMeta: metav1.TypeMeta{
+				APIVersion: authorizationv1alpha1.GroupVersion.String(),
+				Kind:       "BindDefinition",
+			},
+			ObjectMeta: metav1.ObjectMeta{Name: "err-bd", UID: "err-uid"},
+			Spec:       authorizationv1alpha1.BindDefinitionSpec{TargetName: "err-target"},
+		}
+
+		c := fake.NewClientBuilder().WithScheme(s).WithObjects(bindDef).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(_ context.Context, _ client.WithWatch, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+					if _, ok := obj.(*corev1.ServiceAccount); ok {
+						return fmt.Errorf("simulated API error")
+					}
+					return nil
+				},
+			}).Build()
+		r := &BindDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+		result, err := r.deleteServiceAccount(ctx, bindDef, "any-sa", "any-ns")
+		g.Expect(err).To(HaveOccurred())
+		g.Expect(err.Error()).To(ContainSubstring("simulated API error"))
+		g.Expect(result).To(Equal(deleteResultUnknown))
 	})
 
 	t.Run("returns NoOwnerRef for unowned SA", func(t *testing.T) {

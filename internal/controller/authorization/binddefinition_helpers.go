@@ -101,7 +101,7 @@ func (r *BindDefinitionReconciler) markReady(
 	ctx context.Context,
 	bindDefinition *authorizationv1alpha1.BindDefinition,
 ) {
-	_ = ctx // unused but kept for consistent function signature
+	log.FromContext(ctx).V(3).Info("marking BindDefinition as ready", "bindDefinitionName", bindDefinition.Name)
 	conditions.MarkReady(bindDefinition, bindDefinition.Generation,
 		authorizationv1alpha1.ReadyReasonReconciled, authorizationv1alpha1.ReadyMessageReconciled)
 	bindDefinition.Status.ObservedGeneration = bindDefinition.Generation
@@ -112,9 +112,10 @@ func (r *BindDefinitionReconciler) markReady(
 type deleteResult int
 
 const (
-	deleteResultDeleted deleteResult = iota
-	deleteResultNotFound
-	deleteResultNoOwnerRef
+	deleteResultUnknown    deleteResult = iota // zero value — returned on error paths when the outcome is indeterminate.
+	deleteResultDeleted                        // resource was successfully deleted.
+	deleteResultNotFound                       // resource was already gone.
+	deleteResultNoOwnerRef                     // resource exists but is not owned by this BindDefinition.
 )
 
 // deleteServiceAccount attempts to delete a service account if it has an ownerReference.
@@ -136,7 +137,7 @@ func (r *BindDefinitionReconciler) deleteServiceAccount(
 		}
 		logger.Error(err, "Unable to fetch ServiceAccount from Kubernetes API",
 			"bindDefinitionName", bindDef.Name, "serviceAccount", saName, "namespace", saNamespace)
-		return 0, fmt.Errorf("get ServiceAccount %s/%s: %w", saNamespace, saName, err)
+		return deleteResultUnknown, fmt.Errorf("get ServiceAccount %s/%s: %w", saNamespace, saName, err)
 	}
 
 	// Check if referenced by other BindDefinitions
@@ -144,7 +145,7 @@ func (r *BindDefinitionReconciler) deleteServiceAccount(
 	if err != nil {
 		logger.Error(err, "Failed to check if ServiceAccount is referenced by other BindDefinitions",
 			"bindDefinitionName", bindDef.Name, "serviceAccount", sa.Name, "namespace", sa.Namespace)
-		return 0, fmt.Errorf("check ServiceAccount %s/%s references: %w", sa.Namespace, sa.Name, err)
+		return deleteResultUnknown, fmt.Errorf("check ServiceAccount %s/%s references: %w", sa.Namespace, sa.Name, err)
 	}
 
 	if isReferenced {
@@ -201,7 +202,7 @@ func (r *BindDefinitionReconciler) deleteServiceAccount(
 		}
 		logger.Error(err, "Failed to delete ServiceAccount",
 			"bindDefinitionName", bindDef.Name, "serviceAccount", sa.Name, "namespace", sa.Namespace)
-		return 0, fmt.Errorf("delete ServiceAccount %s/%s: %w", sa.Namespace, sa.Name, err)
+		return deleteResultUnknown, fmt.Errorf("delete ServiceAccount %s/%s: %w", sa.Namespace, sa.Name, err)
 	}
 
 	logger.V(1).Info("Successfully deleted ServiceAccount",
@@ -230,7 +231,7 @@ func (r *BindDefinitionReconciler) deleteClusterRoleBinding(
 		}
 		logger.Error(err, "Unable to fetch ClusterRoleBinding from Kubernetes API",
 			"bindDefinitionName", bindDef.Name, "clusterRoleBindingName", crbName)
-		return 0, fmt.Errorf("get ClusterRoleBinding %s: %w", crbName, err)
+		return deleteResultUnknown, fmt.Errorf("get ClusterRoleBinding %s: %w", crbName, err)
 	}
 
 	if !metav1.IsControlledBy(crb, bindDef) {
@@ -254,7 +255,7 @@ func (r *BindDefinitionReconciler) deleteClusterRoleBinding(
 		}
 		logger.Error(err, "Failed to delete ClusterRoleBinding",
 			"bindDefinitionName", bindDef.Name, "clusterRoleBindingName", crbName)
-		return 0, fmt.Errorf("delete ClusterRoleBinding %s: %w", crbName, err)
+		return deleteResultUnknown, fmt.Errorf("delete ClusterRoleBinding %s: %w", crbName, err)
 	}
 
 	metrics.RBACResourcesDeleted.WithLabelValues(metrics.ResourceClusterRoleBinding).Inc()
@@ -283,7 +284,7 @@ func (r *BindDefinitionReconciler) deleteRoleBinding(
 		}
 		logger.Error(err, "Unable to fetch RoleBinding from Kubernetes API",
 			"bindDefinitionName", bindDef.Name, "namespace", namespace, "roleBindingName", rbName)
-		return 0, fmt.Errorf("get RoleBinding %s/%s: %w", namespace, rbName, err)
+		return deleteResultUnknown, fmt.Errorf("get RoleBinding %s/%s: %w", namespace, rbName, err)
 	}
 
 	if !metav1.IsControlledBy(rb, bindDef) {
@@ -308,7 +309,7 @@ func (r *BindDefinitionReconciler) deleteRoleBinding(
 		}
 		logger.Error(err, "Failed to delete RoleBinding",
 			"bindDefinitionName", bindDef.Name, "roleBindingName", rbName, "namespace", namespace)
-		return 0, fmt.Errorf("delete RoleBinding %s/%s: %w", namespace, rbName, err)
+		return deleteResultUnknown, fmt.Errorf("delete RoleBinding %s/%s: %w", namespace, rbName, err)
 	}
 
 	metrics.RBACResourcesDeleted.WithLabelValues(metrics.ResourceRoleBinding).Inc()

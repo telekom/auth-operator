@@ -244,9 +244,10 @@ var (
 	)
 )
 
-func init() {
-	// Register all metrics with controller-runtime's registry.
-	metrics.Registry.MustRegister(
+// allCollectors returns the full list of prometheus.Collector instances
+// managed by this package. Used by both init() and RegisterMetrics().
+func allCollectors() []prometheus.Collector {
+	return []prometheus.Collector{
 		ReconcileTotal,
 		ReconcileDuration,
 		ReconcileErrors,
@@ -266,7 +267,19 @@ func init() {
 		AuthorizerRequestDuration,
 		AuthorizerActiveRules,
 		AuthorizerDeniedPrincipalHitsTotal,
-	)
+	}
+}
+
+func init() {
+	// Register all metrics with controller-runtime's registry.
+	metrics.Registry.MustRegister(allCollectors()...)
+}
+
+// RegisterMetrics registers all auth-operator metrics with the given
+// registerer. This is useful in tests where a custom (non-global) registry
+// is preferred over the default controller-runtime registry used by init().
+func RegisterMetrics(registerer prometheus.Registerer) {
+	registerer.MustRegister(allCollectors()...)
 }
 
 // ReconcileResult constants for labeling reconcile outcomes.

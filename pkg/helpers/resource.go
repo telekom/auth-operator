@@ -2,6 +2,9 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+// Package helpers provides shared utility functions for Kubernetes resource
+// name generation, hashing, label management, and subject validation used
+// across the auth-operator controllers and webhooks.
 package helpers
 
 import (
