@@ -85,26 +85,30 @@ Prompts are in [`.github/prompts/`](.github/prompts/) and can be invoked by name
 ### Running a Multi-Persona Review
 
 Invoke each review prompt in sequence against a code change and collect findings.
-The 13 reviewer personas cover every issue class found by automated reviewers
-(Copilot, etc.) and more:
+The 12 reviewer personas (out of 16 total prompts; the remaining 4 are
+task and workflow guides: `review-pr`, `add-crd-field`, `helm-chart-changes`,
+`github-pr-management`) cover every issue class found by automated reviewers
+(Copilot, etc.) and more.
+
+Grouped below by the *class of bug* each persona catches (the table
+above groups by domain):
 
 **Code quality** (4 personas):
-- **Go style** catches import alias violations, `%v` error wrapping, `godot` comment periods, `revive` naming
+- **Go style** catches import alias violations (`authorizationv1alpha1` enforcement), `%v` error wrapping, `godot` comment periods, `revive` naming
 - **Concurrency** catches SSA ownership conflicts, condition management bypasses, stale cache reads
 - **K8s patterns** catches missing context timeouts, non-idempotent reconcilers, condition mis-management
 - **Performance** catches unbounded namespace enumeration, SSA no-op waste, high-cardinality metrics
 
 **Correctness** (4 personas):
-- **Integration wiring** catches new code that is defined but never called, SSA apply gaps, RBAC drift
-- **API & CRD** catches missing validation markers, backwards-compatibility breaks, SSA completeness
-- **Edge cases** catches namespace lifecycle races, SSA conflicts, zero-value bugs, webhook timing
-- **QA regression** catches RBAC generation regressions, condition reason changes, rollback hazards
+- **Integration wiring** catches new code that is defined but never called, SSA apply gaps, RBAC drift, **PR description ↔ implementation alignment**
+- **API & CRD** catches missing validation markers, backwards-compatibility breaks (incl. **validation tightening** as breaking), SSA completeness
+- **Edge cases** catches namespace lifecycle races, SSA conflicts, zero-value bugs, webhook timing, **SSA field ownership edge cases** (ForceOwnership wars, GC interactions)
+- **QA regression** catches RBAC generation regressions, condition reason changes, rollback hazards, **verification discipline** (search codebase before flagging)
 
 **Security & documentation** (3 personas):
-- **Security** catches privilege escalation via RBAC generation, webhook bypass, DoS vectors
+- **Security** catches privilege escalation via RBAC generation, webhook bypass, DoS vectors, **error response sanitization** (no internal details in admission responses)
 - **Docs consistency** catches field name mismatches, stale condition references, Helm doc drift
-- **CI & testing** catches coverage gaps, Ginkgo/testify mixing, missing enum cases, golden staleness
+- **CI & testing** catches coverage gaps, Ginkgo/testify mixing, missing enum cases, golden staleness, **verification discipline** (search tests before flagging)
 
-**User-facing** (2 personas):
+**User-facing** (1 persona):
 - **End-user** catches platform engineer confusion, admin upgrade friction, auditor visibility gaps
-- **Helm chart changes** catches values drift, CRD sync issues, RBAC template mismatches

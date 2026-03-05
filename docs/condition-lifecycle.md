@@ -193,10 +193,15 @@ Reports whether all referenced ClusterRoles and Roles exist in the cluster.
 |--------|--------|---------|
 | `True` | `RoleRefValidation` | All referenced roles exist |
 | `False` | `RoleRefNotFound` | One or more referenced roles do not exist |
+| `Unknown` | `RoleRefValidationSkipped` | Role reference validation skipped (missing-role-policy=ignore) |
 
-**Behavior**: When `False`, the operator still creates bindings but marks the
-resource as not fully healthy. This allows partial progress while surfacing
-the missing dependency.
+**Behavior**: When `False` and the `missing-role-policy` annotation is `warn`
+(the default), the operator still creates bindings but marks the resource as
+not fully healthy. This allows partial progress while surfacing the missing
+dependency. When the policy is set to `error`, reconciliation is blocked and
+no bindings are created until the missing roles are resolved. When the policy
+is set to `ignore`, validation is skipped entirely and the condition is set
+to `Unknown`.
 
 ### Reconciliation Sequence (BindDefinition)
 

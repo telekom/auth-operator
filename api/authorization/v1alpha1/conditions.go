@@ -160,6 +160,13 @@ const (
 	// RoleRefInvalidMessage is the format string when role references are missing.
 	// Use with the list of missing role names (accepts any type via %v).
 	RoleRefInvalidMessage AuthZConditionMessage = "Missing role references: %v"
+
+	// RoleRefValidationSkippedReason is used when role reference validation is
+	// skipped because the missing-role-policy is set to "ignore".
+	RoleRefValidationSkippedReason AuthZConditionReason = "RoleRefValidationSkipped"
+	// RoleRefValidationSkippedMessage is the message when role reference
+	// validation is skipped by policy.
+	RoleRefValidationSkippedMessage AuthZConditionMessage = "Role reference validation skipped (missing-role-policy=ignore)"
 )
 
 // WebhookAuthorizer condition types.

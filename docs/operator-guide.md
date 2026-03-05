@@ -109,7 +109,13 @@ The auth-operator consists of two main components:
 |----------|------------------|---------|
 | RoleDefinition | 60 seconds | Drift protection, CRD discovery |
 | BindDefinition | 60 seconds | Drift protection |
-| BindDefinition (missing refs) | 10 seconds | Faster recovery |
+| BindDefinition (missing refs) | 10s → 5min (exponential backoff) | Recovery with reduced API load |
+
+### BindDefinition Annotations
+
+| Annotation | Values | Default | Description |
+|-----------|--------|---------|-------------|
+| `authorization.t-caas.telekom.com/missing-role-policy` | `warn`, `error`, `ignore` | `warn` | Controls behavior when referenced roles don't exist. `warn`: create bindings, surface warning in status. `error`: block binding creation, set condition False. `ignore`: skip validation entirely, set condition Unknown. |
 
 ---
 

@@ -97,6 +97,43 @@ that would slip past routine test coverage.
 - Leader election failover mid-reconcile — does the new leader redo
   the work or miss it?
 
+### 10. Non-Deterministic Evaluation Order
+
+- When multiple items are fetched from an informer cache (e.g., a list
+  of `WebhookAuthorizer` objects) and evaluated in a first-match pattern,
+  the list **must be sorted** before evaluation. Unsorted lists produce
+  non-deterministic results across reconciles.
+- Flag any `range` over a list result that feeds a "first match wins"
+  or "first deny wins" decision without a preceding `slices.SortFunc`
+  or equivalent.
+
+### 11. Scope Mismatch — Namespace vs Non-Resource
+
+- When a SubjectAccessReview has `NonResourceAttributes` (not
+  `ResourceAttributes`), any authorizer scoped to a specific namespace
+  must be skipped. Evaluating a namespace-scoped rule against a
+  non-resource request is semantically meaningless and can produce
+  incorrect denials.
+- Flag evaluation loops that do not distinguish between resource and
+  non-resource SARs when filtering namespace-scoped items.
+
+### 12. Duplicate Output from Overlapping Sets
+
+- Functions that compare two lists for overlaps (e.g., denied principals
+  vs. allowed principals) can produce duplicate results when the same
+  item appears in multiple denied entries. Use a `seen` map or
+  `slices.Compact` after sorting to deduplicate output.
+
+### 13. Dead / Never-Matching Configuration
+
+- Flag configuration objects that can never match any runtime input.
+  Common pattern: a `Principal` (or similar matcher) that sets a scope
+  field (e.g., `Namespace`) but leaves all matching fields (e.g., `User`,
+  `Groups`) empty. The scope field alone is not a matching criterion —
+  without at least one matching field, the entry silently does nothing.
+- Webhook validators should detect these patterns at admission time and
+  return a warning, not silently accept them.
+
 ### 10. Fuzz & Property Testing
 
 - Property: for any valid `RoleDefinition` spec, the generated ClusterRole
@@ -108,6 +145,24 @@ that would slip past routine test coverage.
 - Property: for any sequence of spec updates, the final RBAC state must
   match the final spec (eventual consistency).
 - Fuzz: random bytes in CRD spec fields must not panic the controller.
+
+### 11. SSA Field Ownership Edge Cases
+
+- **User-managed field surviving SSA**: If a user manually edits a label
+  or annotation on an operator-managed RBAC resource, and the operator's
+  SSA apply does NOT include that field, the user's change persists
+  silently. Verify the operator either:
+  1. Declares ownership of ALL label/annotation keys it cares about
+     (so SSA removes user changes), OR
+  2. Explicitly documents that certain fields are user-extensible.
+- **Owner reference garbage collection vs SSA**: If the operator uses
+  SSA to manage a ClusterRoleBinding but also sets ownerReference on it,
+  and the owning CR is deleted, the GC deletes the cluster-scoped
+  resource. Verify this interaction is intended and tested.
+- **ForceOwnership on shared fields**: Two controllers both applying
+  SSA to the same object with `ForceOwnership: true` causes a silent
+  war where the last writer wins. Flag any SSA apply with ForceOwnership
+  on an object that other controllers are known to manage.
 
 ## Output format
 

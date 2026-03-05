@@ -281,10 +281,20 @@ func PatchApplyServiceAccount(
 // clusterRoleMatches returns true if the existing ClusterRole already matches
 // the desired ApplyConfiguration for all SSA-owned fields.
 func clusterRoleMatches(existing *rbacv1.ClusterRole, ac *rbacv1ac.ClusterRoleApplyConfiguration) bool {
-	return labelsMatch(existing.Labels, ac.Labels) &&
-		annotationsMatch(existing.Annotations, ac.Annotations) &&
-		ownerRefsMatch(existing.OwnerReferences, ac.OwnerReferences) &&
-		policyRulesMatch(existing.Rules, ac.Rules)
+	if !labelsMatch(existing.Labels, ac.Labels) ||
+		!annotationsMatch(existing.Annotations, ac.Annotations) ||
+		!ownerRefsMatch(existing.OwnerReferences, ac.OwnerReferences) {
+		return false
+	}
+
+	// For aggregating ClusterRoles, skip .rules comparison because the RBAC
+	// aggregation controller manages .rules — comparing them would cause a
+	// perpetual diff.  Compare the aggregation rule selectors instead.
+	if ac.AggregationRule != nil {
+		return aggregationRuleMatches(existing.AggregationRule, ac.AggregationRule)
+	}
+
+	return policyRulesMatch(existing.Rules, ac.Rules)
 }
 
 // roleMatches returns true if the existing Role already matches the desired ApplyConfiguration.
@@ -525,4 +535,84 @@ func policyRuleACKey(r *rbacv1ac.PolicyRuleApplyConfiguration) string {
 		strings.Join(resources, ",") + "|" +
 		strings.Join(resourceNames, ",") + "|" +
 		strings.Join(nonResourceURLs, ",")
+}
+
+// aggregationRuleMatches compares an existing AggregationRule with the desired
+// ApplyConfiguration.  It only compares the clusterRoleSelectors — the .rules
+// field of aggregating ClusterRoles is managed by the Kubernetes RBAC aggregation
+// controller, not by the auth-operator.
+func aggregationRuleMatches(existing *rbacv1.AggregationRule, desired *rbacv1ac.AggregationRuleApplyConfiguration) bool {
+	if desired == nil {
+		return existing == nil
+	}
+	if existing == nil {
+		return false
+	}
+
+	if len(existing.ClusterRoleSelectors) != len(desired.ClusterRoleSelectors) {
+		return false
+	}
+
+	// Build comparable keys for ordering-insensitive comparison.
+	existingKeys := make([]string, len(existing.ClusterRoleSelectors))
+	for i := range existing.ClusterRoleSelectors {
+		existingKeys[i] = labelSelectorKey(&existing.ClusterRoleSelectors[i])
+	}
+
+	desiredKeys := make([]string, len(desired.ClusterRoleSelectors))
+	for i := range desired.ClusterRoleSelectors {
+		desiredKeys[i] = labelSelectorACKey(&desired.ClusterRoleSelectors[i])
+	}
+
+	slices.Sort(existingKeys)
+	slices.Sort(desiredKeys)
+	return slices.Equal(existingKeys, desiredKeys)
+}
+
+// labelSelectorKey produces a comparable string from a metav1.LabelSelector.
+func labelSelectorKey(sel *metav1.LabelSelector) string {
+	// Collect matchLabels as sorted key=value pairs.
+	labels := make([]string, 0, len(sel.MatchLabels))
+	for k, v := range sel.MatchLabels {
+		labels = append(labels, k+"="+v)
+	}
+	slices.Sort(labels)
+
+	// Collect matchExpressions.
+	exprs := make([]string, 0, len(sel.MatchExpressions))
+	for _, expr := range sel.MatchExpressions {
+		vals := slices.Clone(expr.Values)
+		slices.Sort(vals)
+		exprs = append(exprs, expr.Key+string(expr.Operator)+strings.Join(vals, ","))
+	}
+	slices.Sort(exprs)
+
+	return strings.Join(labels, ";") + "|" + strings.Join(exprs, ";")
+}
+
+// labelSelectorACKey produces a comparable string from a LabelSelectorApplyConfiguration.
+func labelSelectorACKey(sel *metav1ac.LabelSelectorApplyConfiguration) string {
+	labels := make([]string, 0, len(sel.MatchLabels))
+	for k, v := range sel.MatchLabels {
+		labels = append(labels, k+"="+v)
+	}
+	slices.Sort(labels)
+
+	exprs := make([]string, 0, len(sel.MatchExpressions))
+	for _, expr := range sel.MatchExpressions {
+		var op string
+		if expr.Operator != nil {
+			op = string(*expr.Operator)
+		}
+		var key string
+		if expr.Key != nil {
+			key = *expr.Key
+		}
+		vals := slices.Clone(expr.Values)
+		slices.Sort(vals)
+		exprs = append(exprs, key+op+strings.Join(vals, ","))
+	}
+	slices.Sort(exprs)
+
+	return strings.Join(labels, ";") + "|" + strings.Join(exprs, ";")
 }
