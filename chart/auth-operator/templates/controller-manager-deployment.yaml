@@ -28,7 +28,9 @@ spec:
       containers:
       - args:
         - controller
-        - --leader-elect
+        {{- if le (int .Values.controller.replicas) 1 }}
+        - --leader-elect=false
+        {{- end }}
         - --binddefinition-concurrency={{ .Values.controller.bindDefinitionConcurrency }}
         - --roledefinition-concurrency={{ .Values.controller.roleDefinitionConcurrency }}
         - --webhookauthorizer-concurrency={{ .Values.controller.webhookAuthorizerConcurrency }}

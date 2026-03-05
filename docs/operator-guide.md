@@ -197,9 +197,16 @@ helm upgrade auth-operator oci://ghcr.io/telekom/charts/auth-operator \
 
 ### Leader Election
 
-When `controller.replicas > 1`, leader election is automatically enabled.
-Only the leader actively reconciles resources; standby replicas wait to
-acquire leadership if the leader fails.
+Leader election is **enabled by default** in the Go binary (`--leader-elect=true`).
+The Helm chart automatically disables it when `controller.replicas` is 1 (single
+replica). For multi-replica deployments, leader election ensures only one
+controller actively reconciles resources; standby replicas wait to acquire
+leadership if the leader fails.
+
+> **Warning:** If you initially deployed with `--leader-elect=false` (e.g.,
+> the Helm chart's single-replica default) and later scale the deployment
+> without adding `--leader-elect=true`, multiple controllers can run
+> simultaneously, causing conflicting RBAC reconciliations.
 
 **Verify leader election:**
 
@@ -230,7 +237,41 @@ controller:
 
 ### Prometheus Metrics
 
-The operator exposes metrics at `:8080/metrics`. Key metrics:
+The operator exposes metrics at `:8080/metrics` with **authentication and
+authorization enabled**. The metrics endpoint requires a valid Kubernetes
+bearer token with permission to GET the non-resource URL `/metrics`.
+
+To allow Prometheus to scrape metrics, the monitoring ServiceAccount needs
+the following RBAC:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: auth-operator-metrics-reader
+rules:
+  - nonResourceURLs: ["/metrics"]
+    verbs: ["get"]
+```
+
+Bind this ClusterRole to the Prometheus ServiceAccount:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: auth-operator-metrics-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: auth-operator-metrics-reader
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: monitoring
+```
+
+Key metrics:
 
 | Metric | Type | Description |
 |--------|------|-------------|
