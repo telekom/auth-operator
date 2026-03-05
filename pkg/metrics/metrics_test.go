@@ -371,3 +371,18 @@ func getGaugeValue(t *testing.T, gauge prometheus.Gauge) float64 {
 	}
 	return m.GetGauge().GetValue()
 }
+
+func TestRegisterMetrics(t *testing.T) {
+	// Verify that RegisterMetrics successfully registers all collectors into a
+	// fresh custom registry and that Gather returns metrics without errors.
+	reg := prometheus.NewRegistry()
+	RegisterMetrics(reg)
+
+	families, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("Gather() after RegisterMetrics failed: %v", err)
+	}
+	if len(families) == 0 {
+		t.Error("expected at least one metric family from RegisterMetrics, got 0")
+	}
+}
