@@ -57,6 +57,12 @@ spec:
             port: 8081
           initialDelaySeconds: 5
           periodSeconds: 10
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          failureThreshold: {{ .Values.controller.startupProbe.failureThreshold | default 30 }}
+          periodSeconds: {{ .Values.controller.startupProbe.periodSeconds | default 2 }}
         name: manager
         ports:
         - containerPort: 8081
@@ -75,7 +81,7 @@ spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       serviceAccountName: {{ include "auth-operator.fullname" . }}
-      terminationGracePeriodSeconds: 10
+      terminationGracePeriodSeconds: {{ .Values.controller.terminationGracePeriodSeconds }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
