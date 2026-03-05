@@ -445,4 +445,75 @@ var _ = Describe("RoleDefinition Webhook", func() {
 			Expect(k8sClient.Delete(ctx, rd)).To(Succeed())
 		})
 	})
+
+	Context("Update Immutability", func() {
+		It("should deny update that changes targetRole", func() {
+			// Create a Role-scoped RD (valid initial state with targetNamespace).
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-immut-targetrole",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionNamespacedRole,
+					TargetName:      "test-immut-targetrole",
+					TargetNamespace: "default",
+					ScopeNamespaced: true,
+				},
+			}
+			Expect(k8sClient.Create(ctx, rd)).To(Succeed())
+
+			// Changing targetRole to ClusterRole is a valid new state on its
+			// own, but our immutability check must reject the mutation.
+			rd.Spec.TargetRole = DefinitionClusterRole
+			rd.Spec.TargetNamespace = ""
+			err := k8sClient.Update(ctx, rd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("spec.targetRole"))
+			Expect(err.Error()).To(ContainSubstring("immutable"))
+
+			Expect(k8sClient.Delete(ctx, rd)).To(Succeed())
+		})
+
+		It("should deny update that changes targetName", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-immut-targetname",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-immut-targetname",
+					ScopeNamespaced: false,
+				},
+			}
+			Expect(k8sClient.Create(ctx, rd)).To(Succeed())
+
+			rd.Spec.TargetName = "changed-target-name"
+			err := k8sClient.Update(ctx, rd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("spec.targetName"))
+			Expect(err.Error()).To(ContainSubstring("immutable"))
+
+			Expect(k8sClient.Delete(ctx, rd)).To(Succeed())
+		})
+
+		It("should allow update that does not change targetRole or targetName", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-immut-allowed",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-immut-allowed",
+					ScopeNamespaced: false,
+				},
+			}
+			Expect(k8sClient.Create(ctx, rd)).To(Succeed())
+
+			// Only change scopeNamespaced (allowed)
+			rd.Spec.ScopeNamespaced = true
+			Expect(k8sClient.Update(ctx, rd)).To(Succeed())
+
+			Expect(k8sClient.Delete(ctx, rd)).To(Succeed())
+		})
+	})
 })
