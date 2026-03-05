@@ -359,8 +359,15 @@ func TestNewNamespaceTerminationStatus(t *testing.T) {
 	g.Expect(status).NotTo(BeNil())
 	g.Expect(status.blockingResources).To(BeEmpty())
 	g.Expect(status.lastError).ToNot(HaveOccurred())
+	g.Expect(status.fetchedAt.IsZero()).To(BeTrue())
 	// Rate limiter should have the configured interval
 	g.Expect(status.rateLimiter.Interval).To(Equal(10 * time.Second))
+}
+
+func TestTerminationResourceChannelSize(t *testing.T) {
+	g := NewWithT(t)
+	// Verify the constant is defined and reasonable.
+	g.Expect(terminationResourceChannelSize).To(Equal(100))
 }
 
 func TestRBTerminatorReconcileTerminatingNamespaceWithBlockingResources(t *testing.T) {
@@ -488,6 +495,56 @@ func TestRBTerminatorReconcileTerminatingNamespaceNoBlockingResources(t *testing
 	updated := &rbacv1.RoleBinding{}
 	err = c.Get(ctx, types.NamespacedName{Name: "term-rb-clean", Namespace: "clean-term-ns"}, updated)
 	g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "RoleBinding should be gone after finalizer removal")
+
+	// Cache entry should be evicted after successful finalizer removal in the
+	// terminating path — the namespace cleanup is progressing and the cached
+	// data is stale.
+	_, loaded := r.namespaceTerminationResourcesCache.Load("clean-term-ns")
+	g.Expect(loaded).To(BeFalse(), "cache entry should be evicted after finalizer removal in terminating namespace")
+}
+
+func TestRBTerminatorCacheEvictionOnNonTerminatingNamespace(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+	scheme := newTestScheme()
+
+	now := metav1.Now()
+	bdOwnerRef := metav1.OwnerReference{
+		APIVersion: authorizationv1alpha1.GroupVersion.String(),
+		Kind:       "BindDefinition",
+		Name:       "test-bd",
+		UID:        "bd-uid",
+	}
+	rb := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "evict-rb",
+			Namespace:         "evict-ns",
+			OwnerReferences:   []metav1.OwnerReference{bdOwnerRef},
+			DeletionTimestamp: &now,
+			Finalizers:        []string{authorizationv1alpha1.RoleBindingFinalizer},
+		},
+		RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "view"},
+	}
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{Name: "evict-ns"},
+		Status:     corev1.NamespaceStatus{Phase: corev1.NamespaceActive},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rb, ns).Build()
+	r := &RoleBindingTerminator{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
+
+	// Pre-populate the cache (simulates a previous termination check)
+	r.namespaceTerminationResourcesCache.Store("evict-ns", newNamespaceTerminationStatus())
+
+	result, err := r.Reconcile(ctx, reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: "evict-rb", Namespace: "evict-ns"},
+	})
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(result).To(Equal(reconcile.Result{}))
+
+	// Verify cache entry was evicted (#142)
+	_, loaded := r.namespaceTerminationResourcesCache.Load("evict-ns")
+	g.Expect(loaded).To(BeFalse(), "cache entry should be evicted when namespace is not terminating")
 }
 
 func TestRBTerminatorReconcileErrorAddingFinalizer(t *testing.T) {
