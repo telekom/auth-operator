@@ -246,7 +246,7 @@ func TestFlagDefaults(t *testing.T) {
 	}{
 		{"controller", "binddefinition-concurrency", "5"},
 		{"controller", "roledefinition-concurrency", "5"},
-		{"controller", "leader-elect", "false"},
+		{"controller", "leader-elect", "true"},
 		{"controller", "wait-for-crds", "true"},
 		{"controller", "cache-sync-timeout", "2m0s"},
 		{"controller", "graceful-shutdown-timeout", "30s"},

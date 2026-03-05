@@ -24,6 +24,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -102,8 +103,11 @@ ensuring authorization policies are enforced at creation time.`,
 		}
 
 		mgr, err := ctrl.NewManager(cfg, ctrl.Options{
-			Scheme:                 scheme,
-			Metrics:                metricsserver.Options{BindAddress: metricsAddr},
+			Scheme: scheme,
+			Metrics: metricsserver.Options{
+				BindAddress:    metricsAddr,
+				FilterProvider: filters.WithAuthenticationAndAuthorization,
+			},
 			WebhookServer:          webhookServer,
 			HealthProbeBindAddress: probeAddr,
 		})
