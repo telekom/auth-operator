@@ -365,7 +365,7 @@ func TestEvaluateSAR_ResultFields(t *testing.T) {
 				ResourceAttributes: &authzv1.ResourceAttributes{Verb: "get", Group: "", Resource: "pods"},
 			},
 		}
-		res := handler.evaluateSAR(context.Background(), sar, waList)
+		res := handler.evaluateSAR(context.Background(), sar, waList.Items)
 		if !res.allowed {
 			t.Fatal("expected allowed")
 		}
@@ -384,7 +384,7 @@ func TestEvaluateSAR_ResultFields(t *testing.T) {
 				ResourceAttributes: &authzv1.ResourceAttributes{Verb: "get", Resource: "pods"},
 			},
 		}
-		res := handler.evaluateSAR(context.Background(), sar, waList)
+		res := handler.evaluateSAR(context.Background(), sar, waList.Items)
 		if res.allowed {
 			t.Fatal("expected denied")
 		}
@@ -406,7 +406,7 @@ func TestEvaluateSAR_ResultFields(t *testing.T) {
 				ResourceAttributes: &authzv1.ResourceAttributes{Verb: "get", Resource: "pods"},
 			},
 		}
-		res := handler.evaluateSAR(context.Background(), sar, waList)
+		res := handler.evaluateSAR(context.Background(), sar, waList.Items)
 		if res.allowed {
 			t.Fatal("expected denied")
 		}

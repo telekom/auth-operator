@@ -33,6 +33,14 @@ spec:
         - --roledefinition-concurrency={{ .Values.controller.roleDefinitionConcurrency }}
         - --webhookauthorizer-concurrency={{ .Values.controller.webhookAuthorizerConcurrency }}
         - --verbosity={{ .Values.global.logLevel }}
+        {{- if .Values.tracing.enabled }}
+        - --tracing-enabled
+        - --tracing-endpoint={{ required "tracing.endpoint must be set when tracing.enabled is true" .Values.tracing.endpoint }}
+        - --tracing-sampling-rate={{ .Values.tracing.samplingRate }}
+        {{- if .Values.tracing.insecure }}
+        - --tracing-insecure
+        {{- end }}
+        {{- end }}
         command:
         - /auth-operator
         image: {{ include "auth-operator.image" . }}

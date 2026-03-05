@@ -1,6 +1,7 @@
 package webhooks
 
 import (
+	"fmt"
 	"testing"
 
 	admissionv1 "k8s.io/api/admission/v1"
@@ -464,6 +465,28 @@ func TestIsRestrictedBindDefinition(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := IsRestrictedBindDefinition(tt.name); got != tt.want {
 				t.Errorf("IsRestrictedBindDefinition(%q) = %v, want %v", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsFieldIndexError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil error", nil, false},
+		{"index does not exist", fmt.Errorf("Index with name %s does not exist", "foo"), true},
+		{"wrapped index error", fmt.Errorf("list failed: %w", fmt.Errorf("Index with name %s does not exist", "bar")), true},
+		{"RBAC forbidden", fmt.Errorf("forbidden: User cannot list resource"), false},
+		{"network error", fmt.Errorf("dial tcp: connection refused"), false},
+		{"generic error", fmt.Errorf("something went wrong"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isFieldIndexError(tt.err); got != tt.want {
+				t.Errorf("isFieldIndexError(%v) = %v, want %v", tt.err, got, tt.want)
 			}
 		})
 	}

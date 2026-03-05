@@ -161,6 +161,21 @@ This chart installs three Custom Resource Definitions:
 
 For detailed API documentation, see the [API Reference](https://github.com/telekom/auth-operator/blob/main/docs/api-reference/authorization.t-caas.telekom.com.md).
 
+## OpenTelemetry Tracing
+
+Enable distributed tracing via Helm values:
+
+```yaml
+tracing:
+  enabled: true
+  endpoint: "otel-collector.observability:4317"
+  insecure: false
+  samplingRate: 0.1  # 10% of traces; chart default
+```
+
+When disabled (default), tracing has zero overhead — no headers are parsed
+and no spans are created.
+
 ## Examples
 
 ### RoleDefinition

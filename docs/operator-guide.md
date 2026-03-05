@@ -499,6 +499,43 @@ kubectl scale deployment auth-operator-webhook-server -n auth-operator-system --
 
 ---
 
+## OpenTelemetry Tracing
+
+The operator supports distributed tracing via OpenTelemetry (OTLP/gRPC).
+
+### Configuration
+
+| Flag | Env Variable Fallback | Default | Description |
+|------|----------------------|---------|-------------|
+| `--tracing-enabled` | — | `false` | Enable OTLP trace export |
+| `--tracing-endpoint` | `OTEL_EXPORTER_OTLP_ENDPOINT` | (required when enabled) | OTLP collector endpoint (e.g. `otel-collector:4317`) |
+| `--tracing-insecure` | — | `false` | Disable TLS for OTLP connection (auto-inferred from `http://` scheme) |
+| `--tracing-sampling-rate` | — | `0.1` | Sampling rate (0.0–1.0) |
+
+### Helm Values
+
+```yaml
+tracing:
+  enabled: false
+  endpoint: ""
+  insecure: false
+  samplingRate: 0.1  # 10% of traces; use 1.0 for full tracing
+```
+
+### Instrumented Components
+
+| Component | Span Name | Description |
+|-----------|-----------|-------------|
+| RoleDefinition Reconciler | `reconcile.RoleDefinition` | Full reconciliation cycle |
+| WebhookAuthorizer | `webhook.SubjectAccessReview` | SAR evaluation including rule matching |
+| WebhookAuthorizer | `webhook.NamespaceMatch` | Namespace selector evaluation |
+
+When tracing is disabled, the Tracer is set to `nil` and all tracing code
+paths are skipped entirely — header parsing and span creation have zero
+overhead on the hot path.
+
+---
+
 ## See Also
 
 - [Debugging Guide](debugging-guide.md) — Troubleshooting and diagnostics

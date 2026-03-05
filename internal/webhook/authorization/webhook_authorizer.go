@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -21,6 +22,12 @@ import (
 	"github.com/telekom/auth-operator/pkg/helpers"
 	"github.com/telekom/auth-operator/pkg/indexer"
 	pkgmetrics "github.com/telekom/auth-operator/pkg/metrics"
+	"github.com/telekom/auth-operator/pkg/tracing"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=webhookauthorizers,verbs=get;list;watch
@@ -61,90 +68,104 @@ type evaluationResult struct {
 type Authorizer struct {
 	Client client.Client
 	Log    logr.Logger
+	Tracer trace.Tracer
+
+	// indexFallbackWarned ensures the "field index unavailable" warning is
+	// logged only once instead of on every request.
+	indexFallbackWarned sync.Once
 }
 
 func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	start := time.Now()
 
-	defer func() { _ = r.Body.Close() }()
+	// Extract trace context and start a tracing span only when tracing is
+	// enabled (non-nil Tracer). When disabled, this avoids header parsing and
+	// noop span creation on every request — true zero overhead.
+	if wa.Tracer != nil {
+		ctx = otel.GetTextMapPropagator().Extract(ctx, propagation.HeaderCarrier(r.Header))
+		var span trace.Span
+		ctx, span = wa.Tracer.Start(ctx, "webhook.SubjectAccessReview")
+		defer span.End()
+	}
 
-	// Limit request body size to prevent OOM from oversized payloads
+	// Limit request body size to prevent OOM from oversized payloads.
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+
+	// Ensure request body is closed to prevent resource leaks.
+	defer func() { _ = r.Body.Close() }()
 
 	var sar authzv1.SubjectAccessReview
 
 	if err := json.NewDecoder(r.Body).Decode(&sar); err != nil {
 		wa.Log.Error(err, "failed to decode SubjectAccessReview request",
 			"latency", time.Since(start).String())
+		if span := trace.SpanFromContext(ctx); span.IsRecording() {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "invalid request body")
+		}
 		wa.recordErrorMetrics(start)
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
+	wa.annotateSARSpan(ctx, &sar)
 	wa.logReceivedSAR(&sar)
 
-	// Use field-indexed queries to efficiently categorize authorizers.
-	// Global authorizers (no namespace selector) always apply.
-	// Scoped authorizers (with namespace selector) only apply when the SAR
-	// targets a specific namespace, avoiding unnecessary namespace lookups.
-	var globalAuth authzv1alpha1.WebhookAuthorizerList
-	if err := wa.Client.List(ctx, &globalAuth, client.MatchingFields{
-		indexer.WebhookAuthorizerHasNamespaceSelectorField: "false",
-	}); err != nil {
+	// Prepare a shared fallback cache in case the field index is unavailable,
+	// so global and scoped queries share a single fallback API call.
+	var fallbackCache []authzv1alpha1.WebhookAuthorizer
+
+	globalItems, err := wa.listGlobalAuthorizers(ctx, &fallbackCache)
+	if err != nil {
 		wa.Log.Error(err, "failed to list global WebhookAuthorizers",
 			"user", sar.Spec.User,
 			"latency", time.Since(start).String())
+		if span := trace.SpanFromContext(ctx); span.IsRecording() {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "failed to list global WebhookAuthorizers")
+		}
 		wa.recordErrorMetrics(start)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		http.Error(w, "internal evaluation error", http.StatusInternalServerError)
 		return
 	}
 
-	items := globalAuth.Items
+	items := globalItems
 
-	// Only query namespace-scoped authorizers when the SAR has a namespace target.
-	if sar.Spec.ResourceAttributes != nil && sar.Spec.ResourceAttributes.Namespace != "" {
-		var scopedAuth authzv1alpha1.WebhookAuthorizerList
-		if err := wa.Client.List(ctx, &scopedAuth, client.MatchingFields{
-			indexer.WebhookAuthorizerHasNamespaceSelectorField: "true",
-		}); err != nil {
-			wa.Log.Error(err, "failed to list scoped WebhookAuthorizers",
-				"user", sar.Spec.User,
-				"latency", time.Since(start).String())
-			wa.recordErrorMetrics(start)
-			http.Error(w, "internal server error", http.StatusInternalServerError)
-			return
+	// Always query scoped authorizers so the active-rules gauge reflects the
+	// full set regardless of request type. Scoped authorizers are only used
+	// for evaluation when the SAR targets a specific namespace.
+	scopedItems, err := wa.listScopedAuthorizers(ctx, &fallbackCache)
+	if err != nil {
+		wa.Log.Error(err, "failed to list scoped WebhookAuthorizers",
+			"user", sar.Spec.User,
+			"latency", time.Since(start).String())
+		if span := trace.SpanFromContext(ctx); span.IsRecording() {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "failed to list scoped WebhookAuthorizers")
 		}
-		items = append(items, scopedAuth.Items...)
+		wa.recordErrorMetrics(start)
+		http.Error(w, "internal evaluation error", http.StatusInternalServerError)
+		return
+	}
+	if sar.Spec.ResourceAttributes != nil && sar.Spec.ResourceAttributes.Namespace != "" {
+		items = append(items, scopedItems...)
 	}
 
-	// Sort authorizers by name for deterministic evaluation order.
+	// Sort authorizers by name for deterministic first-match evaluation order
+	// regardless of whether the client is backed by a cache (random map
+	// iteration) or the API server (alphabetical order).
 	slices.SortFunc(items, func(a, b authzv1alpha1.WebhookAuthorizer) int {
 		return strings.Compare(a.Name, b.Name)
 	})
 
-	webhookAuthorizers := authzv1alpha1.WebhookAuthorizerList{Items: items}
-	result := wa.evaluateSAR(ctx, &sar, &webhookAuthorizers)
+	result := wa.evaluateSAR(ctx, &sar, items)
 
 	// Count total rules across ALL WebhookAuthorizer resources (global + scoped)
 	// for the gauge. This is request-independent: even if a namespace-scoped
 	// authorizer was not evaluated for this SAR, it still contributes to the
 	// total rule count.
-	allRules := countTotalRules(globalAuth.Items)
-	if sar.Spec.ResourceAttributes != nil && sar.Spec.ResourceAttributes.Namespace != "" {
-		// Scoped authorizers were already listed above; reuse that slice.
-		allRules = countTotalRules(items)
-	} else {
-		// List scoped authorizers separately — they weren't queried above.
-		var allScoped authzv1alpha1.WebhookAuthorizerList
-		if err := wa.Client.List(ctx, &allScoped, client.MatchingFields{
-			indexer.WebhookAuthorizerHasNamespaceSelectorField: "true",
-		}); err != nil {
-			wa.Log.V(1).Info("failed to list scoped authorizers for gauge", "error", err)
-		} else {
-			allRules += countTotalRules(allScoped.Items)
-		}
-	}
+	allRules := countTotalRules(globalItems) + countTotalRules(scopedItems)
 
 	response := authzv1.SubjectAccessReview{
 		TypeMeta: metav1.TypeMeta{
@@ -165,6 +186,10 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		wa.Log.Error(err, "failed to encode SubjectAccessReview response",
 			"latency", time.Since(start).String())
+		if span := trace.SpanFromContext(ctx); span.IsRecording() {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "failed to encode response")
+		}
 		wa.recordErrorMetrics(start)
 		http.Error(w, "internal evaluation error", http.StatusInternalServerError)
 		return
@@ -175,10 +200,42 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	wa.logDecision(&sar, &result, latency)
 	wa.recordMetrics(&result, latency, allRules)
 
+	// Record decision in the span.
+	if span := trace.SpanFromContext(ctx); span.IsRecording() {
+		span.SetAttributes(
+			tracing.AttrDecision.String(result.decision),
+			tracing.AttrReason.String(result.reason),
+			tracing.AttrRuleCount.Int(allRules),
+		)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	if _, err := w.Write(respBytes); err != nil {
 		wa.Log.Error(err, "failed to write SubjectAccessReview response",
 			"latency", time.Since(start).String())
+	}
+}
+
+// annotateSARSpan adds SAR attributes to the active tracing span.
+func (wa *Authorizer) annotateSARSpan(ctx context.Context, sar *authzv1.SubjectAccessReview) {
+	span := trace.SpanFromContext(ctx)
+	if !span.IsRecording() {
+		return
+	}
+	span.SetAttributes(tracing.AttrUser.String(sar.Spec.User))
+	if sar.Spec.ResourceAttributes != nil {
+		span.SetAttributes(
+			tracing.AttrVerb.String(sar.Spec.ResourceAttributes.Verb),
+			tracing.AttrAPIGroup.String(sar.Spec.ResourceAttributes.Group),
+			tracing.AttrResourceType.String(sar.Spec.ResourceAttributes.Resource),
+			tracing.AttrNamespace.String(sar.Spec.ResourceAttributes.Namespace),
+		)
+	}
+	if sar.Spec.NonResourceAttributes != nil {
+		span.SetAttributes(
+			tracing.AttrVerb.String(sar.Spec.NonResourceAttributes.Verb),
+			tracing.AttrPath.String(sar.Spec.NonResourceAttributes.Path),
+		)
 	}
 }
 
@@ -282,11 +339,122 @@ func countTotalRules(authorizers []authzv1alpha1.WebhookAuthorizer) int {
 	return total
 }
 
-func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAccessReview, waList *authzv1alpha1.WebhookAuthorizerList) evaluationResult {
+func (wa *Authorizer) listGlobalAuthorizers(ctx context.Context, cachedAll *[]authzv1alpha1.WebhookAuthorizer) ([]authzv1alpha1.WebhookAuthorizer, error) {
+	var globalAuth authzv1alpha1.WebhookAuthorizerList
+	if err := wa.Client.List(ctx, &globalAuth, client.MatchingFields{
+		indexer.WebhookAuthorizerHasNamespaceSelectorField: "false",
+	}); err == nil {
+		return globalAuth.Items, nil
+	} else if !isFieldIndexError(err) {
+		// Propagate real errors (RBAC, network, etc.) instead of silently
+		// falling back to an unindexed full list which would mask bugs.
+		return nil, fmt.Errorf("indexed list of global WebhookAuthorizers: %w", err)
+	}
+
+	// Field index not registered — fall back to filtering a full list.
+	wa.indexFallbackWarned.Do(func() {
+		wa.Log.Info("field index unavailable for WebhookAuthorizers, falling back to unindexed list")
+	})
+	if cachedAll == nil || *cachedAll == nil {
+		all, err := wa.listAllAuthorizers(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if cachedAll != nil {
+			*cachedAll = all
+		}
+		globalItems := make([]authzv1alpha1.WebhookAuthorizer, 0, len(all))
+		for _, candidate := range all {
+			if helpers.IsLabelSelectorEmpty(&candidate.Spec.NamespaceSelector) {
+				globalItems = append(globalItems, candidate)
+			}
+		}
+		return globalItems, nil
+	}
+
+	globalItems := make([]authzv1alpha1.WebhookAuthorizer, 0, len(*cachedAll))
+	for _, candidate := range *cachedAll {
+		if helpers.IsLabelSelectorEmpty(&candidate.Spec.NamespaceSelector) {
+			globalItems = append(globalItems, candidate)
+		}
+	}
+
+	return globalItems, nil
+}
+
+func (wa *Authorizer) listScopedAuthorizers(ctx context.Context, cachedAll *[]authzv1alpha1.WebhookAuthorizer) ([]authzv1alpha1.WebhookAuthorizer, error) {
+	var scopedAuth authzv1alpha1.WebhookAuthorizerList
+	if err := wa.Client.List(ctx, &scopedAuth, client.MatchingFields{
+		indexer.WebhookAuthorizerHasNamespaceSelectorField: "true",
+	}); err == nil {
+		return scopedAuth.Items, nil
+	} else if !isFieldIndexError(err) {
+		// Propagate real errors (RBAC, network, etc.) instead of silently
+		// falling back to an unindexed full list which would mask bugs.
+		return nil, fmt.Errorf("indexed list of scoped WebhookAuthorizers: %w", err)
+	}
+
+	// Field index not registered — fall back to filtering a full list.
+	// Warning is logged once via indexFallbackWarned in listGlobalAuthorizers.
+	if cachedAll == nil || *cachedAll == nil {
+		all, err := wa.listAllAuthorizers(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if cachedAll != nil {
+			*cachedAll = all
+		}
+		scopedItems := make([]authzv1alpha1.WebhookAuthorizer, 0, len(all))
+		for _, candidate := range all {
+			if !helpers.IsLabelSelectorEmpty(&candidate.Spec.NamespaceSelector) {
+				scopedItems = append(scopedItems, candidate)
+			}
+		}
+		return scopedItems, nil
+	}
+
+	scopedItems := make([]authzv1alpha1.WebhookAuthorizer, 0, len(*cachedAll))
+	for _, candidate := range *cachedAll {
+		if !helpers.IsLabelSelectorEmpty(&candidate.Spec.NamespaceSelector) {
+			scopedItems = append(scopedItems, candidate)
+		}
+	}
+
+	return scopedItems, nil
+}
+
+func (wa *Authorizer) listAllAuthorizers(ctx context.Context) ([]authzv1alpha1.WebhookAuthorizer, error) {
+	var allAuth authzv1alpha1.WebhookAuthorizerList
+	if err := wa.Client.List(ctx, &allAuth); err != nil {
+		return nil, fmt.Errorf("list WebhookAuthorizers: %w", err)
+	}
+	return allAuth.Items, nil
+}
+
+// isFieldIndexError returns true when err indicates that a controller-runtime
+// field index has not been registered. These errors are expected when the
+// webhook process starts before the informer cache has the index configured
+// (e.g. in the standalone webhook binary), and justify falling back to an
+// unindexed full list. All other errors (RBAC, network, API server
+// unavailable) are NOT index errors and must be propagated.
+//
+// NOTE: controller-runtime returns an untyped fmt.Errorf for missing field
+// indexes (see cache/internal/informers_map.go), so there is no sentinel
+// error or typed error to use with errors.Is/errors.As. String matching is
+// the only reliable detection method available.
+func isFieldIndexError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "does not exist") && strings.Contains(msg, "index")
+}
+
+func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAccessReview, items []authzv1alpha1.WebhookAuthorizer) evaluationResult {
 	evaluated := 0
 	skipped := 0
 
-	for i, webhookAuthorizer := range waList.Items {
+	for i, webhookAuthorizer := range items {
 		// Skip namespace-scoped authorizers for non-resource or cluster-scoped SARs
 		// that have no namespace target. This is a defensive guard — the list query
 		// already excludes scoped authorizers for these cases, but this ensures
@@ -378,6 +546,13 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 
 // namespaceMatches checks if the namespace matches the selector.
 func (wa *Authorizer) namespaceMatches(ctx context.Context, namespace string, selector *metav1.LabelSelector) bool {
+	if wa.Tracer != nil {
+		var span trace.Span
+		ctx, span = wa.Tracer.Start(ctx, "webhook.NamespaceMatch",
+			trace.WithAttributes(tracing.AttrNamespace.String(namespace)))
+		defer span.End()
+	}
+
 	if namespace == "" {
 		return false
 	}

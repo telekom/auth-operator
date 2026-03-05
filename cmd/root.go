@@ -6,11 +6,14 @@ package cmd
 import (
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 	"regexp"
+	"strings"
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/pkg/system"
+	"github.com/telekom/auth-operator/pkg/tracing"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 
@@ -33,6 +36,12 @@ var (
 	probeAddr   string
 	metricsAddr string
 	namespace   string
+
+	// Tracing flags.
+	tracingEnabled      bool
+	tracingEndpoint     string
+	tracingSamplingRate float64
+	tracingInsecure     bool
 )
 
 // redactSensitiveFlags returns a map of flags with sensitive values redacted.
@@ -113,6 +122,17 @@ func init() {
 		"The address the probe endpoint binds to.")
 	rootCmd.PersistentFlags().StringVar(&metricsAddr, "metrics-bind-address", ":8080",
 		"The address the metrics endpoint binds to. Use \"0\" to disable metrics serving.")
+
+	// Tracing flags
+	rootCmd.PersistentFlags().BoolVar(&tracingEnabled, "tracing-enabled", false,
+		"Enable OpenTelemetry tracing. Requires --tracing-endpoint (or OTEL_EXPORTER_OTLP_ENDPOINT env) to be set.")
+	rootCmd.PersistentFlags().StringVar(&tracingEndpoint, "tracing-endpoint", "",
+		"OTLP collector endpoint for tracing (e.g. otel-collector:4317). "+
+			"Can also be set via OTEL_EXPORTER_OTLP_ENDPOINT environment variable.")
+	rootCmd.PersistentFlags().Float64Var(&tracingSamplingRate, "tracing-sampling-rate", 0.1,
+		"Trace sampling rate (0.0 to 1.0). Default is 0.1 (10%% sampling).")
+	rootCmd.PersistentFlags().BoolVar(&tracingInsecure, "tracing-insecure", false,
+		"Use insecure (non-TLS) connection to the OTLP collector.")
 }
 
 func initScheme() {
@@ -121,4 +141,40 @@ func initScheme() {
 
 	utilruntime.Must(authorizationv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(apiextensionsv1.AddToScheme(scheme))
+}
+
+// tracingConfig returns the tracing configuration derived from CLI flags
+// and environment variables. The flag value takes precedence; the
+// OTEL_EXPORTER_OTLP_ENDPOINT environment variable is used as fallback.
+// If the endpoint contains a scheme (http:// or https://), it is parsed
+// as a URL to extract the host:port. When --tracing-insecure was not
+// explicitly set, the insecure flag is inferred from the scheme
+// (http → insecure, https → secure).
+func tracingConfig() tracing.Config {
+	endpoint := strings.TrimSpace(tracingEndpoint)
+	if endpoint == "" {
+		endpoint = strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
+	}
+
+	insecure := tracingInsecure
+	insecureExplicitlySet := rootCmd.PersistentFlags().Changed("tracing-insecure")
+
+	// Parse as URL if it contains a scheme — otlptracegrpc.WithEndpoint
+	// expects a bare host:port.
+	if strings.Contains(endpoint, "://") {
+		if u, err := url.Parse(endpoint); err == nil && u.Host != "" {
+			// Only infer insecure from scheme when the flag wasn't explicitly set.
+			if !insecureExplicitlySet && u.Scheme == "http" {
+				insecure = true
+			}
+			endpoint = u.Host
+		}
+	}
+
+	return tracing.Config{
+		Enabled:      tracingEnabled,
+		Endpoint:     endpoint,
+		SamplingRate: tracingSamplingRate,
+		Insecure:     insecure,
+	}
 }
