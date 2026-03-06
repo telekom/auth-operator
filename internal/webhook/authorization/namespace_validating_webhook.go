@@ -246,14 +246,14 @@ func (v *NamespaceValidator) crossValidateLegacyLabels(logger logr.Logger, req a
 		logger.V(2).Info("adoption denied: legacy platform namespace cannot become non-platform",
 			"namespace", req.Name, "legacyOwner", legacyOwner, "newOwner", newOwner)
 		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultDenied).Inc()
-		resp := admission.Denied(fmt.Sprintf("Legacy platform namespace (%s=%s) cannot be adopted as '%s'", legacyOwnerLabel, legacyOwner, newOwner))
+		resp := admission.Denied(fmt.Sprintf(DenialLegacyPlatformToNonPlatformFmt, legacyOwnerLabel, legacyOwner, newOwner))
 		return &resp
 	}
 	if !isLegacyPlatform && isNewPlatform {
 		logger.V(2).Info("adoption denied: legacy non-platform namespace cannot become platform",
 			"namespace", req.Name, "legacyOwner", legacyOwner, "newOwner", newOwner)
 		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultDenied).Inc()
-		resp := admission.Denied(fmt.Sprintf("Legacy non-platform namespace (%s=%s) cannot be adopted as 'platform'", legacyOwnerLabel, legacyOwner))
+		resp := admission.Denied(fmt.Sprintf(DenialLegacyNonPlatformToPlatformFmt, legacyOwnerLabel, legacyOwner))
 		return &resp
 	}
 
