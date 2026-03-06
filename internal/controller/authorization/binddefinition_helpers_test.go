@@ -1205,6 +1205,63 @@ func TestResolveRoleBindingNamespaces(t *testing.T) {
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(result).To(HaveLen(1)) // deduplicated
 	})
+
+	t.Run("skips empty label selectors to avoid matching all namespaces", func(t *testing.T) {
+		g := NewWithT(t)
+
+		ns := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: "ns1", Labels: map[string]string{"env": "test"}},
+		}
+		ns2 := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: "ns2"},
+		}
+
+		c := fake.NewClientBuilder().WithScheme(s).WithObjects(ns, ns2).Build()
+		r := &BindDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+		// An empty selector ({}) should be skipped, not match all namespaces.
+		binding := authorizationv1alpha1.NamespaceBinding{
+			NamespaceSelector: []metav1.LabelSelector{
+				{}, // empty - should be skipped
+				{MatchLabels: map[string]string{"env": "test"}},
+			},
+			ClusterRoleRefs: []string{"view"},
+		}
+
+		result, err := r.resolveRoleBindingNamespaces(ctx, binding)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(result).To(HaveLen(1))
+		g.Expect(result[0].Name).To(Equal("ns1"))
+	})
+
+	t.Run("explicit namespace takes precedence over selectors", func(t *testing.T) {
+		g := NewWithT(t)
+
+		ns1 := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: "explicit-ns", Labels: map[string]string{"env": "test"}},
+		}
+		ns2 := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: "selected-ns", Labels: map[string]string{"env": "test"}},
+		}
+
+		c := fake.NewClientBuilder().WithScheme(s).WithObjects(ns1, ns2).Build()
+		r := &BindDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+		// When both Namespace and NamespaceSelector are set, only the explicit
+		// namespace should be returned (selectors are ignored).
+		binding := authorizationv1alpha1.NamespaceBinding{
+			Namespace: "explicit-ns",
+			NamespaceSelector: []metav1.LabelSelector{
+				{MatchLabels: map[string]string{"env": "test"}},
+			},
+			ClusterRoleRefs: []string{"view"},
+		}
+
+		result, err := r.resolveRoleBindingNamespaces(ctx, binding)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(result).To(HaveLen(1))
+		g.Expect(result[0].Name).To(Equal("explicit-ns"))
+	})
 }
 
 func TestEnsureServiceAccountsUnit(t *testing.T) {
