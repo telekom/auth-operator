@@ -204,11 +204,12 @@ rules:
   - get
   - list
   - watch
-# --- ClusterRole reads (BindDefinition webhook validates ClusterRoleRef existence) ---
+# --- RBAC reads (BindDefinition webhook validates role reference existence) ---
 - apiGroups:
   - rbac.authorization.k8s.io
   resources:
   - clusterroles
+  - roles
   verbs:
   - get
   - list
