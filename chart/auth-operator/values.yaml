@@ -65,6 +65,13 @@ controller:
 webhookServer:
   replicas: 1
   tdgMigration: "false"
+  # Maximum sustained requests per second for the /authorize endpoint.
+  # Note: this limit is per pod. In HA deployments with multiple replicas,
+  # the effective cluster-wide rate limit is (replicas × authorizeRateLimit).
+  authorizeRateLimit: 100
+  # Maximum burst size for the /authorize rate limiter.
+  # Must be >= 1 when rate limiting is enabled.
+  authorizeRateBurst: 200
   podDisruptionBudget:
     # Enable PodDisruptionBudget for high availability
     enabled: false

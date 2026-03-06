@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"golang.org/x/time/rate"
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -66,9 +67,10 @@ type evaluationResult struct {
 // so that List and Get calls are served from the informer cache rather than
 // hitting the API server on every SubjectAccessReview evaluation.
 type Authorizer struct {
-	Client client.Client
-	Log    logr.Logger
-	Tracer trace.Tracer
+	Client  client.Client
+	Log     logr.Logger
+	Tracer  trace.Tracer
+	Limiter *rate.Limiter
 
 	// indexFallbackWarned ensures the "field index unavailable" warning is
 	// logged only once instead of on every request.
@@ -78,6 +80,17 @@ type Authorizer struct {
 func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	start := time.Now()
+
+	// Rate-limit incoming requests to prevent overloading the authorizer.
+	// When the limiter is configured and the token bucket is exhausted,
+	// record the rate-limit event and send a rate-limited SubjectAccessReview response.
+	if wa.Limiter != nil && !wa.Limiter.Allow() {
+		pkgmetrics.AuthorizerRateLimitedTotal.Inc()
+		wa.Log.V(1).Info("rate limit exceeded, rejecting request",
+			"latency", time.Since(start).String())
+		wa.writeRateLimitResponse(w)
+		return
+	}
 
 	// Extract trace context and start a tracing span only when tracing is
 	// enabled (non-nil Tracer). When disabled, this avoids header parsing and
@@ -629,6 +642,28 @@ func (wa *Authorizer) recordMetrics(result *evaluationResult, latency time.Durat
 
 	if result.matchedField == "deniedPrincipal" {
 		pkgmetrics.AuthorizerDeniedPrincipalHitsTotal.WithLabelValues(result.authorizerName).Inc()
+	}
+}
+
+// writeRateLimitResponse writes a SubjectAccessReview response that denies the
+// request due to rate limiting. Uses HTTP 200 with Allowed=false as required by
+// the Kubernetes authorization webhook protocol (non-200 is treated as a webhook
+// failure, not a valid denial).
+func (wa *Authorizer) writeRateLimitResponse(w http.ResponseWriter) {
+	response := authzv1.SubjectAccessReview{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "authorization.k8s.io/v1",
+			Kind:       "SubjectAccessReview",
+		},
+		Status: authzv1.SubjectAccessReviewStatus{
+			Allowed: false,
+			Reason:  "rate limit exceeded",
+		},
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		wa.Log.Error(err, "failed to encode rate-limit response")
 	}
 }
 
