@@ -790,17 +790,19 @@ func TestServeHTTP_RateLimiting(t *testing.T) {
 	rec1 := httptest.NewRecorder()
 	handler.ServeHTTP(rec1, req1)
 
-	if rec1.Code == http.StatusTooManyRequests {
-		t.Error("first request should not be rate limited (burst=1)")
+	if rec1.Code != http.StatusOK {
+		t.Errorf("expected first request to succeed with status %d, got %d", http.StatusOK, rec1.Code)
 	}
 
 	// Second request should be rate limited (no tokens left, 0 rps).
+	// Per the Kubernetes authorization webhook protocol, the response is HTTP 200
+	// with Allowed=false (non-200 would be treated as a webhook failure).
 	req2 := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
 	rec2 := httptest.NewRecorder()
 	handler.ServeHTTP(rec2, req2)
 
-	if rec2.Code != http.StatusTooManyRequests {
-		t.Errorf("expected status %d, got %d", http.StatusTooManyRequests, rec2.Code)
+	if rec2.Code != http.StatusOK {
+		t.Errorf("expected rate-limited response to use status %d (K8s webhook protocol), got %d", http.StatusOK, rec2.Code)
 	}
 
 	// Verify the response is a valid denied SubjectAccessReview.
@@ -813,11 +815,6 @@ func TestServeHTTP_RateLimiting(t *testing.T) {
 	}
 	if response.Status.Reason != "rate limit exceeded" {
 		t.Errorf("expected reason %q, got %q", "rate limit exceeded", response.Status.Reason)
-	}
-
-	// Verify Retry-After header.
-	if rec2.Header().Get("Retry-After") != "1" {
-		t.Errorf("expected Retry-After=1, got %q", rec2.Header().Get("Retry-After"))
 	}
 
 	// Verify the rate-limited metric incremented.
@@ -858,8 +855,8 @@ func TestServeHTTP_NoRateLimiter(t *testing.T) {
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
-		if rec.Code == http.StatusTooManyRequests {
-			t.Errorf("request %d should not be rate limited when Limiter is nil", i)
+		if rec.Code != http.StatusOK {
+			t.Errorf("request %d: expected status %d, got %d", i, http.StatusOK, rec.Code)
 		}
 	}
 }
