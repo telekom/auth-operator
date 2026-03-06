@@ -150,10 +150,10 @@ func (r *BindDefinitionReconciler) SetupWithManager(mgr ctrl.Manager, concurrenc
 		// watch namespaces to:
 		// - refresh bindings when labels change
 		// - remove finalizers of owned resources during termination
-		// The predicate filters out status-only and annotation-only updates
+		// The predicate filters out annotation-only and non-phase status updates
 		// to avoid O(N×M) fan-out on events that cannot affect namespace matching.
-		// Delete events are intentionally processed so the reconciler can
-		// clean up finalizers on resources owned in the deleted namespace.
+		// Phase transitions (e.g. Active -> Terminating) and delete events are
+		// intentionally processed so the reconciler can clean up finalizers.
 		Watches(&corev1.Namespace{},
 			handler.EnqueueRequestsFromMapFunc(r.namespaceToBindDefinitionRequests),
 			builder.WithPredicates(namespaceLabelOrPhaseChangePredicate()),
@@ -240,8 +240,8 @@ func namespaceLabelOrPhaseChangePredicate() predicate.Predicate {
 				return true
 			}
 			// Trigger on label changes (affects namespace selector matching).
-			// Normalize nil vs empty maps so we don't trigger on spurious
-			// differences when both effectively mean "no labels".
+			// maps.Equal treats nil and empty maps as equal, so we only trigger
+			// on real label changes, not on "no labels" vs empty-map differences.
 			if !maps.Equal(e.ObjectOld.GetLabels(), e.ObjectNew.GetLabels()) {
 				return true
 			}
