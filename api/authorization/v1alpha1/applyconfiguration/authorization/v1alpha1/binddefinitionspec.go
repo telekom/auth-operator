@@ -27,6 +27,7 @@ import (
 // BindDefinitionSpec defines the desired state of BindDefinition.
 type BindDefinitionSpecApplyConfiguration struct {
 	// Name that will be prefixed to the concatenated string which is the name of the binding. Follows format "targetName-clusterrole/role-binding" where clusterrole/role is the in-cluster existing ClusterRole or Role.
+	// This field is immutable after creation; changing it would orphan existing bindings and service accounts.
 	TargetName *string `json:"targetName,omitempty"`
 	// List of subjects that will be bound to a target ClusterRole/Role. Can be "User", "Group" or "ServiceAccount".
 	Subjects []v1.Subject `json:"subjects,omitempty"`

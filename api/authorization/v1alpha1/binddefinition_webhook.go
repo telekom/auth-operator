@@ -10,6 +10,8 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -22,6 +24,9 @@ import (
 type BindDefinitionValidator struct {
 	Client client.Client
 }
+
+// supportedSubjectKinds lists the RBAC-supported subject types for BindDefinition subjects.
+var supportedSubjectKinds = []string{rbacv1.UserKind, rbacv1.GroupKind, rbacv1.ServiceAccountKind}
 
 var _ admission.Validator[*BindDefinition] = &BindDefinitionValidator{}
 
@@ -59,6 +64,19 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 			logger.Info("validation failed: duplicate targetName",
 				"name", r.Name, "targetName", r.Spec.TargetName, "conflictsWith", bindDefinition.Name)
 			return nil, apierrors.NewBadRequest(fmt.Sprintf("targetName %s already exists in BindDefinition %s", r.Spec.TargetName, bindDefinition.Name))
+		}
+	}
+
+	// Validate subject Kinds are one of the RBAC-supported types.
+	for i, subject := range r.Spec.Subjects {
+		switch subject.Kind {
+		case rbacv1.UserKind, rbacv1.GroupKind, rbacv1.ServiceAccountKind:
+			// valid
+		default:
+			fldErr := field.NotSupported(field.NewPath("spec", "subjects").Index(i).Child("kind"), subject.Kind, supportedSubjectKinds)
+			return warnings, apierrors.NewInvalid(
+				schema.GroupKind{Group: GroupVersion.Group, Kind: "BindDefinition"},
+				r.Name, field.ErrorList{fldErr})
 		}
 	}
 
@@ -251,16 +269,21 @@ func (v *BindDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 	logger := log.FromContext(ctx).WithName("binddefinition-webhook")
 	logger.V(1).Info("validating update", "name", newObj.Name)
 
-	// Validate when the spec changes (Generation bump) or when the effective
-	// missing-role-policy annotation value changes, since a policy change can
-	// gate stricter validation even without a spec change. When the new policy
-	// is "ignore", validateBindDefinitionSpec will skip role checks.
-	oldPolicy := oldObj.GetMissingRolePolicy()
-	newPolicy := newObj.GetMissingRolePolicy()
-	if oldObj.Generation == newObj.Generation && oldPolicy == newPolicy {
-		return nil, nil
+	// Immutability: targetName cannot be changed after creation.
+	// Changing it would orphan the generated bindings and service accounts.
+	if oldObj.Spec.TargetName != newObj.Spec.TargetName {
+		allErrs := field.ErrorList{
+			field.Forbidden(field.NewPath("spec", "targetName"), "field is immutable after creation"),
+		}
+		return nil, apierrors.NewInvalid(
+			schema.GroupKind{Group: GroupVersion.Group, Kind: "BindDefinition"},
+			newObj.Name, allErrs)
 	}
 
+	// Spec validation is unconditional: Kubernetes increments metadata.generation
+	// after admission, so old/new generation are always equal during the webhook
+	// call and cannot be used to detect spec-only changes. The missing-role-policy
+	// annotation may also change between old and new, gating stricter checks.
 	return v.validateBindDefinitionSpec(ctx, newObj)
 }
 

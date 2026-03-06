@@ -85,6 +85,21 @@ func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 	logger := log.FromContext(ctx).WithName("roledefinition-webhook")
 	logger.V(1).Info("validating update", "name", newObj.Name)
 
+	// Immutability: targetRole and targetName cannot be changed after creation.
+	// Changing them would orphan the generated ClusterRole/Role and its bindings.
+	var allErrs field.ErrorList
+	if oldObj.Spec.TargetRole != newObj.Spec.TargetRole {
+		allErrs = append(allErrs, field.Forbidden(field.NewPath("spec", "targetRole"), "field is immutable after creation"))
+	}
+	if oldObj.Spec.TargetName != newObj.Spec.TargetName {
+		allErrs = append(allErrs, field.Forbidden(field.NewPath("spec", "targetName"), "field is immutable after creation"))
+	}
+	if len(allErrs) > 0 {
+		return nil, apierrors.NewInvalid(
+			schema.GroupKind{Group: GroupVersion.Group, Kind: "RoleDefinition"},
+			newObj.Name, allErrs)
+	}
+
 	// Always check forbidden aggregation labels, even on metadata-only
 	// updates (which don't bump generation), to prevent adding a forbidden
 	// label via kubectl label or similar tools.
