@@ -182,6 +182,7 @@ rules:
   - authorization.t-caas.telekom.com
   resources:
   - binddefinitions
+  - roledefinitions
   verbs:
   - get
   - list
@@ -199,6 +200,15 @@ rules:
   - authorization.t-caas.telekom.com
   resources:
   - webhookauthorizers
+  verbs:
+  - get
+  - list
+  - watch
+# --- ClusterRole reads (BindDefinition webhook validates ClusterRoleRef existence) ---
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - clusterroles
   verbs:
   - get
   - list
