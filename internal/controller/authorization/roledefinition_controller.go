@@ -426,10 +426,13 @@ func (r *RoleDefinitionReconciler) applyStatus(ctx context.Context, roleDefiniti
 }
 
 func (r *RoleDefinitionReconciler) filterAPIResourcesForRoleDefinition(
-	_ context.Context,
+	ctx context.Context,
 	roleDefinition *authorizationv1alpha1.RoleDefinition,
 	apiResources discovery.APIResourcesByGroupVersion,
 ) (map[string]*rbacv1.PolicyRule, error) {
+	logger := log.FromContext(ctx)
+	logger.V(3).Info("filtering API resources for RoleDefinition",
+		"roleDefinition", roleDefinition.Name, "apiGroupCount", len(apiResources))
 	rulesByAPIGroupAndVerbs := make(map[string]*rbacv1.PolicyRule)
 
 	// Filter API Resources based on RoleDefinition spec.
