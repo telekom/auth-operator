@@ -211,7 +211,7 @@ leadership if the leader fails.
 **Verify leader election:**
 
 ```bash
-kubectl get lease -n auth-operator-system auth-operator-leader-election -o yaml
+kubectl get lease -n auth-operator-system auth.t-caas.telekom.com -o yaml
 ```
 
 ### Pod Anti-Affinity
@@ -240,6 +240,12 @@ controller:
 The operator exposes metrics at `:8080/metrics` with **authentication and
 authorization enabled**. The metrics endpoint requires a valid Kubernetes
 bearer token with permission to GET the non-resource URL `/metrics`.
+
+**RBAC prerequisites**: The operator pods use `WithAuthenticationAndAuthorization`
+to validate metrics requests via the Kubernetes API. This requires the operator
+ServiceAccounts to have `system:auth-delegator` permissions for TokenReview and
+SubjectAccessReview API calls. The Helm chart creates a `ClusterRoleBinding`
+to `system:auth-delegator` for both ServiceAccounts automatically.
 
 To allow Prometheus to scrape metrics, the monitoring ServiceAccount needs
 the following RBAC:
@@ -283,6 +289,11 @@ Key metrics:
 | `auth_operator_namespaces_active` | Gauge | Namespaces matching selectors |
 
 ### Enable ServiceMonitor
+
+The metrics endpoint requires authentication, so the ServiceMonitor must
+include a bearer token for Prometheus to authenticate. The Helm chart
+configures bearer token authentication via a projected `ServiceAccount`
+token volume when `metrics.serviceMonitor.enabled` is set.
 
 ```bash
 helm upgrade auth-operator oci://ghcr.io/telekom/charts/auth-operator \

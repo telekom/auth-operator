@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Binds both operator ServiceAccounts to system:auth-delegator so they can
+# perform TokenReview and SubjectAccessReview for authenticated metrics.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "auth-operator.fullname" . }}-auth-delegator
+  labels:
+    {{- include "auth-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "auth-operator.fullname" . }}
+    namespace: {{ .Release.Namespace }}
+  - kind: ServiceAccount
+    name: {{ include "auth-operator.fullname" . }}-webhook-server
+    namespace: {{ .Release.Namespace }}
