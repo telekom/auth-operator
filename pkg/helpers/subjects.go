@@ -8,6 +8,8 @@ import (
 )
 
 // SubjectExists checks if an rbacv1.Subject exists in a slice.
+// This uses O(n) linear search via slices.ContainsFunc, which is appropriate
+// because BindDefinition subject lists are typically small (single-digit).
 func SubjectExists(subjectList []rbacv1.Subject, subject rbacv1.Subject) bool {
 	return slices.ContainsFunc(subjectList, func(s rbacv1.Subject) bool {
 		return s.Kind == subject.Kind &&

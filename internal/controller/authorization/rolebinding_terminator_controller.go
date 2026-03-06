@@ -308,6 +308,10 @@ func formatBlockingResourcesMessage(blockingResources []namespaceDeletionResourc
 	return strings.Join(resourceDetails, "; ")
 }
 
+// isOwnedByBindDefinition reports whether the given owner references include
+// a BindDefinition from the authorization.t-caas.telekom.com API group.
+// It is used across multiple files within this package (terminator controller,
+// helpers) so it remains package-private here rather than exported to pkg/helpers.
 func isOwnedByBindDefinition(ownerReferences []metav1.OwnerReference) bool {
 	for _, ownerRef := range ownerReferences {
 		if ownerRef.Kind == "BindDefinition" && ownerRef.APIVersion == authorizationv1alpha1.GroupVersion.String() {
