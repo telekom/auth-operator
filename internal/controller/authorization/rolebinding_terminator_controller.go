@@ -160,7 +160,10 @@ func (r *RoleBindingTerminator) getNamespacedBlockingResources(ctx context.Conte
 		)
 	}
 
-	return blockingResources, lastError
+	// Return a defensive copy so callers cannot mutate the cached slice.
+	result := make([]namespaceDeletionResourceBlocking, len(blockingResources))
+	copy(result, blockingResources)
+	return result, lastError
 }
 
 // namespaceHasResources returns the namespaced resources (excluding RoleBindings and
@@ -504,7 +507,10 @@ func (r *RoleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 		r.recorder.Eventf(bindDefinition, nil, corev1.EventTypeNormal, authorizationv1alpha1.EventReasonFinalizerRemoved, authorizationv1alpha1.EventActionFinalizerRemove, "Removed finalizer from RoleBinding %s in terminating namespace %s", roleBinding.Name, namespace.Name)
-		// Evict the cache entry — namespace termination cleanup is complete.
+		// Evict the cache entry — this RoleBinding's finalizer removal means
+		// termination cleanup is complete (all blocking resources already gone).
+		// The cache is retained WHILE blocking resources exist to avoid redundant
+		// API calls for sibling RoleBindings in the same namespace.
 		r.namespaceTerminationResourcesCache.Delete(namespace.Name)
 		logger.V(1).Info("successfully removed finalizer from RoleBinding in terminating namespace")
 	} else {
