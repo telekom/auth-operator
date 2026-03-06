@@ -345,6 +345,7 @@ spec:
                 description: |-
                   TargetName is the name of the target role. This can be any name that accurately describes the ClusterRole/Role.
                   Must be a valid Kubernetes name (max 63 characters for most resources).
+                  This field is immutable after creation; changing it would orphan the generated role and its bindings.
                 maxLength: 63
                 minLength: 5
                 pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
@@ -354,8 +355,9 @@ spec:
                   Required when "TargetRole" is "Role".
                 type: string
               targetRole:
-                description: TargetRole is the role type that will be reconciled.
-                  This can be a ClusterRole or a namespaced Role.
+                description: |-
+                  TargetRole is the role type that will be reconciled. This can be a ClusterRole or a namespaced Role.
+                  This field is immutable after creation; changing it would orphan the generated role and its bindings.
                 enum:
                 - ClusterRole
                 - Role
