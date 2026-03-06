@@ -45,13 +45,14 @@ func ownerRefForRoleDefinition(roleDefinition *authorizationv1alpha1.RoleDefinit
 
 // markStalled marks the RoleDefinition as stalled with the given error (kstatus pattern).
 // Uses SSA to apply the stalled condition atomically.
+// The error is logged at debug level; callers log at the appropriate severity.
 func (r *RoleDefinitionReconciler) markStalled(
 	ctx context.Context,
 	roleDefinition *authorizationv1alpha1.RoleDefinition,
 	err error,
 ) {
 	logger := log.FromContext(ctx)
-	logger.Error(err, "RoleDefinition stalled", "roleDefinitionName", roleDefinition.Name)
+	logger.V(1).Info("marking RoleDefinition as stalled", "roleDefinitionName", roleDefinition.Name, "error", err)
 	// Copy status and apply stalled condition
 	conditions.MarkStalled(roleDefinition, roleDefinition.Generation,
 		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, "reconciliation error (check operator logs for details)")
