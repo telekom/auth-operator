@@ -119,7 +119,6 @@ webhookServer:
   service:
     port: 443
     protocol: TCP
-    type: ClusterIP
 
 metrics:
   # Require authentication and authorization for the /metrics endpoint.
