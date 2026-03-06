@@ -25,12 +25,14 @@ const (
 // +kubebuilder:validation:XValidation:rule="self.targetRole != 'ClusterRole' || !has(self.targetNamespace) || size(self.targetNamespace) == 0",message="targetNamespace must be empty when targetRole is 'ClusterRole'"
 type RoleDefinitionSpec struct {
 	// TargetRole is the role type that will be reconciled. This can be a ClusterRole or a namespaced Role.
+	// This field is immutable after creation; changing it would orphan the generated role and its bindings.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Enum=ClusterRole;Role
 	TargetRole string `json:"targetRole"`
 
 	// TargetName is the name of the target role. This can be any name that accurately describes the ClusterRole/Role.
 	// Must be a valid Kubernetes name (max 63 characters for most resources).
+	// This field is immutable after creation; changing it would orphan the generated role and its bindings.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=5
 	// +kubebuilder:validation:MaxLength=63

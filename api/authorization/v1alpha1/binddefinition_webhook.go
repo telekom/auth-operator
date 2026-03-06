@@ -25,6 +25,9 @@ type BindDefinitionValidator struct {
 	Client client.Client
 }
 
+// supportedSubjectKinds lists the RBAC-supported subject types for BindDefinition subjects.
+var supportedSubjectKinds = []string{rbacv1.UserKind, rbacv1.GroupKind, rbacv1.ServiceAccountKind}
+
 var _ admission.Validator[*BindDefinition] = &BindDefinitionValidator{}
 
 // SetupWebhookWithManager will setup the manager to manage the webhooks.
@@ -70,8 +73,7 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 		case rbacv1.UserKind, rbacv1.GroupKind, rbacv1.ServiceAccountKind:
 			// valid
 		default:
-			supportedKinds := []string{rbacv1.UserKind, rbacv1.GroupKind, rbacv1.ServiceAccountKind}
-			fldErr := field.NotSupported(field.NewPath("spec", "subjects").Index(i).Child("kind"), subject.Kind, supportedKinds)
+			fldErr := field.NotSupported(field.NewPath("spec", "subjects").Index(i).Child("kind"), subject.Kind, supportedSubjectKinds)
 			return warnings, apierrors.NewInvalid(
 				schema.GroupKind{Group: GroupVersion.Group, Kind: "BindDefinition"},
 				r.Name, field.ErrorList{fldErr})
@@ -278,11 +280,10 @@ func (v *BindDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 			newObj.Name, allErrs)
 	}
 
-	// Always run spec validation on update because Kubernetes increments
-	// generation after admission webhooks run, so old.Generation and
-	// new.Generation are always equal during the webhook call.
-	// We also re-validate when the missing-role-policy annotation changes,
-	// since it gates stricter role-existence checks.
+	// Spec validation is unconditional: Kubernetes increments metadata.generation
+	// after admission, so old/new generation are always equal during the webhook
+	// call and cannot be used to detect spec-only changes. The missing-role-policy
+	// annotation may also change between old and new, gating stricter checks.
 	return v.validateBindDefinitionSpec(ctx, newObj)
 }
 
