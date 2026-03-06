@@ -346,13 +346,15 @@ func (r *BindDefinitionReconciler) filterActiveNamespaces(
 }
 
 // resolveRoleBindingNamespaces returns the namespaces that match the roleBinding's selection criteria.
+// When an explicit Namespace is set it takes precedence; NamespaceSelector entries are only evaluated
+// when Namespace is empty. Empty selectors ({}) are skipped to avoid unintentionally matching all namespaces.
 func (r *BindDefinitionReconciler) resolveRoleBindingNamespaces(
 	ctx context.Context,
 	roleBinding authorizationv1alpha1.NamespaceBinding,
 ) ([]corev1.Namespace, error) {
 	var namespaces []corev1.Namespace
 
-	// If explicit namespace is specified, use that
+	// If explicit namespace is specified, use that (takes precedence over selectors).
 	if roleBinding.Namespace != "" {
 		ns := &corev1.Namespace{}
 		err := r.client.Get(ctx, types.NamespacedName{Name: roleBinding.Namespace}, ns)
@@ -368,6 +370,10 @@ func (r *BindDefinitionReconciler) resolveRoleBindingNamespaces(
 	// Otherwise, use namespace selectors
 	seen := make(map[string]bool)
 	for _, nsSelector := range roleBinding.NamespaceSelector {
+		// Skip empty selectors to avoid matching all namespaces.
+		if helpers.IsLabelSelectorEmpty(&nsSelector) {
+			continue
+		}
 		selector, err := metav1.LabelSelectorAsSelector(&nsSelector)
 		if err != nil {
 			return nil, fmt.Errorf("parse namespace selector: %w", err)
