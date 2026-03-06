@@ -25,7 +25,7 @@ require (
 	github.com/prometheus/client_model v0.6.2
 	go.opentelemetry.io/otel v1.41.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.40.0
-	go.opentelemetry.io/otel/sdk v1.40.0
+	go.opentelemetry.io/otel/sdk v1.41.0
 	go.opentelemetry.io/otel/trace v1.41.0
 	golang.org/x/sync v0.19.0
 	golang.org/x/time v0.14.0
