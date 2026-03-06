@@ -68,9 +68,10 @@ Image reference precedence: `digest` > `tag` > `Chart.AppVersion`
 |-----------|-------------|---------|
 | `controller.replicas` | Number of controller replicas | `1` |
 | `controller.resources.limits.cpu` | CPU limit | `500m` |
-| `controller.resources.limits.memory` | Memory limit | `128Mi` |
+| `controller.resources.limits.memory` | Memory limit | `256Mi` |
 | `controller.resources.requests.cpu` | CPU request | `10m` |
-| `controller.resources.requests.memory` | Memory request | `64Mi` |
+| `controller.resources.requests.memory` | Memory request | `128Mi` |
+| `controller.terminationGracePeriodSeconds` | Seconds to wait for graceful shutdown | `35` |
 | `controller.podDisruptionBudget.enabled` | Enable PDB | `false` |
 | `controller.podDisruptionBudget.minAvailable` | Minimum available pods | `1` |
 
@@ -78,15 +79,17 @@ Image reference precedence: `digest` > `tag` > `Chart.AppVersion`
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `webhookServer.replicas` | Number of webhook server replicas | `1` |
+| `webhookServer.replicas` | Number of webhook server replicas | `2` |
 | `webhookServer.tdgMigration` | Enable TDG migration mode | `"false"` |
 | `webhookServer.resources.limits.cpu` | CPU limit | `150m` |
-| `webhookServer.resources.limits.memory` | Memory limit | `128Mi` |
+| `webhookServer.resources.limits.memory` | Memory limit | `256Mi` |
 | `webhookServer.resources.requests.cpu` | CPU request | `50m` |
-| `webhookServer.resources.requests.memory` | Memory request | `64Mi` |
+| `webhookServer.resources.requests.memory` | Memory request | `128Mi` |
+| `webhookServer.terminationGracePeriodSeconds` | Seconds to wait for graceful shutdown | `35` |
+| `webhookServer.affinity` | Pod affinity rules (overrides global `affinity`) | Pod anti-affinity across nodes |
 | `webhookServer.service.port` | Service port | `443` |
 | `webhookServer.service.type` | Service type | `ClusterIP` |
-| `webhookServer.podDisruptionBudget.enabled` | Enable PDB | `false` |
+| `webhookServer.podDisruptionBudget.enabled` | Enable PDB | `true` |
 | `webhookServer.podDisruptionBudget.minAvailable` | Minimum available pods | `1` |
 
 ### Service Account Configuration
@@ -124,7 +127,8 @@ For the full list of exposed metrics and recommended alert rules, see the
 
 ## High Availability
 
-For production deployments, enable high availability with digest-based image reference:
+The webhook server defaults to 2 replicas with pod anti-affinity and PDB enabled for
+production-ready high availability. To also enable HA for the controller:
 
 ```bash
 helm install auth-operator oci://ghcr.io/telekom/charts/auth-operator \
@@ -133,9 +137,7 @@ helm install auth-operator oci://ghcr.io/telekom/charts/auth-operator \
   --create-namespace \
   --set image.digest=sha256:<digest> \
   --set controller.replicas=2 \
-  --set controller.podDisruptionBudget.enabled=true \
-  --set webhookServer.replicas=2 \
-  --set webhookServer.podDisruptionBudget.enabled=true
+  --set controller.podDisruptionBudget.enabled=true
 ```
 
 ## Uninstallation
