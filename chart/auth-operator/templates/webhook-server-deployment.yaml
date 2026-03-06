@@ -88,7 +88,7 @@ spec:
       {{- end }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
-      serviceAccountName: {{ include "auth-operator.fullname" . }}
+      serviceAccountName: {{ include "auth-operator.fullname" . }}-webhook-server
       terminationGracePeriodSeconds: 10
       {{- with .Values.nodeSelector }}
       nodeSelector:

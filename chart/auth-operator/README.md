@@ -91,9 +91,18 @@ Image reference precedence: `digest` > `tag` > `Chart.AppVersion`
 
 ### Service Account Configuration
 
+The controller and webhook server use separate ServiceAccounts with dedicated
+ClusterRoles following the principle of least privilege:
+
+- **`<fullname>-controller-manager`** — RBAC management, API discovery, CRD reconciliation
+- **`<fullname>-webhook-server`** — Admission webhook validation, cert-controller TLS rotation
+
+Secrets access (for TLS certificates) is scoped to the operator namespace via
+a namespaced Role, not a ClusterRole.
+
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `serviceAccount.annotations` | Service account annotations | `{}` |
+| `serviceAccount.annotations` | Annotations applied to both ServiceAccounts | `{}` |
 
 ### Metrics & Monitoring
 
