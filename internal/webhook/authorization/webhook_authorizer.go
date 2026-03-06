@@ -83,7 +83,7 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Rate-limit incoming requests to prevent overloading the authorizer.
 	// When the limiter is configured and the token bucket is exhausted,
-	// return HTTP 429 with a denied SubjectAccessReview response.
+	// record the rate-limit event and send a rate-limited SubjectAccessReview response.
 	if wa.Limiter != nil && !wa.Limiter.Allow() {
 		pkgmetrics.AuthorizerRateLimitedTotal.Inc()
 		wa.Log.V(1).Info("rate limit exceeded, rejecting request",
@@ -646,7 +646,9 @@ func (wa *Authorizer) recordMetrics(result *evaluationResult, latency time.Durat
 }
 
 // writeRateLimitResponse writes a SubjectAccessReview response that denies the
-// request due to rate limiting and sets the HTTP status to 429 Too Many Requests.
+// request due to rate limiting. Uses HTTP 200 with Allowed=false as required by
+// the Kubernetes authorization webhook protocol (non-200 is treated as a webhook
+// failure, not a valid denial).
 func (wa *Authorizer) writeRateLimitResponse(w http.ResponseWriter) {
 	response := authzv1.SubjectAccessReview{
 		TypeMeta: metav1.TypeMeta{
@@ -659,8 +661,7 @@ func (wa *Authorizer) writeRateLimitResponse(w http.ResponseWriter) {
 		},
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Retry-After", "1")
-	w.WriteHeader(http.StatusTooManyRequests)
+	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		wa.Log.Error(err, "failed to encode rate-limit response")
 	}
