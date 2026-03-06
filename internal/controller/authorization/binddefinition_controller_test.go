@@ -18,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -2746,11 +2747,27 @@ func TestNamespaceToBindDefinitionRequests(t *testing.T) {
 	_ = authorizationv1alpha1.AddToScheme(scheme)
 	_ = corev1.SchemeBuilder.AddToScheme(scheme)
 
-	t.Run("returns requests for all BindDefinitions", func(t *testing.T) {
+	t.Run("returns requests only for matching BindDefinitions", func(t *testing.T) {
 		g := NewWithT(t)
 
-		bd1 := &authorizationv1alpha1.BindDefinition{ObjectMeta: metav1.ObjectMeta{Name: "bd1"}}
-		bd2 := &authorizationv1alpha1.BindDefinition{ObjectMeta: metav1.ObjectMeta{Name: "bd2"}}
+		// bd1 has a namespace selector that matches the test namespace.
+		bd1 := &authorizationv1alpha1.BindDefinition{
+			ObjectMeta: metav1.ObjectMeta{Name: "bd1"},
+			Spec: authorizationv1alpha1.BindDefinitionSpec{
+				RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+					{NamespaceSelector: []metav1.LabelSelector{{}}}, // empty selector matches all
+				},
+			},
+		}
+		// bd2 has an explicit namespace match.
+		bd2 := &authorizationv1alpha1.BindDefinition{
+			ObjectMeta: metav1.ObjectMeta{Name: "bd2"},
+			Spec: authorizationv1alpha1.BindDefinitionSpec{
+				RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+					{Namespace: "test-ns"},
+				},
+			},
+		}
 
 		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bd1, bd2).Build()
 		r := &BindDefinitionReconciler{client: c, scheme: scheme}
@@ -2758,6 +2775,74 @@ func TestNamespaceToBindDefinitionRequests(t *testing.T) {
 		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test-ns"}}
 		requests := r.namespaceToBindDefinitionRequests(ctx, ns)
 		g.Expect(requests).To(HaveLen(2))
+	})
+
+	t.Run("skips cluster-only BindDefinitions without roleBindings", func(t *testing.T) {
+		g := NewWithT(t)
+
+		// bd with no roleBindings is cluster-only and should be skipped.
+		bd := &authorizationv1alpha1.BindDefinition{
+			ObjectMeta: metav1.ObjectMeta{Name: "cluster-only-bd"},
+		}
+
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bd).Build()
+		r := &BindDefinitionReconciler{client: c, scheme: scheme}
+
+		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test-ns"}}
+		requests := r.namespaceToBindDefinitionRequests(ctx, ns)
+		g.Expect(requests).To(BeEmpty())
+	})
+
+	t.Run("skips BindDefinitions with non-matching selectors", func(t *testing.T) {
+		g := NewWithT(t)
+
+		bd := &authorizationv1alpha1.BindDefinition{
+			ObjectMeta: metav1.ObjectMeta{Name: "non-matching-bd"},
+			Spec: authorizationv1alpha1.BindDefinitionSpec{
+				RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+					{NamespaceSelector: []metav1.LabelSelector{
+						{MatchLabels: map[string]string{"env": "production"}},
+					}},
+				},
+			},
+		}
+
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bd).Build()
+		r := &BindDefinitionReconciler{client: c, scheme: scheme}
+
+		// Namespace without the "env=production" label.
+		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+			Name:   "test-ns",
+			Labels: map[string]string{"env": "staging"},
+		}}
+		requests := r.namespaceToBindDefinitionRequests(ctx, ns)
+		g.Expect(requests).To(BeEmpty())
+	})
+
+	t.Run("matches all BDs with roleBindings during namespace termination", func(t *testing.T) {
+		g := NewWithT(t)
+
+		bd := &authorizationv1alpha1.BindDefinition{
+			ObjectMeta: metav1.ObjectMeta{Name: "any-bd"},
+			Spec: authorizationv1alpha1.BindDefinitionSpec{
+				RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+					{NamespaceSelector: []metav1.LabelSelector{
+						{MatchLabels: map[string]string{"env": "production"}},
+					}},
+				},
+			},
+		}
+
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bd).Build()
+		r := &BindDefinitionReconciler{client: c, scheme: scheme}
+
+		// Terminating namespace should match all BDs with roleBindings.
+		ns := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: "terminating-ns"},
+			Status:     corev1.NamespaceStatus{Phase: corev1.NamespaceTerminating},
+		}
+		requests := r.namespaceToBindDefinitionRequests(ctx, ns)
+		g.Expect(requests).To(HaveLen(1))
 	})
 
 	t.Run("returns nil for non-namespace object", func(t *testing.T) {
@@ -2769,6 +2854,134 @@ func TestNamespaceToBindDefinitionRequests(t *testing.T) {
 		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}}
 		requests := r.namespaceToBindDefinitionRequests(ctx, pod)
 		g.Expect(requests).To(BeNil())
+	})
+}
+
+func TestNamespaceLabelOrPhaseChangePredicate(t *testing.T) {
+	pred := namespaceLabelOrPhaseChangePredicate()
+
+	t.Run("create events always pass", func(t *testing.T) {
+		g := NewWithT(t)
+		g.Expect(pred.Create(event.CreateEvent{
+			Object: &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "ns1"}},
+		})).To(BeTrue())
+	})
+
+	t.Run("delete events always pass", func(t *testing.T) {
+		g := NewWithT(t)
+		g.Expect(pred.Delete(event.DeleteEvent{
+			Object: &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "ns1"}},
+		})).To(BeTrue())
+	})
+
+	t.Run("update with label change passes", func(t *testing.T) {
+		g := NewWithT(t)
+		g.Expect(pred.Update(event.UpdateEvent{
+			ObjectOld: &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+				Name: "ns1", Labels: map[string]string{"env": "dev"},
+			}},
+			ObjectNew: &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+				Name: "ns1", Labels: map[string]string{"env": "prod"},
+			}},
+		})).To(BeTrue())
+	})
+
+	t.Run("update with phase change passes", func(t *testing.T) {
+		g := NewWithT(t)
+		g.Expect(pred.Update(event.UpdateEvent{
+			ObjectOld: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{Name: "ns1"},
+				Status:     corev1.NamespaceStatus{Phase: corev1.NamespaceActive},
+			},
+			ObjectNew: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{Name: "ns1"},
+				Status:     corev1.NamespaceStatus{Phase: corev1.NamespaceTerminating},
+			},
+		})).To(BeTrue())
+	})
+
+	t.Run("update with only annotation change is filtered", func(t *testing.T) {
+		g := NewWithT(t)
+		g.Expect(pred.Update(event.UpdateEvent{
+			ObjectOld: &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+				Name: "ns1", Annotations: map[string]string{"a": "1"},
+			}},
+			ObjectNew: &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+				Name: "ns1", Annotations: map[string]string{"a": "2"},
+			}},
+		})).To(BeFalse())
+	})
+
+	t.Run("update with no changes is filtered", func(t *testing.T) {
+		g := NewWithT(t)
+		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "ns1"}}
+		g.Expect(pred.Update(event.UpdateEvent{
+			ObjectOld: ns,
+			ObjectNew: ns,
+		})).To(BeFalse())
+	})
+}
+
+func TestBindDefinitionMatchesNamespace(t *testing.T) {
+	t.Run("cluster-only BD does not match", func(t *testing.T) {
+		g := NewWithT(t)
+		bd := &authorizationv1alpha1.BindDefinition{}
+		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "ns1"}}
+		g.Expect(bindDefinitionMatchesNamespace(bd, ns)).To(BeFalse())
+	})
+
+	t.Run("explicit namespace match", func(t *testing.T) {
+		g := NewWithT(t)
+		bd := &authorizationv1alpha1.BindDefinition{
+			Spec: authorizationv1alpha1.BindDefinitionSpec{
+				RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+					{Namespace: "target-ns"},
+				},
+			},
+		}
+		g.Expect(bindDefinitionMatchesNamespace(bd, &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: "target-ns"},
+		})).To(BeTrue())
+		g.Expect(bindDefinitionMatchesNamespace(bd, &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: "other-ns"},
+		})).To(BeFalse())
+	})
+
+	t.Run("label selector match", func(t *testing.T) {
+		g := NewWithT(t)
+		bd := &authorizationv1alpha1.BindDefinition{
+			Spec: authorizationv1alpha1.BindDefinitionSpec{
+				RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+					{NamespaceSelector: []metav1.LabelSelector{
+						{MatchLabels: map[string]string{"env": "prod"}},
+					}},
+				},
+			},
+		}
+		g.Expect(bindDefinitionMatchesNamespace(bd, &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: "ns1", Labels: map[string]string{"env": "prod"}},
+		})).To(BeTrue())
+		g.Expect(bindDefinitionMatchesNamespace(bd, &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: "ns1", Labels: map[string]string{"env": "dev"}},
+		})).To(BeFalse())
+	})
+
+	t.Run("terminating namespace matches all BDs with roleBindings", func(t *testing.T) {
+		g := NewWithT(t)
+		bd := &authorizationv1alpha1.BindDefinition{
+			Spec: authorizationv1alpha1.BindDefinitionSpec{
+				RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+					{NamespaceSelector: []metav1.LabelSelector{
+						{MatchLabels: map[string]string{"env": "prod"}},
+					}},
+				},
+			},
+		}
+		ns := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: "ns1"},
+			Status:     corev1.NamespaceStatus{Phase: corev1.NamespaceTerminating},
+		}
+		g.Expect(bindDefinitionMatchesNamespace(bd, ns)).To(BeTrue())
 	})
 }
 
