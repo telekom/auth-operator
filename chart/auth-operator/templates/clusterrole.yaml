@@ -194,8 +194,6 @@ rules:
   - webhookauthorizers/status
   verbs:
   - get
-  - patch
-  - update
 - apiGroups:
   - authorization.t-caas.telekom.com
   resources:
