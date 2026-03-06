@@ -100,6 +100,7 @@ path = [
   "CONTRIBUTING.md",
   "CODE_OF_CONDUCT.md",
   "docs/**/*.md",
+  "!docs/proposals/**/*.md",
   "docs/**/*.yaml",
   "docs/**/*.docx",
   "docs/**/*.drawio",
@@ -110,6 +111,15 @@ path = [
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
 SPDX-License-Identifier = "CC0-1.0"
+
+# Proposals - CC-BY-4.0 (design documents)
+# Uses 'aggregate' precedence so this annotation applies uniformly
+# in addition to any in-file SPDX headers.
+[[annotations]]
+path = ["docs/proposals/**/*.md"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
+SPDX-License-Identifier = "CC-BY-4.0"
 
 # Hack scripts - Apache-2.0
 [[annotations]]
