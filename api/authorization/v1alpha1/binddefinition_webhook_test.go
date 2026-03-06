@@ -186,6 +186,11 @@ var _ = Describe("BindDefinition Webhook", func() {
 					},
 				},
 			}
+			// The webhook validator uses the manager's cached client.
+			// Poll with DryRun until the informer cache has synced the ClusterRole.
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Create(ctx, bd.DeepCopy(), client.DryRunAll)).To(Succeed())
+			}).WithTimeout(10 * time.Second).WithPolling(250 * time.Millisecond).Should(Succeed())
 			Expect(k8sClient.Create(ctx, bd)).To(Succeed())
 
 			// Cleanup

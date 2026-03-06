@@ -47,7 +47,7 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 		"namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username)
 
 	// Check for bypass conditions
-	bypassResult := CheckValidatorBypass(req.UserInfo.Username, req.Operation, req.Name, v.TDGMigration)
+	bypassResult := CheckBypass(req.UserInfo.Username, req.Operation, req.Name, v.TDGMigration)
 	if bypassResult.ShouldBypass {
 		logger.Info("AUDIT: webhook bypass granted",
 			"namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username,
@@ -192,7 +192,7 @@ func (v *NamespaceValidator) validateLabelImmutability(logger logr.Logger, req a
 			logger.V(2).Info("label modification denied",
 				"namespace", req.Name, "label", key, "oldValue", oldValue, "newValue", newValue)
 			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultDenied).Inc()
-			resp := admission.Denied(fmt.Sprintf("Modification of label '%s' is not allowed", key))
+			resp := admission.Denied(fmt.Sprintf(DenialLabelModificationFmt, key))
 			return &resp
 		}
 	}
@@ -246,14 +246,14 @@ func (v *NamespaceValidator) crossValidateLegacyLabels(logger logr.Logger, req a
 		logger.V(2).Info("adoption denied: legacy platform namespace cannot become non-platform",
 			"namespace", req.Name, "legacyOwner", legacyOwner, "newOwner", newOwner)
 		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultDenied).Inc()
-		resp := admission.Denied(fmt.Sprintf("Legacy platform namespace (%s=%s) cannot be adopted as '%s'", legacyOwnerLabel, legacyOwner, newOwner))
+		resp := admission.Denied(fmt.Sprintf(DenialLegacyPlatformToNonPlatformFmt, legacyOwnerLabel, legacyOwner, newOwner))
 		return &resp
 	}
 	if !isLegacyPlatform && isNewPlatform {
 		logger.V(2).Info("adoption denied: legacy non-platform namespace cannot become platform",
 			"namespace", req.Name, "legacyOwner", legacyOwner, "newOwner", newOwner)
 		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultDenied).Inc()
-		resp := admission.Denied(fmt.Sprintf("Legacy non-platform namespace (%s=%s) cannot be adopted as 'platform'", legacyOwnerLabel, legacyOwner))
+		resp := admission.Denied(fmt.Sprintf(DenialLegacyNonPlatformToPlatformFmt, legacyOwnerLabel, legacyOwner))
 		return &resp
 	}
 
@@ -332,7 +332,7 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 		return admission.Allowed("")
 	}
 
-	denialMsg := fmt.Sprintf("User %s is not the owner of namespace %s", req.UserInfo.Username, ns.Name)
+	denialMsg := fmt.Sprintf(DenialNotNamespaceOwnerFmt, req.UserInfo.Username, ns.Name)
 	logger.V(1).Info("namespace operation denied", "namespace", req.Name,
 		"operation", req.Operation, "username", req.UserInfo.Username, "reason", denialMsg)
 	metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultDenied).Inc()

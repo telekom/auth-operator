@@ -95,10 +95,10 @@ type BypassCheckResult struct {
 	Reason       string
 }
 
-// CheckMutatorBypass checks if a request should bypass the namespace mutator webhook.
-// Returns true if the user is a known system account that should be allowed without mutation.
-func CheckMutatorBypass(username string, operation admissionv1.Operation, namespace string, tdgMigration bool) BypassCheckResult {
-	// Allow kubernetes-admin without mutation
+// CheckBypass checks if a request should bypass the namespace webhook (both mutator and validator).
+// Returns true if the user is a known system account that should be allowed without processing.
+func CheckBypass(username string, operation admissionv1.Operation, namespace string, tdgMigration bool) BypassCheckResult {
+	// Allow kubernetes-admin without processing.
 	if username == kubernetesAdmin {
 		return BypassCheckResult{ShouldBypass: true, Reason: "kubernetes-admin"}
 	}
@@ -131,47 +131,6 @@ func CheckMutatorBypass(username string, operation admissionv1.Operation, namesp
 				return BypassCheckResult{ShouldBypass: true, Reason: "trident-operator for trident-system (tdgMigration)"}
 			}
 		}
-	}
-
-	return BypassCheckResult{ShouldBypass: false}
-}
-
-// CheckValidatorBypass checks if a request should bypass the namespace validator webhook.
-// Returns true if the user is a known system account that should be allowed.
-func CheckValidatorBypass(username string, operation admissionv1.Operation, namespace string, tdgMigration bool) BypassCheckResult {
-	// Allow kubernetes-admin
-	if username == kubernetesAdmin {
-		return BypassCheckResult{ShouldBypass: true, Reason: "kubernetes-admin"}
-	}
-
-	// TDG migration specific bypasses
-	if tdgMigration {
-		switch username {
-		case helmControllerSA:
-			return BypassCheckResult{ShouldBypass: true, Reason: "helm-controller (tdgMigration)"}
-		case kustomizeControllerSA:
-			return BypassCheckResult{ShouldBypass: true, Reason: "kustomize-controller (tdgMigration)"}
-		case schiffTenantM2MSA:
-			return BypassCheckResult{ShouldBypass: true, Reason: "schiff-tenant m2m-sa (tdgMigration)"}
-		case schiffSystemM2MSA:
-			return BypassCheckResult{ShouldBypass: true, Reason: "schiff-system m2m-sa (tdgMigration)"}
-		case capiOperatorManagerSAConst:
-			return BypassCheckResult{ShouldBypass: true, Reason: "capi-operator-manager (tdgMigration)"}
-		case tridentOperatorSystemSA:
-			if operation == admissionv1.Update && namespace == tridentSystemNamespace {
-				return BypassCheckResult{ShouldBypass: true, Reason: "trident-operator for trident-system (tdgMigration)"}
-			}
-		}
-	}
-
-	// Allow trident-operator for its own namespace
-	if username == tridentOperatorStorageSA && operation == admissionv1.Update && namespace == tridentStorageNamespace {
-		return BypassCheckResult{ShouldBypass: true, Reason: "trident-operator for t-caas-storage"}
-	}
-
-	// Allow capi-operator-manager for updates
-	if username == capiOperatorManagerSAConst && operation == admissionv1.Update {
-		return BypassCheckResult{ShouldBypass: true, Reason: "capi-operator-manager"}
 	}
 
 	return BypassCheckResult{ShouldBypass: false}
