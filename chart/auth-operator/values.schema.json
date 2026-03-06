@@ -139,14 +139,14 @@
       "properties": {
         "bindDefinitionConcurrency": {
           "type": "integer",
-          "description": "Number of concurrent reconcilers for BindDefinition controller.",
-          "minimum": 1,
+          "description": "Number of concurrent reconcilers for BindDefinition controller (0 to disable).",
+          "minimum": 0,
           "default": 10
         },
         "roleDefinitionConcurrency": {
           "type": "integer",
-          "description": "Number of concurrent reconcilers for RoleDefinition controller.",
-          "minimum": 1,
+          "description": "Number of concurrent reconcilers for RoleDefinition controller (0 to disable).",
+          "minimum": 0,
           "default": 10
         },
         "webhookAuthorizerConcurrency": {
@@ -194,44 +194,17 @@
             "minAvailable": {
               "type": "integer",
               "description": "Minimum number of pods that must be available during disruption.",
-              "minimum": 0,
+              "minimum": 1,
               "default": 1
             },
             "maxUnavailable": {
               "type": "integer",
               "description": "Maximum number of pods that can be unavailable during disruption.",
-              "minimum": 0
+              "minimum": 1
             }
           },
           "not": {
             "required": ["minAvailable", "maxUnavailable"]
-          }
-        },
-        "leaderElection": {
-          "type": "object",
-          "description": "Leader election configuration for HA deployments.",
-          "additionalProperties": false,
-          "properties": {
-            "enabled": {
-              "type": "boolean",
-              "description": "Enable leader election.",
-              "default": true
-            },
-            "leaseDuration": {
-              "type": "string",
-              "description": "Duration a non-leader candidate waits before forcing a leadership change.",
-              "default": "15s"
-            },
-            "renewDeadline": {
-              "type": "string",
-              "description": "Duration the leader retries refreshing leadership before giving up.",
-              "default": "10s"
-            },
-            "retryPeriod": {
-              "type": "string",
-              "description": "Duration between leader election retries.",
-              "default": "2s"
-            }
           }
         },
         "terminationGracePeriodSeconds": {
@@ -239,25 +212,6 @@
           "description": "Seconds to wait for graceful shutdown before SIGKILL.",
           "minimum": 0,
           "default": 35
-        },
-        "startupProbe": {
-          "type": "object",
-          "description": "Startup probe settings (tune for large clusters that need longer init).",
-          "additionalProperties": false,
-          "properties": {
-            "failureThreshold": {
-              "type": "integer",
-              "description": "Number of consecutive failures before the container is restarted.",
-              "minimum": 1,
-              "default": 30
-            },
-            "periodSeconds": {
-              "type": "integer",
-              "description": "How often to perform the probe.",
-              "minimum": 1,
-              "default": 2
-            }
-          }
         }
       }
     },
@@ -291,13 +245,13 @@
             "minAvailable": {
               "type": "integer",
               "description": "Minimum number of pods that must be available during disruption.",
-              "minimum": 0,
+              "minimum": 1,
               "default": 1
             },
             "maxUnavailable": {
               "type": "integer",
               "description": "Maximum number of pods that can be unavailable during disruption.",
-              "minimum": 0
+              "minimum": 1
             }
           },
           "not": {
@@ -339,14 +293,8 @@
             "protocol": {
               "type": "string",
               "description": "Service protocol.",
-              "enum": ["TCP", "UDP"],
+              "enum": ["TCP"],
               "default": "TCP"
-            },
-            "type": {
-              "type": "string",
-              "description": "Service type.",
-              "enum": ["ClusterIP", "NodePort", "LoadBalancer"],
-              "default": "ClusterIP"
             }
           }
         },
@@ -356,51 +304,9 @@
           "minimum": 0,
           "default": 35
         },
-        "startupProbe": {
-          "type": "object",
-          "description": "Startup probe settings.",
-          "additionalProperties": false,
-          "properties": {
-            "path": {
-              "type": "string",
-              "description": "HTTP endpoint for the startup probe.",
-              "default": "/healthz"
-            },
-            "port": {
-              "type": "integer",
-              "description": "Port for the startup probe.",
-              "minimum": 1,
-              "default": 8081
-            },
-            "failureThreshold": {
-              "type": "integer",
-              "description": "Number of consecutive failures before the container is restarted.",
-              "minimum": 1,
-              "default": 30
-            },
-            "periodSeconds": {
-              "type": "integer",
-              "description": "How often to perform the probe.",
-              "minimum": 1,
-              "default": 2
-            }
-          }
-        },
         "affinity": {
           "type": "object",
           "description": "Pod affinity rules (overrides global affinity)."
-        },
-        "authorizeRateLimit": {
-          "type": "integer",
-          "description": "Maximum sustained requests per second for the /authorize endpoint.",
-          "minimum": 1,
-          "default": 100
-        },
-        "authorizeRateBurst": {
-          "type": "integer",
-          "description": "Maximum burst size for the /authorize rate limiter.",
-          "minimum": 1,
-          "default": 200
         }
       }
     },

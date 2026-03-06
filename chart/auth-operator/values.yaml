@@ -83,7 +83,6 @@ webhookServer:
   service:
     port: 443
     protocol: TCP
-    type: ClusterIP
 
 metrics:
   service:
