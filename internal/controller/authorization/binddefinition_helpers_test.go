@@ -3,7 +3,6 @@ package authorization
 import (
 	"context"
 	"errors"
-	"fmt"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -930,7 +929,7 @@ func TestDeleteServiceAccountUnit(t *testing.T) {
 			WithInterceptorFuncs(interceptor.Funcs{
 				Get: func(_ context.Context, _ client.WithWatch, _ client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
 					if _, ok := obj.(*corev1.ServiceAccount); ok {
-						return fmt.Errorf("simulated API error")
+						return errors.New("simulated API error")
 					}
 					return nil
 				},
