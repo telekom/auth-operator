@@ -72,6 +72,8 @@ Image reference precedence: `digest` > `tag` > `Chart.AppVersion`
 | `controller.resources.requests.cpu` | CPU request | `10m` |
 | `controller.resources.requests.memory` | Memory request | `128Mi` |
 | `controller.terminationGracePeriodSeconds` | Seconds to wait for graceful shutdown | `35` |
+| `controller.startupProbe.failureThreshold` | Startup probe consecutive failures before restart | `30` |
+| `controller.startupProbe.periodSeconds` | How often to perform the startup probe | `2` |
 | `controller.podDisruptionBudget.enabled` | Enable PDB | `false` |
 | `controller.podDisruptionBudget.minAvailable` | Minimum available pods | `1` |
 
@@ -86,6 +88,10 @@ Image reference precedence: `digest` > `tag` > `Chart.AppVersion`
 | `webhookServer.resources.requests.cpu` | CPU request | `50m` |
 | `webhookServer.resources.requests.memory` | Memory request | `128Mi` |
 | `webhookServer.terminationGracePeriodSeconds` | Seconds to wait for graceful shutdown | `35` |
+| `webhookServer.startupProbe.path` | HTTP endpoint for the startup probe | `/healthz` |
+| `webhookServer.startupProbe.port` | Port for the startup probe | `8081` |
+| `webhookServer.startupProbe.failureThreshold` | Startup probe consecutive failures before restart | `30` |
+| `webhookServer.startupProbe.periodSeconds` | How often to perform the startup probe | `2` |
 | `webhookServer.affinity` | Pod affinity rules (overrides global `affinity`) | Pod anti-affinity across nodes |
 | `webhookServer.service.port` | Service port | `443` |
 | `webhookServer.service.type` | Service type | `ClusterIP` |
