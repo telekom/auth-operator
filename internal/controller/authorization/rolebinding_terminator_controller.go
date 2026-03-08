@@ -160,7 +160,9 @@ func (r *RoleBindingTerminator) getNamespacedBlockingResources(ctx context.Conte
 		)
 	}
 
-	// Return a defensive copy so callers cannot mutate the cached slice.
+	// Return a defensive copy of the top-level slice so callers cannot
+	// append/remove elements in the cached data. Note: nested slices
+	// (e.g. Names) are shared with the cache and must not be mutated.
 	result := make([]namespaceDeletionResourceBlocking, len(blockingResources))
 	copy(result, blockingResources)
 	return result, lastError
