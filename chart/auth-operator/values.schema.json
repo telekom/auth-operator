@@ -195,15 +195,19 @@
               "default": false
             },
             "minAvailable": {
-              "type": "integer",
-              "description": "Minimum number of pods that must be available during disruption.",
-              "minimum": 0,
+              "oneOf": [
+                { "type": "integer", "minimum": 0 },
+                { "type": "string", "pattern": "^[0-9]+%$" }
+              ],
+              "description": "Minimum number (or percentage) of pods that must be available during disruption.",
               "default": 1
             },
             "maxUnavailable": {
-              "type": "integer",
-              "description": "Maximum number of pods that can be unavailable during disruption.",
-              "minimum": 1
+              "oneOf": [
+                { "type": "integer", "minimum": 1 },
+                { "type": "string", "pattern": "^[0-9]+%$" }
+              ],
+              "description": "Maximum number (or percentage) of pods that can be unavailable during disruption."
             }
           },
           "not": {
@@ -214,7 +218,26 @@
           "type": "integer",
           "description": "Seconds to wait for graceful shutdown before SIGKILL.",
           "minimum": 0,
-          "default": 10
+          "default": 35
+        },
+        "startupProbe": {
+          "type": "object",
+          "description": "Startup probe settings (tune for large clusters that need longer init).",
+          "additionalProperties": false,
+          "properties": {
+            "failureThreshold": {
+              "type": "integer",
+              "description": "Startup probe consecutive failures before restart.",
+              "minimum": 1,
+              "default": 30
+            },
+            "periodSeconds": {
+              "type": "integer",
+              "description": "How often to perform the startup probe.",
+              "minimum": 1,
+              "default": 2
+            }
+          }
         }
       }
     },
@@ -227,13 +250,25 @@
           "type": "integer",
           "description": "Number of webhook server replicas.",
           "minimum": 1,
-          "default": 1
+          "default": 2
         },
         "tdgMigration": {
           "type": ["string", "boolean"],
           "description": "Enable TDG migration mode.",
           "enum": ["true", "false", true, false],
           "default": "false"
+        },
+        "authorizeRateLimit": {
+          "type": "number",
+          "description": "Maximum sustained requests per second for the /authorize endpoint. Set to 0 to disable rate limiting. Per-pod limit.",
+          "minimum": 0,
+          "default": 100
+        },
+        "authorizeRateBurst": {
+          "type": "integer",
+          "description": "Maximum burst size for the /authorize rate limiter. Must be >= 1 when rate limiting is enabled.",
+          "minimum": 0,
+          "default": 200
         },
         "podDisruptionBudget": {
           "type": "object",
@@ -243,18 +278,22 @@
             "enabled": {
               "type": "boolean",
               "description": "Enable PodDisruptionBudget for high availability.",
-              "default": false
+              "default": true
             },
             "minAvailable": {
-              "type": "integer",
-              "description": "Minimum number of pods that must be available during disruption.",
-              "minimum": 0,
+              "oneOf": [
+                { "type": "integer", "minimum": 0 },
+                { "type": "string", "pattern": "^[0-9]+%$" }
+              ],
+              "description": "Minimum number (or percentage) of pods that must be available during disruption.",
               "default": 1
             },
             "maxUnavailable": {
-              "type": "integer",
-              "description": "Maximum number of pods that can be unavailable during disruption.",
-              "minimum": 1
+              "oneOf": [
+                { "type": "integer", "minimum": 1 },
+                { "type": "string", "pattern": "^[0-9]+%$" }
+              ],
+              "description": "Maximum number (or percentage) of pods that can be unavailable during disruption."
             }
           },
           "not": {
@@ -308,7 +347,38 @@
           "type": "integer",
           "description": "Seconds to wait for graceful shutdown before SIGKILL.",
           "minimum": 0,
-          "default": 10
+          "default": 35
+        },
+        "startupProbe": {
+          "type": "object",
+          "description": "Startup probe settings for webhook server.",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "HTTP endpoint for the startup probe.",
+              "default": "/healthz"
+            },
+            "port": {
+              "type": "integer",
+              "description": "Port for the startup probe.",
+              "minimum": 1,
+              "maximum": 65535,
+              "default": 8081
+            },
+            "failureThreshold": {
+              "type": "integer",
+              "description": "Startup probe consecutive failures before restart.",
+              "minimum": 1,
+              "default": 60
+            },
+            "periodSeconds": {
+              "type": "integer",
+              "description": "How often to perform the startup probe.",
+              "minimum": 1,
+              "default": 2
+            }
+          }
         },
         "affinity": {
           "type": "object",
@@ -321,6 +391,18 @@
       "description": "Metrics and monitoring configuration.",
       "additionalProperties": false,
       "properties": {
+        "auth": {
+          "type": "object",
+          "description": "Metrics endpoint authentication and authorization.",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Require authentication and authorization for the /metrics endpoint.",
+              "default": false
+            }
+          }
+        },
         "service": {
           "type": "object",
           "description": "Metrics service configuration.",
