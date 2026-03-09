@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-# Binds both operator ServiceAccounts to system:auth-delegator so they can
+# Binds the operator ServiceAccount to system:auth-delegator so it can
 # perform TokenReview and SubjectAccessReview for authenticated metrics.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -17,7 +17,4 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: {{ include "auth-operator.fullname" . }}
-    namespace: {{ .Release.Namespace }}
-  - kind: ServiceAccount
-    name: {{ include "auth-operator.fullname" . }}-webhook-server
     namespace: {{ .Release.Namespace }}

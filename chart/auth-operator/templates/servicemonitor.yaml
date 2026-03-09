@@ -20,11 +20,7 @@ spec:
       {{- with .Values.metrics.serviceMonitor.scrapeTimeout }}
       scrapeTimeout: {{ . }}
       {{- end }}
-      authorization:
-        type: Bearer
-        credentials:
-          name: {{ include "auth-operator.fullname" . }}-metrics-token
-          key: token
+      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
   selector:
     matchLabels:
       control-plane: controller-manager
