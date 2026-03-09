@@ -228,6 +228,7 @@ func TestRootCmdPersistentFlags(t *testing.T) {
 		"verbosity",
 		"health-probe-bind-address",
 		"metrics-bind-address",
+		"metrics-secure",
 	}
 
 	for _, name := range expectedFlags {
@@ -235,6 +236,12 @@ func TestRootCmdPersistentFlags(t *testing.T) {
 		if f == nil {
 			t.Errorf("expected persistent flag %q not found on root command", name)
 		}
+	}
+
+	// Verify metrics-secure defaults to false.
+	f := flags.Lookup("metrics-secure")
+	if f != nil && f.DefValue != "false" {
+		t.Errorf("flag %q default = %q, want %q", "metrics-secure", f.DefValue, "false")
 	}
 }
 

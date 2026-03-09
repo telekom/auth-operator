@@ -26,7 +26,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
-	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
@@ -102,7 +101,7 @@ and their status is kept up to date.`,
 
 			Metrics: metricsserver.Options{
 				BindAddress:    metricsAddr,
-				FilterProvider: filters.WithAuthenticationAndAuthorization,
+				FilterProvider: metricsFilterProvider(),
 			},
 			LeaderElection:          enableLeaderElection,
 			LeaderElectionID:        "auth.t-caas.telekom.com",

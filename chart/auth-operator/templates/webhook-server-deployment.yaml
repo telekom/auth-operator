@@ -40,6 +40,9 @@ spec:
         - --authorize-rate-limit={{ .Values.webhookServer.authorizeRateLimit }}
         - --authorize-rate-burst={{ .Values.webhookServer.authorizeRateBurst }}
         - --verbosity={{ .Values.global.logLevel }}
+        {{- if .Values.metrics.auth.enabled }}
+        - --metrics-secure
+        {{- end }}
         {{- if .Values.tracing.enabled }}
         - --tracing-enabled
         - --tracing-endpoint={{ required "tracing.endpoint must be set when tracing.enabled is true" .Values.tracing.endpoint }}

@@ -6,6 +6,7 @@ package cmd
 import (
 	"flag"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"regexp"
@@ -16,6 +17,7 @@ import (
 	"github.com/telekom/auth-operator/pkg/tracing"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -23,6 +25,8 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
 // sensitivePattern matches flag names that may contain sensitive data.
@@ -36,6 +40,8 @@ var (
 	probeAddr   string
 	metricsAddr string
 	namespace   string
+
+	metricsSecure bool
 
 	// Tracing flags.
 	tracingEnabled      bool
@@ -123,6 +129,10 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&metricsAddr, "metrics-bind-address", ":8080",
 		"The address the metrics endpoint binds to. Use \"0\" to disable metrics serving.")
 
+	rootCmd.PersistentFlags().BoolVar(&metricsSecure, "metrics-secure", false,
+		"Require authentication and authorization for the metrics endpoint. "+
+			"When enabled, the operator uses TokenReview and SubjectAccessReview to protect /metrics.")
+
 	// Tracing flags
 	rootCmd.PersistentFlags().BoolVar(&tracingEnabled, "tracing-enabled", false,
 		"Enable OpenTelemetry tracing. Requires --tracing-endpoint (or OTEL_EXPORTER_OTLP_ENDPOINT env) to be set.")
@@ -141,6 +151,16 @@ func initScheme() {
 
 	utilruntime.Must(authorizationv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(apiextensionsv1.AddToScheme(scheme))
+}
+
+// metricsFilterProvider returns the appropriate metrics filter provider based
+// on the --metrics-secure flag. When secure metrics are enabled, it requires
+// authentication and authorization for the /metrics endpoint.
+func metricsFilterProvider() func(c *rest.Config, httpClient *http.Client) (metricsserver.Filter, error) {
+	if metricsSecure {
+		return filters.WithAuthenticationAndAuthorization
+	}
+	return nil
 }
 
 // tracingConfig returns the tracing configuration derived from CLI flags
