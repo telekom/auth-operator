@@ -237,16 +237,17 @@ controller:
 
 ### Prometheus Metrics
 
-The operator exposes metrics at `:8080/metrics` with **authentication and
-authorization enabled**. The metrics endpoint requires a valid Kubernetes
+The operator exposes metrics at `:8080/metrics`. When `metrics.auth.enabled`
+is set to `true` in the Helm values, the endpoint requires a valid Kubernetes
 bearer token with permission to GET the non-resource URL `/metrics`.
 
 **RBAC prerequisites**: The operator pods use `WithAuthenticationAndAuthorization`
-to validate metrics requests via the Kubernetes API. This requires the operator
-ServiceAccount (which is also used by the webhook deployment) to have
+to validate metrics requests via the Kubernetes API. This requires both the
+controller-manager and webhook-server ServiceAccounts to have
 `system:auth-delegator` permissions for TokenReview and SubjectAccessReview
 API calls. The Helm chart creates a `ClusterRoleBinding` to
-`system:auth-delegator` for this ServiceAccount automatically.
+`system:auth-delegator` for both ServiceAccounts automatically when
+`metrics.auth.enabled` is `true`.
 
 To allow Prometheus to scrape metrics, the monitoring ServiceAccount needs
 the following RBAC:
@@ -291,10 +292,11 @@ Key metrics:
 
 ### Enable ServiceMonitor
 
-The metrics endpoint requires authentication, so the ServiceMonitor must
-include a bearer token for Prometheus to authenticate. The Helm chart
-configures bearer token authentication via the in-pod ServiceAccount token
-(`bearerTokenFile`) when `metrics.serviceMonitor.enabled` is set.
+When `metrics.auth.enabled` is `true`, the metrics endpoint requires
+authentication. The ServiceMonitor must include a bearer token for
+Prometheus to authenticate. The Helm chart configures bearer token
+authentication via the in-pod ServiceAccount token (`bearerTokenFile`)
+when `metrics.auth.enabled` is set.
 
 ```bash
 helm upgrade auth-operator oci://ghcr.io/telekom/charts/auth-operator \
