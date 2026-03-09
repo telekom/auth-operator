@@ -37,6 +37,8 @@ spec:
         - --cert-rotation-validating-webhook={{ include "auth-operator.fullname" . }}-namespace-validating-webhook-configuration
         - --cert-rotation-validating-webhook={{ include "auth-operator.fullname" . }}-binder-validating-webhook-configuration
         - --tdg-migration={{ .Values.webhookServer.tdgMigration }}
+        - --authorize-rate-limit={{ .Values.webhookServer.authorizeRateLimit }}
+        - --authorize-rate-burst={{ .Values.webhookServer.authorizeRateBurst }}
         - --verbosity={{ .Values.global.logLevel }}
         {{- if .Values.tracing.enabled }}
         - --tracing-enabled

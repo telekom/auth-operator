@@ -289,6 +289,33 @@ Helm values to create them.
 > This label is automatically set by the API server (available since Kubernetes 1.21;
 > this operator requires Kubernetes 1.28+).
 
+### Rate Limiting
+
+The `/authorize` webhook endpoint supports token-bucket rate limiting to
+protect the API server from excessive authorization requests. Configure it
+via Helm values:
+
+```yaml
+webhookServer:
+  authorizeRateLimit: 100   # sustained requests per second per pod
+  authorizeRateBurst: 200   # burst capacity
+```
+
+When rate limiting is active and the token bucket is exhausted, the webhook
+returns a valid `SubjectAccessReview` response with `Allowed: false` and
+reason `"rate limit exceeded"`. The `authorizer_rate_limited_total` Prometheus
+metric tracks how often this occurs.
+
+> **HA Note:** The rate limit is **per pod**. In deployments with multiple
+> replicas, the effective cluster-wide limit is `replicas × authorizeRateLimit`.
+
+Set `authorizeRateLimit: 0` to disable rate limiting entirely.
+
+> **Upgrade Note:** Rate limiting is **enabled by default** at 100 req/s
+> (burst 200). Existing clusters upgrading to this version will start
+> enforcing the limit automatically. Set `authorizeRateLimit: 0` to
+> restore the previous unlimited behaviour.
+
 **Webhook server** — Only allows ingress on port 9443 (webhook) from all
 namespaces (required for kube-apiserver on host network) and port 8081
 (health probes).

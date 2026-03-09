@@ -37,6 +37,7 @@ func TestMetricRegistration(t *testing.T) {
 		{"WebhookRequestsTotal", WebhookRequestsTotal},
 		{"ServiceAccountSkippedPreExisting", ServiceAccountSkippedPreExisting},
 		{"ExternalSAsReferenced", ExternalSAsReferenced},
+		{"AuthorizerRateLimitedTotal", AuthorizerRateLimitedTotal},
 	}
 
 	for _, c := range collectors {
