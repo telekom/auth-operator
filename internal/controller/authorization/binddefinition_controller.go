@@ -131,9 +131,8 @@ func NewBindDefinitionReconciler(
 }
 
 // SetupWithManager sets up the controller with the Manager.
-// Used to watch for namespace creation events https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/handler#example-EnqueueRequestsFromMapFunc
-// Used a predicate to ignore deletes of namespace, as this can be done in a regular
-// reconcile requeue and does not require immediate action from controller.
+// Watches namespaces with a predicate that filters out annotation-only updates,
+// passing through label changes, phase transitions, and deletes for finalizer cleanup.
 func (r *BindDefinitionReconciler) SetupWithManager(mgr ctrl.Manager, concurrency int) error {
 	if r.RoleBindingTerminator == nil {
 		return fmt.Errorf("RoleBindingTerminator is nil - use NewBindDefinitionReconciler to create the reconciler")
@@ -172,10 +171,9 @@ func (r *BindDefinitionReconciler) SetupWithManager(mgr ctrl.Manager, concurrenc
 		Complete(r)
 }
 
-// namespaceToBindDefinitionRequests() implements the MapFunc type and makes it possible to return an EventHandler
-// for any object implementing client.Object. Used it to fan-out updates to all RoleDefinitions on new CRD create
-// https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/handler#EnqueueRequestsFromMapFunc
-// https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/handler#MapFunc
+// namespaceToBindDefinitionRequests maps a Namespace event to reconcile
+// requests for all BindDefinitions whose namespace selectors or explicit
+// namespace references match the changed namespace.
 func (r *BindDefinitionReconciler) namespaceToBindDefinitionRequests(ctx context.Context, obj client.Object) []reconcile.Request {
 	logger := log.FromContext(ctx)
 	logger.V(2).Info("namespaceToBindDefinitionRequests triggered", "objectName", obj.GetName(), "objectNamespace", obj.GetNamespace())
@@ -279,7 +277,9 @@ func bindDefinitionMatchesNamespace(bd *authorizationv1alpha1.BindDefinition, ns
 		if rb.Namespace == ns.Name {
 			return true
 		}
-		// Label selector match.
+		// Label selector match. An empty LabelSelector ({}) produces
+		// labels.Everything() and matches all namespaces, consistent with
+		// Kubernetes semantics and the BindDefinition validating webhook.
 		for _, sel := range rb.NamespaceSelector {
 			selector, err := metav1.LabelSelectorAsSelector(&sel)
 			if err != nil {
