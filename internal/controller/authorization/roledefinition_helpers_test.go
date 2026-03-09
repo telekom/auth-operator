@@ -607,7 +607,7 @@ func TestRoleDefinitionMarkStalled(t *testing.T) {
 			if cond.Type == "Stalled" {
 				stalledFound = true
 				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
-				g.Expect(cond.Message).To(ContainSubstring("reconciliation error (check operator logs for details)"))
+				g.Expect(cond.Message).To(ContainSubstring("check operator logs for details"))
 			}
 		}
 		g.Expect(stalledFound).To(BeTrue(), "Stalled condition should be set")

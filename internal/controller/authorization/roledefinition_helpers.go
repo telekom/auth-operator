@@ -55,7 +55,7 @@ func (r *RoleDefinitionReconciler) markStalled(
 	logger.V(1).Info("marking RoleDefinition as stalled", "roleDefinitionName", roleDefinition.Name, "error", err)
 	// Copy status and apply stalled condition
 	conditions.MarkStalled(roleDefinition, roleDefinition.Generation,
-		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, "reconciliation error (check operator logs for details)")
+		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, "check operator logs for details")
 	roleDefinition.Status.ObservedGeneration = roleDefinition.Generation
 	if updateErr := ssa.ApplyRoleDefinitionStatus(ctx, r.client, roleDefinition); updateErr != nil {
 		logger.Error(updateErr, "failed to apply Stalled status via SSA", "roleDefinitionName", roleDefinition.Name)

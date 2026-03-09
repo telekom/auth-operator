@@ -2525,7 +2525,7 @@ func TestMarkStalledBindDefinition(t *testing.T) {
 			if cond.Type == "Stalled" {
 				stalledFound = true
 				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
-				g.Expect(cond.Message).To(ContainSubstring("test error"))
+				g.Expect(cond.Message).To(ContainSubstring("check operator logs for details"))
 			}
 		}
 		g.Expect(stalledFound).To(BeTrue(), "Stalled condition should be set")
@@ -4182,7 +4182,7 @@ func TestReconcile_MissingRolePolicy_Error(t *testing.T) {
 	stalledCond := findCondition(updated.Status.Conditions, string(conditions.StalledConditionType))
 	g.Expect(stalledCond).NotTo(BeNil(), "expected Stalled condition to be set")
 	g.Expect(stalledCond.Status).To(Equal(metav1.ConditionTrue))
-	g.Expect(stalledCond.Message).To(ContainSubstring("policy=error"))
+	g.Expect(stalledCond.Message).To(ContainSubstring("check operator logs for details"))
 
 	// Verify RoleRefsValid condition and missingRoleRefs in status.
 	roleRefCond := findCondition(updated.Status.Conditions, string(authorizationv1alpha1.RoleRefValidCondition))

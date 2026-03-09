@@ -213,14 +213,16 @@ func convertLabelSelector(ls *metav1.LabelSelector) (labels.Selector, error) {
 }
 
 // markStalled marks the WebhookAuthorizer as stalled with the given error.
+// The error is logged at debug level; callers log at the appropriate severity.
 func (r *WebhookAuthorizerReconciler) markStalled(
 	ctx context.Context,
 	wa *authorizationv1alpha1.WebhookAuthorizer,
 	err error,
 ) error {
 	logger := log.FromContext(ctx)
+	logger.V(1).Info("marking WebhookAuthorizer as stalled", "webhookAuthorizer", wa.Name, "error", err)
 	conditions.MarkStalled(wa, wa.Generation,
-		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, err.Error())
+		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, "check operator logs for details")
 	wa.Status.ObservedGeneration = wa.Generation
 	wa.Status.AuthorizerConfigured = false
 	if updateErr := ssa.ApplyWebhookAuthorizerStatus(ctx, r.client, wa); updateErr != nil {
