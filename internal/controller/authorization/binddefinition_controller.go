@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"time"
 
@@ -11,17 +12,21 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/events"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
@@ -126,9 +131,8 @@ func NewBindDefinitionReconciler(
 }
 
 // SetupWithManager sets up the controller with the Manager.
-// Used to watch for namespace creation events https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/handler#example-EnqueueRequestsFromMapFunc
-// Used a predicate to ignore deletes of namespace, as this can be done in a regular
-// reconcile requeue and does not require immediate action from controller.
+// Watches namespaces with a predicate that filters out annotation-only updates,
+// passing through label changes, phase transitions, and deletes for finalizer cleanup.
 func (r *BindDefinitionReconciler) SetupWithManager(mgr ctrl.Manager, concurrency int) error {
 	if r.RoleBindingTerminator == nil {
 		return fmt.Errorf("RoleBindingTerminator is nil - use NewBindDefinitionReconciler to create the reconciler")
@@ -145,7 +149,16 @@ func (r *BindDefinitionReconciler) SetupWithManager(mgr ctrl.Manager, concurrenc
 		// watch namespaces to:
 		// - refresh bindings when labels change
 		// - remove finalizers of owned resources during termination
-		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(r.namespaceToBindDefinitionRequests)).
+		// The predicate filters out annotation-only and non-phase status updates
+		// to avoid O(N×M) fan-out on events that cannot affect namespace matching.
+		// Phase transitions (e.g. Active → Terminating) are the primary signal
+		// for finalizer cleanup. Delete events are also passed through as a
+		// safety net, although by the time a namespace delete event fires the
+		// object is typically already gone from the API server.
+		Watches(&corev1.Namespace{},
+			handler.EnqueueRequestsFromMapFunc(r.namespaceToBindDefinitionRequests),
+			builder.WithPredicates(namespaceLabelOrPhaseChangePredicate()),
+		).
 
 		// watch owned ClusterRoleBindings to detect external drift
 		Owns(&rbacv1.ClusterRoleBinding{}).
@@ -160,15 +173,14 @@ func (r *BindDefinitionReconciler) SetupWithManager(mgr ctrl.Manager, concurrenc
 		Complete(r)
 }
 
-// namespaceToBindDefinitionRequests() implements the MapFunc type and makes it possible to return an EventHandler
-// for any object implementing client.Object. Used it to fan-out updates to all RoleDefinitions on new CRD create
-// https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/handler#EnqueueRequestsFromMapFunc
-// https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/handler#MapFunc
+// namespaceToBindDefinitionRequests maps a Namespace event to reconcile
+// requests for all BindDefinitions whose namespace selectors or explicit
+// namespace references match the changed namespace.
 func (r *BindDefinitionReconciler) namespaceToBindDefinitionRequests(ctx context.Context, obj client.Object) []reconcile.Request {
 	logger := log.FromContext(ctx)
 	logger.V(2).Info("namespaceToBindDefinitionRequests triggered", "objectName", obj.GetName(), "objectNamespace", obj.GetNamespace())
 
-	// Type assertion to ensure obj is a Namespace
+	// Type assertion to ensure obj is a Namespace.
 	namespace, ok := obj.(*corev1.Namespace)
 	if !ok {
 		logger.Error(fmt.Errorf("unexpected type"), "Expected *Namespace", "got", fmt.Sprintf("%T", obj))
@@ -177,7 +189,7 @@ func (r *BindDefinitionReconciler) namespaceToBindDefinitionRequests(ctx context
 
 	logger.V(2).Info("processing namespace event", "namespace", namespace.Name, "phase", namespace.Status.Phase)
 
-	// List all RoleDefinition resources
+	// List all BindDefinition resources.
 	bindDefList := &authorizationv1alpha1.BindDefinitionList{}
 	err := r.client.List(ctx, bindDefList)
 	if err != nil {
@@ -187,18 +199,109 @@ func (r *BindDefinitionReconciler) namespaceToBindDefinitionRequests(ctx context
 
 	logger.V(3).Info("found BindDefinitions", "namespace", namespace.Name, "bindDefinitionCount", len(bindDefList.Items))
 
-	requests := make([]reconcile.Request, len(bindDefList.Items))
-	for i, bindDef := range bindDefList.Items {
-		logger.V(3).Info("enqueuing BindDefinition reconciliation", "namespace", namespace.Name, "bindDefinition", bindDef.Name, "bindDefinitionNamespace", bindDef.Namespace, "index", i)
-		requests[i] = reconcile.Request{
+	// Filter BindDefinitions to only those whose namespace selectors could
+	// match this namespace, reducing unnecessary reconciliations.
+	requests := make([]reconcile.Request, 0, len(bindDefList.Items))
+	for i := range bindDefList.Items {
+		bindDef := &bindDefList.Items[i]
+		if !bindDefinitionMatchesNamespace(bindDef, namespace) {
+			if len(bindDef.Spec.RoleBindings) == 0 {
+				logger.V(3).Info("skipping BindDefinition (cluster-only, no roleBindings)",
+					"namespace", namespace.Name, "bindDefinition", bindDef.Name)
+			} else {
+				logger.V(3).Info("skipping BindDefinition (no matching selector)",
+					"namespace", namespace.Name, "bindDefinition", bindDef.Name)
+			}
+			metrics.NamespaceFanoutSkipped.Inc()
+			continue
+		}
+		logger.V(3).Info("enqueuing BindDefinition reconciliation",
+			"namespace", namespace.Name, "bindDefinition", bindDef.Name)
+		metrics.NamespaceFanoutEnqueued.Inc()
+		requests = append(requests, reconcile.Request{
 			NamespacedName: types.NamespacedName{
 				Name:      bindDef.Name,
 				Namespace: bindDef.Namespace,
 			},
+		})
+	}
+
+	logger.V(2).Info("returning reconciliation requests",
+		"namespace", namespace.Name,
+		"requestCount", len(requests),
+		"totalBindDefinitions", len(bindDefList.Items))
+	return requests
+}
+
+// namespaceLabelOrPhaseChangePredicate returns a predicate that passes namespace
+// events only when labels change or the namespace phase transitions (e.g. to
+// Terminating). Annotation-only and status-only updates are filtered out,
+// avoiding expensive O(N×M) fan-out for events that cannot affect namespace
+// selector matching.
+func namespaceLabelOrPhaseChangePredicate() predicate.Predicate {
+	return predicate.Funcs{
+		CreateFunc: func(_ event.CreateEvent) bool { return true },
+		DeleteFunc: func(_ event.DeleteEvent) bool { return true },
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			if e.ObjectOld == nil || e.ObjectNew == nil {
+				return true
+			}
+			// Trigger on label changes (affects namespace selector matching).
+			// maps.Equal treats nil and empty maps as equal, so we only trigger
+			// on real label changes, not on "no labels" vs empty-map differences.
+			if !maps.Equal(e.ObjectOld.GetLabels(), e.ObjectNew.GetLabels()) {
+				return true
+			}
+			// Trigger on phase changes (e.g. Active → Terminating).
+			oldNS, ok1 := e.ObjectOld.(*corev1.Namespace)
+			newNS, ok2 := e.ObjectNew.(*corev1.Namespace)
+			if ok1 && ok2 && oldNS.Status.Phase != newNS.Status.Phase {
+				return true
+			}
+			return false
+		},
+		GenericFunc: func(_ event.GenericEvent) bool { return false },
+	}
+}
+
+// bindDefinitionMatchesNamespace reports whether a BindDefinition has any
+// roleBinding whose namespace selector or explicit namespace field could
+// match the given namespace. BindDefinitions with no roleBindings (cluster-only)
+// are skipped. During namespace termination, all BDs with roleBindings are
+// matched to ensure finalizer cleanup.
+func bindDefinitionMatchesNamespace(bd *authorizationv1alpha1.BindDefinition, ns *corev1.Namespace) bool {
+	if len(bd.Spec.RoleBindings) == 0 {
+		// Cluster-only BD — no namespace-scoped work needed.
+		return false
+	}
+
+	// During namespace termination, match all BDs with roleBindings to
+	// ensure owned resources are cleaned up via finalizers.
+	if conditions.IsNamespaceTerminating(ns) {
+		return true
+	}
+
+	for _, rb := range bd.Spec.RoleBindings {
+		// Explicit namespace match.
+		if rb.Namespace == ns.Name {
+			return true
+		}
+		// Label selector match. An empty LabelSelector ({}) produces
+		// labels.Everything() and matches all namespaces, consistent with
+		// Kubernetes semantics and the BindDefinition validating webhook.
+		for _, sel := range rb.NamespaceSelector {
+			selector, err := metav1.LabelSelectorAsSelector(&sel)
+			if err != nil {
+				// Invalid selector — include this BD so reconciliation
+				// can report the error via conditions.
+				return true
+			}
+			if selector.Matches(labels.Set(ns.GetLabels())) {
+				return true
+			}
 		}
 	}
-	logger.V(2).Info("returning reconciliation requests", "namespace", namespace.Name, "requestCount", len(requests))
-	return requests
+	return false
 }
 
 // For checking if terminating BindDefinition refers a ServiceAccount

@@ -254,6 +254,27 @@ var (
 			Help:      "Total SubjectAccessReview requests rejected due to rate limiting",
 		},
 	)
+
+	// NamespaceFanoutSkipped counts how many BindDefinitions were filtered
+	// out (not enqueued) during namespace-event fan-out because their
+	// selectors did not match the changed namespace.
+	NamespaceFanoutSkipped = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Name:      "namespace_fanout_skipped_total",
+			Help:      "Total BindDefinitions skipped during namespace-event fan-out (cluster-only or selector mismatch)",
+		},
+	)
+
+	// NamespaceFanoutEnqueued counts how many BindDefinitions were enqueued
+	// for reconciliation during namespace-event fan-out.
+	NamespaceFanoutEnqueued = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Name:      "namespace_fanout_enqueued_total",
+			Help:      "Total BindDefinitions enqueued during namespace-event fan-out (selector match)",
+		},
+	)
 )
 
 // allCollectors returns the full list of prometheus.Collector instances
@@ -280,6 +301,8 @@ func allCollectors() []prometheus.Collector {
 		AuthorizerActiveRules,
 		AuthorizerDeniedPrincipalHitsTotal,
 		AuthorizerRateLimitedTotal,
+		NamespaceFanoutSkipped,
+		NamespaceFanoutEnqueued,
 	}
 }
 
