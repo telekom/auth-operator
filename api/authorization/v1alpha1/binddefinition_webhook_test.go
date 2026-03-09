@@ -254,4 +254,86 @@ var _ = Describe("BindDefinition Webhook", func() {
 			Expect(err.Error()).To(ContainSubstring("ServiceAccount subjects must specify a namespace"))
 		})
 	})
+
+	Context("Subject Kind Validation", func() {
+		It("should reject a BindDefinition with unsupported subject Kind", func() {
+			bd := &BindDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-bad-subject-kind",
+				},
+				Spec: BindDefinitionSpec{
+					TargetName: "test-bad-subject-kind",
+					Subjects: []rbacv1.Subject{
+						{Kind: "Pod", Name: "test-pod"},
+					},
+					ClusterRoleBindings: ClusterBinding{
+						ClusterRoleRefs: []string{"view"},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, bd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("spec.subjects[0].kind"))
+		})
+	})
+
+	Context("Update Immutability", func() {
+		It("should deny update that changes targetName", func() {
+			// Create a valid BindDefinition first
+			bd := &BindDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-immut-bd-target",
+				},
+				Spec: BindDefinitionSpec{
+					TargetName: "test-immut-bd-target",
+					Subjects:   validSubjects,
+					ClusterRoleBindings: ClusterBinding{
+						ClusterRoleRefs: []string{"test-bd-admit-role"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, bd)).To(Succeed())
+
+			// Attempt to change targetName — should be rejected
+			Eventually(func(g Gomega) {
+				fresh := &BindDefinition{}
+				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(bd), fresh)).To(Succeed())
+				fresh.Spec.TargetName = "changed-target-name"
+				err := k8sClient.Update(ctx, fresh)
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(err.Error()).To(ContainSubstring("spec.targetName"))
+				g.Expect(err.Error()).To(ContainSubstring("immutable"))
+			}, 5*time.Second, 250*time.Millisecond).Should(Succeed())
+
+			Expect(k8sClient.Delete(ctx, bd)).To(Succeed())
+		})
+
+		It("should allow update that does not change targetName", func() {
+			bd := &BindDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-immut-bd-allowed",
+				},
+				Spec: BindDefinitionSpec{
+					TargetName: "test-immut-bd-allowed",
+					Subjects:   validSubjects,
+					ClusterRoleBindings: ClusterBinding{
+						ClusterRoleRefs: []string{"test-bd-admit-role"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, bd)).To(Succeed())
+
+			// Change subjects (allowed)
+			Eventually(func(g Gomega) {
+				fresh := &BindDefinition{}
+				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(bd), fresh)).To(Succeed())
+				fresh.Spec.Subjects = []rbacv1.Subject{
+					{Kind: rbacv1.UserKind, APIGroup: rbacv1.GroupName, Name: "new-user"},
+				}
+				g.Expect(k8sClient.Update(ctx, fresh)).To(Succeed())
+			}, 5*time.Second, 250*time.Millisecond).Should(Succeed())
+
+			Expect(k8sClient.Delete(ctx, bd)).To(Succeed())
+		})
+	})
 })

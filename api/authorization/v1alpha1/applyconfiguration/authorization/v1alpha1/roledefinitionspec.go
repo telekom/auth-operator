@@ -28,9 +28,11 @@ import (
 // RoleDefinitionSpec defines the desired state of RoleDefinition.
 type RoleDefinitionSpecApplyConfiguration struct {
 	// TargetRole is the role type that will be reconciled. This can be a ClusterRole or a namespaced Role.
+	// This field is immutable after creation; changing it would orphan the generated role and its bindings.
 	TargetRole *string `json:"targetRole,omitempty"`
 	// TargetName is the name of the target role. This can be any name that accurately describes the ClusterRole/Role.
 	// Must be a valid Kubernetes name (max 63 characters for most resources).
+	// This field is immutable after creation; changing it would orphan the generated role and its bindings.
 	TargetName *string `json:"targetName,omitempty"`
 	// TargetNamespace is the target namespace for the Role. Required when "TargetRole" is "Role".
 	TargetNamespace *string `json:"targetNamespace,omitempty"`
