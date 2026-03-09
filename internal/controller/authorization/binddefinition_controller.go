@@ -1212,7 +1212,7 @@ func (r *BindDefinitionReconciler) collectNamespaces(ctx context.Context, bindDe
 	for _, roleBinding := range bindDefinition.Spec.RoleBindings {
 		resolved, err := r.resolveRoleBindingNamespaces(ctx, roleBinding)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("collect namespaces for roleBinding: %w", err)
 		}
 		for _, ns := range resolved {
 			namespaceSet[ns.Name] = ns
