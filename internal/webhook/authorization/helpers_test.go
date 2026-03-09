@@ -72,7 +72,7 @@ func TestParseServiceAccount(t *testing.T) {
 	}
 }
 
-func TestCheckMutatorBypass(t *testing.T) {
+func TestCheckBypass(t *testing.T) {
 	tests := []struct {
 		name         string
 		username     string
@@ -224,18 +224,18 @@ func TestCheckMutatorBypass(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := CheckMutatorBypass(tt.username, tt.operation, tt.namespace, tt.tdgMigration)
+			result := CheckBypass(tt.username, tt.operation, tt.namespace, tt.tdgMigration)
 			if result.ShouldBypass != tt.wantBypass {
-				t.Errorf("CheckMutatorBypass() ShouldBypass = %v, want %v", result.ShouldBypass, tt.wantBypass)
+				t.Errorf("CheckBypass() ShouldBypass = %v, want %v", result.ShouldBypass, tt.wantBypass)
 			}
 			if tt.wantReason != "" && result.Reason != tt.wantReason {
-				t.Errorf("CheckMutatorBypass() Reason = %q, want %q", result.Reason, tt.wantReason)
+				t.Errorf("CheckBypass() Reason = %q, want %q", result.Reason, tt.wantReason)
 			}
 		})
 	}
 }
 
-func TestCheckValidatorBypass(t *testing.T) {
+func TestCheckBypassValidatorCases(t *testing.T) {
 	tests := []struct {
 		name         string
 		username     string
@@ -356,12 +356,12 @@ func TestCheckValidatorBypass(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := CheckValidatorBypass(tt.username, tt.operation, tt.namespace, tt.tdgMigration)
+			result := CheckBypass(tt.username, tt.operation, tt.namespace, tt.tdgMigration)
 			if result.ShouldBypass != tt.wantBypass {
-				t.Errorf("CheckValidatorBypass() ShouldBypass = %v, want %v", result.ShouldBypass, tt.wantBypass)
+				t.Errorf("CheckBypass() ShouldBypass = %v, want %v", result.ShouldBypass, tt.wantBypass)
 			}
 			if tt.wantReason != "" && result.Reason != tt.wantReason {
-				t.Errorf("CheckValidatorBypass() Reason = %q, want %q", result.Reason, tt.wantReason)
+				t.Errorf("CheckBypass() Reason = %q, want %q", result.Reason, tt.wantReason)
 			}
 		})
 	}
