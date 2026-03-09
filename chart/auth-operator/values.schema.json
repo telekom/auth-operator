@@ -1,0 +1,576 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "Auth Operator Helm Values",
+  "description": "Values schema for the auth-operator Helm chart.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "image": {
+      "type": "object",
+      "description": "Container image configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "repository": {
+          "type": "string",
+          "description": "Container image repository.",
+          "default": "ghcr.io/telekom/auth-operator"
+        },
+        "tag": {
+          "type": "string",
+          "description": "Container image tag. Falls back to Chart.AppVersion if empty."
+        },
+        "digest": {
+          "type": "string",
+          "description": "Container image digest (immutable reference, highest precedence)."
+        },
+        "pullPolicy": {
+          "type": "string",
+          "description": "Image pull policy.",
+          "enum": ["Always", "IfNotPresent", "Never"],
+          "default": "IfNotPresent"
+        }
+      }
+    },
+    "imagePullSecrets": {
+      "type": "array",
+      "description": "Image pull secrets.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": ["name"]
+      }
+    },
+    "nameOverride": {
+      "type": "string",
+      "description": "Override the chart name."
+    },
+    "fullnameOverride": {
+      "type": "string",
+      "description": "Override the full release name."
+    },
+    "global": {
+      "type": "object",
+      "description": "Global settings applied to all components.",
+      "additionalProperties": false,
+      "properties": {
+        "logLevel": {
+          "type": "integer",
+          "description": "Log verbosity level (0-9, higher is more verbose).",
+          "minimum": 0,
+          "maximum": 9,
+          "default": 2
+        }
+      }
+    },
+    "serviceAccount": {
+      "type": "object",
+      "description": "ServiceAccount configuration (applied to both controller and webhook SAs).",
+      "additionalProperties": false,
+      "properties": {
+        "annotations": {
+          "type": "object",
+          "description": "Annotations to add to the ServiceAccounts.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "nodeSelector": {
+      "type": "object",
+      "description": "Node selection constraints (applied to all pods).",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "tolerations": {
+      "type": "array",
+      "description": "Tolerations (applied to all pods).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "key": { "type": "string" },
+          "operator": { "type": "string", "enum": ["Exists", "Equal"] },
+          "value": { "type": "string" },
+          "effect": { "type": "string", "enum": ["NoSchedule", "PreferNoSchedule", "NoExecute", ""] },
+          "tolerationSeconds": { "type": "integer" }
+        }
+      }
+    },
+    "affinity": {
+      "type": "object",
+      "description": "Pod affinity rules (applied to all pods)."
+    },
+    "topologySpreadConstraints": {
+      "type": "array",
+      "description": "Pod topology spread constraints (applied to all pods).",
+      "items": {
+        "type": "object"
+      }
+    },
+    "priorityClassName": {
+      "type": "string",
+      "description": "Priority class name for pods."
+    },
+    "podAnnotations": {
+      "type": "object",
+      "description": "Additional pod annotations (applied to all pods).",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "podLabels": {
+      "type": "object",
+      "description": "Additional pod labels (applied to all pods).",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "controller": {
+      "type": "object",
+      "description": "Controller manager configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "bindDefinitionConcurrency": {
+          "type": "integer",
+          "description": "Number of concurrent reconcilers for BindDefinition controller (0 to disable).",
+          "minimum": 0,
+          "default": 10
+        },
+        "roleDefinitionConcurrency": {
+          "type": "integer",
+          "description": "Number of concurrent reconcilers for RoleDefinition controller (0 to disable).",
+          "minimum": 0,
+          "default": 10
+        },
+        "webhookAuthorizerConcurrency": {
+          "type": "integer",
+          "description": "Number of concurrent reconcilers for WebhookAuthorizer controller (0 to disable).",
+          "minimum": 0,
+          "default": 1
+        },
+        "resources": {
+          "type": "object",
+          "description": "Container resource requests and limits.",
+          "additionalProperties": false,
+          "properties": {
+            "limits": {
+              "type": "object",
+              "additionalProperties": { "type": "string" },
+              "properties": {
+                "cpu": { "type": "string", "description": "CPU limit." },
+                "memory": { "type": "string", "description": "Memory limit." }
+              }
+            },
+            "requests": {
+              "type": "object",
+              "additionalProperties": { "type": "string" },
+              "properties": {
+                "cpu": { "type": "string", "description": "CPU request." },
+                "memory": { "type": "string", "description": "Memory request." }
+              }
+            }
+          }
+        },
+        "replicas": {
+          "type": "integer",
+          "description": "Number of controller replicas.",
+          "minimum": 1,
+          "default": 1
+        },
+        "podDisruptionBudget": {
+          "type": "object",
+          "description": "PodDisruptionBudget configuration.",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enable PodDisruptionBudget for high availability.",
+              "default": false
+            },
+            "minAvailable": {
+              "oneOf": [
+                { "type": "integer", "minimum": 0 },
+                { "type": "string", "pattern": "^[0-9]+%$" }
+              ],
+              "description": "Minimum number (or percentage) of pods that must be available during disruption.",
+              "default": 1
+            },
+            "maxUnavailable": {
+              "oneOf": [
+                { "type": "integer", "minimum": 1 },
+                { "type": "string", "pattern": "^[0-9]+%$" }
+              ],
+              "description": "Maximum number (or percentage) of pods that can be unavailable during disruption."
+            }
+          },
+          "not": {
+            "required": ["minAvailable", "maxUnavailable"]
+          }
+        },
+        "terminationGracePeriodSeconds": {
+          "type": "integer",
+          "description": "Seconds to wait for graceful shutdown before SIGKILL.",
+          "minimum": 0,
+          "default": 35
+        },
+        "startupProbe": {
+          "type": "object",
+          "description": "Startup probe settings (tune for large clusters that need longer init).",
+          "additionalProperties": false,
+          "properties": {
+            "failureThreshold": {
+              "type": "integer",
+              "description": "Startup probe consecutive failures before restart.",
+              "minimum": 1,
+              "default": 30
+            },
+            "periodSeconds": {
+              "type": "integer",
+              "description": "How often to perform the startup probe.",
+              "minimum": 1,
+              "default": 2
+            }
+          }
+        }
+      }
+    },
+    "webhookServer": {
+      "type": "object",
+      "description": "Webhook server configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "replicas": {
+          "type": "integer",
+          "description": "Number of webhook server replicas.",
+          "minimum": 1,
+          "default": 2
+        },
+        "tdgMigration": {
+          "type": ["string", "boolean"],
+          "description": "Enable TDG migration mode.",
+          "enum": ["true", "false", true, false],
+          "default": "false"
+        },
+        "authorizeRateLimit": {
+          "type": "number",
+          "description": "Maximum sustained requests per second for the /authorize endpoint. Set to 0 to disable rate limiting. Per-pod limit.",
+          "minimum": 0,
+          "default": 100
+        },
+        "authorizeRateBurst": {
+          "type": "integer",
+          "description": "Maximum burst size for the /authorize rate limiter. Must be >= 1 when rate limiting is enabled.",
+          "minimum": 0,
+          "default": 200
+        },
+        "podDisruptionBudget": {
+          "type": "object",
+          "description": "PodDisruptionBudget configuration.",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enable PodDisruptionBudget for high availability.",
+              "default": true
+            },
+            "minAvailable": {
+              "oneOf": [
+                { "type": "integer", "minimum": 0 },
+                { "type": "string", "pattern": "^[0-9]+%$" }
+              ],
+              "description": "Minimum number (or percentage) of pods that must be available during disruption.",
+              "default": 1
+            },
+            "maxUnavailable": {
+              "oneOf": [
+                { "type": "integer", "minimum": 1 },
+                { "type": "string", "pattern": "^[0-9]+%$" }
+              ],
+              "description": "Maximum number (or percentage) of pods that can be unavailable during disruption."
+            }
+          },
+          "not": {
+            "required": ["minAvailable", "maxUnavailable"]
+          }
+        },
+        "resources": {
+          "type": "object",
+          "description": "Container resource requests and limits.",
+          "additionalProperties": false,
+          "properties": {
+            "limits": {
+              "type": "object",
+              "additionalProperties": { "type": "string" },
+              "properties": {
+                "cpu": { "type": "string", "description": "CPU limit." },
+                "memory": { "type": "string", "description": "Memory limit." }
+              }
+            },
+            "requests": {
+              "type": "object",
+              "additionalProperties": { "type": "string" },
+              "properties": {
+                "cpu": { "type": "string", "description": "CPU request." },
+                "memory": { "type": "string", "description": "Memory request." }
+              }
+            }
+          }
+        },
+        "service": {
+          "type": "object",
+          "description": "Webhook service configuration.",
+          "additionalProperties": false,
+          "properties": {
+            "port": {
+              "type": "integer",
+              "description": "Service port.",
+              "minimum": 1,
+              "maximum": 65535,
+              "default": 443
+            },
+            "protocol": {
+              "type": "string",
+              "description": "Service protocol.",
+              "enum": ["TCP"],
+              "default": "TCP"
+            }
+          }
+        },
+        "terminationGracePeriodSeconds": {
+          "type": "integer",
+          "description": "Seconds to wait for graceful shutdown before SIGKILL.",
+          "minimum": 0,
+          "default": 35
+        },
+        "startupProbe": {
+          "type": "object",
+          "description": "Startup probe settings for webhook server.",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "HTTP endpoint for the startup probe.",
+              "default": "/healthz"
+            },
+            "port": {
+              "type": "integer",
+              "description": "Port for the startup probe.",
+              "minimum": 1,
+              "maximum": 65535,
+              "default": 8081
+            },
+            "failureThreshold": {
+              "type": "integer",
+              "description": "Startup probe consecutive failures before restart.",
+              "minimum": 1,
+              "default": 60
+            },
+            "periodSeconds": {
+              "type": "integer",
+              "description": "How often to perform the startup probe.",
+              "minimum": 1,
+              "default": 2
+            }
+          }
+        },
+        "affinity": {
+          "type": "object",
+          "description": "Pod affinity rules (overrides global affinity)."
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "description": "Metrics and monitoring configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "auth": {
+          "type": "object",
+          "description": "Metrics endpoint authentication and authorization.",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Require authentication and authorization for the /metrics endpoint.",
+              "default": false
+            }
+          }
+        },
+        "service": {
+          "type": "object",
+          "description": "Metrics service configuration.",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Create a dedicated Service for Prometheus scraping.",
+              "default": true
+            },
+            "port": {
+              "type": "integer",
+              "description": "Metrics service port.",
+              "minimum": 1,
+              "maximum": 65535,
+              "default": 8080
+            }
+          }
+        },
+        "serviceMonitor": {
+          "type": "object",
+          "description": "Prometheus ServiceMonitor configuration.",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Create a Prometheus ServiceMonitor.",
+              "default": false
+            },
+            "interval": {
+              "type": "string",
+              "description": "Scrape interval (uses Prometheus default if empty)."
+            },
+            "scrapeTimeout": {
+              "type": "string",
+              "description": "Scrape timeout (uses Prometheus default if empty)."
+            },
+            "additionalLabels": {
+              "type": "object",
+              "description": "Additional labels for ServiceMonitor (e.g., for label-based selection).",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "podSecurityContext": {
+      "type": "object",
+      "description": "Pod-level security context (applied to all pods)."
+    },
+    "containerSecurityContext": {
+      "type": "object",
+      "description": "Container-level security context (applied to all containers)."
+    },
+    "networkPolicy": {
+      "type": "object",
+      "description": "Network policies for restricting pod-level ingress and egress.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable NetworkPolicy resources for webhook and metrics port isolation.",
+          "default": false
+        },
+        "metricsNamespace": {
+          "type": "string",
+          "description": "Namespace that hosts the monitoring stack (Prometheus).",
+          "default": "monitoring"
+        },
+        "webhookServer": {
+          "type": "object",
+          "description": "Webhook server network policy configuration.",
+          "additionalProperties": false,
+          "properties": {
+            "ingressFrom": {
+              "type": "array",
+              "description": "Custom ingress from rules for the webhook port (9443).",
+              "items": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "controllerManager": {
+          "type": "object",
+          "description": "Controller manager network policy configuration.",
+          "additionalProperties": false,
+          "properties": {
+            "ingressFrom": {
+              "type": "array",
+              "description": "Custom ingress from rules for the metrics port (8080).",
+              "items": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "egress": {
+          "type": "object",
+          "description": "Egress rules — required when a default-deny egress policy exists.",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enable egress rules.",
+              "default": false
+            },
+            "dnsNamespace": {
+              "type": "string",
+              "description": "Namespace where CoreDNS runs (for UDP/TCP 53).",
+              "default": "kube-system"
+            },
+            "apiServerCIDR": {
+              "type": "string",
+              "description": "API server CIDR for egress restriction. Empty allows any destination on 443/6443."
+            },
+            "additionalRules": {
+              "type": "array",
+              "description": "Additional custom egress rules (e.g., webhook callbacks).",
+              "items": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "tracing": {
+      "type": "object",
+      "description": "OpenTelemetry tracing configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable distributed tracing via OpenTelemetry.",
+          "default": false
+        },
+        "endpoint": {
+          "type": "string",
+          "description": "OTLP collector endpoint (e.g. 'otel-collector:4317')."
+        },
+        "samplingRate": {
+          "type": "number",
+          "description": "Trace sampling rate (0.0 to 1.0).",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.1
+        },
+        "insecure": {
+          "type": "boolean",
+          "description": "Use insecure (non-TLS) connection to the collector.",
+          "default": false
+        }
+      },
+      "if": {
+        "properties": { "enabled": { "const": true } },
+        "required": ["enabled"]
+      },
+      "then": {
+        "required": ["endpoint"],
+        "properties": {
+          "endpoint": {
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

@@ -83,6 +83,8 @@ Image reference precedence: `digest` > `tag` > `Chart.AppVersion`
 |-----------|-------------|---------|
 | `webhookServer.replicas` | Number of webhook server replicas | `2` |
 | `webhookServer.tdgMigration` | Enable TDG migration mode | `"false"` |
+| `webhookServer.authorizeRateLimit` | Max sustained requests/sec for /authorize endpoint (per pod, 0 to disable) | `100` |
+| `webhookServer.authorizeRateBurst` | Max burst size for /authorize rate limiter | `200` |
 | `webhookServer.resources.limits.cpu` | CPU limit | `150m` |
 | `webhookServer.resources.limits.memory` | Memory limit | `256Mi` |
 | `webhookServer.resources.requests.cpu` | CPU request | `50m` |
@@ -90,11 +92,10 @@ Image reference precedence: `digest` > `tag` > `Chart.AppVersion`
 | `webhookServer.terminationGracePeriodSeconds` | Seconds to wait for graceful shutdown | `35` |
 | `webhookServer.startupProbe.path` | HTTP endpoint for the startup probe | `/healthz` |
 | `webhookServer.startupProbe.port` | Port for the startup probe | `8081` |
-| `webhookServer.startupProbe.failureThreshold` | Startup probe consecutive failures before restart | `30` |
+| `webhookServer.startupProbe.failureThreshold` | Startup probe consecutive failures before restart | `60` |
 | `webhookServer.startupProbe.periodSeconds` | How often to perform the startup probe | `2` |
 | `webhookServer.affinity` | Pod affinity rules (overrides global `affinity`) | Pod anti-affinity across nodes |
 | `webhookServer.service.port` | Service port | `443` |
-| `webhookServer.service.type` | Service type | `ClusterIP` |
 | `webhookServer.podDisruptionBudget.enabled` | Enable PDB | `true` |
 | `webhookServer.podDisruptionBudget.minAvailable` | Minimum available pods | `1` |
 
