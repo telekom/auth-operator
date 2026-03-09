@@ -1,10 +1,12 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ include "auth-operator.fullname" . }}
+  name: {{ include "auth-operator.fullname" . }}-controller-manager
   labels:
+    app.kubernetes.io/component: controller-manager
   {{- include "auth-operator.labels" . | nindent 4 }}
 rules:
+# --- Namespace management (BindDefinition + RoleBindingTerminator) ---
 - apiGroups:
   - ""
   resources:
@@ -20,16 +22,7 @@ rules:
   verbs:
   - get
   - update
-- apiGroups:
-  - ""
-  resources:
-  - secrets
-  verbs:
-  - get
-  - list
-  - patch
-  - update
-  - watch
+# --- ServiceAccount management (BindDefinition) ---
 - apiGroups:
   - ""
   resources:
@@ -37,38 +30,34 @@ rules:
   verbs:
   - create
   - delete
-  - deletecollection
   - get
   - list
   - patch
   - update
   - watch
+# --- Event recording ---
 - apiGroups:
   - ""
   - events.k8s.io
   resources:
   - events
   verbs:
-  - '*'
-- apiGroups:
-  - '*'
-  resources:
-  - '*'
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
-  - admissionregistration.k8s.io
-  resources:
-  - mutatingwebhookconfigurations
-  - validatingwebhookconfigurations
-  verbs:
-  - get
-  - list
+  - create
   - patch
   - update
+# --- API discovery (RoleDefinition — needs broad read to discover all resources) ---
+# NOTE: This broad read access is required by design. The RoleDefinition controller
+# must discover all API resources to generate accurate ClusterRoles/Roles.
+# The discovery API (/api, /apis) only lists resource types, not instances.
+- apiGroups:
+  - '*'
+  resources:
+  - '*'
+  verbs:
+  - get
+  - list
   - watch
+# --- CRD discovery ---
 - apiGroups:
   - apiextensions.k8s.io
   resources:
@@ -77,6 +66,7 @@ rules:
   - get
   - list
   - watch
+# --- CRD management ---
 - apiGroups:
   - authorization.t-caas.telekom.com
   resources:
@@ -113,16 +103,13 @@ rules:
   - get
   - list
   - watch
-- apiGroups:
-  - coordination.k8s.io
-  resources:
-  - leases
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - update
+# --- RBAC management (RoleDefinition + BindDefinition) ---
+# WARNING: The escalate and bind verbs are required for the operator to create
+# ClusterRoles/Roles with arbitrary permissions and bind them to subjects.
+# A compromised controller SA could escalate privileges. Mitigate by:
+# - Restricting network access to the controller pod
+# - Monitoring RBAC changes via audit logging
+# - Using PodSecurityStandards to prevent container escape
 - apiGroups:
   - rbac.authorization.k8s.io
   resources:
@@ -158,3 +145,70 @@ rules:
   - rolebindings/finalizers
   verbs:
   - update
+---
+# Webhook server ClusterRole — minimal permissions for admission webhooks
+# and cert-controller TLS certificate rotation.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "auth-operator.fullname" . }}-webhook-server
+  labels:
+    app.kubernetes.io/component: webhook-server
+  {{- include "auth-operator.labels" . | nindent 4 }}
+rules:
+# --- Namespace reads (WebhookAuthorizer) ---
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
+# --- Webhook configuration management (cert-controller) ---
+- apiGroups:
+  - admissionregistration.k8s.io
+  resources:
+  - mutatingwebhookconfigurations
+  - validatingwebhookconfigurations
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+# --- CRD reads (admission validation) ---
+- apiGroups:
+  - authorization.t-caas.telekom.com
+  resources:
+  - binddefinitions
+  - roledefinitions
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - authorization.t-caas.telekom.com
+  resources:
+  - binddefinitions/status
+  - webhookauthorizers/status
+  verbs:
+  - get
+- apiGroups:
+  - authorization.t-caas.telekom.com
+  resources:
+  - webhookauthorizers
+  verbs:
+  - get
+  - list
+  - watch
+# --- RBAC reads (BindDefinition webhook validates role reference existence) ---
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - clusterroles
+  - roles
+  verbs:
+  - get
+  - list
+  - watch
