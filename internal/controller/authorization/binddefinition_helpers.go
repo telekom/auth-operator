@@ -367,13 +367,11 @@ func (r *BindDefinitionReconciler) resolveRoleBindingNamespaces(
 		return []corev1.Namespace{*ns}, nil
 	}
 
-	// Otherwise, use namespace selectors
+	// Otherwise, use namespace selectors.
+	// An empty LabelSelector ({}) matches all namespaces per Kubernetes semantics,
+	// consistent with the BindDefinition validating webhook behavior.
 	seen := make(map[string]bool)
 	for _, nsSelector := range roleBinding.NamespaceSelector {
-		// Skip empty selectors to avoid matching all namespaces.
-		if helpers.IsLabelSelectorEmpty(&nsSelector) {
-			continue
-		}
 		selector, err := metav1.LabelSelectorAsSelector(&nsSelector)
 		if err != nil {
 			return nil, fmt.Errorf("parse namespace selector: %w", err)
