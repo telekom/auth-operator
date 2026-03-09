@@ -158,9 +158,11 @@
         "resources": {
           "type": "object",
           "description": "Container resource requests and limits.",
+          "additionalProperties": false,
           "properties": {
             "limits": {
               "type": "object",
+              "additionalProperties": false,
               "properties": {
                 "cpu": { "type": "string", "description": "CPU limit." },
                 "memory": { "type": "string", "description": "Memory limit." }
@@ -168,6 +170,7 @@
             },
             "requests": {
               "type": "object",
+              "additionalProperties": false,
               "properties": {
                 "cpu": { "type": "string", "description": "CPU request." },
                 "memory": { "type": "string", "description": "Memory request." }
@@ -261,9 +264,11 @@
         "resources": {
           "type": "object",
           "description": "Container resource requests and limits.",
+          "additionalProperties": false,
           "properties": {
             "limits": {
               "type": "object",
+              "additionalProperties": false,
               "properties": {
                 "cpu": { "type": "string", "description": "CPU limit." },
                 "memory": { "type": "string", "description": "Memory limit." }
@@ -271,6 +276,7 @@
             },
             "requests": {
               "type": "object",
+              "additionalProperties": false,
               "properties": {
                 "cpu": { "type": "string", "description": "CPU request." },
                 "memory": { "type": "string", "description": "Memory request." }
