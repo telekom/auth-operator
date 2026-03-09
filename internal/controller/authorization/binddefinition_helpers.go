@@ -347,7 +347,7 @@ func (r *BindDefinitionReconciler) filterActiveNamespaces(
 
 // resolveRoleBindingNamespaces returns the namespaces that match the roleBinding's selection criteria.
 // When an explicit Namespace is set it takes precedence; NamespaceSelector entries are only evaluated
-// when Namespace is empty. Empty selectors ({}) are skipped to avoid unintentionally matching all namespaces.
+// when Namespace is empty. An empty LabelSelector ({}) matches all namespaces per Kubernetes semantics.
 func (r *BindDefinitionReconciler) resolveRoleBindingNamespaces(
 	ctx context.Context,
 	roleBinding authorizationv1alpha1.NamespaceBinding,
