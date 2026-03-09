@@ -81,14 +81,16 @@ func (r *BindDefinitionReconciler) applyStatusNonFatal(ctx context.Context, bind
 
 // markStalled marks the BindDefinition as stalled with the given error (kstatus pattern).
 // Uses SSA to apply the stalled condition atomically.
+// The error is logged at debug level; callers log at the appropriate severity.
 func (r *BindDefinitionReconciler) markStalled(
 	ctx context.Context,
 	bindDefinition *authorizationv1alpha1.BindDefinition,
 	err error,
 ) {
 	logger := log.FromContext(ctx)
+	logger.V(1).Info("marking BindDefinition as stalled", "bindDefinitionName", bindDefinition.Name, "error", err)
 	conditions.MarkStalled(bindDefinition, bindDefinition.Generation,
-		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, err.Error())
+		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, "check operator logs for details")
 	bindDefinition.Status.ObservedGeneration = bindDefinition.Generation
 	if updateErr := ssa.ApplyBindDefinitionStatus(ctx, r.client, bindDefinition); updateErr != nil {
 		logger.Error(updateErr, "failed to apply Stalled status via SSA", "bindDefinitionName", bindDefinition.Name)

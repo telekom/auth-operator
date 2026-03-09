@@ -248,8 +248,15 @@ func init() {
 
 	webhookCmd.Flags().IntVar(&webhookPort, "port", 9443,
 		"The port the webhook server binds to. If not set, it will be set to '9443' as a default.")
+	// HTTP/2 is disabled by default as a mitigation for CVE-2023-44487
+	// (HTTP/2 Rapid Reset) and CVE-2023-39325 (Go net/http2 resource
+	// consumption). Enable only if your network infrastructure provides its
+	// own HTTP/2 attack mitigation (e.g. a load balancer with
+	// SETTINGS_MAX_CONCURRENT_STREAMS limiting).
 	webhookCmd.Flags().BoolVar(&enableHTTP2, "enable-http2", false,
-		"If set, HTTP/2 will be enabled for the webhook server.")
+		"If set, HTTP/2 will be enabled for the webhook server. "+
+			"Disabled by default to mitigate CVE-2023-44487 and CVE-2023-39325; "+
+			"enable only if your infrastructure mitigates HTTP/2 attacks.")
 	webhookCmd.Flags().StringVar(&webhookCertsDir, "certs-dir", "", "The directory for https certificates")
 	webhookCmd.Flags().BoolVar(&disableCertRotation, "disable-cert-rotation", false,
 		"disable automatic generation and rotation of webhook TLS certificates/keys")
