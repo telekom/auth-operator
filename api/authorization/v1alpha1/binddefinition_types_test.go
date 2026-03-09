@@ -71,13 +71,13 @@ func TestUnmarshalRoleBindings(t *testing.T) {
 		input    string
 		wantLen  int
 		wantErr  bool
-		wantRefs []string // ClusterRoleRefs of first element, if any.
+		wantRefs [][]string // ClusterRoleRefs for each element.
 	}{
 		{
 			name:     "JSON array with entries",
 			input:    `[{"clusterRoleRefs":["view"],"namespace":"ns1"},{"clusterRoleRefs":["edit"]}]`,
 			wantLen:  2,
-			wantRefs: []string{"view"},
+			wantRefs: [][]string{{"view"}, {"edit"}},
 		},
 		{
 			name:    "empty JSON array",
@@ -93,7 +93,7 @@ func TestUnmarshalRoleBindings(t *testing.T) {
 			name:     "legacy single object with content",
 			input:    `{"clusterRoleRefs":["view"],"namespace":"ns1"}`,
 			wantLen:  1,
-			wantRefs: []string{"view"},
+			wantRefs: [][]string{{"view"}},
 		},
 		{
 			name:    "legacy empty object",
@@ -122,9 +122,19 @@ func TestUnmarshalRoleBindings(t *testing.T) {
 			if len(rb) != tt.wantLen {
 				t.Errorf("len = %d, want %d", len(rb), tt.wantLen)
 			}
-			if tt.wantRefs != nil && len(rb) > 0 {
-				if len(rb[0].ClusterRoleRefs) != len(tt.wantRefs) {
-					t.Errorf("ClusterRoleRefs = %v, want %v", rb[0].ClusterRoleRefs, tt.wantRefs)
+			for i, refs := range tt.wantRefs {
+				if i >= len(rb) {
+					t.Errorf("missing element %d", i)
+					continue
+				}
+				if len(rb[i].ClusterRoleRefs) != len(refs) {
+					t.Errorf("rb[%d].ClusterRoleRefs = %v, want %v", i, rb[i].ClusterRoleRefs, refs)
+					continue
+				}
+				for j, ref := range refs {
+					if rb[i].ClusterRoleRefs[j] != ref {
+						t.Errorf("rb[%d].ClusterRoleRefs[%d] = %q, want %q", i, j, rb[i].ClusterRoleRefs[j], ref)
+					}
 				}
 			}
 		})
@@ -203,5 +213,33 @@ func TestBindDefinitionSpecUnmarshalArrayRoleBindings(t *testing.T) {
 	}
 	if spec.RoleBindings[0].Namespace != "ns1" {
 		t.Errorf("RoleBindings[0].Namespace = %q, want %q", spec.RoleBindings[0].Namespace, "ns1")
+	}
+	if len(spec.RoleBindings[1].RoleRefs) != 1 || spec.RoleBindings[1].RoleRefs[0] != "edit" {
+		t.Errorf("RoleBindings[1].RoleRefs = %v, want [edit]", spec.RoleBindings[1].RoleRefs)
+	}
+}
+
+func TestBindDefinitionSpecUnmarshalOmittedRoleBindings(t *testing.T) {
+	// When roleBindings is absent from JSON, pre-existing RoleBindings must be preserved.
+	spec := BindDefinitionSpec{
+		RoleBindings: []NamespaceBinding{
+			{Namespace: "kept"},
+		},
+	}
+	specJSON := `{
+		"targetName": "test",
+		"subjects": [{"kind":"Group","apiGroup":"rbac.authorization.k8s.io","name":"devs"}],
+		"clusterRoleBindings": {"clusterRoleRefs": ["admin"]}
+	}`
+
+	if err := json.Unmarshal([]byte(specJSON), &spec); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(spec.RoleBindings) != 1 {
+		t.Fatalf("RoleBindings len = %d, want 1 (preserved)", len(spec.RoleBindings))
+	}
+	if spec.RoleBindings[0].Namespace != "kept" {
+		t.Errorf("RoleBindings[0].Namespace = %q, want %q", spec.RoleBindings[0].Namespace, "kept")
 	}
 }

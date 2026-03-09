@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 
@@ -110,7 +111,7 @@ type BindDefinitionSpec struct {
 // to a list ([]NamespaceBinding). Resources created before that migration may
 // still be stored as a JSON object in etcd.
 func unmarshalRoleBindings(raw json.RawMessage) ([]NamespaceBinding, error) {
-	if len(raw) == 0 || string(raw) == "null" {
+	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return nil, nil
 	}
 
@@ -151,11 +152,15 @@ func (s *BindDefinitionSpec) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	rb, err := unmarshalRoleBindings(aux.RawRoleBindings)
-	if err != nil {
-		return err
+	// Only overwrite RoleBindings when the field is present in JSON;
+	// if absent, RawRoleBindings is nil and we leave the field untouched.
+	if aux.RawRoleBindings != nil {
+		rb, err := unmarshalRoleBindings(aux.RawRoleBindings)
+		if err != nil {
+			return err
+		}
+		s.RoleBindings = rb
 	}
-	s.RoleBindings = rb
 
 	return nil
 }
