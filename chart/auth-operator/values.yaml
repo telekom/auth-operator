@@ -48,11 +48,17 @@ controller:
   resources:
     limits:
       cpu: 500m
-      memory: 128Mi
+      memory: 256Mi
     requests:
       cpu: 10m
-      memory: 64Mi
+      memory: 128Mi
   replicas: 1
+  # Seconds to wait for graceful shutdown before SIGKILL
+  terminationGracePeriodSeconds: 35
+  # Startup probe settings (tune for large clusters that need longer init)
+  startupProbe:
+    failureThreshold: 30
+    periodSeconds: 2
   podDisruptionBudget:
     # Enable PodDisruptionBudget for high availability
     enabled: false
@@ -63,7 +69,9 @@ controller:
     # maxUnavailable: 1
 
 webhookServer:
-  replicas: 1
+  # When replicas > 1, leader election is automatically enabled to prevent
+  # concurrent cert rotation updates to the same Secret/WebhookConfiguration.
+  replicas: 2
   tdgMigration: "false"
   # Maximum sustained requests per second for the /authorize endpoint.
   # Note: this limit is per pod. In HA deployments with multiple replicas,
@@ -74,7 +82,7 @@ webhookServer:
   authorizeRateBurst: 200
   podDisruptionBudget:
     # Enable PodDisruptionBudget for high availability
-    enabled: false
+    enabled: true
     # Minimum number of pods that must be available during disruption
     minAvailable: 1
     # Maximum number of pods that can be unavailable during disruption
@@ -83,10 +91,31 @@ webhookServer:
   resources:
     limits:
       cpu: 150m
-      memory: 128Mi
+      memory: 256Mi
     requests:
       cpu: 50m
-      memory: 64Mi
+      memory: 128Mi
+  # Seconds to wait for graceful shutdown before SIGKILL
+  terminationGracePeriodSeconds: 35
+  # Startup probe settings (tune for large clusters that need longer init).
+  # Non-leader replicas wait for the cert Secret volume mount, which may
+  # take up to ~60s for kubelet sync; 120s window provides headroom.
+  startupProbe:
+    path: /healthz
+    port: 8081
+    failureThreshold: 60
+    periodSeconds: 2
+  # Pod affinity rules for webhook server (overrides global affinity).
+  # Default spreads replicas across nodes for high availability.
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                control-plane: webhook-server
+            topologyKey: kubernetes.io/hostname
   service:
     port: 443
     protocol: TCP

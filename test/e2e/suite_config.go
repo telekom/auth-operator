@@ -131,7 +131,7 @@ var ClusterMapping = map[string]TestSuiteConfig{
 		TestNamespaces:   []string{"e2e-ha-test-ns"},
 		MultiNode:        true,
 		Labels:           []string{"ha", "leader-election"},
-		DeployTimeout:    "5m",
+		DeployTimeout:    "8m",
 		ReconcileTimeout: "3m",
 		PollingInterval:  "5s",
 	},

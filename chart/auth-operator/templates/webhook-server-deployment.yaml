@@ -39,6 +39,9 @@ spec:
         - --tdg-migration={{ .Values.webhookServer.tdgMigration }}
         - --authorize-rate-limit={{ .Values.webhookServer.authorizeRateLimit }}
         - --authorize-rate-burst={{ .Values.webhookServer.authorizeRateBurst }}
+        {{- if gt (int .Values.webhookServer.replicas) 1 }}
+        - --leader-elect=true
+        {{- end }}
         - --verbosity={{ .Values.global.logLevel }}
         {{- if .Values.metrics.auth.enabled }}
         - --metrics-secure
@@ -80,6 +83,12 @@ spec:
             port: 8081
           initialDelaySeconds: 5
           periodSeconds: 10
+        startupProbe:
+          httpGet:
+            path: {{ .Values.webhookServer.startupProbe.path | default "/healthz" }}
+            port: {{ .Values.webhookServer.startupProbe.port | default 8081 }}
+          failureThreshold: {{ .Values.webhookServer.startupProbe.failureThreshold | default 30 }}
+          periodSeconds: {{ .Values.webhookServer.startupProbe.periodSeconds | default 2 }}
         resources: {{- toYaml .Values.webhookServer.resources | nindent 10 }}
         securityContext:
           {{- toYaml .Values.containerSecurityContext | nindent 10 }}
@@ -94,14 +103,19 @@ spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       serviceAccountName: {{ include "auth-operator.fullname" . }}-webhook-server
-      terminationGracePeriodSeconds: 10
+      terminationGracePeriodSeconds: {{ .Values.webhookServer.terminationGracePeriodSeconds | default 35 }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with .Values.webhookServer.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- else }}
       {{- with .Values.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- end }}
       {{- with .Values.tolerations }}
       tolerations:

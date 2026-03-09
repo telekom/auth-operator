@@ -106,7 +106,7 @@ var _ = Describe("Leader Election and HA E2E", Ordered, Label("ha", "leader-elec
 				"--set", "webhookServer.podDisruptionBudget.enabled=true",
 				"--set", "webhookServer.podDisruptionBudget.minAvailable=2",
 				"--wait",
-				"--timeout", "5m",
+				"--timeout", "8m",
 			)
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Helm install failed: %s", string(output))
