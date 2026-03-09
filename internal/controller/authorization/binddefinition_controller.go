@@ -205,10 +205,12 @@ func (r *BindDefinitionReconciler) namespaceToBindDefinitionRequests(ctx context
 		if !bindDefinitionMatchesNamespace(bindDef, namespace) {
 			logger.V(3).Info("skipping BindDefinition (no matching selector)",
 				"namespace", namespace.Name, "bindDefinition", bindDef.Name)
+			metrics.NamespaceFanoutSkipped.Inc()
 			continue
 		}
 		logger.V(3).Info("enqueuing BindDefinition reconciliation",
 			"namespace", namespace.Name, "bindDefinition", bindDef.Name)
+		metrics.NamespaceFanoutEnqueued.Inc()
 		requests = append(requests, reconcile.Request{
 			NamespacedName: types.NamespacedName{
 				Name:      bindDef.Name,
@@ -251,7 +253,7 @@ func namespaceLabelOrPhaseChangePredicate() predicate.Predicate {
 			}
 			return false
 		},
-		GenericFunc: func(_ event.GenericEvent) bool { return true },
+		GenericFunc: func(_ event.GenericEvent) bool { return false },
 	}
 }
 
@@ -268,7 +270,7 @@ func bindDefinitionMatchesNamespace(bd *authorizationv1alpha1.BindDefinition, ns
 
 	// During namespace termination, match all BDs with roleBindings to
 	// ensure owned resources are cleaned up via finalizers.
-	if ns.Status.Phase == corev1.NamespaceTerminating {
+	if conditions.IsNamespaceTerminating(ns) {
 		return true
 	}
 

@@ -2953,6 +2953,13 @@ func TestNamespaceLabelOrPhaseChangePredicate(t *testing.T) {
 			ObjectNew: ns,
 		})).To(BeFalse())
 	})
+
+	t.Run("generic events are filtered", func(t *testing.T) {
+		g := NewWithT(t)
+		g.Expect(pred.Generic(event.GenericEvent{
+			Object: &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "ns1"}},
+		})).To(BeFalse())
+	})
 }
 
 func TestBindDefinitionMatchesNamespace(t *testing.T) {
