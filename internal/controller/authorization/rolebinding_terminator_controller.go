@@ -48,6 +48,10 @@ const (
 	maxConcurrentResourceChecks = 30
 	// terminatingNamespaceRequeueInterval is how often to recheck a terminating namespace.
 	terminatingNamespaceRequeueInterval = 15 * time.Second
+	// terminationResourceChannelSize is the buffer size for the blocking resources channel.
+	// Sized for the typical number of distinct API resource types in a cluster with CRDs.
+	// If the buffer is full, resource check goroutines will block until the collector drains it.
+	terminationResourceChannelSize = 100
 )
 
 // namespaceDeletionResourceBlocking represents a resource type and the specific instances blocking namespace deletion.
@@ -64,6 +68,7 @@ type namespaceTerminationStatus struct {
 	blockingResources []namespaceDeletionResourceBlocking
 	mutex             sync.Mutex
 	lastError         error
+	fetchedAt         time.Time
 	rateLimiter       rate.Sometimes
 }
 
@@ -123,19 +128,44 @@ func (r *RoleBindingTerminator) SetupWithManager(mgr ctrl.Manager, concurrency i
 
 // getNamespacedBlockingResources retrieves cached blocking resources for a namespace, recalculating them if the rate limiter allows it.
 func (r *RoleBindingTerminator) getNamespacedBlockingResources(ctx context.Context, namespace string) ([]namespaceDeletionResourceBlocking, error) {
+	logger := log.FromContext(ctx)
 	v, _ := r.namespaceTerminationResourcesCache.LoadOrStore(namespace, newNamespaceTerminationStatus())
 
-	// Use rate limiter to avoid frequent checks
+	// Use rate limiter to avoid frequent checks.
 	nsTermStatus := v.(*namespaceTerminationStatus)
 
+	refreshed := false
 	nsTermStatus.rateLimiter.Do(func() {
 		nsTermStatus.mutex.Lock()
 		defer nsTermStatus.mutex.Unlock()
 
-		// Recalculate blocking resources
+		// Recalculate blocking resources.
 		nsTermStatus.blockingResources, nsTermStatus.lastError = namespaceHasResources(ctx, r.resourceTracker, r.dynamicClient, namespace)
+		nsTermStatus.fetchedAt = time.Now()
+		refreshed = true
 	})
-	return nsTermStatus.blockingResources, nsTermStatus.lastError
+
+	// Snapshot cached fields under lock to avoid data races with concurrent refreshes.
+	nsTermStatus.mutex.Lock()
+	blockingResources := nsTermStatus.blockingResources
+	lastError := nsTermStatus.lastError
+	fetchedAt := nsTermStatus.fetchedAt
+	nsTermStatus.mutex.Unlock()
+
+	if !refreshed && !fetchedAt.IsZero() {
+		logger.V(2).Info("returning cached blocking resources",
+			"namespace", namespace,
+			"cacheAge", time.Since(fetchedAt),
+			"blockingResourceCount", len(blockingResources),
+		)
+	}
+
+	// Return a defensive copy of the top-level slice so callers cannot
+	// append/remove elements in the cached data. Note: nested slices
+	// (e.g. Names) are shared with the cache and must not be mutated.
+	result := make([]namespaceDeletionResourceBlocking, len(blockingResources))
+	copy(result, blockingResources)
+	return result, lastError
 }
 
 // namespaceHasResources returns the namespaced resources (excluding RoleBindings and
@@ -167,7 +197,7 @@ func namespaceHasResources(ctx context.Context, resourceTracker *discovery.Resou
 	var blockingResources []namespaceDeletionResourceBlocking
 
 	// channel to collect blocking resources
-	blockingResourcesChannel := make(chan namespaceDeletionResourceBlocking, 100)
+	blockingResourcesChannel := make(chan namespaceDeletionResourceBlocking, terminationResourceChannelSize)
 
 	// WaitGroup to ensure collector goroutine finishes
 	var collectorWg sync.WaitGroup
@@ -280,7 +310,7 @@ func supportsList(verbs []string) bool {
 
 // formatBlockingResourcesMessage creates a detailed event message about what resources are blocking namespace deletion.
 func formatBlockingResourcesMessage(blockingResources []namespaceDeletionResourceBlocking) string {
-	resourceDetails := []string{}
+	resourceDetails := make([]string, 0, len(blockingResources))
 
 	for _, rb := range blockingResources {
 		var resourceType string
@@ -341,6 +371,7 @@ func (r *RoleBindingTerminator) getOwningBindDefinition(ctx context.Context, own
 func (r *RoleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	startTime := time.Now()
 	logger := log.FromContext(ctx).WithValues("roleBinding", req.NamespacedName)
+	ctx = log.IntoContext(ctx, logger)
 
 	// Track reconcile duration on exit
 	defer func() {
@@ -408,6 +439,8 @@ func (r *RoleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request)
 				return ctrl.Result{}, err
 			}
 			logger.V(1).Info("removed finalizer from RoleBinding")
+			// Evict the cache entry — no longer needed for a non-terminating namespace.
+			r.namespaceTerminationResourcesCache.Delete(roleBinding.Namespace)
 		}
 		// Namespace is not terminating — no blocking-resource check needed.
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleBindingTerminator, metrics.ResultSuccess).Inc()
@@ -476,6 +509,11 @@ func (r *RoleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 		r.recorder.Eventf(bindDefinition, nil, corev1.EventTypeNormal, authorizationv1alpha1.EventReasonFinalizerRemoved, authorizationv1alpha1.EventActionFinalizerRemove, "Removed finalizer from RoleBinding %s in terminating namespace %s", roleBinding.Name, namespace.Name)
+		// Evict the cache entry — this RoleBinding's finalizer removal means
+		// termination cleanup is complete (all blocking resources already gone).
+		// The cache is retained WHILE blocking resources exist to avoid redundant
+		// API calls for sibling RoleBindings in the same namespace.
+		r.namespaceTerminationResourcesCache.Delete(namespace.Name)
 		logger.V(1).Info("successfully removed finalizer from RoleBinding in terminating namespace")
 	} else {
 		logger.V(3).Info("RoleBinding does not have finalizer", "roleBindingName", roleBinding.Name)
