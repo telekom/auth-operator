@@ -151,8 +151,10 @@ func (r *BindDefinitionReconciler) SetupWithManager(mgr ctrl.Manager, concurrenc
 		// - remove finalizers of owned resources during termination
 		// The predicate filters out annotation-only and non-phase status updates
 		// to avoid O(N×M) fan-out on events that cannot affect namespace matching.
-		// Phase transitions (e.g. Active -> Terminating) and delete events are
-		// intentionally processed so the reconciler can clean up finalizers.
+		// Phase transitions (e.g. Active → Terminating) are the primary signal
+		// for finalizer cleanup. Delete events are also passed through as a
+		// safety net, although by the time a namespace delete event fires the
+		// object is typically already gone from the API server.
 		Watches(&corev1.Namespace{},
 			handler.EnqueueRequestsFromMapFunc(r.namespaceToBindDefinitionRequests),
 			builder.WithPredicates(namespaceLabelOrPhaseChangePredicate()),
@@ -199,7 +201,7 @@ func (r *BindDefinitionReconciler) namespaceToBindDefinitionRequests(ctx context
 
 	// Filter BindDefinitions to only those whose namespace selectors could
 	// match this namespace, reducing unnecessary reconciliations.
-	var requests []reconcile.Request
+	requests := make([]reconcile.Request, 0, len(bindDefList.Items))
 	for i := range bindDefList.Items {
 		bindDef := &bindDefList.Items[i]
 		if !bindDefinitionMatchesNamespace(bindDef, namespace) {
