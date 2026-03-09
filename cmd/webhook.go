@@ -206,6 +206,9 @@ func configureWebhooks(mgr manager.Manager, tp *tracing.Provider) error {
 		Log:    ctrl.Log.WithName("Authorizer"),
 		Tracer: tp.TracerIfEnabled(),
 	}
+	if authorizeRateLimit < 0 {
+		return fmt.Errorf("--authorize-rate-limit must be non-negative, got %v", authorizeRateLimit)
+	}
 	if authorizeRateLimit > 0 {
 		if authorizeRateBurst <= 0 {
 			return fmt.Errorf("--authorize-rate-burst must be positive when rate limiting is enabled, got %d", authorizeRateBurst)
