@@ -162,30 +162,25 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 	return admission.Denied(DenialNoOIDCAttributes)
 }
 
+// trackedLabelKeys defines the set of label keys that are extracted from NamespaceSelectors.
+var trackedLabelKeys = map[string]bool{
+	authzv1alpha1.LabelKeyOwner:      true,
+	authzv1alpha1.LabelKeyTenant:     true,
+	authzv1alpha1.LabelKeyThirdParty: true,
+}
+
 // Extract labels from NamespaceSelector.
 func getLabelsFromNamespaceSelector(selector metav1.LabelSelector) map[string]string {
 	labels := map[string]string{}
-	// Process matchLabels
+	// Process matchLabels.
 	for key, value := range selector.MatchLabels {
-		if key == authzv1alpha1.LabelKeyOwner {
-			labels[key] = value
-		}
-		if key == authzv1alpha1.LabelKeyTenant {
-			labels[key] = value
-		}
-		if key == authzv1alpha1.LabelKeyThirdParty {
+		if trackedLabelKeys[key] {
 			labels[key] = value
 		}
 	}
-	// Process matchExpressions
+	// Process matchExpressions.
 	for _, expr := range selector.MatchExpressions {
-		if expr.Key == authzv1alpha1.LabelKeyOwner && expr.Operator == metav1.LabelSelectorOpIn && len(expr.Values) == 1 {
-			labels[expr.Key] = expr.Values[0]
-		}
-		if expr.Key == authzv1alpha1.LabelKeyTenant && expr.Operator == metav1.LabelSelectorOpIn && len(expr.Values) == 1 {
-			labels[expr.Key] = expr.Values[0]
-		}
-		if expr.Key == authzv1alpha1.LabelKeyThirdParty && expr.Operator == metav1.LabelSelectorOpIn && len(expr.Values) == 1 {
+		if trackedLabelKeys[expr.Key] && expr.Operator == metav1.LabelSelectorOpIn && len(expr.Values) == 1 {
 			labels[expr.Key] = expr.Values[0]
 		}
 	}
