@@ -566,7 +566,7 @@ spec:
 				"--set", "webhookServer.podDisruptionBudget.enabled=true",
 				"--set", "webhookServer.podDisruptionBudget.minAvailable=1",
 				"--wait",
-				"--timeout", "5m",
+				"--timeout", "7m",
 			)
 			cmd := exec.CommandContext(context.Background(), "helm", upgradeArgs...)
 			output, err := utils.Run(cmd)

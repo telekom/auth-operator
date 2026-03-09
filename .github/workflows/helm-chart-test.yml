@@ -157,7 +157,7 @@ jobs:
             --set image.repository=auth-operator \
             --set image.tag=test \
             --wait \
-            --timeout 5m
+            --timeout 7m
 
       - name: Verify installation
         run: |

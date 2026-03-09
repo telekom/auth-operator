@@ -143,8 +143,11 @@ For the full list of exposed metrics and recommended alert rules, see the
 
 ## High Availability
 
-The webhook server defaults to 2 replicas with pod anti-affinity and PDB enabled for
-production-ready high availability. To also enable HA for the controller:
+The webhook server defaults to 2 replicas with pod anti-affinity and PDB enabled.
+When multiple replicas are deployed, leader election is automatically enabled so
+that only one replica drives certificate rotation. Non-leader replicas detect the
+TLS certificate via the Secret volume mount and become ready independently, so all
+replicas serve admission webhook traffic. To also enable HA for the controller:
 
 ```bash
 helm install auth-operator oci://ghcr.io/telekom/charts/auth-operator \

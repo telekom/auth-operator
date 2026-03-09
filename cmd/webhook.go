@@ -9,7 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync/atomic"
+	"time"
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	authorizationwebhook "github.com/telekom/auth-operator/internal/webhook/authorization"
@@ -108,8 +111,8 @@ ensuring authorization policies are enforced at creation time.`,
 				BindAddress:    metricsAddr,
 				FilterProvider: metricsFilterProvider(),
 			},
-			WebhookServer:          webhookServer,
-			HealthProbeBindAddress: probeAddr,
+			WebhookServer:           webhookServer,
+			HealthProbeBindAddress:  probeAddr,
 			LeaderElection:          webhookLeaderElect,
 			LeaderElectionID:        "auth-webhook.t-caas.telekom.com",
 			LeaderElectionNamespace: namespace,
@@ -169,7 +172,10 @@ ensuring authorization policies are enforced at creation time.`,
 		}
 
 		// The cert rotator will notify when we can start the webhook
-		// and the metric endpoint
+		// and the metric endpoint.
+		// When leader election is enabled, only the leader runs the cert rotator.
+		// Non-leader replicas detect certificate availability via the Secret
+		// volume mount and become ready independently.
 		if !disableCertRotation {
 			setupLog.Info("enabling certificate rotation",
 				"dnsName", certRotationDNSName,
@@ -177,6 +183,9 @@ ensuring authorization policies are enforced at creation time.`,
 				"mutatingWebhooks", certRotationMutatingWebhooks,
 				"validatingWebhooks", certRotationValidatingWebhooks,
 			)
+			// Use a separate channel for the cert rotator so we can also
+			// detect cert availability from the Secret volume mount (non-leader pods).
+			certRotatorReady := make(chan struct{})
 			if err := certrotator.Enable(
 				mgr,
 				namespace,
@@ -184,10 +193,41 @@ ensuring authorization policies are enforced at creation time.`,
 				certRotationDNSName,
 				certRotationSecretName,
 				webhooks,
-				startListeners,
+				certRotatorReady,
 			); err != nil {
 				return fmt.Errorf("unable to set up cert rotation: %w", err)
 			}
+
+			// Signal startListeners when certificates are available, either via
+			// the cert rotator (leader) or by detecting cert files on disk (non-leader).
+			go func() {
+				certFile := filepath.Join(webhookCertsDir, "tls.crt")
+				keyFile := filepath.Join(webhookCertsDir, "tls.key")
+				ticker := time.NewTicker(2 * time.Second)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-certRotatorReady:
+						setupLog.Info("cert rotator signaled readiness (leader)")
+						close(startListeners)
+						return
+					case <-ticker.C:
+						certInfo, err := os.Stat(certFile)
+						if err != nil || certInfo.Size() == 0 {
+							continue
+						}
+						keyInfo, err := os.Stat(keyFile)
+						if err != nil || keyInfo.Size() == 0 {
+							continue
+						}
+						setupLog.Info("certificate files detected via volume mount, signaling readiness")
+						close(startListeners)
+						return
+					}
+				}
+			}()
 		} else {
 			setupLog.Info("certificate rotation disabled, using existing certificates")
 			close(startListeners)

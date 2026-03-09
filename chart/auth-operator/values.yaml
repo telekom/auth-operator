@@ -97,11 +97,13 @@ webhookServer:
       memory: 128Mi
   # Seconds to wait for graceful shutdown before SIGKILL
   terminationGracePeriodSeconds: 35
-  # Startup probe settings (tune for large clusters that need longer init)
+  # Startup probe settings (tune for large clusters that need longer init).
+  # Non-leader replicas wait for the cert Secret volume mount, which may
+  # take up to ~60s for kubelet sync; 120s window provides headroom.
   startupProbe:
     path: /healthz
     port: 8081
-    failureThreshold: 30
+    failureThreshold: 60
     periodSeconds: 2
   # Pod affinity rules for webhook server (overrides global affinity).
   # Default spreads replicas across nodes for high availability.
