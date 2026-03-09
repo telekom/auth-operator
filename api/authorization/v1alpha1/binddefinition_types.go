@@ -1,6 +1,9 @@
 package v1alpha1
 
 import (
+	"encoding/json"
+	"fmt"
+
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -100,6 +103,61 @@ type BindDefinitionSpec struct {
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:default=true
 	AutomountServiceAccountToken *bool `json:"automountServiceAccountToken,omitempty"`
+}
+
+// unmarshalRoleBindings handles backward-compatible unmarshaling of the
+// roleBindings field, which was changed from a single object (NamespaceBinding)
+// to a list ([]NamespaceBinding). Resources created before that migration may
+// still be stored as a JSON object in etcd.
+func unmarshalRoleBindings(raw json.RawMessage) ([]NamespaceBinding, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+
+	// Try array first (current format).
+	var arr []NamespaceBinding
+	if err := json.Unmarshal(raw, &arr); err == nil {
+		return arr, nil
+	}
+
+	// Fallback: try single object (legacy format).
+	var single NamespaceBinding
+	if err := json.Unmarshal(raw, &single); err != nil {
+		return nil, fmt.Errorf("cannot unmarshal roleBindings: expected array or object: %w", err)
+	}
+
+	if len(single.ClusterRoleRefs) > 0 || len(single.RoleRefs) > 0 ||
+		single.Namespace != "" || len(single.NamespaceSelector) > 0 {
+		return []NamespaceBinding{single}, nil
+	}
+
+	return []NamespaceBinding{}, nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler for BindDefinitionSpec.
+// It provides backward-compatible unmarshaling of the roleBindings field,
+// which was changed from a single object to a list.
+func (s *BindDefinitionSpec) UnmarshalJSON(data []byte) error {
+	// Use a type alias to prevent infinite recursion.
+	type bindDefinitionSpecAlias BindDefinitionSpec
+	aux := &struct {
+		*bindDefinitionSpecAlias
+		RawRoleBindings json.RawMessage `json:"roleBindings,omitempty"`
+	}{
+		bindDefinitionSpecAlias: (*bindDefinitionSpecAlias)(s),
+	}
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	rb, err := unmarshalRoleBindings(aux.RawRoleBindings)
+	if err != nil {
+		return err
+	}
+	s.RoleBindings = rb
+
+	return nil
 }
 
 // BindDefinitionStatus defines the observed state of BindDefinition.
