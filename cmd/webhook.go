@@ -206,13 +206,10 @@ func configureWebhooks(mgr manager.Manager, tp *tracing.Provider) error {
 		Log:    ctrl.Log.WithName("Authorizer"),
 		Tracer: tp.TracerIfEnabled(),
 	}
-	if authorizeRateLimit < 0 {
-		return fmt.Errorf("--authorize-rate-limit must be non-negative, got %v", authorizeRateLimit)
+	if err := validateRateLimitFlags(authorizeRateLimit, authorizeRateBurst); err != nil {
+		return err
 	}
 	if authorizeRateLimit > 0 {
-		if authorizeRateBurst <= 0 {
-			return fmt.Errorf("--authorize-rate-burst must be positive when rate limiting is enabled, got %d", authorizeRateBurst)
-		}
 		authorizer.Limiter = rate.NewLimiter(rate.Limit(authorizeRateLimit), authorizeRateBurst)
 		log.Info("rate limiting enabled for /authorize",
 			"rateLimit", authorizeRateLimit,
@@ -283,4 +280,15 @@ func init() {
 		"Maximum sustained requests per second for the /authorize endpoint. Set to 0 to disable rate limiting.")
 	webhookCmd.Flags().IntVar(&authorizeRateBurst, "authorize-rate-burst", 200,
 		"Maximum burst size for the /authorize endpoint rate limiter.")
+}
+
+// validateRateLimitFlags validates rate-limit and burst flag values.
+func validateRateLimitFlags(limit float64, burst int) error {
+	if limit < 0 {
+		return fmt.Errorf("--authorize-rate-limit must be non-negative, got %v", limit)
+	}
+	if limit > 0 && burst <= 0 {
+		return fmt.Errorf("--authorize-rate-burst must be positive when rate limiting is enabled, got %d", burst)
+	}
+	return nil
 }

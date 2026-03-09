@@ -133,6 +133,33 @@ func TestControllerCmdFlagValidation(t *testing.T) {
 	}
 }
 
+func TestValidateRateLimitFlags(t *testing.T) {
+	tests := []struct {
+		name        string
+		limit       float64
+		burst       int
+		expectError bool
+	}{
+		{"disabled (zero limit)", 0, 0, false},
+		{"valid limit and burst", 100, 200, false},
+		{"fractional limit", 0.5, 1, false},
+		{"negative limit", -1, 200, true},
+		{"zero burst with positive limit", 100, 0, true},
+		{"negative burst with positive limit", 100, -1, true},
+		{"zero limit ignores burst", 0, -1, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateRateLimitFlags(tt.limit, tt.burst)
+			if (err != nil) != tt.expectError {
+				t.Errorf("validateRateLimitFlags(%v, %d): expected error=%v, got %v",
+					tt.limit, tt.burst, tt.expectError, err)
+			}
+		})
+	}
+}
+
 func TestRootCommandStructure(t *testing.T) {
 	// Verify rootCmd has expected subcommands
 	subcommands := rootCmd.Commands()

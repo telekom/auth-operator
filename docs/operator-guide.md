@@ -311,6 +311,11 @@ metric tracks how often this occurs.
 
 Set `authorizeRateLimit: 0` to disable rate limiting entirely.
 
+> **Upgrade Note:** Rate limiting is **enabled by default** at 100 req/s
+> (burst 200). Existing clusters upgrading to this version will start
+> enforcing the limit automatically. Set `authorizeRateLimit: 0` to
+> restore the previous unlimited behaviour.
+
 **Webhook server** — Only allows ingress on port 9443 (webhook) from all
 namespaces (required for kube-apiserver on host network) and port 8081
 (health probes).
