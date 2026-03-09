@@ -1938,6 +1938,39 @@ func TestCollectNamespaces(t *testing.T) {
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(nsSet).To(HaveLen(1), "same namespace should be deduplicated")
 	})
+
+	t.Run("empty LabelSelector matches all namespaces", func(t *testing.T) {
+		g := NewWithT(t)
+
+		ns1 := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: "ns-a"},
+		}
+		ns2 := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: "ns-b", Labels: map[string]string{"env": "prod"}},
+		}
+		bindDef := &authorizationv1alpha1.BindDefinition{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-bd"},
+			Spec: authorizationv1alpha1.BindDefinitionSpec{
+				TargetName: "test",
+				Subjects:   []rbacv1.Subject{{Kind: "User", Name: "u"}},
+				RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+					{
+						ClusterRoleRefs:   []string{"view"},
+						NamespaceSelector: []metav1.LabelSelector{{}},
+					},
+				},
+			},
+		}
+
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ns1, ns2).Build()
+		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
+
+		nsSet, err := r.collectNamespaces(ctx, bindDef)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(nsSet).To(HaveLen(2), "empty LabelSelector should match all namespaces per Kubernetes semantics")
+		g.Expect(nsSet).To(HaveKey("ns-a"))
+		g.Expect(nsSet).To(HaveKey("ns-b"))
+	})
 }
 
 // TestIsSAReferencedByOtherBindDefs tests the cross-reference check for ServiceAccounts

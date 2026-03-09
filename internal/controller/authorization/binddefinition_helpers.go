@@ -346,13 +346,15 @@ func (r *BindDefinitionReconciler) filterActiveNamespaces(
 }
 
 // resolveRoleBindingNamespaces returns the namespaces that match the roleBinding's selection criteria.
+// When an explicit Namespace is set it takes precedence; NamespaceSelector entries are only evaluated
+// when Namespace is empty. An empty LabelSelector ({}) matches all namespaces per Kubernetes semantics.
 func (r *BindDefinitionReconciler) resolveRoleBindingNamespaces(
 	ctx context.Context,
 	roleBinding authorizationv1alpha1.NamespaceBinding,
 ) ([]corev1.Namespace, error) {
 	var namespaces []corev1.Namespace
 
-	// If explicit namespace is specified, use that
+	// If explicit namespace is specified, use that (takes precedence over selectors).
 	if roleBinding.Namespace != "" {
 		ns := &corev1.Namespace{}
 		err := r.client.Get(ctx, types.NamespacedName{Name: roleBinding.Namespace}, ns)
@@ -365,7 +367,9 @@ func (r *BindDefinitionReconciler) resolveRoleBindingNamespaces(
 		return []corev1.Namespace{*ns}, nil
 	}
 
-	// Otherwise, use namespace selectors
+	// Otherwise, use namespace selectors.
+	// An empty LabelSelector ({}) matches all namespaces per Kubernetes semantics,
+	// consistent with the BindDefinition validating webhook behavior.
 	seen := make(map[string]bool)
 	for _, nsSelector := range roleBinding.NamespaceSelector {
 		selector, err := metav1.LabelSelectorAsSelector(&nsSelector)
