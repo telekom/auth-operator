@@ -38,6 +38,8 @@ func TestMetricRegistration(t *testing.T) {
 		{"ServiceAccountSkippedPreExisting", ServiceAccountSkippedPreExisting},
 		{"ExternalSAsReferenced", ExternalSAsReferenced},
 		{"AuthorizerRateLimitedTotal", AuthorizerRateLimitedTotal},
+		{"NamespaceFanoutSkipped", NamespaceFanoutSkipped},
+		{"NamespaceFanoutEnqueued", NamespaceFanoutEnqueued},
 	}
 
 	for _, c := range collectors {

@@ -243,7 +243,7 @@ var (
 		[]string{"authorizer"},
 	)
 
-// AuthorizerRateLimitedTotal counts the number of SubjectAccessReview
+	// AuthorizerRateLimitedTotal counts the number of SubjectAccessReview
 	// requests rejected because the rate limiter's token bucket was exhausted.
 	// A sustained non-zero rate indicates the /authorize endpoint is receiving
 	// more traffic than the configured --authorize-rate-limit allows.

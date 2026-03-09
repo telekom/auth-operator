@@ -205,8 +205,13 @@ func (r *BindDefinitionReconciler) namespaceToBindDefinitionRequests(ctx context
 	for i := range bindDefList.Items {
 		bindDef := &bindDefList.Items[i]
 		if !bindDefinitionMatchesNamespace(bindDef, namespace) {
-			logger.V(3).Info("skipping BindDefinition (no matching selector)",
-				"namespace", namespace.Name, "bindDefinition", bindDef.Name)
+			if len(bindDef.Spec.RoleBindings) == 0 {
+				logger.V(3).Info("skipping BindDefinition (cluster-only, no roleBindings)",
+					"namespace", namespace.Name, "bindDefinition", bindDef.Name)
+			} else {
+				logger.V(3).Info("skipping BindDefinition (no matching selector)",
+					"namespace", namespace.Name, "bindDefinition", bindDef.Name)
+			}
 			metrics.NamespaceFanoutSkipped.Inc()
 			continue
 		}
