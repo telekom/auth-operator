@@ -81,6 +81,14 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	start := time.Now()
 
+	// Limit request body size to prevent OOM from oversized payloads.
+	// Applied before any other processing so that early-return paths
+	// (rate limiting, decode errors) also benefit from the size cap.
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+
+	// Ensure request body is closed to prevent resource leaks.
+	defer func() { _ = r.Body.Close() }()
+
 	// Rate-limit incoming requests to prevent overloading the authorizer.
 	// When the limiter is configured and the token bucket is exhausted,
 	// record the rate-limit event and send a rate-limited SubjectAccessReview response.
@@ -101,12 +109,6 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ctx, span = wa.Tracer.Start(ctx, "webhook.SubjectAccessReview")
 		defer span.End()
 	}
-
-	// Limit request body size to prevent OOM from oversized payloads.
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
-
-	// Ensure request body is closed to prevent resource leaks.
-	defer func() { _ = r.Body.Close() }()
 
 	var sar authzv1.SubjectAccessReview
 
