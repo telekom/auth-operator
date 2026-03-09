@@ -28,11 +28,16 @@ spec:
       containers:
       - args:
         - controller
-        - --leader-elect
+        {{- if le (int .Values.controller.replicas) 1 }}
+        - --leader-elect=false
+        {{- end }}
         - --binddefinition-concurrency={{ .Values.controller.bindDefinitionConcurrency }}
         - --roledefinition-concurrency={{ .Values.controller.roleDefinitionConcurrency }}
         - --webhookauthorizer-concurrency={{ .Values.controller.webhookAuthorizerConcurrency }}
         - --verbosity={{ .Values.global.logLevel }}
+        {{- if .Values.metrics.auth.enabled }}
+        - --metrics-secure
+        {{- end }}
         {{- if .Values.tracing.enabled }}
         - --tracing-enabled
         - --tracing-endpoint={{ required "tracing.endpoint must be set when tracing.enabled is true" .Values.tracing.endpoint }}

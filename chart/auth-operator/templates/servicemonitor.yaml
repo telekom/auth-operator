@@ -20,6 +20,9 @@ spec:
       {{- with .Values.metrics.serviceMonitor.scrapeTimeout }}
       scrapeTimeout: {{ . }}
       {{- end }}
+      {{- if .Values.metrics.auth.enabled }}
+      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      {{- end }}
   selector:
     matchLabels:
       control-plane: controller-manager

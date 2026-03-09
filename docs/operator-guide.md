@@ -197,14 +197,21 @@ helm upgrade auth-operator oci://ghcr.io/telekom/charts/auth-operator \
 
 ### Leader Election
 
-When `controller.replicas > 1`, leader election is automatically enabled.
-Only the leader actively reconciles resources; standby replicas wait to
-acquire leadership if the leader fails.
+Leader election is **enabled by default** in the Go binary (`--leader-elect=true`).
+The Helm chart automatically disables it when `controller.replicas` is 1 (single
+replica). For multi-replica deployments, leader election ensures only one
+controller actively reconciles resources; standby replicas wait to acquire
+leadership if the leader fails.
+
+> **Warning:** If you initially deployed with `--leader-elect=false` (e.g.,
+> the Helm chart's single-replica default) and later scale the deployment
+> without adding `--leader-elect=true`, multiple controllers can run
+> simultaneously, causing conflicting RBAC reconciliations.
 
 **Verify leader election:**
 
 ```bash
-kubectl get lease -n auth-operator-system auth-operator-leader-election -o yaml
+kubectl get lease -n auth-operator-system auth.t-caas.telekom.com -o yaml
 ```
 
 ### Pod Anti-Affinity
@@ -230,7 +237,49 @@ controller:
 
 ### Prometheus Metrics
 
-The operator exposes metrics at `:8080/metrics`. Key metrics:
+The operator exposes metrics at `:8080/metrics`. When `metrics.auth.enabled`
+is set to `true` in the Helm values, the endpoint requires a valid Kubernetes
+bearer token with permission to GET the non-resource URL `/metrics`.
+
+**RBAC prerequisites**: The operator pods use `WithAuthenticationAndAuthorization`
+to validate metrics requests via the Kubernetes API. This requires both the
+controller-manager and webhook-server ServiceAccounts to have
+`system:auth-delegator` permissions for TokenReview and SubjectAccessReview
+API calls. The Helm chart creates a `ClusterRoleBinding` to
+`system:auth-delegator` for both ServiceAccounts automatically when
+`metrics.auth.enabled` is `true`.
+
+To allow Prometheus to scrape metrics, the monitoring ServiceAccount needs
+the following RBAC:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: auth-operator-metrics-reader
+rules:
+  - nonResourceURLs: ["/metrics"]
+    verbs: ["get"]
+```
+
+Bind this ClusterRole to the Prometheus ServiceAccount:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: auth-operator-metrics-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: auth-operator-metrics-reader
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: monitoring
+```
+
+Key metrics:
 
 | Metric | Type | Description |
 |--------|------|-------------|
@@ -242,6 +291,12 @@ The operator exposes metrics at `:8080/metrics`. Key metrics:
 | `auth_operator_namespaces_active` | Gauge | Namespaces matching selectors |
 
 ### Enable ServiceMonitor
+
+When `metrics.auth.enabled` is `true`, the metrics endpoint requires
+authentication. The ServiceMonitor must include a bearer token for
+Prometheus to authenticate. The Helm chart configures bearer token
+authentication via the in-pod ServiceAccount token (`bearerTokenFile`)
+when `metrics.auth.enabled` is set.
 
 ```bash
 helm upgrade auth-operator oci://ghcr.io/telekom/charts/auth-operator \

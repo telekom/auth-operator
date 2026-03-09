@@ -100,7 +100,8 @@ and their status is kept up to date.`,
 			Scheme: scheme,
 
 			Metrics: metricsserver.Options{
-				BindAddress: metricsAddr,
+				BindAddress:    metricsAddr,
+				FilterProvider: metricsFilterProvider(),
 			},
 			LeaderElection:          enableLeaderElection,
 			LeaderElectionID:        "auth.t-caas.telekom.com",
@@ -211,9 +212,9 @@ and their status is kept up to date.`,
 func init() {
 	rootCmd.AddCommand(controllerCmd)
 
-	controllerCmd.Flags().BoolVar(&enableLeaderElection, "leader-elect", false,
+	controllerCmd.Flags().BoolVar(&enableLeaderElection, "leader-elect", true,
 		"Enable leader election for controller manager. "+
-			"Enabling this will ensure there is only one active controller manager.")
+			"Enabled by default for safety. Disable only for single-replica deployments.")
 	controllerCmd.Flags().IntVar(&bindDefinitionConcurrency, "binddefinition-concurrency", 5,
 		"Number of concurrent workers for BindDefinition reconciler. Default is 5. Use 0 to disable the reconciler.")
 	controllerCmd.Flags().IntVar(&roleDefinitionConcurrency, "roledefinition-concurrency", 5,

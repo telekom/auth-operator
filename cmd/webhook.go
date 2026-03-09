@@ -102,8 +102,11 @@ ensuring authorization policies are enforced at creation time.`,
 		}
 
 		mgr, err := ctrl.NewManager(cfg, ctrl.Options{
-			Scheme:                 scheme,
-			Metrics:                metricsserver.Options{BindAddress: metricsAddr},
+			Scheme: scheme,
+			Metrics: metricsserver.Options{
+				BindAddress:    metricsAddr,
+				FilterProvider: metricsFilterProvider(),
+			},
 			WebhookServer:          webhookServer,
 			HealthProbeBindAddress: probeAddr,
 		})
