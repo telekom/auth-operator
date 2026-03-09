@@ -51,3 +51,8 @@ subjects:
 - kind: ServiceAccount
   name: '{{ include "auth-operator.fullname" . }}-controller-manager'
   namespace: '{{ .Release.Namespace }}'
+{{- if gt (int .Values.webhookServer.replicas) 1 }}
+- kind: ServiceAccount
+  name: '{{ include "auth-operator.fullname" . }}-webhook-server'
+  namespace: '{{ .Release.Namespace }}'
+{{- end }}
