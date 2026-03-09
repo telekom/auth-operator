@@ -8,6 +8,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -280,10 +281,13 @@ func (v *BindDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 			newObj.Name, allErrs)
 	}
 
-	// Spec validation is unconditional: Kubernetes increments metadata.generation
-	// after admission, so old/new generation are always equal during the webhook
-	// call and cannot be used to detect spec-only changes. The missing-role-policy
-	// annotation may also change between old and new, gating stricter checks.
+	// Skip expensive spec validation (namespace listing, role lookups) when
+	// neither the spec nor the missing-role-policy annotation changed.
+	if equality.Semantic.DeepEqual(oldObj.Spec, newObj.Spec) &&
+		oldObj.GetMissingRolePolicy() == newObj.GetMissingRolePolicy() {
+		return nil, nil
+	}
+
 	return v.validateBindDefinitionSpec(ctx, newObj)
 }
 
