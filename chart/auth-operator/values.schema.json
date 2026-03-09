@@ -162,7 +162,7 @@
           "properties": {
             "limits": {
               "type": "object",
-              "additionalProperties": false,
+              "additionalProperties": { "type": "string" },
               "properties": {
                 "cpu": { "type": "string", "description": "CPU limit." },
                 "memory": { "type": "string", "description": "Memory limit." }
@@ -170,7 +170,7 @@
             },
             "requests": {
               "type": "object",
-              "additionalProperties": false,
+              "additionalProperties": { "type": "string" },
               "properties": {
                 "cpu": { "type": "string", "description": "CPU request." },
                 "memory": { "type": "string", "description": "Memory request." }
@@ -197,7 +197,7 @@
             "minAvailable": {
               "type": "integer",
               "description": "Minimum number of pods that must be available during disruption.",
-              "minimum": 1,
+              "minimum": 0,
               "default": 1
             },
             "maxUnavailable": {
@@ -248,7 +248,7 @@
             "minAvailable": {
               "type": "integer",
               "description": "Minimum number of pods that must be available during disruption.",
-              "minimum": 1,
+              "minimum": 0,
               "default": 1
             },
             "maxUnavailable": {
@@ -268,7 +268,7 @@
           "properties": {
             "limits": {
               "type": "object",
-              "additionalProperties": false,
+              "additionalProperties": { "type": "string" },
               "properties": {
                 "cpu": { "type": "string", "description": "CPU limit." },
                 "memory": { "type": "string", "description": "Memory limit." }
@@ -276,7 +276,7 @@
             },
             "requests": {
               "type": "object",
-              "additionalProperties": false,
+              "additionalProperties": { "type": "string" },
               "properties": {
                 "cpu": { "type": "string", "description": "CPU request." },
                 "memory": { "type": "string", "description": "Memory request." }
