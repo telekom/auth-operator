@@ -69,6 +69,8 @@ controller:
     # maxUnavailable: 1
 
 webhookServer:
+  # When replicas > 1, leader election is automatically enabled to prevent
+  # concurrent cert rotation updates to the same Secret/WebhookConfiguration.
   replicas: 2
   tdgMigration: "false"
   # Maximum sustained requests per second for the /authorize endpoint.

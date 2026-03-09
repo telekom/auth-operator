@@ -41,6 +41,7 @@ var (
 	enableTDGMigration             bool
 	authorizeRateLimit             float64
 	authorizeRateBurst             int
+	webhookLeaderElect             bool
 )
 
 // webhookCmd represents the webhook command.
@@ -109,6 +110,9 @@ ensuring authorization policies are enforced at creation time.`,
 			},
 			WebhookServer:          webhookServer,
 			HealthProbeBindAddress: probeAddr,
+			LeaderElection:          webhookLeaderElect,
+			LeaderElectionID:        "auth-webhook.t-caas.telekom.com",
+			LeaderElectionNamespace: namespace,
 		})
 		if err != nil {
 			return fmt.Errorf("unable to start manager: %w", err)
@@ -290,6 +294,10 @@ func init() {
 		"Maximum sustained requests per second for the /authorize endpoint. Set to 0 to disable rate limiting.")
 	webhookCmd.Flags().IntVar(&authorizeRateBurst, "authorize-rate-burst", 200,
 		"Maximum burst size for the /authorize endpoint rate limiter.")
+
+	webhookCmd.Flags().BoolVar(&webhookLeaderElect, "leader-elect", false,
+		"Enable leader election for the webhook manager. Required when running "+
+			"multiple replicas with cert rotation to prevent concurrent Secret updates.")
 }
 
 // validateRateLimitFlags validates rate-limit and burst flag values.

@@ -39,6 +39,9 @@ spec:
         - --tdg-migration={{ .Values.webhookServer.tdgMigration }}
         - --authorize-rate-limit={{ .Values.webhookServer.authorizeRateLimit }}
         - --authorize-rate-burst={{ .Values.webhookServer.authorizeRateBurst }}
+        {{- if gt (int .Values.webhookServer.replicas) 1 }}
+        - --leader-elect=true
+        {{- end }}
         - --verbosity={{ .Values.global.logLevel }}
         {{- if .Values.metrics.auth.enabled }}
         - --metrics-secure
