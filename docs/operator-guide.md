@@ -135,11 +135,11 @@ The auth-operator consists of two main components:
 |------|-------------|---------|
 | `--namespace` | Operator namespace | `POD_NAMESPACE` |
 | `--health-probe-bind-address` | Health probe address | `:8081` |
-| `--metrics-bind-address` | Prometheus metrics address | `:8080` |
+| `--metrics-bind-address` | Prometheus metrics address (set to `0` to disable serving) | `:8080` |
 | `--metrics-secure` | Require authn/authz for metrics endpoint | `false` |
 | `--verbosity` / `-v` | Log level (0-9) | `2` |
-| `--tracing-enabled` | Enable OpenTelemetry tracing | `false` |
-| `--tracing-endpoint` | OTLP collector endpoint | — |
+| `--tracing-enabled` | Enable OpenTelemetry tracing (requires `--tracing-endpoint` or `OTEL_EXPORTER_OTLP_ENDPOINT`) | `false` |
+| `--tracing-endpoint` | OTLP collector endpoint (required when `--tracing-enabled` is true, unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set) | — |
 | `--tracing-sampling-rate` | Trace sampling rate (0.0–1.0) | `0.1` |
 | `--tracing-insecure` | Use insecure gRPC for tracing | `false` |
 
