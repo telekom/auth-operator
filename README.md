@@ -154,7 +154,7 @@ See the [Operator Guide](docs/operator-guide.md) for the full reference.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--namespace` | `kube-system` | Operator namespace (falls back to `POD_NAMESPACE` env) |
+| `--namespace` | `$POD_NAMESPACE` | Operator namespace (value of `POD_NAMESPACE` env var; empty if unset) |
 | `--health-probe-bind-address` | `:8081` | Health probe bind address |
 | `--metrics-bind-address` | `:8080` | Metrics bind address |
 | `--leader-elect` | `true` | Enable leader election for HA |
