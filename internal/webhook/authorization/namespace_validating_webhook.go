@@ -332,6 +332,43 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 		return admission.Allowed("")
 	}
 
+	// Last resort: if the user is a ServiceAccount performing CREATE/UPDATE, check if
+	// its source namespace has the same tracked ownership labels as the target namespace (issue #202).
+	// This is restricted to CREATE/UPDATE — DELETE is intentionally excluded.
+	if saInfo.IsServiceAccount &&
+		(req.Operation == admissionv1.Create || req.Operation == admissionv1.Update) {
+		inheritedLabels, saErr := GetSANamespaceTrackedLabels(ctx, v.Client, saInfo)
+		if saErr != nil {
+			logger.Error(saErr, "failed to lookup SA namespace labels", "saNamespace", saInfo.Namespace, "targetNamespace", req.Name)
+			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()
+			return admission.Errored(http.StatusInternalServerError, saErr)
+		}
+		if len(inheritedLabels) > 0 {
+			// Symmetric comparison: all inherited labels must match AND the target
+			// must not have extra tracked ownership labels beyond what the SA namespace has.
+			labelsMatch := true
+			for k, val := range inheritedLabels {
+				actual, ok := ns.Labels[k]
+				if !ok || actual != val {
+					labelsMatch = false
+					break
+				}
+			}
+			if labelsMatch {
+				// Check for extra tracked keys on the target that the SA namespace doesn't have.
+				if extraKey := FindExtraTrackedKey(ns.Labels, inheritedLabels); extraKey != "" {
+					labelsMatch = false
+				}
+			}
+			if labelsMatch {
+				logger.V(1).Info("SA namespace label inheritance - authorized via matching SA source namespace labels",
+					"namespace", req.Name, "saNamespace", saInfo.Namespace, "username", req.UserInfo.Username)
+				metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
+				return admission.Allowed("")
+			}
+		}
+	}
+
 	denialMsg := fmt.Sprintf(DenialNotNamespaceOwnerFmt, req.UserInfo.Username, ns.Name)
 	logger.V(1).Info("namespace operation denied", "namespace", req.Name,
 		"operation", req.Operation, "username", req.UserInfo.Username, "reason", denialMsg)

@@ -1,11 +1,21 @@
 package webhooks
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
+	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	admissionv1 "k8s.io/api/admission/v1"
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
 func TestParseServiceAccount(t *testing.T) {
@@ -487,6 +497,323 @@ func TestIsFieldIndexError(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := isFieldIndexError(tt.err); got != tt.want {
 				t.Errorf("isFieldIndexError(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetSANamespaceTrackedLabels(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(authzv1alpha1.AddToScheme(scheme))
+
+	tests := []struct {
+		name       string
+		saInfo     ServiceAccountInfo
+		namespaces []corev1.Namespace
+		wantLabels map[string]string
+		wantErr    bool
+	}{
+		{
+			name:       "not a service account",
+			saInfo:     ServiceAccountInfo{IsServiceAccount: false},
+			wantLabels: nil,
+		},
+		{
+			name:       "SA namespace does not exist",
+			saInfo:     ServiceAccountInfo{Namespace: "nonexistent", Name: "sa", IsServiceAccount: true},
+			wantLabels: nil,
+		},
+		{
+			name:   "SA namespace has no tracked labels",
+			saInfo: ServiceAccountInfo{Namespace: "my-ns", Name: "sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "my-ns", Labels: map[string]string{"unrelated": "label"}}},
+			},
+			wantLabels: nil,
+		},
+		{
+			name:   "SA namespace has owner+tenant labels",
+			saInfo: ServiceAccountInfo{Namespace: "tenant-ns", Name: "operator-sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "tenant-ns", Labels: map[string]string{
+					authzv1alpha1.LabelKeyOwner:  "tenant",
+					authzv1alpha1.LabelKeyTenant: "team-alpha",
+				}}},
+			},
+			wantLabels: map[string]string{
+				authzv1alpha1.LabelKeyOwner:  "tenant",
+				authzv1alpha1.LabelKeyTenant: "team-alpha",
+			},
+		},
+		{
+			name:   "SA namespace has thirdparty labels",
+			saInfo: ServiceAccountInfo{Namespace: "3p-ns", Name: "sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "3p-ns", Labels: map[string]string{
+					authzv1alpha1.LabelKeyOwner:      "thirdparty",
+					authzv1alpha1.LabelKeyThirdParty: "vendor-x",
+				}}},
+			},
+			wantLabels: map[string]string{
+				authzv1alpha1.LabelKeyOwner:      "thirdparty",
+				authzv1alpha1.LabelKeyThirdParty: "vendor-x",
+			},
+		},
+		{
+			name:   "SA namespace has platform label only",
+			saInfo: ServiceAccountInfo{Namespace: "platform-ns", Name: "sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "platform-ns", Labels: map[string]string{
+					authzv1alpha1.LabelKeyOwner: "platform",
+				}}},
+			},
+			wantLabels: map[string]string{
+				authzv1alpha1.LabelKeyOwner: "platform",
+			},
+		},
+		{
+			name:   "SA namespace has no labels at all",
+			saInfo: ServiceAccountInfo{Namespace: "bare-ns", Name: "sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "bare-ns"}},
+			},
+			wantLabels: nil,
+		},
+		{
+			name:   "tenant owner without tenant identifying label - incomplete, returns nil",
+			saInfo: ServiceAccountInfo{Namespace: "bad-ns", Name: "sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "bad-ns", Labels: map[string]string{
+					authzv1alpha1.LabelKeyOwner: "tenant",
+				}}},
+			},
+			wantLabels: nil,
+		},
+		{
+			name:   "thirdparty owner without thirdparty identifying label - incomplete, returns nil",
+			saInfo: ServiceAccountInfo{Namespace: "bad-3p", Name: "sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "bad-3p", Labels: map[string]string{
+					authzv1alpha1.LabelKeyOwner: "thirdparty",
+				}}},
+			},
+			wantLabels: nil,
+		},
+		{
+			name:   "tenant label present without owner label - no owner, returns nil",
+			saInfo: ServiceAccountInfo{Namespace: "no-owner", Name: "sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "no-owner", Labels: map[string]string{
+					authzv1alpha1.LabelKeyTenant: "team-x",
+				}}},
+			},
+			wantLabels: nil,
+		},
+		{
+			name:   "platform owner with tenant label - ambiguous, returns nil",
+			saInfo: ServiceAccountInfo{Namespace: "ambig-1", Name: "sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "ambig-1", Labels: map[string]string{
+					authzv1alpha1.LabelKeyOwner:  "platform",
+					authzv1alpha1.LabelKeyTenant: "team-x",
+				}}},
+			},
+			wantLabels: nil,
+		},
+		{
+			name:   "platform owner with thirdparty label - ambiguous, returns nil",
+			saInfo: ServiceAccountInfo{Namespace: "ambig-2", Name: "sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "ambig-2", Labels: map[string]string{
+					authzv1alpha1.LabelKeyOwner:      "platform",
+					authzv1alpha1.LabelKeyThirdParty: "vendor-x",
+				}}},
+			},
+			wantLabels: nil,
+		},
+		{
+			name:   "tenant owner with thirdparty label - ambiguous, returns nil",
+			saInfo: ServiceAccountInfo{Namespace: "ambig-3", Name: "sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "ambig-3", Labels: map[string]string{
+					authzv1alpha1.LabelKeyOwner:      "tenant",
+					authzv1alpha1.LabelKeyTenant:     "team-x",
+					authzv1alpha1.LabelKeyThirdParty: "vendor-x",
+				}}},
+			},
+			wantLabels: nil,
+		},
+		{
+			name:   "thirdparty owner with tenant label - ambiguous, returns nil",
+			saInfo: ServiceAccountInfo{Namespace: "ambig-4", Name: "sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "ambig-4", Labels: map[string]string{
+					authzv1alpha1.LabelKeyOwner:      "thirdparty",
+					authzv1alpha1.LabelKeyThirdParty: "vendor-x",
+					authzv1alpha1.LabelKeyTenant:     "team-x",
+				}}},
+			},
+			wantLabels: nil,
+		},
+		{
+			name:   "unknown owner value - returns nil",
+			saInfo: ServiceAccountInfo{Namespace: "unknown-owner", Name: "sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "unknown-owner", Labels: map[string]string{
+					authzv1alpha1.LabelKeyOwner: "custom-value",
+				}}},
+			},
+			wantLabels: nil,
+		},
+		{
+			name:   "owner label with empty value - returns nil",
+			saInfo: ServiceAccountInfo{Namespace: "empty-owner", Name: "sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "empty-owner", Labels: map[string]string{
+					authzv1alpha1.LabelKeyOwner: "",
+				}}},
+			},
+			wantLabels: nil,
+		},
+		{
+			name:   "tenant owner with empty tenant value - returns nil",
+			saInfo: ServiceAccountInfo{Namespace: "empty-tenant", Name: "sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "empty-tenant", Labels: map[string]string{
+					authzv1alpha1.LabelKeyOwner:  "tenant",
+					authzv1alpha1.LabelKeyTenant: "",
+				}}},
+			},
+			wantLabels: nil,
+		},
+		{
+			name:   "thirdparty owner with empty thirdparty value - returns nil",
+			saInfo: ServiceAccountInfo{Namespace: "empty-tp", Name: "sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "empty-tp", Labels: map[string]string{
+					authzv1alpha1.LabelKeyOwner:      "thirdparty",
+					authzv1alpha1.LabelKeyThirdParty: "",
+				}}},
+			},
+			wantLabels: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			builder := fake.NewClientBuilder().WithScheme(scheme)
+			for i := range tt.namespaces {
+				builder = builder.WithObjects(&tt.namespaces[i])
+			}
+			c := builder.Build()
+
+			got, err := GetSANamespaceTrackedLabels(context.Background(), c, tt.saInfo)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if tt.wantLabels == nil {
+				if len(got) != 0 {
+					t.Errorf("expected empty labels, got %v", got)
+				}
+				return
+			}
+
+			if len(got) != len(tt.wantLabels) {
+				t.Errorf("expected %d labels, got %d: %v", len(tt.wantLabels), len(got), got)
+				return
+			}
+			for k, v := range tt.wantLabels {
+				if got[k] != v {
+					t.Errorf("expected label %s=%s, got %s", k, v, got[k])
+				}
+			}
+		})
+	}
+}
+
+func TestGetSANamespaceTrackedLabels_ClientGetError(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(authzv1alpha1.AddToScheme(scheme))
+
+	injectedErr := fmt.Errorf("transient API failure")
+	c := fake.NewClientBuilder().WithScheme(scheme).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(_ context.Context, _ client.WithWatch, _ client.ObjectKey, _ client.Object, _ ...client.GetOption) error {
+				return injectedErr
+			},
+		}).Build()
+
+	saInfo := ServiceAccountInfo{Namespace: "some-ns", Name: "sa", IsServiceAccount: true}
+	got, err := GetSANamespaceTrackedLabels(context.Background(), c, saInfo)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if len(got) != 0 {
+		t.Errorf("expected empty labels on error, got %v", got)
+	}
+}
+
+func TestFindExtraTrackedKey(t *testing.T) {
+	tests := []struct {
+		name         string
+		targetLabels map[string]string
+		inherited    map[string]string
+		want         string
+	}{
+		{
+			name:         "no extra keys",
+			targetLabels: map[string]string{authzv1alpha1.LabelKeyOwner: "platform"},
+			inherited:    map[string]string{authzv1alpha1.LabelKeyOwner: "platform"},
+			want:         "",
+		},
+		{
+			name:         "target has no tracked keys",
+			targetLabels: map[string]string{"unrelated": "val"},
+			inherited:    map[string]string{authzv1alpha1.LabelKeyOwner: "platform"},
+			want:         "",
+		},
+		{
+			name:         "target has extra tenant key",
+			targetLabels: map[string]string{authzv1alpha1.LabelKeyOwner: "platform", authzv1alpha1.LabelKeyTenant: "team-x"},
+			inherited:    map[string]string{authzv1alpha1.LabelKeyOwner: "platform"},
+			want:         authzv1alpha1.LabelKeyTenant,
+		},
+		{
+			name:         "target has extra thirdparty key",
+			targetLabels: map[string]string{authzv1alpha1.LabelKeyOwner: "platform", authzv1alpha1.LabelKeyThirdParty: "vendor-x"},
+			inherited:    map[string]string{authzv1alpha1.LabelKeyOwner: "platform"},
+			want:         authzv1alpha1.LabelKeyThirdParty,
+		},
+		{
+			name:         "target has extra owner key",
+			targetLabels: map[string]string{authzv1alpha1.LabelKeyOwner: "platform"},
+			inherited:    map[string]string{authzv1alpha1.LabelKeyTenant: "team-x"},
+			want:         authzv1alpha1.LabelKeyOwner,
+		},
+		{
+			name:         "both empty",
+			targetLabels: map[string]string{},
+			inherited:    map[string]string{},
+			want:         "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FindExtraTrackedKey(tt.targetLabels, tt.inherited)
+			if got != tt.want {
+				t.Errorf("FindExtraTrackedKey() = %q, want %q", got, tt.want)
 			}
 		})
 	}

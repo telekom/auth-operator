@@ -1,11 +1,26 @@
 package webhooks
 
 import (
+	"context"
+	"fmt"
 	"strings"
 
+	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	admissionv1 "k8s.io/api/admission/v1"
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+// trackedOwnershipKeys defines the ownership label keys used for SA namespace
+// label inheritance, label extraction, and extra-key detection.
+var trackedOwnershipKeys = []string{
+	authzv1alpha1.LabelKeyOwner,
+	authzv1alpha1.LabelKeyTenant,
+	authzv1alpha1.LabelKeyThirdParty,
+}
 
 /*
 BYPASS ACCOUNT SECURITY MODEL
@@ -157,4 +172,89 @@ func MatchesSubjects(userGroups []string, saInfo ServiceAccountInfo, subjects []
 // IsRestrictedBindDefinition checks if a BindDefinition should be skipped based on its name.
 func IsRestrictedBindDefinition(name string) bool {
 	return strings.HasSuffix(name, "-namespaced-reader-restricted")
+}
+
+// GetSANamespaceTrackedLabels looks up the namespace where the ServiceAccount resides
+// and returns the tracked ownership labels (owner, tenant, thirdparty) found on it.
+// It validates that the label set is a valid ownership combination:
+//   - The owner label must always be present.
+//   - For tenant/thirdparty owners, the corresponding identifying label must also be present.
+//
+// Returns an empty map if the SA is not a ServiceAccount, the namespace has no tracked
+// labels, or the label set is incomplete. Returns a non-nil error only for transient
+// API failures (non-NotFound errors) so the caller can return admission.Errored.
+func GetSANamespaceTrackedLabels(ctx context.Context, c client.Client, saInfo ServiceAccountInfo) (map[string]string, error) {
+	if !saInfo.IsServiceAccount {
+		return map[string]string{}, nil
+	}
+
+	saNamespace := &corev1.Namespace{}
+	if err := c.Get(ctx, types.NamespacedName{Name: saInfo.Namespace}, saNamespace); err != nil {
+		if apierrors.IsNotFound(err) {
+			return map[string]string{}, nil
+		}
+		return map[string]string{}, fmt.Errorf("unable to get SA namespace %q: %w", saInfo.Namespace, err)
+	}
+
+	result := map[string]string{}
+	for _, key := range trackedOwnershipKeys {
+		if val, ok := saNamespace.Labels[key]; ok {
+			result[key] = val
+		}
+	}
+
+	// Require at minimum the owner label with a non-empty value.
+	ownerVal, hasOwner := result[authzv1alpha1.LabelKeyOwner]
+	if !hasOwner || ownerVal == "" {
+		return map[string]string{}, nil
+	}
+
+	// Enforce a valid and non-ambiguous ownership combination:
+	//   - owner=platform    => only owner; no tenant/thirdparty labels
+	//   - owner=tenant      => owner + tenant; no thirdparty label
+	//   - owner=thirdparty  => owner + thirdparty; no tenant label
+	// Any other combination is treated as invalid and results in no tracked labels.
+	switch ownerVal {
+	case authzv1alpha1.OwnerPlatform:
+		if _, ok := result[authzv1alpha1.LabelKeyTenant]; ok {
+			return map[string]string{}, nil
+		}
+		if _, ok := result[authzv1alpha1.LabelKeyThirdParty]; ok {
+			return map[string]string{}, nil
+		}
+	case authzv1alpha1.OwnerTenant:
+		tenantVal, hasTenant := result[authzv1alpha1.LabelKeyTenant]
+		if !hasTenant || tenantVal == "" {
+			return map[string]string{}, nil
+		}
+		if _, ok := result[authzv1alpha1.LabelKeyThirdParty]; ok {
+			return map[string]string{}, nil
+		}
+	case authzv1alpha1.OwnerThirdParty:
+		tpVal, hasTP := result[authzv1alpha1.LabelKeyThirdParty]
+		if !hasTP || tpVal == "" {
+			return map[string]string{}, nil
+		}
+		if _, ok := result[authzv1alpha1.LabelKeyTenant]; ok {
+			return map[string]string{}, nil
+		}
+	default:
+		// Unknown owner values are not considered valid tracked ownership.
+		return map[string]string{}, nil
+	}
+
+	return result, nil
+}
+
+// FindExtraTrackedKey returns the first tracked ownership label key that exists
+// on targetLabels but is absent from inherited. Returns "" if no extra keys exist.
+func FindExtraTrackedKey(targetLabels, inherited map[string]string) string {
+	for _, key := range trackedOwnershipKeys {
+		if _, onTarget := targetLabels[key]; onTarget {
+			if _, onSA := inherited[key]; !onSA {
+				return key
+			}
+		}
+	}
+	return ""
 }

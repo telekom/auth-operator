@@ -1981,3 +1981,279 @@ func mustMarshalJSON(t *testing.T, obj interface{}) []byte {
 	}
 	return data
 }
+
+// TestNamespaceValidatorSANamespaceInheritance tests the SA namespace label inheritance feature (issue #202).
+// When no BindDefinition authorizes the SA, but the SA's source namespace has matching tracked labels
+// with the target namespace, the request is allowed as a last-resort fallback.
+func TestNamespaceValidatorSANamespaceInheritance(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(authzv1alpha1.AddToScheme(scheme))
+
+	tests := []struct {
+		name          string
+		operation     admissionv1.Operation
+		username      string
+		groups        []string
+		targetNS      *corev1.Namespace
+		saNamespace   *corev1.Namespace // SA's source namespace (pre-existing in cluster)
+		expectedAllow bool
+	}{
+		{
+			name:      "SA in tenant namespace creates matching tenant namespace - allowed",
+			operation: admissionv1.Create,
+			username:  "system:serviceaccount:tenant-alpha:my-operator",
+			targetNS: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "new-tenant-ns",
+					Labels: map[string]string{
+						"t-caas.telekom.com/owner":  "tenant",
+						"t-caas.telekom.com/tenant": "team-alpha",
+					},
+				},
+			},
+			saNamespace: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "tenant-alpha",
+					Labels: map[string]string{
+						"t-caas.telekom.com/owner":  "tenant",
+						"t-caas.telekom.com/tenant": "team-alpha",
+					},
+				},
+			},
+			expectedAllow: true,
+		},
+		{
+			name:      "SA in tenant namespace creates namespace with different tenant - denied",
+			operation: admissionv1.Create,
+			username:  "system:serviceaccount:tenant-alpha:my-operator",
+			targetNS: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "new-tenant-ns",
+					Labels: map[string]string{
+						"t-caas.telekom.com/owner":  "tenant",
+						"t-caas.telekom.com/tenant": "team-beta",
+					},
+				},
+			},
+			saNamespace: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "tenant-alpha",
+					Labels: map[string]string{
+						"t-caas.telekom.com/owner":  "tenant",
+						"t-caas.telekom.com/tenant": "team-alpha",
+					},
+				},
+			},
+			expectedAllow: false,
+		},
+		{
+			name:      "SA in platform namespace creates matching platform namespace - allowed",
+			operation: admissionv1.Create,
+			username:  "system:serviceaccount:platform-ns:platform-sa",
+			targetNS: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "new-platform-ns",
+					Labels: map[string]string{
+						"t-caas.telekom.com/owner": "platform",
+					},
+				},
+			},
+			saNamespace: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "platform-ns",
+					Labels: map[string]string{
+						"t-caas.telekom.com/owner": "platform",
+					},
+				},
+			},
+			expectedAllow: true,
+		},
+		{
+			name:      "SA in namespace without tracked labels - denied",
+			operation: admissionv1.Create,
+			username:  "system:serviceaccount:bare-ns:sa",
+			targetNS: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "new-ns",
+					Labels: map[string]string{
+						"t-caas.telekom.com/owner": "tenant",
+					},
+				},
+			},
+			saNamespace: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "bare-ns",
+					Labels: map[string]string{"unrelated": "value"},
+				},
+			},
+			expectedAllow: false,
+		},
+		{
+			name:      "Non-SA user without BindDefinition match - denied (no inheritance)",
+			operation: admissionv1.Create,
+			username:  "some-oidc-user",
+			groups:    []string{"unrelated-group"},
+			targetNS: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "new-ns",
+					Labels: map[string]string{
+						"t-caas.telekom.com/owner": "tenant",
+					},
+				},
+			},
+			expectedAllow: false,
+		},
+		{
+			name:      "SA in tenant namespace updates matching namespace - allowed",
+			operation: admissionv1.Update,
+			username:  "system:serviceaccount:tenant-alpha:my-operator",
+			targetNS: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "existing-tenant-ns",
+					Labels: map[string]string{
+						"t-caas.telekom.com/owner":  "tenant",
+						"t-caas.telekom.com/tenant": "team-alpha",
+					},
+				},
+			},
+			saNamespace: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "tenant-alpha",
+					Labels: map[string]string{
+						"t-caas.telekom.com/owner":  "tenant",
+						"t-caas.telekom.com/tenant": "team-alpha",
+					},
+				},
+			},
+			expectedAllow: true,
+		},
+		{
+			name:      "SA in tenant namespace - target NS has owner mismatch - denied",
+			operation: admissionv1.Create,
+			username:  "system:serviceaccount:tenant-alpha:my-operator",
+			targetNS: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "new-ns",
+					Labels: map[string]string{
+						"t-caas.telekom.com/owner": "platform",
+					},
+				},
+			},
+			saNamespace: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "tenant-alpha",
+					Labels: map[string]string{
+						"t-caas.telekom.com/owner":  "tenant",
+						"t-caas.telekom.com/tenant": "team-alpha",
+					},
+				},
+			},
+			expectedAllow: false,
+		},
+		{
+			name:      "SA source namespace does not exist - denied",
+			operation: admissionv1.Create,
+			username:  "system:serviceaccount:nonexistent-ns:sa",
+			targetNS: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "new-ns",
+					Labels: map[string]string{
+						"t-caas.telekom.com/owner": "tenant",
+					},
+				},
+			},
+			// No saNamespace provided — it doesn't exist in the cluster
+			expectedAllow: false,
+		},
+		{
+			name:      "SA with subset of tracked keys - target has extra tracked key - denied",
+			operation: admissionv1.Create,
+			username:  "system:serviceaccount:platform-ns:platform-sa",
+			targetNS: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "new-ns",
+					Labels: map[string]string{
+						"t-caas.telekom.com/owner":  "platform",
+						"t-caas.telekom.com/tenant": "team-alpha",
+					},
+				},
+			},
+			saNamespace: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "platform-ns",
+					Labels: map[string]string{
+						"t-caas.telekom.com/owner": "platform",
+					},
+				},
+			},
+			expectedAllow: false,
+		},
+		{
+			name:      "SA DELETE operation - SA fallback not applied - denied",
+			operation: admissionv1.Delete,
+			username:  "system:serviceaccount:tenant-alpha:my-operator",
+			targetNS: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "tenant-ns",
+					Labels: map[string]string{
+						"t-caas.telekom.com/owner":  "tenant",
+						"t-caas.telekom.com/tenant": "team-alpha",
+					},
+				},
+			},
+			saNamespace: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "tenant-alpha",
+					Labels: map[string]string{
+						"t-caas.telekom.com/owner":  "tenant",
+						"t-caas.telekom.com/tenant": "team-alpha",
+					},
+				},
+			},
+			expectedAllow: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			builder := fake.NewClientBuilder().WithScheme(scheme)
+			if tt.saNamespace != nil {
+				builder = builder.WithObjects(tt.saNamespace)
+			}
+			fakeClient := builder.Build()
+
+			validator := &webhooks.NamespaceValidator{
+				Client:  fakeClient,
+				Decoder: crAdmission.NewDecoder(scheme),
+			}
+
+			targetNSRaw := mustMarshalJSON(t, tt.targetNS)
+			admissionReq := admissionv1.AdmissionRequest{
+				Kind:      metav1.GroupVersionKind{Group: "", Version: "v1", Kind: "Namespace"},
+				Name:      tt.targetNS.Name,
+				Operation: tt.operation,
+				UserInfo: authenticationv1.UserInfo{
+					Username: tt.username,
+					Groups:   tt.groups,
+				},
+				Object: runtime.RawExtension{Raw: targetNSRaw},
+			}
+			if tt.operation == admissionv1.Update {
+				admissionReq.OldObject = runtime.RawExtension{Raw: targetNSRaw}
+			}
+			req := crAdmission.Request{
+				AdmissionRequest: admissionReq,
+			}
+
+			resp := validator.Handle(context.Background(), req)
+
+			if tt.expectedAllow && !resp.Allowed {
+				t.Errorf("expected allowed, got denied: %s", resp.Result.Message)
+			}
+			if !tt.expectedAllow && resp.Allowed {
+				t.Errorf("expected denied, got allowed")
+			}
+		})
+	}
+}
