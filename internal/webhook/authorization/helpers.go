@@ -14,6 +14,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// trackedOwnershipKeys defines the ownership label keys used for SA namespace
+// label inheritance, label extraction, and extra-key detection.
+var trackedOwnershipKeys = []string{
+	authzv1alpha1.LabelKeyOwner,
+	authzv1alpha1.LabelKeyTenant,
+	authzv1alpha1.LabelKeyThirdParty,
+}
+
 /*
 BYPASS ACCOUNT SECURITY MODEL
 
@@ -188,14 +196,8 @@ func GetSANamespaceTrackedLabels(ctx context.Context, c client.Client, saInfo Se
 		return map[string]string{}, fmt.Errorf("unable to get SA namespace %q: %w", saInfo.Namespace, err)
 	}
 
-	trackedKeys := []string{
-		authzv1alpha1.LabelKeyOwner,
-		authzv1alpha1.LabelKeyTenant,
-		authzv1alpha1.LabelKeyThirdParty,
-	}
-
 	result := map[string]string{}
-	for _, key := range trackedKeys {
+	for _, key := range trackedOwnershipKeys {
 		if val, ok := saNamespace.Labels[key]; ok {
 			result[key] = val
 		}
@@ -247,12 +249,7 @@ func GetSANamespaceTrackedLabels(ctx context.Context, c client.Client, saInfo Se
 // FindExtraTrackedKey returns the first tracked ownership label key that exists
 // on targetLabels but is absent from inherited. Returns "" if no extra keys exist.
 func FindExtraTrackedKey(targetLabels, inherited map[string]string) string {
-	trackedKeys := []string{
-		authzv1alpha1.LabelKeyOwner,
-		authzv1alpha1.LabelKeyTenant,
-		authzv1alpha1.LabelKeyThirdParty,
-	}
-	for _, key := range trackedKeys {
+	for _, key := range trackedOwnershipKeys {
 		if _, onTarget := targetLabels[key]; onTarget {
 			if _, onSA := inherited[key]; !onSA {
 				return key

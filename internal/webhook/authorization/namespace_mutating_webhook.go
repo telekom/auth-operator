@@ -219,11 +219,14 @@ func (m *NamespaceMutator) applyLabelPatch(ctx context.Context, req admission.Re
 }
 
 // trackedLabelKeys defines the set of label keys that are extracted from NamespaceSelectors.
-var trackedLabelKeys = map[string]bool{
-	authzv1alpha1.LabelKeyOwner:      true,
-	authzv1alpha1.LabelKeyTenant:     true,
-	authzv1alpha1.LabelKeyThirdParty: true,
-}
+// Derived from the package-level trackedOwnershipKeys.
+var trackedLabelKeys = func() map[string]bool {
+	m := make(map[string]bool, len(trackedOwnershipKeys))
+	for _, k := range trackedOwnershipKeys {
+		m[k] = true
+	}
+	return m
+}()
 
 // Extract labels from NamespaceSelector.
 func getLabelsFromNamespaceSelector(selector metav1.LabelSelector) map[string]string {
