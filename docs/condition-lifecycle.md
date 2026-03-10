@@ -347,8 +347,8 @@ kubectl get roledefinitions -o json | \
 ### Monitoring Conditions via Metrics
 
 The operator exposes a `auth_operator_reconcile_total` counter with a `result`
-label (`success`, `error`, `requeue`). A rising `error` count correlates with
-`Stalled=True` conditions:
+label. Possible values are `success`, `error`, `requeue`, `skipped`, `finalized`,
+and `degraded`. A rising `error` count correlates with `Stalled=True` conditions:
 
 ```bash
 curl -s http://localhost:8080/metrics | grep auth_operator_reconcile_total
@@ -356,8 +356,8 @@ curl -s http://localhost:8080/metrics | grep auth_operator_reconcile_total
 
 ### Condition Staleness Check
 
-If `observedGeneration` on a condition is **less than** `metadata.generation`,
-the condition is stale — the resource has been modified since the last
+If `status.observedGeneration` is **less than** `metadata.generation`,
+the status is stale — the resource has been modified since the last
 reconciliation. Wait for the controller to re-evaluate:
 
 ```bash

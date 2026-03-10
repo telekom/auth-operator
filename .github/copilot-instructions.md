@@ -260,9 +260,7 @@ logger.V(1).Info("debug")  // Verbose
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `POD_NAMESPACE` | Operator namespace (from Kubernetes downward API) | *(none)* |
-| `LEADER_ELECTION` | Enable leader election | `true` |
-| `PROBE_ADDR` | Health probe address | `:8081` |
-| `METRICS_ADDR` | Metrics address | `:8080` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector endpoint (alternative to `--tracing-endpoint` flag) | *(none)* |
 
 ## Common Issues & Workarounds
 
