@@ -291,3 +291,9 @@ const (
 	// PolicyCompliantMessagePolicyScopeNotMatched is the message when policy scope doesn't match target namespaces.
 	PolicyCompliantMessagePolicyScopeNotMatched AuthZConditionMessage = "Target namespaces are outside policy scope"
 )
+
+// Deprovisioned condition constants for restricted resources.
+const (
+	// DeprovisionedReason is the reason when resources are deprovisioned due to policy violations.
+	DeprovisionedReason AuthZConditionReason = "Deprovisioned"
+)

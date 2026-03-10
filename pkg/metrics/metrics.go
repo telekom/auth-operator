@@ -337,10 +337,13 @@ const (
 
 // ControllerName constants.
 const (
-	ControllerRoleDefinition        = "RoleDefinition"
-	ControllerBindDefinition        = "BindDefinition"
-	ControllerRoleBindingTerminator = "RoleBindingTerminator"
-	ControllerWebhookAuthorizer     = "WebhookAuthorizer"
+	ControllerRoleDefinition           = "RoleDefinition"
+	ControllerBindDefinition           = "BindDefinition"
+	ControllerRoleBindingTerminator    = "RoleBindingTerminator"
+	ControllerWebhookAuthorizer        = "WebhookAuthorizer"
+	ControllerRBACPolicy               = "RBACPolicy"
+	ControllerRestrictedBindDefinition = "RestrictedBindDefinition"
+	ControllerRestrictedRoleDefinition = "RestrictedRoleDefinition"
 )
 
 // ResourceType constants.
