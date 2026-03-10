@@ -416,6 +416,8 @@ spec:
         request.resourceAttributes.verb in ["delete", "patch", "update"] &&
         (now.getHours() < 8 || now.getHours() >= 18)
       action: Deny
+      # now is always UTC — convert your local time accordingly
+      # getHours() returns 0–23; the boundary at exactly 08:00 is getHours() == 8
       message: "destructive operations are only allowed 08:00–18:00 UTC"
 ```
 
@@ -479,17 +481,21 @@ celRules:
 ```
 
 When `messageExpression` is set and evaluates successfully, its result is used.
-If evaluation fails, `message` is used as a fallback. When neither is set,
-a default reason including the authorizer and rule name is generated.
+If evaluation fails, `message` is used as a fallback (only if non-empty). When
+neither produces a usable string, a default reason including the authorizer and
+rule name is generated (format: `"{authorizerName}/{ruleName}"`).
 
 This follows the `ValidatingAdmissionPolicy` pattern where `message` and
 `messageExpression` are separate fields, avoiding the ambiguity of implicit
 CEL detection.
 
-> **Security note**: `messageExpression` can expose paramRef data via SAR
-> response reason strings. Since the CR author has cluster-admin access
-> (Section 10.1), this is within the trust boundary. Auditors should review
-> `messageExpression` fields for unintended data exposure.
+> **Security note**: `messageExpression` output is visible to the **requesting
+> user** (via SAR response reason strings), not just the CR author. Since the CR
+> author has cluster-admin access (Section 10.1), this is within the trust
+> boundary for expression authoring. However, authors must not reference sensitive
+> paramRef data (e.g., API keys or credentials stored in ConfigMaps) in
+> `messageExpression` fields, as this would leak the data to requesting users.
+> Auditors should review `messageExpression` fields for unintended data exposure.
 
 ---
 
@@ -1180,7 +1186,7 @@ remains stable across rule reordering and is more meaningful in dashboards.
 | CEL type error | **Permanent** | Set condition, don't requeue | `CELCompilationFailed` |
 | paramRef not found | **Transient** (object may appear) | Set condition, requeue with backoff | `ParamRefNotFound` |
 | paramRef cache miss | **Transient** | Log warning, use null variable | — |
-| CEL runtime cost exceeded | **Permanent** (expression too complex) | Deny + log at Error | `CELCostExceeded` |
+| CEL runtime cost exceeded | **Permanent** (expression too complex) | Deny + log at Error | — (metric only) |
 | CEL runtime error (division by zero, null deref) | **Input-dependent** (varies per request) | Deny + log at Error | — |
 
 > **Input-dependent errors**: CEL runtime errors like division by zero or
@@ -1195,6 +1201,21 @@ remains stable across rule reordering and is more meaningful in dashboards.
 CEL evaluation logs follow the existing structured logging conventions:
 
 ```
+// Info (V(0)) — CEL-driven deny decisions (security-critical, always logged)
+logger.Info("CEL rule denied request",
+    "authorizer", wa.Name,
+    "rule", rule.Name,
+    "action", "Deny",
+    "user", request.User,
+    "resource", request.Resource)
+
+// Info (V(1)) — CEL-driven allow decisions
+logger.V(1).Info("CEL rule allowed request",
+    "authorizer", wa.Name,
+    "rule", rule.Name,
+    "action", "Allow",
+    "user", request.User)
+
 // Debug (V(2)) — per-expression eval result
 logger.V(2).Info("CEL expression evaluated",
     "authorizer", wa.Name,
@@ -1202,7 +1223,7 @@ logger.V(2).Info("CEL expression evaluated",
     "result", result,
     "duration", elapsed)
 
-// Warning — runtime error (input-dependent, indicates missing has() guard)
+// Error — runtime error (input-dependent, indicates missing has() guard)
 logger.Error(err, "CEL runtime error, denying request",
     "authorizer", wa.Name,
     "rule", rule.Name)
@@ -1518,7 +1539,7 @@ into container args on the manager deployment.
 
 ## 17. Appendix: Review Persona Analysis
 
-This design was refined using the auth-operator's 13 review personas in a
+This design was refined using the auth-operator's 12 review personas in a
 multi-pass subagent review. Below are the key findings and how each was
 addressed in the refined proposal.
 
@@ -1530,7 +1551,7 @@ addressed in the refined proposal.
 | C2 | Edge Cases | Dynamic paramRef `${request...}` syntax contradicted cache-at-reconcile design | Fixed: Removed `${...}` syntax. Static names only. Dynamic resolution deferred (Open Question #3) |
 | C3 | Concurrency | Non-leader replicas have no compiled CEL (reconciler runs on leader only) | Fixed: Added lazy compilation on non-leaders via `sync.Once`-per-entry pattern (Section 11.1) |
 | C4 | Performance | Latency budget math wrong: 100×32×5ms = 16s, not <200ms | Fixed: Added tiered analysis (typical/medium/large) + `--cel-evaluation-timeout` flag (Section 11.2) |
-| C5 | Go Style | Condition naming inconsistent with existing `AuthZConditionReason` typed pattern | Fixed: Conditions now use `StalledReasonCELCompilationFailed` etc. with type table (Section 5) |
+| C5 | Go Style | Condition naming inconsistent with existing `AuthZConditionReason` typed pattern | Fixed: Conditions now use `WAStalledReasonCELCompilationFailed` etc. with type table (Section 5) |
 
 ### High Findings (addressed in this revision)
 
