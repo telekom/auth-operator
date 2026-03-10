@@ -140,6 +140,7 @@ The auth-operator consists of two main components:
 | `--verbosity` / `-v` | Log level (0-9) | `2` |
 | `--tracing-enabled` | Enable OpenTelemetry tracing | `false` |
 | `--tracing-endpoint` | OTLP collector endpoint | — |
+| `--tracing-sampling-rate` | Trace sampling rate (0.0–1.0) | `0.1` |
 | `--tracing-insecure` | Use insecure gRPC for tracing | `false` |
 
 ### CLI Flags (controller subcommand)
