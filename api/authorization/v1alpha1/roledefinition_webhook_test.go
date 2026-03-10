@@ -5,6 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 package v1alpha1
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -538,8 +539,14 @@ var _ = Describe("RoleDefinition Webhook", func() {
 			}
 			err := k8sClient.Create(ctx, rd)
 			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsInvalid(err)).To(BeTrue(), "expected Invalid status reason")
 			statusErr := &apierrors.StatusError{}
-			Expect(err).To(BeAssignableToTypeOf(statusErr))
+			Expect(errors.As(err, &statusErr)).To(BeTrue())
+			Expect(statusErr.ErrStatus.Details.Causes).To(ContainElement(
+				Satisfy(func(c metav1.StatusCause) bool {
+					return c.Field == "spec.restrictedVerbs"
+				}),
+			), "expected cause targeting spec.restrictedVerbs")
 		})
 
 		It("should reject RestrictedVerbs with empty string item", func() {
@@ -556,8 +563,14 @@ var _ = Describe("RoleDefinition Webhook", func() {
 			}
 			err := k8sClient.Create(ctx, rd)
 			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsInvalid(err)).To(BeTrue(), "expected Invalid status reason")
 			statusErr := &apierrors.StatusError{}
-			Expect(err).To(BeAssignableToTypeOf(statusErr))
+			Expect(errors.As(err, &statusErr)).To(BeTrue())
+			Expect(statusErr.ErrStatus.Details.Causes).To(ContainElement(
+				Satisfy(func(c metav1.StatusCause) bool {
+					return c.Field == "spec.restrictedVerbs[0]"
+				}),
+			), "expected cause targeting spec.restrictedVerbs[0]")
 		})
 
 		It("should reject RestrictedVerbs with invalid pattern", func() {
@@ -574,8 +587,14 @@ var _ = Describe("RoleDefinition Webhook", func() {
 			}
 			err := k8sClient.Create(ctx, rd)
 			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsInvalid(err)).To(BeTrue(), "expected Invalid status reason")
 			statusErr := &apierrors.StatusError{}
-			Expect(err).To(BeAssignableToTypeOf(statusErr))
+			Expect(errors.As(err, &statusErr)).To(BeTrue())
+			Expect(statusErr.ErrStatus.Details.Causes).To(ContainElement(
+				Satisfy(func(c metav1.StatusCause) bool {
+					return c.Field == "spec.restrictedVerbs[0]"
+				}),
+			), "expected cause targeting spec.restrictedVerbs[0]")
 		})
 
 		It("should accept valid RestrictedVerbs within limits", func() {
@@ -618,8 +637,14 @@ var _ = Describe("RoleDefinition Webhook", func() {
 			}
 			err := k8sClient.Create(ctx, rd)
 			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsInvalid(err)).To(BeTrue(), "expected Invalid status reason")
 			statusErr := &apierrors.StatusError{}
-			Expect(err).To(BeAssignableToTypeOf(statusErr))
+			Expect(errors.As(err, &statusErr)).To(BeTrue())
+			Expect(statusErr.ErrStatus.Details.Causes).To(ContainElement(
+				Satisfy(func(c metav1.StatusCause) bool {
+					return c.Field == "spec.restrictedResources"
+				}),
+			), "expected cause targeting spec.restrictedResources")
 		})
 	})
 })
