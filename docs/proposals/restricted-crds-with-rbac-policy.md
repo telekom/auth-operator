@@ -727,14 +727,14 @@ spec:
     - clusterRoleRefs:
         - edit
       namespaceSelector:
-        matchLabels:
-          tenant: team-a
+        - matchLabels:
+            tenant: team-a
     - roleRefs:
         - app-role  # Reference Roles in target namespaces
       namespaceSelector:
-        matchLabels:
-          app: my-app
-          tenant: team-a
+        - matchLabels:
+            app: my-app
+            tenant: team-a
 
 status:
   # ServiceAccounts created by this RestrictedBindDefinition
@@ -1168,19 +1168,19 @@ spec:
       - kube-public
       - default
     
-    # Forbidden source namespace prefixes (bare prefix, matches "prefix*")
+    # Forbidden source namespace prefixes (requires trailing "*")
     forbiddenSourcePrefixes:
-      - "kube-"
-      - "team-b-"  # Other tenant's namespaces
+      - "kube-*"
+      - "team-b-*"  # Other tenant's namespaces
     
     # Restrict which roles can be mirrored (by name prefix/suffix)
     allowedRolePrefixes:
-      - "team-a-"
-      - "shared-"
+      - "team-a-*"
+      - "shared-*"
     
     forbiddenRoleSuffixes:
-      - "-admin"
-      - "-privileged"
+      - "*-admin"
+      - "*-privileged"
     
     # Maximum number of target namespaces per RestrictedRoleDefinition
     maxMirrorTargets: 20
@@ -1473,7 +1473,7 @@ metadata:
     authorization.t-caas.telekom.com/rbac-policy: tenant-team-a-policy
 ```
 
-### Recording Audit Information
+### 1. Recording Audit Information
 
 Audit trail is implemented via two complementary mechanisms:
 
@@ -1514,8 +1514,22 @@ func (m *RestrictedBindDefinitionMutator) Handle(ctx context.Context,
         rbd.Annotations["authorization.t-caas.telekom.com/created-by"] = userInfo.Username
         rbd.Annotations["authorization.t-caas.telekom.com/created-at"] = now
     }
+    // Always overwrite from req.UserInfo to prevent client-supplied tampering.
     rbd.Annotations["authorization.t-caas.telekom.com/last-modified-by"] = userInfo.Username
     rbd.Annotations["authorization.t-caas.telekom.com/last-modified-at"] = now
+    // On UPDATE, re-assert the created-by annotation from the old object to
+    // prevent tenants from rewriting creator identity.
+    if req.Operation == admissionv1.Update {
+        oldRBD := &authorizationv1alpha1.RestrictedBindDefinition{}
+        if err := m.decoder.DecodeRaw(req.OldObject, oldRBD); err == nil {
+            if v, ok := oldRBD.Annotations["authorization.t-caas.telekom.com/created-by"]; ok {
+                rbd.Annotations["authorization.t-caas.telekom.com/created-by"] = v
+            }
+            if v, ok := oldRBD.Annotations["authorization.t-caas.telekom.com/created-at"]; ok {
+                rbd.Annotations["authorization.t-caas.telekom.com/created-at"] = v
+            }
+        }
+    }
 
     marshaledRBD, err := json.Marshal(rbd)
     if err != nil {
@@ -1552,7 +1566,7 @@ spec:
     groupLimits:
       # Allow groups starting with team-a- (simple prefix, NO regex)
       allowedPrefixes:
-        - "team-a-"
+        - "team-a-*"
       forbiddenGroups:
         - "team-a-admins"  # Admins handled separately
     
@@ -2713,9 +2727,10 @@ spec:
     targetNamespaceLimits:
       # Method 1: Explicit allowed namespaces (exact match)
       allowedNamespaces:
-        - team-a-dev
-        - team-a-staging
-        - team-a-prod
+        names:
+          - team-a-dev
+          - team-a-staging
+          - team-a-prod
     
       # Method 2: Prefix-based (simple wildcard, NO regex)
       # Matches: team-a-dev, team-a-staging, team-a-anything
@@ -2741,11 +2756,12 @@ spec:
     
       # Forbidden always takes precedence
       forbiddenNamespaces:
-        - kube-system
-        - kube-public
-      forbiddenNamespacePrefixes:
-        - "kube-*"
-        - "istio-*"
+        names:
+          - kube-system
+          - kube-public
+        prefixes:
+          - "kube-*"
+          - "istio-*"
       forbiddenNamespaceSelector:
         matchLabels:
           protected: "true"
@@ -2781,13 +2797,13 @@ spec:
       
       # Select SAs by name prefix (simple wildcard, NO regex)
       allowedServiceAccountPrefixes:
-        - "app-"
-        - "svc-"
+        - "app-*"
+        - "svc-*"
       
       # Forbid privileged SA names
       forbiddenServiceAccountPrefixes:
-        - "admin-"
-        - "root-"
+        - "admin-*"
+        - "root-*"
 ```
 
 ### Example: Role Reference Selection
@@ -2802,13 +2818,13 @@ spec:
     roleBindingLimits:
       # Allow roles by name prefix (simple wildcard, NO regex)
       allowedRoleRefPrefixes:
-        - "team-a-"
-        - "shared-"
+        - "team-a-*"
+        - "shared-*"
       
       # Forbid roles by suffix (simple wildcard, NO regex)
       forbiddenRoleRefSuffixes:
-        - "-admin"
-        - "-superuser"
+        - "*-admin"
+        - "*-superuser"
       
       # Forbid roles with specific labels (if ClusterRoles are labeled)
       forbiddenRoleRefSelector:
