@@ -126,8 +126,39 @@ The auth-operator consists of two main components:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `POD_NAMESPACE` | Operator namespace (from Kubernetes downward API) | *(none)* |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector endpoint (alternative to `--tracing-endpoint` flag) | *(none)* |
+| `POD_NAMESPACE` | Operator namespace (used as default for `--namespace` flag) | — |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector endpoint (alternative to `--tracing-endpoint` flag) | — |
+
+### CLI Flags (Global)
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--namespace` | Operator namespace | `POD_NAMESPACE` |
+| `--health-probe-bind-address` | Health probe address | `:8081` |
+| `--metrics-bind-address` | Prometheus metrics address | `:8080` |
+| `--metrics-secure` | Require authn/authz for metrics endpoint | `false` |
+| `--verbosity` / `-v` | Log level (0-9) | `2` |
+| `--tracing-enabled` | Enable OpenTelemetry tracing | `false` |
+| `--tracing-endpoint` | OTLP collector endpoint | — |
+| `--tracing-insecure` | Use insecure gRPC for tracing | `false` |
+
+### CLI Flags (controller subcommand)
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--leader-elect` | Enable HA leader election | `true` |
+| `--binddefinition-concurrency` | Max concurrent BindDefinition reconciliations | `5` |
+| `--roledefinition-concurrency` | Max concurrent RoleDefinition reconciliations | `5` |
+| `--webhookauthorizer-concurrency` | Max concurrent WebhookAuthorizer reconciliations | `1` |
+
+### CLI Flags (webhook subcommand)
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--port` | Webhook server port | `9443` |
+| `--leader-elect` | Enable HA leader election | `false` |
+| `--certs-dir` | Directory for HTTPS certificates | — |
+| `--disable-cert-rotation` | Disable automatic cert rotation | `false` |
 
 ### Helm Values
 

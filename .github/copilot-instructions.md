@@ -255,12 +255,36 @@ logger.V(1).Info("debug")  // Verbose
 | `PROJECT` | Kubebuilder project metadata (do not edit) |
 | `Makefile` | All build/test/deploy commands |
 
-## Environment Variables
+## Environment Variables & CLI Flags
+
+### Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `POD_NAMESPACE` | Operator namespace (from Kubernetes downward API) | *(none)* |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector endpoint (alternative to `--tracing-endpoint` flag) | *(none)* |
+| `POD_NAMESPACE` | Operator namespace (default for `--namespace` flag) | — |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector endpoint (alternative to `--tracing-endpoint` flag) | — |
+
+### CLI Flags (Global)
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--namespace` | Operator namespace | `POD_NAMESPACE` |
+| `--health-probe-bind-address` | Health probe address | `:8081` |
+| `--metrics-bind-address` | Metrics address | `:8080` |
+| `--metrics-secure` | Require authn/authz for metrics endpoint | `false` |
+
+### CLI Flags (controller subcommand)
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--leader-elect` | Enable leader election | `true` |
+
+### CLI Flags (webhook subcommand)
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--port` | Webhook server port | `9443` |
+| `--leader-elect` | Enable leader election | `false` |
 
 ## Common Issues & Workarounds
 
