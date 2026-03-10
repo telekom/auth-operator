@@ -458,17 +458,28 @@ func TestNamespaceMutatorSANamespaceInheritance(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to marshal namespace: %v", err)
 		}
-		return crAdmission.Request{
+		req := crAdmission.Request{
 			AdmissionRequest: admissionv1.AdmissionRequest{
 				Operation: operation,
 				UserInfo: authenticationv1.UserInfo{
 					Username: username,
 					Groups:   groups,
 				},
-				Object:    runtime.RawExtension{Raw: nsRaw},
-				OldObject: runtime.RawExtension{Raw: nsRaw},
+				Kind: metav1.GroupVersionKind{
+					Group:   "",
+					Version: "v1",
+					Kind:    "Namespace",
+				},
+				Name:   ns.Name,
+				Object: runtime.RawExtension{Raw: nsRaw},
 			},
 		}
+
+		if operation == admissionv1.Update {
+			req.OldObject = runtime.RawExtension{Raw: nsRaw}
+		}
+
+		return req
 	}
 
 	tests := []struct {

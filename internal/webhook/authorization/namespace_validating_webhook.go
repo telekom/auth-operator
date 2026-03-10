@@ -339,7 +339,7 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 		(req.Operation == admissionv1.Create || req.Operation == admissionv1.Update) {
 		inheritedLabels, saErr := GetSANamespaceTrackedLabels(ctx, v.Client, saInfo)
 		if saErr != nil {
-			logger.Error(saErr, "failed to lookup SA namespace labels", "namespace", req.Name)
+			logger.Error(saErr, "failed to lookup SA namespace labels", "saNamespace", saInfo.Namespace, "targetNamespace", req.Name)
 			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()
 			return admission.Errored(http.StatusInternalServerError, saErr)
 		}

@@ -2229,18 +2229,21 @@ func TestNamespaceValidatorSANamespaceInheritance(t *testing.T) {
 			}
 
 			targetNSRaw := mustMarshalJSON(t, tt.targetNS)
-			req := crAdmission.Request{
-				AdmissionRequest: admissionv1.AdmissionRequest{
-					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
-					Name:      tt.targetNS.Name,
-					Operation: tt.operation,
-					UserInfo: authenticationv1.UserInfo{
-						Username: tt.username,
-						Groups:   tt.groups,
-					},
-					Object:    runtime.RawExtension{Raw: targetNSRaw},
-					OldObject: runtime.RawExtension{Raw: targetNSRaw},
+			admissionReq := admissionv1.AdmissionRequest{
+				Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
+				Name:      tt.targetNS.Name,
+				Operation: tt.operation,
+				UserInfo: authenticationv1.UserInfo{
+					Username: tt.username,
+					Groups:   tt.groups,
 				},
+				Object: runtime.RawExtension{Raw: targetNSRaw},
+			}
+			if tt.operation == admissionv1.Update {
+				admissionReq.OldObject = runtime.RawExtension{Raw: targetNSRaw}
+			}
+			req := crAdmission.Request{
+				AdmissionRequest: admissionReq,
 			}
 
 			resp := validator.Handle(context.Background(), req)
