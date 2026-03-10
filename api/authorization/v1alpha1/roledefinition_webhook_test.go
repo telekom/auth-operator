@@ -592,5 +592,27 @@ var _ = Describe("RoleDefinition Webhook", func() {
 			Expect(k8sClient.Create(ctx, rd)).To(Succeed())
 			Expect(k8sClient.Delete(ctx, rd)).To(Succeed())
 		})
+
+		It("should reject RestrictedResources exceeding MaxItems=128", func() {
+			resources := make([]metav1.APIResource, 129)
+			for i := range resources {
+				resources[i] = metav1.APIResource{Name: "configmaps"}
+			}
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-maxitems-resources",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:          DefinitionClusterRole,
+					TargetName:          "test-maxitems-resources",
+					ScopeNamespaced:     false,
+					RestrictedResources: resources,
+				},
+			}
+			err := k8sClient.Create(ctx, rd)
+			Expect(err).To(HaveOccurred())
+			statusErr := &apierrors.StatusError{}
+			Expect(err).To(BeAssignableToTypeOf(statusErr))
+		})
 	})
 })
