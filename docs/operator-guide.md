@@ -150,6 +150,9 @@ The auth-operator consists of two main components:
 | `--binddefinition-concurrency` | Max concurrent BindDefinition reconciliations | `5` |
 | `--roledefinition-concurrency` | Max concurrent RoleDefinition reconciliations | `5` |
 | `--webhookauthorizer-concurrency` | Max concurrent WebhookAuthorizer reconciliations | `1` |
+| `--cache-sync-timeout` | Timeout for waiting for CRDs to become available | `2m` |
+| `--graceful-shutdown-timeout` | Timeout for graceful shutdown of the manager | `30s` |
+| `--wait-for-crds` | Wait for required CRDs before starting controllers | `true` |
 
 ### CLI Flags (webhook subcommand)
 
@@ -159,6 +162,14 @@ The auth-operator consists of two main components:
 | `--leader-elect` | Enable HA leader election | `false` |
 | `--certs-dir` | Directory for HTTPS certificates | — |
 | `--disable-cert-rotation` | Disable automatic cert rotation | `false` |
+| `--enable-http2` | Enable HTTP/2 on the webhook server | `false` |
+| `--cert-rotation-dns-name` | DNS name for the generated TLS certificate | — |
+| `--cert-rotation-secret-name` | Secret name for the rotated certificate | — |
+| `--cert-rotation-mutating-webhook` | Mutating webhook names to patch with CA bundle | — |
+| `--cert-rotation-validating-webhook` | Validating webhook names to patch with CA bundle | — |
+| `--tdg-migration` | Enable T-DDI to T-CaaS migration mode | `false` |
+| `--authorize-rate-limit` | Per-pod sustained requests/second for authorize endpoint | `100` |
+| `--authorize-rate-burst` | Burst size for authorize endpoint rate limiter | `200` |
 
 ### Helm Values
 

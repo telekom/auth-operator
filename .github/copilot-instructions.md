@@ -272,12 +272,23 @@ logger.V(1).Info("debug")  // Verbose
 | `--health-probe-bind-address` | Health probe address | `:8081` |
 | `--metrics-bind-address` | Metrics address | `:8080` |
 | `--metrics-secure` | Require authn/authz for metrics endpoint | `false` |
+| `--verbosity` / `-v` | Log level (0-9) | `2` |
+| `--tracing-enabled` | Enable OpenTelemetry tracing | `false` |
+| `--tracing-endpoint` | OTLP collector endpoint (overrides `OTEL_EXPORTER_OTLP_ENDPOINT`) | — |
+| `--tracing-sampling-rate` | Trace sampling rate (0.0-1.0) | `0.1` |
+| `--tracing-insecure` | Use insecure gRPC for tracing | `false` |
 
 ### CLI Flags (controller subcommand)
 
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--leader-elect` | Enable leader election | `true` |
+| `--binddefinition-concurrency` | Max concurrent BindDefinition reconciles | `5` |
+| `--roledefinition-concurrency` | Max concurrent RoleDefinition reconciles | `5` |
+| `--webhookauthorizer-concurrency` | Max concurrent WebhookAuthorizer reconciles | `1` |
+| `--cache-sync-timeout` | Timeout for waiting for CRDs to become available | `2m` |
+| `--graceful-shutdown-timeout` | Timeout for graceful shutdown of the manager | `30s` |
+| `--wait-for-crds` | Wait for required CRDs before starting controllers | `true` |
 
 ### CLI Flags (webhook subcommand)
 
@@ -285,6 +296,16 @@ logger.V(1).Info("debug")  // Verbose
 |------|-------------|---------|
 | `--port` | Webhook server port | `9443` |
 | `--leader-elect` | Enable leader election | `false` |
+| `--certs-dir` | Directory for HTTPS certificates | — |
+| `--disable-cert-rotation` | Disable automatic cert rotation | `false` |
+| `--enable-http2` | Enable HTTP/2 on the webhook server | `false` |
+| `--cert-rotation-dns-name` | DNS name for the generated TLS certificate | — |
+| `--cert-rotation-secret-name` | Secret name for the rotated certificate | — |
+| `--cert-rotation-mutating-webhook` | Mutating webhook names to patch with CA bundle | — |
+| `--cert-rotation-validating-webhook` | Validating webhook names to patch with CA bundle | — |
+| `--tdg-migration` | Enable T-DDI to T-CaaS migration mode | `false` |
+| `--authorize-rate-limit` | Per-pod sustained requests/second for authorize endpoint | `100` |
+| `--authorize-rate-burst` | Burst size for authorize endpoint rate limiter | `200` |
 
 ## Common Issues & Workarounds
 
