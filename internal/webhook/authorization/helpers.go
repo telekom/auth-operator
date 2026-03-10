@@ -201,9 +201,9 @@ func GetSANamespaceTrackedLabels(ctx context.Context, c client.Client, saInfo Se
 		}
 	}
 
-	// Require at minimum the owner label.
+	// Require at minimum the owner label with a non-empty value.
 	ownerVal, hasOwner := result[authzv1alpha1.LabelKeyOwner]
-	if !hasOwner {
+	if !hasOwner || ownerVal == "" {
 		return map[string]string{}, nil
 	}
 
@@ -221,14 +221,16 @@ func GetSANamespaceTrackedLabels(ctx context.Context, c client.Client, saInfo Se
 			return map[string]string{}, nil
 		}
 	case authzv1alpha1.OwnerTenant:
-		if _, ok := result[authzv1alpha1.LabelKeyTenant]; !ok {
+		tenantVal, hasTenant := result[authzv1alpha1.LabelKeyTenant]
+		if !hasTenant || tenantVal == "" {
 			return map[string]string{}, nil
 		}
 		if _, ok := result[authzv1alpha1.LabelKeyThirdParty]; ok {
 			return map[string]string{}, nil
 		}
 	case authzv1alpha1.OwnerThirdParty:
-		if _, ok := result[authzv1alpha1.LabelKeyThirdParty]; !ok {
+		tpVal, hasTP := result[authzv1alpha1.LabelKeyThirdParty]
+		if !hasTP || tpVal == "" {
 			return map[string]string{}, nil
 		}
 		if _, ok := result[authzv1alpha1.LabelKeyTenant]; ok {

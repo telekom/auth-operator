@@ -348,7 +348,8 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 			// must not have extra tracked ownership labels beyond what the SA namespace has.
 			labelsMatch := true
 			for k, val := range inheritedLabels {
-				if ns.Labels[k] != val {
+				actual, ok := ns.Labels[k]
+				if !ok || actual != val {
 					labelsMatch = false
 					break
 				}

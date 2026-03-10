@@ -666,6 +666,38 @@ func TestGetSANamespaceTrackedLabels(t *testing.T) {
 			},
 			wantLabels: nil,
 		},
+		{
+			name:   "owner label with empty value - returns nil",
+			saInfo: ServiceAccountInfo{Namespace: "empty-owner", Name: "sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "empty-owner", Labels: map[string]string{
+					authzv1alpha1.LabelKeyOwner: "",
+				}}},
+			},
+			wantLabels: nil,
+		},
+		{
+			name:   "tenant owner with empty tenant value - returns nil",
+			saInfo: ServiceAccountInfo{Namespace: "empty-tenant", Name: "sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "empty-tenant", Labels: map[string]string{
+					authzv1alpha1.LabelKeyOwner:  "tenant",
+					authzv1alpha1.LabelKeyTenant: "",
+				}}},
+			},
+			wantLabels: nil,
+		},
+		{
+			name:   "thirdparty owner with empty thirdparty value - returns nil",
+			saInfo: ServiceAccountInfo{Namespace: "empty-tp", Name: "sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "empty-tp", Labels: map[string]string{
+					authzv1alpha1.LabelKeyOwner:      "thirdparty",
+					authzv1alpha1.LabelKeyThirdParty: "",
+				}}},
+			},
+			wantLabels: nil,
+		},
 	}
 
 	for _, tt := range tests {
