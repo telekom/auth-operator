@@ -13,7 +13,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
 func TestParseServiceAccount(t *testing.T) {
@@ -647,5 +649,29 @@ func TestGetSANamespaceTrackedLabels(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestGetSANamespaceTrackedLabels_ClientGetError(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(authzv1alpha1.AddToScheme(scheme))
+
+	injectedErr := fmt.Errorf("transient API failure")
+	c := fake.NewClientBuilder().WithScheme(scheme).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(_ context.Context, _ client.WithWatch, _ client.ObjectKey, _ client.Object, _ ...client.GetOption) error {
+				return injectedErr
+			},
+		}).Build()
+
+	saInfo := ServiceAccountInfo{Namespace: "some-ns", Name: "sa", IsServiceAccount: true}
+	got, err := GetSANamespaceTrackedLabels(context.Background(), c, saInfo)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if len(got) != 0 {
+		t.Errorf("expected empty labels on error, got %v", got)
 	}
 }

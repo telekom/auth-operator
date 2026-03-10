@@ -98,7 +98,7 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 						logger.V(1).Info("SA namespace label inheritance denied - label conflict on target namespace",
 							"namespace", req.Name, "label", k, "existingValue", existingVal, "inheritedValue", inheritedVal)
 						metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultDenied).Inc()
-						return admission.Denied(fmt.Sprintf(DenialLabelConflictFmt, req.Name, k, existingVal, inheritedVal))
+						return admission.Denied(fmt.Sprintf(DenialLabelConflictFmt, req.Name, k, existingVal, inheritedVal, saInfo.Namespace))
 					}
 				}
 			}

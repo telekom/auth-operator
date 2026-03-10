@@ -27,6 +27,7 @@ const (
 
 	// DenialLabelConflictFmt is a format string returned by the namespace mutator
 	// when SA namespace label inheritance detects a conflicting tracked label value
-	// on the target namespace.
-	DenialLabelConflictFmt = "Namespace %s already has label %s=%s which conflicts with inherited value %s from SA namespace"
+	// on the target namespace. Parameters: target namespace, label key, existing value,
+	// inherited value, SA namespace name.
+	DenialLabelConflictFmt = "Namespace %s already has label %s=%s which conflicts with inherited value %s from SA namespace %s"
 )
