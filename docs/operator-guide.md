@@ -127,10 +127,7 @@ The auth-operator consists of two main components:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `POD_NAMESPACE` | Operator namespace (from Kubernetes downward API) | *(none)* |
-| `LEADER_ELECTION` | Enable HA leader election | `true` |
-| `PROBE_ADDR` | Health probe address | `:8081` |
-| `METRICS_ADDR` | Prometheus metrics address | `:8080` |
-| `WEBHOOK_PORT` | Webhook server port | `9443` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector endpoint (alternative to `--tracing-endpoint` flag) | *(none)* |
 
 ### Helm Values
 
