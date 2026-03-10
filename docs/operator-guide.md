@@ -138,10 +138,7 @@ The auth-operator consists of two main components:
 | `--metrics-bind-address` | Prometheus metrics address (set to `0` to disable serving) | `:8080` |
 | `--metrics-secure` | Require authn/authz for metrics endpoint | `false` |
 | `--verbosity` / `-v` | Log level (0-9) | `2` |
-| `--tracing-enabled` | Enable OpenTelemetry tracing (requires `--tracing-endpoint` or `OTEL_EXPORTER_OTLP_ENDPOINT`) | `false` |
-| `--tracing-endpoint` | OTLP collector endpoint (required when `--tracing-enabled` is true, unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set) | — |
-| `--tracing-sampling-rate` | Trace sampling rate (0.0–1.0) | `0.1` |
-| `--tracing-insecure` | Use insecure gRPC for tracing | `false` |
+| `--tracing-*` | See [OpenTelemetry Tracing](#opentelemetry-tracing) for tracing-related flags and defaults | — |
 
 ### CLI Flags (controller subcommand)
 
@@ -151,7 +148,7 @@ The auth-operator consists of two main components:
 | `--binddefinition-concurrency` | Max concurrent BindDefinition reconciliations | `5` |
 | `--roledefinition-concurrency` | Max concurrent RoleDefinition reconciliations | `5` |
 | `--webhookauthorizer-concurrency` | Max concurrent WebhookAuthorizer reconciliations | `1` |
-| `--cache-sync-timeout` | Timeout for waiting for CRDs to become available | `2m` |
+| `--cache-sync-timeout` | Timeout for waiting for CRDs to become available | `2m0s` |
 | `--graceful-shutdown-timeout` | Timeout for graceful shutdown of the manager | `30s` |
 | `--wait-for-crds` | Wait for required CRDs before starting controllers | `true` |
 

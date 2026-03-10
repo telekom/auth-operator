@@ -286,7 +286,7 @@ logger.V(1).Info("debug")  // Verbose
 | `--binddefinition-concurrency` | Max concurrent BindDefinition reconciliations | `5` |
 | `--roledefinition-concurrency` | Max concurrent RoleDefinition reconciliations | `5` |
 | `--webhookauthorizer-concurrency` | Max concurrent WebhookAuthorizer reconciliations | `1` |
-| `--cache-sync-timeout` | Timeout for waiting for CRDs to become available | `2m` |
+| `--cache-sync-timeout` | Timeout for waiting for CRDs to become available | `2m0s` |
 | `--graceful-shutdown-timeout` | Timeout for graceful shutdown of the manager | `30s` |
 | `--wait-for-crds` | Wait for required CRDs before starting controllers | `true` |
 
