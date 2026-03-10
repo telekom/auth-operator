@@ -147,15 +147,17 @@ kubectl get rolebindings -A -l app.kubernetes.io/managed-by=auth-operator
 
 ## Configuration
 
-### Environment Variables
+### Environment Variables and CLI Flags
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `NAMESPACE` | Operator namespace | `kube-system` |
-| `LEADER_ELECTION` | Enable leader election for HA | `true` |
-| `PROBE_ADDR` | Health probe address | `:8081` |
-| `METRICS_ADDR` | Prometheus metrics address | `:8080` |
-| `WEBHOOK_PORT` | Webhook server port | `9443` |
+The operator uses CLI flags (not environment variables) for most settings.
+See the [Operator Guide](docs/operator-guide.md) for the full reference.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--namespace` | `kube-system` | Operator namespace (falls back to `POD_NAMESPACE` env) |
+| `--health-probe-bind-address` | `:8081` | Health probe bind address |
+| `--metrics-bind-address` | `:8080` | Metrics bind address |
+| `--leader-elect` | `true` | Enable leader election for HA |
 
 ### Helm Values
 

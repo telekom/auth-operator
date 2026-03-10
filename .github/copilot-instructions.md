@@ -259,10 +259,8 @@ logger.V(1).Info("debug")  // Verbose
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `NAMESPACE` | Operator namespace | `kube-system` |
-| `LEADER_ELECTION` | Enable leader election | `true` |
-| `PROBE_ADDR` | Health probe address | `:8081` |
-| `METRICS_ADDR` | Metrics address | `:8080` |
+| `POD_NAMESPACE` | Operator namespace (from Kubernetes downward API) | *(none)* |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector endpoint (alternative to `--tracing-endpoint` flag) | *(none)* |
 
 ## Common Issues & Workarounds
 

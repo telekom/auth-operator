@@ -24,6 +24,7 @@ steps.
 - [Performance Issues](#performance-issues)
 - [Log Analysis](#log-analysis)
 - [Collecting Debug Information](#collecting-debug-information)
+- [FAQ — Common Error Messages](#faq--common-error-messages)
 
 ---
 
@@ -529,6 +530,93 @@ chmod +x collect-debug.sh
 # With custom namespace
 NAMESPACE=my-namespace ./collect-debug.sh
 ```
+
+---
+
+## FAQ — Common Error Messages
+
+### "Error from server (InternalError): Internal error occurred: failed calling webhook"
+
+The validating or mutating webhook is unreachable. Common causes:
+
+1. Webhook pod not running — check `kubectl get pods -n auth-operator-system`
+2. Certificate expired — restart the webhook pod to trigger cert rotation
+3. Network policy blocking port 9443 — ensure ingress is allowed
+
+### "unable to get resource: clusterroles.rbac.authorization.k8s.io ... not found"
+
+A BindDefinition references a ClusterRole that does not exist. Check the
+`RoleRefsValid` condition on the BindDefinition:
+
+```bash
+kubectl get binddefinition <name> -o jsonpath='{.status.conditions[?(@.type=="RoleRefsValid")]}'
+```
+
+The `missingRoleRefs` status field lists exactly which roles are unresolved:
+
+```bash
+kubectl get binddefinition <name> -o jsonpath='{.status.missingRoleRefs}'
+```
+
+Create the missing role (e.g., via RoleDefinition) or remove the reference.
+
+### "SSA apply failed" / "conflict with field manager"
+
+Another controller or manual edit is competing for ownership of a field
+managed by auth-operator via Server-Side Apply. Identify the conflicting
+manager:
+
+```bash
+kubectl get clusterrole <name> -o json | jq '.metadata.managedFields[] | {manager, fieldsV1}'
+```
+
+Remove the conflicting manager's ownership or ensure only auth-operator
+manages the resource.
+
+### "API discovery failed" / "unable to retrieve the complete list of server APIs"
+
+The operator cannot reach the Kubernetes API server or an aggregated API
+service is unavailable. Check:
+
+```bash
+kubectl get apiservices | grep -v Available
+```
+
+Fix or remove unavailable API services.
+
+### RoleDefinition shows Ready=True but ClusterRole permissions look wrong
+
+The generated ClusterRole reflects the deny-list at the time of last
+reconciliation. Verify:
+
+1. The `restrictedApis` / `restrictedResources` / `restrictedVerbs` in the
+   spec match your intent
+2. Run `kubectl api-resources --verbs=list` to see what the cluster exposes
+3. The operator re-discovers APIs every 5 minutes — wait for the next cycle
+
+### BindDefinition Ready=True but RoleRefsValid=False
+
+This is expected behavior. The operator creates bindings regardless of whether
+all referenced roles exist (`missing-role-policy=warn` by default). Users
+bound to missing roles simply have no permissions from those roles. The
+`missingRoleRefs` status field lists the unresolved references.
+
+### Namespace labels changed but RoleBindings not updated
+
+The operator reconciles BindDefinitions every 60 seconds. After changing
+namespace labels, wait up to one minute for the RoleBindings to be updated.
+You can also trigger immediate reconciliation by annotating the
+BindDefinition:
+
+```bash
+kubectl annotate binddefinition <name> reconcile-trigger=$(date +%s) --overwrite
+```
+
+### How do I interpret the `externalServiceAccounts` status field?
+
+This field lists ServiceAccounts referenced by a BindDefinition that were
+**not created** by the operator — they already existed. The operator uses
+these SAs in bindings but does not manage their lifecycle (create/delete).
 
 ---
 
