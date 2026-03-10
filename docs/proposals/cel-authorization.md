@@ -127,9 +127,26 @@ We introduce CEL (Common Expression Language) into the `WebhookAuthorizer` in
 | **1** | `matchConditions` | CEL guards that scope when an authorizer applies | — |
 | **2** | `celRules` | CEL expressions that return allow/deny/noOpinion | Phase 1 |
 | **3** | `paramRef` | In-cluster object lookups available as CEL variables | Phase 2 |
-| **4** | `mode: cel` | Full CEL evaluation replacing the static model | Phases 1–3 |
+| **4** | `mode: CEL` | Full CEL evaluation replacing the static model | Phases 1–3 |
 
 Each phase is independently useful, backwards-compatible, and shippable.
+
+### Progressive Disclosure
+
+Most users will never need all four phases. Here is the expected usage breakdown:
+
+| % of Users | Needs | Phase |
+|------------|-------|-------|
+| **~80%** | Static `allowedPrincipals` + `resourceRules` only | **None** (existing API) |
+| **~15%** | `matchConditions` to reduce authorizer scope (e.g., skip for system accounts) | **Phase 1** |
+| **~4%** | `celRules` for dynamic allow/deny logic (e.g., time-based, annotation-based) | **Phase 2** |
+| **~1%** | `paramRef` or `mode: CEL` for advanced policy (e.g., ConfigMap-driven allow lists, full CEL mode) | **Phases 3–4** |
+
+> **You probably don't need this**: If your authorization needs are met by
+> `allowedPrincipals`, `deniedPrincipals`, and `resourceRules` today, you do
+> not need CEL. The static model is simpler, faster, and covers the vast
+> majority of use cases. CEL is an escape hatch for the ~20% of cases where
+> static fields are insufficient.
 
 ---
 
@@ -262,12 +279,12 @@ The reconciler re-validates CEL for CRs that bypassed webhook validation
 ```go
 const (
     // CEL compilation errors are permanent — the user must fix the expression.
-    StalledReasonCELCompilationFailed  AuthZConditionReason  = "CELCompilationFailed"
-    StalledMessageCELCompilationFailed AuthZConditionMessage = "one or more CEL expressions failed compilation: %s"
+    WAStalledReasonCELCompilationFailed  AuthZConditionReason  = "CELCompilationFailed"
+    WAStalledMessageCELCompilationFailed AuthZConditionMessage = "One or more CEL expressions failed compilation: %s"
 
     // paramRef target not found is transient — the object may appear.
-    ReconcilingReasonParamRefNotFound  AuthZConditionReason  = "ParamRefNotFound"
-    ReconcilingMessageParamRefNotFound AuthZConditionMessage = "paramRef target %s/%s not found in cache"
+    WAReconcilingReasonParamRefNotFound  AuthZConditionReason  = "ParamRefNotFound"
+    WAReconcilingMessageParamRefNotFound AuthZConditionMessage = "ParamRef target %s/%s not found in cache"
 )
 ```
 
@@ -431,6 +448,13 @@ For each WebhookAuthorizer (sorted by name):
 > **Design invariant**: Static `deniedPrincipals` are always checked **before**
 > CEL rules. No CEL Allow rule can override an explicit `deniedPrincipals` entry.
 > This preserves the existing deny-before-allow security guarantee.
+
+> **Important**: A CEL Allow rule in step 4b grants access **independently** of
+> the CR's `resourceRules`/`nonResourceRules`. CEL rules have full access to the
+> request and can implement their own resource-scoping logic within the
+> expression. If you need to constrain a CEL Allow to specific resources, include
+> that check in the CEL expression itself (e.g.,
+> `request.resourceAttributes.resource == "deployments" && ...`).
 
 CEL rules are evaluated **first-match**. If no CEL rule matches, evaluation
 falls through to the existing static logic, preserving backwards compatibility.
@@ -606,7 +630,7 @@ spec:
   celRules:
     - name: checkAllowList
       expression: >-
-        has(allowList.data) && has(allowList.data["users"]) &&
+        has(allowList.data) && "users" in allowList.data &&
         request.user in allowList.data["users"].split(",")
       action: Allow
       message: "user is in the authorized-deployers ConfigMap"
@@ -785,6 +809,11 @@ must handle the empty case for CRs that bypass defaulting (backup restore, GitOp
 # x-kubernetes-validations on WebhookAuthorizerSpec:
 - rule: "self.mode != 'CEL' || self.authorization != ''"
   message: "authorization expression is required when mode is CEL"
+# Existing rules must be updated to exempt mode: CEL:
+- rule: "self.mode == 'CEL' || ((has(self.resourceRules) && size(self.resourceRules) > 0) || (has(self.nonResourceRules) && size(self.nonResourceRules) > 0))"
+  message: "at least one resourceRules or nonResourceRules is required (unless mode is CEL)"
+- rule: "self.mode == 'CEL' || ((has(self.allowedPrincipals) && size(self.allowedPrincipals) > 0) || (has(self.deniedPrincipals) && size(self.deniedPrincipals) > 0))"
+  message: "at least one allowedPrincipals or deniedPrincipals is required (unless mode is CEL)"
 ```
 
 The reconciler additionally validates: if `mode == CEL` and `authorization == ""`,
@@ -813,12 +842,13 @@ spec:
     request.user == "system:anonymous" ? authz.deny("anonymous access denied") :
 
     // Deny destructive verbs outside business hours.
+    has(request.resourceAttributes) &&
     request.resourceAttributes.verb in ["delete"] &&
     (now.getHours() < 8 || now.getHours() >= 18) ?
       authz.deny("delete operations only allowed 08:00-18:00 UTC") :
 
     // Allow users in the allowList ConfigMap.
-    has(policy.data["users"]) &&
+    "users" in policy.data &&
     request.user in policy.data["users"].split(",") ?
       authz.allow("user in authorized-deployers list") :
 
@@ -1041,9 +1071,10 @@ cached using an `atomic.Pointer` to an immutable snapshot map, keyed by
   generation changes (reconciler replaces entry).
 - **CR deletion cleanup**: The reconciler's finalizer (or `DeleteFunc`
   watch predicate) removes the CR's entry from the cache.
-- **Bounded** by the total number of WebhookAuthorizer CRs × max expressions
-  per CR (i.e. N × 48, where N is CR count). For typical deployments
-  (10–100 CRs), this is negligible memory.
+- **Bounded** by the total number of WebhookAuthorizer CRs × max compiled
+  expressions per CR (i.e. N × 81 = 16 matchConditions + 32 celRules +
+  32 celRule messageExpressions + 1 authorization expression, where N is
+  CR count). For typical deployments (10–100 CRs), this is negligible memory.
 
 ```go
 type compilationCache struct {
@@ -1058,11 +1089,15 @@ type cacheKey struct {
 
 **Multi-replica behavior**: The reconciler only runs on the leader, so only
 the leader proactively compiles CEL during reconciliation. Non-leader replicas
-(which still serve webhook requests) compile lazily on first evaluation and
-cache the result. This lazy path uses a `sync.Once`-per-entry pattern to
-avoid duplicate compilations. The lazy compilation path is acceptable because
-it only occurs during leader failover and the compilation cost (<10ms per CR)
-is within the webhook timeout budget.
+(which still serve webhook requests) compile lazily on first evaluation for a
+given `(uid, generation)` and cache the result. This lazy path uses a
+`sync.Once`-per-entry pattern to avoid duplicate compilations. In a typical
+multi-replica deployment, this means each non-leader pod will incur a one-time
+compilation cost per WebhookAuthorizer CR (and generation) on the hot path
+when it first handles a SAR after startup or after a CR update. The per-CR
+compilation cost (<10ms per CR in benchmarks) is within the webhook timeout
+budget and is amortized over subsequent requests because compiled programs are
+cached.
 
 ### 11.2 Evaluation Latency Budget
 
@@ -1076,7 +1111,7 @@ timeout (default 10s, typically set to 3–5s). The CEL evaluation budget:
 | CEL matchCondition evaluation (per authorizer) | <1ms | Cached program, simple bool |
 | CEL rule evaluation (per rule) | <5ms | Cached program, cost-bounded |
 | paramRef resolution (per ref) | <1ms | Informer cache read |
-| **Typical (10 authorizers × 5 rules each)** | **<10ms** | Realistic estimate |
+| **Typical (10 authorizers × 5 rules each)** | **<250ms** | Realistic estimate (10 × 5 × <5ms) |
 | **Worst case (100 authorizers × 32 rules)** | **~16s** | Theoretical maximum |
 
 > **⚠️ Worst case is unrealistic**: 100 authorizers × 32 rules each = 3,200
@@ -1093,8 +1128,11 @@ timeout (default 10s, typically set to 3–5s). The CEL evaluation budget:
 >
 > The `--cel-evaluation-timeout` flag (default: `1s`) sets a hard deadline
 > for CEL evaluation across all authorizers for a single SAR. When exceeded,
-> the handler returns `NoOpinion` for remaining authorizers and logs a
-> warning. This prevents runaway evaluation from blocking the API server.
+> all remaining (unevaluated) authorizers are treated as **Deny**, and the
+> overall authorization decision is **Deny** (fail-closed). A warning is
+> logged. This is consistent with the fail-closed error handling model
+> described in Section 10.4 and prevents runaway evaluation from consuming
+> unbounded CPU while still blocking the request safely.
 
 ### 11.3 Metrics
 
@@ -1427,7 +1465,7 @@ into container args on the manager deployment.
 |------|------|
 | 1 | Add `CELRule`, `CELRuleAction` types |
 | 2 | Add celRules evaluation between matchConditions and static logic |
-| 3 | Implement `now` variable injection with monotonic clock |
+| 3 | Implement `now` variable injection using UTC wall clock (`time.Now().UTC()`) |
 | 4 | Implement `authorizer.*` variable injection |
 | 5 | Implement `messageExpression` support |
 | 6 | Tests + docs |
