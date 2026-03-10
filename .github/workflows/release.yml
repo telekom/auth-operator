@@ -669,7 +669,14 @@ jobs:
 
   helm-release:
     name: Release Helm Chart
-    needs: [prepare, assemble]
+    needs: [prepare, assemble, release]
+    # Run after release job: on tag pushes wait for release to succeed,
+    # on PRs the release job is skipped so allow helm-release to proceed.
+    if: >-
+      !cancelled()
+      && needs.prepare.result == 'success'
+      && needs.assemble.result == 'success'
+      && (needs.release.result == 'success' || needs.release.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: write

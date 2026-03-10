@@ -7,15 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0-rc.13] — Pre-release
+
 ### Added
 
-- ServiceAccount namespace label inheritance: when no BindDefinition matches, SAs can create/update namespaces inheriting ownership labels from their source namespace as a last-resort fallback (#202)
+- ServiceAccount namespace label inheritance: when no BindDefinition matches, SAs can create/update namespaces inheriting ownership labels from their source namespace as a last-resort fallback (#202, #213)
+- `MaxItems` validation on `RestrictedResources` and `RestrictedVerbs` fields to enforce bounded input sizes (#218)
 
 ### Fixed
 
+- WebhookAuthorizer metrics now cleaned up on CR deletion, preventing stale metric series (#215)
+- Namespace mutating webhook now registers the UPDATE operation, fixing label inheritance on namespace updates (#216)
+- Periodic drift-correction requeue added to WebhookAuthorizer controller to self-heal configuration drift (#214)
 - Repeated label key checks in `getLabelsFromNamespaceSelector()` replaced with set-based lookup (#156)
-- Stale resource defaults in kustomize base configs (`config/manager/manager.yaml`, `config/webhook/deployment.yaml`)
-- Documentation drift in `docs/operator-guide.md` — Helm Values section now matches current chart defaults
+- Stale resource defaults in kustomize base configs (#199)
+- Incorrect `OTEL_EXPORTER_OTLP_ENDPOINT` environment variable documentation (#217)
+- `--namespace` flag default documentation corrected in README (#222)
+
+### Documentation
+
+- End-user documentation improvements for operator guide (#221)
+- Missing BindDefinition status fields added to API reference (#220)
+- Documentation drift in `docs/operator-guide.md` — Helm Values section now matches current chart defaults (#199)
+
+### CI
+
+- `govulncheck` and `gosec` pinned to specific versions for reproducible builds (#219)
+- `anchore/sbom-action` bumped from 0.23.0 to 0.23.1 (#200)
+- `sigstore/cosign-installer` bumped from 4.0.0 to 4.1.0 (#201)
+- Release workflow: `helm-release` job now depends on `release` job to prevent upload-before-creation race
 
 ## [0.4.0-rc.12] — Pre-release
 
