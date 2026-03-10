@@ -355,18 +355,8 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 			}
 			if labelsMatch {
 				// Check for extra tracked keys on the target that the SA namespace doesn't have.
-				extraTrackedKeys := []string{
-					authzv1alpha1.LabelKeyOwner,
-					authzv1alpha1.LabelKeyTenant,
-					authzv1alpha1.LabelKeyThirdParty,
-				}
-				for _, tk := range extraTrackedKeys {
-					if _, onTarget := ns.Labels[tk]; onTarget {
-						if _, onSA := inheritedLabels[tk]; !onSA {
-							labelsMatch = false
-							break
-						}
-					}
+				if extraKey := FindExtraTrackedKey(ns.Labels, inheritedLabels); extraKey != "" {
+					labelsMatch = false
 				}
 			}
 			if labelsMatch {

@@ -30,4 +30,9 @@ const (
 	// on the target namespace. Parameters: target namespace, label key, existing value,
 	// inherited value, SA namespace name.
 	DenialLabelConflictFmt = "Namespace %s already has label %s=%s which conflicts with inherited value %s from SA namespace %s"
+
+	// DenialExtraTrackedKeyFmt is a format string returned by the namespace mutator
+	// when the target namespace has a tracked label not present on the SA source namespace.
+	// Parameters: target namespace, extra key, SA namespace name.
+	DenialExtraTrackedKeyFmt = "Namespace %s has tracked label %s not present on SA source namespace %s"
 )

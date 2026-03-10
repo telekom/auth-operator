@@ -108,8 +108,7 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 					logger.V(1).Info("SA namespace label inheritance denied - target has extra tracked key",
 						"namespace", req.Name, "extraKey", extraKey, "saNamespace", saInfo.Namespace)
 					metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultDenied).Inc()
-					return admission.Denied(fmt.Sprintf(
-						"Namespace %s has tracked label %s not present on SA source namespace %s",
+					return admission.Denied(fmt.Sprintf(DenialExtraTrackedKeyFmt,
 						req.Name, extraKey, saInfo.Namespace))
 				}
 			}

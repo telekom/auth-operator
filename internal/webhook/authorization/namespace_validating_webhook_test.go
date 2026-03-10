@@ -2230,7 +2230,7 @@ func TestNamespaceValidatorSANamespaceInheritance(t *testing.T) {
 
 			targetNSRaw := mustMarshalJSON(t, tt.targetNS)
 			admissionReq := admissionv1.AdmissionRequest{
-				Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
+				Kind:      metav1.GroupVersionKind{Group: "", Version: "v1", Kind: "Namespace"},
 				Name:      tt.targetNS.Name,
 				Operation: tt.operation,
 				UserInfo: authenticationv1.UserInfo{

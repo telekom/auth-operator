@@ -176,17 +176,16 @@ func IsRestrictedBindDefinition(name string) bool {
 // labels, or the label set is incomplete. Returns a non-nil error only for transient
 // API failures (non-NotFound errors) so the caller can return admission.Errored.
 func GetSANamespaceTrackedLabels(ctx context.Context, c client.Client, saInfo ServiceAccountInfo) (map[string]string, error) {
-	empty := map[string]string{}
 	if !saInfo.IsServiceAccount {
-		return empty, nil
+		return map[string]string{}, nil
 	}
 
 	saNamespace := &corev1.Namespace{}
 	if err := c.Get(ctx, types.NamespacedName{Name: saInfo.Namespace}, saNamespace); err != nil {
 		if apierrors.IsNotFound(err) {
-			return empty, nil
+			return map[string]string{}, nil
 		}
-		return empty, fmt.Errorf("unable to get SA namespace %q: %w", saInfo.Namespace, err)
+		return map[string]string{}, fmt.Errorf("unable to get SA namespace %q: %w", saInfo.Namespace, err)
 	}
 
 	trackedKeys := []string{
@@ -205,7 +204,7 @@ func GetSANamespaceTrackedLabels(ctx context.Context, c client.Client, saInfo Se
 	// Require at minimum the owner label.
 	ownerVal, hasOwner := result[authzv1alpha1.LabelKeyOwner]
 	if !hasOwner {
-		return empty, nil
+		return map[string]string{}, nil
 	}
 
 	// Enforce a valid and non-ambiguous ownership combination:
@@ -216,28 +215,28 @@ func GetSANamespaceTrackedLabels(ctx context.Context, c client.Client, saInfo Se
 	switch ownerVal {
 	case authzv1alpha1.OwnerPlatform:
 		if _, ok := result[authzv1alpha1.LabelKeyTenant]; ok {
-			return empty, nil
+			return map[string]string{}, nil
 		}
 		if _, ok := result[authzv1alpha1.LabelKeyThirdParty]; ok {
-			return empty, nil
+			return map[string]string{}, nil
 		}
 	case authzv1alpha1.OwnerTenant:
 		if _, ok := result[authzv1alpha1.LabelKeyTenant]; !ok {
-			return empty, nil
+			return map[string]string{}, nil
 		}
 		if _, ok := result[authzv1alpha1.LabelKeyThirdParty]; ok {
-			return empty, nil
+			return map[string]string{}, nil
 		}
 	case authzv1alpha1.OwnerThirdParty:
 		if _, ok := result[authzv1alpha1.LabelKeyThirdParty]; !ok {
-			return empty, nil
+			return map[string]string{}, nil
 		}
 		if _, ok := result[authzv1alpha1.LabelKeyTenant]; ok {
-			return empty, nil
+			return map[string]string{}, nil
 		}
 	default:
 		// Unknown owner values are not considered valid tracked ownership.
-		return empty, nil
+		return map[string]string{}, nil
 	}
 
 	return result, nil
