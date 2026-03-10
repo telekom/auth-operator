@@ -510,6 +510,7 @@ func TestGetSANamespaceTrackedLabels(t *testing.T) {
 		saInfo     ServiceAccountInfo
 		namespaces []corev1.Namespace
 		wantLabels map[string]string
+		wantErr    bool
 	}{
 		{
 			name:       "not a service account",
@@ -530,7 +531,7 @@ func TestGetSANamespaceTrackedLabels(t *testing.T) {
 			wantLabels: nil,
 		},
 		{
-			name:   "SA namespace has owner label",
+			name:   "SA namespace has owner+tenant labels",
 			saInfo: ServiceAccountInfo{Namespace: "tenant-ns", Name: "operator-sa", IsServiceAccount: true},
 			namespaces: []corev1.Namespace{
 				{ObjectMeta: metav1.ObjectMeta{Name: "tenant-ns", Labels: map[string]string{
@@ -577,6 +578,36 @@ func TestGetSANamespaceTrackedLabels(t *testing.T) {
 			},
 			wantLabels: nil,
 		},
+		{
+			name:   "tenant owner without tenant identifying label - incomplete, returns nil",
+			saInfo: ServiceAccountInfo{Namespace: "bad-ns", Name: "sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "bad-ns", Labels: map[string]string{
+					authzv1alpha1.LabelKeyOwner: "tenant",
+				}}},
+			},
+			wantLabels: nil,
+		},
+		{
+			name:   "thirdparty owner without thirdparty identifying label - incomplete, returns nil",
+			saInfo: ServiceAccountInfo{Namespace: "bad-3p", Name: "sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "bad-3p", Labels: map[string]string{
+					authzv1alpha1.LabelKeyOwner: "thirdparty",
+				}}},
+			},
+			wantLabels: nil,
+		},
+		{
+			name:   "tenant label present without owner label - no owner, returns nil",
+			saInfo: ServiceAccountInfo{Namespace: "no-owner", Name: "sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "no-owner", Labels: map[string]string{
+					authzv1alpha1.LabelKeyTenant: "team-x",
+				}}},
+			},
+			wantLabels: nil,
+		},
 	}
 
 	for _, tt := range tests {
@@ -587,11 +618,21 @@ func TestGetSANamespaceTrackedLabels(t *testing.T) {
 			}
 			c := builder.Build()
 
-			got := GetSANamespaceTrackedLabels(context.Background(), c, tt.saInfo)
+			got, err := GetSANamespaceTrackedLabels(context.Background(), c, tt.saInfo)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 
 			if tt.wantLabels == nil {
-				if got != nil {
-					t.Errorf("expected nil, got %v", got)
+				if len(got) != 0 {
+					t.Errorf("expected empty labels, got %v", got)
 				}
 				return
 			}

@@ -79,11 +79,30 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 
 	// Last resort: if no BindDefinition matched and the user is a ServiceAccount,
 	// inherit tracked ownership labels from the SA's source namespace (issue #202).
-	if len(labelsToAdd) == 0 && saInfo.IsServiceAccount {
-		labelsToAdd = GetSANamespaceTrackedLabels(ctx, m.Client, saInfo)
-		if len(labelsToAdd) > 0 {
+	// Only applies to CREATE/UPDATE — never to DELETE.
+	if len(labelsToAdd) == 0 && saInfo.IsServiceAccount &&
+		(req.Operation == admissionv1.Create || req.Operation == admissionv1.Update) {
+		inherited, saErr := GetSANamespaceTrackedLabels(ctx, m.Client, saInfo)
+		if saErr != nil {
+			logger.Error(saErr, "failed to lookup SA namespace labels", "namespace", req.Name)
+			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultErrored).Inc()
+			return admission.Errored(http.StatusInternalServerError, saErr)
+		}
+		if len(inherited) > 0 {
+			// Check for conflicts: if the target already has a tracked label with a different value, deny.
+			if ns.Labels != nil {
+				for k, inheritedVal := range inherited {
+					if existingVal, exists := ns.Labels[k]; exists && existingVal != inheritedVal {
+						logger.V(1).Info("SA namespace label inheritance denied - label conflict on target namespace",
+							"namespace", req.Name, "label", k, "existingValue", existingVal, "inheritedValue", inheritedVal)
+						metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultDenied).Inc()
+						return admission.Denied(DenialNoOIDCAttributes)
+					}
+				}
+			}
 			logger.V(1).Info("SA namespace label inheritance - inheriting labels from SA source namespace",
-				"namespace", req.Name, "saNamespace", saInfo.Namespace, "labelCount", len(labelsToAdd))
+				"namespace", req.Name, "saNamespace", saInfo.Namespace, "labelCount", len(inherited))
+			labelsToAdd = inherited
 		}
 	}
 

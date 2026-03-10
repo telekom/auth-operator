@@ -332,16 +332,41 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 		return admission.Allowed("")
 	}
 
-	// Last resort: if the user is a ServiceAccount, check if its source namespace
-	// has the same tracked ownership labels as the target namespace (issue #202).
-	if saInfo.IsServiceAccount {
-		inheritedLabels := GetSANamespaceTrackedLabels(ctx, v.Client, saInfo)
+	// Last resort: if the user is a ServiceAccount performing CREATE/UPDATE, check if
+	// its source namespace has the same tracked ownership labels as the target namespace (issue #202).
+	// This is restricted to CREATE/UPDATE — DELETE is intentionally excluded.
+	if saInfo.IsServiceAccount &&
+		(req.Operation == admissionv1.Create || req.Operation == admissionv1.Update) {
+		inheritedLabels, saErr := GetSANamespaceTrackedLabels(ctx, v.Client, saInfo)
+		if saErr != nil {
+			logger.Error(saErr, "failed to lookup SA namespace labels", "namespace", req.Name)
+			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()
+			return admission.Errored(http.StatusInternalServerError, saErr)
+		}
 		if len(inheritedLabels) > 0 {
+			// Symmetric comparison: all inherited labels must match AND the target
+			// must not have extra tracked ownership labels beyond what the SA namespace has.
 			labelsMatch := true
-			for k, v := range inheritedLabels {
-				if ns.Labels[k] != v {
+			for k, val := range inheritedLabels {
+				if ns.Labels[k] != val {
 					labelsMatch = false
 					break
+				}
+			}
+			if labelsMatch {
+				// Check for extra tracked keys on the target that the SA namespace doesn't have.
+				extraTrackedKeys := []string{
+					authzv1alpha1.LabelKeyOwner,
+					authzv1alpha1.LabelKeyTenant,
+					authzv1alpha1.LabelKeyThirdParty,
+				}
+				for _, tk := range extraTrackedKeys {
+					if _, onTarget := ns.Labels[tk]; onTarget {
+						if _, onSA := inheritedLabels[tk]; !onSA {
+							labelsMatch = false
+							break
+						}
+					}
 				}
 			}
 			if labelsMatch {

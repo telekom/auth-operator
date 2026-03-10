@@ -2166,6 +2166,53 @@ func TestNamespaceValidatorSANamespaceInheritance(t *testing.T) {
 			// No saNamespace provided — it doesn't exist in the cluster
 			expectedAllow: false,
 		},
+		{
+			name:      "SA with subset of tracked keys - target has extra tracked key - denied",
+			operation: admissionv1.Create,
+			username:  "system:serviceaccount:platform-ns:platform-sa",
+			targetNS: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "new-ns",
+					Labels: map[string]string{
+						"t-caas.telekom.com/owner":  "platform",
+						"t-caas.telekom.com/tenant": "team-alpha",
+					},
+				},
+			},
+			saNamespace: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "platform-ns",
+					Labels: map[string]string{
+						"t-caas.telekom.com/owner": "platform",
+					},
+				},
+			},
+			expectedAllow: false,
+		},
+		{
+			name:      "SA DELETE operation - SA fallback not applied - denied",
+			operation: admissionv1.Delete,
+			username:  "system:serviceaccount:tenant-alpha:my-operator",
+			targetNS: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "tenant-ns",
+					Labels: map[string]string{
+						"t-caas.telekom.com/owner":  "tenant",
+						"t-caas.telekom.com/tenant": "team-alpha",
+					},
+				},
+			},
+			saNamespace: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "tenant-alpha",
+					Labels: map[string]string{
+						"t-caas.telekom.com/owner":  "tenant",
+						"t-caas.telekom.com/tenant": "team-alpha",
+					},
+				},
+			},
+			expectedAllow: false,
+		},
 	}
 
 	for _, tt := range tests {
