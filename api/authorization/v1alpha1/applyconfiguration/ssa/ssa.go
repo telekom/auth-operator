@@ -141,6 +141,104 @@ func WebhookAuthorizerStatusFrom(status *authv1alpha1.WebhookAuthorizerStatus) *
 	return result
 }
 
+// ApplyRBACPolicyStatus applies a status update to an RBACPolicy using native SSA.
+// It delegates to PatchApplyRBACPolicyStatus which compares against the cache first
+// and skips the API call when the status is already up-to-date.
+func ApplyRBACPolicyStatus(ctx context.Context, c client.Client, rp *authv1alpha1.RBACPolicy) error {
+	_, err := PatchApplyRBACPolicyStatus(ctx, c, rp)
+	return err
+}
+
+// ApplyRestrictedBindDefinitionStatus applies a status update to a RestrictedBindDefinition using native SSA.
+// It delegates to PatchApplyRestrictedBindDefinitionStatus which compares against the cache first
+// and skips the API call when the status is already up-to-date.
+func ApplyRestrictedBindDefinitionStatus(ctx context.Context, c client.Client, rbd *authv1alpha1.RestrictedBindDefinition) error {
+	_, err := PatchApplyRestrictedBindDefinitionStatus(ctx, c, rbd)
+	return err
+}
+
+// ApplyRestrictedRoleDefinitionStatus applies a status update to a RestrictedRoleDefinition using native SSA.
+// It delegates to PatchApplyRestrictedRoleDefinitionStatus which compares against the cache first
+// and skips the API call when the status is already up-to-date.
+func ApplyRestrictedRoleDefinitionStatus(ctx context.Context, c client.Client, rrd *authv1alpha1.RestrictedRoleDefinition) error {
+	_, err := PatchApplyRestrictedRoleDefinitionStatus(ctx, c, rrd)
+	return err
+}
+
+// RBACPolicyStatusFrom converts an RBACPolicyStatus to its ApplyConfiguration.
+func RBACPolicyStatusFrom(status *authv1alpha1.RBACPolicyStatus) *ac.RBACPolicyStatusApplyConfiguration {
+	if status == nil {
+		return nil
+	}
+
+	result := ac.RBACPolicyStatus()
+	result.WithObservedGeneration(status.ObservedGeneration)
+	result.WithBoundResourceCount(status.BoundResourceCount)
+
+	for i := range status.Conditions {
+		result.WithConditions(ConditionFrom(&status.Conditions[i]))
+	}
+
+	return result
+}
+
+// RestrictedBindDefinitionStatusFrom converts a RestrictedBindDefinitionStatus to its ApplyConfiguration.
+func RestrictedBindDefinitionStatusFrom(status *authv1alpha1.RestrictedBindDefinitionStatus) *ac.RestrictedBindDefinitionStatusApplyConfiguration {
+	if status == nil {
+		return nil
+	}
+
+	result := ac.RestrictedBindDefinitionStatus()
+	result.WithObservedGeneration(status.ObservedGeneration)
+	result.WithBindReconciled(status.BindReconciled)
+
+	for _, sa := range status.GeneratedServiceAccounts {
+		result.WithGeneratedServiceAccounts(sa)
+	}
+
+	result.MissingRoleRefs = make([]string, 0, len(status.MissingRoleRefs))
+	for _, ref := range status.MissingRoleRefs {
+		result.WithMissingRoleRefs(ref)
+	}
+
+	for _, sa := range status.ExternalServiceAccounts {
+		result.WithExternalServiceAccounts(sa)
+	}
+
+	result.PolicyViolations = make([]string, 0, len(status.PolicyViolations))
+	for _, v := range status.PolicyViolations {
+		result.WithPolicyViolations(v)
+	}
+
+	for i := range status.Conditions {
+		result.WithConditions(ConditionFrom(&status.Conditions[i]))
+	}
+
+	return result
+}
+
+// RestrictedRoleDefinitionStatusFrom converts a RestrictedRoleDefinitionStatus to its ApplyConfiguration.
+func RestrictedRoleDefinitionStatusFrom(status *authv1alpha1.RestrictedRoleDefinitionStatus) *ac.RestrictedRoleDefinitionStatusApplyConfiguration {
+	if status == nil {
+		return nil
+	}
+
+	result := ac.RestrictedRoleDefinitionStatus()
+	result.WithObservedGeneration(status.ObservedGeneration)
+	result.WithRoleReconciled(status.RoleReconciled)
+
+	result.PolicyViolations = make([]string, 0, len(status.PolicyViolations))
+	for _, v := range status.PolicyViolations {
+		result.WithPolicyViolations(v)
+	}
+
+	for i := range status.Conditions {
+		result.WithConditions(ConditionFrom(&status.Conditions[i]))
+	}
+
+	return result
+}
+
 // ConditionFrom converts a metav1.Condition to its ApplyConfiguration.
 func ConditionFrom(c *metav1.Condition) *metav1ac.ConditionApplyConfiguration {
 	if c == nil {
