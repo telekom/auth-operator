@@ -275,7 +275,7 @@ logger.V(1).Info("debug")  // Verbose
 | `--verbosity` / `-v` | Log level (0-9) | `2` |
 | `--tracing-enabled` | Enable OpenTelemetry tracing (requires `--tracing-endpoint` or `OTEL_EXPORTER_OTLP_ENDPOINT`) | `false` |
 | `--tracing-endpoint` | OTLP collector endpoint (required when `--tracing-enabled` is true, unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set) | — |
-| `--tracing-sampling-rate` | Trace sampling rate (0.0-1.0) | `0.1` |
+| `--tracing-sampling-rate` | Trace sampling rate (0.0–1.0) | `0.1` |
 | `--tracing-insecure` | Use insecure gRPC for tracing | `false` |
 
 ### CLI Flags (controller subcommand)
@@ -283,9 +283,9 @@ logger.V(1).Info("debug")  // Verbose
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--leader-elect` | Enable leader election | `true` |
-| `--binddefinition-concurrency` | Max concurrent BindDefinition reconciles | `5` |
-| `--roledefinition-concurrency` | Max concurrent RoleDefinition reconciles | `5` |
-| `--webhookauthorizer-concurrency` | Max concurrent WebhookAuthorizer reconciles | `1` |
+| `--binddefinition-concurrency` | Max concurrent BindDefinition reconciliations | `5` |
+| `--roledefinition-concurrency` | Max concurrent RoleDefinition reconciliations | `5` |
+| `--webhookauthorizer-concurrency` | Max concurrent WebhookAuthorizer reconciliations | `1` |
 | `--cache-sync-timeout` | Timeout for waiting for CRDs to become available | `2m` |
 | `--graceful-shutdown-timeout` | Timeout for graceful shutdown of the manager | `30s` |
 | `--wait-for-crds` | Wait for required CRDs before starting controllers | `true` |
