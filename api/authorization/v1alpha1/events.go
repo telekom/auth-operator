@@ -57,6 +57,21 @@ const (
 	// EventReasonExternalSAUntracked indicates a BindDefinition no longer references
 	// an external (pre-existing) ServiceAccount.
 	EventReasonExternalSAUntracked = "ExternalSAUntracked"
+
+	// EventReasonPolicyViolation indicates a policy violation was detected.
+	EventReasonPolicyViolation = "PolicyViolation"
+
+	// EventReasonPolicyCompliance indicates all policy checks passed.
+	EventReasonPolicyCompliance = "PolicyCompliance"
+
+	// EventReasonPolicyNotFound indicates the referenced RBACPolicy was not found.
+	EventReasonPolicyNotFound = "PolicyNotFound"
+
+	// EventReasonPolicyValidated indicates the resource was validated against the policy.
+	EventReasonPolicyValidated = "PolicyValidated"
+
+	// EventReasonDeprovisioned indicates resources were deprovisioned due to policy violation.
+	EventReasonDeprovisioned = "Deprovisioned"
 )
 
 // Event action constants for the events.k8s.io/v1 API.

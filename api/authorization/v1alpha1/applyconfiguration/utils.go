@@ -37,20 +37,60 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &authorizationv1alpha1.BindDefinitionSpecApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("BindDefinitionStatus"):
 		return &authorizationv1alpha1.BindDefinitionStatusApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("BindingLimits"):
+		return &authorizationv1alpha1.BindingLimitsApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("ClusterBinding"):
 		return &authorizationv1alpha1.ClusterBindingApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("NameMatchLimits"):
+		return &authorizationv1alpha1.NameMatchLimitsApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("NamespaceBinding"):
 		return &authorizationv1alpha1.NamespaceBindingApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("NamespaceLimits"):
+		return &authorizationv1alpha1.NamespaceLimitsApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("PolicyScope"):
+		return &authorizationv1alpha1.PolicyScopeApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("Principal"):
 		return &authorizationv1alpha1.PrincipalApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("RBACPolicy"):
+		return &authorizationv1alpha1.RBACPolicyApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("RBACPolicyReference"):
+		return &authorizationv1alpha1.RBACPolicyReferenceApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("RBACPolicySpec"):
+		return &authorizationv1alpha1.RBACPolicySpecApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("RBACPolicyStatus"):
+		return &authorizationv1alpha1.RBACPolicyStatusApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("ResourceVerbRule"):
+		return &authorizationv1alpha1.ResourceVerbRuleApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("RestrictedAPIGroup"):
 		return &authorizationv1alpha1.RestrictedAPIGroupApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("RestrictedBindDefinition"):
+		return &authorizationv1alpha1.RestrictedBindDefinitionApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("RestrictedBindDefinitionSpec"):
+		return &authorizationv1alpha1.RestrictedBindDefinitionSpecApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("RestrictedBindDefinitionStatus"):
+		return &authorizationv1alpha1.RestrictedBindDefinitionStatusApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("RestrictedRoleDefinition"):
+		return &authorizationv1alpha1.RestrictedRoleDefinitionApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("RestrictedRoleDefinitionSpec"):
+		return &authorizationv1alpha1.RestrictedRoleDefinitionSpecApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("RestrictedRoleDefinitionStatus"):
+		return &authorizationv1alpha1.RestrictedRoleDefinitionStatusApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("RoleDefinition"):
 		return &authorizationv1alpha1.RoleDefinitionApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("RoleDefinitionSpec"):
 		return &authorizationv1alpha1.RoleDefinitionSpecApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("RoleDefinitionStatus"):
 		return &authorizationv1alpha1.RoleDefinitionStatusApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("RoleLimits"):
+		return &authorizationv1alpha1.RoleLimitsApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("RoleRefLimits"):
+		return &authorizationv1alpha1.RoleRefLimitsApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("SACreationConfig"):
+		return &authorizationv1alpha1.SACreationConfigApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("ServiceAccountLimits"):
+		return &authorizationv1alpha1.ServiceAccountLimitsApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("SubjectLimits"):
+		return &authorizationv1alpha1.SubjectLimitsApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("WebhookAuthorizer"):
 		return &authorizationv1alpha1.WebhookAuthorizerApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("WebhookAuthorizerSpec"):
