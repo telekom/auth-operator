@@ -5,6 +5,8 @@ SPDX-License-Identifier: Apache-2.0
 package v1alpha1
 
 import (
+	"errors"
+	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -514,6 +516,135 @@ var _ = Describe("RoleDefinition Webhook", func() {
 			Expect(k8sClient.Update(ctx, rd)).To(Succeed())
 
 			Expect(k8sClient.Delete(ctx, rd)).To(Succeed())
+		})
+	})
+
+	Context("MaxItems and field validation constraints", func() {
+
+		It("should reject RestrictedVerbs exceeding MaxItems=16", func() {
+			verbs := make([]string, 17)
+			for i := range verbs {
+				verbs[i] = "get"
+			}
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-maxitems-verbs",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-maxitems-verbs",
+					ScopeNamespaced: false,
+					RestrictedVerbs: verbs,
+				},
+			}
+			err := k8sClient.Create(ctx, rd)
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsInvalid(err)).To(BeTrue(), "expected Invalid status reason")
+			statusErr := &apierrors.StatusError{}
+			Expect(errors.As(err, &statusErr)).To(BeTrue())
+			Expect(statusErr.ErrStatus.Details.Causes).To(ContainElement(
+				Satisfy(func(c metav1.StatusCause) bool {
+					return c.Field == "spec.restrictedVerbs"
+				}),
+			), "expected cause targeting spec.restrictedVerbs")
+		})
+
+		It("should reject RestrictedVerbs with empty string item", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-verb-empty",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-verb-empty",
+					ScopeNamespaced: false,
+					RestrictedVerbs: []string{""},
+				},
+			}
+			err := k8sClient.Create(ctx, rd)
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsInvalid(err)).To(BeTrue(), "expected Invalid status reason")
+			statusErr := &apierrors.StatusError{}
+			Expect(errors.As(err, &statusErr)).To(BeTrue())
+			Expect(statusErr.ErrStatus.Details.Causes).To(ContainElement(
+				Satisfy(func(c metav1.StatusCause) bool {
+					return c.Field == "spec.restrictedVerbs[0]"
+				}),
+			), "expected cause targeting spec.restrictedVerbs[0]")
+		})
+
+		It("should reject RestrictedVerbs with invalid pattern", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-verb-pattern",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-verb-pattern",
+					ScopeNamespaced: false,
+					RestrictedVerbs: []string{"GET"},
+				},
+			}
+			err := k8sClient.Create(ctx, rd)
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsInvalid(err)).To(BeTrue(), "expected Invalid status reason")
+			statusErr := &apierrors.StatusError{}
+			Expect(errors.As(err, &statusErr)).To(BeTrue())
+			Expect(statusErr.ErrStatus.Details.Causes).To(ContainElement(
+				Satisfy(func(c metav1.StatusCause) bool {
+					return c.Field == "spec.restrictedVerbs[0]"
+				}),
+			), "expected cause targeting spec.restrictedVerbs[0]")
+		})
+
+		It("should accept valid RestrictedVerbs within limits", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-valid-verbs",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-valid-verbs",
+					ScopeNamespaced: false,
+					RestrictedVerbs: []string{"get", "list", "watch", "*"},
+				},
+			}
+			Expect(k8sClient.Create(ctx, rd)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, rd)).To(Succeed())
+		})
+
+		It("should reject RestrictedResources exceeding MaxItems=128", func() {
+			resources := make([]metav1.APIResource, 129)
+			for i := range resources {
+				resources[i] = metav1.APIResource{
+					Name:         fmt.Sprintf("resource%d", i),
+					SingularName: fmt.Sprintf("resource%d", i),
+					Kind:         fmt.Sprintf("Resource%d", i),
+					Namespaced:   true,
+					Verbs:        metav1.Verbs{"get", "list"},
+				}
+			}
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-maxitems-resources",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:          DefinitionClusterRole,
+					TargetName:          "test-maxitems-resources",
+					ScopeNamespaced:     false,
+					RestrictedResources: resources,
+				},
+			}
+			err := k8sClient.Create(ctx, rd)
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsInvalid(err)).To(BeTrue(), "expected Invalid status reason")
+			statusErr := &apierrors.StatusError{}
+			Expect(errors.As(err, &statusErr)).To(BeTrue())
+			Expect(statusErr.ErrStatus.Details.Causes).To(ContainElement(
+				Satisfy(func(c metav1.StatusCause) bool {
+					return c.Field == "spec.restrictedResources"
+				}),
+			), "expected cause targeting spec.restrictedResources")
 		})
 	})
 })

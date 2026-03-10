@@ -328,13 +328,18 @@ spec:
                   - singularName
                   - verbs
                   type: object
+                maxItems: 128
                 type: array
               restrictedVerbs:
                 description: |-
                   RestrictedVerbs holds all verbs which will *NOT* be reconciled into the "TargetRole".
                   The RBAC operator discovers all resource verbs available and removes those listed here.
                 items:
+                  maxLength: 63
+                  minLength: 1
+                  pattern: ^([a-z]+|\*)$
                   type: string
+                maxItems: 16
                 type: array
               scopeNamespaced:
                 description: |-
