@@ -77,10 +77,10 @@ spec:
           resources:
             limits:
               cpu: 150m
-              memory: 128Mi
+              memory: 256Mi
             requests:
               cpu: 50m
-              memory: 64Mi
+              memory: 128Mi
           ports:
             - name: health-probe
               containerPort: 8081
@@ -93,7 +93,7 @@ spec:
               mountPath: /tmp/k8s-webhook-server/serving-certs
               readOnly: true
       serviceAccountName: manager
-      terminationGracePeriodSeconds: 10
+      terminationGracePeriodSeconds: 35
       volumes:
         - name: cert
           secret:

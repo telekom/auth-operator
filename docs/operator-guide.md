@@ -142,31 +142,54 @@ controller:
   resources:
     limits:
       cpu: 500m
-      memory: 128Mi
+      memory: 256Mi
     requests:
       cpu: 10m
-      memory: 64Mi
+      memory: 128Mi
+  terminationGracePeriodSeconds: 35
+  startupProbe:
+    failureThreshold: 30
+    periodSeconds: 2
   podDisruptionBudget:
     enabled: false
     minAvailable: 1
 
 # Webhook server configuration
 webhookServer:
-  replicas: 1
+  replicas: 2
   tdgMigration: "false"  # Enable for T-DDI to T-CaaS migration
+  authorizeRateLimit: 100   # Per-pod sustained requests/second
+  authorizeRateBurst: 200   # Burst size for rate limiter
   resources:
     limits:
       cpu: 150m
-      memory: 128Mi
+      memory: 256Mi
     requests:
       cpu: 50m
-      memory: 64Mi
+      memory: 128Mi
+  terminationGracePeriodSeconds: 35
+  startupProbe:
+    path: /healthz
+    port: 8081
+    failureThreshold: 60
+    periodSeconds: 2
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                control-plane: webhook-server
+            topologyKey: kubernetes.io/hostname
   podDisruptionBudget:
-    enabled: false
+    enabled: true
     minAvailable: 1
 
 # Metrics and monitoring
 metrics:
+  auth:
+    enabled: false  # Require auth for /metrics endpoint
   service:
     enabled: true
     port: 8080
@@ -184,15 +207,15 @@ For production environments, deploy multiple replicas with leader election:
 
 ### Helm Configuration
 
+The webhook server defaults to **2 replicas** with pod anti-affinity and PDB
+enabled. To also enable HA for the controller:
+
 ```bash
 helm upgrade auth-operator oci://ghcr.io/telekom/charts/auth-operator \
   --namespace auth-operator-system \
   --set controller.replicas=2 \
   --set controller.podDisruptionBudget.enabled=true \
-  --set controller.podDisruptionBudget.minAvailable=1 \
-  --set webhookServer.replicas=2 \
-  --set webhookServer.podDisruptionBudget.enabled=true \
-  --set webhookServer.podDisruptionBudget.minAvailable=1
+  --set controller.podDisruptionBudget.minAvailable=1
 ```
 
 ### Leader Election
