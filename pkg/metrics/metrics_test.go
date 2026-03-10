@@ -300,6 +300,48 @@ func TestDeleteManagedResourceSeries(t *testing.T) {
 	}
 }
 
+func TestDeleteAuthorizerSeries(t *testing.T) {
+	authorizerName := "test-authorizer-delete"
+
+	// Increment counters for all decision labels.
+	for _, decision := range []string{AuthorizerDecisionAllowed, AuthorizerDecisionDenied, AuthorizerDecisionNoOpinion, AuthorizerDecisionError} {
+		AuthorizerRequestsTotal.WithLabelValues(decision, authorizerName).Inc()
+	}
+	AuthorizerDeniedPrincipalHitsTotal.WithLabelValues(authorizerName).Inc()
+
+	// Verify counters are non-zero before deletion.
+	for _, decision := range []string{AuthorizerDecisionAllowed, AuthorizerDecisionDenied, AuthorizerDecisionNoOpinion, AuthorizerDecisionError} {
+		counter, err := AuthorizerRequestsTotal.GetMetricWithLabelValues(decision, authorizerName)
+		if err != nil {
+			t.Fatalf("failed to get metric: %v", err)
+		}
+		if val := getCounterValue(t, counter); val != 1 {
+			t.Errorf("expected counter for %s to be 1 before deletion, got %f", decision, val)
+		}
+	}
+
+	// Delete the series.
+	DeleteAuthorizerSeries(authorizerName)
+
+	// After deletion, fresh metric reads should return zero (new series).
+	for _, decision := range []string{AuthorizerDecisionAllowed, AuthorizerDecisionDenied, AuthorizerDecisionNoOpinion, AuthorizerDecisionError} {
+		counter, err := AuthorizerRequestsTotal.GetMetricWithLabelValues(decision, authorizerName)
+		if err != nil {
+			t.Fatalf("failed to get metric: %v", err)
+		}
+		if val := getCounterValue(t, counter); val != 0 {
+			t.Errorf("expected counter for %s to be 0 after deletion, got %f", decision, val)
+		}
+	}
+	deniedCounter, err := AuthorizerDeniedPrincipalHitsTotal.GetMetricWithLabelValues(authorizerName)
+	if err != nil {
+		t.Fatalf("failed to get denied principal metric: %v", err)
+	}
+	if val := getCounterValue(t, deniedCounter); val != 0 {
+		t.Errorf("expected denied principal counter to be 0 after deletion, got %f", val)
+	}
+}
+
 func TestConstants(t *testing.T) {
 	// Verify namespace constant
 	if Namespace != "auth_operator" {
