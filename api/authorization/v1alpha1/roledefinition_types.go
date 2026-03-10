@@ -61,11 +61,14 @@ type RoleDefinitionSpec struct {
 	// RestrictedResources holds all resources which will *NOT* be reconciled into the "TargetRole".
 	// The RBAC operator discovers all API resources available and removes those listed here.
 	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MaxItems=128
 	RestrictedResources []metav1.APIResource `json:"restrictedResources,omitempty"`
 
 	// RestrictedVerbs holds all verbs which will *NOT* be reconciled into the "TargetRole".
 	// The RBAC operator discovers all resource verbs available and removes those listed here.
 	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:validation:items:MaxLength=63
 	RestrictedVerbs []string `json:"restrictedVerbs,omitempty"`
 
 	// BreakglassAllowed marks generated ClusterRoles as eligible for temporary
