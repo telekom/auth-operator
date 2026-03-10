@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- ServiceAccount namespace label inheritance: when no BindDefinition matches, SAs can create/update namespaces inheriting ownership labels from their source namespace as a last-resort fallback (#202)
+
 ### Fixed
 
 - Repeated label key checks in `getLabelsFromNamespaceSelector()` replaced with set-based lookup (#156)

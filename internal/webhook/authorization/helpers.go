@@ -1,10 +1,15 @@
 package webhooks
 
 import (
+	"context"
 	"strings"
 
+	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	admissionv1 "k8s.io/api/admission/v1"
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 /*
@@ -157,4 +162,36 @@ func MatchesSubjects(userGroups []string, saInfo ServiceAccountInfo, subjects []
 // IsRestrictedBindDefinition checks if a BindDefinition should be skipped based on its name.
 func IsRestrictedBindDefinition(name string) bool {
 	return strings.HasSuffix(name, "-namespaced-reader-restricted")
+}
+
+// GetSANamespaceTrackedLabels looks up the namespace where the ServiceAccount resides
+// and returns the tracked ownership labels (owner, tenant, thirdparty) found on it.
+// Returns nil if the SA namespace has no tracked labels or the lookup fails.
+func GetSANamespaceTrackedLabels(ctx context.Context, c client.Client, saInfo ServiceAccountInfo) map[string]string {
+	if !saInfo.IsServiceAccount {
+		return nil
+	}
+
+	saNamespace := &corev1.Namespace{}
+	if err := c.Get(ctx, types.NamespacedName{Name: saInfo.Namespace}, saNamespace); err != nil {
+		return nil
+	}
+
+	trackedKeys := []string{
+		authzv1alpha1.LabelKeyOwner,
+		authzv1alpha1.LabelKeyTenant,
+		authzv1alpha1.LabelKeyThirdParty,
+	}
+
+	result := map[string]string{}
+	for _, key := range trackedKeys {
+		if val, ok := saNamespace.Labels[key]; ok {
+			result[key] = val
+		}
+	}
+
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }

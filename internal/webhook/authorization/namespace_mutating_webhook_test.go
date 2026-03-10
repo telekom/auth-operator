@@ -438,6 +438,258 @@ func TestNamespaceMutatorHandle(t *testing.T) {
 	}
 }
 
+// TestNamespaceMutatorSANamespaceInheritance tests the SA namespace label inheritance feature (issue #202).
+// When no BindDefinition matches, but the requesting SA's source namespace has tracked ownership labels,
+// those labels are inherited by the target namespace as a last-resort fallback.
+func TestNamespaceMutatorSANamespaceInheritance(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(authzv1alpha1.AddToScheme(scheme))
+
+	buildRequest := func(
+		t *testing.T,
+		operation admissionv1.Operation,
+		username string,
+		groups []string,
+		ns *corev1.Namespace,
+	) crAdmission.Request {
+		t.Helper()
+		nsRaw, err := json.Marshal(ns)
+		if err != nil {
+			t.Fatalf("failed to marshal namespace: %v", err)
+		}
+		return crAdmission.Request{
+			AdmissionRequest: admissionv1.AdmissionRequest{
+				Operation: operation,
+				UserInfo: authenticationv1.UserInfo{
+					Username: username,
+					Groups:   groups,
+				},
+				Object:    runtime.RawExtension{Raw: nsRaw},
+				OldObject: runtime.RawExtension{Raw: nsRaw},
+			},
+		}
+	}
+
+	tests := []struct {
+		name          string
+		operation     admissionv1.Operation
+		username      string
+		groups        []string
+		namespace     *corev1.Namespace
+		saNamespace   *corev1.Namespace // The SA's source namespace (with labels)
+		expectAllowed bool
+		expectPatch   bool
+		expectLabels  map[string]string
+	}{
+		{
+			name:      "SA in tenant namespace creates new tenant namespace - labels inherited",
+			operation: admissionv1.Create,
+			username:  "system:serviceaccount:tenant-alpha:my-operator",
+			namespace: &corev1.Namespace{
+				TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Namespace"},
+				ObjectMeta: metav1.ObjectMeta{Name: "new-ns"},
+			},
+			saNamespace: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "tenant-alpha",
+					Labels: map[string]string{
+						"t-caas.telekom.com/owner":  "tenant",
+						"t-caas.telekom.com/tenant": "team-alpha",
+					},
+				},
+			},
+			expectAllowed: true,
+			expectPatch:   true,
+			expectLabels: map[string]string{
+				"t-caas.telekom.com/owner":  "tenant",
+				"t-caas.telekom.com/tenant": "team-alpha",
+			},
+		},
+		{
+			name:      "SA in platform namespace creates new namespace - labels inherited",
+			operation: admissionv1.Create,
+			username:  "system:serviceaccount:platform-ns:platform-sa",
+			namespace: &corev1.Namespace{
+				TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Namespace"},
+				ObjectMeta: metav1.ObjectMeta{Name: "new-platform-ns"},
+			},
+			saNamespace: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "platform-ns",
+					Labels: map[string]string{
+						"t-caas.telekom.com/owner": "platform",
+					},
+				},
+			},
+			expectAllowed: true,
+			expectPatch:   true,
+			expectLabels: map[string]string{
+				"t-caas.telekom.com/owner": "platform",
+			},
+		},
+		{
+			name:      "SA in thirdparty namespace creates new namespace - labels inherited",
+			operation: admissionv1.Create,
+			username:  "system:serviceaccount:vendor-ns:vendor-sa",
+			namespace: &corev1.Namespace{
+				TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Namespace"},
+				ObjectMeta: metav1.ObjectMeta{Name: "new-vendor-ns"},
+			},
+			saNamespace: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "vendor-ns",
+					Labels: map[string]string{
+						"t-caas.telekom.com/owner":      "thirdparty",
+						"t-caas.telekom.com/thirdparty": "vendor-x",
+					},
+				},
+			},
+			expectAllowed: true,
+			expectPatch:   true,
+			expectLabels: map[string]string{
+				"t-caas.telekom.com/owner":      "thirdparty",
+				"t-caas.telekom.com/thirdparty": "vendor-x",
+			},
+		},
+		{
+			name:      "SA in namespace without tracked labels - denied",
+			operation: admissionv1.Create,
+			username:  "system:serviceaccount:untracked-ns:sa",
+			namespace: &corev1.Namespace{
+				TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Namespace"},
+				ObjectMeta: metav1.ObjectMeta{Name: "new-ns"},
+			},
+			saNamespace: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "untracked-ns",
+					Labels: map[string]string{"unrelated": "label"},
+				},
+			},
+			expectAllowed: false,
+			expectPatch:   false,
+		},
+		{
+			name:      "Non-SA user without BindDefinition match - denied (no inheritance)",
+			operation: admissionv1.Create,
+			username:  "some-oidc-user",
+			groups:    []string{"unrelated-group"},
+			namespace: &corev1.Namespace{
+				TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Namespace"},
+				ObjectMeta: metav1.ObjectMeta{Name: "new-ns"},
+			},
+			expectAllowed: false,
+			expectPatch:   false,
+		},
+		{
+			name:      "SA in tenant namespace updates namespace - labels inherited",
+			operation: admissionv1.Update,
+			username:  "system:serviceaccount:tenant-alpha:my-operator",
+			namespace: &corev1.Namespace{
+				TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Namespace"},
+				ObjectMeta: metav1.ObjectMeta{Name: "existing-ns"},
+			},
+			saNamespace: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "tenant-alpha",
+					Labels: map[string]string{
+						"t-caas.telekom.com/owner":  "tenant",
+						"t-caas.telekom.com/tenant": "team-alpha",
+					},
+				},
+			},
+			expectAllowed: true,
+			expectPatch:   true,
+			expectLabels: map[string]string{
+				"t-caas.telekom.com/owner":  "tenant",
+				"t-caas.telekom.com/tenant": "team-alpha",
+			},
+		},
+		{
+			name:      "SA inheritance does not overwrite existing labels on target",
+			operation: admissionv1.Create,
+			username:  "system:serviceaccount:tenant-alpha:my-operator",
+			namespace: &corev1.Namespace{
+				TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Namespace"},
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "new-ns",
+					Labels: map[string]string{
+						"t-caas.telekom.com/owner": "tenant",
+					},
+				},
+			},
+			saNamespace: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "tenant-alpha",
+					Labels: map[string]string{
+						"t-caas.telekom.com/owner":  "tenant",
+						"t-caas.telekom.com/tenant": "team-alpha",
+					},
+				},
+			},
+			expectAllowed: true,
+			expectPatch:   true,
+			expectLabels: map[string]string{
+				"t-caas.telekom.com/owner":  "tenant",
+				"t-caas.telekom.com/tenant": "team-alpha",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			builder := fake.NewClientBuilder().WithScheme(scheme)
+			if tt.saNamespace != nil {
+				builder = builder.WithObjects(tt.saNamespace)
+			}
+			fakeClient := builder.Build()
+
+			mutator := &webhooks.NamespaceMutator{
+				Client:  fakeClient,
+				Decoder: crAdmission.NewDecoder(scheme),
+			}
+
+			req := buildRequest(t, tt.operation, tt.username, tt.groups, tt.namespace)
+			resp := mutator.Handle(context.Background(), req)
+
+			if tt.expectAllowed && !resp.Allowed {
+				t.Errorf("expected Allowed but got Denied: %v", resp.Result.Message)
+			}
+			if !tt.expectAllowed && resp.Allowed {
+				t.Errorf("expected Denied but got Allowed")
+			}
+
+			if tt.expectPatch {
+				if len(resp.Patches) == 0 {
+					t.Errorf("expected patches but got none")
+				} else {
+					patchesJSON, err := json.Marshal(resp.Patches)
+					if err != nil {
+						t.Fatalf("failed to marshal resp.Patches: %v", err)
+					}
+					originalBytes, _ := json.Marshal(tt.namespace)
+					patched, err := admission.ApplyPatch(originalBytes, patchesJSON)
+					if err != nil {
+						t.Fatalf("failed to apply JSON patch: %v", err)
+					}
+					var patchedNamespace corev1.Namespace
+					if err := json.Unmarshal(patched, &patchedNamespace); err != nil {
+						t.Fatalf("failed to unmarshal patched namespace: %v", err)
+					}
+					for k, v := range tt.expectLabels {
+						gotVal, ok := patchedNamespace.Labels[k]
+						if !ok || gotVal != v {
+							t.Errorf("expected label %q=%q, got %q", k, v, gotVal)
+						}
+					}
+				}
+			} else if len(resp.Patches) > 0 {
+				t.Errorf("did not expect patches, but got: %v", resp.Patches)
+			}
+		})
+	}
+}
+
 // Performance test
 func TestNamespaceMutatorPerformance(t *testing.T) {
 	isCI := os.Getenv("CI")

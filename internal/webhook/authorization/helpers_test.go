@@ -1,11 +1,19 @@
 package webhooks
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
+	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	admissionv1 "k8s.io/api/admission/v1"
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 func TestParseServiceAccount(t *testing.T) {
@@ -487,6 +495,115 @@ func TestIsFieldIndexError(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := isFieldIndexError(tt.err); got != tt.want {
 				t.Errorf("isFieldIndexError(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetSANamespaceTrackedLabels(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(authzv1alpha1.AddToScheme(scheme))
+
+	tests := []struct {
+		name       string
+		saInfo     ServiceAccountInfo
+		namespaces []corev1.Namespace
+		wantLabels map[string]string
+	}{
+		{
+			name:       "not a service account",
+			saInfo:     ServiceAccountInfo{IsServiceAccount: false},
+			wantLabels: nil,
+		},
+		{
+			name:       "SA namespace does not exist",
+			saInfo:     ServiceAccountInfo{Namespace: "nonexistent", Name: "sa", IsServiceAccount: true},
+			wantLabels: nil,
+		},
+		{
+			name:   "SA namespace has no tracked labels",
+			saInfo: ServiceAccountInfo{Namespace: "my-ns", Name: "sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "my-ns", Labels: map[string]string{"unrelated": "label"}}},
+			},
+			wantLabels: nil,
+		},
+		{
+			name:   "SA namespace has owner label",
+			saInfo: ServiceAccountInfo{Namespace: "tenant-ns", Name: "operator-sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "tenant-ns", Labels: map[string]string{
+					authzv1alpha1.LabelKeyOwner:  "tenant",
+					authzv1alpha1.LabelKeyTenant: "team-alpha",
+				}}},
+			},
+			wantLabels: map[string]string{
+				authzv1alpha1.LabelKeyOwner:  "tenant",
+				authzv1alpha1.LabelKeyTenant: "team-alpha",
+			},
+		},
+		{
+			name:   "SA namespace has thirdparty labels",
+			saInfo: ServiceAccountInfo{Namespace: "3p-ns", Name: "sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "3p-ns", Labels: map[string]string{
+					authzv1alpha1.LabelKeyOwner:      "thirdparty",
+					authzv1alpha1.LabelKeyThirdParty: "vendor-x",
+				}}},
+			},
+			wantLabels: map[string]string{
+				authzv1alpha1.LabelKeyOwner:      "thirdparty",
+				authzv1alpha1.LabelKeyThirdParty: "vendor-x",
+			},
+		},
+		{
+			name:   "SA namespace has platform label only",
+			saInfo: ServiceAccountInfo{Namespace: "platform-ns", Name: "sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "platform-ns", Labels: map[string]string{
+					authzv1alpha1.LabelKeyOwner: "platform",
+				}}},
+			},
+			wantLabels: map[string]string{
+				authzv1alpha1.LabelKeyOwner: "platform",
+			},
+		},
+		{
+			name:   "SA namespace has no labels at all",
+			saInfo: ServiceAccountInfo{Namespace: "bare-ns", Name: "sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "bare-ns"}},
+			},
+			wantLabels: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			builder := fake.NewClientBuilder().WithScheme(scheme)
+			for i := range tt.namespaces {
+				builder = builder.WithObjects(&tt.namespaces[i])
+			}
+			c := builder.Build()
+
+			got := GetSANamespaceTrackedLabels(context.Background(), c, tt.saInfo)
+
+			if tt.wantLabels == nil {
+				if got != nil {
+					t.Errorf("expected nil, got %v", got)
+				}
+				return
+			}
+
+			if len(got) != len(tt.wantLabels) {
+				t.Errorf("expected %d labels, got %d: %v", len(tt.wantLabels), len(got), got)
+				return
+			}
+			for k, v := range tt.wantLabels {
+				if got[k] != v {
+					t.Errorf("expected label %s=%s, got %s", k, v, got[k])
+				}
 			}
 		})
 	}

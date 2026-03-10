@@ -70,47 +70,74 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 			"namespace", req.Name, "username", req.UserInfo.Username, "groupCount", len(userGroups))
 	}
 
+	// Collect labels from matching BindDefinitions
+	labelsToAdd, listErr := m.collectBindDefinitionLabels(ctx, req.Name, userGroups, saInfo)
+	if listErr != nil {
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultErrored).Inc()
+		return admission.Errored(http.StatusInternalServerError, listErr)
+	}
+
+	// Last resort: if no BindDefinition matched and the user is a ServiceAccount,
+	// inherit tracked ownership labels from the SA's source namespace (issue #202).
+	if len(labelsToAdd) == 0 && saInfo.IsServiceAccount {
+		labelsToAdd = GetSANamespaceTrackedLabels(ctx, m.Client, saInfo)
+		if len(labelsToAdd) > 0 {
+			logger.V(1).Info("SA namespace label inheritance - inheriting labels from SA source namespace",
+				"namespace", req.Name, "saNamespace", saInfo.Namespace, "labelCount", len(labelsToAdd))
+		}
+	}
+
+	// If there are labels to add, mutate the namespace
+	if len(labelsToAdd) > 0 {
+		return m.applyLabelPatch(ctx, req, ns, labelsToAdd)
+	}
+
+	// If no labels to add, deny the request with a warning
+	logger.V(1).Info("namespace mutation denied - no labels matched", "namespace", req.Name, "username", req.UserInfo.Username)
+	metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultDenied).Inc()
+	return admission.Denied(DenialNoOIDCAttributes)
+}
+
+// collectBindDefinitionLabels iterates over all BindDefinitions and collects labels to add
+// from those whose subjects match the requesting user.
+func (m *NamespaceMutator) collectBindDefinitionLabels(ctx context.Context, nsName string, userGroups []string, saInfo ServiceAccountInfo) (map[string]string, error) {
+	logger := logf.FromContext(ctx).WithName("namespace-mutator")
+
 	// Fetch all BindDefinition CRDs
 	bindDefinitions := &authzv1alpha1.BindDefinitionList{}
 	if err := m.Client.List(ctx, bindDefinitions); err != nil {
-		logger.Error(err, "failed to list BindDefinitions", "namespace", req.Name)
-		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultErrored).Inc()
-		return admission.Errored(http.StatusInternalServerError, err)
+		logger.Error(err, "failed to list BindDefinitions", "namespace", nsName)
+		return nil, err
 	}
 
 	logger.V(2).Info("checking BindDefinitions for label mutations",
-		"namespace", req.Name, "bindDefinitionCount", len(bindDefinitions.Items))
+		"namespace", nsName, "bindDefinitionCount", len(bindDefinitions.Items))
 
-	// Prepare a map to hold labels to be added
 	labelsToAdd := map[string]string{}
 
-	// Iterate over each BindDefinition
 	for bdIdx, bindDef := range bindDefinitions.Items {
-		// Skip BindDefinitions whose name ends with "-namespaced-reader-restricted"
 		if IsRestrictedBindDefinition(bindDef.Name) {
 			logger.V(4).Info("skipping restricted BindDefinition", "bindDefinitionName", bindDef.Name)
 			continue
 		}
 
 		logger.V(3).Info("checking BindDefinition for user match",
-			"namespace", req.Name, "bindDefinitionName", bindDef.Name, "bdIndex", bdIdx)
+			"namespace", nsName, "bindDefinitionName", bindDef.Name, "bdIndex", bdIdx)
 
-		// Check if the user's group or service account matches subjects
 		if MatchesSubjects(userGroups, saInfo, bindDef.Spec.Subjects) {
 			logger.V(3).Info("user matched - extracting labels from RoleBindings",
-				"namespace", req.Name, "bindDefinition", bindDef.Name)
+				"namespace", nsName, "bindDefinition", bindDef.Name)
 
 			for rbIdx, roleBinding := range bindDef.Spec.RoleBindings {
-				// Extract labels from namespaceSelector in RoleBindings
 				if len(roleBinding.NamespaceSelector) > 0 {
 					logger.V(3).Info("processing RoleBinding namespace selectors",
-						"namespace", req.Name, "roleBindingIndex", rbIdx,
+						"namespace", nsName, "roleBindingIndex", rbIdx,
 						"selectorCount", len(roleBinding.NamespaceSelector))
 
 					for nsIdx, nsSelector := range roleBinding.NamespaceSelector {
 						labels := getLabelsFromNamespaceSelector(nsSelector)
 						logger.V(3).Info("extracted labels from selector",
-							"namespace", req.Name, "rbIndex", rbIdx,
+							"namespace", nsName, "rbIndex", rbIdx,
 							"selectorIndex", nsIdx, "labelCount", len(labels))
 
 						for k, v := range labels {
@@ -121,45 +148,43 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 			}
 		} else {
 			logger.V(4).Info("user not matched in BindDefinition",
-				"namespace", req.Name, "bindDefinitionName", bindDef.Name)
+				"namespace", nsName, "bindDefinitionName", bindDef.Name)
 		}
 	}
 
-	// If there are labels to add, mutate the namespace
-	if len(labelsToAdd) > 0 {
-		logger.V(2).Info("mutating namespace with labels",
-			"namespace", req.Name, "labelCount", len(labelsToAdd))
+	return labelsToAdd, nil
+}
 
-		if ns.Labels == nil {
-			ns.Labels = map[string]string{}
-		}
-		for k, v := range labelsToAdd {
-			if _, exists := ns.Labels[k]; !exists {
-				logger.V(2).Info("adding label to namespace",
-					"namespace", req.Name, "label", k, "value", v)
-				ns.Labels[k] = v
-			} else {
-				logger.V(3).Info("label already exists - skipping",
-					"namespace", req.Name, "label", k)
-			}
-		}
+// applyLabelPatch adds the given labels to the namespace and returns a patch response.
+func (m *NamespaceMutator) applyLabelPatch(ctx context.Context, req admission.Request, ns *corev1.Namespace, labelsToAdd map[string]string) admission.Response {
+	logger := logf.FromContext(ctx).WithName("namespace-mutator")
 
-		// Marshal the mutated namespace object
-		marshalledNS, err := json.Marshal(ns)
-		if err != nil {
-			logger.Error(err, "failed to marshal mutated namespace", "namespace", req.Name)
-			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultErrored).Inc()
-			return admission.Errored(http.StatusInternalServerError, err)
+	logger.V(2).Info("mutating namespace with labels",
+		"namespace", req.Name, "labelCount", len(labelsToAdd))
+
+	if ns.Labels == nil {
+		ns.Labels = map[string]string{}
+	}
+	for k, v := range labelsToAdd {
+		if _, exists := ns.Labels[k]; !exists {
+			logger.V(2).Info("adding label to namespace",
+				"namespace", req.Name, "label", k, "value", v)
+			ns.Labels[k] = v
+		} else {
+			logger.V(3).Info("label already exists - skipping",
+				"namespace", req.Name, "label", k)
 		}
-		logger.V(1).Info("namespace mutation successful", "namespace", req.Name, "labelCount", len(labelsToAdd))
-		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
-		return admission.PatchResponseFromRaw(req.Object.Raw, marshalledNS)
 	}
 
-	// If no labels to add, deny the request with a warning
-	logger.V(1).Info("namespace mutation denied - no labels matched", "namespace", req.Name, "username", req.UserInfo.Username)
-	metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultDenied).Inc()
-	return admission.Denied(DenialNoOIDCAttributes)
+	marshalledNS, err := json.Marshal(ns)
+	if err != nil {
+		logger.Error(err, "failed to marshal mutated namespace", "namespace", req.Name)
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultErrored).Inc()
+		return admission.Errored(http.StatusInternalServerError, err)
+	}
+	logger.V(1).Info("namespace mutation successful", "namespace", req.Name, "labelCount", len(labelsToAdd))
+	metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
+	return admission.PatchResponseFromRaw(req.Object.Raw, marshalledNS)
 }
 
 // trackedLabelKeys defines the set of label keys that are extracted from NamespaceSelectors.

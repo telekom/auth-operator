@@ -332,6 +332,27 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 		return admission.Allowed("")
 	}
 
+	// Last resort: if the user is a ServiceAccount, check if its source namespace
+	// has the same tracked ownership labels as the target namespace (issue #202).
+	if saInfo.IsServiceAccount {
+		inheritedLabels := GetSANamespaceTrackedLabels(ctx, v.Client, saInfo)
+		if len(inheritedLabels) > 0 {
+			labelsMatch := true
+			for k, v := range inheritedLabels {
+				if ns.Labels[k] != v {
+					labelsMatch = false
+					break
+				}
+			}
+			if labelsMatch {
+				logger.V(1).Info("SA namespace label inheritance - authorized via matching SA source namespace labels",
+					"namespace", req.Name, "saNamespace", saInfo.Namespace, "username", req.UserInfo.Username)
+				metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
+				return admission.Allowed("")
+			}
+		}
+	}
+
 	denialMsg := fmt.Sprintf(DenialNotNamespaceOwnerFmt, req.UserInfo.Username, ns.Name)
 	logger.V(1).Info("namespace operation denied", "namespace", req.Name,
 		"operation", req.Operation, "username", req.UserInfo.Username, "reason", denialMsg)
