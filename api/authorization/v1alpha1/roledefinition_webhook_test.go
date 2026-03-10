@@ -5,6 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 package v1alpha1
 
 import (
+	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -596,7 +597,13 @@ var _ = Describe("RoleDefinition Webhook", func() {
 		It("should reject RestrictedResources exceeding MaxItems=128", func() {
 			resources := make([]metav1.APIResource, 129)
 			for i := range resources {
-				resources[i] = metav1.APIResource{Name: "configmaps"}
+				resources[i] = metav1.APIResource{
+					Name:         fmt.Sprintf("resource%d", i),
+					SingularName: fmt.Sprintf("resource%d", i),
+					Kind:         fmt.Sprintf("Resource%d", i),
+					Namespaced:   true,
+					Verbs:        metav1.Verbs{"get", "list"},
+				}
 			}
 			rd := &RoleDefinition{
 				ObjectMeta: metav1.ObjectMeta{

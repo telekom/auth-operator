@@ -336,7 +336,7 @@ spec:
                 items:
                   maxLength: 63
                   minLength: 1
-                  pattern: ^[a-z*]+$
+                  pattern: ^([a-z]+|\*)$
                   type: string
                 maxItems: 16
                 type: array

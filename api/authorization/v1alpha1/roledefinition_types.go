@@ -70,7 +70,7 @@ type RoleDefinitionSpec struct {
 	// +kubebuilder:validation:MaxItems=16
 	// +kubebuilder:validation:items:MinLength=1
 	// +kubebuilder:validation:items:MaxLength=63
-	// +kubebuilder:validation:items:Pattern=`^[a-z*]+$`
+	// +kubebuilder:validation:items:Pattern=`^([a-z]+|\*)$`
 	RestrictedVerbs []string `json:"restrictedVerbs,omitempty"`
 
 	// BreakglassAllowed marks generated ClusterRoles as eligible for temporary
