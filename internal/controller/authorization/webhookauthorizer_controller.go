@@ -167,9 +167,10 @@ func (r *WebhookAuthorizerReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerWebhookAuthorizer, metrics.ResultSuccess).Inc()
 	logger.V(1).Info("WebhookAuthorizer reconciled successfully",
 		"webhookAuthorizer", wa.Name,
-		"generation", wa.Generation)
+		"generation", wa.Generation,
+		"requeueAfter", DefaultRequeueInterval)
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
 }
 
 // validateNamespaceSelector validates that the NamespaceSelector can be parsed
