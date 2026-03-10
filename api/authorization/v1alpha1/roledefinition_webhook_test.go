@@ -516,4 +516,81 @@ var _ = Describe("RoleDefinition Webhook", func() {
 			Expect(k8sClient.Delete(ctx, rd)).To(Succeed())
 		})
 	})
+
+	Context("MaxItems and field validation constraints", func() {
+
+		It("should reject RestrictedVerbs exceeding MaxItems=16", func() {
+			verbs := make([]string, 17)
+			for i := range verbs {
+				verbs[i] = "get"
+			}
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-maxitems-verbs",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-maxitems-verbs",
+					ScopeNamespaced: false,
+					RestrictedVerbs: verbs,
+				},
+			}
+			err := k8sClient.Create(ctx, rd)
+			Expect(err).To(HaveOccurred())
+			statusErr := &apierrors.StatusError{}
+			Expect(err).To(BeAssignableToTypeOf(statusErr))
+		})
+
+		It("should reject RestrictedVerbs with empty string item", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-verb-empty",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-verb-empty",
+					ScopeNamespaced: false,
+					RestrictedVerbs: []string{""},
+				},
+			}
+			err := k8sClient.Create(ctx, rd)
+			Expect(err).To(HaveOccurred())
+			statusErr := &apierrors.StatusError{}
+			Expect(err).To(BeAssignableToTypeOf(statusErr))
+		})
+
+		It("should reject RestrictedVerbs with invalid pattern", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-verb-pattern",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-verb-pattern",
+					ScopeNamespaced: false,
+					RestrictedVerbs: []string{"GET"},
+				},
+			}
+			err := k8sClient.Create(ctx, rd)
+			Expect(err).To(HaveOccurred())
+			statusErr := &apierrors.StatusError{}
+			Expect(err).To(BeAssignableToTypeOf(statusErr))
+		})
+
+		It("should accept valid RestrictedVerbs within limits", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-valid-verbs",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-valid-verbs",
+					ScopeNamespaced: false,
+					RestrictedVerbs: []string{"get", "list", "watch", "*"},
+				},
+			}
+			Expect(k8sClient.Create(ctx, rd)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, rd)).To(Succeed())
+		})
+	})
 })

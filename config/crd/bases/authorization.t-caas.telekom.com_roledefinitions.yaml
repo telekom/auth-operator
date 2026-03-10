@@ -335,6 +335,8 @@ spec:
                   The RBAC operator discovers all resource verbs available and removes those listed here.
                 items:
                   maxLength: 63
+                  minLength: 1
+                  pattern: ^[a-z*]+$
                   type: string
                 maxItems: 16
                 type: array
