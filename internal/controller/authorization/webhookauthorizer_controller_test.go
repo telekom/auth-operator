@@ -71,7 +71,7 @@ func TestReconcile_EmptySelector_Ready(t *testing.T) {
 
 	result, err := r.Reconcile(ctxWithLogger(), reconcileRequest("test-authorizer"))
 	g.Expect(err).NotTo(gomega.HaveOccurred())
-	g.Expect(result).To(gomega.Equal(ctrl.Result{}))
+	g.Expect(result.RequeueAfter).To(gomega.Equal(DefaultRequeueInterval))
 
 	// Verify status was updated
 	var updated authorizationv1alpha1.WebhookAuthorizer
@@ -108,7 +108,7 @@ func TestReconcile_WithMatchLabels_Ready(t *testing.T) {
 
 	result, err := r.Reconcile(ctxWithLogger(), reconcileRequest("label-authorizer"))
 	g.Expect(err).NotTo(gomega.HaveOccurred())
-	g.Expect(result).To(gomega.Equal(ctrl.Result{}))
+	g.Expect(result.RequeueAfter).To(gomega.Equal(DefaultRequeueInterval))
 
 	var updated authorizationv1alpha1.WebhookAuthorizer
 	g.Expect(c.Get(ctxWithLogger(), types.NamespacedName{Name: "label-authorizer"}, &updated)).To(gomega.Succeed())
@@ -148,7 +148,7 @@ func TestReconcile_WithMatchExpressions_Ready(t *testing.T) {
 
 	result, err := r.Reconcile(ctxWithLogger(), reconcileRequest("expr-authorizer"))
 	g.Expect(err).NotTo(gomega.HaveOccurred())
-	g.Expect(result).To(gomega.Equal(ctrl.Result{}))
+	g.Expect(result.RequeueAfter).To(gomega.Equal(DefaultRequeueInterval))
 
 	var updated authorizationv1alpha1.WebhookAuthorizer
 	g.Expect(c.Get(ctxWithLogger(), types.NamespacedName{Name: "expr-authorizer"}, &updated)).To(gomega.Succeed())
@@ -209,7 +209,7 @@ func TestReconcile_GenerationUpdate(t *testing.T) {
 
 	result, err := r.Reconcile(ctxWithLogger(), reconcileRequest("gen-authorizer"))
 	g.Expect(err).NotTo(gomega.HaveOccurred())
-	g.Expect(result).To(gomega.Equal(ctrl.Result{}))
+	g.Expect(result.RequeueAfter).To(gomega.Equal(DefaultRequeueInterval))
 
 	var updated authorizationv1alpha1.WebhookAuthorizer
 	g.Expect(c.Get(ctxWithLogger(), types.NamespacedName{Name: "gen-authorizer"}, &updated)).To(gomega.Succeed())
@@ -238,7 +238,7 @@ func TestReconcile_WithPrincipals_Ready(t *testing.T) {
 
 	result, err := r.Reconcile(ctxWithLogger(), reconcileRequest("principals-authorizer"))
 	g.Expect(err).NotTo(gomega.HaveOccurred())
-	g.Expect(result).To(gomega.Equal(ctrl.Result{}))
+	g.Expect(result.RequeueAfter).To(gomega.Equal(DefaultRequeueInterval))
 
 	var updated authorizationv1alpha1.WebhookAuthorizer
 	g.Expect(c.Get(ctxWithLogger(), types.NamespacedName{Name: "principals-authorizer"}, &updated)).To(gomega.Succeed())
@@ -266,7 +266,7 @@ func TestReconcile_NoMatchingNamespaces_StillReady(t *testing.T) {
 
 	result, err := r.Reconcile(ctxWithLogger(), reconcileRequest("no-match-authorizer"))
 	g.Expect(err).NotTo(gomega.HaveOccurred())
-	g.Expect(result).To(gomega.Equal(ctrl.Result{}))
+	g.Expect(result.RequeueAfter).To(gomega.Equal(DefaultRequeueInterval))
 
 	var updated authorizationv1alpha1.WebhookAuthorizer
 	g.Expect(c.Get(ctxWithLogger(), types.NamespacedName{Name: "no-match-authorizer"}, &updated)).To(gomega.Succeed())
