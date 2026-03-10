@@ -24,4 +24,9 @@ const (
 	// DenialLegacyNonPlatformToPlatformFmt is a format string returned when a
 	// legacy non-platform namespace is being adopted as platform.
 	DenialLegacyNonPlatformToPlatformFmt = "Legacy non-platform namespace (%s=%s) cannot be adopted as 'platform'"
+
+	// DenialLabelConflictFmt is a format string returned by the namespace mutator
+	// when SA namespace label inheritance detects a conflicting tracked label value
+	// on the target namespace.
+	DenialLabelConflictFmt = "Namespace %s already has label %s=%s which conflicts with inherited value %s from SA namespace"
 )

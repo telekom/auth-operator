@@ -3,6 +3,7 @@ package webhooks
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
@@ -84,7 +85,8 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 		(req.Operation == admissionv1.Create || req.Operation == admissionv1.Update) {
 		inherited, saErr := GetSANamespaceTrackedLabels(ctx, m.Client, saInfo)
 		if saErr != nil {
-			logger.Error(saErr, "failed to lookup SA namespace labels", "namespace", req.Name)
+			logger.Error(saErr, "failed to lookup SA namespace labels",
+				"saNamespace", saInfo.Namespace, "targetNamespace", req.Name)
 			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultErrored).Inc()
 			return admission.Errored(http.StatusInternalServerError, saErr)
 		}
@@ -96,7 +98,7 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 						logger.V(1).Info("SA namespace label inheritance denied - label conflict on target namespace",
 							"namespace", req.Name, "label", k, "existingValue", existingVal, "inheritedValue", inheritedVal)
 						metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultDenied).Inc()
-						return admission.Denied(DenialNoOIDCAttributes)
+						return admission.Denied(fmt.Sprintf(DenialLabelConflictFmt, req.Name, k, existingVal, inheritedVal))
 					}
 				}
 			}

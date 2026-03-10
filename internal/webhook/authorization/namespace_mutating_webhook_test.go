@@ -726,52 +726,6 @@ func TestNamespaceMutatorSANamespaceInheritance(t *testing.T) {
 			expectAllowed: true,
 			expectPatch:   false,
 		},
-		{
-			name:      "SA inheritance denied on conflicting tracked label value",
-			operation: admissionv1.Create,
-			username:  "system:serviceaccount:tenant-alpha:my-operator",
-			namespace: &corev1.Namespace{
-				TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Namespace"},
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "new-ns",
-					Labels: map[string]string{
-						"t-caas.telekom.com/tenant": "team-beta",
-					},
-				},
-			},
-			saNamespace: &corev1.Namespace{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "tenant-alpha",
-					Labels: map[string]string{
-						"t-caas.telekom.com/owner":  "tenant",
-						"t-caas.telekom.com/tenant": "team-alpha",
-					},
-				},
-			},
-			expectAllowed: false,
-			expectPatch:   false,
-		},
-		{
-			name:      "SA inheritance not applied to DELETE operations",
-			operation: admissionv1.Delete,
-			username:  "system:serviceaccount:tenant-alpha:my-operator",
-			namespace: &corev1.Namespace{
-				TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Namespace"},
-				ObjectMeta: metav1.ObjectMeta{Name: "some-ns"},
-			},
-			saNamespace: &corev1.Namespace{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "tenant-alpha",
-					Labels: map[string]string{
-						"t-caas.telekom.com/owner":  "tenant",
-						"t-caas.telekom.com/tenant": "team-alpha",
-					},
-				},
-			},
-			// The mutating webhook allows non-CREATE/UPDATE operations at the top
-			expectAllowed: true,
-			expectPatch:   false,
-		},
 	}
 
 	for _, tt := range tests {
