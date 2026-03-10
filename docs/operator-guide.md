@@ -21,6 +21,7 @@ of the auth-operator in production Kubernetes environments.
 - [Security Considerations](#security-considerations)
 - [Upgrades](#upgrades)
 - [Backup and Recovery](#backup-and-recovery)
+- [Understanding ScopeNamespaced](#understanding-scopenamespaced)
 - [Common Operations](#common-operations)
 
 ---
@@ -540,6 +541,107 @@ If the operator is unavailable, managed RBAC resources persist. To recover:
 
 ```bash
 kubectl apply -f "$BACKUP_DIR/"
+```
+
+---
+
+## Understanding ScopeNamespaced
+
+The `scopeNamespaced` field on RoleDefinition controls which API resources
+are included in the generated ClusterRole or Role.
+
+### How It Works
+
+| `scopeNamespaced` | Included Resources | Typical Use |
+|-------------------|--------------------|-------------|
+| `true` | Only **namespaced** resources (Pods, Services, ConfigMaps, etc.) | Tenant roles — daily workload management |
+| `false` | Only **cluster-scoped** resources (Nodes, Namespaces, CRDs, etc.) | Platform admin roles — cluster infrastructure |
+
+You can preview which resources fall into each scope:
+
+```bash
+# Namespaced resources (scopeNamespaced: true)
+kubectl api-resources --namespaced=true -o wide
+
+# Cluster-scoped resources (scopeNamespaced: false)
+kubectl api-resources --namespaced=false -o wide
+```
+
+### When to Use Each Setting
+
+**`scopeNamespaced: true`** — Use for tenant developers who need to manage
+workloads within their namespaces. The generated role contains permissions for
+namespace-scoped resources only (e.g., Pods, Deployments, Services). Combine
+with BindDefinition's `namespaceSelector` to restrict which namespaces
+the role applies to.
+
+**`scopeNamespaced: false`** — Use for platform administrators who need to
+manage cluster-level infrastructure. The generated role contains permissions
+for cluster-scoped resources only (e.g., Nodes, PersistentVolumes, CRDs).
+
+### Example: Two-Tier Access
+
+```yaml
+# Tier 1: Namespace-scoped workload access
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: tenant-workload
+spec:
+  targetRole: ClusterRole
+  targetName: tenant-workload
+  scopeNamespaced: true        # Only namespaced resources
+  restrictedApis:
+    - name: authorization.t-caas.telekom.com
+  restrictedResources:
+    - name: secrets             # Restrict sensitive resources
+---
+# Tier 2: Cluster-scoped read access
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: platform-reader
+spec:
+  targetRole: ClusterRole
+  targetName: platform-reader
+  scopeNamespaced: false       # Only cluster-scoped resources
+  restrictedVerbs:
+    - create
+    - update
+    - delete
+    - patch
+```
+
+### Interaction with BindDefinition
+
+When used with a BindDefinition:
+
+- A **cluster-scoped** RoleDefinition (`scopeNamespaced: false`) is typically
+  bound via `clusterRoleBindings` — the role applies cluster-wide.
+- A **namespace-scoped** RoleDefinition (`scopeNamespaced: true`) is typically
+  bound via `roleBindings` with a `namespaceSelector` — the role applies only
+  in matching namespaces.
+
+```yaml
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: tenant-alpha
+spec:
+  targetName: alpha
+  subjects:
+    - kind: Group
+      name: alpha-developers
+      apiGroup: rbac.authorization.k8s.io
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - platform-reader           # Cluster-scoped role → ClusterRoleBinding
+  roleBindings:
+    - clusterRoleRefs:
+        - tenant-workload         # Namespace-scoped role → RoleBindings
+      namespaceSelector:
+        - matchLabels:
+            t-caas.telekom.com/owner: alpha
 ```
 
 ---

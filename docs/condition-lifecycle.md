@@ -322,3 +322,45 @@ kubectl wait roledefinition <name> --for=condition=Ready --timeout=30s
 kubectl get roledefinitions -o json | \
   jq '.items[] | select(.status.conditions[]? | select(.type=="Stalled" and .status=="True")) | .metadata.name'
 ```
+
+---
+
+## Operational Guidance
+
+### What to Do When a Condition Is False
+
+| Condition | When False | Recommended Action |
+|-----------|-----------|-------------------|
+| `Ready` | Resource not fully reconciled | Check `Stalled` and `Reconciling` conditions for details |
+| `RoleRefsValid` | Referenced roles missing | Create the missing ClusterRole/Role, or remove the reference from the BindDefinition |
+| `RulesValid` | Invalid resource/non-resource rules | Fix the rule syntax in the WebhookAuthorizer spec |
+| `NamespaceSelectorValid` | Unparseable label selector | Fix the label selector expression in the spec |
+| `PrincipalConfigured` | No principals defined | Add `allowedPrincipals` or `deniedPrincipals` to the WebhookAuthorizer |
+
+### What to Do When a Condition Is True (Abnormal-True)
+
+| Condition | When True | Recommended Action |
+|-----------|----------|-------------------|
+| `Stalled` | Persistent error | Read the condition's `message` field for error details; fix the root cause and the operator will retry |
+| `Reconciling` | Active reconciliation | Normal — wait for completion; if stuck for >5 minutes, check controller logs |
+
+### Monitoring Conditions via Metrics
+
+The operator exposes a `auth_operator_reconcile_total` counter with a `result`
+label (`success`, `error`, `requeue`). A rising `error` count correlates with
+`Stalled=True` conditions:
+
+```bash
+curl -s http://localhost:8080/metrics | grep auth_operator_reconcile_total
+```
+
+### Condition Staleness Check
+
+If `observedGeneration` on a condition is **less than** `metadata.generation`,
+the condition is stale — the resource has been modified since the last
+reconciliation. Wait for the controller to re-evaluate:
+
+```bash
+kubectl get roledefinition <name> -o json | \
+  jq '{generation: .metadata.generation, observedGeneration: .status.observedGeneration}'
+```
