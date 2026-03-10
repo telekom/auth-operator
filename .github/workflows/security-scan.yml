@@ -46,8 +46,11 @@ jobs:
           go-version: ${{ steps.go-version.outputs.version }}
           cache: true
 
+      - name: Load versions from versions.env
+        run: grep -v '^#' versions.env | grep -v '^$' >> $GITHUB_ENV
+
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+        run: go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
 
       - name: Run govulncheck
         continue-on-error: true
@@ -78,8 +81,11 @@ jobs:
           go-version: ${{ steps.go-version.outputs.version }}
           cache: true
 
+      - name: Load versions from versions.env
+        run: grep -v '^#' versions.env | grep -v '^$' >> $GITHUB_ENV
+
       - name: Install gosec
-        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+        run: go install github.com/securego/gosec/v2/cmd/gosec@${{ env.GOSEC_VERSION }}
 
       - name: Run gosec
         run: gosec -fmt sarif -out gosec-results.sarif -exclude=G104,G304 ./... || true
