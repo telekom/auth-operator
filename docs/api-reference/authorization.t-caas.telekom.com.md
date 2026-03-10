@@ -76,6 +76,8 @@ _Appears in:_
 | `observedGeneration` _integer_ | ObservedGeneration is the last observed generation of the resource.<br />This is used by kstatus to determine if the resource is current. |  | Optional: \{\} <br /> |
 | `bindReconciled` _boolean_ | Not extremely important as most status updates are driven by Conditions. We read the JSONPath from this status field to signify completed reconciliation. |  | Optional: \{\} <br /> |
 | `generatedServiceAccounts` _[Subject](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#subject-v1-rbac) array_ | If the BindDefinition points to a subject of "Kind: ServiceAccount" and the service account is not present. The controller will reconcile it automatically. |  | Optional: \{\} <br /> |
+| `missingRoleRefs` _string array_ | MissingRoleRefs lists role references that could not be resolved during the<br />last reconciliation. Format: "ClusterRole/\<name\>" or "Role/\<namespace\>/\<name\>".<br />Empty when all referenced roles exist. |  | Optional: \{\} <br /> |
+| `externalServiceAccounts` _string array_ | ExternalServiceAccounts lists ServiceAccounts referenced by this BindDefinition<br />that already existed and are not owned by any BindDefinition. These SAs are used<br />in bindings but not managed (created/deleted) by the controller.<br />Format: "\<namespace\>/\<name\>". |  | Optional: \{\} <br /> |
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#condition-v1-meta) array_ | Conditions defines current service state of the Bind definition. All conditions should evaluate to true to signify successful reconciliation. |  | Optional: \{\} <br /> |
 
 ##### Status Conditions
