@@ -45,7 +45,7 @@ The policy CRD is currently called `RBACPolicy`, but alternatives worth consider
 - [Unified Selector Model](#unified-selector-model)
 - [Implementation Notes](#implementation-notes)
 - [Related](#related)
-- [Appendix: Naming Alternatives](#naming-alternatives)
+- [Naming Alternatives](#naming-alternatives)
 
 > **Note on Go type definitions:** The Go types in this proposal are
 > intentionally skeletal. During implementation, fields will be added as
@@ -62,6 +62,13 @@ The policy CRD is currently called `RBACPolicy`, but alternatives worth consider
 5. **Continuous enforcement** - validate on every reconcile, deprovision on violation
 6. **Explicit policy binding** - resources explicitly reference their governing policy
 7. **Full audit trail** - track who created/modified resources
+
+## Non-Goals
+
+1. **Replacing existing CRDs** — `RoleDefinition` and `BindDefinition` remain unchanged; restricted variants are additive
+2. **Regex-based matching** — only simple prefix/suffix wildcards are supported (see Design Principles)
+3. **Cross-cluster policy federation** — policies are scoped to a single cluster
+4. **Runtime authorization decisions** — this proposal covers RBAC resource generation, not webhook-based authorization (see CEL Authorization proposal)
 
 ## Design Principles
 
@@ -1750,25 +1757,20 @@ apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: BindDefinition
 metadata:
   name: team-a-rbac-applier-permissions
-  namespace: platform-system
 spec:
-  # Create the ServiceAccount in tenant's system namespace
-  serviceAccountRef:
-    name: team-a-rbac-applier
-    namespace: team-a-system
-    create: true
+  targetName: team-a-rbac-applier
 
-  # Grant limited RBAC permissions via RoleBindings in each tenant namespace
-  bindingType: RoleBinding
-  roleRef:
-    kind: ClusterRole
-    name: tenant-rbac-applier  # Pre-defined ClusterRole with limited permissions
+  subjects:
+    - kind: ServiceAccount
+      name: team-a-rbac-applier
+      namespace: team-a-system
 
-  # Only apply in tenant's namespaces
-  targetNamespaces:
-    selector:
-      matchLabels:
-        tenant: team-a
+  roleBindings:
+    - clusterRoleRefs:
+        - tenant-rbac-applier  # Pre-defined ClusterRole with limited permissions
+      namespaceSelector:
+        - matchLabels:
+            tenant: team-a
 ---
 # Step 2: The ClusterRole that defines max permissions for tenant
 apiVersion: rbac.authorization.k8s.io/v1
@@ -1946,19 +1948,20 @@ Platform admin creates base roles via RoleDefinition:
 
 ```yaml
 # Platform-managed base role (RoleDefinition)
+# Uses API discovery to dynamically generate a ClusterRole
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: RoleDefinition
 metadata:
   name: platform-base-role
 spec:
-  rules:
-    - apiGroups: [""]
-      resources: ["pods", "services"]
-      verbs: ["get", "list", "watch"]
-  targetNamespaces:
-    selector:
-      matchLabels:
-        platform.t-caas.telekom.com/managed: "true"
+  targetRole: ClusterRole
+  targetName: platform-base-role
+  # RoleDefinition uses restrictedApis/restrictedResources/restrictedVerbs
+  # to dynamically discover and generate RBAC rules
+  restrictedVerbs:
+    - get
+    - list
+    - watch
 ```
 
 Tenant extends with RestrictedRoleDefinition (different name, additive permissions):
@@ -2629,6 +2632,8 @@ type RBACPolicyReference struct {
 
 // RestrictedBindDefinitionStatus defines the observed state of RestrictedBindDefinition.
 type RestrictedBindDefinitionStatus struct {
+	// ObservedGeneration is the most recent generation observed by the controller.
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 	// GeneratedServiceAccounts lists SAs created by this RestrictedBindDefinition.
 	GeneratedServiceAccounts []rbacv1.Subject `json:"generatedServiceAccounts,omitempty"`
 	// ExternalServiceAccounts lists pre-existing SAs used but not managed.
@@ -2697,6 +2702,8 @@ type NamespaceTarget struct {
 
 // RestrictedRoleDefinitionStatus defines the observed state of RestrictedRoleDefinition.
 type RestrictedRoleDefinitionStatus struct {
+	// ObservedGeneration is the most recent generation observed by the controller.
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 	// GeneratedRoles tracks Roles created by this RestrictedRoleDefinition.
 	GeneratedRoles []GeneratedRoleRef `json:"generatedRoles,omitempty"`
 	// Conditions represent the latest available observations.
