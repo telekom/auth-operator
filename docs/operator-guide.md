@@ -126,7 +126,7 @@ The auth-operator consists of two main components:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `NAMESPACE` | Operator namespace | `kube-system` |
+| `POD_NAMESPACE` | Operator namespace (from Kubernetes downward API) | *(none)* |
 | `LEADER_ELECTION` | Enable HA leader election | `true` |
 | `PROBE_ADDR` | Health probe address | `:8081` |
 | `METRICS_ADDR` | Prometheus metrics address | `:8080` |

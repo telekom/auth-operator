@@ -592,7 +592,7 @@ reconciliation. Verify:
 1. The `restrictedApis` / `restrictedResources` / `restrictedVerbs` in the
    spec match your intent
 2. Run `kubectl api-resources --verbs=list` to see what the cluster exposes
-3. The operator re-discovers APIs every 60 seconds — wait for the next cycle
+3. The operator re-discovers APIs every 5 minutes — wait for the next cycle
 
 ### BindDefinition Ready=True but RoleRefsValid=False
 

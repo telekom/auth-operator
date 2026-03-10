@@ -259,7 +259,7 @@ logger.V(1).Info("debug")  // Verbose
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `NAMESPACE` | Operator namespace | `kube-system` |
+| `POD_NAMESPACE` | Operator namespace (from Kubernetes downward API) | *(none)* |
 | `LEADER_ELECTION` | Enable leader election | `true` |
 | `PROBE_ADDR` | Health probe address | `:8081` |
 | `METRICS_ADDR` | Metrics address | `:8080` |
