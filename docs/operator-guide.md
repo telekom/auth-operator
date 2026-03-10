@@ -133,7 +133,7 @@ The auth-operator consists of two main components:
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--namespace` | Operator namespace | `POD_NAMESPACE` |
+| `--namespace` | Operator namespace | value of `POD_NAMESPACE` (empty if unset) |
 | `--health-probe-bind-address` | Health probe address | `:8081` |
 | `--metrics-bind-address` | Prometheus metrics address (set to `0` to disable serving) | `:8080` |
 | `--metrics-secure` | Require authn/authz for metrics endpoint | `false` |
@@ -161,13 +161,13 @@ The auth-operator consists of two main components:
 |------|-------------|---------|
 | `--port` | Webhook server port | `9443` |
 | `--leader-elect` | Enable HA leader election | `false` |
-| `--certs-dir` | Directory for HTTPS certificates | — |
+| `--certs-dir` | Directory for HTTPS certificates | `""` |
 | `--disable-cert-rotation` | Disable automatic cert rotation | `false` |
 | `--enable-http2` | Enable HTTP/2 on the webhook server | `false` |
-| `--cert-rotation-dns-name` | DNS name for the generated TLS certificate | — |
-| `--cert-rotation-secret-name` | Secret name for the rotated certificate | — |
-| `--cert-rotation-mutating-webhook` | Mutating webhook names to patch with CA bundle | — |
-| `--cert-rotation-validating-webhook` | Validating webhook names to patch with CA bundle | — |
+| `--cert-rotation-dns-name` | DNS name for the generated TLS certificate | `""` |
+| `--cert-rotation-secret-name` | Secret name for the rotated certificate | `""` |
+| `--cert-rotation-mutating-webhook` | Mutating webhook names to patch with CA bundle | `[]` |
+| `--cert-rotation-validating-webhook` | Validating webhook names to patch with CA bundle | `[]` |
 | `--tdg-migration` | Enable T-DDI to T-CaaS migration mode | `false` |
 | `--authorize-rate-limit` | Per-pod sustained requests/second for authorize endpoint | `100` |
 | `--authorize-rate-burst` | Burst size for authorize endpoint rate limiter | `200` |
