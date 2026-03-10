@@ -610,6 +610,62 @@ func TestGetSANamespaceTrackedLabels(t *testing.T) {
 			},
 			wantLabels: nil,
 		},
+		{
+			name:   "platform owner with tenant label - ambiguous, returns nil",
+			saInfo: ServiceAccountInfo{Namespace: "ambig-1", Name: "sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "ambig-1", Labels: map[string]string{
+					authzv1alpha1.LabelKeyOwner:  "platform",
+					authzv1alpha1.LabelKeyTenant: "team-x",
+				}}},
+			},
+			wantLabels: nil,
+		},
+		{
+			name:   "platform owner with thirdparty label - ambiguous, returns nil",
+			saInfo: ServiceAccountInfo{Namespace: "ambig-2", Name: "sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "ambig-2", Labels: map[string]string{
+					authzv1alpha1.LabelKeyOwner:      "platform",
+					authzv1alpha1.LabelKeyThirdParty: "vendor-x",
+				}}},
+			},
+			wantLabels: nil,
+		},
+		{
+			name:   "tenant owner with thirdparty label - ambiguous, returns nil",
+			saInfo: ServiceAccountInfo{Namespace: "ambig-3", Name: "sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "ambig-3", Labels: map[string]string{
+					authzv1alpha1.LabelKeyOwner:      "tenant",
+					authzv1alpha1.LabelKeyTenant:     "team-x",
+					authzv1alpha1.LabelKeyThirdParty: "vendor-x",
+				}}},
+			},
+			wantLabels: nil,
+		},
+		{
+			name:   "thirdparty owner with tenant label - ambiguous, returns nil",
+			saInfo: ServiceAccountInfo{Namespace: "ambig-4", Name: "sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "ambig-4", Labels: map[string]string{
+					authzv1alpha1.LabelKeyOwner:      "thirdparty",
+					authzv1alpha1.LabelKeyThirdParty: "vendor-x",
+					authzv1alpha1.LabelKeyTenant:     "team-x",
+				}}},
+			},
+			wantLabels: nil,
+		},
+		{
+			name:   "unknown owner value - returns nil",
+			saInfo: ServiceAccountInfo{Namespace: "unknown-owner", Name: "sa", IsServiceAccount: true},
+			namespaces: []corev1.Namespace{
+				{ObjectMeta: metav1.ObjectMeta{Name: "unknown-owner", Labels: map[string]string{
+					authzv1alpha1.LabelKeyOwner: "custom-value",
+				}}},
+			},
+			wantLabels: nil,
+		},
 	}
 
 	for _, tt := range tests {
@@ -673,5 +729,60 @@ func TestGetSANamespaceTrackedLabels_ClientGetError(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("expected empty labels on error, got %v", got)
+	}
+}
+
+func TestFindExtraTrackedKey(t *testing.T) {
+	tests := []struct {
+		name         string
+		targetLabels map[string]string
+		inherited    map[string]string
+		want         string
+	}{
+		{
+			name:         "no extra keys",
+			targetLabels: map[string]string{authzv1alpha1.LabelKeyOwner: "platform"},
+			inherited:    map[string]string{authzv1alpha1.LabelKeyOwner: "platform"},
+			want:         "",
+		},
+		{
+			name:         "target has no tracked keys",
+			targetLabels: map[string]string{"unrelated": "val"},
+			inherited:    map[string]string{authzv1alpha1.LabelKeyOwner: "platform"},
+			want:         "",
+		},
+		{
+			name:         "target has extra tenant key",
+			targetLabels: map[string]string{authzv1alpha1.LabelKeyOwner: "platform", authzv1alpha1.LabelKeyTenant: "team-x"},
+			inherited:    map[string]string{authzv1alpha1.LabelKeyOwner: "platform"},
+			want:         authzv1alpha1.LabelKeyTenant,
+		},
+		{
+			name:         "target has extra thirdparty key",
+			targetLabels: map[string]string{authzv1alpha1.LabelKeyOwner: "platform", authzv1alpha1.LabelKeyThirdParty: "vendor-x"},
+			inherited:    map[string]string{authzv1alpha1.LabelKeyOwner: "platform"},
+			want:         authzv1alpha1.LabelKeyThirdParty,
+		},
+		{
+			name:         "target has extra owner key",
+			targetLabels: map[string]string{authzv1alpha1.LabelKeyOwner: "platform"},
+			inherited:    map[string]string{authzv1alpha1.LabelKeyTenant: "team-x"},
+			want:         authzv1alpha1.LabelKeyOwner,
+		},
+		{
+			name:         "both empty",
+			targetLabels: map[string]string{},
+			inherited:    map[string]string{},
+			want:         "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FindExtraTrackedKey(tt.targetLabels, tt.inherited)
+			if got != tt.want {
+				t.Errorf("FindExtraTrackedKey() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

@@ -671,6 +671,30 @@ func TestNamespaceMutatorSANamespaceInheritance(t *testing.T) {
 			expectPatch:   false,
 		},
 		{
+			name:      "SA inheritance denied when target has extra tracked key not on SA",
+			operation: admissionv1.Create,
+			username:  "system:serviceaccount:platform-ns:my-operator",
+			namespace: &corev1.Namespace{
+				TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Namespace"},
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "new-ns",
+					Labels: map[string]string{
+						"t-caas.telekom.com/tenant": "team-x",
+					},
+				},
+			},
+			saNamespace: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "platform-ns",
+					Labels: map[string]string{
+						"t-caas.telekom.com/owner": "platform",
+					},
+				},
+			},
+			expectAllowed: false,
+			expectPatch:   false,
+		},
+		{
 			name:      "SA inheritance not applied to DELETE operations",
 			operation: admissionv1.Delete,
 			username:  "system:serviceaccount:tenant-alpha:my-operator",

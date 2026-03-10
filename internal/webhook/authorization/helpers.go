@@ -208,17 +208,55 @@ func GetSANamespaceTrackedLabels(ctx context.Context, c client.Client, saInfo Se
 		return empty, nil
 	}
 
-	// For tenant and thirdparty owners, require the corresponding identifying label.
+	// Enforce a valid and non-ambiguous ownership combination:
+	//   - owner=platform    => only owner; no tenant/thirdparty labels
+	//   - owner=tenant      => owner + tenant; no thirdparty label
+	//   - owner=thirdparty  => owner + thirdparty; no tenant label
+	// Any other combination is treated as invalid and results in no tracked labels.
 	switch ownerVal {
+	case authzv1alpha1.OwnerPlatform:
+		if _, ok := result[authzv1alpha1.LabelKeyTenant]; ok {
+			return empty, nil
+		}
+		if _, ok := result[authzv1alpha1.LabelKeyThirdParty]; ok {
+			return empty, nil
+		}
 	case authzv1alpha1.OwnerTenant:
 		if _, ok := result[authzv1alpha1.LabelKeyTenant]; !ok {
+			return empty, nil
+		}
+		if _, ok := result[authzv1alpha1.LabelKeyThirdParty]; ok {
 			return empty, nil
 		}
 	case authzv1alpha1.OwnerThirdParty:
 		if _, ok := result[authzv1alpha1.LabelKeyThirdParty]; !ok {
 			return empty, nil
 		}
+		if _, ok := result[authzv1alpha1.LabelKeyTenant]; ok {
+			return empty, nil
+		}
+	default:
+		// Unknown owner values are not considered valid tracked ownership.
+		return empty, nil
 	}
 
 	return result, nil
+}
+
+// FindExtraTrackedKey returns the first tracked ownership label key that exists
+// on targetLabels but is absent from inherited. Returns "" if no extra keys exist.
+func FindExtraTrackedKey(targetLabels, inherited map[string]string) string {
+	trackedKeys := []string{
+		authzv1alpha1.LabelKeyOwner,
+		authzv1alpha1.LabelKeyTenant,
+		authzv1alpha1.LabelKeyThirdParty,
+	}
+	for _, key := range trackedKeys {
+		if _, onTarget := targetLabels[key]; onTarget {
+			if _, onSA := inherited[key]; !onSA {
+				return key
+			}
+		}
+	}
+	return ""
 }

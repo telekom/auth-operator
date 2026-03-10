@@ -91,8 +91,8 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 			return admission.Errored(http.StatusInternalServerError, saErr)
 		}
 		if len(inherited) > 0 {
-			// Check for conflicts: if the target already has a tracked label with a different value, deny.
 			if ns.Labels != nil {
+				// Check for conflicts: if the target already has a tracked label with a different value, deny.
 				for k, inheritedVal := range inherited {
 					if existingVal, exists := ns.Labels[k]; exists && existingVal != inheritedVal {
 						logger.V(1).Info("SA namespace label inheritance denied - label conflict on target namespace",
@@ -100,6 +100,17 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 						metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultDenied).Inc()
 						return admission.Denied(fmt.Sprintf(DenialLabelConflictFmt, req.Name, k, existingVal, inheritedVal, saInfo.Namespace))
 					}
+				}
+				// Deny early if target has extra tracked keys not present on the SA namespace.
+				// This avoids a mutate-then-deny flow where the mutator would allow and patch,
+				// but the validating webhook would deny due to extra tracked keys.
+				if extraKey := FindExtraTrackedKey(ns.Labels, inherited); extraKey != "" {
+					logger.V(1).Info("SA namespace label inheritance denied - target has extra tracked key",
+						"namespace", req.Name, "extraKey", extraKey, "saNamespace", saInfo.Namespace)
+					metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultDenied).Inc()
+					return admission.Denied(fmt.Sprintf(
+						"Namespace %s has tracked label %s not present on SA source namespace %s",
+						req.Name, extraKey, saInfo.Namespace))
 				}
 			}
 			logger.V(1).Info("SA namespace label inheritance - inheriting labels from SA source namespace",
