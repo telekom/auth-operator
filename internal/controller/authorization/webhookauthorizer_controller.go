@@ -92,8 +92,9 @@ func (r *WebhookAuthorizerReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	wa := &authorizationv1alpha1.WebhookAuthorizer{}
 	if err := r.client.Get(ctx, req.NamespacedName, wa); err != nil {
 		if apierrors.IsNotFound(err) {
-			logger.V(1).Info("WebhookAuthorizer not found (deleted), skipping reconcile",
+			logger.V(1).Info("WebhookAuthorizer not found (deleted), cleaning up metrics",
 				"webhookAuthorizer", req.Name)
+			metrics.DeleteAuthorizerSeries(req.Name)
 			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerWebhookAuthorizer, metrics.ResultSkipped).Inc()
 			return ctrl.Result{}, nil
 		}
