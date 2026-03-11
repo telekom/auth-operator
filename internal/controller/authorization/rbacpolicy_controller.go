@@ -173,7 +173,11 @@ func (r *RBACPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// Step 5: Update status.
-	boundCount := int32(min(len(rbdList.Items)+len(rrdList.Items), math.MaxInt32)) //nolint:gosec // bounded by min
+	total := len(rbdList.Items) + len(rrdList.Items)
+	if total > math.MaxInt32 {
+		total = math.MaxInt32
+	}
+	boundCount := int32(total) // #nosec G115 -- bounded by the check above
 	policy.Status.BoundResourceCount = boundCount
 	logger.V(2).Info("bound resource count updated",
 		"rbacPolicy", policy.Name,
