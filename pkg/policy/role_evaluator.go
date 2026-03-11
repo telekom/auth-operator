@@ -33,32 +33,49 @@ func evaluateRoleLimits(limits *authorizationv1alpha1.RoleLimits, rrd *authoriza
 		})
 	}
 
-	// Check forbidden verbs in RestrictedVerbs.
-	for i, verb := range rrd.Spec.RestrictedVerbs {
-		if containsString(limits.ForbiddenVerbs, verb) {
+	// Check that all forbidden verbs are excluded via RestrictedVerbs.
+	// RestrictedVerbs are verbs NOT included in the generated role, so
+	// a forbidden verb missing from RestrictedVerbs means it could appear
+	// in the generated role.
+	for _, verb := range limits.ForbiddenVerbs {
+		if !containsString(rrd.Spec.RestrictedVerbs, verb) {
 			violations = append(violations, Violation{
-				Field:   fmt.Sprintf("spec.restrictedVerbs[%d]", i),
-				Message: fmt.Sprintf("verb %q is forbidden by policy", verb),
+				Field:   "spec.restrictedVerbs",
+				Message: fmt.Sprintf("forbidden verb %q must be listed in restrictedVerbs", verb),
 			})
 		}
 	}
 
-	// Check restricted APIs against forbidden API groups.
-	for i, api := range rrd.Spec.RestrictedAPIs {
-		if containsString(limits.ForbiddenAPIGroups, api.Name) {
+	// Check that all forbidden API groups are excluded via RestrictedAPIs.
+	for _, group := range limits.ForbiddenAPIGroups {
+		found := false
+		for _, api := range rrd.Spec.RestrictedAPIs {
+			if api.Name == group {
+				found = true
+				break
+			}
+		}
+		if !found {
 			violations = append(violations, Violation{
-				Field:   fmt.Sprintf("spec.restrictedApis[%d]", i),
-				Message: fmt.Sprintf("API group %q is forbidden by policy", api.Name),
+				Field:   "spec.restrictedApis",
+				Message: fmt.Sprintf("forbidden API group %q must be listed in restrictedApis", group),
 			})
 		}
 	}
 
-	// Check restricted resources against forbidden resources.
-	for i, res := range rrd.Spec.RestrictedResources {
-		if containsString(limits.ForbiddenResources, res.Name) {
+	// Check that all forbidden resources are excluded via RestrictedResources.
+	for _, res := range limits.ForbiddenResources {
+		found := false
+		for _, rr := range rrd.Spec.RestrictedResources {
+			if rr.Name == res {
+				found = true
+				break
+			}
+		}
+		if !found {
 			violations = append(violations, Violation{
-				Field:   fmt.Sprintf("spec.restrictedResources[%d]", i),
-				Message: fmt.Sprintf("resource %q is forbidden by policy", res.Name),
+				Field:   "spec.restrictedResources",
+				Message: fmt.Sprintf("forbidden resource %q must be listed in restrictedResources", res),
 			})
 		}
 	}

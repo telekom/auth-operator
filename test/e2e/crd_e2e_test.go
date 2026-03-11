@@ -116,9 +116,14 @@ var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 		cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "-k", fixturesPath, "--ignore-not-found=true")
 		_, _ = utils.Run(cmd)
 
-		// Use centralized cleanup
+		// Clean up custom resources and finalizers without destroying the operator.
+		// The operator namespace and webhooks must persist for other test suites.
+		cleanupAllCRDs()
 		clusterRoles := []string{"e2e-cluster-reader"}
-		CleanupForDevTests(operatorNamespace, clusterRoles)
+		for _, cr := range clusterRoles {
+			cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "clusterrole", cr, "--ignore-not-found=true")
+			_, _ = utils.Run(cmd)
+		}
 		utils.CleanupClusterResources("app.kubernetes.io/managed-by=auth-operator")
 		utils.CleanupResourcesByLabel("role", "app.kubernetes.io/managed-by=auth-operator", testNamespace)
 		utils.CleanupResourcesByLabel("rolebinding", "app.kubernetes.io/managed-by=auth-operator", testNamespace)

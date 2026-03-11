@@ -87,9 +87,9 @@ func TestEvaluateRoleDefinition_ForbiddenVerbs(t *testing.T) {
 		restrictedVerbs []string
 		wantViolations  int
 	}{
-		{name: "no forbidden verbs used", restrictedVerbs: []string{"get", "list"}, wantViolations: 0},
-		{name: "one forbidden verb", restrictedVerbs: []string{"get", "delete"}, wantViolations: 1},
-		{name: "two forbidden verbs", restrictedVerbs: []string{"delete", "escalate"}, wantViolations: 2},
+		{name: "no forbidden verbs excluded", restrictedVerbs: []string{"get", "list"}, wantViolations: 2},
+		{name: "one forbidden verb excluded", restrictedVerbs: []string{"get", "delete"}, wantViolations: 1},
+		{name: "all forbidden verbs excluded", restrictedVerbs: []string{"delete", "escalate"}, wantViolations: 0},
 	}
 
 	for _, tt := range tests {
@@ -132,11 +132,37 @@ func TestEvaluateRoleDefinition_ForbiddenAPIGroups(t *testing.T) {
 	}
 
 	violations := EvaluateRoleDefinition(policy, rrd)
-	if len(violations) != 1 {
-		t.Fatalf("expected 1 violation, got %d: %v", len(violations), violations)
+	if len(violations) != 0 {
+		t.Fatalf("expected 0 violations (forbidden API group is already excluded), got %d: %v", len(violations), violations)
 	}
-	if violations[0].Field != "spec.restrictedApis[1]" {
-		t.Errorf("expected field spec.restrictedApis[1], got %q", violations[0].Field)
+}
+
+func TestEvaluateRoleDefinition_ForbiddenAPIGroups_Missing(t *testing.T) {
+	policy := &authorizationv1alpha1.RBACPolicy{
+		Spec: authorizationv1alpha1.RBACPolicySpec{
+			RoleLimits: &authorizationv1alpha1.RoleLimits{
+				ForbiddenAPIGroups: []string{"certificates.k8s.io"},
+			},
+		},
+	}
+
+	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+			TargetRole:      "Role",
+			TargetName:      "test-role",
+			TargetNamespace: "default",
+			RestrictedAPIs: []metav1.APIGroup{
+				{Name: "apps"},
+			},
+		},
+	}
+
+	violations := EvaluateRoleDefinition(policy, rrd)
+	if len(violations) != 1 {
+		t.Fatalf("expected 1 violation (forbidden API group not excluded), got %d: %v", len(violations), violations)
+	}
+	if violations[0].Field != "spec.restrictedApis" {
+		t.Errorf("expected field spec.restrictedApis, got %q", violations[0].Field)
 	}
 }
 
@@ -162,11 +188,13 @@ func TestEvaluateRoleDefinition_ForbiddenResources(t *testing.T) {
 	}
 
 	violations := EvaluateRoleDefinition(policy, rrd)
+	// "secrets" is in restrictedResources (excluded = compliant).
+	// "configmaps" is NOT in restrictedResources (could appear in role = violation).
 	if len(violations) != 1 {
 		t.Fatalf("expected 1 violation, got %d: %v", len(violations), violations)
 	}
-	if violations[0].Field != "spec.restrictedResources[1]" {
-		t.Errorf("expected field spec.restrictedResources[1], got %q", violations[0].Field)
+	if violations[0].Field != "spec.restrictedResources" {
+		t.Errorf("expected field spec.restrictedResources, got %q", violations[0].Field)
 	}
 }
 
@@ -215,8 +243,9 @@ func TestEvaluateRoleDefinition_MultipleLimits(t *testing.T) {
 	}
 
 	violations := EvaluateRoleDefinition(policy, rrd)
-	// ClusterRole not allowed (1) + forbidden verb (1) + forbidden resource (1)
-	if len(violations) != 3 {
-		t.Errorf("expected 3 violations, got %d: %v", len(violations), violations)
+	// ClusterRole not allowed (1). Forbidden verb "delete" and resource "secrets"
+	// are both in the restricted lists (excluded from role), so no violations there.
+	if len(violations) != 1 {
+		t.Errorf("expected 1 violation (ClusterRole only), got %d: %v", len(violations), violations)
 	}
 }

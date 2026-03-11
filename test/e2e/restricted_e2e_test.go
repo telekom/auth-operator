@@ -19,11 +19,7 @@ import (
 	"github.com/telekom/auth-operator/test/utils"
 )
 
-var _ = Describe("Restricted CRD E2E", Ordered, Label("basic", "restricted"), func() {
-
-	BeforeAll(func() {
-		setSuiteOutputDir("restricted")
-	})
+var _ = Describe("Restricted CRD E2E", Label("basic", "restricted"), func() {
 
 	BeforeEach(func() {
 		By("Waiting for controller-manager and webhook pods to be ready")
