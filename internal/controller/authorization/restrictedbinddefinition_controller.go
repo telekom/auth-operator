@@ -266,32 +266,9 @@ func (r *RestrictedBindDefinitionReconciler) rbdReconcileResources(
 	ctx context.Context,
 	rbd *authorizationv1alpha1.RestrictedBindDefinition,
 ) error {
-	logger := log.FromContext(ctx)
-
 	// Ensure ServiceAccounts.
-	automountToken := ptr.Deref(rbd.Spec.AutomountServiceAccountToken, true)
-	for _, subject := range rbd.Spec.Subjects {
-		if subject.Kind != authorizationv1alpha1.BindSubjectServiceAccount {
-			continue
-		}
-		ns := &corev1.Namespace{}
-		if err := r.client.Get(ctx, types.NamespacedName{Name: subject.Namespace}, ns); err != nil {
-			if apierrors.IsNotFound(err) {
-				logger.V(2).Info("SA namespace not found, skipping", "namespace", subject.Namespace)
-				continue
-			}
-			return fmt.Errorf("get namespace %s: %w", subject.Namespace, err)
-		}
-		if conditions.IsNamespaceTerminating(ns) {
-			continue
-		}
-		ac := pkgssa.ServiceAccountWith(subject.Name, subject.Namespace,
-			helpers.BuildResourceLabels(rbd.Labels), automountToken).
-			WithOwnerReferences(ownerRefForRestricted(rbd, "RestrictedBindDefinition")).
-			WithAnnotations(helpers.BuildResourceAnnotations("RestrictedBindDefinition", rbd.Name))
-		if _, err := pkgssa.PatchApplyServiceAccount(ctx, r.client, ac, pkgssa.FieldOwnerForBD(rbd.Name)); err != nil {
-			return fmt.Errorf("apply ServiceAccount %s/%s: %w", subject.Namespace, subject.Name, err)
-		}
+	if err := r.rbdEnsureServiceAccounts(ctx, rbd); err != nil {
+		return err
 	}
 
 	// Ensure ClusterRoleBindings.
@@ -332,6 +309,63 @@ func (r *RestrictedBindDefinitionReconciler) rbdReconcileResources(
 		}
 	}
 
+	return nil
+}
+
+// rbdEnsureServiceAccounts ensures all ServiceAccount subjects exist, tracking
+// which were generated vs pre-existing (external).
+func (r *RestrictedBindDefinitionReconciler) rbdEnsureServiceAccounts(
+	ctx context.Context,
+	rbd *authorizationv1alpha1.RestrictedBindDefinition,
+) error {
+	logger := log.FromContext(ctx)
+	automountToken := ptr.Deref(rbd.Spec.AutomountServiceAccountToken, true)
+	var generatedSAs []rbacv1.Subject
+	var externalSAs []string
+
+	for _, subject := range rbd.Spec.Subjects {
+		if subject.Kind != authorizationv1alpha1.BindSubjectServiceAccount {
+			continue
+		}
+		ns := &corev1.Namespace{}
+		if err := r.client.Get(ctx, types.NamespacedName{Name: subject.Namespace}, ns); err != nil {
+			if apierrors.IsNotFound(err) {
+				logger.V(2).Info("SA namespace not found, skipping", "namespace", subject.Namespace)
+				continue
+			}
+			return fmt.Errorf("get namespace %s: %w", subject.Namespace, err)
+		}
+		if conditions.IsNamespaceTerminating(ns) {
+			continue
+		}
+
+		// Check if SA pre-exists and is not owned by any RestrictedBindDefinition.
+		existing := &corev1.ServiceAccount{}
+		err := r.client.Get(ctx, types.NamespacedName{Name: subject.Name, Namespace: subject.Namespace}, existing)
+		if err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("get ServiceAccount %s/%s: %w", subject.Namespace, subject.Name, err)
+		}
+		if err == nil && !isOwnedByRestrictedBindDefinition(existing.OwnerReferences) {
+			externalSAs = append(externalSAs, fmt.Sprintf("%s/%s", subject.Namespace, subject.Name))
+			logger.V(1).Info("skipping pre-existing ServiceAccount",
+				"serviceAccount", subject.Name, "namespace", subject.Namespace)
+			continue
+		}
+
+		ac := pkgssa.ServiceAccountWith(subject.Name, subject.Namespace,
+			helpers.BuildResourceLabels(rbd.Labels), automountToken).
+			WithOwnerReferences(ownerRefForRestricted(rbd, "RestrictedBindDefinition")).
+			WithAnnotations(helpers.BuildResourceAnnotations("RestrictedBindDefinition", rbd.Name))
+		if _, err := pkgssa.PatchApplyServiceAccount(ctx, r.client, ac, pkgssa.FieldOwnerForBD(rbd.Name)); err != nil {
+			return fmt.Errorf("apply ServiceAccount %s/%s: %w", subject.Namespace, subject.Name, err)
+		}
+		if !helpers.SubjectExists(generatedSAs, subject) {
+			generatedSAs = append(generatedSAs, subject)
+		}
+	}
+
+	rbd.Status.GeneratedServiceAccounts = helpers.MergeSubjects(rbd.Status.GeneratedServiceAccounts, generatedSAs)
+	rbd.Status.ExternalServiceAccounts = externalSAs
 	return nil
 }
 
