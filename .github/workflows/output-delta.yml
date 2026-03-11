@@ -139,6 +139,9 @@ jobs:
           echo "Waiting for resources to be reconciled..."
           kubectl wait --for=condition=Ready roledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RoleDefinitions not fully reconciled"
           kubectl wait --for=condition=Ready binddefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some BindDefinitions not fully reconciled"
+          kubectl wait --for=condition=Ready rbacpolicy --all --timeout=180s 2>/dev/null || echo "::notice::Some RBACPolicies not fully reconciled"
+          kubectl wait --for=condition=Ready restrictedbinddefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RestrictedBindDefinitions not fully reconciled"
+          kubectl wait --for=condition=Ready restrictedroledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RestrictedRoleDefinitions not fully reconciled"
 
           # Allow extra settle time for cross-resource dependencies (e.g. BDs
           # re-reconcile after RD-generated ClusterRoles appear).
@@ -173,6 +176,9 @@ jobs:
           kubectl wait --for=delete roledefinition --all --timeout=60s 2>/dev/null || true
           kubectl wait --for=delete binddefinition --all --timeout=60s 2>/dev/null || true
           kubectl wait --for=delete webhookauthorizer --all --timeout=60s 2>/dev/null || true
+          kubectl wait --for=delete rbacpolicy --all --timeout=60s 2>/dev/null || true
+          kubectl wait --for=delete restrictedbinddefinition --all --timeout=60s 2>/dev/null || true
+          kubectl wait --for=delete restrictedroledefinition --all --timeout=60s 2>/dev/null || true
           make undeploy 2>/dev/null || true
 
           echo "Main branch outputs captured"
@@ -211,6 +217,9 @@ jobs:
           # Wait for reconciliation
           kubectl wait --for=condition=Ready roledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RoleDefinitions not fully reconciled"
           kubectl wait --for=condition=Ready binddefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some BindDefinitions not fully reconciled"
+          kubectl wait --for=condition=Ready rbacpolicy --all --timeout=180s 2>/dev/null || echo "::notice::Some RBACPolicies not fully reconciled"
+          kubectl wait --for=condition=Ready restrictedbinddefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RestrictedBindDefinitions not fully reconciled"
+          kubectl wait --for=condition=Ready restrictedroledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RestrictedRoleDefinitions not fully reconciled"
 
           echo "Waiting 15s for reconciliation to fully settle..."
           sleep 15
@@ -222,6 +231,9 @@ jobs:
           kubectl wait --for=delete roledefinition --all --timeout=60s 2>/dev/null || true
           kubectl wait --for=delete binddefinition --all --timeout=60s 2>/dev/null || true
           kubectl wait --for=delete webhookauthorizer --all --timeout=60s 2>/dev/null || true
+          kubectl wait --for=delete rbacpolicy --all --timeout=60s 2>/dev/null || true
+          kubectl wait --for=delete restrictedbinddefinition --all --timeout=60s 2>/dev/null || true
+          kubectl wait --for=delete restrictedroledefinition --all --timeout=60s 2>/dev/null || true
           make undeploy 2>/dev/null || true
 
           echo "Fallback baseline captured using PR branch samples"
@@ -283,6 +295,9 @@ jobs:
 
           kubectl wait --for=condition=Ready roledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RoleDefinitions not fully reconciled"
           kubectl wait --for=condition=Ready binddefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some BindDefinitions not fully reconciled"
+          kubectl wait --for=condition=Ready rbacpolicy --all --timeout=180s 2>/dev/null || echo "::notice::Some RBACPolicies not fully reconciled"
+          kubectl wait --for=condition=Ready restrictedbinddefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RestrictedBindDefinitions not fully reconciled"
+          kubectl wait --for=condition=Ready restrictedroledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RestrictedRoleDefinitions not fully reconciled"
 
           echo "Waiting 15s for reconciliation to fully settle..."
           sleep 15
@@ -310,6 +325,9 @@ jobs:
           kubectl wait --for=delete roledefinition --all --timeout=60s 2>/dev/null || true
           kubectl wait --for=delete binddefinition --all --timeout=60s 2>/dev/null || true
           kubectl wait --for=delete webhookauthorizer --all --timeout=60s 2>/dev/null || true
+          kubectl wait --for=delete rbacpolicy --all --timeout=60s 2>/dev/null || true
+          kubectl wait --for=delete restrictedbinddefinition --all --timeout=60s 2>/dev/null || true
+          kubectl wait --for=delete restrictedroledefinition --all --timeout=60s 2>/dev/null || true
           make undeploy 2>/dev/null || true
 
           echo "Tag branch (${{ steps.latest-tag.outputs.tag }}) outputs captured"
@@ -349,6 +367,9 @@ jobs:
 
           kubectl wait --for=condition=Ready roledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RoleDefinitions not fully reconciled"
           kubectl wait --for=condition=Ready binddefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some BindDefinitions not fully reconciled"
+          kubectl wait --for=condition=Ready rbacpolicy --all --timeout=180s 2>/dev/null || echo "::notice::Some RBACPolicies not fully reconciled"
+          kubectl wait --for=condition=Ready restrictedbinddefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RestrictedBindDefinitions not fully reconciled"
+          kubectl wait --for=condition=Ready restrictedroledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RestrictedRoleDefinitions not fully reconciled"
 
           echo "Waiting 15s for reconciliation to fully settle..."
           sleep 15
