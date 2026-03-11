@@ -93,12 +93,15 @@ func checkRoleRef(limits *authorizationv1alpha1.RoleRefLimits, ref, fieldPath st
 	}
 
 	// Check allowed list (default-deny: empty list = nothing allowed).
-	if len(limits.AllowedRoleRefs) > 0 && !matchesAnyWildcard(limits.AllowedRoleRefs, ref) {
+	if !matchesAnyWildcard(limits.AllowedRoleRefs, ref) {
 		violations = append(violations, Violation{
 			Field:   fieldPath,
 			Message: fmt.Sprintf("role ref %q is not in the allowed list", ref),
 		})
 	}
+
+	// TODO: enforce AllowedRoleRefSelector and ForbiddenRoleRefSelector
+	// once the evaluator has access to role labels (requires client lookup).
 
 	return violations
 }
@@ -128,6 +131,8 @@ func evaluateNamespaceLimits(limits *authorizationv1alpha1.NamespaceLimits, rbd 
 }
 
 // checkNamespace validates a single namespace against namespace limits.
+// TODO: enforce AllowedNamespaceSelector once the evaluator has access
+// to namespace labels (requires client lookup or pre-fetched label map).
 func checkNamespace(limits *authorizationv1alpha1.NamespaceLimits, namespace, fieldPath string) []Violation {
 	var violations []Violation
 
@@ -177,8 +182,8 @@ func evaluateSubjectLimits(limits *authorizationv1alpha1.SubjectLimits, subjects
 			continue
 		}
 
-		// Check allowed kinds (default-deny).
-		if len(limits.AllowedKinds) > 0 && !containsString(limits.AllowedKinds, s.Kind) {
+		// Check allowed kinds (default-deny: empty list = nothing allowed).
+		if !containsString(limits.AllowedKinds, s.Kind) {
 			violations = append(violations, Violation{
 				Field:   fieldPath + ".kind",
 				Message: fmt.Sprintf("subject kind %q is not allowed by policy", s.Kind),
@@ -258,6 +263,9 @@ func checkNameMatchLimits(limits *authorizationv1alpha1.NameMatchLimits, name, f
 }
 
 // checkServiceAccountLimits validates a ServiceAccount subject.
+// TODO: enforce AllowAutoCreate, AllowedCreationNamespaceSelector,
+// AllowedNamespaceSelector, and DisableAdoption once the evaluator
+// has access to cluster state or the controller passes SA metadata.
 func checkServiceAccountLimits(limits *authorizationv1alpha1.ServiceAccountLimits, subject rbacv1.Subject, fieldPath string) []Violation {
 	var violations []Violation
 

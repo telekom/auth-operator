@@ -22,6 +22,8 @@ func EvaluateRoleDefinition(policy *authorizationv1alpha1.RBACPolicy, rrd *autho
 }
 
 // evaluateRoleLimits checks role-related constraints.
+// TODO: enforce ForbiddenResourceVerbs (resource+verb combinations) and
+// MaxRulesPerRole once rule-level policy evaluation is implemented.
 func evaluateRoleLimits(limits *authorizationv1alpha1.RoleLimits, rrd *authorizationv1alpha1.RestrictedRoleDefinition) []Violation {
 	var violations []Violation
 
