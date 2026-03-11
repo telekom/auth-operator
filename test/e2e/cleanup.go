@@ -29,6 +29,9 @@ func CleanupTestResources(opts CleanupOptions) {
 		utils.RemoveFinalizersForAll("roledefinition")
 		utils.RemoveFinalizersForAll("binddefinition")
 		utils.RemoveFinalizersForAll("webhookauthorizer")
+		utils.RemoveFinalizersForAll("restrictedbinddefinition")
+		utils.RemoveFinalizersForAll("restrictedroledefinition")
+		utils.RemoveFinalizersForAll("rbacpolicy")
 	}
 
 	if opts.RemoveCRDs {
@@ -127,7 +130,7 @@ func resourceExists(kind, name string) bool {
 
 // cleanupAllCRDs deletes all auth-operator custom resources.
 func cleanupAllCRDs() {
-	resources := []string{"roledefinition", "binddefinition", "webhookauthorizer"}
+	resources := []string{"restrictedbinddefinition", "restrictedroledefinition", "roledefinition", "binddefinition", "webhookauthorizer", "rbacpolicy"}
 	for _, resource := range resources {
 		cmd := exec.CommandContext(context.Background(), "kubectl", "delete", resource, "-A", "--all", "--ignore-not-found=true")
 		_, _ = utils.Run(cmd)

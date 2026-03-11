@@ -19,6 +19,9 @@ import (
 // statusTrue is the status condition value for ready nodes.
 const statusTrue = "True"
 
+// statusFalse is the status condition value for not-ready nodes.
+const statusFalse = "False"
+
 // DebugReport represents a structured test debug report.
 type DebugReport struct {
 	Metadata    reportMetadata  `json:"metadata"`

@@ -499,7 +499,7 @@ spec:
 				if err != nil {
 					return false
 				}
-				return string(statusOutput) == "False"
+				return string(statusOutput) == statusFalse
 			}, time.Minute, 5*time.Second).Should(BeTrue(),
 				"Expected RoleRefsValid condition to be False")
 
@@ -583,6 +583,9 @@ func cleanupCRDE2ETestState() {
 	utils.RemoveFinalizersForAll("roledefinition")
 	utils.RemoveFinalizersForAll("binddefinition")
 	utils.RemoveFinalizersForAll("webhookauthorizer")
+	utils.RemoveFinalizersForAll("restrictedbinddefinition")
+	utils.RemoveFinalizersForAll("restrictedroledefinition")
+	utils.RemoveFinalizersForAll("rbacpolicy")
 	utils.RemoveFinalizersForAll("rolebinding")
 	utils.RemoveFinalizersForAll("clusterrolebinding")
 	utils.RemoveFinalizersForAll("role")
