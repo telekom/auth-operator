@@ -109,7 +109,7 @@ func evaluateBindingLimits(limits *authorizationv1alpha1.BindingLimits, rbd *aut
 func checkRoleRef(limits *authorizationv1alpha1.RoleRefLimits, ref, fieldPath string, roleLabels map[string]string, selectorEnabled bool) []Violation {
 	var violations []Violation
 
-	// Forbidden takes precedence.
+	// Forbidden checks: any match triggers rejection (independent).
 	if len(limits.ForbiddenRoleRefs) > 0 && matchesAnyWildcard(limits.ForbiddenRoleRefs, ref) {
 		violations = append(violations, Violation{
 			Field:   fieldPath,
@@ -117,32 +117,36 @@ func checkRoleRef(limits *authorizationv1alpha1.RoleRefLimits, ref, fieldPath st
 		})
 	}
 
-	// Check allowed list (default-deny: empty list = nothing allowed).
-	if !matchesAnyWildcard(limits.AllowedRoleRefs, ref) {
+	if selectorEnabled && roleLabels != nil && limits.ForbiddenRoleRefSelector != nil {
+		if matchesSelector(limits.ForbiddenRoleRefSelector, roleLabels) {
+			violations = append(violations, Violation{
+				Field:   fieldPath,
+				Message: fmt.Sprintf("role ref %q matches the forbidden role ref label selector", ref),
+			})
+		}
+	}
+
+	// Allowed checks: name OR selector (combined with OR semantics).
+	// A ref is allowed if it matches AllowedRoleRefs OR AllowedRoleRefSelector.
+	hasNameConfig := len(limits.AllowedRoleRefs) > 0
+	hasSelectorConfig := selectorEnabled && limits.AllowedRoleRefSelector != nil
+
+	if hasNameConfig || hasSelectorConfig {
+		nameAllowed := hasNameConfig && matchesAnyWildcard(limits.AllowedRoleRefs, ref)
+		selectorAllowed := hasSelectorConfig && roleLabels != nil && matchesSelector(limits.AllowedRoleRefSelector, roleLabels)
+
+		if !nameAllowed && !selectorAllowed {
+			violations = append(violations, Violation{
+				Field:   fieldPath,
+				Message: fmt.Sprintf("role ref %q is not allowed by policy (name or label selector)", ref),
+			})
+		}
+	} else {
+		// No allowed configuration at all — default-deny.
 		violations = append(violations, Violation{
 			Field:   fieldPath,
 			Message: fmt.Sprintf("role ref %q is not in the allowed list", ref),
 		})
-	}
-
-	// Label-selector-based checks (only when a resolver was available).
-	if selectorEnabled && roleLabels != nil {
-		if limits.ForbiddenRoleRefSelector != nil {
-			if matchesSelector(limits.ForbiddenRoleRefSelector, roleLabels) {
-				violations = append(violations, Violation{
-					Field:   fieldPath,
-					Message: fmt.Sprintf("role ref %q matches the forbidden role ref label selector", ref),
-				})
-			}
-		}
-		if limits.AllowedRoleRefSelector != nil {
-			if !matchesSelector(limits.AllowedRoleRefSelector, roleLabels) {
-				violations = append(violations, Violation{
-					Field:   fieldPath,
-					Message: fmt.Sprintf("role ref %q does not match the allowed role ref label selector", ref),
-				})
-			}
-		}
 	}
 
 	return violations
@@ -346,24 +350,26 @@ func checkServiceAccountLimits(limits *authorizationv1alpha1.ServiceAccountLimit
 		}
 	}
 
-	// Check AllowedCreationNamespaces (static check, no labels needed).
-	if limits.Creation != nil && len(limits.Creation.AllowedCreationNamespaces) > 0 && subject.Namespace != "" {
-		if !containsString(limits.Creation.AllowedCreationNamespaces, subject.Namespace) {
-			violations = append(violations, Violation{
-				Field:   fieldPath + ".namespace",
-				Message: fmt.Sprintf("ServiceAccount namespace %q is not in the allowed creation namespaces", subject.Namespace),
-			})
-		}
-	}
+	// Check SA creation namespace constraints (OR semantics: static list OR selector).
+	if limits.Creation != nil && subject.Namespace != "" {
+		hasStaticCheck := len(limits.Creation.AllowedCreationNamespaces) > 0
+		hasSelectorCheck := limits.Creation.AllowedCreationNamespaceSelector != nil && lg != nil
 
-	// Check AllowedCreationNamespaceSelector.
-	if limits.Creation != nil && limits.Creation.AllowedCreationNamespaceSelector != nil && lg != nil && subject.Namespace != "" {
-		nsLabels, found := lg.GetNamespaceLabels(subject.Namespace)
-		if !found || !matchesSelector(limits.Creation.AllowedCreationNamespaceSelector, nsLabels) {
-			violations = append(violations, Violation{
-				Field:   fieldPath + ".namespace",
-				Message: fmt.Sprintf("ServiceAccount namespace %q does not match the allowed creation namespace label selector", subject.Namespace),
-			})
+		if hasStaticCheck || hasSelectorCheck {
+			staticAllowed := hasStaticCheck && containsString(limits.Creation.AllowedCreationNamespaces, subject.Namespace)
+			selectorAllowed := false
+			if hasSelectorCheck {
+				nsLabels, found := lg.GetNamespaceLabels(subject.Namespace)
+				if found {
+					selectorAllowed = matchesSelector(limits.Creation.AllowedCreationNamespaceSelector, nsLabels)
+				}
+			}
+			if !staticAllowed && !selectorAllowed {
+				violations = append(violations, Violation{
+					Field:   fieldPath + ".namespace",
+					Message: fmt.Sprintf("ServiceAccount namespace %q is not in the allowed creation namespaces", subject.Namespace),
+				})
+			}
 		}
 	}
 
