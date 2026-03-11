@@ -276,6 +276,7 @@ func TestEvaluateBindDefinition_UserNameLimits(t *testing.T) {
 	policy := &authorizationv1alpha1.RBACPolicy{
 		Spec: authorizationv1alpha1.RBACPolicySpec{
 			SubjectLimits: &authorizationv1alpha1.SubjectLimits{
+				AllowedKinds: []string{rbacv1.UserKind},
 				UserLimits: &authorizationv1alpha1.NameMatchLimits{
 					AllowedPrefixes:   []string{"team-"},
 					ForbiddenNames:    []string{"root"},
@@ -317,6 +318,7 @@ func TestEvaluateBindDefinition_GroupNameLimits(t *testing.T) {
 	policy := &authorizationv1alpha1.RBACPolicy{
 		Spec: authorizationv1alpha1.RBACPolicySpec{
 			SubjectLimits: &authorizationv1alpha1.SubjectLimits{
+				AllowedKinds: []string{rbacv1.GroupKind},
 				GroupLimits: &authorizationv1alpha1.NameMatchLimits{
 					AllowedNames: []string{"developers", "viewers"},
 				},
@@ -462,6 +464,7 @@ func TestEvaluateBindDefinition_UserAllowedAndForbiddenSuffixes(t *testing.T) {
 	policy := &authorizationv1alpha1.RBACPolicy{
 		Spec: authorizationv1alpha1.RBACPolicySpec{
 			SubjectLimits: &authorizationv1alpha1.SubjectLimits{
+				AllowedKinds: []string{rbacv1.UserKind},
 				UserLimits: &authorizationv1alpha1.NameMatchLimits{
 					AllowedSuffixes:   []string{"@example.com"},
 					ForbiddenSuffixes: []string{"@evil.com"},
@@ -521,5 +524,51 @@ func TestEvaluateBindDefinition_MaxTargetNamespacesDeduplicated(t *testing.T) {
 	violations := EvaluateBindDefinition(policy, rbd)
 	if len(violations) != 0 {
 		t.Errorf("expected 0 violations (2 unique namespaces <= max 2), got %d: %v", len(violations), violations)
+	}
+}
+
+func TestEvaluateBindDefinition_SubjectKindsDefaultDenyEmpty(t *testing.T) {
+	// When SubjectLimits is set but AllowedKinds is empty (nil), all kinds are denied.
+	policy := &authorizationv1alpha1.RBACPolicy{
+		Spec: authorizationv1alpha1.RBACPolicySpec{
+			SubjectLimits: &authorizationv1alpha1.SubjectLimits{},
+		},
+	}
+
+	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
+		},
+	}
+
+	violations := EvaluateBindDefinition(policy, rbd)
+	if len(violations) != 1 {
+		t.Fatalf("expected 1 violation (empty AllowedKinds = default-deny), got %d: %v", len(violations), violations)
+	}
+}
+
+func TestEvaluateBindDefinition_RoleRefDefaultDenyEmpty(t *testing.T) {
+	// When RoleRefLimits is set but AllowedRoleRefs is empty, all refs are denied.
+	policy := &authorizationv1alpha1.RBACPolicy{
+		Spec: authorizationv1alpha1.RBACPolicySpec{
+			BindingLimits: &authorizationv1alpha1.BindingLimits{
+				AllowClusterRoleBindings: true,
+				ClusterRoleBindingLimits: &authorizationv1alpha1.RoleRefLimits{},
+			},
+		},
+	}
+
+	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+				ClusterRoleRefs: []string{"viewer"},
+			},
+			Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
+		},
+	}
+
+	violations := EvaluateBindDefinition(policy, rbd)
+	if len(violations) != 1 {
+		t.Fatalf("expected 1 violation (empty AllowedRoleRefs = default-deny), got %d: %v", len(violations), violations)
 	}
 }

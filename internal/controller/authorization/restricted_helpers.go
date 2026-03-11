@@ -79,7 +79,7 @@ func handlePolicyViolations(
 		authorizationv1alpha1.PolicyCompliantReasonViolationsDetected, "policy violations: %v", violationStrings)
 
 	recorder.Eventf(runtimeObj, nil, corev1.EventTypeWarning,
-		authorizationv1alpha1.EventReasonPolicyViolation, "Reconcile",
+		authorizationv1alpha1.EventReasonPolicyViolation, authorizationv1alpha1.EventActionReconcile,
 		"Policy violations detected: %v", violationStrings)
 
 	// Deprovision: delete all owned RBAC resources.
@@ -112,7 +112,7 @@ func markPolicyCompliant(
 		authorizationv1alpha1.PolicyCompliantReasonAllChecksPass, "all policy checks passed")
 
 	recorder.Eventf(runtimeObj, nil, corev1.EventTypeNormal,
-		authorizationv1alpha1.EventReasonPolicyCompliance, "Reconcile",
+		authorizationv1alpha1.EventReasonPolicyCompliance, authorizationv1alpha1.EventActionReconcile,
 		"All policy checks passed for RBACPolicy %q", policyName)
 }
 

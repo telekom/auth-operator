@@ -408,6 +408,9 @@ jobs:
           # Get CRD statuses (raw, for debugging)
           kubectl get roledefinitions -A -o yaml > /tmp/controller-logs/roledefinitions.yaml 2>/dev/null || true
           kubectl get binddefinitions -A -o yaml > /tmp/controller-logs/binddefinitions.yaml 2>/dev/null || true
+          kubectl get rbacpolicies -A -o yaml > /tmp/controller-logs/rbacpolicies.yaml 2>/dev/null || true
+          kubectl get restrictedbinddefinitions -A -o yaml > /tmp/controller-logs/restrictedbinddefinitions.yaml 2>/dev/null || true
+          kubectl get restrictedroledefinitions -A -o yaml > /tmp/controller-logs/restrictedroledefinitions.yaml 2>/dev/null || true
 
           echo "Controller logs collected"
 
@@ -443,7 +446,7 @@ jobs:
 
           echo "## CRD Conditions (non-Ready)" >> "$ERROR_LOG"
           echo '```yaml' >> "$ERROR_LOG"
-          for crd in roledefinitions binddefinitions; do
+          for crd in roledefinitions binddefinitions rbacpolicies restrictedbinddefinitions restrictedroledefinitions; do
             if [ -f "/tmp/controller-logs/${crd}.yaml" ]; then
               yq '.items[] | select(.status.conditions != null) | select(.status.conditions[] | select(.status != "True")) | {"name": .metadata.name, "conditions": .status.conditions}' "/tmp/controller-logs/${crd}.yaml" 2>/dev/null >> "$ERROR_LOG" || true
             fi
@@ -504,7 +507,7 @@ jobs:
           done
 
           # CRD status diffs (main vs PR)
-          for resource in roledefinitions-status binddefinitions-status; do
+          for resource in roledefinitions-status binddefinitions-status rbacpolicies-status restrictedbinddefinitions-status restrictedroledefinitions-status; do
             if [ -f "/tmp/main-output/$resource.yaml" ] && [ -f "/tmp/pr-output/$resource.yaml" ]; then
               diff -u /tmp/main-output/$resource.yaml /tmp/pr-output/$resource.yaml > /tmp/diff-output/main/$resource.diff 2>&1 || true
             fi
@@ -516,7 +519,7 @@ jobs:
               diff -u /tmp/tag-output/$resource.yaml /tmp/pr-output/$resource.yaml > /tmp/diff-output/tag/$resource.diff 2>&1 || true
             done
 
-            for resource in roledefinitions-status binddefinitions-status; do
+            for resource in roledefinitions-status binddefinitions-status rbacpolicies-status restrictedbinddefinitions-status restrictedroledefinitions-status; do
               if [ -f "/tmp/tag-output/$resource.yaml" ] && [ -f "/tmp/pr-output/$resource.yaml" ]; then
                 diff -u /tmp/tag-output/$resource.yaml /tmp/pr-output/$resource.yaml > /tmp/diff-output/tag/$resource.diff 2>&1 || true
               fi
@@ -588,7 +591,10 @@ jobs:
               ['RoleBindings', 'rolebindings.diff'],
               ['ServiceAccounts', 'serviceaccounts.diff'],
               ['RoleDefinitions Status', 'roledefinitions-status.diff'],
-              ['BindDefinitions Status', 'binddefinitions-status.diff']
+              ['BindDefinitions Status', 'binddefinitions-status.diff'],
+              ['RBACPolicies Status', 'rbacpolicies-status.diff'],
+              ['RestrictedBindDefinitions Status', 'restrictedbinddefinitions-status.diff'],
+              ['RestrictedRoleDefinitions Status', 'restrictedroledefinitions-status.diff']
             ];
 
             const mainFallback = '${{ steps.diff.outputs.main_fallback }}' === 'true';
