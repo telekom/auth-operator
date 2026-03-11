@@ -29,7 +29,7 @@ spec:
       - "escalate"
       - "impersonate"
       - "bind"
-    maxRulesPerRole: 50
+    maxRulesPerRole: 200
   subjectLimits:
     allowedKinds:
       - "User"
