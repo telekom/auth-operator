@@ -22,3 +22,12 @@ func (v Violation) String() string {
 	}
 	return v.Message
 }
+
+// ViolationStrings converts a slice of violations to their string representations.
+func ViolationStrings(violations []Violation) []string {
+	result := make([]string, len(violations))
+	for i, v := range violations {
+		result[i] = v.String()
+	}
+	return result
+}

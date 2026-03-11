@@ -15,7 +15,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	metav1ac "k8s.io/client-go/applyconfigurations/meta/v1"
 	"k8s.io/client-go/tools/events"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -223,47 +222,22 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 
 	// Step 6: Evaluate policy compliance.
 	violations := policy.EvaluateBindDefinition(rbacPolicy, rbd)
-	if len(violations) > 0 { //nolint:dupl // structurally similar to RRD but type-specific
-		violationStrings := make([]string, len(violations))
-		for i, v := range violations {
-			violationStrings[i] = v.String()
-		}
-		logger.Info("policy violations detected",
-			"name", rbd.Name, "violations", violationStrings)
-		conditions.MarkFalse(rbd, authorizationv1alpha1.PolicyCompliantCondition, rbd.Generation,
-			authorizationv1alpha1.PolicyCompliantReasonViolationsDetected, "policy violations: %v", violationStrings)
-		rbd.Status.PolicyViolations = violationStrings
-
-		r.recorder.Eventf(rbd, nil, corev1.EventTypeWarning,
-			authorizationv1alpha1.EventReasonPolicyViolation, "Reconcile",
-			"Policy violations detected: %v", violationStrings)
-
-		// Deprovision: delete all owned RBAC resources.
-		if err := r.rbdDeprovision(ctx, rbd); err != nil {
-			r.rbdMarkStalled(ctx, rbd, err)
-			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
-			return ctrl.Result{}, fmt.Errorf("deprovision RestrictedBindDefinition %s: %w", rbd.Name, err)
-		}
-
-		rbd.Status.BindReconciled = false
-		conditions.MarkFalse(rbd, conditions.ReadyConditionType, rbd.Generation,
-			authorizationv1alpha1.DeprovisionedReason, "deprovisioned due to policy violations")
-
-		if err := ssa.ApplyRestrictedBindDefinitionStatus(ctx, r.client, rbd); err != nil {
-			logger.Error(err, "failed to apply status after deprovisioning", "name", rbd.Name)
-		}
-		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultDegraded).Inc()
-		return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
+	if len(violations) > 0 {
+		rbd.Status.PolicyViolations = policy.ViolationStrings(violations)
+		result, err := handlePolicyViolations(ctx, rbd, rbd.Generation, violations, r.recorder, rbd, ViolationHandlerConfig{
+			ControllerLabel: metrics.ControllerRestrictedBindDefinition,
+			ResourceKind:    "RestrictedBindDefinition",
+			Deprovision:     func(ctx context.Context) error { return r.rbdDeprovision(ctx, rbd) },
+			MarkStalled:     func(ctx context.Context, err error) { r.rbdMarkStalled(ctx, rbd, err) },
+			SetReconciled:   func(v bool) { rbd.Status.BindReconciled = v },
+			ApplyStatus:     func(ctx context.Context) error { return ssa.ApplyRestrictedBindDefinitionStatus(ctx, r.client, rbd) },
+		})
+		return result, err
 	}
 
 	// Policy compliant.
-	conditions.MarkTrue(rbd, authorizationv1alpha1.PolicyCompliantCondition, rbd.Generation,
-		authorizationv1alpha1.PolicyCompliantReasonAllChecksPass, "all policy checks passed")
+	markPolicyCompliant(rbd, rbd.Generation, r.recorder, rbd, rbacPolicy.Name)
 	rbd.Status.PolicyViolations = nil
-
-	r.recorder.Eventf(rbd, nil, corev1.EventTypeNormal,
-		authorizationv1alpha1.EventReasonPolicyCompliance, "Reconcile",
-		"All policy checks passed for RBACPolicy %q", rbacPolicy.Name)
 
 	// Step 7: Reconcile RBAC resources.
 	if err := r.rbdReconcileResources(ctx, rbd); err != nil {
@@ -313,7 +287,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdReconcileResources(
 		}
 		ac := pkgssa.ServiceAccountWith(subject.Name, subject.Namespace,
 			helpers.BuildResourceLabels(rbd.Labels), automountToken).
-			WithOwnerReferences(rbdOwnerRef(rbd)).
+			WithOwnerReferences(ownerRefForRestricted(rbd, "RestrictedBindDefinition")).
 			WithAnnotations(helpers.BuildResourceAnnotations("RestrictedBindDefinition", rbd.Name))
 		if _, err := pkgssa.PatchApplyServiceAccount(ctx, r.client, ac, pkgssa.FieldOwnerForBD(rbd.Name)); err != nil {
 			return fmt.Errorf("apply ServiceAccount %s/%s: %w", subject.Namespace, subject.Name, err)
@@ -327,7 +301,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdReconcileResources(
 			crbName, helpers.BuildResourceLabels(rbd.Labels), rbd.Spec.Subjects,
 			rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: clusterRoleRef},
 		)
-		ac.WithOwnerReferences(rbdOwnerRef(rbd)).
+		ac.WithOwnerReferences(ownerRefForRestricted(rbd, "RestrictedBindDefinition")).
 			WithAnnotations(helpers.BuildResourceAnnotations("RestrictedBindDefinition", rbd.Name))
 
 		if _, err := pkgssa.PatchApplyClusterRoleBinding(ctx, r.client, ac); err != nil {
@@ -372,7 +346,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdEnsureRoleBinding(
 		rbName, namespace, helpers.BuildResourceLabels(rbd.Labels), rbd.Spec.Subjects,
 		rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: roleKind, Name: roleRef},
 	)
-	ac.WithOwnerReferences(rbdOwnerRef(rbd)).
+	ac.WithOwnerReferences(ownerRefForRestricted(rbd, "RestrictedBindDefinition")).
 		WithAnnotations(helpers.BuildResourceAnnotations("RestrictedBindDefinition", rbd.Name))
 
 	if _, err := pkgssa.PatchApplyRoleBinding(ctx, r.client, ac); err != nil {
@@ -434,7 +408,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdDeprovision(
 		return fmt.Errorf("list ClusterRoleBindings: %w", err)
 	}
 	for i := range crbList.Items {
-		if isOwnedBy(&crbList.Items[i], rbd) {
+		if hasOwnerRef(&crbList.Items[i], rbd) {
 			if err := r.client.Delete(ctx, &crbList.Items[i]); err != nil && !apierrors.IsNotFound(err) {
 				return fmt.Errorf("delete ClusterRoleBinding %s: %w", crbList.Items[i].Name, err)
 			}
@@ -447,7 +421,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdDeprovision(
 		return fmt.Errorf("list RoleBindings: %w", err)
 	}
 	for i := range rbList.Items {
-		if isOwnedBy(&rbList.Items[i], rbd) {
+		if hasOwnerRef(&rbList.Items[i], rbd) {
 			if err := r.client.Delete(ctx, &rbList.Items[i]); err != nil && !apierrors.IsNotFound(err) {
 				return fmt.Errorf("delete RoleBinding %s/%s: %w", rbList.Items[i].Namespace, rbList.Items[i].Name, err)
 			}
@@ -517,27 +491,4 @@ func (r *RestrictedBindDefinitionReconciler) rbdApplyStatusAndMarkStalled(
 	if err := ssa.ApplyRestrictedBindDefinitionStatus(ctx, r.client, rbd); err != nil {
 		logger.Error(err, "failed to apply status via SSA", "name", rbd.Name)
 	}
-}
-
-// rbdOwnerRef creates an OwnerReference for a RestrictedBindDefinition.
-func rbdOwnerRef(rbd *authorizationv1alpha1.RestrictedBindDefinition) *metav1ac.OwnerReferenceApplyConfiguration {
-	return pkgssa.OwnerReference(
-		authorizationv1alpha1.GroupVersion.String(),
-		"RestrictedBindDefinition",
-		rbd.Name,
-		rbd.UID,
-		true,
-		true,
-	)
-}
-
-// isOwnedBy checks if the object is owned by the given owner (cluster-scoped).
-func isOwnedBy(obj, owner metav1.ObjectMetaAccessor) bool {
-	ownerUID := owner.(metav1.Object).GetUID()
-	for _, ref := range obj.(metav1.Object).GetOwnerReferences() {
-		if ref.UID == ownerUID {
-			return true
-		}
-	}
-	return false
 }

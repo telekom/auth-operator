@@ -158,3 +158,20 @@ func TestViolationString(t *testing.T) {
 		})
 	}
 }
+
+func TestViolationStrings(t *testing.T) {
+	violations := []Violation{
+		{Field: "spec.a", Message: "bad"},
+		{Message: "generic"},
+	}
+	got := ViolationStrings(violations)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 strings, got %d", len(got))
+	}
+	if got[0] != "spec.a: bad" {
+		t.Errorf("got[0] = %q, want %q", got[0], "spec.a: bad")
+	}
+	if got[1] != "generic" {
+		t.Errorf("got[1] = %q, want %q", got[1], "generic")
+	}
+}

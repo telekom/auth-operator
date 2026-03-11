@@ -346,14 +346,14 @@ func TestRRD_MarkStalled(t *testing.T) {
 	g.Expect(updated.Status.ObservedGeneration).To(Equal(int64(3)))
 }
 
-func TestRRD_RrdOwnerRef(t *testing.T) {
+func TestRRD_OwnerRefForRestricted(t *testing.T) {
 	g := NewWithT(t)
 
 	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
 		ObjectMeta: metav1.ObjectMeta{Name: "owner-rrd", UID: "uid-456"},
 	}
 
-	ref := rrdOwnerRef(rrd)
+	ref := ownerRefForRestricted(rrd, "RestrictedRoleDefinition")
 	g.Expect(ref).NotTo(BeNil())
 	g.Expect(*ref.Name).To(Equal("owner-rrd"))
 	g.Expect(*ref.UID).To(Equal(types.UID("uid-456")))

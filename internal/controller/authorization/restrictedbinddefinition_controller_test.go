@@ -198,7 +198,7 @@ func TestRBD_Reconcile_GetError(t *testing.T) {
 	g.Expect(err.Error()).To(gomega.ContainSubstring("API unavailable"))
 }
 
-func TestRBD_IsOwnedBy(t *testing.T) {
+func TestRBD_HasOwnerRef(t *testing.T) {
 	g := gomega.NewWithT(t)
 
 	owner := &authorizationv1alpha1.RestrictedBindDefinition{
@@ -232,9 +232,9 @@ func TestRBD_IsOwnedBy(t *testing.T) {
 		},
 	}
 
-	g.Expect(isOwnedBy(owned, owner)).To(gomega.BeTrue())
-	g.Expect(isOwnedBy(notOwned, owner)).To(gomega.BeFalse())
-	g.Expect(isOwnedBy(noRefs, owner)).To(gomega.BeFalse())
+	g.Expect(hasOwnerRef(owned, owner)).To(gomega.BeTrue())
+	g.Expect(hasOwnerRef(notOwned, owner)).To(gomega.BeFalse())
+	g.Expect(hasOwnerRef(noRefs, owner)).To(gomega.BeFalse())
 }
 
 func TestNewRestrictedBindDefinitionReconciler(t *testing.T) {
@@ -560,7 +560,7 @@ func TestRBD_MarkStalled(t *testing.T) {
 	g.Expect(updated.Status.ObservedGeneration).To(gomega.Equal(int64(2)))
 }
 
-func TestRBD_RbdOwnerRef(t *testing.T) {
+func TestRBD_OwnerRefForRestricted(t *testing.T) {
 	g := gomega.NewWithT(t)
 
 	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
@@ -570,7 +570,7 @@ func TestRBD_RbdOwnerRef(t *testing.T) {
 		},
 	}
 
-	ref := rbdOwnerRef(rbd)
+	ref := ownerRefForRestricted(rbd, "RestrictedBindDefinition")
 	g.Expect(ref).NotTo(gomega.BeNil())
 	g.Expect(*ref.Name).To(gomega.Equal("owner-rbd"))
 	g.Expect(*ref.UID).To(gomega.Equal(types.UID("test-uid-123")))
