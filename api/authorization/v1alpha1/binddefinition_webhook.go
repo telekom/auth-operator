@@ -68,6 +68,19 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 		}
 	}
 
+	// Check for cross-type targetName collision with RestrictedBindDefinitions.
+	rbdList := &RestrictedBindDefinitionList{}
+	if err := v.Client.List(ctx, rbdList, client.MatchingFields{
+		TargetNameField: r.Spec.TargetName,
+	}); err != nil {
+		logger.Error(err, "failed to list RestrictedBindDefinitions", "targetName", r.Spec.TargetName)
+		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RestrictedBindDefinitions: %w", err))
+	}
+	if len(rbdList.Items) > 0 {
+		return nil, apierrors.NewBadRequest(
+			fmt.Sprintf("targetName %s already exists in RestrictedBindDefinition %s", r.Spec.TargetName, rbdList.Items[0].Name))
+	}
+
 	// Validate subject Kinds are one of the RBAC-supported types.
 	for i, subject := range r.Spec.Subjects {
 		switch subject.Kind {

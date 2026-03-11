@@ -8,22 +8,43 @@ import "strings"
 
 // MatchesWildcard checks if value matches a simple wildcard pattern.
 // Supports patterns like "prefix*" (prefix match), "*suffix" (suffix match),
-// and "prefix*suffix" (prefix+suffix match). A pattern without wildcards
-// requires an exact match.
+// "prefix*suffix" (prefix+suffix match), and "*mid*" (contains match).
+// Multiple wildcards are supported by splitting on "*" and matching parts
+// in order. A pattern without wildcards requires an exact match.
 func MatchesWildcard(pattern, value string) bool {
 	if pattern == "*" {
 		return true
 	}
 
-	idx := strings.Index(pattern, "*")
-	if idx < 0 {
+	parts := strings.Split(pattern, "*")
+	if len(parts) == 1 {
+		// No wildcards — exact match.
 		return pattern == value
 	}
 
-	prefix := pattern[:idx]
-	suffix := pattern[idx+1:]
+	// Check prefix (part before first *).
+	if !strings.HasPrefix(value, parts[0]) {
+		return false
+	}
+	remaining := value[len(parts[0]):]
 
-	return strings.HasPrefix(value, prefix) && strings.HasSuffix(value, suffix) && len(value) >= len(prefix)+len(suffix)
+	// Check suffix (part after last *).
+	last := parts[len(parts)-1]
+	if !strings.HasSuffix(remaining, last) {
+		return false
+	}
+	remaining = remaining[:len(remaining)-len(last)]
+
+	// Check middle parts appear in order.
+	for _, mid := range parts[1 : len(parts)-1] {
+		idx := strings.Index(remaining, mid)
+		if idx < 0 {
+			return false
+		}
+		remaining = remaining[idx+len(mid):]
+	}
+
+	return true
 }
 
 // matchesAnyWildcard returns true if value matches any of the given patterns.

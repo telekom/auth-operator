@@ -93,6 +93,21 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 		}
 	}
 
+	// Check for cross-type targetName collision with RestrictedRoleDefinitions.
+	rrdList := &RestrictedRoleDefinitionList{}
+	if err := v.Client.List(ctx, rrdList, client.MatchingFields{
+		TargetNameField: obj.Spec.TargetName,
+	}); err != nil {
+		logger.Error(err, "failed to list RestrictedRoleDefinitions", "targetName", obj.Spec.TargetName)
+		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RestrictedRoleDefinitions: %w", err))
+	}
+	for _, existing := range rrdList.Items {
+		if existing.Spec.TargetRole == obj.Spec.TargetRole {
+			return nil, apierrors.NewBadRequest(
+				fmt.Sprintf("targetName %s already exists in RestrictedRoleDefinition %s", obj.Spec.TargetName, existing.Name))
+		}
+	}
+
 	return nil, nil
 }
 

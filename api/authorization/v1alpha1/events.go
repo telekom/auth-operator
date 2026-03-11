@@ -67,9 +67,6 @@ const (
 	// EventReasonPolicyNotFound indicates the referenced RBACPolicy was not found.
 	EventReasonPolicyNotFound = "PolicyNotFound"
 
-	// EventReasonPolicyValidated indicates the resource was validated against the policy.
-	EventReasonPolicyValidated = "PolicyValidated"
-
 	// EventReasonDeprovisioned indicates resources were deprovisioned due to policy violation.
 	EventReasonDeprovisioned = "Deprovisioned"
 )

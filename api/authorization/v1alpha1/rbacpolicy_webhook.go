@@ -127,10 +127,23 @@ func validateRBACPolicySpec(obj *RBACPolicy) error {
 					bl.TargetNamespaceLimits.AllowedNamespaceSelector, err.Error()))
 			}
 		}
+		if bl.TargetNamespaceLimits != nil {
+			for i, v := range bl.TargetNamespaceLimits.ForbiddenNamespacePrefixes {
+				if v == "" {
+					allErrs = append(allErrs, field.Invalid(
+						field.NewPath("spec", "bindingLimits", "targetNamespaceLimits", "forbiddenNamespacePrefixes").Index(i),
+						v, "must not be empty"))
+				}
+			}
+		}
 	}
 
 	// Validate label selectors in subject limits.
 	if sl := obj.Spec.SubjectLimits; sl != nil {
+		allErrs = append(allErrs, validateNameMatchLimits(sl.UserLimits,
+			field.NewPath("spec", "subjectLimits", "userLimits"))...)
+		allErrs = append(allErrs, validateNameMatchLimits(sl.GroupLimits,
+			field.NewPath("spec", "subjectLimits", "groupLimits"))...)
 		if sl.ServiceAccountLimits != nil {
 			if sl.ServiceAccountLimits.AllowedNamespaceSelector != nil {
 				if _, err := metav1.LabelSelectorAsSelector(sl.ServiceAccountLimits.AllowedNamespaceSelector); err != nil {
@@ -177,6 +190,40 @@ func validateRoleRefLimitsSelectors(limits *RoleRefLimits, fldPath *field.Path) 
 			allErrs = append(allErrs, field.Invalid(
 				fldPath.Child("forbiddenRoleRefSelector"),
 				limits.ForbiddenRoleRefSelector, err.Error()))
+		}
+	}
+	return allErrs
+}
+
+// validateNameMatchLimits validates that prefix and suffix arrays in NameMatchLimits
+// do not contain empty strings (which would match everything).
+func validateNameMatchLimits(limits *NameMatchLimits, fldPath *field.Path) field.ErrorList {
+	if limits == nil {
+		return nil
+	}
+	var allErrs field.ErrorList
+	for i, v := range limits.ForbiddenPrefixes {
+		if v == "" {
+			allErrs = append(allErrs, field.Invalid(
+				fldPath.Child("forbiddenPrefixes").Index(i), v, "must not be empty"))
+		}
+	}
+	for i, v := range limits.ForbiddenSuffixes {
+		if v == "" {
+			allErrs = append(allErrs, field.Invalid(
+				fldPath.Child("forbiddenSuffixes").Index(i), v, "must not be empty"))
+		}
+	}
+	for i, v := range limits.AllowedPrefixes {
+		if v == "" {
+			allErrs = append(allErrs, field.Invalid(
+				fldPath.Child("allowedPrefixes").Index(i), v, "must not be empty"))
+		}
+	}
+	for i, v := range limits.AllowedSuffixes {
+		if v == "" {
+			allErrs = append(allErrs, field.Invalid(
+				fldPath.Child("allowedSuffixes").Index(i), v, "must not be empty"))
 		}
 	}
 	return allErrs

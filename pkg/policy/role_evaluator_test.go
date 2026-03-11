@@ -268,6 +268,22 @@ func TestEvaluateRoleDefinition_ForbiddenResourceVerbs(t *testing.T) {
 			wantViolations: 0,
 		},
 		{
+			name: "resource excluded via RestrictedResources with matching group",
+			rules: []authorizationv1alpha1.ResourceVerbRule{
+				{Resource: "certificates", APIGroup: "cert-manager.io", Verbs: []string{"create"}},
+			},
+			restrictedRes:  []metav1.APIResource{{Name: "certificates", Group: "cert-manager.io"}},
+			wantViolations: 0,
+		},
+		{
+			name: "resource excluded via RestrictedResources with different group",
+			rules: []authorizationv1alpha1.ResourceVerbRule{
+				{Resource: "certificates", APIGroup: "cert-manager.io", Verbs: []string{"create"}},
+			},
+			restrictedRes:  []metav1.APIResource{{Name: "certificates", Group: "certificates.k8s.io"}},
+			wantViolations: 1,
+		},
+		{
 			name: "API group excluded via RestrictedAPIs",
 			rules: []authorizationv1alpha1.ResourceVerbRule{
 				{Resource: "certificates", APIGroup: "certificates.k8s.io", Verbs: []string{"create"}},
