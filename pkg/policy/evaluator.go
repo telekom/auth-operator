@@ -8,6 +8,8 @@ import (
 	"fmt"
 
 	rbacv1 "k8s.io/api/rbac/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 )
@@ -15,22 +17,24 @@ import (
 // EvaluateBindDefinition checks a RestrictedBindDefinition against its
 // governing RBACPolicy and returns all violations. An empty slice
 // indicates full compliance.
-func EvaluateBindDefinition(policy *authorizationv1alpha1.RBACPolicy, rbd *authorizationv1alpha1.RestrictedBindDefinition) []Violation {
+// The optional labelGetter enables label-selector-based checks;
+// pass nil to skip selector evaluation.
+func EvaluateBindDefinition(policy *authorizationv1alpha1.RBACPolicy, rbd *authorizationv1alpha1.RestrictedBindDefinition, labelGetter LabelGetter) []Violation {
 	var violations []Violation
 
 	if policy.Spec.BindingLimits != nil {
-		violations = append(violations, evaluateBindingLimits(policy.Spec.BindingLimits, rbd)...)
+		violations = append(violations, evaluateBindingLimits(policy.Spec.BindingLimits, rbd, labelGetter)...)
 	}
 
 	if policy.Spec.SubjectLimits != nil {
-		violations = append(violations, evaluateSubjectLimits(policy.Spec.SubjectLimits, rbd.Spec.Subjects)...)
+		violations = append(violations, evaluateSubjectLimits(policy.Spec.SubjectLimits, rbd.Spec.Subjects, labelGetter)...)
 	}
 
 	return violations
 }
 
 // evaluateBindingLimits checks binding-related constraints.
-func evaluateBindingLimits(limits *authorizationv1alpha1.BindingLimits, rbd *authorizationv1alpha1.RestrictedBindDefinition) []Violation {
+func evaluateBindingLimits(limits *authorizationv1alpha1.BindingLimits, rbd *authorizationv1alpha1.RestrictedBindDefinition, lg LabelGetter) []Violation {
 	var violations []Violation
 
 	// Check ClusterRoleBinding permission.
@@ -44,10 +48,16 @@ func evaluateBindingLimits(limits *authorizationv1alpha1.BindingLimits, rbd *aut
 	// Check CRB role ref limits.
 	if limits.AllowClusterRoleBindings && limits.ClusterRoleBindingLimits != nil {
 		for i, ref := range rbd.Spec.ClusterRoleBindings.ClusterRoleRefs {
+			var roleLabels map[string]string
+			if lg != nil {
+				roleLabels, _ = lg.GetClusterRoleLabels(ref)
+			}
 			violations = append(violations, checkRoleRef(
 				limits.ClusterRoleBindingLimits,
 				ref,
 				fmt.Sprintf("spec.clusterRoleBindings.clusterRoleRefs[%d]", i),
+				roleLabels,
+				lg != nil,
 			)...)
 		}
 	}
@@ -56,17 +66,29 @@ func evaluateBindingLimits(limits *authorizationv1alpha1.BindingLimits, rbd *aut
 	if limits.RoleBindingLimits != nil {
 		for i, nb := range rbd.Spec.RoleBindings {
 			for j, ref := range nb.ClusterRoleRefs {
+				var roleLabels map[string]string
+				if lg != nil {
+					roleLabels, _ = lg.GetClusterRoleLabels(ref)
+				}
 				violations = append(violations, checkRoleRef(
 					limits.RoleBindingLimits,
 					ref,
 					fmt.Sprintf("spec.roleBindings[%d].clusterRoleRefs[%d]", i, j),
+					roleLabels,
+					lg != nil,
 				)...)
 			}
 			for j, ref := range nb.RoleRefs {
+				var roleLabels map[string]string
+				if lg != nil {
+					roleLabels, _ = lg.GetRoleLabels(nb.Namespace, ref)
+				}
 				violations = append(violations, checkRoleRef(
 					limits.RoleBindingLimits,
 					ref,
 					fmt.Sprintf("spec.roleBindings[%d].roleRefs[%d]", i, j),
+					roleLabels,
+					lg != nil,
 				)...)
 			}
 		}
@@ -74,14 +96,17 @@ func evaluateBindingLimits(limits *authorizationv1alpha1.BindingLimits, rbd *aut
 
 	// Check target namespace limits.
 	if limits.TargetNamespaceLimits != nil {
-		violations = append(violations, evaluateNamespaceLimits(limits.TargetNamespaceLimits, rbd)...)
+		violations = append(violations, evaluateNamespaceLimits(limits.TargetNamespaceLimits, rbd, lg)...)
 	}
 
 	return violations
 }
 
 // checkRoleRef validates a single role reference against role ref limits.
-func checkRoleRef(limits *authorizationv1alpha1.RoleRefLimits, ref, fieldPath string) []Violation {
+// roleLabels are the resolved labels of the referenced role (nil if not found
+// or no resolver). selectorEnabled indicates whether a LabelGetter was
+// available (to distinguish "no resolver" from "role not found").
+func checkRoleRef(limits *authorizationv1alpha1.RoleRefLimits, ref, fieldPath string, roleLabels map[string]string, selectorEnabled bool) []Violation {
 	var violations []Violation
 
 	// Forbidden takes precedence.
@@ -100,19 +125,36 @@ func checkRoleRef(limits *authorizationv1alpha1.RoleRefLimits, ref, fieldPath st
 		})
 	}
 
-	// TODO: enforce AllowedRoleRefSelector and ForbiddenRoleRefSelector
-	// once the evaluator has access to role labels (requires client lookup).
+	// Label-selector-based checks (only when a resolver was available).
+	if selectorEnabled && roleLabels != nil {
+		if limits.ForbiddenRoleRefSelector != nil {
+			if matchesSelector(limits.ForbiddenRoleRefSelector, roleLabels) {
+				violations = append(violations, Violation{
+					Field:   fieldPath,
+					Message: fmt.Sprintf("role ref %q matches the forbidden role ref label selector", ref),
+				})
+			}
+		}
+		if limits.AllowedRoleRefSelector != nil {
+			if !matchesSelector(limits.AllowedRoleRefSelector, roleLabels) {
+				violations = append(violations, Violation{
+					Field:   fieldPath,
+					Message: fmt.Sprintf("role ref %q does not match the allowed role ref label selector", ref),
+				})
+			}
+		}
+	}
 
 	return violations
 }
 
 // evaluateNamespaceLimits checks namespace targeting constraints.
-func evaluateNamespaceLimits(limits *authorizationv1alpha1.NamespaceLimits, rbd *authorizationv1alpha1.RestrictedBindDefinition) []Violation {
+func evaluateNamespaceLimits(limits *authorizationv1alpha1.NamespaceLimits, rbd *authorizationv1alpha1.RestrictedBindDefinition, lg LabelGetter) []Violation {
 	var violations []Violation
 
 	for i, nb := range rbd.Spec.RoleBindings {
 		if nb.Namespace != "" {
-			violations = append(violations, checkNamespace(limits, nb.Namespace, fmt.Sprintf("spec.roleBindings[%d].namespace", i))...)
+			violations = append(violations, checkNamespace(limits, nb.Namespace, fmt.Sprintf("spec.roleBindings[%d].namespace", i), lg)...)
 		}
 	}
 
@@ -131,9 +173,7 @@ func evaluateNamespaceLimits(limits *authorizationv1alpha1.NamespaceLimits, rbd 
 }
 
 // checkNamespace validates a single namespace against namespace limits.
-// TODO: enforce AllowedNamespaceSelector once the evaluator has access
-// to namespace labels (requires client lookup or pre-fetched label map).
-func checkNamespace(limits *authorizationv1alpha1.NamespaceLimits, namespace, fieldPath string) []Violation {
+func checkNamespace(limits *authorizationv1alpha1.NamespaceLimits, namespace, fieldPath string, lg LabelGetter) []Violation {
 	var violations []Violation
 
 	if containsString(limits.ForbiddenNamespaces, namespace) {
@@ -148,6 +188,17 @@ func checkNamespace(limits *authorizationv1alpha1.NamespaceLimits, namespace, fi
 			Field:   fieldPath,
 			Message: fmt.Sprintf("namespace %q matches a forbidden prefix", namespace),
 		})
+	}
+
+	// Check AllowedNamespaceSelector.
+	if limits.AllowedNamespaceSelector != nil && lg != nil {
+		nsLabels, found := lg.GetNamespaceLabels(namespace)
+		if !found || !matchesSelector(limits.AllowedNamespaceSelector, nsLabels) {
+			violations = append(violations, Violation{
+				Field:   fieldPath,
+				Message: fmt.Sprintf("namespace %q does not match the allowed namespace label selector", namespace),
+			})
+		}
 	}
 
 	return violations
@@ -167,7 +218,7 @@ func countTargetNamespaces(rbd *authorizationv1alpha1.RestrictedBindDefinition) 
 }
 
 // evaluateSubjectLimits checks subject-related constraints.
-func evaluateSubjectLimits(limits *authorizationv1alpha1.SubjectLimits, subjects []rbacv1.Subject) []Violation {
+func evaluateSubjectLimits(limits *authorizationv1alpha1.SubjectLimits, subjects []rbacv1.Subject, lg LabelGetter) []Violation {
 	var violations []Violation
 
 	for i, s := range subjects {
@@ -203,7 +254,7 @@ func evaluateSubjectLimits(limits *authorizationv1alpha1.SubjectLimits, subjects
 			}
 		case rbacv1.ServiceAccountKind:
 			if limits.ServiceAccountLimits != nil {
-				violations = append(violations, checkServiceAccountLimits(limits.ServiceAccountLimits, s, fieldPath)...)
+				violations = append(violations, checkServiceAccountLimits(limits.ServiceAccountLimits, s, fieldPath, lg)...)
 			}
 		}
 	}
@@ -263,10 +314,10 @@ func checkNameMatchLimits(limits *authorizationv1alpha1.NameMatchLimits, name, f
 }
 
 // checkServiceAccountLimits validates a ServiceAccount subject.
-// TODO: enforce AllowAutoCreate, AllowedCreationNamespaceSelector,
-// AllowedNamespaceSelector, and DisableAdoption once the evaluator
-// has access to cluster state or the controller passes SA metadata.
-func checkServiceAccountLimits(limits *authorizationv1alpha1.ServiceAccountLimits, subject rbacv1.Subject, fieldPath string) []Violation {
+// AllowAutoCreate, AllowedCreationNamespaceSelector, and DisableAdoption
+// are behavioral flags enforced by the controller at reconciliation time,
+// not spec-level constraints checked here.
+func checkServiceAccountLimits(limits *authorizationv1alpha1.ServiceAccountLimits, subject rbacv1.Subject, fieldPath string, lg LabelGetter) []Violation {
 	var violations []Violation
 
 	// Check forbidden namespaces.
@@ -284,5 +335,47 @@ func checkServiceAccountLimits(limits *authorizationv1alpha1.ServiceAccountLimit
 		})
 	}
 
+	// Check AllowedNamespaceSelector.
+	if limits.AllowedNamespaceSelector != nil && lg != nil && subject.Namespace != "" {
+		nsLabels, found := lg.GetNamespaceLabels(subject.Namespace)
+		if !found || !matchesSelector(limits.AllowedNamespaceSelector, nsLabels) {
+			violations = append(violations, Violation{
+				Field:   fieldPath + ".namespace",
+				Message: fmt.Sprintf("ServiceAccount namespace %q does not match the allowed namespace label selector", subject.Namespace),
+			})
+		}
+	}
+
+	// Check AllowedCreationNamespaces (static check, no labels needed).
+	if limits.Creation != nil && len(limits.Creation.AllowedCreationNamespaces) > 0 && subject.Namespace != "" {
+		if !containsString(limits.Creation.AllowedCreationNamespaces, subject.Namespace) {
+			violations = append(violations, Violation{
+				Field:   fieldPath + ".namespace",
+				Message: fmt.Sprintf("ServiceAccount namespace %q is not in the allowed creation namespaces", subject.Namespace),
+			})
+		}
+	}
+
+	// Check AllowedCreationNamespaceSelector.
+	if limits.Creation != nil && limits.Creation.AllowedCreationNamespaceSelector != nil && lg != nil && subject.Namespace != "" {
+		nsLabels, found := lg.GetNamespaceLabels(subject.Namespace)
+		if !found || !matchesSelector(limits.Creation.AllowedCreationNamespaceSelector, nsLabels) {
+			violations = append(violations, Violation{
+				Field:   fieldPath + ".namespace",
+				Message: fmt.Sprintf("ServiceAccount namespace %q does not match the allowed creation namespace label selector", subject.Namespace),
+			})
+		}
+	}
+
 	return violations
+}
+
+// matchesSelector checks if the given labels match a label selector.
+// Returns false if the selector is invalid or labels are nil.
+func matchesSelector(selector *metav1.LabelSelector, objLabels map[string]string) bool {
+	sel, err := metav1.LabelSelectorAsSelector(selector)
+	if err != nil {
+		return false
+	}
+	return sel.Matches(labels.Set(objLabels))
 }

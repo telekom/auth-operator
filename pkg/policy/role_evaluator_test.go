@@ -249,3 +249,122 @@ func TestEvaluateRoleDefinition_MultipleLimits(t *testing.T) {
 		t.Errorf("expected 1 violation (ClusterRole only), got %d: %v", len(violations), violations)
 	}
 }
+
+func TestEvaluateRoleDefinition_ForbiddenResourceVerbs(t *testing.T) {
+	tests := []struct {
+		name            string
+		rules           []authorizationv1alpha1.ResourceVerbRule
+		restrictedVerbs []string
+		restrictedAPIs  []metav1.APIGroup
+		restrictedRes   []metav1.APIResource
+		wantViolations  int
+	}{
+		{
+			name: "resource excluded via RestrictedResources",
+			rules: []authorizationv1alpha1.ResourceVerbRule{
+				{Resource: "secrets", APIGroup: "", Verbs: []string{"delete"}},
+			},
+			restrictedRes:  []metav1.APIResource{{Name: "secrets"}},
+			wantViolations: 0,
+		},
+		{
+			name: "API group excluded via RestrictedAPIs",
+			rules: []authorizationv1alpha1.ResourceVerbRule{
+				{Resource: "certificates", APIGroup: "certificates.k8s.io", Verbs: []string{"create"}},
+			},
+			restrictedAPIs: []metav1.APIGroup{{Name: "certificates.k8s.io"}},
+			wantViolations: 0,
+		},
+		{
+			name: "all verbs excluded via RestrictedVerbs",
+			rules: []authorizationv1alpha1.ResourceVerbRule{
+				{Resource: "secrets", APIGroup: "", Verbs: []string{"delete", "patch"}},
+			},
+			restrictedVerbs: []string{"delete", "patch"},
+			wantViolations:  0,
+		},
+		{
+			name: "some verbs not restricted",
+			rules: []authorizationv1alpha1.ResourceVerbRule{
+				{Resource: "secrets", APIGroup: "", Verbs: []string{"delete", "patch"}},
+			},
+			restrictedVerbs: []string{"delete"},
+			wantViolations:  1,
+		},
+		{
+			name: "no exclusion at all",
+			rules: []authorizationv1alpha1.ResourceVerbRule{
+				{Resource: "secrets", APIGroup: "", Verbs: []string{"delete"}},
+			},
+			wantViolations: 1,
+		},
+		{
+			name: "multiple rules mixed",
+			rules: []authorizationv1alpha1.ResourceVerbRule{
+				{Resource: "secrets", APIGroup: "", Verbs: []string{"delete"}},
+				{Resource: "pods", APIGroup: "", Verbs: []string{"create"}},
+			},
+			restrictedRes:  []metav1.APIResource{{Name: "secrets"}},
+			wantViolations: 1, // pods/create not excluded
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := &authorizationv1alpha1.RBACPolicy{
+				Spec: authorizationv1alpha1.RBACPolicySpec{
+					RoleLimits: &authorizationv1alpha1.RoleLimits{
+						AllowClusterRoles:      true,
+						ForbiddenResourceVerbs: tt.rules,
+					},
+				},
+			}
+			rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+				Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+					TargetRole:          "ClusterRole",
+					TargetName:          "test-role",
+					RestrictedVerbs:     tt.restrictedVerbs,
+					RestrictedAPIs:      tt.restrictedAPIs,
+					RestrictedResources: tt.restrictedRes,
+				},
+			}
+			violations := EvaluateRoleDefinition(p, rrd)
+			if len(violations) != tt.wantViolations {
+				t.Errorf("expected %d violations, got %d: %v", tt.wantViolations, len(violations), violations)
+			}
+		})
+	}
+}
+
+func TestCheckMaxRulesPerRole_NoLimit(t *testing.T) {
+	limits := &authorizationv1alpha1.RoleLimits{}
+	if v := CheckMaxRulesPerRole(limits, 100); v != nil {
+		t.Errorf("expected no violation when MaxRulesPerRole is nil, got: %v", v)
+	}
+}
+
+func TestCheckMaxRulesPerRole_NilLimits(t *testing.T) {
+	if v := CheckMaxRulesPerRole(nil, 100); v != nil {
+		t.Errorf("expected no violation when limits is nil, got: %v", v)
+	}
+}
+
+func TestCheckMaxRulesPerRole_WithinLimit(t *testing.T) {
+	maxRules := int32(10)
+	limits := &authorizationv1alpha1.RoleLimits{MaxRulesPerRole: &maxRules}
+	if v := CheckMaxRulesPerRole(limits, 10); v != nil {
+		t.Errorf("expected no violation when rule count equals max, got: %v", v)
+	}
+}
+
+func TestCheckMaxRulesPerRole_ExceedsLimit(t *testing.T) {
+	maxRules := int32(5)
+	limits := &authorizationv1alpha1.RoleLimits{MaxRulesPerRole: &maxRules}
+	v := CheckMaxRulesPerRole(limits, 10)
+	if v == nil {
+		t.Fatal("expected violation when rule count exceeds max")
+	}
+	if v.Field != "generated rules" {
+		t.Errorf("unexpected field: %q", v.Field)
+	}
+}

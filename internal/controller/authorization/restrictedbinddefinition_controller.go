@@ -221,7 +221,7 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 	}
 
 	// Step 6: Evaluate policy compliance.
-	violations := policy.EvaluateBindDefinition(rbacPolicy, rbd)
+	violations := policy.EvaluateBindDefinition(rbacPolicy, rbd, newLabelGetter(ctx, r.client))
 	if len(violations) > 0 {
 		rbd.Status.PolicyViolations = policy.ViolationStrings(violations)
 		result, err := handlePolicyViolations(ctx, rbd, rbd.Generation, violations, r.recorder, rbd, ViolationHandlerConfig{

@@ -268,6 +268,20 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
+	// Step 7.5: Check MaxRulesPerRole (requires generated rule count).
+	if v := policy.CheckMaxRulesPerRole(rbacPolicy.Spec.RoleLimits, len(finalRules)); v != nil {
+		rrd.Status.PolicyViolations = []string{v.String()}
+		result, err := handlePolicyViolations(ctx, rrd, rrd.Generation, []policy.Violation{*v}, r.recorder, rrd, ViolationHandlerConfig{
+			ControllerLabel: metrics.ControllerRestrictedRoleDefinition,
+			ResourceKind:    "RestrictedRoleDefinition",
+			Deprovision:     func(ctx context.Context) error { return r.rrdDeprovision(ctx, rrd) },
+			MarkStalled:     func(ctx context.Context, err error) { r.rrdMarkStalled(ctx, rrd, err) },
+			SetReconciled:   func(v bool) { rrd.Status.RoleReconciled = v },
+			ApplyStatus:     func(ctx context.Context) error { return ssa.ApplyRestrictedRoleDefinitionStatus(ctx, r.client, rrd) },
+		})
+		return result, err
+	}
+
 	// Step 8: Ensure the target role exists.
 	if err := r.rrdEnsureRole(ctx, rrd, finalRules); err != nil {
 		r.rrdMarkStalled(ctx, rrd, err)

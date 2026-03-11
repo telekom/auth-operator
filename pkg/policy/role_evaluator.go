@@ -6,6 +6,7 @@ package policy
 
 import (
 	"fmt"
+	"strings"
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 )
@@ -22,8 +23,6 @@ func EvaluateRoleDefinition(policy *authorizationv1alpha1.RBACPolicy, rrd *autho
 }
 
 // evaluateRoleLimits checks role-related constraints.
-// TODO: enforce ForbiddenResourceVerbs (resource+verb combinations) and
-// MaxRulesPerRole once rule-level policy evaluation is implemented.
 func evaluateRoleLimits(limits *authorizationv1alpha1.RoleLimits, rrd *authorizationv1alpha1.RestrictedRoleDefinition) []Violation {
 	var violations []Violation
 
@@ -82,5 +81,70 @@ func evaluateRoleLimits(limits *authorizationv1alpha1.RoleLimits, rrd *authoriza
 		}
 	}
 
+	// Check forbidden resource+verb combinations.
+	for _, rule := range limits.ForbiddenResourceVerbs {
+		// Skip if the entire resource is already excluded.
+		if isResourceExcluded(rrd, rule.Resource) {
+			continue
+		}
+		// Skip if the entire API group is already excluded.
+		if isAPIGroupExcluded(rrd, rule.APIGroup) {
+			continue
+		}
+		// Check which verbs are not globally restricted.
+		var uncovered []string
+		for _, verb := range rule.Verbs {
+			if !containsString(rrd.Spec.RestrictedVerbs, verb) {
+				uncovered = append(uncovered, verb)
+			}
+		}
+		if len(uncovered) > 0 {
+			violations = append(violations, Violation{
+				Field: "spec.restrictedVerbs",
+				Message: fmt.Sprintf(
+					"forbidden resource+verb combination: resource %q (apiGroup %q) with verbs [%s] must be restricted",
+					rule.Resource, rule.APIGroup, strings.Join(uncovered, ", "),
+				),
+			})
+		}
+	}
+
 	return violations
+}
+
+// isResourceExcluded returns true if the resource is listed in RestrictedResources.
+func isResourceExcluded(rrd *authorizationv1alpha1.RestrictedRoleDefinition, resource string) bool {
+	for _, rr := range rrd.Spec.RestrictedResources {
+		if rr.Name == resource {
+			return true
+		}
+	}
+	return false
+}
+
+// isAPIGroupExcluded returns true if the API group is listed in RestrictedAPIs.
+func isAPIGroupExcluded(rrd *authorizationv1alpha1.RestrictedRoleDefinition, apiGroup string) bool {
+	for _, api := range rrd.Spec.RestrictedAPIs {
+		if api.Name == apiGroup {
+			return true
+		}
+	}
+	return false
+}
+
+// CheckMaxRulesPerRole validates that the number of generated rules does not
+// exceed the MaxRulesPerRole limit. This is called from the controller after
+// rule generation, since the rule count depends on API discovery.
+func CheckMaxRulesPerRole(limits *authorizationv1alpha1.RoleLimits, ruleCount int) *Violation {
+	if limits == nil || limits.MaxRulesPerRole == nil {
+		return nil
+	}
+	maxRules := int(*limits.MaxRulesPerRole)
+	if ruleCount > maxRules {
+		return &Violation{
+			Field:   "generated rules",
+			Message: fmt.Sprintf("generated role has %d rules, exceeding maximum of %d", ruleCount, maxRules),
+		}
+	}
+	return nil
 }
