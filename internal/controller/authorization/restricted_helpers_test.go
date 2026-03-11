@@ -147,3 +147,50 @@ func TestMarkPolicyCompliant(t *testing.T) {
 	g.Expect(cond.Status).To(gomega.Equal(metav1.ConditionTrue))
 	g.Expect(cond.Reason).To(gomega.Equal(string(authorizationv1alpha1.PolicyCompliantReasonAllChecksPass)))
 }
+
+func TestIsOwnedByRestrictedBindDefinition(t *testing.T) {
+	tests := []struct {
+		name   string
+		refs   []metav1.OwnerReference
+		expect bool
+	}{
+		{
+			name:   "nil refs",
+			refs:   nil,
+			expect: false,
+		},
+		{
+			name:   "empty refs",
+			refs:   []metav1.OwnerReference{},
+			expect: false,
+		},
+		{
+			name: "owned by BindDefinition",
+			refs: []metav1.OwnerReference{
+				{APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: "BindDefinition", Name: "bd1"},
+			},
+			expect: false,
+		},
+		{
+			name: "owned by RestrictedBindDefinition",
+			refs: []metav1.OwnerReference{
+				{APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: "RestrictedBindDefinition", Name: "rbd1"},
+			},
+			expect: true,
+		},
+		{
+			name: "wrong API version",
+			refs: []metav1.OwnerReference{
+				{APIVersion: "apps/v1", Kind: "RestrictedBindDefinition", Name: "rbd1"},
+			},
+			expect: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			g.Expect(isOwnedByRestrictedBindDefinition(tt.refs)).To(gomega.Equal(tt.expect))
+		})
+	}
+}

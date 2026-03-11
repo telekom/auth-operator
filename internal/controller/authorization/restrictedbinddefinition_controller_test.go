@@ -486,6 +486,58 @@ func TestRBD_Reconcile_PolicyCompliant_CreatesServiceAccount(t *testing.T) {
 		Namespace: "sa-ns",
 		Name:      "my-sa",
 	}, &sa)).To(gomega.Succeed())
+
+	// Status should track the generated SA.
+	var updated authorizationv1alpha1.RestrictedBindDefinition
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: "sa-rbd"}, &updated)).To(gomega.Succeed())
+	g.Expect(updated.Status.GeneratedServiceAccounts).To(gomega.HaveLen(1))
+	g.Expect(updated.Status.GeneratedServiceAccounts[0].Name).To(gomega.Equal("my-sa"))
+	g.Expect(updated.Status.GeneratedServiceAccounts[0].Namespace).To(gomega.Equal("sa-ns"))
+	g.Expect(updated.Status.ExternalServiceAccounts).To(gomega.BeEmpty())
+}
+
+func TestRBD_Reconcile_DetectsExternalServiceAccount(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	pol := &authorizationv1alpha1.RBACPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "ext-sa-policy", Generation: 1},
+		Spec: authorizationv1alpha1.RBACPolicySpec{
+			AppliesTo: authorizationv1alpha1.PolicyScope{Namespaces: []string{"default"}},
+		},
+	}
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "ext-ns"}}
+
+	// Pre-existing SA not owned by any RestrictedBindDefinition.
+	externalSA := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{Name: "ext-sa", Namespace: "ext-ns"},
+	}
+
+	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "ext-rbd", Generation: 1},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			PolicyRef:  authorizationv1alpha1.RBACPolicyReference{Name: "ext-sa-policy"},
+			TargetName: "ext-target",
+			Subjects: []rbacv1.Subject{
+				{Kind: rbacv1.ServiceAccountKind, Name: "ext-sa", Namespace: "ext-ns"},
+			},
+			ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+				ClusterRoleRefs: []string{"view"},
+			},
+		},
+	}
+
+	r, c := newRBDTestReconciler(pol, rbd, ns, externalSA)
+	result, err := r.Reconcile(rbdCtx(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "ext-rbd"},
+	})
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	g.Expect(result.RequeueAfter).To(gomega.Equal(DefaultRequeueInterval))
+
+	// External SA should be tracked in status, not adopted.
+	var updated authorizationv1alpha1.RestrictedBindDefinition
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: "ext-rbd"}, &updated)).To(gomega.Succeed())
+	g.Expect(updated.Status.ExternalServiceAccounts).To(gomega.ConsistOf("ext-ns/ext-sa"))
+	g.Expect(updated.Status.GeneratedServiceAccounts).To(gomega.BeEmpty())
 }
 
 func TestRBD_DeprovisionCleansUpResources(t *testing.T) {

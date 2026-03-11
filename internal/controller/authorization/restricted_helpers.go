@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	metav1ac "k8s.io/client-go/applyconfigurations/meta/v1"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -113,4 +114,15 @@ func markPolicyCompliant(
 	recorder.Eventf(runtimeObj, nil, corev1.EventTypeNormal,
 		authorizationv1alpha1.EventReasonPolicyCompliance, "Reconcile",
 		"All policy checks passed for RBACPolicy %q", policyName)
+}
+
+// isOwnedByRestrictedBindDefinition checks whether the given owner references
+// contain an entry for a RestrictedBindDefinition resource.
+func isOwnedByRestrictedBindDefinition(ownerReferences []metav1.OwnerReference) bool {
+	for _, ref := range ownerReferences {
+		if ref.Kind == "RestrictedBindDefinition" && ref.APIVersion == authorizationv1alpha1.GroupVersion.String() {
+			return true
+		}
+	}
+	return false
 }
