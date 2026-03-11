@@ -45,7 +45,6 @@ import (
 
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
-	metav1ac "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=restrictedroledefinitions,verbs=get;list;watch;update;patch
@@ -237,45 +236,22 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 
 	// Step 6: Evaluate policy compliance.
 	violations := policy.EvaluateRoleDefinition(rbacPolicy, rrd)
-	if len(violations) > 0 { //nolint:dupl // structurally similar to RBD but type-specific
-		violationStrings := make([]string, len(violations))
-		for i, v := range violations {
-			violationStrings[i] = v.String()
-		}
-		logger.Info("policy violations detected", "name", rrd.Name, "violations", violationStrings)
-		conditions.MarkFalse(rrd, authorizationv1alpha1.PolicyCompliantCondition, rrd.Generation,
-			authorizationv1alpha1.PolicyCompliantReasonViolationsDetected, "policy violations: %v", violationStrings)
-		rrd.Status.PolicyViolations = violationStrings
-
-		r.recorder.Eventf(rrd, nil, corev1.EventTypeWarning,
-			authorizationv1alpha1.EventReasonPolicyViolation, "Reconcile",
-			"Policy violations detected: %v", violationStrings)
-
-		// Deprovision: delete the managed role.
-		if err := r.rrdDeprovision(ctx, rrd); err != nil {
-			r.rrdMarkStalled(ctx, rrd, err)
-			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
-			return ctrl.Result{}, fmt.Errorf("deprovision RestrictedRoleDefinition %s: %w", rrd.Name, err)
-		}
-
-		rrd.Status.RoleReconciled = false
-		conditions.MarkFalse(rrd, conditions.ReadyConditionType, rrd.Generation,
-			authorizationv1alpha1.DeprovisionedReason, "deprovisioned due to policy violations")
-		if err := ssa.ApplyRestrictedRoleDefinitionStatus(ctx, r.client, rrd); err != nil {
-			logger.Error(err, "failed to apply status after deprovisioning", "name", rrd.Name)
-		}
-		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultDegraded).Inc()
-		return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
+	if len(violations) > 0 {
+		rrd.Status.PolicyViolations = policy.ViolationStrings(violations)
+		result, err := handlePolicyViolations(ctx, rrd, rrd.Generation, violations, r.recorder, rrd, ViolationHandlerConfig{
+			ControllerLabel: metrics.ControllerRestrictedRoleDefinition,
+			ResourceKind:    "RestrictedRoleDefinition",
+			Deprovision:     func(ctx context.Context) error { return r.rrdDeprovision(ctx, rrd) },
+			MarkStalled:     func(ctx context.Context, err error) { r.rrdMarkStalled(ctx, rrd, err) },
+			SetReconciled:   func(v bool) { rrd.Status.RoleReconciled = v },
+			ApplyStatus:     func(ctx context.Context) error { return ssa.ApplyRestrictedRoleDefinitionStatus(ctx, r.client, rrd) },
+		})
+		return result, err
 	}
 
 	// Policy compliant.
-	conditions.MarkTrue(rrd, authorizationv1alpha1.PolicyCompliantCondition, rrd.Generation,
-		authorizationv1alpha1.PolicyCompliantReasonAllChecksPass, "all policy checks passed")
+	markPolicyCompliant(rrd, rrd.Generation, r.recorder, rrd, rbacPolicy.Name)
 	rrd.Status.PolicyViolations = nil
-
-	r.recorder.Eventf(rrd, nil, corev1.EventTypeNormal,
-		authorizationv1alpha1.EventReasonPolicyCompliance, "Reconcile",
-		"All policy checks passed for RBACPolicy %q", rbacPolicy.Name)
 
 	// Step 7: Discover and filter API resources.
 	finalRules, requeue, err := r.rrdDiscoverAndFilter(ctx, rrd)
@@ -430,7 +406,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdEnsureRole(
 ) error {
 	logger := log.FromContext(ctx)
 
-	ownerRef := rrdOwnerRef(rrd)
+	ownerRef := ownerRefForRestricted(rrd, "RestrictedRoleDefinition")
 	labelsMap := helpers.BuildResourceLabels(rrd.Labels)
 	annotations := helpers.BuildResourceAnnotations("RestrictedRoleDefinition", rrd.Name)
 
@@ -561,16 +537,4 @@ func (r *RestrictedRoleDefinitionReconciler) rrdApplyStatusAndMarkStalled(
 	if err := ssa.ApplyRestrictedRoleDefinitionStatus(ctx, r.client, rrd); err != nil {
 		logger.Error(err, "failed to apply status via SSA", "name", rrd.Name)
 	}
-}
-
-// rrdOwnerRef creates an OwnerReference for a RestrictedRoleDefinition.
-func rrdOwnerRef(rrd *authorizationv1alpha1.RestrictedRoleDefinition) *metav1ac.OwnerReferenceApplyConfiguration {
-	return pkgssa.OwnerReference(
-		authorizationv1alpha1.GroupVersion.String(),
-		"RestrictedRoleDefinition",
-		rrd.Name,
-		rrd.UID,
-		true,
-		true,
-	)
 }
