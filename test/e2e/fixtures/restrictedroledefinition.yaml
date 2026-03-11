@@ -1,0 +1,24 @@
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedRoleDefinition
+metadata:
+  name: e2e-test-restricted-role
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/component: e2e-test
+    app.kubernetes.io/created-by: auth-operator
+spec:
+  policyRef:
+    name: e2e-test-policy
+  targetRole: Role
+  targetName: e2e-restricted-reader
+  targetNamespace: e2e-test-ns
+  scopeNamespaced: true
+  restrictedApis:
+    - name: velero.io
+      versions:
+        - groupVersion: velero.io/v1
+          version: v1
+  restrictedVerbs:
+    - escalate
+    - impersonate
+    - bind
