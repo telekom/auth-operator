@@ -599,30 +599,28 @@ func TestEvaluateBindDefinition_RoleRefDefaultDenyEmpty(t *testing.T) {
 // --- Label-selector-based tests ---
 
 func TestEvaluateBindDefinition_AllowedRoleRefSelector(t *testing.T) {
-	policy := &authorizationv1alpha1.RBACPolicy{
-		Spec: authorizationv1alpha1.RBACPolicySpec{
-			BindingLimits: &authorizationv1alpha1.BindingLimits{
-				AllowClusterRoleBindings: true,
-				ClusterRoleBindingLimits: &authorizationv1alpha1.RoleRefLimits{
-					AllowedRoleRefs: []string{"*"},
-					AllowedRoleRefSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{"managed-by": "auth-operator"},
+	// Test OR semantics: AllowedRoleRefs OR AllowedRoleRefSelector.
+	t.Run("selector only - matching labels", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				BindingLimits: &authorizationv1alpha1.BindingLimits{
+					AllowClusterRoleBindings: true,
+					ClusterRoleBindingLimits: &authorizationv1alpha1.RoleRefLimits{
+						AllowedRoleRefSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"managed-by": "auth-operator"},
+						},
 					},
 				},
 			},
-		},
-	}
-
-	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
-		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
-			ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
-				ClusterRoleRefs: []string{"viewer"},
+		}
+		rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+			Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+				ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+					ClusterRoleRefs: []string{"viewer"},
+				},
+				Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
 			},
-			Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
-		},
-	}
-
-	t.Run("matching labels", func(t *testing.T) {
+		}
 		lg := &fakeLabelGetter{
 			clusterRoles: map[string]map[string]string{
 				"viewer": {"managed-by": "auth-operator"},
@@ -630,11 +628,31 @@ func TestEvaluateBindDefinition_AllowedRoleRefSelector(t *testing.T) {
 		}
 		violations := EvaluateBindDefinition(policy, rbd, lg)
 		if len(violations) != 0 {
-			t.Errorf("expected 0 violations, got %d: %v", len(violations), violations)
+			t.Errorf("expected 0 violations (selector matches), got %d: %v", len(violations), violations)
 		}
 	})
 
-	t.Run("non-matching labels", func(t *testing.T) {
+	t.Run("selector only - non-matching labels", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				BindingLimits: &authorizationv1alpha1.BindingLimits{
+					AllowClusterRoleBindings: true,
+					ClusterRoleBindingLimits: &authorizationv1alpha1.RoleRefLimits{
+						AllowedRoleRefSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"managed-by": "auth-operator"},
+						},
+					},
+				},
+			},
+		}
+		rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+			Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+				ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+					ClusterRoleRefs: []string{"viewer"},
+				},
+				Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
+			},
+		}
 		lg := &fakeLabelGetter{
 			clusterRoles: map[string]map[string]string{
 				"viewer": {"managed-by": "other"},
@@ -642,23 +660,166 @@ func TestEvaluateBindDefinition_AllowedRoleRefSelector(t *testing.T) {
 		}
 		violations := EvaluateBindDefinition(policy, rbd, lg)
 		if len(violations) != 1 {
-			t.Fatalf("expected 1 violation, got %d: %v", len(violations), violations)
+			t.Fatalf("expected 1 violation (selector does not match), got %d: %v", len(violations), violations)
+		}
+	})
+
+	t.Run("OR semantics - name matches but selector does not", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				BindingLimits: &authorizationv1alpha1.BindingLimits{
+					AllowClusterRoleBindings: true,
+					ClusterRoleBindingLimits: &authorizationv1alpha1.RoleRefLimits{
+						AllowedRoleRefs: []string{"viewer"},
+						AllowedRoleRefSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"managed-by": "auth-operator"},
+						},
+					},
+				},
+			},
+		}
+		rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+			Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+				ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+					ClusterRoleRefs: []string{"viewer"},
+				},
+				Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
+			},
+		}
+		lg := &fakeLabelGetter{
+			clusterRoles: map[string]map[string]string{
+				"viewer": {"managed-by": "other"},
+			},
+		}
+		// Name "viewer" is in AllowedRoleRefs → allowed via OR.
+		violations := EvaluateBindDefinition(policy, rbd, lg)
+		if len(violations) != 0 {
+			t.Errorf("expected 0 violations (name matches via OR), got %d: %v", len(violations), violations)
+		}
+	})
+
+	t.Run("OR semantics - selector matches but name does not", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				BindingLimits: &authorizationv1alpha1.BindingLimits{
+					AllowClusterRoleBindings: true,
+					ClusterRoleBindingLimits: &authorizationv1alpha1.RoleRefLimits{
+						AllowedRoleRefs: []string{"editor"},
+						AllowedRoleRefSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"managed-by": "auth-operator"},
+						},
+					},
+				},
+			},
+		}
+		rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+			Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+				ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+					ClusterRoleRefs: []string{"viewer"},
+				},
+				Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
+			},
+		}
+		lg := &fakeLabelGetter{
+			clusterRoles: map[string]map[string]string{
+				"viewer": {"managed-by": "auth-operator"},
+			},
+		}
+		// Name "viewer" not in AllowedRoleRefs but matches selector → allowed via OR.
+		violations := EvaluateBindDefinition(policy, rbd, lg)
+		if len(violations) != 0 {
+			t.Errorf("expected 0 violations (selector matches via OR), got %d: %v", len(violations), violations)
+		}
+	})
+
+	t.Run("OR semantics - neither matches", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				BindingLimits: &authorizationv1alpha1.BindingLimits{
+					AllowClusterRoleBindings: true,
+					ClusterRoleBindingLimits: &authorizationv1alpha1.RoleRefLimits{
+						AllowedRoleRefs: []string{"editor"},
+						AllowedRoleRefSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"managed-by": "auth-operator"},
+						},
+					},
+				},
+			},
+		}
+		rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+			Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+				ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+					ClusterRoleRefs: []string{"viewer"},
+				},
+				Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
+			},
+		}
+		lg := &fakeLabelGetter{
+			clusterRoles: map[string]map[string]string{
+				"viewer": {"managed-by": "other"},
+			},
+		}
+		// Neither name nor selector matches → violation.
+		violations := EvaluateBindDefinition(policy, rbd, lg)
+		if len(violations) != 1 {
+			t.Fatalf("expected 1 violation (neither name nor selector matches), got %d: %v", len(violations), violations)
 		}
 	})
 
 	t.Run("role not found skips selector", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				BindingLimits: &authorizationv1alpha1.BindingLimits{
+					AllowClusterRoleBindings: true,
+					ClusterRoleBindingLimits: &authorizationv1alpha1.RoleRefLimits{
+						AllowedRoleRefSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"managed-by": "auth-operator"},
+						},
+					},
+				},
+			},
+		}
+		rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+			Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+				ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+					ClusterRoleRefs: []string{"viewer"},
+				},
+				Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
+			},
+		}
 		lg := &fakeLabelGetter{clusterRoles: map[string]map[string]string{}}
+		// Role not found → selector can't match → rejected.
 		violations := EvaluateBindDefinition(policy, rbd, lg)
-		// Role not found → selector check skipped, no violation from selector.
-		if len(violations) != 0 {
-			t.Errorf("expected 0 violations (role not found, selector skipped), got %d: %v", len(violations), violations)
+		if len(violations) != 1 {
+			t.Fatalf("expected 1 violation (role not found, selector can't match), got %d: %v", len(violations), violations)
 		}
 	})
 
-	t.Run("nil LabelGetter skips selector", func(t *testing.T) {
+	t.Run("nil LabelGetter with selector only", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				BindingLimits: &authorizationv1alpha1.BindingLimits{
+					AllowClusterRoleBindings: true,
+					ClusterRoleBindingLimits: &authorizationv1alpha1.RoleRefLimits{
+						AllowedRoleRefSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"managed-by": "auth-operator"},
+						},
+					},
+				},
+			},
+		}
+		rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+			Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+				ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+					ClusterRoleRefs: []string{"viewer"},
+				},
+				Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
+			},
+		}
+		// No LabelGetter → selector treated as not configured → default-deny.
 		violations := EvaluateBindDefinition(policy, rbd, nil)
-		if len(violations) != 0 {
-			t.Errorf("expected 0 violations (no resolver), got %d: %v", len(violations), violations)
+		if len(violations) != 1 {
+			t.Fatalf("expected 1 violation (no resolver, default-deny), got %d: %v", len(violations), violations)
 		}
 	})
 }
@@ -921,7 +1082,6 @@ func TestEvaluateBindDefinition_RoleBindingRoleRefSelector(t *testing.T) {
 		Spec: authorizationv1alpha1.RBACPolicySpec{
 			BindingLimits: &authorizationv1alpha1.BindingLimits{
 				RoleBindingLimits: &authorizationv1alpha1.RoleRefLimits{
-					AllowedRoleRefs: []string{"*"},
 					AllowedRoleRefSelector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{"safe": "true"},
 					},
@@ -960,6 +1120,117 @@ func TestEvaluateBindDefinition_RoleBindingRoleRefSelector(t *testing.T) {
 		violations := EvaluateBindDefinition(policy, rbd, lg)
 		if len(violations) != 1 {
 			t.Fatalf("expected 1 violation, got %d: %v", len(violations), violations)
+		}
+	})
+}
+
+func TestEvaluateBindDefinition_SACreationNamespaceORSemantics(t *testing.T) {
+	// Test OR semantics: AllowedCreationNamespaces OR AllowedCreationNamespaceSelector.
+	t.Run("in static list but not matching selector", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				SubjectLimits: &authorizationv1alpha1.SubjectLimits{
+					AllowedKinds: []string{rbacv1.ServiceAccountKind},
+					ServiceAccountLimits: &authorizationv1alpha1.ServiceAccountLimits{
+						Creation: &authorizationv1alpha1.SACreationConfig{
+							AllowAutoCreate:           true,
+							AllowedCreationNamespaces: []string{"team-a"},
+							AllowedCreationNamespaceSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{"auto-create": "enabled"},
+							},
+						},
+					},
+				},
+			},
+		}
+		rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+			Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+				Subjects: []rbacv1.Subject{
+					{Kind: rbacv1.ServiceAccountKind, Name: "runner", Namespace: "team-a"},
+				},
+			},
+		}
+		lg := &fakeLabelGetter{
+			namespaces: map[string]map[string]string{
+				"team-a": {"auto-create": "disabled"},
+			},
+		}
+		// "team-a" is in the static list → allowed via OR, even though selector doesn't match.
+		violations := EvaluateBindDefinition(policy, rbd, lg)
+		if len(violations) != 0 {
+			t.Errorf("expected 0 violations (static list matches via OR), got %d: %v", len(violations), violations)
+		}
+	})
+
+	t.Run("matches selector but not in static list", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				SubjectLimits: &authorizationv1alpha1.SubjectLimits{
+					AllowedKinds: []string{rbacv1.ServiceAccountKind},
+					ServiceAccountLimits: &authorizationv1alpha1.ServiceAccountLimits{
+						Creation: &authorizationv1alpha1.SACreationConfig{
+							AllowAutoCreate:           true,
+							AllowedCreationNamespaces: []string{"team-a"},
+							AllowedCreationNamespaceSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{"auto-create": "enabled"},
+							},
+						},
+					},
+				},
+			},
+		}
+		rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+			Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+				Subjects: []rbacv1.Subject{
+					{Kind: rbacv1.ServiceAccountKind, Name: "runner", Namespace: "team-b"},
+				},
+			},
+		}
+		lg := &fakeLabelGetter{
+			namespaces: map[string]map[string]string{
+				"team-b": {"auto-create": "enabled"},
+			},
+		}
+		// "team-b" not in static list, but matches selector → allowed via OR.
+		violations := EvaluateBindDefinition(policy, rbd, lg)
+		if len(violations) != 0 {
+			t.Errorf("expected 0 violations (selector matches via OR), got %d: %v", len(violations), violations)
+		}
+	})
+
+	t.Run("matches neither", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				SubjectLimits: &authorizationv1alpha1.SubjectLimits{
+					AllowedKinds: []string{rbacv1.ServiceAccountKind},
+					ServiceAccountLimits: &authorizationv1alpha1.ServiceAccountLimits{
+						Creation: &authorizationv1alpha1.SACreationConfig{
+							AllowAutoCreate:           true,
+							AllowedCreationNamespaces: []string{"team-a"},
+							AllowedCreationNamespaceSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{"auto-create": "enabled"},
+							},
+						},
+					},
+				},
+			},
+		}
+		rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+			Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+				Subjects: []rbacv1.Subject{
+					{Kind: rbacv1.ServiceAccountKind, Name: "runner", Namespace: "team-c"},
+				},
+			},
+		}
+		lg := &fakeLabelGetter{
+			namespaces: map[string]map[string]string{
+				"team-c": {"auto-create": "disabled"},
+			},
+		}
+		// "team-c" not in static list, doesn't match selector → violation.
+		violations := EvaluateBindDefinition(policy, rbd, lg)
+		if len(violations) != 1 {
+			t.Fatalf("expected 1 violation (neither matches), got %d: %v", len(violations), violations)
 		}
 	})
 }
