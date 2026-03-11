@@ -94,7 +94,7 @@ func handlePolicyViolations(
 		authorizationv1alpha1.DeprovisionedReason, "deprovisioned due to policy violations")
 
 	if err := cfg.ApplyStatus(ctx); err != nil {
-		logger.Error(err, "failed to apply status after deprovisioning", "name", runtimeObj.GetName())
+		return ctrl.Result{}, fmt.Errorf("apply status after deprovisioning %s %s: %w", cfg.ResourceKind, runtimeObj.GetName(), err)
 	}
 	metrics.ReconcileTotal.WithLabelValues(cfg.ControllerLabel, metrics.ResultDegraded).Inc()
 	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil

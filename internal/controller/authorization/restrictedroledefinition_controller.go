@@ -262,7 +262,7 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 	}
 	if requeue {
 		if err := ssa.ApplyRestrictedRoleDefinitionStatus(ctx, r.client, rrd); err != nil {
-			logger.Error(err, "failed to apply status before requeue", "name", rrd.Name)
+			return ctrl.Result{}, fmt.Errorf("apply status before requeue for RestrictedRoleDefinition %s: %w", rrd.Name, err)
 		}
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultRequeue).Inc()
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
@@ -356,7 +356,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdDiscoverAndFilter(
 				continue
 			}
 
-			key := fmt.Sprintf("%s|%v", gv, verbs)
+			key := gv + "|" + strings.Join(verbs, ",")
 			existing, exists := rulesByKey[key]
 			if !exists {
 				existing = &rbacv1.PolicyRule{
@@ -531,7 +531,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdMarkStalled(
 	logger := log.FromContext(ctx)
 	logger.V(1).Info("marking RestrictedRoleDefinition as stalled", "name", rrd.Name, "error", err)
 	conditions.MarkStalled(rrd, rrd.Generation,
-		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, "check operator logs for details")
+		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, err.Error())
 	rrd.Status.ObservedGeneration = rrd.Generation
 	if updateErr := ssa.ApplyRestrictedRoleDefinitionStatus(ctx, r.client, rrd); updateErr != nil {
 		logger.Error(updateErr, "failed to apply Stalled status via SSA", "name", rrd.Name)

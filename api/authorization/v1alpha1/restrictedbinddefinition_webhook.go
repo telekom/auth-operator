@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -100,6 +101,32 @@ func (v *RestrictedBindDefinitionValidator) validateRestrictedBindDefinitionSpec
 				"name", obj.Name, "targetName", obj.Spec.TargetName, "conflictsWith", existing.Name)
 			return apierrors.NewBadRequest(
 				fmt.Sprintf("targetName %s already exists in RestrictedBindDefinition %s", obj.Spec.TargetName, existing.Name))
+		}
+	}
+
+	// Check for cross-type targetName collision with BindDefinitions.
+	bdList := &BindDefinitionList{}
+	if err := v.Client.List(ctx, bdList, client.MatchingFields{
+		TargetNameField: obj.Spec.TargetName,
+	}); err != nil {
+		logger.Error(err, "failed to list BindDefinitions", "targetName", obj.Spec.TargetName)
+		return apierrors.NewInternalError(fmt.Errorf("unable to list BindDefinitions: %w", err))
+	}
+	if len(bdList.Items) > 0 {
+		return apierrors.NewBadRequest(
+			fmt.Sprintf("targetName %s already exists in BindDefinition %s", obj.Spec.TargetName, bdList.Items[0].Name))
+	}
+
+	// Validate subject Kinds are one of the RBAC-supported types.
+	for i, subject := range obj.Spec.Subjects {
+		switch subject.Kind {
+		case rbacv1.UserKind, rbacv1.GroupKind, rbacv1.ServiceAccountKind:
+			// valid
+		default:
+			fldErr := field.NotSupported(field.NewPath("spec", "subjects").Index(i).Child("kind"), subject.Kind, supportedSubjectKinds)
+			return apierrors.NewInvalid(
+				schema.GroupKind{Group: GroupVersion.Group, Kind: "RestrictedBindDefinition"},
+				obj.Name, field.ErrorList{fldErr})
 		}
 	}
 

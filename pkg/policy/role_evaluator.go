@@ -83,8 +83,8 @@ func evaluateRoleLimits(limits *authorizationv1alpha1.RoleLimits, rrd *authoriza
 
 	// Check forbidden resource+verb combinations.
 	for _, rule := range limits.ForbiddenResourceVerbs {
-		// Skip if the entire resource is already excluded.
-		if isResourceExcluded(rrd, rule.Resource) {
+		// Skip if the entire resource is already excluded in the matching API group.
+		if isResourceExcludedForGroup(rrd, rule.Resource, rule.APIGroup) {
 			continue
 		}
 		// Skip if the entire API group is already excluded.
@@ -112,10 +112,12 @@ func evaluateRoleLimits(limits *authorizationv1alpha1.RoleLimits, rrd *authoriza
 	return violations
 }
 
-// isResourceExcluded returns true if the resource is listed in RestrictedResources.
-func isResourceExcluded(rrd *authorizationv1alpha1.RestrictedRoleDefinition, resource string) bool {
+// isResourceExcludedForGroup returns true if the resource is listed in RestrictedResources
+// and either the restricted resource has no Group set (applies to all groups) or its Group
+// matches the given apiGroup.
+func isResourceExcludedForGroup(rrd *authorizationv1alpha1.RestrictedRoleDefinition, resource, apiGroup string) bool {
 	for _, rr := range rrd.Spec.RestrictedResources {
-		if rr.Name == resource {
+		if rr.Name == resource && (rr.Group == "" || rr.Group == apiGroup) {
 			return true
 		}
 	}

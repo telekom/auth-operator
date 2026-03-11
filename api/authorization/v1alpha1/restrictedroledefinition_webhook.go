@@ -7,6 +7,7 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -104,6 +105,40 @@ func (v *RestrictedRoleDefinitionValidator) validateRestrictedRoleDefinitionSpec
 		}
 	}
 
+	// Check for cross-type targetName collision with RoleDefinitions.
+	rdList := &RoleDefinitionList{}
+	if err := v.Client.List(ctx, rdList, client.MatchingFields{
+		TargetNameField: obj.Spec.TargetName,
+	}); err != nil {
+		logger.Error(err, "failed to list RoleDefinitions", "targetName", obj.Spec.TargetName)
+		return apierrors.NewInternalError(fmt.Errorf("unable to list RoleDefinitions: %w", err))
+	}
+	for _, existing := range rdList.Items {
+		if existing.Spec.TargetRole == obj.Spec.TargetRole {
+			return apierrors.NewBadRequest(
+				fmt.Sprintf("targetName %s already exists in RoleDefinition %s", obj.Spec.TargetName, existing.Name))
+		}
+	}
+
+	// Validate restrictedAPIs versions follow the expected format.
+	return validateRestrictedRoleDefinitionAPIsVersions(obj)
+}
+
+// validateRestrictedRoleDefinitionAPIsVersions ensures every version entry
+// starts with 'v' and is at most 20 characters.
+func validateRestrictedRoleDefinitionAPIsVersions(obj *RestrictedRoleDefinition) error {
+	for i, group := range obj.Spec.RestrictedAPIs {
+		for j, gv := range group.Versions {
+			if !strings.HasPrefix(gv.Version, "v") || len(gv.Version) > 20 {
+				return apierrors.NewInvalid(
+					schema.GroupKind{Group: GroupVersion.Group, Kind: "RestrictedRoleDefinition"},
+					obj.Name,
+					field.ErrorList{field.Invalid(
+						field.NewPath("spec", "restrictedApis").Index(i).Child("versions").Index(j).Child("version"),
+						gv.Version, "must start with 'v' and be at most 20 characters")})
+			}
+		}
+	}
 	return nil
 }
 

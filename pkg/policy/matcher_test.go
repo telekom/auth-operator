@@ -29,6 +29,11 @@ func TestMatchesWildcard(t *testing.T) {
 		{name: "prefix+suffix mismatch prefix", pattern: "team-*-role", value: "group-alpha-role", want: false},
 		{name: "empty pattern empty value", pattern: "", value: "", want: true},
 		{name: "empty pattern non-empty value", pattern: "", value: "x", want: false},
+		{name: "multi-wildcard contains", pattern: "*admin*", value: "cluster-admin-role", want: true},
+		{name: "multi-wildcard contains exact", pattern: "*admin*", value: "admin", want: true},
+		{name: "multi-wildcard no match", pattern: "*admin*", value: "cluster-viewer", want: false},
+		{name: "multi-wildcard prefix+mid+suffix", pattern: "team-*-admin-*-role", value: "team-x-admin-y-role", want: true},
+		{name: "multi-wildcard prefix+mid+suffix mismatch", pattern: "team-*-admin-*-role", value: "team-x-viewer-y-role", want: false},
 	}
 
 	for _, tt := range tests {

@@ -92,6 +92,7 @@ func (r *RestrictedBindDefinitionReconciler) SetupWithManager(mgr ctrl.Manager, 
 		// Re-reconcile when namespaces change (label changes affect namespace selectors).
 		Watches(&corev1.Namespace{},
 			handler.EnqueueRequestsFromMapFunc(r.namespaceToRestrictedBindDefinitions),
+			builder.WithPredicates(namespaceLabelOrPhaseChangePredicate()),
 		).
 		WithOptions(controller.TypedOptions[reconcile.Request]{MaxConcurrentReconciles: concurrency}).
 		Complete(r)
@@ -506,7 +507,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdMarkStalled(
 	logger := log.FromContext(ctx)
 	logger.V(1).Info("marking RestrictedBindDefinition as stalled", "name", rbd.Name, "error", err)
 	conditions.MarkStalled(rbd, rbd.Generation,
-		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, "check operator logs for details")
+		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, err.Error())
 	rbd.Status.ObservedGeneration = rbd.Generation
 	if updateErr := ssa.ApplyRestrictedBindDefinitionStatus(ctx, r.client, rbd); updateErr != nil {
 		logger.Error(updateErr, "failed to apply Stalled status via SSA", "name", rbd.Name)
