@@ -23,10 +23,6 @@ var _ = Describe("Restricted CRD E2E", Ordered, Label("basic", "restricted"), fu
 
 	BeforeAll(func() {
 		setSuiteOutputDir("restricted")
-		By("Setting up the test environment for restricted CRD tests")
-
-		By("Ensuring test namespace exists")
-		ensureTestNamespace()
 	})
 
 	BeforeEach(func() {
