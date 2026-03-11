@@ -298,6 +298,24 @@ func configureWebhooks(mgr manager.Manager, tp *tracing.Provider) error {
 		return fmt.Errorf("unable to create webhook for WebhookAuthorizer: %w", err)
 	}
 
+	// Setup RBACPolicy validator
+	log.Info("setting up RBACPolicy validating webhook")
+	if err := (&authorizationv1alpha1.RBACPolicy{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook for RBACPolicy: %w", err)
+	}
+
+	// Setup RestrictedBindDefinition validator
+	log.Info("setting up RestrictedBindDefinition validating webhook")
+	if err := (&authorizationv1alpha1.RestrictedBindDefinition{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook for RestrictedBindDefinition: %w", err)
+	}
+
+	// Setup RestrictedRoleDefinition validator
+	log.Info("setting up RestrictedRoleDefinition validating webhook")
+	if err := (&authorizationv1alpha1.RestrictedRoleDefinition{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create webhook for RestrictedRoleDefinition: %w", err)
+	}
+
 	log.Info("all webhooks configured successfully")
 	return nil
 }

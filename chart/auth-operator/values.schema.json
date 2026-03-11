@@ -155,6 +155,24 @@
           "minimum": 0,
           "default": 1
         },
+        "rbacPolicyConcurrency": {
+          "type": "integer",
+          "description": "Number of concurrent reconcilers for RBACPolicy controller (0 to disable).",
+          "minimum": 0,
+          "default": 5
+        },
+        "restrictedBindDefinitionConcurrency": {
+          "type": "integer",
+          "description": "Number of concurrent reconcilers for RestrictedBindDefinition controller (0 to disable).",
+          "minimum": 0,
+          "default": 5
+        },
+        "restrictedRoleDefinitionConcurrency": {
+          "type": "integer",
+          "description": "Number of concurrent reconcilers for RestrictedRoleDefinition controller (0 to disable).",
+          "minimum": 0,
+          "default": 5
+        },
         "resources": {
           "type": "object",
           "description": "Container resource requests and limits.",
