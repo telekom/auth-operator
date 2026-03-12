@@ -207,7 +207,7 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 		if apierrors.IsNotFound(err) {
 			logger.Info("referenced RBACPolicy not found", "name", rbd.Name, "policyRef", rbd.Spec.PolicyRef.Name)
 			conditions.MarkFalse(rbd, authorizationv1alpha1.PolicyCompliantCondition, rbd.Generation,
-				authorizationv1alpha1.PolicyCompliantReasonPolicyNotFound, "referenced RBACPolicy %q not found", rbd.Spec.PolicyRef.Name)
+				authorizationv1alpha1.PolicyCompliantReasonPolicyNotFound, authorizationv1alpha1.PolicyCompliantMessagePolicyNotFound, rbd.Spec.PolicyRef.Name)
 			r.recorder.Eventf(rbd, nil, corev1.EventTypeWarning,
 				authorizationv1alpha1.EventReasonPolicyNotFound, "Reconcile",
 				"Referenced RBACPolicy %q not found", rbd.Spec.PolicyRef.Name)
@@ -244,6 +244,7 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 	if err := r.rbdReconcileResources(ctx, rbd); err != nil {
 		r.rbdMarkStalled(ctx, rbd, err)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, err
 	}
 
@@ -255,6 +256,7 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 	if err := ssa.ApplyRestrictedBindDefinitionStatus(ctx, r.client, rbd); err != nil {
 		logger.Error(err, "failed to apply RestrictedBindDefinition status", "name", rbd.Name)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, fmt.Errorf("apply RestrictedBindDefinition %s status: %w", rbd.Name, err)
 	}
 
@@ -439,7 +441,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdDeprovision(
 
 	// Delete owned ClusterRoleBindings.
 	crbList := &rbacv1.ClusterRoleBindingList{}
-	if err := r.client.List(ctx, crbList); err != nil {
+	if err := r.client.List(ctx, crbList, client.MatchingLabels{helpers.ManagedByLabelStandard: helpers.ManagedByValue}); err != nil {
 		return fmt.Errorf("list ClusterRoleBindings: %w", err)
 	}
 	for i := range crbList.Items {
@@ -452,7 +454,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdDeprovision(
 
 	// Delete owned RoleBindings.
 	rbList := &rbacv1.RoleBindingList{}
-	if err := r.client.List(ctx, rbList); err != nil {
+	if err := r.client.List(ctx, rbList, client.MatchingLabels{helpers.ManagedByLabelStandard: helpers.ManagedByValue}); err != nil {
 		return fmt.Errorf("list RoleBindings: %w", err)
 	}
 	for i := range rbList.Items {
@@ -507,7 +509,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdMarkStalled(
 	logger := log.FromContext(ctx)
 	logger.V(1).Info("marking RestrictedBindDefinition as stalled", "name", rbd.Name, "error", err)
 	conditions.MarkStalled(rbd, rbd.Generation,
-		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, err.Error())
+		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, "check operator logs for details")
 	rbd.Status.ObservedGeneration = rbd.Generation
 	if updateErr := ssa.ApplyRestrictedBindDefinitionStatus(ctx, r.client, rbd); updateErr != nil {
 		logger.Error(updateErr, "failed to apply Stalled status via SSA", "name", rbd.Name)

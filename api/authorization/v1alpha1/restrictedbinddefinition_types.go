@@ -67,7 +67,7 @@ type RestrictedBindDefinitionStatus struct {
 
 	// GeneratedServiceAccounts lists ServiceAccounts that were auto-created.
 	// +kubebuilder:validation:Optional
-	GeneratedServiceAccounts []rbacv1.Subject `json:"generatedServiceAccounts"`
+	GeneratedServiceAccounts []rbacv1.Subject `json:"generatedServiceAccounts,omitempty"`
 
 	// MissingRoleRefs lists role references that could not be resolved.
 	// Format: "ClusterRole/<name>" or "Role/<namespace>/<name>".

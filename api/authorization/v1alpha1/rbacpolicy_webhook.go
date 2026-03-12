@@ -152,6 +152,13 @@ func validateRBACPolicySpec(obj *RBACPolicy) error {
 						sl.ServiceAccountLimits.AllowedNamespaceSelector, err.Error()))
 				}
 			}
+			for i, v := range sl.ServiceAccountLimits.ForbiddenNamespacePrefixes {
+				if v == "" {
+					allErrs = append(allErrs, field.Invalid(
+						field.NewPath("spec", "subjectLimits", "serviceAccountLimits", "forbiddenNamespacePrefixes").Index(i),
+						v, "must not be empty"))
+				}
+			}
 			if sl.ServiceAccountLimits.Creation != nil && sl.ServiceAccountLimits.Creation.AllowedCreationNamespaceSelector != nil {
 				if _, err := metav1.LabelSelectorAsSelector(sl.ServiceAccountLimits.Creation.AllowedCreationNamespaceSelector); err != nil {
 					allErrs = append(allErrs, field.Invalid(
@@ -160,6 +167,11 @@ func validateRBACPolicySpec(obj *RBACPolicy) error {
 				}
 			}
 		}
+
+		allErrs = append(allErrs, validateSubjectKinds(sl.AllowedKinds,
+			field.NewPath("spec", "subjectLimits", "allowedKinds"))...)
+		allErrs = append(allErrs, validateSubjectKinds(sl.ForbiddenKinds,
+			field.NewPath("spec", "subjectLimits", "forbiddenKinds"))...)
 	}
 
 	if len(allErrs) > 0 {
@@ -224,6 +236,28 @@ func validateNameMatchLimits(limits *NameMatchLimits, fldPath *field.Path) field
 		if v == "" {
 			allErrs = append(allErrs, field.Invalid(
 				fldPath.Child("allowedSuffixes").Index(i), v, "must not be empty"))
+		}
+	}
+	return allErrs
+}
+
+// validSubjectKinds lists the valid RBAC subject kinds.
+var validSubjectKinds = []string{"User", "Group", "ServiceAccount"}
+
+// validateSubjectKinds validates that all entries in a subject kind list are valid.
+func validateSubjectKinds(kinds []string, fldPath *field.Path) field.ErrorList {
+	var allErrs field.ErrorList
+	for i, kind := range kinds {
+		valid := false
+		for _, vk := range validSubjectKinds {
+			if kind == vk {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			allErrs = append(allErrs, field.NotSupported(
+				fldPath.Index(i), kind, validSubjectKinds))
 		}
 	}
 	return allErrs

@@ -96,6 +96,7 @@ type RestrictedRoleDefinitionStatus struct {
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Time since creation"
 // +kubebuilder:printcolumn:name="Target",type="string",JSONPath=".spec.targetRole",description="Target RBAC object type"
 // +kubebuilder:printcolumn:name="Role name",type="string",JSONPath=".spec.targetName",description="Name of the generated role"
+// +kubebuilder:printcolumn:name="Namespaced scope",type="boolean",JSONPath=".spec.scopeNamespaced",description="Whether the generated role covers namespaced resources"
 // +kubebuilder:printcolumn:name="PolicyRef",type="string",JSONPath=".spec.policyRef.name",description="The referenced RBACPolicy"
 type RestrictedRoleDefinition struct {
 	metav1.TypeMeta   `json:",inline"`
