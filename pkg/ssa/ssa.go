@@ -22,26 +22,28 @@ const FieldOwner = "auth-operator"
 // maxFieldManagerLength is the Kubernetes API server limit for fieldManager.
 const maxFieldManagerLength = 128
 
-// FieldOwnerForBD returns a per-BindDefinition field owner for SSA.
-// This allows multiple BDs to independently manage ownerReferences on shared SAs.
-// Each BD's ownerRef is tracked separately so one BD's apply doesn't remove another's.
-// If the resulting field owner would exceed 128 characters (K8s limit), the BD name
-// is truncated and suffixed with a short hash to ensure uniqueness.
-func FieldOwnerForBD(bdName string) string {
+// FieldOwnerFor returns a per-resource field owner for SSA.
+// This allows multiple resources (BindDefinitions, RestrictedBindDefinitions)
+// to independently manage ownerReferences on shared ServiceAccounts.
+// Each resource's ownerRef is tracked separately so one resource's apply
+// doesn't remove another's.
+// If the resulting field owner would exceed 128 characters (K8s limit), the
+// name is truncated and suffixed with a short hash to ensure uniqueness.
+func FieldOwnerFor(resourceName string) string {
 	prefix := FieldOwner + "/"
-	fullOwner := prefix + bdName
+	fullOwner := prefix + resourceName
 
 	if len(fullOwner) <= maxFieldManagerLength {
 		return fullOwner
 	}
 
 	// Hash the full name for uniqueness
-	hash := sha256.Sum256([]byte(bdName))
+	hash := sha256.Sum256([]byte(resourceName))
 	hashSuffix := hex.EncodeToString(hash[:4]) // 8 hex chars
 
-	// Truncate bdName to fit: prefix + truncated + "-" + hash <= 128
+	// Truncate name to fit: prefix + truncated + "-" + hash <= 128
 	maxNameLen := maxFieldManagerLength - len(prefix) - 1 - len(hashSuffix)
-	truncatedName := bdName[:maxNameLen]
+	truncatedName := resourceName[:maxNameLen]
 
 	return prefix + truncatedName + "-" + hashSuffix
 }

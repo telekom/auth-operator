@@ -66,6 +66,9 @@ func (v *RBACPolicyValidator) ValidateUpdate(ctx context.Context, oldObj, newObj
 // ValidateDelete checks if any RestrictedBindDefinitions or RestrictedRoleDefinitions
 // still reference this policy. If so, deletion is blocked.
 func (v *RBACPolicyValidator) ValidateDelete(ctx context.Context, obj *RBACPolicy) (admission.Warnings, error) {
+	ctx, cancel := context.WithTimeout(ctx, webhookValidationTimeout)
+	defer cancel()
+
 	logger := log.FromContext(ctx).WithName("rbacpolicy-webhook")
 	logger.V(1).Info("validating delete", "name", obj.Name)
 

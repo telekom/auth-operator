@@ -418,6 +418,7 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			metrics.RoleRefsMissing.DeleteLabelValues(bindDefinition.Name)
 			metrics.NamespacesActive.DeleteLabelValues(bindDefinition.Name)
 			metrics.ExternalSAsReferenced.DeleteLabelValues(bindDefinition.Name)
+			metrics.ServiceAccountSkippedPreExisting.DeleteLabelValues(bindDefinition.Name)
 		}
 		return result, err
 	}
@@ -920,7 +921,7 @@ func (r *BindDefinitionReconciler) applyServiceAccount(
 
 	// Use per-BD FieldOwner so each BD's ownerRef is tracked independently.
 	// Without this, SSA would remove BD-A's ownerRef when BD-B applies its ownerRef.
-	fieldOwner := pkgssa.FieldOwnerForBD(bindDef.Name)
+	fieldOwner := pkgssa.FieldOwnerFor(bindDef.Name)
 	result, patchErr := pkgssa.PatchApplyServiceAccount(ctx, r.client, ac, fieldOwner)
 	if patchErr != nil {
 		logger.Error(patchErr, "Failed to apply ServiceAccount",
@@ -1065,6 +1066,7 @@ func (r *BindDefinitionReconciler) reconcileDelete(
 	metrics.RoleRefsMissing.DeleteLabelValues(bindDefinition.Name)
 	metrics.NamespacesActive.DeleteLabelValues(bindDefinition.Name)
 	metrics.ExternalSAsReferenced.DeleteLabelValues(bindDefinition.Name)
+	metrics.ServiceAccountSkippedPreExisting.DeleteLabelValues(bindDefinition.Name)
 
 	conditions.MarkTrue(bindDefinition, authorizationv1alpha1.DeleteCondition, bindDefinition.Generation,
 		authorizationv1alpha1.DeleteReason, authorizationv1alpha1.DeleteMessage)

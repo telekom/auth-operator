@@ -270,7 +270,9 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 		"groupCount", len(userGroups))
 
 	bindDefinitions := &authzv1alpha1.BindDefinitionList{}
-	if err := v.Client.List(ctx, bindDefinitions); err != nil {
+	listCtx, cancel := context.WithTimeout(ctx, webhookListTimeout)
+	defer cancel()
+	if err := v.Client.List(listCtx, bindDefinitions); err != nil {
 		logger.Error(err, "failed to list BindDefinitions", "namespace", req.Name)
 		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()
 		return admission.Errored(http.StatusInternalServerError, err)
@@ -337,7 +339,9 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 	// This is restricted to CREATE/UPDATE — DELETE is intentionally excluded.
 	if saInfo.IsServiceAccount &&
 		(req.Operation == admissionv1.Create || req.Operation == admissionv1.Update) {
-		inheritedLabels, saErr := GetSANamespaceTrackedLabels(ctx, v.Client, saInfo)
+		saCtx, saCancel := context.WithTimeout(ctx, webhookListTimeout)
+		defer saCancel()
+		inheritedLabels, saErr := GetSANamespaceTrackedLabels(saCtx, v.Client, saInfo)
 		if saErr != nil {
 			logger.Error(saErr, "failed to lookup SA namespace labels", "saNamespace", saInfo.Namespace, "targetNamespace", req.Name)
 			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()

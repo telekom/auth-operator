@@ -50,6 +50,11 @@ import (
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=restrictedroledefinitions,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=restrictedroledefinitions/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=restrictedroledefinitions/finalizers,verbs=update
+// +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=rbacpolicies,verbs=get;list;watch
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,verbs=get;list;watch;create;update;patch;delete;escalate;bind
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch;create;update;patch;delete;escalate;bind
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch;update
+// +kubebuilder:rbac:groups="events.k8s.io",resources=events,verbs=create;patch;update
 
 // RestrictedRoleDefinitionReconciler reconciles a RestrictedRoleDefinition object.
 type RestrictedRoleDefinitionReconciler struct {
@@ -117,7 +122,9 @@ func (r *RestrictedRoleDefinitionReconciler) queueAll() handler.MapFunc {
 	return func(ctx context.Context, _ client.Object) []reconcile.Request {
 		logger := log.FromContext(ctx)
 		list := &authorizationv1alpha1.RestrictedRoleDefinitionList{}
-		if err := r.client.List(ctx, list); err != nil {
+		listCtx, cancel := context.WithTimeout(ctx, queueAllTimeout)
+		defer cancel()
+		if err := r.client.List(listCtx, list); err != nil {
 			logger.Error(err, "failed to list RestrictedRoleDefinitions")
 			return nil
 		}

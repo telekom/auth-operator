@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -18,6 +19,12 @@ import (
 // TargetNameField is the field index for efficient lookups by Spec.TargetName.
 // This index must be registered with the manager before use.
 const TargetNameField = ".spec.targetName"
+
+// webhookValidationTimeout is the maximum duration CRD webhook validators wait
+// for cache-backed List or Get calls. Informer-cache reads normally complete in
+// microseconds; the timeout is a safety net for cold-cache or degraded
+// API-server scenarios.
+const webhookValidationTimeout = 5 * time.Second
 
 // RoleDefinitionValidator implements admission.Validator for RoleDefinition.
 // It holds a client reference for listing existing resources during validation.
@@ -53,6 +60,9 @@ func validateRestrictedAPIsVersions(obj *RoleDefinition) error {
 
 // ValidateCreate implements admission.Validator for RoleDefinition.
 func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleDefinition) (admission.Warnings, error) {
+	ctx, cancel := context.WithTimeout(ctx, webhookValidationTimeout)
+	defer cancel()
+
 	logger := log.FromContext(ctx).WithName("roledefinition-webhook")
 	logger.V(1).Info("validating create", "name", obj.Name)
 
@@ -97,6 +107,9 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 
 // ValidateUpdate implements admission.Validator for RoleDefinition.
 func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *RoleDefinition) (admission.Warnings, error) {
+	ctx, cancel := context.WithTimeout(ctx, webhookValidationTimeout)
+	defer cancel()
+
 	logger := log.FromContext(ctx).WithName("roledefinition-webhook")
 	logger.V(1).Info("validating update", "name", newObj.Name)
 
