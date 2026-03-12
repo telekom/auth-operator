@@ -180,6 +180,7 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 	if err := r.client.Get(ctx, req.NamespacedName, rrd); err != nil {
 		if apierrors.IsNotFound(err) {
 			logger.V(1).Info("RestrictedRoleDefinition not found (deleted), skipping", "name", req.Name)
+			metrics.DeletePolicyViolationSeries(metrics.ControllerRestrictedRoleDefinition, req.Name)
 			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultSkipped).Inc()
 			return ctrl.Result{}, nil
 		}
@@ -252,7 +253,7 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 	}
 
 	// Policy compliant.
-	markPolicyCompliant(rrd, rrd.Generation, r.recorder, rrd, rbacPolicy.Name)
+	markPolicyCompliant(rrd, rrd.Generation, r.recorder, rrd, rbacPolicy.Name, metrics.ControllerRestrictedRoleDefinition)
 	rrd.Status.PolicyViolations = nil
 
 	// Step 7: Discover and filter API resources.
@@ -515,6 +516,9 @@ func (r *RestrictedRoleDefinitionReconciler) rrdHandleDeletion(
 	if err := r.rrdDeprovision(ctx, rrd); err != nil {
 		return fmt.Errorf("delete cleanup for RestrictedRoleDefinition %s: %w", rrd.Name, err)
 	}
+
+	// Clean up metric series.
+	metrics.DeletePolicyViolationSeries(metrics.ControllerRestrictedRoleDefinition, rrd.Name)
 
 	// Remove finalizer.
 	old := rrd.DeepCopy()
