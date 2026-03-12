@@ -37,6 +37,9 @@ func (r *RestrictedRoleDefinition) SetupWebhookWithManager(mgr ctrl.Manager) err
 
 // ValidateCreate implements admission.Validator for RestrictedRoleDefinition.
 func (v *RestrictedRoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RestrictedRoleDefinition) (admission.Warnings, error) {
+	ctx, cancel := context.WithTimeout(ctx, webhookValidationTimeout)
+	defer cancel()
+
 	logger := log.FromContext(ctx).WithName("restrictedroledefinition-webhook")
 	logger.V(1).Info("validating create", "name", obj.Name)
 
@@ -45,11 +48,14 @@ func (v *RestrictedRoleDefinitionValidator) ValidateCreate(ctx context.Context, 
 	}
 
 	// Verify that the referenced RBACPolicy exists.
-	return v.validatePolicyRefExists(ctx, obj)
+	return nil, v.validatePolicyRefExists(ctx, obj)
 }
 
 // ValidateUpdate implements admission.Validator for RestrictedRoleDefinition.
 func (v *RestrictedRoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *RestrictedRoleDefinition) (admission.Warnings, error) {
+	ctx, cancel := context.WithTimeout(ctx, webhookValidationTimeout)
+	defer cancel()
+
 	logger := log.FromContext(ctx).WithName("restrictedroledefinition-webhook")
 	logger.V(1).Info("validating update", "name", newObj.Name)
 
@@ -75,7 +81,7 @@ func (v *RestrictedRoleDefinitionValidator) ValidateUpdate(ctx context.Context, 
 	}
 
 	// Verify that the referenced RBACPolicy exists.
-	return v.validatePolicyRefExists(ctx, newObj)
+	return nil, v.validatePolicyRefExists(ctx, newObj)
 }
 
 // ValidateDelete implements admission.Validator for RestrictedRoleDefinition.
@@ -144,18 +150,18 @@ func validateRestrictedRoleDefinitionAPIsVersions(obj *RestrictedRoleDefinition)
 
 // validatePolicyRefExists verifies that the referenced RBACPolicy exists.
 // Full policy compliance evaluation is performed by the controller during reconciliation.
-func (v *RestrictedRoleDefinitionValidator) validatePolicyRefExists(ctx context.Context, obj *RestrictedRoleDefinition) (admission.Warnings, error) {
+func (v *RestrictedRoleDefinitionValidator) validatePolicyRefExists(ctx context.Context, obj *RestrictedRoleDefinition) error {
 	logger := log.FromContext(ctx).WithName("restrictedroledefinition-webhook")
 
 	rbacPolicy := &RBACPolicy{}
 	if err := v.Client.Get(ctx, client.ObjectKey{Name: obj.Spec.PolicyRef.Name}, rbacPolicy); err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil, apierrors.NewBadRequest(
+			return apierrors.NewBadRequest(
 				fmt.Sprintf("referenced RBACPolicy %q does not exist", obj.Spec.PolicyRef.Name))
 		}
 		logger.Error(err, "failed to get RBACPolicy", "policyRef", obj.Spec.PolicyRef.Name)
-		return nil, apierrors.NewInternalError(fmt.Errorf("unable to get RBACPolicy: %w", err))
+		return apierrors.NewInternalError(fmt.Errorf("unable to get RBACPolicy: %w", err))
 	}
 
-	return nil, nil
+	return nil
 }

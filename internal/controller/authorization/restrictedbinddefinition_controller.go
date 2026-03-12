@@ -45,6 +45,15 @@ import (
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=restrictedbinddefinitions,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=restrictedbinddefinitions/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=restrictedbinddefinitions/finalizers,verbs=update
+// +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=rbacpolicies,verbs=get;list;watch
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,verbs=get;list;watch
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,verbs=get;list;watch;create;update;patch;delete;escalate
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete;escalate
+// +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=create;delete;get;list;patch;update;watch
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch;update
+// +kubebuilder:rbac:groups="events.k8s.io",resources=events,verbs=create;patch;update
 
 // RestrictedBindDefinitionReconciler reconciles a RestrictedBindDefinition object.
 type RestrictedBindDefinitionReconciler struct {
@@ -382,7 +391,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdEnsureServiceAccounts(
 			helpers.BuildResourceLabels(rbd.Labels), automountToken).
 			WithOwnerReferences(ownerRefForRestricted(rbd, "RestrictedBindDefinition")).
 			WithAnnotations(helpers.BuildResourceAnnotations("RestrictedBindDefinition", rbd.Name))
-		if _, err := pkgssa.PatchApplyServiceAccount(ctx, r.client, ac, pkgssa.FieldOwnerForBD(rbd.Name)); err != nil {
+		if _, err := pkgssa.PatchApplyServiceAccount(ctx, r.client, ac, pkgssa.FieldOwnerFor(rbd.Name)); err != nil {
 			return fmt.Errorf("apply ServiceAccount %s/%s: %w", subject.Namespace, subject.Name, err)
 		}
 		if !helpers.SubjectExists(generatedSAs, subject) {

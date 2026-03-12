@@ -38,6 +38,9 @@ func (r *RestrictedBindDefinition) SetupWebhookWithManager(mgr ctrl.Manager) err
 
 // ValidateCreate implements admission.Validator for RestrictedBindDefinition.
 func (v *RestrictedBindDefinitionValidator) ValidateCreate(ctx context.Context, obj *RestrictedBindDefinition) (admission.Warnings, error) {
+	ctx, cancel := context.WithTimeout(ctx, webhookValidationTimeout)
+	defer cancel()
+
 	logger := log.FromContext(ctx).WithName("restrictedbinddefinition-webhook")
 	logger.V(1).Info("validating create", "name", obj.Name)
 
@@ -46,11 +49,14 @@ func (v *RestrictedBindDefinitionValidator) ValidateCreate(ctx context.Context, 
 	}
 
 	// Verify that the referenced RBACPolicy exists.
-	return v.validatePolicyRefExists(ctx, obj)
+	return nil, v.validatePolicyRefExists(ctx, obj)
 }
 
 // ValidateUpdate implements admission.Validator for RestrictedBindDefinition.
 func (v *RestrictedBindDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *RestrictedBindDefinition) (admission.Warnings, error) {
+	ctx, cancel := context.WithTimeout(ctx, webhookValidationTimeout)
+	defer cancel()
+
 	logger := log.FromContext(ctx).WithName("restrictedbinddefinition-webhook")
 	logger.V(1).Info("validating update", "name", newObj.Name)
 
@@ -73,7 +79,7 @@ func (v *RestrictedBindDefinitionValidator) ValidateUpdate(ctx context.Context, 
 	}
 
 	// Verify that the referenced RBACPolicy exists.
-	return v.validatePolicyRefExists(ctx, newObj)
+	return nil, v.validatePolicyRefExists(ctx, newObj)
 }
 
 // ValidateDelete implements admission.Validator for RestrictedBindDefinition.
@@ -149,18 +155,18 @@ func (v *RestrictedBindDefinitionValidator) validateRestrictedBindDefinitionSpec
 
 // validatePolicyRefExists verifies that the referenced RBACPolicy exists.
 // Full policy compliance evaluation is performed by the controller during reconciliation.
-func (v *RestrictedBindDefinitionValidator) validatePolicyRefExists(ctx context.Context, obj *RestrictedBindDefinition) (admission.Warnings, error) {
+func (v *RestrictedBindDefinitionValidator) validatePolicyRefExists(ctx context.Context, obj *RestrictedBindDefinition) error {
 	logger := log.FromContext(ctx).WithName("restrictedbinddefinition-webhook")
 
 	rbacPolicy := &RBACPolicy{}
 	if err := v.Client.Get(ctx, client.ObjectKey{Name: obj.Spec.PolicyRef.Name}, rbacPolicy); err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil, apierrors.NewBadRequest(
+			return apierrors.NewBadRequest(
 				fmt.Sprintf("referenced RBACPolicy %q does not exist", obj.Spec.PolicyRef.Name))
 		}
 		logger.Error(err, "failed to get RBACPolicy", "policyRef", obj.Spec.PolicyRef.Name)
-		return nil, apierrors.NewInternalError(fmt.Errorf("unable to get RBACPolicy: %w", err))
+		return apierrors.NewInternalError(fmt.Errorf("unable to get RBACPolicy: %w", err))
 	}
 
-	return nil, nil
+	return nil
 }
