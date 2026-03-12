@@ -210,6 +210,10 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 		old := rrd.DeepCopy()
 		controllerutil.AddFinalizer(rrd, authorizationv1alpha1.RestrictedRoleDefinitionFinalizer)
 		if err := r.client.Patch(ctx, rrd, client.MergeFromWithOptions(old, client.MergeFromWithOptimisticLock{})); err != nil {
+			if apierrors.IsConflict(err) {
+				logger.V(1).Info("conflict adding finalizer, requeuing", "name", rrd.Name)
+				return ctrl.Result{Requeue: true}, nil
+			}
 			r.rrdMarkStalled(ctx, rrd, err)
 			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
 			return ctrl.Result{}, fmt.Errorf("add finalizer to RestrictedRoleDefinition %s: %w", rrd.Name, err)
