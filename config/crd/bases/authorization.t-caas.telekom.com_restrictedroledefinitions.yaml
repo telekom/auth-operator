@@ -37,6 +37,10 @@ spec:
       jsonPath: .spec.targetName
       name: Role name
       type: string
+    - description: Whether the generated role covers namespaced resources
+      jsonPath: .spec.scopeNamespaced
+      name: Namespaced scope
+      type: boolean
     - description: The referenced RBACPolicy
       jsonPath: .spec.policyRef.name
       name: PolicyRef

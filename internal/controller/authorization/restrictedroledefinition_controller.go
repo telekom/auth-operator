@@ -192,6 +192,7 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 	if !rrd.DeletionTimestamp.IsZero() {
 		if err := r.rrdHandleDeletion(ctx, rrd); err != nil {
 			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
+			metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
 			return ctrl.Result{}, err
 		}
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultFinalized).Inc()
@@ -220,7 +221,7 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 		if apierrors.IsNotFound(err) {
 			logger.Info("referenced RBACPolicy not found", "name", rrd.Name, "policyRef", rrd.Spec.PolicyRef.Name)
 			conditions.MarkFalse(rrd, authorizationv1alpha1.PolicyCompliantCondition, rrd.Generation,
-				authorizationv1alpha1.PolicyCompliantReasonPolicyNotFound, "referenced RBACPolicy %q not found", rrd.Spec.PolicyRef.Name)
+				authorizationv1alpha1.PolicyCompliantReasonPolicyNotFound, authorizationv1alpha1.PolicyCompliantMessagePolicyNotFound, rrd.Spec.PolicyRef.Name)
 			rrd.Status.PolicyViolations = []string{fmt.Sprintf("policy %q not found", rrd.Spec.PolicyRef.Name)}
 			r.recorder.Eventf(rrd, nil, corev1.EventTypeWarning,
 				authorizationv1alpha1.EventReasonPolicyNotFound, "Reconcile",
@@ -231,6 +232,7 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 		}
 		r.rrdMarkStalled(ctx, rrd, err)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, fmt.Errorf("fetch RBACPolicy %s: %w", rrd.Spec.PolicyRef.Name, err)
 	}
 
@@ -258,6 +260,7 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 	if err != nil {
 		r.rrdMarkStalled(ctx, rrd, err)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, err
 	}
 	if requeue {
@@ -286,6 +289,7 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 	if err := r.rrdEnsureRole(ctx, rrd, finalRules); err != nil {
 		r.rrdMarkStalled(ctx, rrd, err)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, err
 	}
 
@@ -297,6 +301,7 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 	if err := ssa.ApplyRestrictedRoleDefinitionStatus(ctx, r.client, rrd); err != nil {
 		logger.Error(err, "failed to apply RestrictedRoleDefinition status", "name", rrd.Name)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, fmt.Errorf("apply RestrictedRoleDefinition %s status: %w", rrd.Name, err)
 	}
 
@@ -531,7 +536,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdMarkStalled(
 	logger := log.FromContext(ctx)
 	logger.V(1).Info("marking RestrictedRoleDefinition as stalled", "name", rrd.Name, "error", err)
 	conditions.MarkStalled(rrd, rrd.Generation,
-		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, err.Error())
+		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, "check operator logs for details")
 	rrd.Status.ObservedGeneration = rrd.Generation
 	if updateErr := ssa.ApplyRestrictedRoleDefinitionStatus(ctx, r.client, rrd); updateErr != nil {
 		logger.Error(updateErr, "failed to apply Stalled status via SSA", "name", rrd.Name)

@@ -76,7 +76,7 @@ func handlePolicyViolations(
 		"name", runtimeObj.GetName(), "violations", violationStrings)
 
 	conditions.MarkFalse(obj, authorizationv1alpha1.PolicyCompliantCondition, generation,
-		authorizationv1alpha1.PolicyCompliantReasonViolationsDetected, "policy violations: %v", violationStrings)
+		authorizationv1alpha1.PolicyCompliantReasonViolationsDetected, authorizationv1alpha1.PolicyCompliantMessageViolationsDetected, violationStrings)
 
 	recorder.Eventf(runtimeObj, nil, corev1.EventTypeWarning,
 		authorizationv1alpha1.EventReasonPolicyViolation, authorizationv1alpha1.EventActionReconcile,
@@ -86,6 +86,7 @@ func handlePolicyViolations(
 	if err := cfg.Deprovision(ctx); err != nil {
 		cfg.MarkStalled(ctx, err)
 		metrics.ReconcileTotal.WithLabelValues(cfg.ControllerLabel, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(cfg.ControllerLabel, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, fmt.Errorf("deprovision %s %s: %w", cfg.ResourceKind, runtimeObj.GetName(), err)
 	}
 
@@ -94,6 +95,8 @@ func handlePolicyViolations(
 		authorizationv1alpha1.DeprovisionedReason, "deprovisioned due to policy violations")
 
 	if err := cfg.ApplyStatus(ctx); err != nil {
+		metrics.ReconcileTotal.WithLabelValues(cfg.ControllerLabel, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(cfg.ControllerLabel, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, fmt.Errorf("apply status after deprovisioning %s %s: %w", cfg.ResourceKind, runtimeObj.GetName(), err)
 	}
 	metrics.ReconcileTotal.WithLabelValues(cfg.ControllerLabel, metrics.ResultDegraded).Inc()
@@ -109,7 +112,7 @@ func markPolicyCompliant(
 	policyName string,
 ) {
 	conditions.MarkTrue(obj, authorizationv1alpha1.PolicyCompliantCondition, generation,
-		authorizationv1alpha1.PolicyCompliantReasonAllChecksPass, "all policy checks passed")
+		authorizationv1alpha1.PolicyCompliantReasonAllChecksPass, authorizationv1alpha1.PolicyCompliantMessageAllChecksPass)
 
 	recorder.Eventf(runtimeObj, nil, corev1.EventTypeNormal,
 		authorizationv1alpha1.EventReasonPolicyCompliance, authorizationv1alpha1.EventActionReconcile,

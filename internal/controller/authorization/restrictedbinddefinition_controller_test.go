@@ -26,6 +26,7 @@ import (
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/pkg/conditions"
+	"github.com/telekom/auth-operator/pkg/helpers"
 )
 
 func newRBDTestReconciler(objs ...client.Object) (*RestrictedBindDefinitionReconciler, client.Client) {
@@ -552,7 +553,8 @@ func TestRBD_DeprovisionCleansUpResources(t *testing.T) {
 
 	crb := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "deprov-crb",
+			Name:   "deprov-crb",
+			Labels: map[string]string{helpers.ManagedByLabelStandard: helpers.ManagedByValue},
 			OwnerReferences: []metav1.OwnerReference{
 				{UID: "deprov-uid"},
 			},
@@ -563,6 +565,7 @@ func TestRBD_DeprovisionCleansUpResources(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "deprov-rb",
 			Namespace: "default",
+			Labels:    map[string]string{helpers.ManagedByLabelStandard: helpers.ManagedByValue},
 			OwnerReferences: []metav1.OwnerReference{
 				{UID: "deprov-uid"},
 			},
@@ -897,7 +900,8 @@ func TestRBD_Reconcile_DeleteWithDeprovisionError(t *testing.T) {
 	// CRB that will fail to delete.
 	crb := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "delete-err-target-view-binding",
+			Name:   "delete-err-target-view-binding",
+			Labels: map[string]string{helpers.ManagedByLabelStandard: helpers.ManagedByValue},
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion: authorizationv1alpha1.GroupVersion.String(),

@@ -76,8 +76,8 @@ func cleanupAllCRDs() {
 	}
 }
 
-// CleanupForHelmTests provides convenient cleanup for Helm-based tests
-// Usage: CleanupForHelmTests(helmNamespace, helmReleaseName, additionalNamespaces...)
+// CleanupForHelmTests provides convenient cleanup for Helm-based tests.
+// Usage: CleanupForHelmTests(helmNamespace, helmReleaseName, additionalNamespaces...).
 func CleanupForHelmTests(namespace, release string, additionalNamespaces ...string) {
 	namespaces := make([]string, 0, 1+len(additionalNamespaces))
 	namespaces = append(namespaces, namespace)
