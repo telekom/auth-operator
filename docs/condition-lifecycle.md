@@ -53,7 +53,6 @@ encountered a persistent error; **absent** when healthy.
 | Status | Reason | Meaning |
 |--------|--------|---------|
 | `True` | `Error` | A reconciliation error occurred |
-| `True` | `MissingDependency` | A required dependency is missing |
 | *(deleted)* | — | Reconciliation succeeded or progressing |
 
 **Lifecycle**: Set via `MarkStalled()` on unrecoverable errors. Deleted when
@@ -298,6 +297,7 @@ Reports whether the resource complies with its referenced RBACPolicy.
 | `True` | `AllChecksPass` | All policy checks pass |
 | `False` | `ViolationsDetected` | Policy violations detected: *\<details\>* |
 | `False` | `PolicyNotFound` | Referenced RBACPolicy %q not found |
+| `False` | `PolicyScopeNotMatched` | Target namespaces are outside policy scope |
 
 **Lifecycle**: Evaluated on every reconciliation after fetching the referenced
 RBACPolicy. When violations are detected, the controller triggers

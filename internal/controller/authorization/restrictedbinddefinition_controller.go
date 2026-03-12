@@ -199,6 +199,10 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 		old := rbd.DeepCopy()
 		controllerutil.AddFinalizer(rbd, authorizationv1alpha1.RestrictedBindDefinitionFinalizer)
 		if err := r.client.Patch(ctx, rbd, client.MergeFromWithOptions(old, client.MergeFromWithOptimisticLock{})); err != nil {
+			if apierrors.IsConflict(err) {
+				logger.V(1).Info("conflict adding finalizer, requeuing", "name", rbd.Name)
+				return ctrl.Result{Requeue: true}, nil
+			}
 			r.rbdMarkStalled(ctx, rbd, err)
 			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
 			return ctrl.Result{}, fmt.Errorf("add finalizer to RestrictedBindDefinition %s: %w", rbd.Name, err)

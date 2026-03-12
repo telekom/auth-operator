@@ -76,6 +76,9 @@ Image reference precedence: `digest` > `tag` > `Chart.AppVersion`
 | `controller.startupProbe.periodSeconds` | How often to perform the startup probe | `2` |
 | `controller.podDisruptionBudget.enabled` | Enable PDB | `false` |
 | `controller.podDisruptionBudget.minAvailable` | Minimum available pods | `1` |
+| `controller.bindDefinitionConcurrency` | Max concurrent BindDefinition reconciliations | `10` |
+| `controller.roleDefinitionConcurrency` | Max concurrent RoleDefinition reconciliations | `10` |
+| `controller.webhookAuthorizerConcurrency` | Max concurrent WebhookAuthorizer reconciliations | `1` |
 | `controller.rbacPolicyConcurrency` | Max concurrent RBACPolicy reconciliations (0 to disable) | `5` |
 | `controller.restrictedBindDefinitionConcurrency` | Max concurrent RestrictedBindDefinition reconciliations (0 to disable) | `5` |
 | `controller.restrictedRoleDefinitionConcurrency` | Max concurrent RestrictedRoleDefinition reconciliations (0 to disable) | `5` |
