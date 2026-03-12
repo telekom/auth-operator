@@ -7,6 +7,7 @@ package authorization
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -165,6 +166,9 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 	if err := r.client.Get(ctx, req.NamespacedName, rbd); err != nil {
 		if apierrors.IsNotFound(err) {
 			logger.V(1).Info("RestrictedBindDefinition not found (deleted), skipping", "name", req.Name)
+			metrics.DeletePolicyViolationSeries(metrics.ControllerRestrictedBindDefinition, req.Name)
+			metrics.RoleRefsMissing.DeleteLabelValues(req.Name)
+			metrics.NamespacesActive.DeleteLabelValues(req.Name)
 			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultSkipped).Inc()
 			return ctrl.Result{}, nil
 		}
@@ -222,7 +226,7 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 	}
 
 	// Step 6: Evaluate policy compliance.
-	violations := policy.EvaluateBindDefinition(rbacPolicy, rbd, newLabelGetter(ctx, r.client))
+	violations := policy.EvaluateBindDefinition(ctx, rbacPolicy, rbd, newLabelGetter(r.client))
 	if len(violations) > 0 {
 		rbd.Status.PolicyViolations = policy.ViolationStrings(violations)
 		result, err := handlePolicyViolations(ctx, rbd, rbd.Generation, violations, r.recorder, rbd, ViolationHandlerConfig{
@@ -237,7 +241,7 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 	}
 
 	// Policy compliant.
-	markPolicyCompliant(rbd, rbd.Generation, r.recorder, rbd, rbacPolicy.Name)
+	markPolicyCompliant(rbd, rbd.Generation, r.recorder, rbd, rbacPolicy.Name, metrics.ControllerRestrictedBindDefinition)
 	rbd.Status.PolicyViolations = nil
 
 	// Step 7: Reconcile RBAC resources.
@@ -247,6 +251,17 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, err
 	}
+
+	// Step 7.5: Validate role references.
+	missingRoles, err := r.rbdValidateRoleReferences(ctx, rbd)
+	if err != nil {
+		r.rbdMarkStalled(ctx, rbd, err)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
+		return ctrl.Result{}, err
+	}
+	rbd.Status.MissingRoleRefs = missingRoles
+	metrics.RoleRefsMissing.WithLabelValues(rbd.Name).Set(float64(len(missingRoles)))
 
 	// Step 8: Mark Ready.
 	rbd.Status.BindReconciled = true
@@ -290,6 +305,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdReconcileResources(
 	}
 
 	// Ensure RoleBindings.
+	activeNamespaces := make(map[string]struct{})
 	for _, roleBinding := range rbd.Spec.RoleBindings {
 		targetNamespaces, err := r.rbdResolveNamespaces(ctx, roleBinding)
 		if err != nil {
@@ -299,6 +315,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdReconcileResources(
 			if conditions.IsNamespaceTerminating(&ns) {
 				continue
 			}
+			activeNamespaces[ns.Name] = struct{}{}
 			for _, clusterRoleRef := range roleBinding.ClusterRoleRefs {
 				if err := r.rbdEnsureRoleBinding(ctx, rbd, ns.Name, clusterRoleRef, "ClusterRole"); err != nil {
 					return err
@@ -311,6 +328,8 @@ func (r *RestrictedBindDefinitionReconciler) rbdReconcileResources(
 			}
 		}
 	}
+
+	metrics.NamespacesActive.WithLabelValues(rbd.Name).Set(float64(len(activeNamespaces)))
 
 	return nil
 }
@@ -489,6 +508,11 @@ func (r *RestrictedBindDefinitionReconciler) reconcileDelete(
 		return fmt.Errorf("delete cleanup for RestrictedBindDefinition %s: %w", rbd.Name, err)
 	}
 
+	// Clean up metric series.
+	metrics.DeletePolicyViolationSeries(metrics.ControllerRestrictedBindDefinition, rbd.Name)
+	metrics.RoleRefsMissing.DeleteLabelValues(rbd.Name)
+	metrics.NamespacesActive.DeleteLabelValues(rbd.Name)
+
 	// Remove finalizer.
 	old := rbd.DeepCopy()
 	controllerutil.RemoveFinalizer(rbd, authorizationv1alpha1.RestrictedBindDefinitionFinalizer)
@@ -528,4 +552,80 @@ func (r *RestrictedBindDefinitionReconciler) rbdApplyStatusAndMarkStalled(
 	if err := ssa.ApplyRestrictedBindDefinitionStatus(ctx, r.client, rbd); err != nil {
 		logger.Error(err, "failed to apply status via SSA", "name", rbd.Name)
 	}
+}
+
+// rbdValidateRoleReferences checks that all referenced ClusterRoles and Roles exist.
+// Returns the list of missing references in the format "ClusterRole/<name>" or
+// "Role/<namespace>/<name>".
+//
+//nolint:dupl // Mirrors BD's validateRoleReferences; different receiver and namespace resolver.
+func (r *RestrictedBindDefinitionReconciler) rbdValidateRoleReferences(
+	ctx context.Context,
+	rbd *authorizationv1alpha1.RestrictedBindDefinition,
+) ([]string, error) {
+	logger := log.FromContext(ctx)
+	var missingRoles []string
+
+	// Check ClusterRoleRefs in ClusterRoleBindings.
+	for _, clusterRoleRef := range rbd.Spec.ClusterRoleBindings.ClusterRoleRefs {
+		cr := &rbacv1.ClusterRole{}
+		if err := r.client.Get(ctx, types.NamespacedName{Name: clusterRoleRef}, cr); err != nil {
+			if apierrors.IsNotFound(err) {
+				roleName := fmt.Sprintf("ClusterRole/%s", clusterRoleRef)
+				if !slices.Contains(missingRoles, roleName) {
+					logger.V(1).Info("ClusterRole not found", "clusterRole", clusterRoleRef)
+					missingRoles = append(missingRoles, roleName)
+				}
+			} else {
+				return missingRoles, fmt.Errorf("check ClusterRole %q existence: %w", clusterRoleRef, err)
+			}
+		}
+	}
+
+	// Check ClusterRoleRefs and RoleRefs in RoleBindings.
+	for _, roleBinding := range rbd.Spec.RoleBindings {
+		for _, clusterRoleRef := range roleBinding.ClusterRoleRefs {
+			cr := &rbacv1.ClusterRole{}
+			if err := r.client.Get(ctx, types.NamespacedName{Name: clusterRoleRef}, cr); err != nil {
+				if apierrors.IsNotFound(err) {
+					roleName := fmt.Sprintf("ClusterRole/%s", clusterRoleRef)
+					if !slices.Contains(missingRoles, roleName) {
+						logger.V(1).Info("ClusterRole not found", "clusterRole", clusterRoleRef)
+						missingRoles = append(missingRoles, roleName)
+					}
+				} else {
+					return missingRoles, fmt.Errorf("check ClusterRole %q existence: %w", clusterRoleRef, err)
+				}
+			}
+		}
+
+		// Resolve namespaces for this roleBinding to check RoleRefs.
+		targetNamespaces, err := r.rbdResolveNamespaces(ctx, roleBinding)
+		if err != nil {
+			return missingRoles, fmt.Errorf("resolve namespaces for roleBinding during validation: %w", err)
+		}
+
+		for _, roleRef := range roleBinding.RoleRefs {
+			for _, ns := range targetNamespaces {
+				if conditions.IsNamespaceTerminating(&ns) {
+					continue
+				}
+				role := &rbacv1.Role{}
+				if err := r.client.Get(ctx, types.NamespacedName{Name: roleRef, Namespace: ns.Name}, role); err != nil {
+					if apierrors.IsNotFound(err) {
+						roleName := fmt.Sprintf("Role/%s/%s", ns.Name, roleRef)
+						if !slices.Contains(missingRoles, roleName) {
+							logger.V(1).Info("Role not found", "role", roleRef, "namespace", ns.Name)
+							missingRoles = append(missingRoles, roleName)
+						}
+					} else {
+						logger.Error(err, "failed to check Role existence", "role", roleRef, "namespace", ns.Name)
+					}
+				}
+			}
+		}
+	}
+
+	slices.Sort(missingRoles)
+	return missingRoles, nil
 }

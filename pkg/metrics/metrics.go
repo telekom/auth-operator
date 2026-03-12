@@ -275,6 +275,21 @@ var (
 			Help:      "Total BindDefinitions enqueued during namespace-event fan-out (selector match)",
 		},
 	)
+
+	// PolicyViolationsActive tracks the number of active policy violations
+	// detected per restricted resource during the last reconciliation.
+	// A non-zero value indicates the resource is non-compliant with its
+	// referenced RBACPolicy and has been deprovisioned. The gauge resets
+	// to 0 when the resource becomes compliant. Call
+	// DeletePolicyViolationSeries on resource deletion to avoid stale series.
+	PolicyViolationsActive = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: Namespace,
+			Name:      "policy_violations_active",
+			Help:      "Number of active policy violations per restricted resource (0 = compliant)",
+		},
+		[]string{"controller", "name"},
+	)
 )
 
 // allCollectors returns the full list of prometheus.Collector instances
@@ -303,6 +318,7 @@ func allCollectors() []prometheus.Collector {
 		AuthorizerRateLimitedTotal,
 		NamespaceFanoutSkipped,
 		NamespaceFanoutEnqueued,
+		PolicyViolationsActive,
 	}
 }
 
@@ -395,4 +411,10 @@ func DeleteAuthorizerSeries(authorizerName string) {
 		AuthorizerRequestsTotal.DeleteLabelValues(decision, authorizerName)
 	}
 	AuthorizerDeniedPrincipalHitsTotal.DeleteLabelValues(authorizerName)
+}
+
+// DeletePolicyViolationSeries removes the PolicyViolationsActive gauge series
+// for a deleted restricted resource to prevent stale zero-value series.
+func DeletePolicyViolationSeries(controller, name string) {
+	PolicyViolationsActive.DeleteLabelValues(controller, name)
 }

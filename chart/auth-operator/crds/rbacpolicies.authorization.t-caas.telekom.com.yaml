@@ -26,6 +26,11 @@ spec:
       jsonPath: .status.boundResourceCount
       name: Bound
       type: integer
+    - description: Explicit namespace scope
+      jsonPath: .spec.appliesTo.namespaces
+      name: Namespaces
+      priority: 1
+      type: string
     - description: Time since creation
       jsonPath: .metadata.creationTimestamp
       name: Age

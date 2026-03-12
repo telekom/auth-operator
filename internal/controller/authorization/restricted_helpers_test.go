@@ -140,7 +140,7 @@ func TestMarkPolicyCompliant(t *testing.T) {
 	}
 
 	recorder := events.NewFakeRecorder(10)
-	markPolicyCompliant(rbd, rbd.Generation, recorder, rbd, "test-policy")
+	markPolicyCompliant(rbd, rbd.Generation, recorder, rbd, "test-policy", metrics.ControllerRestrictedBindDefinition)
 
 	cond := conditions.Get(rbd, authorizationv1alpha1.PolicyCompliantCondition)
 	g.Expect(cond).NotTo(gomega.BeNil())

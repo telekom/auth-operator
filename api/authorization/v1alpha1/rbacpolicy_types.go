@@ -311,6 +311,7 @@ type RBACPolicyStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status",description="Whether the RBACPolicy is ready"
 // +kubebuilder:printcolumn:name="Bound",type="integer",JSONPath=".status.boundResourceCount",description="Number of bound restricted resources"
+// +kubebuilder:printcolumn:name="Namespaces",type="string",JSONPath=".spec.appliesTo.namespaces",priority=1,description="Explicit namespace scope"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Time since creation"
 type RBACPolicy struct {
 	metav1.TypeMeta   `json:",inline"`

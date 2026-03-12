@@ -5,6 +5,7 @@
 package policy
 
 import (
+	"context"
 	"testing"
 
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -22,17 +23,17 @@ type fakeLabelGetter struct {
 	roles        map[string]map[string]string // key: "namespace/name"
 }
 
-func (f *fakeLabelGetter) GetNamespaceLabels(name string) (map[string]string, bool) {
+func (f *fakeLabelGetter) GetNamespaceLabels(_ context.Context, name string) (map[string]string, bool) {
 	l, ok := f.namespaces[name]
 	return l, ok
 }
 
-func (f *fakeLabelGetter) GetClusterRoleLabels(name string) (map[string]string, bool) {
+func (f *fakeLabelGetter) GetClusterRoleLabels(_ context.Context, name string) (map[string]string, bool) {
 	l, ok := f.clusterRoles[name]
 	return l, ok
 }
 
-func (f *fakeLabelGetter) GetRoleLabels(namespace, name string) (map[string]string, bool) {
+func (f *fakeLabelGetter) GetRoleLabels(_ context.Context, namespace, name string) (map[string]string, bool) {
 	l, ok := f.roles[namespace+"/"+name]
 	return l, ok
 }
@@ -45,7 +46,7 @@ func TestEvaluateBindDefinition_NoLimits(t *testing.T) {
 		},
 	}
 
-	violations := EvaluateBindDefinition(policy, rbd, nil)
+	violations := EvaluateBindDefinition(context.Background(), policy, rbd, nil)
 	if len(violations) != 0 {
 		t.Errorf("expected no violations, got %v", violations)
 	}
@@ -68,7 +69,7 @@ func TestEvaluateBindDefinition_CRBNotAllowed(t *testing.T) {
 		},
 	}
 
-	violations := EvaluateBindDefinition(policy, rbd, nil)
+	violations := EvaluateBindDefinition(context.Background(), policy, rbd, nil)
 	if len(violations) != 1 {
 		t.Fatalf("expected 1 violation, got %d: %v", len(violations), violations)
 	}
@@ -94,7 +95,7 @@ func TestEvaluateBindDefinition_CRBAllowed(t *testing.T) {
 		},
 	}
 
-	violations := EvaluateBindDefinition(policy, rbd, nil)
+	violations := EvaluateBindDefinition(context.Background(), policy, rbd, nil)
 	if len(violations) != 0 {
 		t.Errorf("expected no violations, got %v", violations)
 	}
@@ -136,7 +137,7 @@ func TestEvaluateBindDefinition_RoleRefAllowedAndForbidden(t *testing.T) {
 				},
 			}
 
-			violations := EvaluateBindDefinition(policy, rbd, nil)
+			violations := EvaluateBindDefinition(context.Background(), policy, rbd, nil)
 			if len(violations) != tt.wantViolations {
 				t.Errorf("expected %d violations, got %d: %v", tt.wantViolations, len(violations), violations)
 			}
@@ -172,7 +173,7 @@ func TestEvaluateBindDefinition_RoleBindingLimits(t *testing.T) {
 		},
 	}
 
-	violations := EvaluateBindDefinition(policy, rbd, nil)
+	violations := EvaluateBindDefinition(context.Background(), policy, rbd, nil)
 	if len(violations) != 1 {
 		t.Fatalf("expected 1 violation, got %d: %v", len(violations), violations)
 	}
@@ -240,7 +241,7 @@ func TestEvaluateBindDefinition_NamespaceLimits(t *testing.T) {
 					Subjects:     []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
 				},
 			}
-			violations := EvaluateBindDefinition(policy, rbd, nil)
+			violations := EvaluateBindDefinition(context.Background(), policy, rbd, nil)
 			if len(violations) != tt.wantViolations {
 				t.Errorf("expected %d violations, got %d: %v", tt.wantViolations, len(violations), violations)
 			}
@@ -287,7 +288,7 @@ func TestEvaluateBindDefinition_SubjectKindLimits(t *testing.T) {
 					Subjects: tt.subjects,
 				},
 			}
-			violations := EvaluateBindDefinition(policy, rbd, nil)
+			violations := EvaluateBindDefinition(context.Background(), policy, rbd, nil)
 			if len(violations) != tt.wantViolations {
 				t.Errorf("expected %d violations, got %d: %v", tt.wantViolations, len(violations), violations)
 			}
@@ -329,7 +330,7 @@ func TestEvaluateBindDefinition_UserNameLimits(t *testing.T) {
 					Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: tt.userName}},
 				},
 			}
-			violations := EvaluateBindDefinition(policy, rbd, nil)
+			violations := EvaluateBindDefinition(context.Background(), policy, rbd, nil)
 			if len(violations) != tt.wantViolations {
 				t.Errorf("expected %d violations for user %q, got %d: %v", tt.wantViolations, tt.userName, len(violations), violations)
 			}
@@ -365,7 +366,7 @@ func TestEvaluateBindDefinition_GroupNameLimits(t *testing.T) {
 					Subjects: []rbacv1.Subject{{Kind: rbacv1.GroupKind, Name: tt.groupName}},
 				},
 			}
-			violations := EvaluateBindDefinition(policy, rbd, nil)
+			violations := EvaluateBindDefinition(context.Background(), policy, rbd, nil)
 			if len(violations) != tt.wantViolations {
 				t.Errorf("expected %d violations for group %q, got %d: %v", tt.wantViolations, tt.groupName, len(violations), violations)
 			}
@@ -407,7 +408,7 @@ func TestEvaluateBindDefinition_ServiceAccountLimits(t *testing.T) {
 					}},
 				},
 			}
-			violations := EvaluateBindDefinition(policy, rbd, nil)
+			violations := EvaluateBindDefinition(context.Background(), policy, rbd, nil)
 			if len(violations) != tt.wantViolations {
 				t.Errorf("expected %d violations for SA namespace %q, got %d: %v", tt.wantViolations, tt.saNamespace, len(violations), violations)
 			}
@@ -450,7 +451,7 @@ func TestEvaluateBindDefinition_AllDimensions(t *testing.T) {
 		},
 	}
 
-	violations := EvaluateBindDefinition(policy, rbd, nil)
+	violations := EvaluateBindDefinition(context.Background(), policy, rbd, nil)
 	// Expected: CRB not allowed (1) + role ref not allowed (1) + forbidden namespace (1) + forbidden SA kind (1)
 	if len(violations) != 4 {
 		t.Errorf("expected 4 violations, got %d: %v", len(violations), violations)
@@ -474,7 +475,7 @@ func TestEvaluateBindDefinition_SubjectAllowedKindsDefaultDeny(t *testing.T) {
 		},
 	}
 
-	violations := EvaluateBindDefinition(policy, rbd, nil)
+	violations := EvaluateBindDefinition(context.Background(), policy, rbd, nil)
 	if len(violations) != 1 {
 		t.Fatalf("expected 1 violation, got %d: %v", len(violations), violations)
 	}
@@ -513,7 +514,7 @@ func TestEvaluateBindDefinition_UserAllowedAndForbiddenSuffixes(t *testing.T) {
 					Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: tt.userName}},
 				},
 			}
-			violations := EvaluateBindDefinition(policy, rbd, nil)
+			violations := EvaluateBindDefinition(context.Background(), policy, rbd, nil)
 			if len(violations) != tt.wantViolations {
 				t.Errorf("expected %d violations for user %q, got %d: %v", tt.wantViolations, tt.userName, len(violations), violations)
 			}
@@ -544,7 +545,7 @@ func TestEvaluateBindDefinition_MaxTargetNamespacesDeduplicated(t *testing.T) {
 		},
 	}
 
-	violations := EvaluateBindDefinition(policy, rbd, nil)
+	violations := EvaluateBindDefinition(context.Background(), policy, rbd, nil)
 	if len(violations) != 0 {
 		t.Errorf("expected 0 violations (2 unique namespaces <= max 2), got %d: %v", len(violations), violations)
 	}
@@ -564,7 +565,7 @@ func TestEvaluateBindDefinition_SubjectKindsDefaultDenyEmpty(t *testing.T) {
 		},
 	}
 
-	violations := EvaluateBindDefinition(policy, rbd, nil)
+	violations := EvaluateBindDefinition(context.Background(), policy, rbd, nil)
 	if len(violations) != 1 {
 		t.Fatalf("expected 1 violation (empty AllowedKinds = default-deny), got %d: %v", len(violations), violations)
 	}
@@ -590,7 +591,7 @@ func TestEvaluateBindDefinition_RoleRefDefaultDenyEmpty(t *testing.T) {
 		},
 	}
 
-	violations := EvaluateBindDefinition(policy, rbd, nil)
+	violations := EvaluateBindDefinition(context.Background(), policy, rbd, nil)
 	if len(violations) != 1 {
 		t.Fatalf("expected 1 violation (empty AllowedRoleRefs = default-deny), got %d: %v", len(violations), violations)
 	}
@@ -626,7 +627,7 @@ func TestEvaluateBindDefinition_AllowedRoleRefSelector(t *testing.T) {
 				"viewer": {"managed-by": "auth-operator"},
 			},
 		}
-		violations := EvaluateBindDefinition(policy, rbd, lg)
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, lg)
 		if len(violations) != 0 {
 			t.Errorf("expected 0 violations (selector matches), got %d: %v", len(violations), violations)
 		}
@@ -658,7 +659,7 @@ func TestEvaluateBindDefinition_AllowedRoleRefSelector(t *testing.T) {
 				"viewer": {"managed-by": "other"},
 			},
 		}
-		violations := EvaluateBindDefinition(policy, rbd, lg)
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, lg)
 		if len(violations) != 1 {
 			t.Fatalf("expected 1 violation (selector does not match), got %d: %v", len(violations), violations)
 		}
@@ -692,7 +693,7 @@ func TestEvaluateBindDefinition_AllowedRoleRefSelector(t *testing.T) {
 			},
 		}
 		// Name "viewer" is in AllowedRoleRefs → allowed via OR.
-		violations := EvaluateBindDefinition(policy, rbd, lg)
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, lg)
 		if len(violations) != 0 {
 			t.Errorf("expected 0 violations (name matches via OR), got %d: %v", len(violations), violations)
 		}
@@ -726,7 +727,7 @@ func TestEvaluateBindDefinition_AllowedRoleRefSelector(t *testing.T) {
 			},
 		}
 		// Name "viewer" not in AllowedRoleRefs but matches selector → allowed via OR.
-		violations := EvaluateBindDefinition(policy, rbd, lg)
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, lg)
 		if len(violations) != 0 {
 			t.Errorf("expected 0 violations (selector matches via OR), got %d: %v", len(violations), violations)
 		}
@@ -760,7 +761,7 @@ func TestEvaluateBindDefinition_AllowedRoleRefSelector(t *testing.T) {
 			},
 		}
 		// Neither name nor selector matches → violation.
-		violations := EvaluateBindDefinition(policy, rbd, lg)
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, lg)
 		if len(violations) != 1 {
 			t.Fatalf("expected 1 violation (neither name nor selector matches), got %d: %v", len(violations), violations)
 		}
@@ -789,7 +790,7 @@ func TestEvaluateBindDefinition_AllowedRoleRefSelector(t *testing.T) {
 		}
 		lg := &fakeLabelGetter{clusterRoles: map[string]map[string]string{}}
 		// Role not found → selector can't match → rejected.
-		violations := EvaluateBindDefinition(policy, rbd, lg)
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, lg)
 		if len(violations) != 1 {
 			t.Fatalf("expected 1 violation (role not found, selector can't match), got %d: %v", len(violations), violations)
 		}
@@ -817,7 +818,7 @@ func TestEvaluateBindDefinition_AllowedRoleRefSelector(t *testing.T) {
 			},
 		}
 		// No LabelGetter → selector treated as not configured → default-deny.
-		violations := EvaluateBindDefinition(policy, rbd, nil)
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, nil)
 		if len(violations) != 1 {
 			t.Fatalf("expected 1 violation (no resolver, default-deny), got %d: %v", len(violations), violations)
 		}
@@ -854,7 +855,7 @@ func TestEvaluateBindDefinition_ForbiddenRoleRefSelector(t *testing.T) {
 				"admin": {"privileged": "true"},
 			},
 		}
-		violations := EvaluateBindDefinition(policy, rbd, lg)
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, lg)
 		if len(violations) != 1 {
 			t.Fatalf("expected 1 violation (forbidden selector match), got %d: %v", len(violations), violations)
 		}
@@ -866,7 +867,7 @@ func TestEvaluateBindDefinition_ForbiddenRoleRefSelector(t *testing.T) {
 				"admin": {"privileged": "false"},
 			},
 		}
-		violations := EvaluateBindDefinition(policy, rbd, lg)
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, lg)
 		if len(violations) != 0 {
 			t.Errorf("expected 0 violations, got %d: %v", len(violations), violations)
 		}
@@ -901,7 +902,7 @@ func TestEvaluateBindDefinition_AllowedNamespaceSelector(t *testing.T) {
 				"team-a": {"env": "production"},
 			},
 		}
-		violations := EvaluateBindDefinition(policy, rbd, lg)
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, lg)
 		if len(violations) != 0 {
 			t.Errorf("expected 0 violations, got %d: %v", len(violations), violations)
 		}
@@ -913,7 +914,7 @@ func TestEvaluateBindDefinition_AllowedNamespaceSelector(t *testing.T) {
 				"team-a": {"env": "staging"},
 			},
 		}
-		violations := EvaluateBindDefinition(policy, rbd, lg)
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, lg)
 		if len(violations) != 1 {
 			t.Fatalf("expected 1 violation, got %d: %v", len(violations), violations)
 		}
@@ -921,14 +922,14 @@ func TestEvaluateBindDefinition_AllowedNamespaceSelector(t *testing.T) {
 
 	t.Run("namespace not found", func(t *testing.T) {
 		lg := &fakeLabelGetter{namespaces: map[string]map[string]string{}}
-		violations := EvaluateBindDefinition(policy, rbd, lg)
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, lg)
 		if len(violations) != 1 {
 			t.Fatalf("expected 1 violation (namespace not found), got %d: %v", len(violations), violations)
 		}
 	})
 
 	t.Run("nil LabelGetter skips selector", func(t *testing.T) {
-		violations := EvaluateBindDefinition(policy, rbd, nil)
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, nil)
 		if len(violations) != 0 {
 			t.Errorf("expected 0 violations (no resolver), got %d: %v", len(violations), violations)
 		}
@@ -963,7 +964,7 @@ func TestEvaluateBindDefinition_SAAllowedNamespaceSelector(t *testing.T) {
 				"platform-ns": {"team": "platform"},
 			},
 		}
-		violations := EvaluateBindDefinition(policy, rbd, lg)
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, lg)
 		if len(violations) != 0 {
 			t.Errorf("expected 0 violations, got %d: %v", len(violations), violations)
 		}
@@ -975,7 +976,7 @@ func TestEvaluateBindDefinition_SAAllowedNamespaceSelector(t *testing.T) {
 				"platform-ns": {"team": "other"},
 			},
 		}
-		violations := EvaluateBindDefinition(policy, rbd, lg)
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, lg)
 		if len(violations) != 1 {
 			t.Fatalf("expected 1 violation, got %d: %v", len(violations), violations)
 		}
@@ -1005,7 +1006,7 @@ func TestEvaluateBindDefinition_SAAllowedCreationNamespaces(t *testing.T) {
 				},
 			},
 		}
-		violations := EvaluateBindDefinition(policy, rbd, nil)
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, nil)
 		if len(violations) != 0 {
 			t.Errorf("expected 0 violations, got %d: %v", len(violations), violations)
 		}
@@ -1019,7 +1020,7 @@ func TestEvaluateBindDefinition_SAAllowedCreationNamespaces(t *testing.T) {
 				},
 			},
 		}
-		violations := EvaluateBindDefinition(policy, rbd, nil)
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, nil)
 		if len(violations) != 1 {
 			t.Fatalf("expected 1 violation, got %d: %v", len(violations), violations)
 		}
@@ -1057,7 +1058,7 @@ func TestEvaluateBindDefinition_SACreationNamespaceSelector(t *testing.T) {
 				"team-ns": {"auto-create": "enabled"},
 			},
 		}
-		violations := EvaluateBindDefinition(policy, rbd, lg)
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, lg)
 		if len(violations) != 0 {
 			t.Errorf("expected 0 violations, got %d: %v", len(violations), violations)
 		}
@@ -1069,7 +1070,7 @@ func TestEvaluateBindDefinition_SACreationNamespaceSelector(t *testing.T) {
 				"team-ns": {"auto-create": "disabled"},
 			},
 		}
-		violations := EvaluateBindDefinition(policy, rbd, lg)
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, lg)
 		if len(violations) != 1 {
 			t.Fatalf("expected 1 violation, got %d: %v", len(violations), violations)
 		}
@@ -1105,7 +1106,7 @@ func TestEvaluateBindDefinition_RoleBindingRoleRefSelector(t *testing.T) {
 				"team-a/my-role": {"safe": "true"},
 			},
 		}
-		violations := EvaluateBindDefinition(policy, rbd, lg)
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, lg)
 		if len(violations) != 0 {
 			t.Errorf("expected 0 violations, got %d: %v", len(violations), violations)
 		}
@@ -1117,7 +1118,7 @@ func TestEvaluateBindDefinition_RoleBindingRoleRefSelector(t *testing.T) {
 				"team-a/my-role": {"safe": "false"},
 			},
 		}
-		violations := EvaluateBindDefinition(policy, rbd, lg)
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, lg)
 		if len(violations) != 1 {
 			t.Fatalf("expected 1 violation, got %d: %v", len(violations), violations)
 		}
@@ -1156,7 +1157,7 @@ func TestEvaluateBindDefinition_SACreationNamespaceORSemantics(t *testing.T) {
 			},
 		}
 		// "team-a" is in the static list → allowed via OR, even though selector doesn't match.
-		violations := EvaluateBindDefinition(policy, rbd, lg)
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, lg)
 		if len(violations) != 0 {
 			t.Errorf("expected 0 violations (static list matches via OR), got %d: %v", len(violations), violations)
 		}
@@ -1192,7 +1193,7 @@ func TestEvaluateBindDefinition_SACreationNamespaceORSemantics(t *testing.T) {
 			},
 		}
 		// "team-b" not in static list, but matches selector → allowed via OR.
-		violations := EvaluateBindDefinition(policy, rbd, lg)
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, lg)
 		if len(violations) != 0 {
 			t.Errorf("expected 0 violations (selector matches via OR), got %d: %v", len(violations), violations)
 		}
@@ -1228,7 +1229,7 @@ func TestEvaluateBindDefinition_SACreationNamespaceORSemantics(t *testing.T) {
 			},
 		}
 		// "team-c" not in static list, doesn't match selector → violation.
-		violations := EvaluateBindDefinition(policy, rbd, lg)
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, lg)
 		if len(violations) != 1 {
 			t.Fatalf("expected 1 violation (neither matches), got %d: %v", len(violations), violations)
 		}
