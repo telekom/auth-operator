@@ -34,6 +34,21 @@ var _ = Describe("RestrictedRoleDefinition Webhook", func() {
 		if err != nil {
 			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(policy), policy)).To(Succeed())
 		}
+
+		// Wait for the informer cache to sync the RBACPolicy so webhook validators
+		// using mgr.GetClient() can find it. DryRun avoids side effects.
+		probe := &RestrictedRoleDefinition{
+			ObjectMeta: metav1.ObjectMeta{Name: "cache-sync-probe-rrd"},
+			Spec: RestrictedRoleDefinitionSpec{
+				PolicyRef:       RBACPolicyReference{Name: policy.Name},
+				TargetRole:      DefinitionClusterRole,
+				TargetName:      "cache-sync-probe-rrd",
+				ScopeNamespaced: false,
+			},
+		}
+		Eventually(func() error {
+			return k8sClient.Create(ctx, probe.DeepCopy(), client.DryRunAll)
+		}).WithTimeout(5 * time.Second).WithPolling(100 * time.Millisecond).Should(Succeed())
 	})
 
 	Context("When creating RestrictedRoleDefinition under Validating Webhook", func() {
