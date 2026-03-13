@@ -236,7 +236,7 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 				authorizationv1alpha1.PolicyCompliantReasonPolicyNotFound, authorizationv1alpha1.PolicyCompliantMessagePolicyNotFound, rrd.Spec.PolicyRef.Name)
 			rrd.Status.PolicyViolations = []string{fmt.Sprintf("policy %q not found", rrd.Spec.PolicyRef.Name)}
 			r.recorder.Eventf(rrd, nil, corev1.EventTypeWarning,
-				authorizationv1alpha1.EventReasonPolicyNotFound, "Reconcile",
+				authorizationv1alpha1.EventReasonPolicyNotFound, authorizationv1alpha1.EventActionReconcile,
 				"Referenced RBACPolicy %q not found", rrd.Spec.PolicyRef.Name)
 			r.rrdApplyStatusAndMarkStalled(ctx, rrd, "policy not found")
 			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultDegraded).Inc()
@@ -507,7 +507,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdDeprovision(
 	}
 
 	r.recorder.Eventf(rrd, nil, corev1.EventTypeWarning,
-		authorizationv1alpha1.EventReasonDeprovisioned, "Reconcile",
+		authorizationv1alpha1.EventReasonDeprovisioned, authorizationv1alpha1.EventActionReconcile,
 		"Deprovisioned %s %s due to policy violations", rrd.Spec.TargetRole, rrd.Spec.TargetName)
 	return nil
 }

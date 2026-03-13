@@ -226,7 +226,7 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 			conditions.MarkFalse(rbd, authorizationv1alpha1.PolicyCompliantCondition, rbd.Generation,
 				authorizationv1alpha1.PolicyCompliantReasonPolicyNotFound, authorizationv1alpha1.PolicyCompliantMessagePolicyNotFound, rbd.Spec.PolicyRef.Name)
 			r.recorder.Eventf(rbd, nil, corev1.EventTypeWarning,
-				authorizationv1alpha1.EventReasonPolicyNotFound, "Reconcile",
+				authorizationv1alpha1.EventReasonPolicyNotFound, authorizationv1alpha1.EventActionReconcile,
 				"Referenced RBACPolicy %q not found", rbd.Spec.PolicyRef.Name)
 			rbd.Status.PolicyViolations = []string{fmt.Sprintf("policy %q not found", rbd.Spec.PolicyRef.Name)}
 			r.rbdApplyStatusAndMarkStalled(ctx, rbd)
@@ -399,7 +399,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdEnsureServiceAccounts(
 		}
 	}
 
-	rbd.Status.GeneratedServiceAccounts = helpers.MergeSubjects(rbd.Status.GeneratedServiceAccounts, generatedSAs)
+	rbd.Status.GeneratedServiceAccounts = generatedSAs
 	rbd.Status.ExternalServiceAccounts = externalSAs
 	return nil
 }
@@ -498,7 +498,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdDeprovision(
 	}
 
 	r.recorder.Eventf(rbd, nil, corev1.EventTypeWarning,
-		authorizationv1alpha1.EventReasonDeprovisioned, "Reconcile",
+		authorizationv1alpha1.EventReasonDeprovisioned, authorizationv1alpha1.EventActionReconcile,
 		"Deprovisioned all RBAC resources due to policy violations")
 
 	return nil
@@ -570,8 +570,6 @@ func (r *RestrictedBindDefinitionReconciler) rbdApplyStatusAndMarkStalled(
 // rbdValidateRoleReferences checks that all referenced ClusterRoles and Roles exist.
 // Returns the list of missing references in the format "ClusterRole/<name>" or
 // "Role/<namespace>/<name>".
-//
-//nolint:dupl // Mirrors BD's validateRoleReferences; different receiver and namespace resolver.
 func (r *RestrictedBindDefinitionReconciler) rbdValidateRoleReferences(
 	ctx context.Context,
 	rbd *authorizationv1alpha1.RestrictedBindDefinition,
@@ -632,7 +630,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdValidateRoleReferences(
 							missingRoles = append(missingRoles, roleName)
 						}
 					} else {
-						logger.Error(err, "failed to check Role existence", "role", roleRef, "namespace", ns.Name)
+						return missingRoles, fmt.Errorf("check Role %s/%s existence: %w", ns.Name, roleRef, err)
 					}
 				}
 			}
