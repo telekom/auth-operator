@@ -72,32 +72,37 @@ func (v *RBACPolicyValidator) ValidateDelete(ctx context.Context, obj *RBACPolic
 	logger := log.FromContext(ctx).WithName("rbacpolicy-webhook")
 	logger.V(1).Info("validating delete", "name", obj.Name)
 
-	// Check for bound RestrictedBindDefinitions. The field index constrains results
-	// to items referencing this policy; the context timeout provides the latency bound.
+	// Check for bound RestrictedBindDefinitions. Only need to check existence,
+	// not count — Limit(1) avoids loading all referencing resources.
 	rbdList := &RestrictedBindDefinitionList{}
 	if err := v.Client.List(ctx, rbdList, client.MatchingFields{
 		PolicyRefField: obj.Name,
-	}); err != nil {
+	}, client.Limit(1)); err != nil {
 		logger.Error(err, "failed to list RestrictedBindDefinitions")
 		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RestrictedBindDefinitions: %w", err))
 	}
-
-	// Check for bound RestrictedRoleDefinitions. The field index constrains results
-	// to items referencing this policy; the context timeout provides the latency bound.
-	rrdList := &RestrictedRoleDefinitionList{}
-	if err := v.Client.List(ctx, rrdList, client.MatchingFields{
-		PolicyRefField: obj.Name,
-	}); err != nil {
-		logger.Error(err, "failed to list RestrictedRoleDefinitions")
-		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RestrictedRoleDefinitions: %w", err))
-	}
-
-	total := len(rbdList.Items) + len(rrdList.Items)
-	if total > 0 {
+	if len(rbdList.Items) > 0 {
 		return nil, apierrors.NewForbidden(
 			schema.GroupResource{Group: GroupVersion.Group, Resource: "rbacpolicies"},
 			obj.Name,
-			fmt.Errorf("cannot delete: %d resource(s) still reference this policy", total),
+			fmt.Errorf("cannot delete: RestrictedBindDefinition(s) still reference this policy"),
+		)
+	}
+
+	// Check for bound RestrictedRoleDefinitions. Only need to check existence,
+	// not count — Limit(1) avoids loading all referencing resources.
+	rrdList := &RestrictedRoleDefinitionList{}
+	if err := v.Client.List(ctx, rrdList, client.MatchingFields{
+		PolicyRefField: obj.Name,
+	}, client.Limit(1)); err != nil {
+		logger.Error(err, "failed to list RestrictedRoleDefinitions")
+		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RestrictedRoleDefinitions: %w", err))
+	}
+	if len(rrdList.Items) > 0 {
+		return nil, apierrors.NewForbidden(
+			schema.GroupResource{Group: GroupVersion.Group, Resource: "rbacpolicies"},
+			obj.Name,
+			fmt.Errorf("cannot delete: RestrictedRoleDefinition(s) still reference this policy"),
 		)
 	}
 
