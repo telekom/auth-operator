@@ -1230,8 +1230,6 @@ func (r *BindDefinitionReconciler) deleteRoleBindingWithStatusUpdate(
 
 // validateRoleReferences checks if all referenced ClusterRoles and Roles exist.
 // Returns a list of missing role names and an error if namespace resolution fails.
-//
-//nolint:dupl // Mirrors RBD's rbdValidateRoleReferences; different receiver and namespace resolver.
 func (r *BindDefinitionReconciler) validateRoleReferences(
 	ctx context.Context,
 	bindDef *authorizationv1alpha1.BindDefinition,
