@@ -56,7 +56,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `targetName` _string_ | Name that will be prefixed to the concatenated string which is the name of the binding. Follows format "targetName-clusterrole/role-binding" where clusterrole/role is the in-cluster existing ClusterRole or Role.<br />This field is immutable after creation; changing it would orphan existing bindings and service accounts. |  | MaxLength: 253 <br />MinLength: 1 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` <br />Required: \{\} <br /> |
+| `targetName` _string_ | Name that will be prefixed to the concatenated string which is the name of the binding. Follows format "targetName-clusterrole/role-binding" where clusterrole/role is the in-cluster existing ClusterRole or Role.<br />This field is immutable after creation; changing it would orphan existing bindings and service accounts. |  | MaxLength: 63 <br />MinLength: 1 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` <br />Required: \{\} <br /> |
 | `subjects` _[Subject](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#subject-v1-rbac) array_ | List of subjects that will be bound to a target ClusterRole/Role. Can be "User", "Group" or "ServiceAccount". |  | MaxItems: 256 <br />Required: \{\} <br /> |
 | `clusterRoleBindings` _[ClusterBinding](#clusterbinding)_ | List of ClusterRoles to which subjects will be bound to. The list is a RoleRef which means we have to specify the full rbacv1.RoleRef schema. The result of specifying this field are ClusterRoleBindings. |  | Optional: \{\} <br /> |
 | `roleBindings` _[NamespaceBinding](#namespacebinding) array_ | List of ClusterRoles/Roles to which subjects will be bound to. The list is a RoleRef which means we have to specify the full rbacv1.RoleRef schema. The result of specifying the field are RoleBindings. |  | MaxItems: 64 <br />Optional: \{\} <br /> |
@@ -364,7 +364,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `policyRef` _[RBACPolicyReference](#rbacpolicyreference)_ | PolicyRef references the RBACPolicy that governs this binding. |  | Required: \{\} <br /> |
-| `targetName` _string_ | TargetName is the name prefix for generated bindings. Follows format<br />"targetName-clusterrole/role-binding".<br />This field is immutable after creation. |  | MaxLength: 253 <br />MinLength: 1 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` <br />Required: \{\} <br /> |
+| `targetName` _string_ | TargetName is the name prefix for generated bindings. Follows format<br />"targetName-clusterrole/role-binding".<br />This field is immutable after creation. |  | MaxLength: 63 <br />MinLength: 1 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` <br />Required: \{\} <br /> |
 | `subjects` _[Subject](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#subject-v1-rbac) array_ | Subjects lists the subjects that will be bound to the target ClusterRole/Role.<br />Can be "User", "Group" or "ServiceAccount". |  | MaxItems: 256 <br />Required: \{\} <br /> |
 | `clusterRoleBindings` _[ClusterBinding](#clusterbinding)_ | ClusterRoleBindings defines cluster-scoped role bindings. |  | Optional: \{\} <br /> |
 | `roleBindings` _[NamespaceBinding](#namespacebinding) array_ | RoleBindings defines namespace-scoped role bindings. |  | MaxItems: 64 <br />Optional: \{\} <br /> |

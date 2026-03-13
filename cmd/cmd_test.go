@@ -110,14 +110,14 @@ func TestControllerCmdFlagValidation(t *testing.T) {
 		flags       map[string]int
 		expectError bool
 	}{
-		{"all positive", map[string]int{"--bd": 5, "--rd": 5, "--wa": 5}, false},
-		{"all zero (disabled)", map[string]int{"--bd": 0, "--rd": 0, "--wa": 0}, false},
-		{"bd zero others positive", map[string]int{"--bd": 0, "--rd": 5, "--wa": 5}, false},
-		{"bd positive others zero", map[string]int{"--bd": 5, "--rd": 0, "--wa": 0}, false},
-		{"bd negative", map[string]int{"--bd": -1, "--rd": 5, "--wa": 5}, true},
-		{"rd negative", map[string]int{"--bd": 5, "--rd": -1, "--wa": 5}, true},
-		{"wa negative", map[string]int{"--bd": 5, "--rd": 5, "--wa": -1}, true},
-		{"all negative", map[string]int{"--bd": -1, "--rd": -1, "--wa": -1}, true},
+		{"all positive", map[string]int{"--binddefinition-concurrency": 5, "--roledefinition-concurrency": 5, "--webhookauthorizer-concurrency": 5}, false},
+		{"all zero (disabled)", map[string]int{"--binddefinition-concurrency": 0, "--roledefinition-concurrency": 0, "--webhookauthorizer-concurrency": 0}, false},
+		{"bd zero others positive", map[string]int{"--binddefinition-concurrency": 0, "--roledefinition-concurrency": 5, "--webhookauthorizer-concurrency": 5}, false},
+		{"bd positive others zero", map[string]int{"--binddefinition-concurrency": 5, "--roledefinition-concurrency": 0, "--webhookauthorizer-concurrency": 0}, false},
+		{"bd negative", map[string]int{"--binddefinition-concurrency": -1, "--roledefinition-concurrency": 5, "--webhookauthorizer-concurrency": 5}, true},
+		{"rd negative", map[string]int{"--binddefinition-concurrency": 5, "--roledefinition-concurrency": -1, "--webhookauthorizer-concurrency": 5}, true},
+		{"wa negative", map[string]int{"--binddefinition-concurrency": 5, "--roledefinition-concurrency": 5, "--webhookauthorizer-concurrency": -1}, true},
+		{"all negative", map[string]int{"--binddefinition-concurrency": -1, "--roledefinition-concurrency": -1, "--webhookauthorizer-concurrency": -1}, true},
 	}
 
 	for _, tt := range tests {
