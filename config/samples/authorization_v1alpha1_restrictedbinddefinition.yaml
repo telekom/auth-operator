@@ -5,6 +5,8 @@
 # =============================================================================
 # RestrictedBindDefinition Samples - Comprehensive Feature Coverage
 # =============================================================================
+# Prerequisite: Apply authorization_v1alpha1_rbacpolicy.yaml first.
+#
 # These samples demonstrate all features of the RestrictedBindDefinition CRD:
 # - Policy reference (policyRef)
 # - ServiceAccount-only subjects

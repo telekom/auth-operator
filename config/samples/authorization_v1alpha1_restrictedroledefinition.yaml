@@ -5,6 +5,8 @@
 # =============================================================================
 # RestrictedRoleDefinition Samples - Comprehensive Feature Coverage
 # =============================================================================
+# Prerequisite: Apply authorization_v1alpha1_rbacpolicy.yaml first.
+#
 # These samples demonstrate all features of the RestrictedRoleDefinition CRD:
 # - Policy reference (policyRef)
 # - Namespaced Role generation within policy limits
