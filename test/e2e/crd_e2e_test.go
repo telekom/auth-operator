@@ -116,7 +116,7 @@ var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 		cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "-k", fixturesPath, "--ignore-not-found=true")
 		_, _ = utils.Run(cmd)
 
-		// Clean up custom resources and finalizers without destroying the operator.
+		// Clean up custom resources without destroying the operator.
 		// The operator namespace and webhooks must persist for other test suites.
 		cleanupAllCRDs()
 		clusterRoles := []string{"e2e-cluster-reader"}

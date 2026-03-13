@@ -7,6 +7,7 @@ package authorization
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -68,15 +69,12 @@ func handlePolicyViolations(
 ) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	violationStrings := make([]string, len(violations))
-	for i, v := range violations {
-		violationStrings[i] = v.String()
-	}
+	violationStrings := policy.ViolationStrings(violations)
 	logger.Info("policy violations detected",
 		"name", runtimeObj.GetName(), "violations", violationStrings)
 
 	conditions.MarkFalse(obj, authorizationv1alpha1.PolicyCompliantCondition, generation,
-		authorizationv1alpha1.PolicyCompliantReasonViolationsDetected, authorizationv1alpha1.PolicyCompliantMessageViolationsDetected, violationStrings)
+		authorizationv1alpha1.PolicyCompliantReasonViolationsDetected, authorizationv1alpha1.PolicyCompliantMessageViolationsDetected, strings.Join(violationStrings, "; "))
 
 	metrics.PolicyViolationsActive.WithLabelValues(cfg.ControllerLabel, runtimeObj.GetName()).Set(float64(len(violations)))
 

@@ -16,10 +16,10 @@ import (
 	"github.com/telekom/auth-operator/test/utils"
 )
 
-// statusTrue is the status condition value for ready nodes.
+// statusTrue is the condition status value for True.
 const statusTrue = "True"
 
-// statusFalse is the status condition value for not-ready nodes.
+// statusFalse is the condition status value for False.
 const statusFalse = "False"
 
 // DebugReport represents a structured test debug report.

@@ -67,6 +67,17 @@ func containsString(slice []string, value string) bool {
 	return false
 }
 
+// containsStringOrWildcard checks if a string slice contains the specific value
+// or the wildcard "*" (which matches any value).
+func containsStringOrWildcard(slice []string, value string) bool {
+	for _, s := range slice {
+		if s == value || s == "*" {
+			return true
+		}
+	}
+	return false
+}
+
 // hasAnyPrefix checks if value starts with any of the given prefixes.
 func hasAnyPrefix(prefixes []string, value string) bool {
 	for _, p := range prefixes {

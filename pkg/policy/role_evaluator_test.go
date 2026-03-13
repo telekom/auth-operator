@@ -16,7 +16,7 @@ func TestEvaluateRoleDefinition_NoLimits(t *testing.T) {
 	policy := &authorizationv1alpha1.RBACPolicy{}
 	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
 		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
-			TargetRole: "ClusterRole",
+			TargetRole: authorizationv1alpha1.DefinitionClusterRole,
 			TargetName: "test-role",
 		},
 	}
@@ -37,7 +37,7 @@ func TestEvaluateRoleDefinition_ClusterRoleNotAllowed(t *testing.T) {
 	}
 	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
 		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
-			TargetRole: "ClusterRole",
+			TargetRole: authorizationv1alpha1.DefinitionClusterRole,
 			TargetName: "test-role",
 		},
 	}
@@ -61,7 +61,7 @@ func TestEvaluateRoleDefinition_RoleAllowedWhenClusterRolesDisabled(t *testing.T
 	}
 	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
 		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
-			TargetRole:      "Role",
+			TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
 			TargetName:      "test-role",
 			TargetNamespace: "default",
 		},
@@ -90,13 +90,14 @@ func TestEvaluateRoleDefinition_ForbiddenVerbs(t *testing.T) {
 		{name: "no forbidden verbs excluded", restrictedVerbs: []string{"get", "list"}, wantViolations: 2},
 		{name: "one forbidden verb excluded", restrictedVerbs: []string{"get", "delete"}, wantViolations: 1},
 		{name: "all forbidden verbs excluded", restrictedVerbs: []string{"delete", "escalate"}, wantViolations: 0},
+		{name: "wildcard covers all forbidden verbs", restrictedVerbs: []string{"*"}, wantViolations: 0},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
 				Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
-					TargetRole:      "Role",
+					TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
 					TargetName:      "test-role",
 					TargetNamespace: "default",
 					RestrictedVerbs: tt.restrictedVerbs,
@@ -121,7 +122,7 @@ func TestEvaluateRoleDefinition_ForbiddenAPIGroups(t *testing.T) {
 
 	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
 		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
-			TargetRole:      "Role",
+			TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
 			TargetName:      "test-role",
 			TargetNamespace: "default",
 			RestrictedAPIs: []metav1.APIGroup{
@@ -148,7 +149,7 @@ func TestEvaluateRoleDefinition_ForbiddenAPIGroups_Missing(t *testing.T) {
 
 	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
 		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
-			TargetRole:      "Role",
+			TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
 			TargetName:      "test-role",
 			TargetNamespace: "default",
 			RestrictedAPIs: []metav1.APIGroup{
@@ -177,7 +178,7 @@ func TestEvaluateRoleDefinition_ForbiddenResources(t *testing.T) {
 
 	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
 		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
-			TargetRole:      "Role",
+			TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
 			TargetName:      "test-role",
 			TargetNamespace: "default",
 			RestrictedResources: []metav1.APIResource{
@@ -209,7 +210,7 @@ func TestEvaluateRoleDefinition_ClusterRoleAllowed(t *testing.T) {
 
 	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
 		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
-			TargetRole: "ClusterRole",
+			TargetRole: authorizationv1alpha1.DefinitionClusterRole,
 			TargetName: "test-role",
 		},
 	}
@@ -233,7 +234,7 @@ func TestEvaluateRoleDefinition_MultipleLimits(t *testing.T) {
 
 	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
 		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
-			TargetRole:      "ClusterRole",
+			TargetRole:      authorizationv1alpha1.DefinitionClusterRole,
 			TargetName:      "test-role",
 			RestrictedVerbs: []string{"delete"},
 			RestrictedResources: []metav1.APIResource{
@@ -337,7 +338,7 @@ func TestEvaluateRoleDefinition_ForbiddenResourceVerbs(t *testing.T) {
 			}
 			rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
 				Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
-					TargetRole:          "ClusterRole",
+					TargetRole:          authorizationv1alpha1.DefinitionClusterRole,
 					TargetName:          "test-role",
 					RestrictedVerbs:     tt.restrictedVerbs,
 					RestrictedAPIs:      tt.restrictedAPIs,

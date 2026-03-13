@@ -16,7 +16,7 @@ import (
 // indicates full compliance.
 func EvaluateRoleDefinition(policy *authorizationv1alpha1.RBACPolicy, rrd *authorizationv1alpha1.RestrictedRoleDefinition) []Violation {
 	if policy.Spec.RoleLimits == nil {
-		return nil
+		return []Violation{}
 	}
 
 	return evaluateRoleLimits(policy.Spec.RoleLimits, rrd)
@@ -27,7 +27,7 @@ func evaluateRoleLimits(limits *authorizationv1alpha1.RoleLimits, rrd *authoriza
 	var violations []Violation
 
 	// Check ClusterRole permission.
-	if !limits.AllowClusterRoles && rrd.Spec.TargetRole == "ClusterRole" {
+	if !limits.AllowClusterRoles && rrd.Spec.TargetRole == authorizationv1alpha1.DefinitionClusterRole {
 		violations = append(violations, Violation{
 			Field:   "spec.targetRole",
 			Message: "ClusterRoles are not allowed by policy",
@@ -39,7 +39,7 @@ func evaluateRoleLimits(limits *authorizationv1alpha1.RoleLimits, rrd *authoriza
 	// a forbidden verb missing from RestrictedVerbs means it could appear
 	// in the generated role.
 	for _, verb := range limits.ForbiddenVerbs {
-		if !containsString(rrd.Spec.RestrictedVerbs, verb) {
+		if !containsStringOrWildcard(rrd.Spec.RestrictedVerbs, verb) {
 			violations = append(violations, Violation{
 				Field:   "spec.restrictedVerbs",
 				Message: fmt.Sprintf("forbidden verb %q must be listed in restrictedVerbs", verb),
@@ -94,7 +94,7 @@ func evaluateRoleLimits(limits *authorizationv1alpha1.RoleLimits, rrd *authoriza
 		// Check which verbs are not globally restricted.
 		var uncovered []string
 		for _, verb := range rule.Verbs {
-			if !containsString(rrd.Spec.RestrictedVerbs, verb) {
+			if !containsStringOrWildcard(rrd.Spec.RestrictedVerbs, verb) {
 				uncovered = append(uncovered, verb)
 			}
 		}
