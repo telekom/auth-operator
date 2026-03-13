@@ -303,22 +303,25 @@ Reports whether the resource complies with its referenced RBACPolicy.
 RBACPolicy. When violations are detected, the controller triggers
 deprovisioning of managed RBAC resources.
 
-### Deprovisioned (Stalled Reason)
+### Deprovisioned (Policy Violation)
 
 When policy violations are detected, the controller deprovisions all managed
-RBAC resources and marks the resource as `Stalled` with reason `Deprovisioned`:
+RBAC resources and marks the resource as non-ready:
 
 | Condition | Status | Reason | Message |
 |-----------|--------|--------|---------|
-| `Stalled` | `True` | `Deprovisioned` | check operator logs for details |
+| `PolicyCompliant` | `False` | `ViolationsDetected` | violation details (up to 10) |
 | `Ready` | `False` | `Deprovisioned` | deprovisioned due to policy violations |
+
+If deprovision itself fails, the controller additionally sets `Stalled=True`
+to signal an operational error requiring investigation.
 
 ### Reconciliation Sequence (RestrictedRoleDefinition)
 
 ```
 PolicyCompliant → Discover APIs → Filter APIs → EnsureRole → Ready
     │
-    └─ (violations) → Deprovision → Stalled
+    └─ (violations) → Deprovision → Ready=False (Deprovisioned)
 ```
 
 ### Reconciliation Sequence (RestrictedBindDefinition)
@@ -326,7 +329,7 @@ PolicyCompliant → Discover APIs → Filter APIs → EnsureRole → Ready
 ```
 PolicyCompliant → EnsureServiceAccounts → EnsureBindings → Ready
     │
-    └─ (violations) → Deprovision → Stalled
+    └─ (violations) → Deprovision → Ready=False (Deprovisioned)
 ```
 
 ---

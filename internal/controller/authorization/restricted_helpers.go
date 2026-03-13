@@ -93,7 +93,7 @@ func handlePolicyViolations(
 
 	recorder.Eventf(runtimeObj, nil, corev1.EventTypeWarning,
 		authorizationv1alpha1.EventReasonPolicyViolation, authorizationv1alpha1.EventActionReconcile,
-		"Policy violations detected: %v", msgStrings)
+		"Policy violations detected: %s", strings.Join(msgStrings, "; "))
 
 	// Deprovision: delete all owned RBAC resources.
 	if err := cfg.Deprovision(ctx); err != nil {

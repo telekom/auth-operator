@@ -118,6 +118,20 @@ func TestControllerCmdFlagValidation(t *testing.T) {
 		{"rd negative", map[string]int{"--binddefinition-concurrency": 5, "--roledefinition-concurrency": -1, "--webhookauthorizer-concurrency": 5}, true},
 		{"wa negative", map[string]int{"--binddefinition-concurrency": 5, "--roledefinition-concurrency": 5, "--webhookauthorizer-concurrency": -1}, true},
 		{"all negative", map[string]int{"--binddefinition-concurrency": -1, "--roledefinition-concurrency": -1, "--webhookauthorizer-concurrency": -1}, true},
+		{"rbacpolicy positive", map[string]int{"--rbacpolicy-concurrency": 5}, false},
+		{"rbacpolicy negative", map[string]int{"--rbacpolicy-concurrency": -1}, true},
+		{"restrictedbinddefinition positive", map[string]int{"--restrictedbinddefinition-concurrency": 5}, false},
+		{"restrictedbinddefinition negative", map[string]int{"--restrictedbinddefinition-concurrency": -1}, true},
+		{"restrictedroledefinition positive", map[string]int{"--restrictedroledefinition-concurrency": 5}, false},
+		{"restrictedroledefinition negative", map[string]int{"--restrictedroledefinition-concurrency": -1}, true},
+		{"all six flags positive", map[string]int{
+			"--binddefinition-concurrency":           5,
+			"--roledefinition-concurrency":           5,
+			"--webhookauthorizer-concurrency":        1,
+			"--rbacpolicy-concurrency":               5,
+			"--restrictedbinddefinition-concurrency": 5,
+			"--restrictedroledefinition-concurrency": 5,
+		}, false},
 	}
 
 	for _, tt := range tests {
