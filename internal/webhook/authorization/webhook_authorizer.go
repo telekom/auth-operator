@@ -356,7 +356,7 @@ func countTotalRules(authorizers []authzv1alpha1.WebhookAuthorizer) int {
 
 func (wa *Authorizer) listGlobalAuthorizers(ctx context.Context, cachedAll *[]authzv1alpha1.WebhookAuthorizer) ([]authzv1alpha1.WebhookAuthorizer, error) {
 	var globalAuth authzv1alpha1.WebhookAuthorizerList
-	listCtx, cancel := context.WithTimeout(ctx, webhookListTimeout)
+	listCtx, cancel := context.WithTimeout(ctx, authzv1alpha1.WebhookCacheTimeout)
 	defer cancel()
 	if err := wa.Client.List(listCtx, &globalAuth, client.MatchingFields{
 		indexer.WebhookAuthorizerHasNamespaceSelectorField: "false",
@@ -401,7 +401,7 @@ func (wa *Authorizer) listGlobalAuthorizers(ctx context.Context, cachedAll *[]au
 
 func (wa *Authorizer) listScopedAuthorizers(ctx context.Context, cachedAll *[]authzv1alpha1.WebhookAuthorizer) ([]authzv1alpha1.WebhookAuthorizer, error) {
 	var scopedAuth authzv1alpha1.WebhookAuthorizerList
-	listCtx, cancel := context.WithTimeout(ctx, webhookListTimeout)
+	listCtx, cancel := context.WithTimeout(ctx, authzv1alpha1.WebhookCacheTimeout)
 	defer cancel()
 	if err := wa.Client.List(listCtx, &scopedAuth, client.MatchingFields{
 		indexer.WebhookAuthorizerHasNamespaceSelectorField: "true",
@@ -443,7 +443,7 @@ func (wa *Authorizer) listScopedAuthorizers(ctx context.Context, cachedAll *[]au
 }
 
 func (wa *Authorizer) listAllAuthorizers(ctx context.Context) ([]authzv1alpha1.WebhookAuthorizer, error) {
-	listCtx, cancel := context.WithTimeout(ctx, webhookListTimeout)
+	listCtx, cancel := context.WithTimeout(ctx, authzv1alpha1.WebhookCacheTimeout)
 	defer cancel()
 	var allAuth authzv1alpha1.WebhookAuthorizerList
 	if err := wa.Client.List(listCtx, &allAuth); err != nil {

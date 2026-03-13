@@ -83,7 +83,7 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 	// Only applies to CREATE/UPDATE — never to DELETE.
 	if len(labelsToAdd) == 0 && saInfo.IsServiceAccount &&
 		(req.Operation == admissionv1.Create || req.Operation == admissionv1.Update) {
-		saCtx, saCancel := context.WithTimeout(ctx, webhookListTimeout)
+		saCtx, saCancel := context.WithTimeout(ctx, authzv1alpha1.WebhookCacheTimeout)
 		defer saCancel()
 		inherited, saErr := GetSANamespaceTrackedLabels(saCtx, m.Client, saInfo)
 		if saErr != nil {
@@ -138,7 +138,7 @@ func (m *NamespaceMutator) collectBindDefinitionLabels(ctx context.Context, nsNa
 
 	// Fetch all BindDefinition CRDs
 	bindDefinitions := &authzv1alpha1.BindDefinitionList{}
-	listCtx, cancel := context.WithTimeout(ctx, webhookListTimeout)
+	listCtx, cancel := context.WithTimeout(ctx, authzv1alpha1.WebhookCacheTimeout)
 	defer cancel()
 	if err := m.Client.List(listCtx, bindDefinitions); err != nil {
 		logger.Error(err, "failed to list BindDefinitions", "namespace", nsName)

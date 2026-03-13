@@ -37,7 +37,7 @@ func (r *RestrictedRoleDefinition) SetupWebhookWithManager(mgr ctrl.Manager) err
 
 // ValidateCreate implements admission.Validator for RestrictedRoleDefinition.
 func (v *RestrictedRoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RestrictedRoleDefinition) (admission.Warnings, error) {
-	ctx, cancel := context.WithTimeout(ctx, webhookValidationTimeout)
+	ctx, cancel := context.WithTimeout(ctx, WebhookCacheTimeout)
 	defer cancel()
 
 	logger := log.FromContext(ctx).WithName("restrictedroledefinition-webhook")
@@ -53,7 +53,7 @@ func (v *RestrictedRoleDefinitionValidator) ValidateCreate(ctx context.Context, 
 
 // ValidateUpdate implements admission.Validator for RestrictedRoleDefinition.
 func (v *RestrictedRoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *RestrictedRoleDefinition) (admission.Warnings, error) {
-	ctx, cancel := context.WithTimeout(ctx, webhookValidationTimeout)
+	ctx, cancel := context.WithTimeout(ctx, WebhookCacheTimeout)
 	defer cancel()
 
 	logger := log.FromContext(ctx).WithName("restrictedroledefinition-webhook")

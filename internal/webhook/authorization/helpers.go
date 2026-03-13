@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	admissionv1 "k8s.io/api/admission/v1"
@@ -14,12 +13,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
-
-// webhookListTimeout is the maximum duration webhook handlers wait for
-// cache-backed List or Get calls. Informer-cache reads normally complete in
-// microseconds; the timeout is a safety net for cold-cache or degraded
-// API-server scenarios.
-const webhookListTimeout = 5 * time.Second
 
 // trackedOwnershipKeys defines the ownership label keys used for SA namespace
 // label inheritance, label extraction, and extra-key detection.

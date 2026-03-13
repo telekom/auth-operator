@@ -87,7 +87,7 @@ func (r *BindDefinition) SetupWebhookWithManager(mgr ctrl.Manager) error {
 // "ignore", role checks are skipped entirely. The controller will also handle missing
 // roles during reconciliation and set appropriate conditions.
 func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context, r *BindDefinition) (admission.Warnings, error) {
-	ctx, cancel := context.WithTimeout(ctx, webhookValidationTimeout)
+	ctx, cancel := context.WithTimeout(ctx, WebhookCacheTimeout)
 	defer cancel()
 
 	logger := log.FromContext(ctx).WithName("binddefinition-webhook")
