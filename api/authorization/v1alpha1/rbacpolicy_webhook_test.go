@@ -303,9 +303,11 @@ var _ = Describe("RBACPolicy Webhook", func() {
 			}
 			Expect(k8sClient.Create(ctx, rbd)).To(Succeed())
 
-			// Wait for cache and verify delete is blocked.
+			// Use DryRun to poll until the informer cache has synced the RBD;
+			// a real Delete could permanently remove the policy if the cache
+			// hasn't synced the reference yet.
 			Eventually(func(g Gomega) {
-				err := k8sClient.Delete(ctx, pol.DeepCopy())
+				err := k8sClient.Delete(ctx, pol.DeepCopy(), client.DryRunAll)
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err.Error()).To(ContainSubstring("still reference this policy"))
 			}).WithTimeout(testTimeoutSeconds * time.Second).WithPolling(250 * time.Millisecond).Should(Succeed())
@@ -343,9 +345,11 @@ var _ = Describe("RBACPolicy Webhook", func() {
 			}
 			Expect(k8sClient.Create(ctx, rrd)).To(Succeed())
 
-			// Wait for cache and verify delete is blocked.
+			// Use DryRun to poll until the informer cache has synced the RRD;
+			// a real Delete could permanently remove the policy if the cache
+			// hasn't synced the reference yet.
 			Eventually(func(g Gomega) {
-				err := k8sClient.Delete(ctx, pol.DeepCopy())
+				err := k8sClient.Delete(ctx, pol.DeepCopy(), client.DryRunAll)
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err.Error()).To(ContainSubstring("still reference this policy"))
 			}).WithTimeout(testTimeoutSeconds * time.Second).WithPolling(250 * time.Millisecond).Should(Succeed())
