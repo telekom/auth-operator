@@ -93,11 +93,13 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 	logger := log.FromContext(ctx).WithName("binddefinition-webhook")
 	var warnings admission.Warnings
 
-	// Use field index for efficient lookup by TargetName (cap at 100 to bound webhook latency).
+	// Use field index for efficient lookup by TargetName. The field index constrains
+	// results to the small set matching this targetName; the context timeout provides
+	// the hard latency bound.
 	bindDefinitionList := &BindDefinitionList{}
 	if err := v.Client.List(ctx, bindDefinitionList, client.MatchingFields{
 		TargetNameField: r.Spec.TargetName,
-	}, client.Limit(100)); err != nil {
+	}); err != nil {
 		logger.Error(err, "failed to list BindDefinitions", "targetName", r.Spec.TargetName)
 		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list BindDefinitions: %w", err))
 	}

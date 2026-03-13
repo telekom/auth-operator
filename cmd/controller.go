@@ -6,6 +6,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -341,9 +342,15 @@ func waitForRequiredCRDs(ctx context.Context, cfg *rest.Config, timeout time.Dur
 
 // validateConcurrency checks that all concurrency values are non-negative.
 func validateConcurrency(flags map[string]int) error {
-	for name, v := range flags {
-		if v < 0 {
-			return fmt.Errorf("concurrency value for %s must be >= 0, got %d", name, v)
+	names := make([]string, 0, len(flags))
+	for name := range flags {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+
+	for _, name := range names {
+		if flags[name] < 0 {
+			return fmt.Errorf("concurrency value for %s must be >= 0, got %d", name, flags[name])
 		}
 	}
 	return nil

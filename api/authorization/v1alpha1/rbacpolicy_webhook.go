@@ -72,20 +72,22 @@ func (v *RBACPolicyValidator) ValidateDelete(ctx context.Context, obj *RBACPolic
 	logger := log.FromContext(ctx).WithName("rbacpolicy-webhook")
 	logger.V(1).Info("validating delete", "name", obj.Name)
 
-	// Check for bound RestrictedBindDefinitions (cap at 100 to bound webhook latency).
+	// Check for bound RestrictedBindDefinitions. The field index constrains results
+	// to items referencing this policy; the context timeout provides the latency bound.
 	rbdList := &RestrictedBindDefinitionList{}
 	if err := v.Client.List(ctx, rbdList, client.MatchingFields{
 		PolicyRefField: obj.Name,
-	}, client.Limit(100)); err != nil {
+	}); err != nil {
 		logger.Error(err, "failed to list RestrictedBindDefinitions")
 		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RestrictedBindDefinitions: %w", err))
 	}
 
-	// Check for bound RestrictedRoleDefinitions (cap at 100 to bound webhook latency).
+	// Check for bound RestrictedRoleDefinitions. The field index constrains results
+	// to items referencing this policy; the context timeout provides the latency bound.
 	rrdList := &RestrictedRoleDefinitionList{}
 	if err := v.Client.List(ctx, rrdList, client.MatchingFields{
 		PolicyRefField: obj.Name,
-	}, client.Limit(100)); err != nil {
+	}); err != nil {
 		logger.Error(err, "failed to list RestrictedRoleDefinitions")
 		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RestrictedRoleDefinitions: %w", err))
 	}

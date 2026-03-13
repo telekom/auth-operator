@@ -79,7 +79,7 @@ type BindDefinitionSpec struct {
 	// This field is immutable after creation; changing it would orphan existing bindings and service accounts.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:MaxLength=63
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	TargetName string `json:"targetName"`
 

@@ -92,11 +92,12 @@ func (v *RestrictedBindDefinitionValidator) ValidateDelete(_ context.Context, _ 
 func (v *RestrictedBindDefinitionValidator) validateRestrictedBindDefinitionSpec(ctx context.Context, obj *RestrictedBindDefinition) error {
 	logger := log.FromContext(ctx).WithName("restrictedbinddefinition-webhook")
 
-	// Check duplicate targetName (cap at 100 to bound webhook latency).
+	// Check duplicate targetName. The field index constrains results to matching
+	// items; the context timeout provides the hard latency bound.
 	rbdList := &RestrictedBindDefinitionList{}
 	if err := v.Client.List(ctx, rbdList, client.MatchingFields{
 		TargetNameField: obj.Spec.TargetName,
-	}, client.Limit(100)); err != nil {
+	}); err != nil {
 		logger.Error(err, "failed to list RestrictedBindDefinitions", "targetName", obj.Spec.TargetName)
 		return apierrors.NewInternalError(fmt.Errorf("unable to list RestrictedBindDefinitions: %w", err))
 	}

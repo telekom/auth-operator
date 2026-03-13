@@ -70,11 +70,13 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 		return nil, err
 	}
 
-	// Use field index for efficient lookup by TargetName (cap at 100 to bound webhook latency).
+	// Use field index for efficient lookup by TargetName. The field index constrains
+	// results to the small set matching this targetName; the context timeout provides
+	// the hard latency bound.
 	roleDefinitionList := &RoleDefinitionList{}
 	if err := v.Client.List(ctx, roleDefinitionList, client.MatchingFields{
 		TargetNameField: obj.Spec.TargetName,
-	}, client.Limit(100)); err != nil {
+	}); err != nil {
 		logger.Error(err, "failed to list RoleDefinitions", "targetName", obj.Spec.TargetName)
 		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RoleDefinitions: %w", err))
 	}
@@ -87,11 +89,11 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 		}
 	}
 
-	// Check for cross-type targetName collision with RestrictedRoleDefinitions (cap at 100 to bound webhook latency).
+	// Check for cross-type targetName collision with RestrictedRoleDefinitions.
 	rrdList := &RestrictedRoleDefinitionList{}
 	if err := v.Client.List(ctx, rrdList, client.MatchingFields{
 		TargetNameField: obj.Spec.TargetName,
-	}, client.Limit(100)); err != nil {
+	}); err != nil {
 		logger.Error(err, "failed to list RestrictedRoleDefinitions", "targetName", obj.Spec.TargetName)
 		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RestrictedRoleDefinitions: %w", err))
 	}
@@ -144,11 +146,13 @@ func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 		return nil, err
 	}
 
-	// Use field index for efficient lookup by TargetName (cap at 100 to bound webhook latency).
+	// Use field index for efficient lookup by TargetName. The field index constrains
+	// results to the small set matching this targetName; the context timeout provides
+	// the hard latency bound.
 	roleDefinitionList := &RoleDefinitionList{}
 	if err := v.Client.List(ctx, roleDefinitionList, client.MatchingFields{
 		TargetNameField: newObj.Spec.TargetName,
-	}, client.Limit(100)); err != nil {
+	}); err != nil {
 		logger.Error(err, "failed to list RoleDefinitions", "targetName", newObj.Spec.TargetName)
 		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RoleDefinitions: %w", err))
 	}
