@@ -93,11 +93,11 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 	logger := log.FromContext(ctx).WithName("binddefinition-webhook")
 	var warnings admission.Warnings
 
-	// Use field index for efficient lookup by TargetName
+	// Use field index for efficient lookup by TargetName (cap at 100 to bound webhook latency).
 	bindDefinitionList := &BindDefinitionList{}
 	if err := v.Client.List(ctx, bindDefinitionList, client.MatchingFields{
 		TargetNameField: r.Spec.TargetName,
-	}); err != nil {
+	}, client.Limit(100)); err != nil {
 		logger.Error(err, "failed to list BindDefinitions", "targetName", r.Spec.TargetName)
 		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list BindDefinitions: %w", err))
 	}
@@ -112,11 +112,11 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 		}
 	}
 
-	// Check for cross-type targetName collision with RestrictedBindDefinitions.
+	// Check for cross-type targetName collision with RestrictedBindDefinitions (only need first match).
 	rbdList := &RestrictedBindDefinitionList{}
 	if err := v.Client.List(ctx, rbdList, client.MatchingFields{
 		TargetNameField: r.Spec.TargetName,
-	}); err != nil {
+	}, client.Limit(1)); err != nil {
 		logger.Error(err, "failed to list RestrictedBindDefinitions", "targetName", r.Spec.TargetName)
 		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RestrictedBindDefinitions: %w", err))
 	}

@@ -92,11 +92,11 @@ func (v *RestrictedBindDefinitionValidator) ValidateDelete(_ context.Context, _ 
 func (v *RestrictedBindDefinitionValidator) validateRestrictedBindDefinitionSpec(ctx context.Context, obj *RestrictedBindDefinition) error {
 	logger := log.FromContext(ctx).WithName("restrictedbinddefinition-webhook")
 
-	// Check duplicate targetName.
+	// Check duplicate targetName (cap at 100 to bound webhook latency).
 	rbdList := &RestrictedBindDefinitionList{}
 	if err := v.Client.List(ctx, rbdList, client.MatchingFields{
 		TargetNameField: obj.Spec.TargetName,
-	}); err != nil {
+	}, client.Limit(100)); err != nil {
 		logger.Error(err, "failed to list RestrictedBindDefinitions", "targetName", obj.Spec.TargetName)
 		return apierrors.NewInternalError(fmt.Errorf("unable to list RestrictedBindDefinitions: %w", err))
 	}
@@ -110,11 +110,11 @@ func (v *RestrictedBindDefinitionValidator) validateRestrictedBindDefinitionSpec
 		}
 	}
 
-	// Check for cross-type targetName collision with BindDefinitions.
+	// Check for cross-type targetName collision with BindDefinitions (only need first match).
 	bdList := &BindDefinitionList{}
 	if err := v.Client.List(ctx, bdList, client.MatchingFields{
 		TargetNameField: obj.Spec.TargetName,
-	}); err != nil {
+	}, client.Limit(1)); err != nil {
 		logger.Error(err, "failed to list BindDefinitions", "targetName", obj.Spec.TargetName)
 		return apierrors.NewInternalError(fmt.Errorf("unable to list BindDefinitions: %w", err))
 	}
