@@ -38,6 +38,21 @@ var _ = Describe("RestrictedBindDefinition Webhook", func() {
 			// Already exists from a previous test.
 			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(policy), policy)).To(Succeed())
 		}
+
+		// Wait for the informer cache to sync the RBACPolicy so webhook validators
+		// using mgr.GetClient() can find it. DryRun avoids side effects.
+		probe := &RestrictedBindDefinition{
+			ObjectMeta: metav1.ObjectMeta{Name: "cache-sync-probe-rbd"},
+			Spec: RestrictedBindDefinitionSpec{
+				PolicyRef:           RBACPolicyReference{Name: policy.Name},
+				TargetName:          "cache-sync-probe-rbd",
+				Subjects:            []rbacv1.Subject{{Kind: rbacv1.GroupKind, APIGroup: rbacv1.GroupName, Name: "probe"}},
+				ClusterRoleBindings: ClusterBinding{ClusterRoleRefs: []string{"probe"}},
+			},
+		}
+		Eventually(func() error {
+			return k8sClient.Create(ctx, probe.DeepCopy(), client.DryRunAll)
+		}).WithTimeout(5 * time.Second).WithPolling(100 * time.Millisecond).Should(Succeed())
 	})
 
 	Context("When creating RestrictedBindDefinition under Validating Webhook", func() {
