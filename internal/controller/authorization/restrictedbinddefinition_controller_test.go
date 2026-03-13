@@ -841,17 +841,33 @@ func TestRBD_PolicyToRestrictedBindDefinitions_ListError(t *testing.T) {
 func TestRBD_NamespaceToRestrictedBindDefinitions(t *testing.T) {
 	g := gomega.NewWithT(t)
 
+	// rbd1 has a roleBinding with an explicit namespace match.
 	rbd1 := &authorizationv1alpha1.RestrictedBindDefinition{
 		ObjectMeta: metav1.ObjectMeta{Name: "ns-rbd-1"},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+				{Namespace: "some-namespace", ClusterRoleRefs: []string{"view"}},
+			},
+		},
 	}
+	// rbd2 has a roleBinding with a selector that matches any namespace.
 	rbd2 := &authorizationv1alpha1.RestrictedBindDefinition{
 		ObjectMeta: metav1.ObjectMeta{Name: "ns-rbd-2"},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+				{NamespaceSelector: []metav1.LabelSelector{{}}, ClusterRoleRefs: []string{"edit"}},
+			},
+		},
+	}
+	// rbd3 has no roleBindings — should be skipped.
+	rbd3 := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "ns-rbd-3"},
 	}
 
 	scheme := newTestScheme()
 	c := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(rbd1, rbd2).
+		WithObjects(rbd1, rbd2, rbd3).
 		Build()
 	r := NewRestrictedBindDefinitionReconciler(c, scheme, events.NewFakeRecorder(10))
 
@@ -859,6 +875,7 @@ func TestRBD_NamespaceToRestrictedBindDefinitions(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "some-namespace"},
 	}
 	requests := r.namespaceToRestrictedBindDefinitions(rbdCtx(), ns)
+	// Only rbd1 (explicit match) and rbd2 (selector match) should be enqueued.
 	g.Expect(requests).To(gomega.HaveLen(2))
 }
 

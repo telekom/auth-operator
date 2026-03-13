@@ -14,6 +14,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/events"
@@ -113,7 +114,9 @@ func (r *RestrictedBindDefinitionReconciler) SetupWithManager(mgr ctrl.Manager, 
 func (r *RestrictedBindDefinitionReconciler) policyToRestrictedBindDefinitions(ctx context.Context, obj client.Object) []reconcile.Request {
 	logger := log.FromContext(ctx)
 	rbdList := &authorizationv1alpha1.RestrictedBindDefinitionList{}
-	if err := r.client.List(ctx, rbdList,
+	listCtx, cancel := context.WithTimeout(ctx, queueAllTimeout)
+	defer cancel()
+	if err := r.client.List(listCtx, rbdList,
 		client.MatchingFields{indexer.RestrictedBindDefinitionPolicyRefField: obj.GetName()}); err != nil {
 		logger.Error(err, "failed to list RestrictedBindDefinitions for policy", "policy", obj.GetName())
 		return nil
@@ -126,19 +129,64 @@ func (r *RestrictedBindDefinitionReconciler) policyToRestrictedBindDefinitions(c
 }
 
 // namespaceToRestrictedBindDefinitions maps a Namespace event to reconcile requests
-// for all RestrictedBindDefinitions that may be affected.
-func (r *RestrictedBindDefinitionReconciler) namespaceToRestrictedBindDefinitions(ctx context.Context, _ client.Object) []reconcile.Request {
+// for RestrictedBindDefinitions whose namespace selectors or explicit namespace
+// references match the changed namespace.
+func (r *RestrictedBindDefinitionReconciler) namespaceToRestrictedBindDefinitions(ctx context.Context, obj client.Object) []reconcile.Request {
 	logger := log.FromContext(ctx)
+
+	namespace, ok := obj.(*corev1.Namespace)
+	if !ok {
+		logger.Error(fmt.Errorf("unexpected type"), "Expected *Namespace", "got", fmt.Sprintf("%T", obj))
+		return nil
+	}
+
 	rbdList := &authorizationv1alpha1.RestrictedBindDefinitionList{}
-	if err := r.client.List(ctx, rbdList); err != nil {
+	listCtx, cancel := context.WithTimeout(ctx, queueAllTimeout)
+	defer cancel()
+	if err := r.client.List(listCtx, rbdList); err != nil {
 		logger.Error(err, "failed to list RestrictedBindDefinitions")
 		return nil
 	}
-	requests := make([]reconcile.Request, len(rbdList.Items))
-	for i, rbd := range rbdList.Items {
-		requests[i] = reconcile.Request{NamespacedName: types.NamespacedName{Name: rbd.Name}}
+
+	requests := make([]reconcile.Request, 0, len(rbdList.Items))
+	for i := range rbdList.Items {
+		rbd := &rbdList.Items[i]
+		if !restrictedBindDefinitionMatchesNamespace(rbd, namespace) {
+			metrics.NamespaceFanoutSkipped.Inc()
+			continue
+		}
+		metrics.NamespaceFanoutEnqueued.Inc()
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: rbd.Name},
+		})
 	}
 	return requests
+}
+
+// restrictedBindDefinitionMatchesNamespace returns true if the RBD has any
+// roleBinding entry whose explicit namespace or namespace selector matches ns.
+func restrictedBindDefinitionMatchesNamespace(rbd *authorizationv1alpha1.RestrictedBindDefinition, ns *corev1.Namespace) bool {
+	if len(rbd.Spec.RoleBindings) == 0 {
+		return false
+	}
+	if conditions.IsNamespaceTerminating(ns) {
+		return true
+	}
+	for _, rb := range rbd.Spec.RoleBindings {
+		if rb.Namespace == ns.Name {
+			return true
+		}
+		for _, sel := range rb.NamespaceSelector {
+			selector, err := metav1.LabelSelectorAsSelector(&sel)
+			if err != nil {
+				return true
+			}
+			if selector.Matches(labels.Set(ns.GetLabels())) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Reconcile handles the reconciliation loop for RestrictedBindDefinition resources.
