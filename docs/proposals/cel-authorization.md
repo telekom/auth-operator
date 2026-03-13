@@ -5,7 +5,7 @@
 | **Status**     | Draft                                                   |
 | **Authors**    | @MaxRink                                                |
 | **Created**    | 2026-03-01                                              |
-| **K8s target** | 1.35+ (controller-runtime v0.23, apiextensions v0.35)   |
+| **K8s target** | 1.34+ (controller-runtime v0.23, apiextensions v0.34)   |
 | **Go version** | 1.25                                                    |
 
 ---
@@ -312,9 +312,9 @@ type WebhookAuthorizerSpec struct {
     // CELRules is a list of CEL-based authorization rules. Each rule
     // specifies an action (Allow or Deny) and a CEL expression.
     //
-    // CELRules are evaluated AFTER matchConditions pass and BEFORE
-    // static allowedPrincipals/deniedPrincipals. The first matching
-    // CEL rule determines the outcome.
+    // CELRules are evaluated AFTER matchConditions pass and AFTER
+    // static deniedPrincipals, but BEFORE static allowedPrincipals.
+    // The first matching CEL rule determines the outcome.
     //
     // If no CEL rule matches, evaluation falls through to static rules.
     //
@@ -414,10 +414,10 @@ spec:
     - name: denyOutsideBusinessHours
       expression: >-
         request.resourceAttributes.verb in ["delete", "patch", "update"] &&
-        (now.getHours() < 8 || now.getHours() >= 18)
+        (now.getHours("UTC") < 8 || now.getHours("UTC") >= 18)
       action: Deny
       # now is always UTC — convert your local time accordingly
-      # getHours() returns 0–23; the boundary at exactly 08:00 is getHours() == 8
+      # getHours("UTC") returns 0–23; the boundary at exactly 08:00 is getHours("UTC") == 8
       message: "destructive operations are only allowed 08:00–18:00 UTC"
 ```
 
@@ -473,7 +473,7 @@ celRules:
     expression: >-
       has(request.resourceAttributes) &&
       request.resourceAttributes.verb in ["delete"] &&
-      (now.getHours() < 8 || now.getHours() >= 18)
+      (now.getHours("UTC") < 8 || now.getHours("UTC") >= 18)
     action: Deny
     message: "destructive operations are only allowed during business hours"
     messageExpression: >-
@@ -716,7 +716,8 @@ type watchEntry struct {
 ```
 
 - **Reconciler calls** `watchManager.EnsureWatch(gvk)` for each paramRef GVK.
-- **On CR deletion**, `watchManager.Release(gvk)` decrements the ref count;
+- **On CR deletion or update** (when a paramRef GVK is removed),
+  `watchManager.Release(gvk)` decrements the ref count;
   when zero, the watch is cancelled.
 - **Reverse index**: An `EnqueueRequestsFromMapFunc` maps ConfigMap/Namespace
   changes back to referencing `WebhookAuthorizer` CRs, triggering re-reconciliation.
@@ -850,7 +851,7 @@ spec:
     // Deny destructive verbs outside business hours.
     has(request.resourceAttributes) &&
     request.resourceAttributes.verb in ["delete"] &&
-    (now.getHours() < 8 || now.getHours() >= 18) ?
+    (now.getHours("UTC") < 8 || now.getHours("UTC") >= 18) ?
       authz.deny("delete operations only allowed 08:00-18:00 UTC") :
 
     // Allow users in the allowList ConfigMap.
@@ -1255,8 +1256,8 @@ If the CEL evaluation subsystem encounters an unrecoverable error (e.g., panic):
 During a rolling update from a pre-CEL to a CEL-aware operator version:
 
 - Old replicas see unknown CEL fields on CRs. Because CRDs use
-  `+kubebuilder:pruning`, unknown fields are **pruned** — old replicas see
-  the static fields only and evaluate them normally.
+  structural schemas, unknown fields are **pruned** by the API server — old
+  replicas see the static fields only and evaluate them normally.
 - **Risk**: If a CR has `mode: CEL` with no static rules, old replicas see no
   rules and deny everything. During the rolling update window, requests
   alternate between CEL evaluation (new replica) and deny-all (old replica),
@@ -1375,7 +1376,7 @@ detection. Each golden test fixture contains:
 name: cross-field deny outside business hours
 expression: |
   request.resourceAttributes.verb in ["delete"] &&
-  (now.getHours() < 8 || now.getHours() >= 18)
+  (now.getHours("UTC") < 8 || now.getHours("UTC") >= 18)
 action: Deny
 inputs:
   - name: "delete at 07:00 UTC"
@@ -1540,8 +1541,8 @@ into container args on the manager deployment.
 ## 17. Appendix: Review Persona Analysis
 
 This design was refined using the auth-operator's 12 review personas in a
-multi-pass subagent review. Below are the key findings and how each was
-addressed in the refined proposal.
+multi-pass subagent review (see [AGENTS.md](../../AGENTS.md) for the full list).
+Below are the key findings and how each was addressed in the refined proposal.
 
 ### Critical Findings (addressed in this revision)
 
