@@ -561,6 +561,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdApplyStatusAndMarkStalled(
 	logger := log.FromContext(ctx)
 	conditions.MarkStalled(rbd, rbd.Generation,
 		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, "policy not found")
+	rbd.Status.BindReconciled = false
 	rbd.Status.ObservedGeneration = rbd.Generation
 	if err := ssa.ApplyRestrictedBindDefinitionStatus(ctx, r.client, rbd); err != nil {
 		logger.Error(err, "failed to apply status via SSA", "name", rbd.Name)

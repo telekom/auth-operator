@@ -49,14 +49,7 @@ func evaluateRoleLimits(limits *authorizationv1alpha1.RoleLimits, rrd *authoriza
 
 	// Check that all forbidden API groups are excluded via RestrictedAPIs.
 	for _, group := range limits.ForbiddenAPIGroups {
-		found := false
-		for _, api := range rrd.Spec.RestrictedAPIs {
-			if api.Name == group {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !isAPIGroupFullyRestricted(rrd, group) {
 			violations = append(violations, Violation{
 				Field:   "spec.restrictedApis",
 				Message: fmt.Sprintf("forbidden API group %q must be listed in restrictedApis", group),
@@ -66,14 +59,7 @@ func evaluateRoleLimits(limits *authorizationv1alpha1.RoleLimits, rrd *authoriza
 
 	// Check that all forbidden resources are excluded via RestrictedResources.
 	for _, res := range limits.ForbiddenResources {
-		found := false
-		for _, rr := range rrd.Spec.RestrictedResources {
-			if rr.Name == res {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !isResourceFullyRestricted(rrd, res) {
 			violations = append(violations, Violation{
 				Field:   "spec.restrictedResources",
 				Message: fmt.Sprintf("forbidden resource %q must be listed in restrictedResources", res),
@@ -110,6 +96,32 @@ func evaluateRoleLimits(limits *authorizationv1alpha1.RoleLimits, rrd *authoriza
 	}
 
 	return violations
+}
+
+// isAPIGroupFullyRestricted returns true if the API group is listed in
+// RestrictedAPIs with an empty Versions list, meaning the entire group (all
+// versions) is restricted. Specifying a subset of versions would allow other
+// versions through at runtime.
+func isAPIGroupFullyRestricted(rrd *authorizationv1alpha1.RestrictedRoleDefinition, group string) bool {
+	for _, api := range rrd.Spec.RestrictedAPIs {
+		if api.Name == group && len(api.Versions) == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// isResourceFullyRestricted returns true if the resource is listed in
+// RestrictedResources with an empty Group, meaning the resource is restricted
+// from all API groups. If a specific group is set, the resource would only be
+// excluded from that group at runtime, allowing it through from other groups.
+func isResourceFullyRestricted(rrd *authorizationv1alpha1.RestrictedRoleDefinition, res string) bool {
+	for _, rr := range rrd.Spec.RestrictedResources {
+		if rr.Name == res && rr.Group == "" {
+			return true
+		}
+	}
+	return false
 }
 
 // isResourceExcludedForGroup returns true if the resource is listed in RestrictedResources

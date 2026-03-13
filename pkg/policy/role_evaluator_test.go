@@ -167,6 +167,36 @@ func TestEvaluateRoleDefinition_ForbiddenAPIGroups_Missing(t *testing.T) {
 	}
 }
 
+func TestEvaluateRoleDefinition_ForbiddenAPIGroups_VersionBypass(t *testing.T) {
+	policy := &authorizationv1alpha1.RBACPolicy{
+		Spec: authorizationv1alpha1.RBACPolicySpec{
+			RoleLimits: &authorizationv1alpha1.RoleLimits{
+				ForbiddenAPIGroups: []string{"certificates.k8s.io"},
+			},
+		},
+	}
+
+	// A tenant includes the forbidden group but with a specific version,
+	// which would not restrict other versions at runtime.
+	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+			TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
+			TargetName:      "test-role",
+			TargetNamespace: "default",
+			RestrictedAPIs: []metav1.APIGroup{
+				{Name: "certificates.k8s.io", Versions: []metav1.GroupVersionForDiscovery{
+					{Version: "v999"},
+				}},
+			},
+		},
+	}
+
+	violations := EvaluateRoleDefinition(policy, rrd)
+	if len(violations) != 1 {
+		t.Fatalf("expected 1 violation (version-specific restriction does not fully exclude group), got %d: %v", len(violations), violations)
+	}
+}
+
 func TestEvaluateRoleDefinition_ForbiddenResources(t *testing.T) {
 	policy := &authorizationv1alpha1.RBACPolicy{
 		Spec: authorizationv1alpha1.RBACPolicySpec{
@@ -196,6 +226,34 @@ func TestEvaluateRoleDefinition_ForbiddenResources(t *testing.T) {
 	}
 	if violations[0].Field != "spec.restrictedResources" {
 		t.Errorf("expected field spec.restrictedResources, got %q", violations[0].Field)
+	}
+}
+
+func TestEvaluateRoleDefinition_ForbiddenResources_GroupBypass(t *testing.T) {
+	policy := &authorizationv1alpha1.RBACPolicy{
+		Spec: authorizationv1alpha1.RBACPolicySpec{
+			RoleLimits: &authorizationv1alpha1.RoleLimits{
+				ForbiddenResources: []string{"secrets"},
+			},
+		},
+	}
+
+	// A tenant includes "secrets" but with a specific group, which would
+	// only exclude secrets from that group at runtime, not from all groups.
+	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+			TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
+			TargetName:      "test-role",
+			TargetNamespace: "default",
+			RestrictedResources: []metav1.APIResource{
+				{Name: "secrets", Group: "non.existent.group"},
+			},
+		},
+	}
+
+	violations := EvaluateRoleDefinition(policy, rrd)
+	if len(violations) != 1 {
+		t.Fatalf("expected 1 violation (group-specific restriction does not exclude from all groups), got %d: %v", len(violations), violations)
 	}
 }
 

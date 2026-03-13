@@ -350,8 +350,9 @@ func (r *RestrictedRoleDefinitionReconciler) rrdDiscoverAndFilter(
 
 		for _, res := range resources {
 			// Check restricted resources.
+			// An empty Group in the restriction matches all API groups.
 			resourceIsRestricted := slices.ContainsFunc(rrd.Spec.RestrictedResources, func(rule metav1.APIResource) bool {
-				return res.Name == rule.Name && groupVersion.Group == rule.Group
+				return res.Name == rule.Name && (rule.Group == "" || groupVersion.Group == rule.Group)
 			})
 			if resourceIsRestricted {
 				continue
@@ -567,6 +568,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdApplyStatusAndMarkStalled(
 	logger := log.FromContext(ctx)
 	conditions.MarkStalled(rrd, rrd.Generation,
 		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, msg)
+	rrd.Status.RoleReconciled = false
 	rrd.Status.ObservedGeneration = rrd.Generation
 	if err := ssa.ApplyRestrictedRoleDefinitionStatus(ctx, r.client, rrd); err != nil {
 		logger.Error(err, "failed to apply status via SSA", "name", rrd.Name)
