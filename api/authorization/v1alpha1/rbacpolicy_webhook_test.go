@@ -301,7 +301,11 @@ var _ = Describe("RBACPolicy Webhook", func() {
 					},
 				},
 			}
-			Expect(k8sClient.Create(ctx, rbd)).To(Succeed())
+			// Use Eventually to tolerate webhook cache-sync delay for the
+			// RBACPolicy that was just created above.
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Create(ctx, rbd)).To(Succeed())
+			}).WithTimeout(testTimeoutSeconds * time.Second).WithPolling(250 * time.Millisecond).Should(Succeed())
 
 			// Use DryRun to poll until the informer cache has synced the RBD;
 			// a real Delete could permanently remove the policy if the cache
@@ -343,7 +347,11 @@ var _ = Describe("RBACPolicy Webhook", func() {
 					ScopeNamespaced: false,
 				},
 			}
-			Expect(k8sClient.Create(ctx, rrd)).To(Succeed())
+			// Use Eventually to tolerate webhook cache-sync delay for the
+			// RBACPolicy that was just created above.
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Create(ctx, rrd)).To(Succeed())
+			}).WithTimeout(testTimeoutSeconds * time.Second).WithPolling(250 * time.Millisecond).Should(Succeed())
 
 			// Use DryRun to poll until the informer cache has synced the RRD;
 			// a real Delete could permanently remove the policy if the cache
