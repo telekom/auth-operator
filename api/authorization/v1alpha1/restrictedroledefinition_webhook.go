@@ -112,12 +112,12 @@ func (v *RestrictedRoleDefinitionValidator) validateRestrictedRoleDefinitionSpec
 		}
 	}
 
-	// Check for cross-type targetName collision with RoleDefinitions. The field index
-	// constrains results; the context timeout provides the hard latency bound.
+	// Check for cross-type targetName collision with RoleDefinitions (only need first match).
+	// The field index constrains results; the context timeout provides the hard latency bound.
 	rdList := &RoleDefinitionList{}
 	if err := v.Client.List(ctx, rdList, client.MatchingFields{
 		TargetNameField: obj.Spec.TargetName,
-	}); err != nil {
+	}, client.Limit(1)); err != nil {
 		logger.Error(err, "failed to list RoleDefinitions", "targetName", obj.Spec.TargetName)
 		return apierrors.NewInternalError(fmt.Errorf("unable to list RoleDefinitions: %w", err))
 	}
