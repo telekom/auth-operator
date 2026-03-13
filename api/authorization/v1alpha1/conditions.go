@@ -169,9 +169,15 @@ const (
 	RoleRefValidationSkippedMessage AuthZConditionMessage = "Role reference validation skipped (missing-role-policy=ignore)"
 )
 
+// ReadyCondition is the generic Ready condition type shared by all CRD controllers.
+// It uses the kstatus "Ready" convention.
+const ReadyCondition AuthZConditionType = "Ready"
+
 // WebhookAuthorizer condition types.
 const (
 	// WebhookAuthorizerReadyCondition indicates overall readiness of the WebhookAuthorizer.
+	//
+	// Deprecated: Use ReadyCondition for new code. Kept for backwards compatibility.
 	WebhookAuthorizerReadyCondition AuthZConditionType = "Ready"
 	// WebhookAuthorizerRulesValidCondition indicates whether resource and non-resource rules are valid.
 	WebhookAuthorizerRulesValidCondition AuthZConditionType = "RulesValid"

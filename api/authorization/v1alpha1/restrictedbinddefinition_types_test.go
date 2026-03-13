@@ -15,7 +15,7 @@ func TestRestrictedBindDefinitionGetConditions(t *testing.T) {
 	rbd := &RestrictedBindDefinition{
 		Status: RestrictedBindDefinitionStatus{
 			Conditions: []metav1.Condition{
-				{Type: string(WebhookAuthorizerReadyCondition), Status: metav1.ConditionTrue, Reason: "Reconciled"},
+				{Type: string(ReadyCondition), Status: metav1.ConditionTrue, Reason: "Reconciled"},
 				{Type: string(PolicyCompliantCondition), Status: metav1.ConditionTrue, Reason: "AllChecksPass"},
 			},
 		},
@@ -25,7 +25,7 @@ func TestRestrictedBindDefinitionGetConditions(t *testing.T) {
 	if len(conditions) != 2 {
 		t.Fatalf("expected 2 conditions, got %d", len(conditions))
 	}
-	if conditions[0].Type != string(WebhookAuthorizerReadyCondition) {
+	if conditions[0].Type != string(ReadyCondition) {
 		t.Errorf("expected first condition type 'Ready', got %q", conditions[0].Type)
 	}
 	if conditions[1].Type != string(PolicyCompliantCondition) {
@@ -44,7 +44,7 @@ func TestRestrictedBindDefinitionGetConditionsEmpty(t *testing.T) {
 func TestRestrictedBindDefinitionSetConditions(t *testing.T) {
 	rbd := &RestrictedBindDefinition{}
 	expected := []metav1.Condition{
-		{Type: string(WebhookAuthorizerReadyCondition), Status: metav1.ConditionTrue, Reason: "Reconciled"},
+		{Type: string(ReadyCondition), Status: metav1.ConditionTrue, Reason: "Reconciled"},
 	}
 
 	rbd.SetConditions(expected)
@@ -58,14 +58,14 @@ func TestRestrictedBindDefinitionSetConditionsOverwrite(t *testing.T) {
 	rbd := &RestrictedBindDefinition{
 		Status: RestrictedBindDefinitionStatus{
 			Conditions: []metav1.Condition{
-				{Type: string(WebhookAuthorizerReadyCondition), Status: metav1.ConditionFalse},
+				{Type: string(ReadyCondition), Status: metav1.ConditionFalse},
 				{Type: string(PolicyCompliantCondition), Status: metav1.ConditionFalse},
 			},
 		},
 	}
 
 	newConditions := []metav1.Condition{
-		{Type: string(WebhookAuthorizerReadyCondition), Status: metav1.ConditionTrue, Reason: "Reconciled"},
+		{Type: string(ReadyCondition), Status: metav1.ConditionTrue, Reason: "Reconciled"},
 	}
 	rbd.SetConditions(newConditions)
 
@@ -198,7 +198,7 @@ func TestRestrictedBindDefinitionDeepCopy(t *testing.T) {
 			BindReconciled:     true,
 			PolicyViolations:   []string{"violation-1"},
 			Conditions: []metav1.Condition{
-				{Type: string(WebhookAuthorizerReadyCondition), Status: metav1.ConditionTrue},
+				{Type: string(ReadyCondition), Status: metav1.ConditionTrue},
 			},
 		},
 	}

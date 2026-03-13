@@ -14,7 +14,7 @@ func TestRestrictedRoleDefinitionGetConditions(t *testing.T) {
 	rrd := &RestrictedRoleDefinition{
 		Status: RestrictedRoleDefinitionStatus{
 			Conditions: []metav1.Condition{
-				{Type: string(WebhookAuthorizerReadyCondition), Status: metav1.ConditionTrue, Reason: "Reconciled"},
+				{Type: string(ReadyCondition), Status: metav1.ConditionTrue, Reason: "Reconciled"},
 				{Type: string(PolicyCompliantCondition), Status: metav1.ConditionTrue, Reason: "AllChecksPass"},
 			},
 		},
@@ -24,7 +24,7 @@ func TestRestrictedRoleDefinitionGetConditions(t *testing.T) {
 	if len(conditions) != 2 {
 		t.Fatalf("expected 2 conditions, got %d", len(conditions))
 	}
-	if conditions[0].Type != string(WebhookAuthorizerReadyCondition) {
+	if conditions[0].Type != string(ReadyCondition) {
 		t.Errorf("expected 'Ready', got %q", conditions[0].Type)
 	}
 	if conditions[1].Type != string(PolicyCompliantCondition) {
@@ -43,7 +43,7 @@ func TestRestrictedRoleDefinitionGetConditionsEmpty(t *testing.T) {
 func TestRestrictedRoleDefinitionSetConditions(t *testing.T) {
 	rrd := &RestrictedRoleDefinition{}
 	expected := []metav1.Condition{
-		{Type: string(WebhookAuthorizerReadyCondition), Status: metav1.ConditionFalse, Reason: "Error"},
+		{Type: string(ReadyCondition), Status: metav1.ConditionFalse, Reason: "Error"},
 	}
 
 	rrd.SetConditions(expected)
@@ -60,14 +60,14 @@ func TestRestrictedRoleDefinitionSetConditionsOverwrite(t *testing.T) {
 	rrd := &RestrictedRoleDefinition{
 		Status: RestrictedRoleDefinitionStatus{
 			Conditions: []metav1.Condition{
-				{Type: string(WebhookAuthorizerReadyCondition), Status: metav1.ConditionFalse},
+				{Type: string(ReadyCondition), Status: metav1.ConditionFalse},
 				{Type: string(PolicyCompliantCondition), Status: metav1.ConditionFalse},
 			},
 		},
 	}
 
 	rrd.SetConditions([]metav1.Condition{
-		{Type: string(WebhookAuthorizerReadyCondition), Status: metav1.ConditionTrue},
+		{Type: string(ReadyCondition), Status: metav1.ConditionTrue},
 	})
 
 	if len(rrd.Status.Conditions) != 1 {
@@ -155,7 +155,7 @@ func TestRestrictedRoleDefinitionStatusFields(t *testing.T) {
 			RoleReconciled:     true,
 			PolicyViolations:   []string{"forbidden API group: apps", "forbidden verb: delete"},
 			Conditions: []metav1.Condition{
-				{Type: string(WebhookAuthorizerReadyCondition), Status: metav1.ConditionFalse},
+				{Type: string(ReadyCondition), Status: metav1.ConditionFalse},
 			},
 		},
 	}
@@ -191,7 +191,7 @@ func TestRestrictedRoleDefinitionDeepCopy(t *testing.T) {
 			RoleReconciled:     true,
 			PolicyViolations:   []string{"violation-1"},
 			Conditions: []metav1.Condition{
-				{Type: string(WebhookAuthorizerReadyCondition), Status: metav1.ConditionTrue},
+				{Type: string(ReadyCondition), Status: metav1.ConditionTrue},
 			},
 		},
 	}

@@ -32,8 +32,8 @@ var supportedSubjectKinds = []string{rbacv1.UserKind, rbacv1.GroupKind, rbacv1.S
 var _ admission.Validator[*BindDefinition] = &BindDefinitionValidator{}
 
 // checkRoleExists checks whether a Role exists in the given namespace, using
-// roleCache to avoid redundant lookups. It returns (found, error); on NotFound
-// the missing ref is appended to *missingRoles.
+// roleCache to avoid redundant lookups. It returns an error on API failures;
+// on NotFound the missing ref is appended to *missingRoles and nil is returned.
 func (v *BindDefinitionValidator) checkRoleExists(
 	ctx context.Context,
 	namespace, roleRef, bdName string,

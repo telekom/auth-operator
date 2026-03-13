@@ -55,14 +55,14 @@ the corresponding ClusterRoles, Roles, ClusterRoleBindings, and RoleBindings
 are created and kept in sync, and that WebhookAuthorizer resources are validated
 and their status is kept up to date.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := validateConcurrency(
-			bindDefinitionConcurrency,
-			roleDefinitionConcurrency,
-			webhookAuthorizerConcurrency,
-			rbacPolicyConcurrency,
-			restrictedBindDefinitionConcurrency,
-			restrictedRoleDefinitionConcurrency,
-		); err != nil {
+		if err := validateConcurrency(map[string]int{
+			"--binddefinition-concurrency":           bindDefinitionConcurrency,
+			"--roledefinition-concurrency":           roleDefinitionConcurrency,
+			"--webhookauthorizer-concurrency":        webhookAuthorizerConcurrency,
+			"--rbacpolicy-concurrency":               rbacPolicyConcurrency,
+			"--restrictedbinddefinition-concurrency": restrictedBindDefinitionConcurrency,
+			"--restrictedroledefinition-concurrency": restrictedRoleDefinitionConcurrency,
+		}); err != nil {
 			return err
 		}
 
@@ -340,10 +340,10 @@ func waitForRequiredCRDs(ctx context.Context, cfg *rest.Config, timeout time.Dur
 }
 
 // validateConcurrency checks that all concurrency values are non-negative.
-func validateConcurrency(values ...int) error {
-	for _, v := range values {
+func validateConcurrency(flags map[string]int) error {
+	for name, v := range flags {
 		if v < 0 {
-			return fmt.Errorf("concurrency values must be >= 0, got %d", v)
+			return fmt.Errorf("concurrency value for %s must be >= 0, got %d", name, v)
 		}
 	}
 	return nil
