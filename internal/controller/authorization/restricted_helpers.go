@@ -55,6 +55,11 @@ type ViolationHandlerConfig struct {
 }
 
 // handlePolicyViolations processes detected policy violations for a restricted resource.
+// maxViolationsInMessage is the maximum number of violation strings included in
+// condition messages and Kubernetes events. The full list is always available in
+// status.policyViolations.
+const maxViolationsInMessage = 10
+
 // It marks the resource as non-compliant, deprovisions RBAC resources, and returns
 // a requeue result. Returns (result, nil) on success, or (result, error) if
 // deprovisioning fails.
@@ -73,14 +78,22 @@ func handlePolicyViolations(
 	logger.Info("policy violations detected",
 		"name", runtimeObj.GetName(), "violations", violationStrings)
 
+	// Cap the message to avoid oversized condition messages and events.
+	// The full list is stored in status.policyViolations.
+	msgStrings := violationStrings
+	if len(msgStrings) > maxViolationsInMessage {
+		msgStrings = append(msgStrings[:maxViolationsInMessage:maxViolationsInMessage],
+			fmt.Sprintf("and %d more", len(violationStrings)-maxViolationsInMessage))
+	}
+
 	conditions.MarkFalse(obj, authorizationv1alpha1.PolicyCompliantCondition, generation,
-		authorizationv1alpha1.PolicyCompliantReasonViolationsDetected, authorizationv1alpha1.PolicyCompliantMessageViolationsDetected, strings.Join(violationStrings, "; "))
+		authorizationv1alpha1.PolicyCompliantReasonViolationsDetected, authorizationv1alpha1.PolicyCompliantMessageViolationsDetected, strings.Join(msgStrings, "; "))
 
 	metrics.PolicyViolationsActive.WithLabelValues(cfg.ControllerLabel, runtimeObj.GetName()).Set(float64(len(violations)))
 
 	recorder.Eventf(runtimeObj, nil, corev1.EventTypeWarning,
 		authorizationv1alpha1.EventReasonPolicyViolation, authorizationv1alpha1.EventActionReconcile,
-		"Policy violations detected: %v", violationStrings)
+		"Policy violations detected: %v", msgStrings)
 
 	// Deprovision: delete all owned RBAC resources.
 	if err := cfg.Deprovision(ctx); err != nil {

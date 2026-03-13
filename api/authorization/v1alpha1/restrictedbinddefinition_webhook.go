@@ -38,7 +38,7 @@ func (r *RestrictedBindDefinition) SetupWebhookWithManager(mgr ctrl.Manager) err
 
 // ValidateCreate implements admission.Validator for RestrictedBindDefinition.
 func (v *RestrictedBindDefinitionValidator) ValidateCreate(ctx context.Context, obj *RestrictedBindDefinition) (admission.Warnings, error) {
-	ctx, cancel := context.WithTimeout(ctx, webhookValidationTimeout)
+	ctx, cancel := context.WithTimeout(ctx, WebhookCacheTimeout)
 	defer cancel()
 
 	logger := log.FromContext(ctx).WithName("restrictedbinddefinition-webhook")
@@ -54,7 +54,7 @@ func (v *RestrictedBindDefinitionValidator) ValidateCreate(ctx context.Context, 
 
 // ValidateUpdate implements admission.Validator for RestrictedBindDefinition.
 func (v *RestrictedBindDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *RestrictedBindDefinition) (admission.Warnings, error) {
-	ctx, cancel := context.WithTimeout(ctx, webhookValidationTimeout)
+	ctx, cancel := context.WithTimeout(ctx, WebhookCacheTimeout)
 	defer cancel()
 
 	logger := log.FromContext(ctx).WithName("restrictedbinddefinition-webhook")

@@ -92,6 +92,32 @@ func TestContainsString(t *testing.T) {
 	}
 }
 
+func TestContainsStringOrWildcard(t *testing.T) {
+	tests := []struct {
+		name  string
+		slice []string
+		value string
+		want  bool
+	}{
+		{name: "exact match", slice: []string{"a", "b", "c"}, value: "b", want: true},
+		{name: "wildcard matches any", slice: []string{"a", "*"}, value: "z", want: true},
+		{name: "wildcard alone", slice: []string{"*"}, value: "anything", want: true},
+		{name: "no match", slice: []string{"a", "b"}, value: "c", want: false},
+		{name: "empty slice", slice: nil, value: "a", want: false},
+		{name: "empty value exact match", slice: []string{""}, value: "", want: true},
+		{name: "wildcard matches empty", slice: []string{"*"}, value: "", want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := containsStringOrWildcard(tt.slice, tt.value)
+			if got != tt.want {
+				t.Errorf("containsStringOrWildcard(%v, %q) = %v, want %v", tt.slice, tt.value, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestHasAnyPrefix(t *testing.T) {
 	tests := []struct {
 		name     string

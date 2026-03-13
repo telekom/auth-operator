@@ -20,11 +20,12 @@ import (
 // This index must be registered with the manager before use.
 const TargetNameField = ".spec.targetName"
 
-// webhookValidationTimeout is the maximum duration CRD webhook validators wait
-// for cache-backed List or Get calls. Informer-cache reads normally complete in
+// WebhookCacheTimeout is the maximum duration webhook handlers wait for
+// cache-backed List or Get calls. Informer-cache reads normally complete in
 // microseconds; the timeout is a safety net for cold-cache or degraded
-// API-server scenarios.
-const webhookValidationTimeout = 5 * time.Second
+// API-server scenarios. Shared by CRD validation webhooks and authorization
+// webhook handlers.
+const WebhookCacheTimeout = 5 * time.Second
 
 // RoleDefinitionValidator implements admission.Validator for RoleDefinition.
 // It holds a client reference for listing existing resources during validation.
@@ -60,7 +61,7 @@ func validateRestrictedAPIsVersions(obj *RoleDefinition) error {
 
 // ValidateCreate implements admission.Validator for RoleDefinition.
 func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleDefinition) (admission.Warnings, error) {
-	ctx, cancel := context.WithTimeout(ctx, webhookValidationTimeout)
+	ctx, cancel := context.WithTimeout(ctx, WebhookCacheTimeout)
 	defer cancel()
 
 	logger := log.FromContext(ctx).WithName("roledefinition-webhook")
@@ -109,7 +110,7 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 
 // ValidateUpdate implements admission.Validator for RoleDefinition.
 func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *RoleDefinition) (admission.Warnings, error) {
-	ctx, cancel := context.WithTimeout(ctx, webhookValidationTimeout)
+	ctx, cancel := context.WithTimeout(ctx, WebhookCacheTimeout)
 	defer cancel()
 
 	logger := log.FromContext(ctx).WithName("roledefinition-webhook")

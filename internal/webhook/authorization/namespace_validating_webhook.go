@@ -270,7 +270,7 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 		"groupCount", len(userGroups))
 
 	bindDefinitions := &authzv1alpha1.BindDefinitionList{}
-	listCtx, cancel := context.WithTimeout(ctx, webhookListTimeout)
+	listCtx, cancel := context.WithTimeout(ctx, authzv1alpha1.WebhookCacheTimeout)
 	defer cancel()
 	if err := v.Client.List(listCtx, bindDefinitions); err != nil {
 		logger.Error(err, "failed to list BindDefinitions", "namespace", req.Name)
@@ -339,7 +339,7 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 	// This is restricted to CREATE/UPDATE — DELETE is intentionally excluded.
 	if saInfo.IsServiceAccount &&
 		(req.Operation == admissionv1.Create || req.Operation == admissionv1.Update) {
-		saCtx, saCancel := context.WithTimeout(ctx, webhookListTimeout)
+		saCtx, saCancel := context.WithTimeout(ctx, authzv1alpha1.WebhookCacheTimeout)
 		defer saCancel()
 		inheritedLabels, saErr := GetSANamespaceTrackedLabels(saCtx, v.Client, saInfo)
 		if saErr != nil {
