@@ -71,13 +71,16 @@ kubectl get crds | grep t-caas.telekom.com
 
 ## Quick Start
 
-Auth Operator provides three CRDs for managing RBAC:
+Auth Operator provides six CRDs for managing RBAC:
 
 | CRD | Purpose |
 |-----|---------|
 | **RoleDefinition** | Generates ClusterRoles/Roles using deny-list pattern |
 | **BindDefinition** | Creates ClusterRoleBindings/RoleBindings for subjects |
 | **WebhookAuthorizer** | Configures webhook-based authorization *(planned)* |
+| **RBACPolicy** | Defines policy constraints for restricted CRDs |
+| **RestrictedRoleDefinition** | Policy-governed variant of RoleDefinition |
+| **RestrictedBindDefinition** | Policy-governed variant of BindDefinition |
 
 ### 1. Create a RoleDefinition
 

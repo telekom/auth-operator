@@ -141,7 +141,9 @@ func (r *RestrictedRoleDefinitionReconciler) queueAll() handler.MapFunc {
 func (r *RestrictedRoleDefinitionReconciler) policyToRestrictedRoleDefinitions(ctx context.Context, obj client.Object) []reconcile.Request {
 	logger := log.FromContext(ctx)
 	list := &authorizationv1alpha1.RestrictedRoleDefinitionList{}
-	if err := r.client.List(ctx, list,
+	listCtx, cancel := context.WithTimeout(ctx, queueAllTimeout)
+	defer cancel()
+	if err := r.client.List(listCtx, list,
 		client.MatchingFields{indexer.RestrictedRoleDefinitionPolicyRefField: obj.GetName()}); err != nil {
 		logger.Error(err, "failed to list RestrictedRoleDefinitions for policy", "policy", obj.GetName())
 		return nil
