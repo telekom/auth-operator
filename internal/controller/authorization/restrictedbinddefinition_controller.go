@@ -360,8 +360,12 @@ func (r *RestrictedBindDefinitionReconciler) rbdReconcileResources(
 		ac.WithOwnerReferences(ownerRefForRestricted(rbd, "RestrictedBindDefinition")).
 			WithAnnotations(helpers.BuildResourceAnnotations("RestrictedBindDefinition", rbd.Name))
 
-		if _, err := pkgssa.PatchApplyClusterRoleBinding(ctx, r.client, ac); err != nil {
+		if result, err := pkgssa.PatchApplyClusterRoleBinding(ctx, r.client, ac); err != nil {
 			return fmt.Errorf("ensure ClusterRoleBinding %s: %w", crbName, err)
+		} else if result == pkgssa.PatchApplyResultSkipped {
+			metrics.RBACResourcesSkipped.WithLabelValues(metrics.ResourceClusterRoleBinding).Inc()
+		} else {
+			metrics.RBACResourcesApplied.WithLabelValues(metrics.ResourceClusterRoleBinding).Inc()
 		}
 	}
 
@@ -466,8 +470,12 @@ func (r *RestrictedBindDefinitionReconciler) rbdEnsureRoleBinding(
 	ac.WithOwnerReferences(ownerRefForRestricted(rbd, "RestrictedBindDefinition")).
 		WithAnnotations(helpers.BuildResourceAnnotations("RestrictedBindDefinition", rbd.Name))
 
-	if _, err := pkgssa.PatchApplyRoleBinding(ctx, r.client, ac); err != nil {
+	if result, err := pkgssa.PatchApplyRoleBinding(ctx, r.client, ac); err != nil {
 		return fmt.Errorf("ensure RoleBinding %s/%s: %w", namespace, rbName, err)
+	} else if result == pkgssa.PatchApplyResultSkipped {
+		metrics.RBACResourcesSkipped.WithLabelValues(metrics.ResourceRoleBinding).Inc()
+	} else {
+		metrics.RBACResourcesApplied.WithLabelValues(metrics.ResourceRoleBinding).Inc()
 	}
 	return nil
 }

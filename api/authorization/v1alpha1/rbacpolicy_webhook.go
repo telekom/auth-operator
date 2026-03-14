@@ -6,6 +6,7 @@ package v1alpha1
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -79,7 +80,7 @@ func (v *RBACPolicyValidator) ValidateDelete(ctx context.Context, obj *RBACPolic
 		PolicyRefField: obj.Name,
 	}, client.Limit(1)); err != nil {
 		logger.Error(err, "failed to list RestrictedBindDefinitions")
-		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RestrictedBindDefinitions: %w", err))
+		return nil, apierrors.NewInternalError(errors.New("unable to list RestrictedBindDefinitions"))
 	}
 	if len(rbdList.Items) > 0 {
 		return nil, apierrors.NewForbidden(
@@ -96,7 +97,7 @@ func (v *RBACPolicyValidator) ValidateDelete(ctx context.Context, obj *RBACPolic
 		PolicyRefField: obj.Name,
 	}, client.Limit(1)); err != nil {
 		logger.Error(err, "failed to list RestrictedRoleDefinitions")
-		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RestrictedRoleDefinitions: %w", err))
+		return nil, apierrors.NewInternalError(errors.New("unable to list RestrictedRoleDefinitions"))
 	}
 	if len(rrdList.Items) > 0 {
 		return nil, apierrors.NewForbidden(
