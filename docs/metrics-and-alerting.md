@@ -90,7 +90,7 @@ resources:
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `auth_operator_policy_violations_active` | Gauge | `controller`, `name` | Number of active policy violations per restricted resource (0 = compliant). Non-zero indicates the resource has been deprovisioned. |
+| `auth_operator_policy_violations_active` | Gauge | `controller`, `name` | Number of active policy violations per restricted resource (0 = compliant). Non-zero indicates the resource is non-compliant; the controller will attempt deprovisioning. |
 
 ### API Discovery
 

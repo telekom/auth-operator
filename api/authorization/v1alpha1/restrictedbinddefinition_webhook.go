@@ -6,6 +6,7 @@ package v1alpha1
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -99,7 +100,7 @@ func (v *RestrictedBindDefinitionValidator) validateRestrictedBindDefinitionSpec
 		TargetNameField: obj.Spec.TargetName,
 	}); err != nil {
 		logger.Error(err, "failed to list RestrictedBindDefinitions", "targetName", obj.Spec.TargetName)
-		return apierrors.NewInternalError(fmt.Errorf("unable to list RestrictedBindDefinitions: %w", err))
+		return apierrors.NewInternalError(errors.New("unable to list RestrictedBindDefinitions"))
 	}
 
 	for _, existing := range rbdList.Items {
@@ -117,7 +118,7 @@ func (v *RestrictedBindDefinitionValidator) validateRestrictedBindDefinitionSpec
 		TargetNameField: obj.Spec.TargetName,
 	}, client.Limit(1)); err != nil {
 		logger.Error(err, "failed to list BindDefinitions", "targetName", obj.Spec.TargetName)
-		return apierrors.NewInternalError(fmt.Errorf("unable to list BindDefinitions: %w", err))
+		return apierrors.NewInternalError(errors.New("unable to list BindDefinitions"))
 	}
 	if len(bdList.Items) > 0 {
 		return apierrors.NewBadRequest(
@@ -166,7 +167,7 @@ func (v *RestrictedBindDefinitionValidator) validatePolicyRefExists(ctx context.
 				fmt.Sprintf("referenced RBACPolicy %q does not exist", obj.Spec.PolicyRef.Name))
 		}
 		logger.Error(err, "failed to get RBACPolicy", "policyRef", obj.Spec.PolicyRef.Name)
-		return apierrors.NewInternalError(fmt.Errorf("unable to get RBACPolicy: %w", err))
+		return apierrors.NewInternalError(errors.New("unable to get RBACPolicy"))
 	}
 
 	return nil

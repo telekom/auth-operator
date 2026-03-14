@@ -2,6 +2,7 @@ package v1alpha1
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -101,7 +102,7 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 		TargetNameField: r.Spec.TargetName,
 	}); err != nil {
 		logger.Error(err, "failed to list BindDefinitions", "targetName", r.Spec.TargetName)
-		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list BindDefinitions: %w", err))
+		return nil, apierrors.NewInternalError(errors.New("unable to list BindDefinitions"))
 	}
 
 	for _, bindDefinition := range bindDefinitionList.Items {
@@ -120,7 +121,7 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 		TargetNameField: r.Spec.TargetName,
 	}, client.Limit(1)); err != nil {
 		logger.Error(err, "failed to list RestrictedBindDefinitions", "targetName", r.Spec.TargetName)
-		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RestrictedBindDefinitions: %w", err))
+		return nil, apierrors.NewInternalError(errors.New("unable to list RestrictedBindDefinitions"))
 	}
 	if len(rbdList.Items) > 0 {
 		return nil, apierrors.NewBadRequest(
@@ -192,7 +193,7 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 				}
 			} else {
 				logger.Error(err, "failed to fetch clusterrole", "clusterRoleName", clusterRoleRef)
-				return warnings, apierrors.NewInternalError(fmt.Errorf("error fetching clusterrole '%s': %w", clusterRoleRef, err))
+				return warnings, apierrors.NewInternalError(fmt.Errorf("error fetching clusterrole '%s'", clusterRoleRef))
 			}
 		} else {
 			clusterRoleExists[clusterRoleRef] = true
@@ -223,7 +224,7 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 					}
 				} else {
 					logger.Error(err, "failed to fetch clusterrole", "clusterRoleName", clusterRoleRef)
-					return warnings, apierrors.NewInternalError(fmt.Errorf("error fetching clusterrole '%s': %w", clusterRoleRef, err))
+					return warnings, apierrors.NewInternalError(fmt.Errorf("error fetching clusterrole '%s'", clusterRoleRef))
 				}
 			} else {
 				clusterRoleExists[clusterRoleRef] = true
@@ -249,7 +250,7 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 				}
 				if err := v.Client.List(ctx, namespaceList, listOptions); err != nil {
 					logger.Error(err, "failed to list namespaces", "selector", selector.String())
-					return warnings, apierrors.NewInternalError(fmt.Errorf("unable to list namespaces: %w", err))
+					return warnings, apierrors.NewInternalError(errors.New("unable to list namespaces"))
 				}
 				for _, ns := range namespaceList.Items {
 					namespaceSet[ns.Name] = ns
@@ -287,7 +288,7 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 					continue
 				}
 				logger.Error(err, "failed to get namespace", "namespace", roleBinding.Namespace)
-				return warnings, apierrors.NewInternalError(fmt.Errorf("error fetching namespace %q: %w", roleBinding.Namespace, err))
+				return warnings, apierrors.NewInternalError(fmt.Errorf("error fetching namespace %q", roleBinding.Namespace))
 			}
 			if ns.Status.Phase == corev1.NamespaceTerminating {
 				continue

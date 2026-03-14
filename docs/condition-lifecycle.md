@@ -282,6 +282,28 @@ NamespaceSelectorValid → RulesValid → PrincipalConfigured → Ready
 
 ---
 
+## RBACPolicy Conditions
+
+RBACPolicy uses the standard kstatus conditions (`Ready`, `Stalled`).
+
+### Ready
+
+| Status | Reason | Message |
+|--------|--------|---------|
+| `True` | `Reconciled` | Reconciled successfully |
+| `False` | — | Set implicitly when Stalled is True |
+
+### Stalled
+
+| Status | Reason | Message |
+|--------|--------|---------|
+| `True` | `Error` | An error occurred; check operator logs for details |
+
+**Lifecycle**: Set when the controller fails to list or evaluate restricted
+resources during reconciliation. Cleared on the next successful reconciliation.
+
+---
+
 ## Restricted CRD Conditions
 
 RestrictedRoleDefinition and RestrictedBindDefinition use the standard kstatus
