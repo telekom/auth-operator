@@ -279,8 +279,8 @@ var (
 	// PolicyViolationsActive tracks the number of active policy violations
 	// detected per restricted resource during the last reconciliation.
 	// A non-zero value indicates the resource is non-compliant with its
-	// referenced RBACPolicy and has been deprovisioned. The gauge resets
-	// to 0 when the resource becomes compliant. Call
+	// referenced RBACPolicy; the controller will attempt deprovisioning.
+	// The gauge resets to 0 when the resource becomes compliant. Call
 	// DeletePolicyViolationSeries on resource deletion to avoid stale series.
 	PolicyViolationsActive = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
