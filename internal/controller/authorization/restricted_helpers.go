@@ -54,12 +54,12 @@ type ViolationHandlerConfig struct {
 	ApplyStatus func(context.Context) error
 }
 
-// handlePolicyViolations processes detected policy violations for a restricted resource.
 // maxViolationsInMessage is the maximum number of violation strings included in
 // condition messages and Kubernetes events. The full list is always available in
 // status.policyViolations.
 const maxViolationsInMessage = 10
 
+// handlePolicyViolations processes detected policy violations for a restricted resource.
 // It marks the resource as non-compliant, deprovisions RBAC resources, and returns
 // a requeue result. Returns (result, nil) on success, or (result, error) if
 // deprovisioning fails.

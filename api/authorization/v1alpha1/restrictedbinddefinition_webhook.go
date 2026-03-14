@@ -98,7 +98,7 @@ func (v *RestrictedBindDefinitionValidator) validateRestrictedBindDefinitionSpec
 	rbdList := &RestrictedBindDefinitionList{}
 	if err := v.Client.List(ctx, rbdList, client.MatchingFields{
 		TargetNameField: obj.Spec.TargetName,
-	}); err != nil {
+	}, client.Limit(1)); err != nil {
 		logger.Error(err, "failed to list RestrictedBindDefinitions", "targetName", obj.Spec.TargetName)
 		return apierrors.NewInternalError(errors.New("unable to list RestrictedBindDefinitions"))
 	}
@@ -108,7 +108,7 @@ func (v *RestrictedBindDefinitionValidator) validateRestrictedBindDefinitionSpec
 			logger.Info("validation failed: duplicate targetName",
 				"name", obj.Name, "targetName", obj.Spec.TargetName, "conflictsWith", existing.Name)
 			return apierrors.NewBadRequest(
-				fmt.Sprintf("targetName %s already exists in RestrictedBindDefinition %s", obj.Spec.TargetName, existing.Name))
+				fmt.Sprintf("targetName %s is already in use by another RestrictedBindDefinition", obj.Spec.TargetName))
 		}
 	}
 
@@ -122,7 +122,7 @@ func (v *RestrictedBindDefinitionValidator) validateRestrictedBindDefinitionSpec
 	}
 	if len(bdList.Items) > 0 {
 		return apierrors.NewBadRequest(
-			fmt.Sprintf("targetName %s already exists in BindDefinition %s", obj.Spec.TargetName, bdList.Items[0].Name))
+			fmt.Sprintf("targetName %s is already in use by a BindDefinition", obj.Spec.TargetName))
 	}
 
 	// Validate subject Kinds are one of the RBAC-supported types.
