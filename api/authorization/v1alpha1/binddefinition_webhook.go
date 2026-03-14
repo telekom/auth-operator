@@ -111,7 +111,7 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 		if bindDefinition.Name != r.Name {
 			logger.Info("validation failed: duplicate targetName",
 				"name", r.Name, "targetName", r.Spec.TargetName, "conflictsWith", bindDefinition.Name)
-			return nil, apierrors.NewBadRequest(fmt.Sprintf("targetName %s already exists in BindDefinition %s", r.Spec.TargetName, bindDefinition.Name))
+			return nil, apierrors.NewBadRequest(fmt.Sprintf("targetName %s is already in use by another BindDefinition", r.Spec.TargetName))
 		}
 	}
 
@@ -125,7 +125,7 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 	}
 	if len(rbdList.Items) > 0 {
 		return nil, apierrors.NewBadRequest(
-			fmt.Sprintf("targetName %s already exists in RestrictedBindDefinition %s", r.Spec.TargetName, rbdList.Items[0].Name))
+			fmt.Sprintf("targetName %s is already in use by a RestrictedBindDefinition", r.Spec.TargetName))
 	}
 
 	// Validate subject Kinds are one of the RBAC-supported types.

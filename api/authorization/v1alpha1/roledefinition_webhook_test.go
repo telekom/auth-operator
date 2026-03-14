@@ -117,7 +117,7 @@ var _ = Describe("RoleDefinition Webhook", func() {
 			Eventually(func(g Gomega) {
 				err := k8sClient.Create(ctx, rd2.DeepCopy(), client.DryRunAll)
 				g.Expect(err).To(HaveOccurred())
-				g.Expect(err.Error()).To(ContainSubstring("targetName shared-target-name already exists"))
+				g.Expect(err.Error()).To(ContainSubstring("targetName shared-target-name is already in use"))
 			}).WithTimeout(10 * time.Second).WithPolling(250 * time.Millisecond).Should(Succeed())
 
 			// Cleanup
