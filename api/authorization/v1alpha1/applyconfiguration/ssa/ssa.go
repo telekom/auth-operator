@@ -16,7 +16,7 @@ import (
 	metav1ac "k8s.io/client-go/applyconfigurations/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	authv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	ac "github.com/telekom/auth-operator/api/authorization/v1alpha1/applyconfiguration/authorization/v1alpha1"
 )
 
@@ -37,7 +37,7 @@ func applyStatus(ctx context.Context, c client.Client, applyConfig runtime.Apply
 // ApplyRoleDefinitionStatus applies a status update to a RoleDefinition using native SSA.
 // It delegates to PatchApplyRoleDefinitionStatus which compares against the cache first
 // and skips the API call when the status is already up-to-date.
-func ApplyRoleDefinitionStatus(ctx context.Context, c client.Client, rd *authv1alpha1.RoleDefinition) error {
+func ApplyRoleDefinitionStatus(ctx context.Context, c client.Client, rd *authorizationv1alpha1.RoleDefinition) error {
 	_, err := PatchApplyRoleDefinitionStatus(ctx, c, rd)
 	return err
 }
@@ -45,7 +45,7 @@ func ApplyRoleDefinitionStatus(ctx context.Context, c client.Client, rd *authv1a
 // ApplyBindDefinitionStatus applies a status update to a BindDefinition using native SSA.
 // It delegates to PatchApplyBindDefinitionStatus which compares against the cache first
 // and skips the API call when the status is already up-to-date.
-func ApplyBindDefinitionStatus(ctx context.Context, c client.Client, bd *authv1alpha1.BindDefinition) error {
+func ApplyBindDefinitionStatus(ctx context.Context, c client.Client, bd *authorizationv1alpha1.BindDefinition) error {
 	_, err := PatchApplyBindDefinitionStatus(ctx, c, bd)
 	return err
 }
@@ -53,13 +53,13 @@ func ApplyBindDefinitionStatus(ctx context.Context, c client.Client, bd *authv1a
 // ApplyWebhookAuthorizerStatus applies a status update to a WebhookAuthorizer using native SSA.
 // It delegates to PatchApplyWebhookAuthorizerStatus which compares against the cache first
 // and skips the API call when the status is already up-to-date.
-func ApplyWebhookAuthorizerStatus(ctx context.Context, c client.Client, wa *authv1alpha1.WebhookAuthorizer) error {
+func ApplyWebhookAuthorizerStatus(ctx context.Context, c client.Client, wa *authorizationv1alpha1.WebhookAuthorizer) error {
 	_, err := PatchApplyWebhookAuthorizerStatus(ctx, c, wa)
 	return err
 }
 
 // RoleDefinitionStatusFrom converts a RoleDefinitionStatus to its ApplyConfiguration.
-func RoleDefinitionStatusFrom(status *authv1alpha1.RoleDefinitionStatus) *ac.RoleDefinitionStatusApplyConfiguration {
+func RoleDefinitionStatusFrom(status *authorizationv1alpha1.RoleDefinitionStatus) *ac.RoleDefinitionStatusApplyConfiguration {
 	if status == nil {
 		return nil
 	}
@@ -81,7 +81,7 @@ func RoleDefinitionStatusFrom(status *authv1alpha1.RoleDefinitionStatus) *ac.Rol
 }
 
 // BindDefinitionStatusFrom converts a BindDefinitionStatus to its ApplyConfiguration.
-func BindDefinitionStatusFrom(status *authv1alpha1.BindDefinitionStatus) *ac.BindDefinitionStatusApplyConfiguration {
+func BindDefinitionStatusFrom(status *authorizationv1alpha1.BindDefinitionStatus) *ac.BindDefinitionStatusApplyConfiguration {
 	if status == nil {
 		return nil
 	}
@@ -120,7 +120,7 @@ func BindDefinitionStatusFrom(status *authv1alpha1.BindDefinitionStatus) *ac.Bin
 }
 
 // WebhookAuthorizerStatusFrom converts a WebhookAuthorizerStatus to its ApplyConfiguration.
-func WebhookAuthorizerStatusFrom(status *authv1alpha1.WebhookAuthorizerStatus) *ac.WebhookAuthorizerStatusApplyConfiguration {
+func WebhookAuthorizerStatusFrom(status *authorizationv1alpha1.WebhookAuthorizerStatus) *ac.WebhookAuthorizerStatusApplyConfiguration {
 	if status == nil {
 		return nil
 	}
@@ -134,6 +134,104 @@ func WebhookAuthorizerStatusFrom(status *authv1alpha1.WebhookAuthorizerStatus) *
 	result.WithAuthorizerConfigured(status.AuthorizerConfigured)
 
 	// Set conditions
+	for i := range status.Conditions {
+		result.WithConditions(ConditionFrom(&status.Conditions[i]))
+	}
+
+	return result
+}
+
+// ApplyRBACPolicyStatus applies a status update to an RBACPolicy using native SSA.
+// It delegates to PatchApplyRBACPolicyStatus which compares against the cache first
+// and skips the API call when the status is already up-to-date.
+func ApplyRBACPolicyStatus(ctx context.Context, c client.Client, rp *authorizationv1alpha1.RBACPolicy) error {
+	_, err := PatchApplyRBACPolicyStatus(ctx, c, rp)
+	return err
+}
+
+// ApplyRestrictedBindDefinitionStatus applies a status update to a RestrictedBindDefinition using native SSA.
+// It delegates to PatchApplyRestrictedBindDefinitionStatus which compares against the cache first
+// and skips the API call when the status is already up-to-date.
+func ApplyRestrictedBindDefinitionStatus(ctx context.Context, c client.Client, rbd *authorizationv1alpha1.RestrictedBindDefinition) error {
+	_, err := PatchApplyRestrictedBindDefinitionStatus(ctx, c, rbd)
+	return err
+}
+
+// ApplyRestrictedRoleDefinitionStatus applies a status update to a RestrictedRoleDefinition using native SSA.
+// It delegates to PatchApplyRestrictedRoleDefinitionStatus which compares against the cache first
+// and skips the API call when the status is already up-to-date.
+func ApplyRestrictedRoleDefinitionStatus(ctx context.Context, c client.Client, rrd *authorizationv1alpha1.RestrictedRoleDefinition) error {
+	_, err := PatchApplyRestrictedRoleDefinitionStatus(ctx, c, rrd)
+	return err
+}
+
+// RBACPolicyStatusFrom converts an RBACPolicyStatus to its ApplyConfiguration.
+func RBACPolicyStatusFrom(status *authorizationv1alpha1.RBACPolicyStatus) *ac.RBACPolicyStatusApplyConfiguration {
+	if status == nil {
+		return nil
+	}
+
+	result := ac.RBACPolicyStatus()
+	result.WithObservedGeneration(status.ObservedGeneration)
+	result.WithBoundResourceCount(status.BoundResourceCount)
+
+	for i := range status.Conditions {
+		result.WithConditions(ConditionFrom(&status.Conditions[i]))
+	}
+
+	return result
+}
+
+// RestrictedBindDefinitionStatusFrom converts a RestrictedBindDefinitionStatus to its ApplyConfiguration.
+func RestrictedBindDefinitionStatusFrom(status *authorizationv1alpha1.RestrictedBindDefinitionStatus) *ac.RestrictedBindDefinitionStatusApplyConfiguration {
+	if status == nil {
+		return nil
+	}
+
+	result := ac.RestrictedBindDefinitionStatus()
+	result.WithObservedGeneration(status.ObservedGeneration)
+	result.WithBindReconciled(status.BindReconciled)
+
+	for _, sa := range status.GeneratedServiceAccounts {
+		result.WithGeneratedServiceAccounts(sa)
+	}
+
+	result.MissingRoleRefs = make([]string, 0, len(status.MissingRoleRefs))
+	for _, ref := range status.MissingRoleRefs {
+		result.WithMissingRoleRefs(ref)
+	}
+
+	for _, sa := range status.ExternalServiceAccounts {
+		result.WithExternalServiceAccounts(sa)
+	}
+
+	result.PolicyViolations = make([]string, 0, len(status.PolicyViolations))
+	for _, v := range status.PolicyViolations {
+		result.WithPolicyViolations(v)
+	}
+
+	for i := range status.Conditions {
+		result.WithConditions(ConditionFrom(&status.Conditions[i]))
+	}
+
+	return result
+}
+
+// RestrictedRoleDefinitionStatusFrom converts a RestrictedRoleDefinitionStatus to its ApplyConfiguration.
+func RestrictedRoleDefinitionStatusFrom(status *authorizationv1alpha1.RestrictedRoleDefinitionStatus) *ac.RestrictedRoleDefinitionStatusApplyConfiguration {
+	if status == nil {
+		return nil
+	}
+
+	result := ac.RestrictedRoleDefinitionStatus()
+	result.WithObservedGeneration(status.ObservedGeneration)
+	result.WithRoleReconciled(status.RoleReconciled)
+
+	result.PolicyViolations = make([]string, 0, len(status.PolicyViolations))
+	for _, v := range status.PolicyViolations {
+		result.WithPolicyViolations(v)
+	}
+
 	for i := range status.Conditions {
 		result.WithConditions(ConditionFrom(&status.Conditions[i]))
 	}

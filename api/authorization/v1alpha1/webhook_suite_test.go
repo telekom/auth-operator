@@ -103,8 +103,9 @@ var _ = BeforeSuite(func() {
 			Port:    webhookInstallOptions.LocalServingPort,
 			CertDir: webhookInstallOptions.LocalServingCertDir,
 		}),
-		LeaderElection: false,
-		Metrics:        metricsserver.Options{BindAddress: "0"},
+		LeaderElection:         false,
+		Metrics:                metricsserver.Options{BindAddress: "0"},
+		HealthProbeBindAddress: "0",
 	})
 	Expect(err).NotTo(HaveOccurred())
 
@@ -115,6 +116,15 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 
 	err = (&WebhookAuthorizer{}).SetupWebhookWithManager(mgr)
+	Expect(err).NotTo(HaveOccurred())
+
+	err = (&RBACPolicy{}).SetupWebhookWithManager(mgr)
+	Expect(err).NotTo(HaveOccurred())
+
+	err = (&RestrictedBindDefinition{}).SetupWebhookWithManager(mgr)
+	Expect(err).NotTo(HaveOccurred())
+
+	err = (&RestrictedRoleDefinition{}).SetupWebhookWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
 
 	// Register field indexes required by webhook validation (duplicate targetName checks)
@@ -139,6 +149,46 @@ var _ = BeforeSuite(func() {
 		})
 	Expect(err).NotTo(HaveOccurred())
 
+	err = mgr.GetFieldIndexer().IndexField(ctx, &RestrictedBindDefinition{}, TargetNameField,
+		func(obj client.Object) []string {
+			rbd, ok := obj.(*RestrictedBindDefinition)
+			if !ok || rbd.Spec.TargetName == "" {
+				return nil
+			}
+			return []string{rbd.Spec.TargetName}
+		})
+	Expect(err).NotTo(HaveOccurred())
+
+	err = mgr.GetFieldIndexer().IndexField(ctx, &RestrictedRoleDefinition{}, TargetNameField,
+		func(obj client.Object) []string {
+			rrd, ok := obj.(*RestrictedRoleDefinition)
+			if !ok || rrd.Spec.TargetName == "" {
+				return nil
+			}
+			return []string{rrd.Spec.TargetName}
+		})
+	Expect(err).NotTo(HaveOccurred())
+
+	err = mgr.GetFieldIndexer().IndexField(ctx, &RestrictedBindDefinition{}, PolicyRefField,
+		func(obj client.Object) []string {
+			rbd, ok := obj.(*RestrictedBindDefinition)
+			if !ok || rbd.Spec.PolicyRef.Name == "" {
+				return nil
+			}
+			return []string{rbd.Spec.PolicyRef.Name}
+		})
+	Expect(err).NotTo(HaveOccurred())
+
+	err = mgr.GetFieldIndexer().IndexField(ctx, &RestrictedRoleDefinition{}, PolicyRefField,
+		func(obj client.Object) []string {
+			rrd, ok := obj.(*RestrictedRoleDefinition)
+			if !ok || rrd.Spec.PolicyRef.Name == "" {
+				return nil
+			}
+			return []string{rrd.Spec.PolicyRef.Name}
+		})
+	Expect(err).NotTo(HaveOccurred())
+
 	// +kubebuilder:scaffold:webhook
 
 	go func() {
@@ -156,7 +206,7 @@ var _ = BeforeSuite(func() {
 			return err
 		}
 		return conn.Close()
-	}).Should(Succeed())
+	}, "10s", "250ms").Should(Succeed())
 
 })
 

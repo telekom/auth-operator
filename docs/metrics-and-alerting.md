@@ -86,6 +86,12 @@ resources:
 | `auth_operator_namespaces_active` | Gauge | `binddefinition` | Number of active (non-terminating) namespaces matching selectors. |
 | `auth_operator_serviceaccount_skipped_preexisting_total` | Counter | `binddefinition` | Pre-existing ServiceAccounts that were intentionally not adopted (no OwnerRef added). |
 
+### Policy Compliance (Restricted CRDs)
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `auth_operator_policy_violations_active` | Gauge | `controller`, `name` | Number of active policy violations per restricted resource (0 = compliant). Non-zero indicates the resource is non-compliant; the controller will attempt deprovisioning. |
+
 ### API Discovery
 
 | Metric | Type | Labels | Description |

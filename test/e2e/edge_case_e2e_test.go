@@ -332,7 +332,7 @@ spec:
 				if err != nil {
 					return false
 				}
-				return string(output) == "False"
+				return string(output) == statusFalse
 			}, reconcileTimeout, pollInterval).Should(BeTrue(),
 				"RoleRefsValid should be False when referenced ClusterRole does not exist")
 

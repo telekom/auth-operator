@@ -2,6 +2,7 @@ package v1alpha1
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -14,10 +15,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
-
-// TargetNameField is the field index for efficient lookups by Spec.TargetName.
-// This index must be registered with the manager before use.
-const TargetNameField = ".spec.targetName"
 
 // RoleDefinitionValidator implements admission.Validator for RoleDefinition.
 // It holds a client reference for listing existing resources during validation.
@@ -53,6 +50,9 @@ func validateRestrictedAPIsVersions(obj *RoleDefinition) error {
 
 // ValidateCreate implements admission.Validator for RoleDefinition.
 func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleDefinition) (admission.Warnings, error) {
+	ctx, cancel := context.WithTimeout(ctx, WebhookCacheTimeout)
+	defer cancel()
+
 	logger := log.FromContext(ctx).WithName("roledefinition-webhook")
 	logger.V(1).Info("validating create", "name", obj.Name)
 
@@ -60,13 +60,15 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 		return nil, err
 	}
 
-	// Use field index for efficient lookup by TargetName
+	// Use field index for efficient lookup by TargetName. The field index constrains
+	// results to the small set matching this targetName; the context timeout provides
+	// the hard latency bound.
 	roleDefinitionList := &RoleDefinitionList{}
 	if err := v.Client.List(ctx, roleDefinitionList, client.MatchingFields{
 		TargetNameField: obj.Spec.TargetName,
 	}); err != nil {
 		logger.Error(err, "failed to list RoleDefinitions", "targetName", obj.Spec.TargetName)
-		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RoleDefinitions: %w", err))
+		return nil, apierrors.NewInternalError(errors.New("unable to list RoleDefinitions"))
 	}
 
 	for _, roleDefinition := range roleDefinitionList.Items {
@@ -77,11 +79,29 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 		}
 	}
 
+	// Check for cross-type targetName collision with RestrictedRoleDefinitions (only need first match).
+	rrdList := &RestrictedRoleDefinitionList{}
+	if err := v.Client.List(ctx, rrdList, client.MatchingFields{
+		TargetNameField: obj.Spec.TargetName,
+	}, client.Limit(1)); err != nil {
+		logger.Error(err, "failed to list RestrictedRoleDefinitions", "targetName", obj.Spec.TargetName)
+		return nil, apierrors.NewInternalError(errors.New("unable to list RestrictedRoleDefinitions"))
+	}
+	for _, existing := range rrdList.Items {
+		if existing.Spec.TargetRole == obj.Spec.TargetRole {
+			return nil, apierrors.NewBadRequest(
+				fmt.Sprintf("targetName %s already exists in RestrictedRoleDefinition %s", obj.Spec.TargetName, existing.Name))
+		}
+	}
+
 	return nil, nil
 }
 
 // ValidateUpdate implements admission.Validator for RoleDefinition.
 func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *RoleDefinition) (admission.Warnings, error) {
+	ctx, cancel := context.WithTimeout(ctx, WebhookCacheTimeout)
+	defer cancel()
+
 	logger := log.FromContext(ctx).WithName("roledefinition-webhook")
 	logger.V(1).Info("validating update", "name", newObj.Name)
 
@@ -116,13 +136,15 @@ func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 		return nil, err
 	}
 
-	// Use field index for efficient lookup by TargetName
+	// Use field index for efficient lookup by TargetName. The field index constrains
+	// results to the small set matching this targetName; the context timeout provides
+	// the hard latency bound.
 	roleDefinitionList := &RoleDefinitionList{}
 	if err := v.Client.List(ctx, roleDefinitionList, client.MatchingFields{
 		TargetNameField: newObj.Spec.TargetName,
 	}); err != nil {
 		logger.Error(err, "failed to list RoleDefinitions", "targetName", newObj.Spec.TargetName)
-		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RoleDefinitions: %w", err))
+		return nil, apierrors.NewInternalError(errors.New("unable to list RoleDefinitions"))
 	}
 
 	for _, roleDefinition := range roleDefinitionList.Items {

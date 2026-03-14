@@ -26,6 +26,22 @@ const (
 	// This allows the webhook handler to efficiently filter authorizers that
 	// need namespace matching versus those that apply globally.
 	WebhookAuthorizerHasNamespaceSelectorField = ".spec.hasNamespaceSelector"
+
+	// RestrictedBindDefinitionPolicyRefField indexes RestrictedBindDefinition
+	// by the referenced RBACPolicy name for efficient reverse lookups.
+	RestrictedBindDefinitionPolicyRefField = ".spec.policyRef.name"
+
+	// RestrictedRoleDefinitionPolicyRefField indexes RestrictedRoleDefinition
+	// by the referenced RBACPolicy name for efficient reverse lookups.
+	RestrictedRoleDefinitionPolicyRefField = ".spec.policyRef.name"
+
+	// RestrictedBindDefinitionTargetNameField indexes RestrictedBindDefinition
+	// by TargetName for duplicate detection in webhook validation.
+	RestrictedBindDefinitionTargetNameField = ".spec.targetName"
+
+	// RestrictedRoleDefinitionTargetNameField indexes RestrictedRoleDefinition
+	// by TargetName for duplicate detection in webhook validation.
+	RestrictedRoleDefinitionTargetNameField = ".spec.targetName"
 )
 
 // SetupIndexes registers field indexes on the manager's cache for efficient lookups.
@@ -76,6 +92,58 @@ func SetupIndexes(ctx context.Context, mgr manager.Manager) error {
 		return fmt.Errorf("failed to create index for WebhookAuthorizer.Spec.HasNamespaceSelector: %w", err)
 	}
 
+	// Index RestrictedBindDefinition by PolicyRef.Name for reverse lookups from RBACPolicy.
+	if err := mgr.GetFieldIndexer().IndexField(
+		ctx,
+		&authorizationv1alpha1.RestrictedBindDefinition{},
+		RestrictedBindDefinitionPolicyRefField,
+		RestrictedBindDefinitionPolicyRefFunc,
+	); err != nil {
+		return fmt.Errorf("failed to create index for RestrictedBindDefinition.Spec.PolicyRef.Name: %w", err)
+	}
+
+	// Index RestrictedBindDefinition by TargetName for duplicate detection.
+	if err := mgr.GetFieldIndexer().IndexField(
+		ctx,
+		&authorizationv1alpha1.RestrictedBindDefinition{},
+		RestrictedBindDefinitionTargetNameField,
+		func(obj client.Object) []string {
+			rbd, ok := obj.(*authorizationv1alpha1.RestrictedBindDefinition)
+			if !ok || rbd.Spec.TargetName == "" {
+				return nil
+			}
+			return []string{rbd.Spec.TargetName}
+		},
+	); err != nil {
+		return fmt.Errorf("failed to create index for RestrictedBindDefinition.Spec.TargetName: %w", err)
+	}
+
+	// Index RestrictedRoleDefinition by PolicyRef.Name for reverse lookups from RBACPolicy.
+	if err := mgr.GetFieldIndexer().IndexField(
+		ctx,
+		&authorizationv1alpha1.RestrictedRoleDefinition{},
+		RestrictedRoleDefinitionPolicyRefField,
+		RestrictedRoleDefinitionPolicyRefFunc,
+	); err != nil {
+		return fmt.Errorf("failed to create index for RestrictedRoleDefinition.Spec.PolicyRef.Name: %w", err)
+	}
+
+	// Index RestrictedRoleDefinition by TargetName for duplicate detection.
+	if err := mgr.GetFieldIndexer().IndexField(
+		ctx,
+		&authorizationv1alpha1.RestrictedRoleDefinition{},
+		RestrictedRoleDefinitionTargetNameField,
+		func(obj client.Object) []string {
+			rrd, ok := obj.(*authorizationv1alpha1.RestrictedRoleDefinition)
+			if !ok || rrd.Spec.TargetName == "" {
+				return nil
+			}
+			return []string{rrd.Spec.TargetName}
+		},
+	); err != nil {
+		return fmt.Errorf("failed to create index for RestrictedRoleDefinition.Spec.TargetName: %w", err)
+	}
+
 	return nil
 }
 
@@ -90,4 +158,24 @@ func WebhookAuthorizerHasNamespaceSelectorFunc(obj client.Object) []string {
 		return []string{"false"}
 	}
 	return []string{"true"}
+}
+
+// RestrictedBindDefinitionPolicyRefFunc extracts the RBACPolicy name from a
+// RestrictedBindDefinition for field indexing. Exported for testing and fake client setup.
+func RestrictedBindDefinitionPolicyRefFunc(obj client.Object) []string {
+	rbd, ok := obj.(*authorizationv1alpha1.RestrictedBindDefinition)
+	if !ok || rbd.Spec.PolicyRef.Name == "" {
+		return nil
+	}
+	return []string{rbd.Spec.PolicyRef.Name}
+}
+
+// RestrictedRoleDefinitionPolicyRefFunc extracts the RBACPolicy name from a
+// RestrictedRoleDefinition for field indexing. Exported for testing and fake client setup.
+func RestrictedRoleDefinitionPolicyRefFunc(obj client.Object) []string {
+	rrd, ok := obj.(*authorizationv1alpha1.RestrictedRoleDefinition)
+	if !ok || rrd.Spec.PolicyRef.Name == "" {
+		return nil
+	}
+	return []string{rrd.Spec.PolicyRef.Name}
 }

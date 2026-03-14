@@ -1,0 +1,116 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# =============================================================================
+# RestrictedBindDefinition Samples - Comprehensive Feature Coverage
+# =============================================================================
+# Prerequisite: Apply authorization_v1alpha1_rbacpolicy.yaml first.
+#
+# These samples demonstrate all features of the RestrictedBindDefinition CRD:
+# - Policy reference (policyRef)
+# - ServiceAccount-only subjects
+# - ClusterRoleBindings within policy limits
+# - RoleBindings with namespace selectors
+# - Auto-created ServiceAccounts
+# - Mixed subject types (Group + SA)
+# =============================================================================
+
+---
+# -----------------------------------------------------------------------------
+# RestrictedBindDefinition: Team SA Binding
+# Binds a team ServiceAccount to allowed roles within the team-workload-policy.
+# Use case: ServiceAccount-only tenant access
+# Requires: team-workload-policy RBACPolicy
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedBindDefinition
+metadata:
+  name: rbd-team-alpha-sa
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/tenant: team-alpha
+spec:
+  policyRef:
+    name: team-workload-policy
+  targetName: team-alpha-sa-binding
+  subjects:
+    - kind: ServiceAccount
+      name: team-alpha-workload
+      namespace: team-alpha
+      apiGroup: ""
+  roleBindings:
+    - namespace: team-alpha
+      clusterRoleRefs:
+        - t-caas-team-reader
+      roleRefs:
+        - t-caas-team-alpha-editor
+
+---
+# -----------------------------------------------------------------------------
+# RestrictedBindDefinition: Operator Cross-Namespace Binding
+# Binds an operator SA and group across multiple namespaces.
+# Use case: Cross-namespace operator access
+# Requires: operator-cross-namespace-policy RBACPolicy
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedBindDefinition
+metadata:
+  name: rbd-platform-operator
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/tenant: platform-team
+spec:
+  policyRef:
+    name: operator-cross-namespace-policy
+  targetName: platform-operator-binding
+  subjects:
+    - kind: ServiceAccount
+      name: platform-controller
+      namespace: platform-system
+      apiGroup: ""
+    - kind: Group
+      name: platform-operators
+      apiGroup: rbac.authorization.k8s.io
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - t-caas-operator-reader
+  roleBindings:
+    - namespace: team-alpha
+      clusterRoleRefs:
+        - t-caas-operator-manager
+    - namespace: team-beta
+      clusterRoleRefs:
+        - t-caas-operator-manager
+
+---
+# -----------------------------------------------------------------------------
+# RestrictedBindDefinition: CI Pipeline Binding
+# Binds CI service accounts to deploy roles in CI namespaces.
+# Use case: CI/CD pipelines
+# Requires: cicd-pipeline-policy RBACPolicy
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedBindDefinition
+metadata:
+  name: rbd-ci-deploy
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/tenant: cicd
+spec:
+  policyRef:
+    name: cicd-pipeline-policy
+  targetName: ci-deploy-binding
+  automountServiceAccountToken: false
+  subjects:
+    - kind: ServiceAccount
+      name: ci-deployer
+      namespace: ci-runners
+      apiGroup: ""
+  roleBindings:
+    - namespace: cd-deploy
+      clusterRoleRefs:
+        - t-caas-deploy-writer

@@ -78,8 +78,8 @@ The auth-operator consists of two main components:
 
 | Component | Purpose | Replicas |
 |-----------|---------|----------|
-| **Controller Manager** | Reconciles RoleDefinitions, BindDefinitions | 1 (HA: 2+) |
-| **Webhook Server** | Validates namespace operations | 1 (HA: 2+) |
+| **Controller Manager** | Reconciles RoleDefinitions, BindDefinitions, RestrictedRoleDefinitions, RestrictedBindDefinitions, RBACPolicies | 1 (HA: 2+) |
+| **Webhook Server** | Validates CRD operations, namespace admission | 1 (HA: 2+) |
 
 ### Component Interaction
 
@@ -92,9 +92,11 @@ The auth-operator consists of two main components:
 ┌───────────────────────┐        ┌────────────────────────────┐
 │   Controller Manager  │        │     Webhook Server         │
 │   ─────────────────   │        │     ───────────────        │
-│   • RoleDefinition    │        │   • Namespace validation   │
-│   • BindDefinition    │        │   • Label injection        │
-│   • API Discovery     │        │   • TDG migration          │
+│   • RoleDefinition    │        │   • CRD validation         │
+│   • BindDefinition    │        │   • Namespace admission    │
+│   • Restricted CRDs   │        │   • Label injection        │
+│   • RBACPolicy        │        │   • TDG migration          │
+│   • API Discovery     │        │                            │
 └───────────────────────┘        └────────────────────────────┘
             │                                  │
             ▼                                  ▼
@@ -148,6 +150,9 @@ The auth-operator consists of two main components:
 | `--binddefinition-concurrency` | Max concurrent BindDefinition reconciliations | `5` |
 | `--roledefinition-concurrency` | Max concurrent RoleDefinition reconciliations | `5` |
 | `--webhookauthorizer-concurrency` | Max concurrent WebhookAuthorizer reconciliations | `1` |
+| `--rbacpolicy-concurrency` | Max concurrent RBACPolicy reconciliations | `5` |
+| `--restrictedbinddefinition-concurrency` | Max concurrent RestrictedBindDefinition reconciliations | `5` |
+| `--restrictedroledefinition-concurrency` | Max concurrent RestrictedRoleDefinition reconciliations | `5` |
 | `--cache-sync-timeout` | Timeout for waiting for CRDs to become available | `2m0s` |
 | `--graceful-shutdown-timeout` | Timeout for graceful shutdown of the manager | `30s` |
 | `--wait-for-crds` | Wait for required CRDs before starting controllers | `true` |
