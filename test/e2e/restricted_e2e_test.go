@@ -72,7 +72,7 @@ var _ = Describe("Restricted CRD E2E", Ordered, ContinueOnFailure, Label("basic"
 			}, reconcileTimeout, pollingInterval).Should(BeTrue())
 
 			By("Verifying RBACPolicy spec is correct")
-			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "rbacpolicy", "e2e-test-policy",
+			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "rbacpolicy", "e2e-test-policy", // #nosec G204
 				"-o", "jsonpath={.spec.appliesTo.namespaceSelector.matchLabels}")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -89,7 +89,7 @@ var _ = Describe("Restricted CRD E2E", Ordered, ContinueOnFailure, Label("basic"
 			}, reconcileTimeout, pollingInterval).Should(BeTrue())
 
 			By("Verifying initial bound resource count is 0")
-			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "rbacpolicy", "e2e-test-policy",
+			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "rbacpolicy", "e2e-test-policy", // #nosec G204
 				"-o", "jsonpath={.status.boundResourceCount}")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -131,7 +131,7 @@ var _ = Describe("Restricted CRD E2E", Ordered, ContinueOnFailure, Label("basic"
 
 			By("Verifying RoleBinding was created in test namespace")
 			Eventually(func() error {
-				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "rolebinding",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "rolebinding", // #nosec G204
 					"-l", "app.kubernetes.io/managed-by=auth-operator",
 					"-n", testNamespace,
 					"-o", "name")
@@ -147,7 +147,7 @@ var _ = Describe("Restricted CRD E2E", Ordered, ContinueOnFailure, Label("basic"
 
 			By("Verifying RBACPolicy bound count increased")
 			Eventually(func() bool {
-				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "rbacpolicy", "e2e-test-policy",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "rbacpolicy", "e2e-test-policy", // #nosec G204
 					"-o", "jsonpath={.status.boundResourceCount}")
 				output, err := utils.Run(cmd)
 				if err != nil {
@@ -187,14 +187,14 @@ spec:
       clusterRoleRefs:
         - e2e-allowed-reader
 `
-			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-") // #nosec G204
 			cmd.Stdin = strings.NewReader(violatingYAML)
 			_, _ = utils.Run(cmd)
 
 			By("Verifying RestrictedBindDefinition shows policy violations")
 			// The RBD should be created but show PolicyCompliant=False
 			Eventually(func() bool {
-				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "restrictedbinddefinition",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "restrictedbinddefinition", // #nosec G204
 					"e2e-violating-binding",
 					"-o", "jsonpath={.status.conditions[?(@.type=='PolicyCompliant')].status}")
 				output, err := utils.Run(cmd)
@@ -205,7 +205,7 @@ spec:
 			}, reconcileTimeout, pollingInterval).Should(BeTrue())
 
 			By("Cleaning up violating binding")
-			cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "restrictedbinddefinition",
+			cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "restrictedbinddefinition", // #nosec G204
 				"e2e-violating-binding", "--ignore-not-found=true")
 			_, _ = utils.Run(cmd)
 		})
@@ -229,7 +229,7 @@ spec:
 
 			By("Waiting for RoleBinding to be created")
 			Eventually(func() error {
-				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "rolebinding",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "rolebinding", // #nosec G204
 					"-l", "app.kubernetes.io/managed-by=auth-operator",
 					"-n", testNamespace,
 					"-o", "name")
@@ -244,14 +244,14 @@ spec:
 			}, reconcileTimeout, pollingInterval).Should(Succeed())
 
 			By("Deleting RestrictedBindDefinition")
-			cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "restrictedbinddefinition",
+			cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "restrictedbinddefinition", // #nosec G204
 				"e2e-test-restricted-binding", "--timeout=60s")
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for RoleBinding to be cleaned up")
 			Eventually(func() bool {
-				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "rolebinding",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "rolebinding", // #nosec G204
 					"-l", "app.kubernetes.io/managed-by=auth-operator",
 					"-n", testNamespace,
 					"-o", "name")
@@ -296,7 +296,7 @@ spec:
 			}, reconcileTimeout, pollingInterval).Should(Succeed())
 
 			By("Verifying Role excludes restricted APIs (velero.io)")
-			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "role",
+			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "role", // #nosec G204
 				"e2e-restricted-reader", "-n", testNamespace, "-o", "yaml")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -317,7 +317,7 @@ spec:
 			}, reconcileTimeout, pollingInterval).Should(Succeed())
 
 			By("Deleting RestrictedRoleDefinition")
-			cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "restrictedroledefinition",
+			cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "restrictedroledefinition", // #nosec G204
 				"e2e-test-restricted-role", "--timeout=60s")
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -348,19 +348,19 @@ spec:
 			}, reconcileTimeout, pollingInterval).Should(BeTrue())
 
 			By("Attempting to delete RBACPolicy (should be blocked by webhook)")
-			cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "rbacpolicy",
+			cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "rbacpolicy", // #nosec G204
 				"e2e-test-policy", "--timeout=10s")
 			_, err := utils.Run(cmd)
 			Expect(err).To(HaveOccurred(), "RBACPolicy deletion should be blocked when bound resources exist")
 
 			By("Cleaning up: delete the RestrictedRoleDefinition first")
-			cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "restrictedroledefinition",
+			cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "restrictedroledefinition", // #nosec G204
 				"e2e-test-restricted-role", "--ignore-not-found=true", "--timeout=60s")
 			_, _ = utils.Run(cmd)
 
 			By("Now delete the RBACPolicy (should succeed)")
 			Eventually(func() error {
-				cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "rbacpolicy",
+				cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "rbacpolicy", // #nosec G204
 					"e2e-test-policy", "--timeout=30s")
 				_, err := utils.Run(cmd)
 				return err
@@ -370,21 +370,21 @@ spec:
 
 	Context("New CRDs Installed", func() {
 		It("should have RBACPolicy CRD installed", func() {
-			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "crd",
+			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "crd", // #nosec G204
 				"rbacpolicies.authorization.t-caas.telekom.com")
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
 		It("should have RestrictedBindDefinition CRD installed", func() {
-			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "crd",
+			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "crd", // #nosec G204
 				"restrictedbinddefinitions.authorization.t-caas.telekom.com")
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
 		It("should have RestrictedRoleDefinition CRD installed", func() {
-			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "crd",
+			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "crd", // #nosec G204
 				"restrictedroledefinitions.authorization.t-caas.telekom.com")
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -393,7 +393,7 @@ spec:
 })
 
 func checkResourceCondition(resourceType, name, conditionType string) bool {
-	cmd := exec.CommandContext(context.Background(), "kubectl", "get", resourceType, name,
+	cmd := exec.CommandContext(context.Background(), "kubectl", "get", resourceType, name, // #nosec G204
 		"-o", fmt.Sprintf("jsonpath={.status.conditions[?(@.type=='%s')].status}", conditionType))
 	output, err := utils.Run(cmd)
 	if err != nil {
@@ -408,7 +408,7 @@ func cleanupRestrictedCRDTestState() {
 		"restrictedbinddefinition",
 		"restrictedroledefinition",
 	} {
-		cmd := exec.CommandContext(context.Background(), "kubectl", "delete", resource,
+		cmd := exec.CommandContext(context.Background(), "kubectl", "delete", resource, // #nosec G204
 			"-l", "app.kubernetes.io/component=e2e-test",
 			"--ignore-not-found=true", "--wait=false", "--timeout=30s")
 		_, _ = utils.Run(cmd)
@@ -416,7 +416,7 @@ func cleanupRestrictedCRDTestState() {
 	}
 
 	// Delete violating binding if it exists
-	cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "restrictedbinddefinition",
+	cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "restrictedbinddefinition", // #nosec G204
 		"e2e-violating-binding", "--ignore-not-found=true", "--wait=false")
 	_, _ = utils.Run(cmd)
 
@@ -424,7 +424,7 @@ func cleanupRestrictedCRDTestState() {
 	time.Sleep(2 * time.Second)
 
 	// Then delete policies (now that nothing references them)
-	cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "rbacpolicy",
+	cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "rbacpolicy", // #nosec G204
 		"-l", "app.kubernetes.io/component=e2e-test",
 		"--ignore-not-found=true", "--wait=false", "--timeout=30s")
 	_, _ = utils.Run(cmd)
