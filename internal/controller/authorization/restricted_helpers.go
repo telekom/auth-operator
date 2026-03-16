@@ -6,10 +6,12 @@ package authorization
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	metav1ac "k8s.io/client-go/applyconfigurations/meta/v1"
 	"k8s.io/client-go/tools/events"
@@ -58,6 +60,38 @@ type ViolationHandlerConfig struct {
 // condition messages and Kubernetes events. The full list is always available in
 // status.policyViolations.
 const maxViolationsInMessage = 10
+
+// maxStalledErrorDetailLength caps the condition detail length for stalled
+// messages to keep status readable while still surfacing actionable context.
+const maxStalledErrorDetailLength = 220
+
+func stalledErrorDetail(err error) string {
+	if err == nil {
+		return "check operator logs for details"
+	}
+
+	switch {
+	case apierrors.IsForbidden(err):
+		return "authorization denied (check operator logs for details)"
+	case apierrors.IsNotFound(err):
+		return "required resource not found (check operator logs for details)"
+	case apierrors.IsConflict(err):
+		return "resource update conflict (check operator logs for details)"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "reconciliation timed out (check operator logs for details)"
+	case errors.Is(err, context.Canceled):
+		return "reconciliation canceled (check operator logs for details)"
+	default:
+		detail := strings.TrimSpace(strings.ReplaceAll(err.Error(), "\n", " "))
+		if detail == "" {
+			return "check operator logs for details"
+		}
+		if len(detail) > maxStalledErrorDetailLength {
+			return detail[:maxStalledErrorDetailLength] + "..."
+		}
+		return detail
+	}
+}
 
 // handlePolicyViolations processes detected policy violations for a restricted resource.
 // It marks the resource as non-compliant, deprovisions RBAC resources, and returns

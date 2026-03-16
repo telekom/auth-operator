@@ -247,29 +247,6 @@ spec:
   targetNamespace: sample-tenant-b
   scopeNamespaced: true
   restrictedVerbs:
+    - escalate
     - delete
     - patch
-
----
-# -----------------------------------------------------------------------------
-# CASE: Impersonated apply expected failure
-# Policy uses an unprivileged impersonated SA.
-# Expected outcome: reconciliation stalls with authorization errors.
-# -----------------------------------------------------------------------------
-apiVersion: authorization.t-caas.telekom.com/v1alpha1
-kind: RestrictedRoleDefinition
-metadata:
-  name: rrd-case-impersonated-authz-failure
-  labels:
-    app.kubernetes.io/name: auth-operator
-    app.kubernetes.io/managed-by: kustomize
-    t-caas.telekom.com/sample-case: impersonated-failed
-spec:
-  policyRef:
-    name: sample-policy-impersonation-authz-failure
-  targetRole: Role
-  targetName: sample-impersonated-fail-role
-  targetNamespace: sample-tenant-a
-  scopeNamespaced: true
-  restrictedVerbs:
-    - delete

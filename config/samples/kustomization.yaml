@@ -14,6 +14,6 @@ resources:
   - authorization_v1alpha1_rbacpolicy.yaml
   - authorization_v1alpha1_restrictedbinddefinition.yaml
   - authorization_v1alpha1_restrictedroledefinition.yaml
-  # NOTE: authorization_v1alpha1_negative_validation_cases.yaml is intentionally
-  # excluded because it contains webhook/schema rejection examples.
+  # NOTE: Broken sample cases live under config/samples/broken/ and are applied
+  # explicitly in CI output-delta to surface expected failure behavior.
 # +kubebuilder:scaffold:manifestskustomizesamples
