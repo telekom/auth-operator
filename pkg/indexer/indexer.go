@@ -16,10 +16,10 @@ import (
 
 const (
 	// RoleDefinitionTargetNameField is the field index for RoleDefinition.Spec.TargetName.
-	RoleDefinitionTargetNameField = ".spec.targetName"
+	RoleDefinitionTargetNameField = authorizationv1alpha1.TargetNameField
 
 	// BindDefinitionTargetNameField is the field index for BindDefinition.Spec.TargetName.
-	BindDefinitionTargetNameField = ".spec.targetName"
+	BindDefinitionTargetNameField = authorizationv1alpha1.TargetNameField
 
 	// WebhookAuthorizerHasNamespaceSelectorField indexes WebhookAuthorizer
 	// resources by whether they define a non-empty namespace selector.
@@ -37,11 +37,11 @@ const (
 
 	// RestrictedBindDefinitionTargetNameField indexes RestrictedBindDefinition
 	// by TargetName for duplicate detection in webhook validation.
-	RestrictedBindDefinitionTargetNameField = ".spec.targetName"
+	RestrictedBindDefinitionTargetNameField = authorizationv1alpha1.TargetNameField
 
 	// RestrictedRoleDefinitionTargetNameField indexes RestrictedRoleDefinition
 	// by TargetName for duplicate detection in webhook validation.
-	RestrictedRoleDefinitionTargetNameField = ".spec.targetName"
+	RestrictedRoleDefinitionTargetNameField = authorizationv1alpha1.TargetNameField
 )
 
 // SetupIndexes registers field indexes on the manager's cache for efficient lookups.

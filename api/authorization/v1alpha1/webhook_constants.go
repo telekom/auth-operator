@@ -19,7 +19,8 @@ const WebhookCacheTimeout = 5 * time.Second
 
 // roleTargetCollision reports whether two role targets collide.
 // ClusterRole targets collide on role type alone (name is cluster-scoped).
-// Role targets only collide when both targetNamespace and targetName match.
+// Role targets only collide when targetNamespace matches.
+// Callers must pre-filter candidates by targetName (e.g. via TargetNameField).
 func roleTargetCollision(targetRole, targetNamespace, existingRole, existingNamespace string) bool {
 	if targetRole != existingRole {
 		return false

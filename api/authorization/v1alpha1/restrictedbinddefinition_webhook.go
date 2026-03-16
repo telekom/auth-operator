@@ -98,9 +98,9 @@ func (v *RestrictedBindDefinitionValidator) validateRestrictedBindDefinitionSpec
 	rbdList := &RestrictedBindDefinitionList{}
 	if err := v.Client.List(ctx, rbdList, client.MatchingFields{
 		TargetNameField: obj.Spec.TargetName,
-	}); err != nil {
+	}, client.Limit(2)); err != nil {
 		logger.Error(err, "failed to list RestrictedBindDefinitions", "targetName", obj.Spec.TargetName)
-		return apierrors.NewInternalError(errors.New("unable to list RestrictedBindDefinitions"))
+		return apierrors.NewInternalError(fmt.Errorf("unable to list RestrictedBindDefinitions: %w", err))
 	}
 
 	for _, existing := range rbdList.Items {
@@ -118,7 +118,7 @@ func (v *RestrictedBindDefinitionValidator) validateRestrictedBindDefinitionSpec
 		TargetNameField: obj.Spec.TargetName,
 	}, client.Limit(1)); err != nil {
 		logger.Error(err, "failed to list BindDefinitions", "targetName", obj.Spec.TargetName)
-		return apierrors.NewInternalError(errors.New("unable to list BindDefinitions"))
+		return apierrors.NewInternalError(fmt.Errorf("unable to list BindDefinitions: %w", err))
 	}
 	if len(bdList.Items) > 0 {
 		return apierrors.NewBadRequest(
