@@ -297,7 +297,7 @@ var (
 	// policyViolationsByResource tracks per-resource violation counts so the
 	// exported metric can publish a controller-level aggregate with bounded
 	// label cardinality.
-	policyViolationsByResource = make(map[string]map[string]float64)
+	policyViolationsByResource = make(map[string]map[string]int)
 )
 
 // allCollectors returns the full list of prometheus.Collector instances
@@ -423,13 +423,13 @@ func DeleteAuthorizerSeries(authorizerName string) {
 
 // SetPolicyViolationsActive updates the active violation count for a specific
 // restricted resource and exports the aggregate total per controller.
-func SetPolicyViolationsActive(controller, name string, violations float64) {
+func SetPolicyViolationsActive(controller, name string, violations int) {
 	policyViolationsMu.Lock()
 	defer policyViolationsMu.Unlock()
 
 	resourceCounts, ok := policyViolationsByResource[controller]
 	if !ok {
-		resourceCounts = make(map[string]float64)
+		resourceCounts = make(map[string]int)
 		policyViolationsByResource[controller] = resourceCounts
 	}
 
@@ -458,16 +458,16 @@ func DeletePolicyViolationContribution(controller, name string) {
 	setPolicyViolationsAggregateLocked(controller, resourceCounts)
 }
 
-func setPolicyViolationsAggregateLocked(controller string, resourceCounts map[string]float64) {
+func setPolicyViolationsAggregateLocked(controller string, resourceCounts map[string]int) {
 	if len(resourceCounts) == 0 {
 		delete(policyViolationsByResource, controller)
 		PolicyViolationsActive.WithLabelValues(controller).Set(0)
 		return
 	}
 
-	total := 0.0
+	total := 0
 	for _, count := range resourceCounts {
 		total += count
 	}
-	PolicyViolationsActive.WithLabelValues(controller).Set(total)
+	PolicyViolationsActive.WithLabelValues(controller).Set(float64(total))
 }

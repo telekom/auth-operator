@@ -76,10 +76,12 @@ func (r *RBACPolicyReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Ma
 		// Watch RestrictedBindDefinitions and re-reconcile the referenced RBACPolicy.
 		Watches(&authorizationv1alpha1.RestrictedBindDefinition{},
 			handler.EnqueueRequestsFromMapFunc(r.restrictedResourceToPolicyRequests),
+			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
 		).
 		// Watch RestrictedRoleDefinitions and re-reconcile the referenced RBACPolicy.
 		Watches(&authorizationv1alpha1.RestrictedRoleDefinition{},
 			handler.EnqueueRequestsFromMapFunc(r.restrictedResourceToPolicyRequests),
+			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
 		).
 		WithOptions(controller.TypedOptions[reconcile.Request]{MaxConcurrentReconciles: concurrency}).
 		Complete(r)

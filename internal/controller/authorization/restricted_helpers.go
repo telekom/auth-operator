@@ -91,7 +91,7 @@ func handlePolicyViolations(
 	conditions.MarkFalse(obj, authorizationv1alpha1.PolicyCompliantCondition, generation,
 		authorizationv1alpha1.PolicyCompliantReasonViolationsDetected, authorizationv1alpha1.PolicyCompliantMessageViolationsDetected, strings.Join(msgStrings, "; "))
 
-	metrics.SetPolicyViolationsActive(cfg.ControllerLabel, runtimeObj.GetName(), float64(len(violations)))
+	metrics.SetPolicyViolationsActive(cfg.ControllerLabel, runtimeObj.GetName(), len(violations))
 
 	recorder.Eventf(runtimeObj, nil, corev1.EventTypeWarning,
 		authorizationv1alpha1.EventReasonPolicyViolation, authorizationv1alpha1.EventActionReconcile,

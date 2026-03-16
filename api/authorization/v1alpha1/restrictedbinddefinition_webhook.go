@@ -6,7 +6,6 @@ package v1alpha1
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -167,7 +166,7 @@ func (v *RestrictedBindDefinitionValidator) validatePolicyRefExists(ctx context.
 				fmt.Sprintf("referenced RBACPolicy %q does not exist", obj.Spec.PolicyRef.Name))
 		}
 		logger.Error(err, "failed to get RBACPolicy", "policyRef", obj.Spec.PolicyRef.Name)
-		return apierrors.NewInternalError(errors.New("unable to get RBACPolicy"))
+		return apierrors.NewInternalError(fmt.Errorf("unable to get RBACPolicy %q: %w", obj.Spec.PolicyRef.Name, err))
 	}
 
 	return nil
