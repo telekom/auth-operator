@@ -198,6 +198,63 @@ var _ = Describe("RBACPolicy Webhook", func() {
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("allowedCreationNamespaceSelector"))
 		})
+
+		It("Should admit an RBACPolicy with valid defaultAssignment", func() {
+			pol := &RBACPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rbacpol-default-assignment-valid",
+				},
+				Spec: RBACPolicySpec{
+					AppliesTo: PolicyScope{
+						Namespaces: []string{"default"},
+					},
+					DefaultAssignment: &DefaultPolicyAssignment{
+						Groups: []string{"oidc:team-a-admins"},
+						ServiceAccounts: []SARef{
+							{Name: "rbac-applier", Namespace: "team-a"},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, pol)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, pol)).To(Succeed())
+		})
+
+		It("Should deny an RBACPolicy with empty defaultAssignment", func() {
+			pol := &RBACPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rbacpol-default-assignment-empty",
+				},
+				Spec: RBACPolicySpec{
+					AppliesTo: PolicyScope{
+						Namespaces: []string{"default"},
+					},
+					DefaultAssignment: &DefaultPolicyAssignment{},
+				},
+			}
+			err := k8sClient.Create(ctx, pol)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("defaultAssignment"))
+		})
+
+		It("Should deny an RBACPolicy defaultAssignment serviceAccount without namespace", func() {
+			pol := &RBACPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rbacpol-default-assignment-sa-missing-ns",
+				},
+				Spec: RBACPolicySpec{
+					AppliesTo: PolicyScope{
+						Namespaces: []string{"default"},
+					},
+					DefaultAssignment: &DefaultPolicyAssignment{
+						ServiceAccounts: []SARef{{Name: "rbac-applier"}},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, pol)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("serviceAccounts[0].namespace"))
+		})
 	})
 
 	Context("When updating RBACPolicy under Validating Webhook", func() {

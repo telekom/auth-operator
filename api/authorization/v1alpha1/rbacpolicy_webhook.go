@@ -185,6 +185,9 @@ func validateRBACPolicySpec(obj *RBACPolicy) error {
 			field.NewPath("spec", "subjectLimits", "forbiddenKinds"))...)
 	}
 
+	allErrs = append(allErrs, validateDefaultAssignment(obj.Spec.DefaultAssignment,
+		field.NewPath("spec", "defaultAssignment"))...)
+
 	if len(allErrs) > 0 {
 		return apierrors.NewInvalid(
 			schema.GroupKind{Group: GroupVersion.Group, Kind: "RBACPolicy"},
@@ -192,6 +195,40 @@ func validateRBACPolicySpec(obj *RBACPolicy) error {
 	}
 
 	return nil
+}
+
+// validateDefaultAssignment validates the optional default policy assignment block.
+func validateDefaultAssignment(da *DefaultPolicyAssignment, fldPath *field.Path) field.ErrorList {
+	if da == nil {
+		return nil
+	}
+
+	var allErrs field.ErrorList
+	if len(da.Groups) == 0 && len(da.ServiceAccounts) == 0 {
+		allErrs = append(allErrs, field.Invalid(fldPath, da,
+			"must define at least one group or serviceAccount"))
+	}
+
+	for i, g := range da.Groups {
+		if g == "" {
+			allErrs = append(allErrs, field.Invalid(
+				fldPath.Child("groups").Index(i), g, "must not be empty"))
+		}
+	}
+
+	for i, sa := range da.ServiceAccounts {
+		if sa.Name == "" {
+			allErrs = append(allErrs, field.Required(
+				fldPath.Child("serviceAccounts").Index(i).Child("name"), "name is required"))
+		}
+		if sa.Namespace == "" {
+			allErrs = append(allErrs, field.Required(
+				fldPath.Child("serviceAccounts").Index(i).Child("namespace"),
+				"namespace is required for default policy serviceAccount matching"))
+		}
+	}
+
+	return allErrs
 }
 
 // validateRoleRefLimitsSelectors validates label selectors within RoleRefLimits.

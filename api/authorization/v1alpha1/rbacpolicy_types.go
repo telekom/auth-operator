@@ -284,6 +284,21 @@ type SubjectLimits struct {
 	ServiceAccountLimits *ServiceAccountLimits `json:"serviceAccountLimits,omitempty"`
 }
 
+// DefaultPolicyAssignment defines identities that must use this policy by default
+// when creating RestrictedBindDefinition/RestrictedRoleDefinition resources.
+type DefaultPolicyAssignment struct {
+	// Groups lists requester group names for which this policy is the default.
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MaxItems=128
+	// +kubebuilder:validation:items:MinLength=1
+	Groups []string `json:"groups,omitempty"`
+
+	// ServiceAccounts lists requester ServiceAccounts for which this policy is the default.
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MaxItems=128
+	ServiceAccounts []SARef `json:"serviceAccounts,omitempty"`
+}
+
 // RBACPolicySpec defines the desired state of RBACPolicy.
 // +kubebuilder:validation:XValidation:rule="has(self.appliesTo.namespaceSelector) || (has(self.appliesTo.namespaces) && size(self.appliesTo.namespaces) > 0)",message="appliesTo must specify at least namespaceSelector or namespaces"
 type RBACPolicySpec struct {
@@ -302,6 +317,11 @@ type RBACPolicySpec struct {
 	// SubjectLimits constrains the subjects a tenant may use.
 	// +kubebuilder:validation:Optional
 	SubjectLimits *SubjectLimits `json:"subjectLimits,omitempty"`
+
+	// DefaultAssignment defines requester identities that must use this policy by default
+	// when creating restricted resources.
+	// +kubebuilder:validation:Optional
+	DefaultAssignment *DefaultPolicyAssignment `json:"defaultAssignment,omitempty"`
 }
 
 // RBACPolicyStatus defines the observed state of RBACPolicy.

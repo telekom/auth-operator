@@ -30,6 +30,9 @@ type RBACPolicySpecApplyConfiguration struct {
 	RoleLimits *RoleLimitsApplyConfiguration `json:"roleLimits,omitempty"`
 	// SubjectLimits constrains the subjects a tenant may use.
 	SubjectLimits *SubjectLimitsApplyConfiguration `json:"subjectLimits,omitempty"`
+	// DefaultAssignment defines requester identities that must use this policy by default
+	// when creating restricted resources.
+	DefaultAssignment *DefaultPolicyAssignmentApplyConfiguration `json:"defaultAssignment,omitempty"`
 }
 
 // RBACPolicySpecApplyConfiguration constructs a declarative configuration of the RBACPolicySpec type for use with
@@ -67,5 +70,13 @@ func (b *RBACPolicySpecApplyConfiguration) WithRoleLimits(value *RoleLimitsApply
 // If called multiple times, the SubjectLimits field is set to the value of the last call.
 func (b *RBACPolicySpecApplyConfiguration) WithSubjectLimits(value *SubjectLimitsApplyConfiguration) *RBACPolicySpecApplyConfiguration {
 	b.SubjectLimits = value
+	return b
+}
+
+// WithDefaultAssignment sets the DefaultAssignment field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the DefaultAssignment field is set to the value of the last call.
+func (b *RBACPolicySpecApplyConfiguration) WithDefaultAssignment(value *DefaultPolicyAssignmentApplyConfiguration) *RBACPolicySpecApplyConfiguration {
+	b.DefaultAssignment = value
 	return b
 }

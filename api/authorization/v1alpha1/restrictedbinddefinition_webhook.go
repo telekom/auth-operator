@@ -49,7 +49,22 @@ func (v *RestrictedBindDefinitionValidator) ValidateCreate(ctx context.Context, 
 	}
 
 	// Verify that the referenced RBACPolicy exists.
-	return nil, v.validatePolicyRefExists(ctx, obj)
+	if err := v.validatePolicyRefExists(ctx, obj); err != nil {
+		return nil, err
+	}
+
+	// Enforce requester-based default policy assignment, if configured.
+	if err := validateDefaultPolicyForRequester(
+		ctx,
+		v.Client,
+		schema.GroupKind{Group: GroupVersion.Group, Kind: "RestrictedBindDefinition"},
+		obj.Name,
+		obj.Spec.PolicyRef.Name,
+	); err != nil {
+		return nil, err
+	}
+
+	return nil, nil
 }
 
 // ValidateUpdate implements admission.Validator for RestrictedBindDefinition.
@@ -79,7 +94,22 @@ func (v *RestrictedBindDefinitionValidator) ValidateUpdate(ctx context.Context, 
 	}
 
 	// Verify that the referenced RBACPolicy exists.
-	return nil, v.validatePolicyRefExists(ctx, newObj)
+	if err := v.validatePolicyRefExists(ctx, newObj); err != nil {
+		return nil, err
+	}
+
+	// Enforce requester-based default policy assignment, if configured.
+	if err := validateDefaultPolicyForRequester(
+		ctx,
+		v.Client,
+		schema.GroupKind{Group: GroupVersion.Group, Kind: "RestrictedBindDefinition"},
+		newObj.Name,
+		newObj.Spec.PolicyRef.Name,
+	); err != nil {
+		return nil, err
+	}
+
+	return nil, nil
 }
 
 // ValidateDelete implements admission.Validator for RestrictedBindDefinition.
