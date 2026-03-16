@@ -95,7 +95,7 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 	for _, existing := range rrdList.Items {
 		if roleTargetCollision(obj.Spec.TargetRole, obj.Spec.TargetNamespace, existing.Spec.TargetRole, existing.Spec.TargetNamespace) {
 			return nil, apierrors.NewBadRequest(
-				fmt.Sprintf("targetName %s is already in use by a RestrictedRoleDefinition", obj.Spec.TargetName))
+				fmt.Sprintf("targetName %s is already in use by RestrictedRoleDefinition %q", obj.Spec.TargetName, existing.Name))
 		}
 	}
 
@@ -177,7 +177,7 @@ func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 	for _, existing := range rrdList.Items {
 		if roleTargetCollision(newObj.Spec.TargetRole, newObj.Spec.TargetNamespace, existing.Spec.TargetRole, existing.Spec.TargetNamespace) {
 			return nil, apierrors.NewBadRequest(
-				fmt.Sprintf("targetName %s is already in use by a RestrictedRoleDefinition", newObj.Spec.TargetName))
+				fmt.Sprintf("targetName %s is already in use by RestrictedRoleDefinition %q", newObj.Spec.TargetName, existing.Name))
 		}
 	}
 
