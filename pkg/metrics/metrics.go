@@ -442,9 +442,9 @@ func SetPolicyViolationsActive(controller, name string, violations float64) {
 	setPolicyViolationsAggregateLocked(controller, resourceCounts)
 }
 
-// DeletePolicyViolationSeries removes the PolicyViolationsActive gauge series
-// contribution for a deleted restricted resource and updates the aggregate.
-func DeletePolicyViolationSeries(controller, name string) {
+// DeletePolicyViolationContribution removes the in-memory contribution for a
+// deleted restricted resource and updates the controller-level aggregate gauge.
+func DeletePolicyViolationContribution(controller, name string) {
 	policyViolationsMu.Lock()
 	defer policyViolationsMu.Unlock()
 

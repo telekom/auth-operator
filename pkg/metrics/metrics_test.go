@@ -342,14 +342,14 @@ func TestDeleteAuthorizerSeries(t *testing.T) {
 	}
 }
 
-func TestSetAndDeletePolicyViolationSeries(t *testing.T) {
+func TestSetAndDeletePolicyViolationContribution(t *testing.T) {
 	controller := ControllerRestrictedBindDefinition
 	resourceA := "test-rbd-a"
 	resourceB := "test-rbd-b"
 
 	// Ensure a clean starting point for this controller label.
-	DeletePolicyViolationSeries(controller, resourceA)
-	DeletePolicyViolationSeries(controller, resourceB)
+	DeletePolicyViolationContribution(controller, resourceA)
+	DeletePolicyViolationContribution(controller, resourceB)
 
 	SetPolicyViolationsActive(controller, resourceA, 2)
 	SetPolicyViolationsActive(controller, resourceB, 3)
@@ -367,7 +367,7 @@ func TestSetAndDeletePolicyViolationSeries(t *testing.T) {
 		t.Errorf("expected aggregated policy violations to be 3 after clearing one resource, got %f", val)
 	}
 
-	DeletePolicyViolationSeries(controller, resourceB)
+	DeletePolicyViolationContribution(controller, resourceB)
 	if val := getGaugeValue(t, gauge); val != 0 {
 		t.Errorf("expected aggregated policy violations to be 0 after deletion, got %f", val)
 	}
