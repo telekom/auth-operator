@@ -75,7 +75,8 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 		if roleDefinition.Spec.TargetRole == obj.Spec.TargetRole && roleDefinition.Name != obj.Name {
 			logger.Info("validation failed: duplicate targetName",
 				"name", obj.Name, "targetName", obj.Spec.TargetName, "conflictsWith", roleDefinition.Name)
-			return nil, apierrors.NewBadRequest(fmt.Sprintf("targetName %s is already in use by another RoleDefinition", obj.Spec.TargetName))
+			return nil, apierrors.NewBadRequest(
+				fmt.Sprintf("targetName %s is already in use by RoleDefinition %s", obj.Spec.TargetName, roleDefinition.Name))
 		}
 	}
 
@@ -151,7 +152,8 @@ func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 		if roleDefinition.Spec.TargetRole == newObj.Spec.TargetRole && roleDefinition.Name != newObj.Name {
 			logger.Info("validation failed: duplicate targetName",
 				"name", newObj.Name, "targetName", newObj.Spec.TargetName, "conflictsWith", roleDefinition.Name)
-			return nil, apierrors.NewBadRequest(fmt.Sprintf("targetName %s is already in use by another RoleDefinition", newObj.Spec.TargetName))
+			return nil, apierrors.NewBadRequest(
+				fmt.Sprintf("targetName %s is already in use by RoleDefinition %s", newObj.Spec.TargetName, roleDefinition.Name))
 		}
 	}
 

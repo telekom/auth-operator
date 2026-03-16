@@ -77,6 +77,22 @@ const (
 	// EventActionReconcile indicates a reconciliation action.
 	EventActionReconcile = "Reconcile"
 
+	// EventActionCreate indicates a resource creation action.
+	//
+	// Deprecated: use EventActionCreateResource.
+	EventActionCreate = "CreateResource"
+
+	// EventActionUpdate indicates a resource update action.
+	//
+	// Deprecated: use EventActionUpdateResource.
+	EventActionUpdate = "UpdateResource"
+
+	// EventActionCreateResource indicates a resource creation action.
+	EventActionCreateResource = EventActionCreate
+
+	// EventActionUpdateResource indicates a resource update action.
+	EventActionUpdateResource = EventActionUpdate
+
 	// EventActionDelete indicates a resource deletion action.
 	EventActionDelete = "DeleteResource"
 

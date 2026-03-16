@@ -193,7 +193,7 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 				}
 			} else {
 				logger.Error(err, "failed to fetch clusterrole", "clusterRoleName", clusterRoleRef)
-				return warnings, apierrors.NewInternalError(fmt.Errorf("error fetching clusterrole '%s'", clusterRoleRef))
+				return warnings, apierrors.NewInternalError(errors.New("unable to fetch ClusterRole"))
 			}
 		} else {
 			clusterRoleExists[clusterRoleRef] = true
@@ -224,7 +224,7 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 					}
 				} else {
 					logger.Error(err, "failed to fetch clusterrole", "clusterRoleName", clusterRoleRef)
-					return warnings, apierrors.NewInternalError(fmt.Errorf("error fetching clusterrole '%s'", clusterRoleRef))
+					return warnings, apierrors.NewInternalError(errors.New("unable to fetch ClusterRole"))
 				}
 			} else {
 				clusterRoleExists[clusterRoleRef] = true
@@ -272,7 +272,9 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 				}
 				for _, roleRef := range roleBinding.RoleRefs {
 					if err := v.checkRoleExists(ctx, ns.Name, roleRef, r.Name, policy, roleExists, &missingRoles); err != nil {
-						return warnings, apierrors.NewInternalError(err)
+						logger.Error(err, "failed to validate role reference",
+							"name", r.Name, "namespace", ns.Name, "roleName", roleRef)
+						return warnings, apierrors.NewInternalError(errors.New("unable to validate role references"))
 					}
 				}
 			}
@@ -288,14 +290,16 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 					continue
 				}
 				logger.Error(err, "failed to get namespace", "namespace", roleBinding.Namespace)
-				return warnings, apierrors.NewInternalError(fmt.Errorf("error fetching namespace %q", roleBinding.Namespace))
+				return warnings, apierrors.NewInternalError(errors.New("unable to get namespace"))
 			}
 			if ns.Status.Phase == corev1.NamespaceTerminating {
 				continue
 			}
 			for _, roleRef := range roleBinding.RoleRefs {
 				if err := v.checkRoleExists(ctx, roleBinding.Namespace, roleRef, r.Name, policy, roleExists, &missingRoles); err != nil {
-					return warnings, apierrors.NewInternalError(err)
+					logger.Error(err, "failed to validate role reference",
+						"name", r.Name, "namespace", roleBinding.Namespace, "roleName", roleRef)
+					return warnings, apierrors.NewInternalError(errors.New("unable to validate role references"))
 				}
 			}
 		}
