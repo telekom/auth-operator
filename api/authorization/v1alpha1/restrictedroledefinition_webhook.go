@@ -60,13 +60,16 @@ func (v *RestrictedRoleDefinitionValidator) ValidateUpdate(ctx context.Context, 
 	logger := log.FromContext(ctx).WithName("restrictedroledefinition-webhook")
 	logger.V(1).Info("validating update", "name", newObj.Name)
 
-	// Enforce immutability of targetRole, targetName, and policyRef.
+	// Enforce immutability of targetRole, targetName, targetNamespace, and policyRef.
 	var allErrs field.ErrorList
 	if oldObj.Spec.TargetRole != newObj.Spec.TargetRole {
 		allErrs = append(allErrs, field.Forbidden(field.NewPath("spec", "targetRole"), "field is immutable after creation"))
 	}
 	if oldObj.Spec.TargetName != newObj.Spec.TargetName {
 		allErrs = append(allErrs, field.Forbidden(field.NewPath("spec", "targetName"), "field is immutable after creation"))
+	}
+	if oldObj.Spec.TargetNamespace != newObj.Spec.TargetNamespace {
+		allErrs = append(allErrs, field.Forbidden(field.NewPath("spec", "targetNamespace"), "field is immutable after creation"))
 	}
 	if oldObj.Spec.PolicyRef.Name != newObj.Spec.PolicyRef.Name {
 		allErrs = append(allErrs, field.Forbidden(field.NewPath("spec", "policyRef", "name"), "field is immutable after creation"))
@@ -94,7 +97,8 @@ func (v *RestrictedRoleDefinitionValidator) ValidateDelete(_ context.Context, _ 
 func (v *RestrictedRoleDefinitionValidator) validateRestrictedRoleDefinitionSpec(ctx context.Context, obj *RestrictedRoleDefinition) error {
 	logger := log.FromContext(ctx).WithName("restrictedroledefinition-webhook")
 
-	// Check duplicate targetName (scoped to same targetRole). The field index constrains
+	// Check duplicate targetName. Collisions are scoped by targetRole and,
+	// for Role targets, targetNamespace. The field index constrains
 	// results to matching items; the context timeout provides the hard latency bound.
 	rrdList := &RestrictedRoleDefinitionList{}
 	if err := v.Client.List(ctx, rrdList, client.MatchingFields{
@@ -105,7 +109,8 @@ func (v *RestrictedRoleDefinitionValidator) validateRestrictedRoleDefinitionSpec
 	}
 
 	for _, existing := range rrdList.Items {
-		if existing.Spec.TargetRole == obj.Spec.TargetRole && existing.Name != obj.Name {
+		if existing.Name != obj.Name &&
+			roleTargetCollision(obj.Spec.TargetRole, obj.Spec.TargetNamespace, existing.Spec.TargetRole, existing.Spec.TargetNamespace) {
 			logger.Info("validation failed: duplicate targetName",
 				"name", obj.Name, "targetName", obj.Spec.TargetName, "conflictsWith", existing.Name)
 			return apierrors.NewBadRequest(
@@ -123,7 +128,7 @@ func (v *RestrictedRoleDefinitionValidator) validateRestrictedRoleDefinitionSpec
 		return apierrors.NewInternalError(errors.New("unable to list RoleDefinitions"))
 	}
 	for _, existing := range rdList.Items {
-		if existing.Spec.TargetRole == obj.Spec.TargetRole {
+		if roleTargetCollision(obj.Spec.TargetRole, obj.Spec.TargetNamespace, existing.Spec.TargetRole, existing.Spec.TargetNamespace) {
 			return apierrors.NewBadRequest(
 				fmt.Sprintf("targetName %s is already in use by a RoleDefinition", obj.Spec.TargetName))
 		}

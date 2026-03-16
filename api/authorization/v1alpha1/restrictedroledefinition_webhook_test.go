@@ -153,6 +153,44 @@ var _ = Describe("RestrictedRoleDefinition Webhook", func() {
 
 			Expect(k8sClient.Delete(ctx, rrd1)).To(Succeed())
 		})
+
+		It("Should allow same targetName for namespaced Role targets in different namespaces", func() {
+			rrd1 := &RestrictedRoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rrd-same-role-name-team-a",
+				},
+				Spec: RestrictedRoleDefinitionSpec{
+					PolicyRef:       RBACPolicyReference{Name: policy.Name},
+					TargetRole:      DefinitionNamespacedRole,
+					TargetName:      "shared-rrd-role-name",
+					TargetNamespace: "team-a",
+					ScopeNamespaced: true,
+				},
+			}
+			Expect(k8sClient.Create(ctx, rrd1)).To(Succeed())
+
+			rrd2 := &RestrictedRoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rrd-same-role-name-team-b",
+				},
+				Spec: RestrictedRoleDefinitionSpec{
+					PolicyRef:       RBACPolicyReference{Name: policy.Name},
+					TargetRole:      DefinitionNamespacedRole,
+					TargetName:      "shared-rrd-role-name",
+					TargetNamespace: "team-b",
+					ScopeNamespaced: true,
+				},
+			}
+			Eventually(func(g Gomega) {
+				err := k8sClient.Create(ctx, rrd2.DeepCopy(), client.DryRunAll)
+				g.Expect(err).NotTo(HaveOccurred())
+			}).WithTimeout(testTimeoutSeconds * time.Second).WithPolling(250 * time.Millisecond).Should(Succeed())
+
+			Expect(k8sClient.Create(ctx, rrd2)).To(Succeed())
+
+			Expect(k8sClient.Delete(ctx, rrd1)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, rrd2)).To(Succeed())
+		})
 	})
 
 	Context("When updating RestrictedRoleDefinition under Validating Webhook", func() {
@@ -230,6 +268,34 @@ var _ = Describe("RestrictedRoleDefinition Webhook", func() {
 				latest.Spec.PolicyRef.Name = "different-policy"
 				err := k8sClient.Update(ctx, latest)
 				g.Expect(err).To(HaveOccurred())
+				g.Expect(err.Error()).To(ContainSubstring("immutable"))
+			}).WithTimeout(testTimeoutSeconds * time.Second).WithPolling(250 * time.Millisecond).Should(Succeed())
+
+			Expect(k8sClient.Delete(ctx, rrd)).To(Succeed())
+		})
+
+		It("Should deny changing targetNamespace (immutable)", func() {
+			rrd := &RestrictedRoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rrd-immut-tns",
+				},
+				Spec: RestrictedRoleDefinitionSpec{
+					PolicyRef:       RBACPolicyReference{Name: policy.Name},
+					TargetRole:      DefinitionNamespacedRole,
+					TargetName:      "test-rrd-immut-tns",
+					TargetNamespace: "team-a",
+					ScopeNamespaced: true,
+				},
+			}
+			Expect(k8sClient.Create(ctx, rrd)).To(Succeed())
+
+			Eventually(func(g Gomega) {
+				latest := &RestrictedRoleDefinition{}
+				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(rrd), latest)).To(Succeed())
+				latest.Spec.TargetNamespace = "team-b"
+				err := k8sClient.Update(ctx, latest)
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(err.Error()).To(ContainSubstring("spec.targetNamespace"))
 				g.Expect(err.Error()).To(ContainSubstring("immutable"))
 			}).WithTimeout(testTimeoutSeconds * time.Second).WithPolling(250 * time.Millisecond).Should(Succeed())
 

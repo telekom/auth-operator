@@ -16,3 +16,18 @@ const TargetNameField = ".spec.targetName"
 // API-server scenarios. Shared by CRD validation webhooks and authorization
 // webhook handlers.
 const WebhookCacheTimeout = 5 * time.Second
+
+// roleTargetCollision reports whether two role targets collide.
+// ClusterRole targets collide on role type alone (name is cluster-scoped).
+// Role targets only collide when both targetNamespace and targetName match.
+func roleTargetCollision(targetRole, targetNamespace, existingRole, existingNamespace string) bool {
+	if targetRole != existingRole {
+		return false
+	}
+
+	if targetRole == DefinitionClusterRole {
+		return true
+	}
+
+	return targetNamespace == existingNamespace
+}

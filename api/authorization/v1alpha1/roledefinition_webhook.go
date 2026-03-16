@@ -88,7 +88,8 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 	}
 
 	for _, roleDefinition := range roleDefinitionList.Items {
-		if roleDefinition.Spec.TargetRole == obj.Spec.TargetRole && roleDefinition.Name != obj.Name {
+		if roleDefinition.Name != obj.Name &&
+			roleTargetCollision(obj.Spec.TargetRole, obj.Spec.TargetNamespace, roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetNamespace) {
 			logger.Info("validation failed: duplicate targetName",
 				"name", obj.Name, "targetName", obj.Spec.TargetName, "conflictsWith", roleDefinition.Name)
 			return nil, apierrors.NewBadRequest(
@@ -105,7 +106,7 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 		return nil, apierrors.NewInternalError(errors.New("unable to list RestrictedRoleDefinitions"))
 	}
 	for _, existing := range rrdList.Items {
-		if existing.Spec.TargetRole == obj.Spec.TargetRole {
+		if roleTargetCollision(obj.Spec.TargetRole, obj.Spec.TargetNamespace, existing.Spec.TargetRole, existing.Spec.TargetNamespace) {
 			return nil, apierrors.NewBadRequest(
 				fmt.Sprintf("targetName %s is already in use by a RestrictedRoleDefinition", obj.Spec.TargetName))
 		}
@@ -122,14 +123,18 @@ func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 	logger := log.FromContext(ctx).WithName("roledefinition-webhook")
 	logger.V(1).Info("validating update", "name", newObj.Name)
 
-	// Immutability: targetRole and targetName cannot be changed after creation.
-	// Changing them would orphan the generated ClusterRole/Role and its bindings.
+	// Immutability: targetRole, targetName, and targetNamespace cannot be changed
+	// after creation. Changing these would orphan the generated
+	// ClusterRole/Role and its bindings.
 	var allErrs field.ErrorList
 	if oldObj.Spec.TargetRole != newObj.Spec.TargetRole {
 		allErrs = append(allErrs, field.Forbidden(field.NewPath("spec", "targetRole"), "field is immutable after creation"))
 	}
 	if oldObj.Spec.TargetName != newObj.Spec.TargetName {
 		allErrs = append(allErrs, field.Forbidden(field.NewPath("spec", "targetName"), "field is immutable after creation"))
+	}
+	if oldObj.Spec.TargetNamespace != newObj.Spec.TargetNamespace {
+		allErrs = append(allErrs, field.Forbidden(field.NewPath("spec", "targetNamespace"), "field is immutable after creation"))
 	}
 	if len(allErrs) > 0 {
 		return nil, apierrors.NewInvalid(
@@ -165,7 +170,8 @@ func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 	}
 
 	for _, roleDefinition := range roleDefinitionList.Items {
-		if roleDefinition.Spec.TargetRole == newObj.Spec.TargetRole && roleDefinition.Name != newObj.Name {
+		if roleDefinition.Name != newObj.Name &&
+			roleTargetCollision(newObj.Spec.TargetRole, newObj.Spec.TargetNamespace, roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetNamespace) {
 			logger.Info("validation failed: duplicate targetName",
 				"name", newObj.Name, "targetName", newObj.Spec.TargetName, "conflictsWith", roleDefinition.Name)
 			return nil, apierrors.NewBadRequest(
