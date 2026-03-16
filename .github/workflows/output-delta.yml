@@ -135,20 +135,24 @@ jobs:
             echo "::warning::Main branch samples failed to apply, will use PR branch samples as baseline"
           fi
 
-          # Apply intentionally broken (runtime-failure) samples.
+          # Apply intentionally broken (runtime-failure) samples when available.
           # These must stay structurally valid and apply successfully.
-          broken_samples_applied=false
-          for i in 1 2 3 4 5; do
-            if kubectl apply --server-side --force-conflicts -k config/samples/broken/ 2>&1; then
-              broken_samples_applied=true
-              break
+          if [ -f config/samples/broken/kustomization.yaml ]; then
+            broken_samples_applied=false
+            for i in 1 2 3 4 5; do
+              if kubectl apply --server-side --force-conflicts -k config/samples/broken/ 2>&1; then
+                broken_samples_applied=true
+                break
+              fi
+              echo "Broken sample apply attempt $i failed, waiting before retry..."
+              sleep 10
+            done
+            if [ "$broken_samples_applied" = "false" ]; then
+              echo "::error::Broken runtime-failure samples must apply successfully"
+              exit 1
             fi
-            echo "Broken sample apply attempt $i failed, waiting before retry..."
-            sleep 10
-          done
-          if [ "$broken_samples_applied" = "false" ]; then
-            echo "::error::Broken runtime-failure samples must apply successfully"
-            exit 1
+          else
+            echo "::notice::No config/samples/broken set in this branch, skipping broken-sample apply"
           fi
 
           # Wait for all CRs to be fully reconciled (Ready condition)
@@ -225,20 +229,24 @@ jobs:
             sleep 10
           done
 
-          # Apply intentionally broken (runtime-failure) samples.
+          # Apply intentionally broken (runtime-failure) samples when available.
           # These must stay structurally valid and apply successfully.
-          broken_samples_applied=false
-          for i in 1 2 3 4 5; do
-            if kubectl apply --server-side --force-conflicts -k config/samples/broken/ 2>&1; then
-              broken_samples_applied=true
-              break
+          if [ -f config/samples/broken/kustomization.yaml ]; then
+            broken_samples_applied=false
+            for i in 1 2 3 4 5; do
+              if kubectl apply --server-side --force-conflicts -k config/samples/broken/ 2>&1; then
+                broken_samples_applied=true
+                break
+              fi
+              echo "Broken sample apply attempt $i failed, waiting before retry..."
+              sleep 10
+            done
+            if [ "$broken_samples_applied" = "false" ]; then
+              echo "::error::Broken runtime-failure samples must apply successfully"
+              exit 1
             fi
-            echo "Broken sample apply attempt $i failed, waiting before retry..."
-            sleep 10
-          done
-          if [ "$broken_samples_applied" = "false" ]; then
-            echo "::error::Broken runtime-failure samples must apply successfully"
-            exit 1
+          else
+            echo "::notice::No config/samples/broken set in this branch, skipping broken-sample apply"
           fi
 
           # Wait for reconciliation

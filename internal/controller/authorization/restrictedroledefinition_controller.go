@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -329,7 +328,7 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, fmt.Errorf("resolve apply client for RestrictedRoleDefinition %s: %w", rrd.Name, err)
 	}
-	r.rrdLogApplyIdentity(ctx, logger, rrd.Name, rbacPolicy.Name, impersonatedUser)
+	r.rrdLogApplyIdentity(ctx, rrd.Name, rbacPolicy.Name, impersonatedUser)
 
 	// Step 8: Ensure the target role exists.
 	if err := r.rrdEnsureRole(ctx, rrd, finalRules, applyClient); err != nil {
@@ -614,13 +613,13 @@ func (r *RestrictedRoleDefinitionReconciler) rrdApplyStatusAndMarkStalled(
 
 func (r *RestrictedRoleDefinitionReconciler) rrdLogApplyIdentity(
 	ctx context.Context,
-	logger logr.Logger,
 	resourceName, policyName, impersonatedUser string,
 ) {
 	if impersonatedUser == "" {
 		return
 	}
 
+	logger := log.FromContext(ctx)
 	trace.SpanFromContext(ctx).SetAttributes(tracing.AttrUser.String(impersonatedUser))
 	logger.V(2).Info("using impersonated apply identity", "name", resourceName, "impersonatedUser", impersonatedUser, "policy", policyName)
 }
