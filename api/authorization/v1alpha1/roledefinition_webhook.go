@@ -38,13 +38,13 @@ func (r *RoleDefinition) SetupWebhookWithManager(mgr ctrl.Manager) error {
 // +kubebuilder:webhook:path=/validate-authorization-t-caas-telekom-com-v1alpha1-roledefinition,mutating=false,failurePolicy=fail,sideEffects=None,groups=authorization.t-caas.telekom.com,resources=roledefinitions,verbs=create;update,versions=v1alpha1,name=roledefinition.validating.webhook.auth.t-caas.telekom.de,admissionReviewVersions=v1
 
 // validateRestrictedAPIsVersions ensures every version entry starts with 'v'
-// and is at most 20 characters. This was previously a CEL XValidation rule but
+// and is at most maxVersionLength characters. This was previously a CEL XValidation rule but
 // the nested iteration over the RestrictedAPIGroup type exceeded the CEL cost budget.
 func validateRestrictedAPIsVersions(obj *RoleDefinition) error {
 	for i, group := range obj.Spec.RestrictedAPIs {
 		for j, gv := range group.Versions {
 			if !strings.HasPrefix(gv.Version, "v") || len(gv.Version) > maxVersionLength {
-				return fmt.Errorf("restrictedApis[%d].versions[%d].version %q: must start with 'v' and be at most 20 characters", i, j, gv.Version)
+				return fmt.Errorf("restrictedApis[%d].versions[%d].version %q: must start with 'v' and be at most %d characters", i, j, gv.Version, maxVersionLength)
 			}
 		}
 	}
@@ -104,7 +104,7 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 	rrdList := &RestrictedRoleDefinitionList{}
 	if err := v.Client.List(ctx, rrdList, client.MatchingFields{
 		TargetNameField: obj.Spec.TargetName,
-	}, client.Limit(1)); err != nil {
+	}); err != nil {
 		logger.Error(err, "failed to list RestrictedRoleDefinitions", "targetName", obj.Spec.TargetName)
 		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RestrictedRoleDefinitions: %w", err))
 	}
@@ -186,7 +186,7 @@ func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 	rrdList := &RestrictedRoleDefinitionList{}
 	if err := v.Client.List(ctx, rrdList, client.MatchingFields{
 		TargetNameField: newObj.Spec.TargetName,
-	}, client.Limit(1)); err != nil {
+	}); err != nil {
 		logger.Error(err, "failed to list RestrictedRoleDefinitions", "targetName", newObj.Spec.TargetName)
 		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RestrictedRoleDefinitions: %w", err))
 	}
