@@ -252,7 +252,7 @@ and their status is kept up to date.`,
 			if err != nil {
 				return fmt.Errorf("unable to create RestrictedRoleDefinition reconciler: %w", err)
 			}
-			if err := restrictedRoleDefinitionController.SetupWithManager(ctx, mgr, restrictedRoleDefinitionConcurrency); err != nil {
+			if err := restrictedRoleDefinitionController.SetupWithManager(mgr, restrictedRoleDefinitionConcurrency); err != nil {
 				return fmt.Errorf("unable to setup controller RestrictedRoleDefinition with manager: %w", err)
 			}
 			setupLog.Info("RestrictedRoleDefinition reconciler configured successfully")

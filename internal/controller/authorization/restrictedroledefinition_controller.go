@@ -107,7 +107,7 @@ func NewRestrictedRoleDefinitionReconciler(
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *RestrictedRoleDefinitionReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, concurrency int) error {
+func (r *RestrictedRoleDefinitionReconciler) SetupWithManager(mgr ctrl.Manager, concurrency int) error {
 	if r.restConfig == nil {
 		r.restConfig = mgr.GetConfig()
 	}
