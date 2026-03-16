@@ -107,7 +107,7 @@ func (v *RestrictedBindDefinitionValidator) validateRestrictedBindDefinitionSpec
 			logger.Info("validation failed: duplicate targetName",
 				"name", obj.Name, "targetName", obj.Spec.TargetName, "conflictsWith", existing.Name)
 			return apierrors.NewBadRequest(
-				fmt.Sprintf("targetName %s is already in use by another RestrictedBindDefinition", obj.Spec.TargetName))
+				fmt.Sprintf("targetName %s is already in use by RestrictedBindDefinition %q", obj.Spec.TargetName, existing.Name))
 		}
 	}
 
@@ -119,9 +119,9 @@ func (v *RestrictedBindDefinitionValidator) validateRestrictedBindDefinitionSpec
 		logger.Error(err, "failed to list BindDefinitions", "targetName", obj.Spec.TargetName)
 		return apierrors.NewInternalError(fmt.Errorf("unable to list BindDefinitions: %w", err))
 	}
-	if len(bdList.Items) > 0 {
+	for _, existing := range bdList.Items {
 		return apierrors.NewBadRequest(
-			fmt.Sprintf("targetName %s is already in use by a BindDefinition", obj.Spec.TargetName))
+			fmt.Sprintf("targetName %s is already in use by BindDefinition %q", obj.Spec.TargetName, existing.Name))
 	}
 
 	// Validate subject Kinds are one of the RBAC-supported types.
