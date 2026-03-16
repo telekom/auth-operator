@@ -33,6 +33,9 @@ type RBACPolicySpecApplyConfiguration struct {
 	// DefaultAssignment defines requester identities that must use this policy by default
 	// when creating restricted resources.
 	DefaultAssignment *DefaultPolicyAssignmentApplyConfiguration `json:"defaultAssignment,omitempty"`
+	// Impersonation configures ServiceAccount impersonation for restricted resource
+	// apply operations governed by this policy.
+	Impersonation *ImpersonationConfigApplyConfiguration `json:"impersonation,omitempty"`
 }
 
 // RBACPolicySpecApplyConfiguration constructs a declarative configuration of the RBACPolicySpec type for use with
@@ -78,5 +81,13 @@ func (b *RBACPolicySpecApplyConfiguration) WithSubjectLimits(value *SubjectLimit
 // If called multiple times, the DefaultAssignment field is set to the value of the last call.
 func (b *RBACPolicySpecApplyConfiguration) WithDefaultAssignment(value *DefaultPolicyAssignmentApplyConfiguration) *RBACPolicySpecApplyConfiguration {
 	b.DefaultAssignment = value
+	return b
+}
+
+// WithImpersonation sets the Impersonation field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Impersonation field is set to the value of the last call.
+func (b *RBACPolicySpecApplyConfiguration) WithImpersonation(value *ImpersonationConfigApplyConfiguration) *RBACPolicySpecApplyConfiguration {
+	b.Impersonation = value
 	return b
 }

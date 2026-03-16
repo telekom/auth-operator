@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/events"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -53,6 +54,7 @@ import (
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete;escalate
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=create;delete;get;list;patch;update;watch
+// +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=impersonate
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch;update
 // +kubebuilder:rbac:groups="events.k8s.io",resources=events,verbs=create;patch;update
 
@@ -62,6 +64,9 @@ type RestrictedBindDefinitionReconciler struct {
 	scheme   *runtime.Scheme
 	recorder events.EventRecorder
 	tracer   trace.Tracer
+
+	restConfig                *rest.Config
+	impersonatedClientFactory impersonatedClientFactory
 }
 
 // setTracer implements tracerSetter.
@@ -75,9 +80,10 @@ func NewRestrictedBindDefinitionReconciler(
 	opts ...ReconcilerOption,
 ) *RestrictedBindDefinitionReconciler {
 	r := &RestrictedBindDefinitionReconciler{
-		client:   cachedClient,
-		scheme:   scheme,
-		recorder: recorder,
+		client:                    cachedClient,
+		scheme:                    scheme,
+		recorder:                  recorder,
+		impersonatedClientFactory: newImpersonatedClient,
 	}
 	for _, opt := range opts {
 		opt(r)
@@ -87,6 +93,10 @@ func NewRestrictedBindDefinitionReconciler(
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *RestrictedBindDefinitionReconciler) SetupWithManager(mgr ctrl.Manager, concurrency int) error {
+	if r.restConfig == nil {
+		r.restConfig = mgr.GetConfig()
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&authorizationv1alpha1.RestrictedBindDefinition{},
 			builder.WithPredicates(predicate.GenerationChangedPredicate{})).
@@ -107,6 +117,18 @@ func (r *RestrictedBindDefinitionReconciler) SetupWithManager(mgr ctrl.Manager, 
 		).
 		WithOptions(controller.TypedOptions[reconcile.Request]{MaxConcurrentReconciles: concurrency}).
 		Complete(r)
+}
+
+func (r *RestrictedBindDefinitionReconciler) rbdResolveApplyClient(
+	rbacPolicy *authorizationv1alpha1.RBACPolicy,
+) (client.Client, string, error) {
+	return resolvePolicyApplyClient(
+		r.client,
+		r.scheme,
+		r.restConfig,
+		rbacPolicy,
+		r.impersonatedClientFactory,
+	)
 }
 
 // policyToRestrictedBindDefinitions maps an RBACPolicy event to reconcile requests
@@ -304,9 +326,19 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 	// Policy compliant.
 	markPolicyCompliant(rbd, rbd.Generation, r.recorder, rbd, rbacPolicy.Name, metrics.ControllerRestrictedBindDefinition)
 	rbd.Status.PolicyViolations = nil
+	applyClient, impersonatedUser, err := r.rbdResolveApplyClient(rbacPolicy)
+	if err != nil {
+		r.rbdMarkStalled(ctx, rbd, err)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
+		return ctrl.Result{}, fmt.Errorf("resolve apply client for RestrictedBindDefinition %s: %w", rbd.Name, err)
+	}
+	if impersonatedUser != "" {
+		logger.V(1).Info("using impersonated apply identity", "restrictedBindDefinition", rbd.Name, "impersonatedUser", impersonatedUser, "policy", rbacPolicy.Name)
+	}
 
 	// Step 7: Reconcile RBAC resources.
-	if err := r.rbdReconcileResources(ctx, rbd); err != nil {
+	if err := r.rbdReconcileResources(ctx, rbd, applyClient); err != nil {
 		r.rbdMarkStalled(ctx, rbd, err)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
@@ -344,9 +376,10 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 func (r *RestrictedBindDefinitionReconciler) rbdReconcileResources(
 	ctx context.Context,
 	rbd *authorizationv1alpha1.RestrictedBindDefinition,
+	applyClient client.Client,
 ) error {
 	// Ensure ServiceAccounts.
-	if err := r.rbdEnsureServiceAccounts(ctx, rbd); err != nil {
+	if err := r.rbdEnsureServiceAccounts(ctx, rbd, applyClient); err != nil {
 		return err
 	}
 
@@ -360,7 +393,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdReconcileResources(
 		ac.WithOwnerReferences(ownerRefForRestricted(rbd, "RestrictedBindDefinition")).
 			WithAnnotations(helpers.BuildResourceAnnotations("RestrictedBindDefinition", rbd.Name))
 
-		if result, err := pkgssa.PatchApplyClusterRoleBinding(ctx, r.client, ac); err != nil {
+		if result, err := pkgssa.PatchApplyClusterRoleBinding(ctx, applyClient, ac); err != nil {
 			return fmt.Errorf("ensure ClusterRoleBinding %s: %w", crbName, err)
 		} else if result == pkgssa.PatchApplyResultSkipped {
 			metrics.RBACResourcesSkipped.WithLabelValues(metrics.ResourceClusterRoleBinding).Inc()
@@ -382,12 +415,12 @@ func (r *RestrictedBindDefinitionReconciler) rbdReconcileResources(
 			}
 			activeNamespaces[ns.Name] = struct{}{}
 			for _, clusterRoleRef := range roleBinding.ClusterRoleRefs {
-				if err := r.rbdEnsureRoleBinding(ctx, rbd, ns.Name, clusterRoleRef, "ClusterRole"); err != nil {
+				if err := r.rbdEnsureRoleBinding(ctx, rbd, ns.Name, clusterRoleRef, "ClusterRole", applyClient); err != nil {
 					return err
 				}
 			}
 			for _, roleRef := range roleBinding.RoleRefs {
-				if err := r.rbdEnsureRoleBinding(ctx, rbd, ns.Name, roleRef, "Role"); err != nil {
+				if err := r.rbdEnsureRoleBinding(ctx, rbd, ns.Name, roleRef, "Role", applyClient); err != nil {
 					return err
 				}
 			}
@@ -404,6 +437,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdReconcileResources(
 func (r *RestrictedBindDefinitionReconciler) rbdEnsureServiceAccounts(
 	ctx context.Context,
 	rbd *authorizationv1alpha1.RestrictedBindDefinition,
+	applyClient client.Client,
 ) error {
 	logger := log.FromContext(ctx)
 	automountToken := ptr.Deref(rbd.Spec.AutomountServiceAccountToken, true)
@@ -443,7 +477,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdEnsureServiceAccounts(
 			helpers.BuildResourceLabels(rbd.Labels), automountToken).
 			WithOwnerReferences(ownerRefForRestricted(rbd, "RestrictedBindDefinition")).
 			WithAnnotations(helpers.BuildResourceAnnotations("RestrictedBindDefinition", rbd.Name))
-		if _, err := pkgssa.PatchApplyServiceAccount(ctx, r.client, ac, pkgssa.FieldOwnerFor(rbd.Name)); err != nil {
+		if _, err := pkgssa.PatchApplyServiceAccount(ctx, applyClient, ac, pkgssa.FieldOwnerFor(rbd.Name)); err != nil {
 			return fmt.Errorf("apply ServiceAccount %s/%s: %w", subject.Namespace, subject.Name, err)
 		}
 		if !helpers.SubjectExists(generatedSAs, subject) {
@@ -461,6 +495,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdEnsureRoleBinding(
 	ctx context.Context,
 	rbd *authorizationv1alpha1.RestrictedBindDefinition,
 	namespace, roleRef, roleKind string,
+	applyClient client.Client,
 ) error {
 	rbName := helpers.BuildBindingName(rbd.Spec.TargetName, roleRef)
 	ac := pkgssa.RoleBindingWithSubjectsAndRoleRef(
@@ -470,7 +505,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdEnsureRoleBinding(
 	ac.WithOwnerReferences(ownerRefForRestricted(rbd, "RestrictedBindDefinition")).
 		WithAnnotations(helpers.BuildResourceAnnotations("RestrictedBindDefinition", rbd.Name))
 
-	if result, err := pkgssa.PatchApplyRoleBinding(ctx, r.client, ac); err != nil {
+	if result, err := pkgssa.PatchApplyRoleBinding(ctx, applyClient, ac); err != nil {
 		return fmt.Errorf("ensure RoleBinding %s/%s: %w", namespace, rbName, err)
 	} else if result == pkgssa.PatchApplyResultSkipped {
 		metrics.RBACResourcesSkipped.WithLabelValues(metrics.ResourceRoleBinding).Inc()

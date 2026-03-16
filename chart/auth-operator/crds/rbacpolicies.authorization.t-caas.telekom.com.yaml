@@ -471,6 +471,32 @@ spec:
                     maxItems: 128
                     type: array
                 type: object
+              impersonation:
+                description: |-
+                  Impersonation configures ServiceAccount impersonation for restricted resource
+                  apply operations governed by this policy.
+                properties:
+                  enabled:
+                    default: false
+                    description: Enabled enables ServiceAccount impersonation during
+                      restricted resource apply operations.
+                    type: boolean
+                  serviceAccountRef:
+                    description: |-
+                      ServiceAccountRef is the ServiceAccount identity used for impersonated apply operations.
+                      Required when enabled is true.
+                    properties:
+                      name:
+                        description: Name of the ServiceAccount.
+                        minLength: 1
+                        type: string
+                      namespace:
+                        description: Namespace of the ServiceAccount.
+                        type: string
+                    required:
+                    - name
+                    type: object
+                type: object
               roleLimits:
                 description: RoleLimits constrains roles that may be generated.
                 properties:
