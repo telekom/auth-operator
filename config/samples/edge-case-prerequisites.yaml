@@ -153,3 +153,32 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: sample-impersonation-rbac-manager
+
+---
+# ClusterRole fragments used by aggregateFrom RoleDefinition sample cases.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sample-aggregate-fragment-configmaps
+  labels:
+    t-caas.telekom.com/purpose: sample-scenarios
+    t-caas.telekom.com/rbac-fragment: "true"
+    t-caas.telekom.com/aggregate-scope: team
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sample-aggregate-fragment-pods
+  labels:
+    t-caas.telekom.com/purpose: sample-scenarios
+    t-caas.telekom.com/rbac-fragment: "true"
+    t-caas.telekom.com/aggregate-scope: team
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]

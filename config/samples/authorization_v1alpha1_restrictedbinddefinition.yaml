@@ -243,3 +243,30 @@ spec:
     - namespace: sample-tenant-b
       clusterRoleRefs:
         - sample-existing-cluster-role
+
+---
+# -----------------------------------------------------------------------------
+# CASE: Blocked by policy (forbidden subject kind)
+# Uses a ServiceAccount-only policy but provides a User subject.
+# Expected: policy violation, deprovision/degraded status.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedBindDefinition
+metadata:
+  name: rbd-case-blocked-subject-kind
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/sample-case: blocked-subject
+spec:
+  policyRef:
+    name: sample-policy-block-clusterrolebindings
+  targetName: sample-blocked-subject-kind
+  subjects:
+    - kind: User
+      name: sample-user-blocked
+      apiGroup: rbac.authorization.k8s.io
+  roleBindings:
+    - namespace: sample-tenant-a
+      roleRefs:
+        - sample-existing-role
