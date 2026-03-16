@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -188,6 +189,7 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 			trace.WithAttributes(
 				tracing.AttrController.String("RestrictedRoleDefinition"),
 				tracing.AttrResource.String(req.Name),
+				tracing.AttrNamespace.String(req.Namespace),
 			))
 		defer func() {
 			if retErr != nil {
@@ -327,7 +329,7 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, fmt.Errorf("resolve apply client for RestrictedRoleDefinition %s: %w", rrd.Name, err)
 	}
-	logger.V(1).Info("resolved apply identity", "restrictedRoleDefinition", rrd.Name, "impersonatedUser", impersonatedUser, "policy", rbacPolicy.Name)
+	r.rrdLogApplyIdentity(ctx, logger, rrd.Name, rbacPolicy.Name, impersonatedUser)
 
 	// Step 8: Ensure the target role exists.
 	if err := r.rrdEnsureRole(ctx, rrd, finalRules, applyClient); err != nil {
@@ -583,9 +585,11 @@ func (r *RestrictedRoleDefinitionReconciler) rrdMarkStalled(
 	err error,
 ) {
 	logger := log.FromContext(ctx)
-	logger.V(1).Info("marking RestrictedRoleDefinition as stalled", "name", rrd.Name, "error", err)
+	detail := stalledErrorDetail(err)
+	logger.V(1).Info("marking RestrictedRoleDefinition as stalled", "name", rrd.Name, "error", err, "detail", detail)
 	conditions.MarkStalled(rrd, rrd.Generation,
-		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, "check operator logs for details")
+		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, detail)
+	rrd.Status.RoleReconciled = false
 	rrd.Status.ObservedGeneration = rrd.Generation
 	if updateErr := ssa.ApplyRestrictedRoleDefinitionStatus(ctx, r.client, rrd); updateErr != nil {
 		logger.Error(updateErr, "failed to apply Stalled status via SSA", "name", rrd.Name)
@@ -606,4 +610,17 @@ func (r *RestrictedRoleDefinitionReconciler) rrdApplyStatusAndMarkStalled(
 	if err := ssa.ApplyRestrictedRoleDefinitionStatus(ctx, r.client, rrd); err != nil {
 		logger.Error(err, "failed to apply status via SSA", "name", rrd.Name)
 	}
+}
+
+func (r *RestrictedRoleDefinitionReconciler) rrdLogApplyIdentity(
+	ctx context.Context,
+	logger logr.Logger,
+	resourceName, policyName, impersonatedUser string,
+) {
+	if impersonatedUser == "" {
+		return
+	}
+
+	trace.SpanFromContext(ctx).SetAttributes(tracing.AttrUser.String(impersonatedUser))
+	logger.V(2).Info("using impersonated apply identity", "name", resourceName, "impersonatedUser", impersonatedUser, "policy", policyName)
 }

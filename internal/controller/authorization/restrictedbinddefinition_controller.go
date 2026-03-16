@@ -222,6 +222,7 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 			trace.WithAttributes(
 				tracing.AttrController.String("RestrictedBindDefinition"),
 				tracing.AttrResource.String(req.Name),
+				tracing.AttrNamespace.String(req.Namespace),
 			))
 		defer func() {
 			if retErr != nil {
@@ -334,7 +335,8 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 		return ctrl.Result{}, fmt.Errorf("resolve apply client for RestrictedBindDefinition %s: %w", rbd.Name, err)
 	}
 	if impersonatedUser != "" {
-		logger.V(1).Info("using impersonated apply identity", "restrictedBindDefinition", rbd.Name, "impersonatedUser", impersonatedUser, "policy", rbacPolicy.Name)
+		trace.SpanFromContext(ctx).SetAttributes(tracing.AttrUser.String(impersonatedUser))
+		logger.V(2).Info("using impersonated apply identity", "name", rbd.Name, "impersonatedUser", impersonatedUser, "policy", rbacPolicy.Name)
 	}
 
 	// Step 7: Reconcile RBAC resources.
@@ -635,9 +637,11 @@ func (r *RestrictedBindDefinitionReconciler) rbdMarkStalled(
 	err error,
 ) {
 	logger := log.FromContext(ctx)
-	logger.V(1).Info("marking RestrictedBindDefinition as stalled", "name", rbd.Name, "error", err)
+	detail := stalledErrorDetail(err)
+	logger.V(1).Info("marking RestrictedBindDefinition as stalled", "name", rbd.Name, "error", err, "detail", detail)
 	conditions.MarkStalled(rbd, rbd.Generation,
-		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, "check operator logs for details")
+		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, detail)
+	rbd.Status.BindReconciled = false
 	rbd.Status.ObservedGeneration = rbd.Generation
 	if updateErr := ssa.ApplyRestrictedBindDefinitionStatus(ctx, r.client, rbd); updateErr != nil {
 		logger.Error(updateErr, "failed to apply Stalled status via SSA", "name", rbd.Name)

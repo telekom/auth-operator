@@ -135,6 +135,22 @@ jobs:
             echo "::warning::Main branch samples failed to apply, will use PR branch samples as baseline"
           fi
 
+          # Apply intentionally broken (runtime-failure) samples.
+          # These must stay structurally valid and apply successfully.
+          broken_samples_applied=false
+          for i in 1 2 3 4 5; do
+            if kubectl apply --server-side --force-conflicts -k config/samples/broken/ 2>&1; then
+              broken_samples_applied=true
+              break
+            fi
+            echo "Broken sample apply attempt $i failed, waiting before retry..."
+            sleep 10
+          done
+          if [ "$broken_samples_applied" = "false" ]; then
+            echo "::error::Broken runtime-failure samples must apply successfully"
+            exit 1
+          fi
+
           # Wait for all CRs to be fully reconciled (Ready condition)
           echo "Waiting for resources to be reconciled..."
           kubectl wait --for=condition=Ready roledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RoleDefinitions not fully reconciled"
@@ -165,6 +181,7 @@ jobs:
           done
 
           # Cleanup samples -- delete CRs and wait for finalizers to be processed before undeploying
+          kubectl delete -k config/samples/broken/ --ignore-not-found --timeout=60s 2>/dev/null || true
           kubectl delete -k config/samples/ --ignore-not-found --timeout=60s 2>/dev/null || true
           echo "Waiting for CRs to be fully deleted..."
           kubectl wait --for=delete roledefinition --all --timeout=60s 2>/dev/null || true
@@ -208,6 +225,22 @@ jobs:
             sleep 10
           done
 
+          # Apply intentionally broken (runtime-failure) samples.
+          # These must stay structurally valid and apply successfully.
+          broken_samples_applied=false
+          for i in 1 2 3 4 5; do
+            if kubectl apply --server-side --force-conflicts -k config/samples/broken/ 2>&1; then
+              broken_samples_applied=true
+              break
+            fi
+            echo "Broken sample apply attempt $i failed, waiting before retry..."
+            sleep 10
+          done
+          if [ "$broken_samples_applied" = "false" ]; then
+            echo "::error::Broken runtime-failure samples must apply successfully"
+            exit 1
+          fi
+
           # Wait for reconciliation
           kubectl wait --for=condition=Ready roledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RoleDefinitions not fully reconciled"
           kubectl wait --for=condition=Ready binddefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some BindDefinitions not fully reconciled"
@@ -217,6 +250,7 @@ jobs:
 
           bash hack/ci/capture-operator-output.sh /tmp/main-output
 
+          kubectl delete -k config/samples/broken/ --ignore-not-found --timeout=60s 2>/dev/null || true
           kubectl delete -k config/samples/ --ignore-not-found --timeout=60s 2>/dev/null || true
           kubectl wait --for=delete roledefinition --all --timeout=60s 2>/dev/null || true
           kubectl wait --for=delete binddefinition --all --timeout=60s 2>/dev/null || true
@@ -283,6 +317,22 @@ jobs:
             exit 0
           fi
 
+          # Apply intentionally broken (runtime-failure) samples.
+          # These must stay structurally valid and apply successfully.
+          broken_samples_applied=false
+          for i in 1 2 3 4 5; do
+            if kubectl apply --server-side --force-conflicts -k config/samples/broken/ 2>&1; then
+              broken_samples_applied=true
+              break
+            fi
+            echo "Broken sample apply attempt $i failed, waiting before retry..."
+            sleep 10
+          done
+          if [ "$broken_samples_applied" = "false" ]; then
+            echo "::error::Broken runtime-failure samples must apply successfully"
+            exit 1
+          fi
+
           kubectl wait --for=condition=Ready roledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RoleDefinitions not fully reconciled"
           kubectl wait --for=condition=Ready binddefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some BindDefinitions not fully reconciled"
           kubectl wait --for=condition=Ready rbacpolicy --all --timeout=180s 2>/dev/null || echo "::notice::Some RBACPolicies not fully reconciled"
@@ -306,6 +356,7 @@ jobs:
             kubectl logs -n $ns -l control-plane=webhook-server > /tmp/controller-logs/tag-${ns}-webhook.log 2>/dev/null || true
           done
 
+          kubectl delete -k config/samples/broken/ --ignore-not-found --timeout=60s 2>/dev/null || true
           kubectl delete -k config/samples/ --ignore-not-found --timeout=60s 2>/dev/null || true
           echo "Waiting for CRs to be fully deleted..."
           kubectl wait --for=delete roledefinition --all --timeout=60s 2>/dev/null || true
@@ -354,6 +405,22 @@ jobs:
           done
           if [ "$pr_samples_applied" = "false" ]; then
             echo "::error::PR branch samples failed to apply after 5 attempts"
+            exit 1
+          fi
+
+          # Apply intentionally broken (runtime-failure) samples.
+          # These must stay structurally valid and apply successfully.
+          broken_samples_applied=false
+          for i in 1 2 3 4 5; do
+            if kubectl apply --server-side --force-conflicts -k config/samples/broken/ 2>&1; then
+              broken_samples_applied=true
+              break
+            fi
+            echo "Broken sample apply attempt $i failed, waiting before retry..."
+            sleep 10
+          done
+          if [ "$broken_samples_applied" = "false" ]; then
+            echo "::error::Broken runtime-failure samples must apply successfully"
             exit 1
           fi
 
