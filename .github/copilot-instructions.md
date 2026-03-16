@@ -255,6 +255,19 @@ logger.Info("msg", "key", val)
 logger.V(1).Info("debug")  // Verbose
 ```
 
+Use context-aware logging only in production controller/webhook code:
+- derive logger with `log.FromContext(ctx)` where logging happens, or
+- pass `ctx` into helpers and derive logger inside helper.
+
+Do not pass raw logger instances across helper boundaries when `ctx` is available.
+
+### Sample Set Semantics
+
+- `config/samples/` contains structurally valid baseline samples for normal reconciliation.
+- `config/samples/broken/` contains structurally valid runtime-failure samples that MUST apply,
+  then stall or partially reconcile.
+- Webhook/schema-invalid examples should not be part of the broken apply kustomization.
+
 ## Configuration Files
 
 | File | Purpose |
