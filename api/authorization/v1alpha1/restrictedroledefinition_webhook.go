@@ -122,7 +122,7 @@ func (v *RestrictedRoleDefinitionValidator) validateRestrictedRoleDefinitionSpec
 	rdList := &RoleDefinitionList{}
 	if err := v.Client.List(ctx, rdList, client.MatchingFields{
 		TargetNameField: obj.Spec.TargetName,
-	}, client.Limit(1)); err != nil {
+	}); err != nil {
 		logger.Error(err, "failed to list RoleDefinitions", "targetName", obj.Spec.TargetName)
 		return apierrors.NewInternalError(fmt.Errorf("unable to list RoleDefinitions: %w", err))
 	}
@@ -138,7 +138,7 @@ func (v *RestrictedRoleDefinitionValidator) validateRestrictedRoleDefinitionSpec
 }
 
 // validateRestrictedRoleDefinitionAPIsVersions ensures every version entry
-// starts with 'v' and is at most 20 characters.
+// starts with 'v' and is at most maxVersionLength characters.
 func validateRestrictedRoleDefinitionAPIsVersions(obj *RestrictedRoleDefinition) error {
 	for i, group := range obj.Spec.RestrictedAPIs {
 		for j, gv := range group.Versions {
@@ -148,7 +148,7 @@ func validateRestrictedRoleDefinitionAPIsVersions(obj *RestrictedRoleDefinition)
 					obj.Name,
 					field.ErrorList{field.Invalid(
 						field.NewPath("spec", "restrictedApis").Index(i).Child("versions").Index(j).Child("version"),
-						gv.Version, "must start with 'v' and be at most 20 characters")})
+						gv.Version, fmt.Sprintf("must start with 'v' and be at most %d characters", maxVersionLength))})
 			}
 		}
 	}
