@@ -35,6 +35,7 @@ type RoleRefLimits struct {
 	// "prefix*" and "*suffix". An empty list means no role refs are allowed (default-deny).
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=128
+	// +kubebuilder:validation:items:MinLength=1
 	AllowedRoleRefs []string `json:"allowedRoleRefs,omitempty"`
 
 	// AllowedRoleRefSelector selects allowed roles by label.
@@ -45,6 +46,7 @@ type RoleRefLimits struct {
 	// Takes precedence over AllowedRoleRefs.
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=128
+	// +kubebuilder:validation:items:MinLength=1
 	ForbiddenRoleRefs []string `json:"forbiddenRoleRefs,omitempty"`
 
 	// ForbiddenRoleRefSelector selects forbidden roles by label.
@@ -61,11 +63,13 @@ type NamespaceLimits struct {
 	// ForbiddenNamespaces is a list of namespace names that may not be targeted.
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=128
+	// +kubebuilder:validation:items:MinLength=1
 	ForbiddenNamespaces []string `json:"forbiddenNamespaces,omitempty"`
 
 	// ForbiddenNamespacePrefixes is a list of namespace name prefixes that may not be targeted.
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:MinLength=1
 	ForbiddenNamespacePrefixes []string `json:"forbiddenNamespacePrefixes,omitempty"`
 
 	// MaxTargetNamespaces limits the number of target namespaces per binding.
@@ -123,16 +127,19 @@ type RoleLimits struct {
 	// ForbiddenVerbs is a list of verbs that must not appear in generated roles.
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:validation:items:MinLength=1
 	ForbiddenVerbs []string `json:"forbiddenVerbs,omitempty"`
 
 	// ForbiddenResources is a list of resources that must not appear in generated roles.
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=128
+	// +kubebuilder:validation:items:MinLength=1
 	ForbiddenResources []string `json:"forbiddenResources,omitempty"`
 
 	// ForbiddenAPIGroups is a list of API groups that must not appear in generated roles.
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:MinLength=1
 	ForbiddenAPIGroups []string `json:"forbiddenAPIGroups,omitempty"`
 
 	// ForbiddenResourceVerbs is a list of specific resource+verb combinations that are forbidden.
@@ -151,31 +158,37 @@ type NameMatchLimits struct {
 	// AllowedNames is a list of allowed subject names.
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=128
+	// +kubebuilder:validation:items:MinLength=1
 	AllowedNames []string `json:"allowedNames,omitempty"`
 
 	// ForbiddenNames is a list of forbidden subject names.
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=128
+	// +kubebuilder:validation:items:MinLength=1
 	ForbiddenNames []string `json:"forbiddenNames,omitempty"`
 
 	// AllowedPrefixes is a list of allowed name prefixes.
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:MinLength=1
 	AllowedPrefixes []string `json:"allowedPrefixes,omitempty"`
 
 	// ForbiddenPrefixes is a list of forbidden name prefixes.
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:MinLength=1
 	ForbiddenPrefixes []string `json:"forbiddenPrefixes,omitempty"`
 
 	// AllowedSuffixes is a list of allowed name suffixes.
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:MinLength=1
 	AllowedSuffixes []string `json:"allowedSuffixes,omitempty"`
 
 	// ForbiddenSuffixes is a list of forbidden name suffixes.
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:MinLength=1
 	ForbiddenSuffixes []string `json:"forbiddenSuffixes,omitempty"`
 }
 
@@ -205,6 +218,7 @@ type SACreationConfig struct {
 	// AllowedCreationNamespaces is an explicit list of namespaces where SA creation is allowed.
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=128
+	// +kubebuilder:validation:items:MinLength=1
 	AllowedCreationNamespaces []string `json:"allowedCreationNamespaces,omitempty"`
 
 	// AutomountServiceAccountToken controls automount for auto-created SAs.
@@ -226,11 +240,13 @@ type ServiceAccountLimits struct {
 	// ForbiddenNamespaces is a list of namespaces whose SAs may not be referenced.
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=128
+	// +kubebuilder:validation:items:MinLength=1
 	ForbiddenNamespaces []string `json:"forbiddenNamespaces,omitempty"`
 
 	// ForbiddenNamespacePrefixes is a list of namespace prefixes to deny.
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:MinLength=1
 	ForbiddenNamespacePrefixes []string `json:"forbiddenNamespacePrefixes,omitempty"`
 
 	// Creation constrains ServiceAccount auto-creation behaviour.
@@ -245,12 +261,14 @@ type SubjectLimits struct {
 	// An empty list means no subject kinds are allowed (default-deny).
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=3
+	// +kubebuilder:validation:items:MinLength=1
 	AllowedKinds []string `json:"allowedKinds,omitempty"`
 
 	// ForbiddenKinds lists subject kinds that are explicitly forbidden.
 	// Takes precedence over AllowedKinds.
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=3
+	// +kubebuilder:validation:items:MinLength=1
 	ForbiddenKinds []string `json:"forbiddenKinds,omitempty"`
 
 	// UserLimits constrains User subject names.

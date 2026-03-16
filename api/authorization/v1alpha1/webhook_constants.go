@@ -10,6 +10,10 @@ import "time"
 // This index must be registered with the manager before use.
 const TargetNameField = ".spec.targetName"
 
+// maxVersionLength is the upper bound for API version strings (e.g. "v1beta2").
+// Shared by RoleDefinition and RestrictedRoleDefinition validation.
+const maxVersionLength = 20
+
 // WebhookCacheTimeout is the maximum duration webhook handlers wait for
 // cache-backed List or Get calls. Informer-cache reads normally complete in
 // microseconds; the timeout is a safety net for cold-cache or degraded
