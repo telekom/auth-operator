@@ -98,7 +98,7 @@ func (v *RestrictedBindDefinitionValidator) validateRestrictedBindDefinitionSpec
 	rbdList := &RestrictedBindDefinitionList{}
 	if err := v.Client.List(ctx, rbdList, client.MatchingFields{
 		TargetNameField: obj.Spec.TargetName,
-	}, client.Limit(1)); err != nil {
+	}); err != nil {
 		logger.Error(err, "failed to list RestrictedBindDefinitions", "targetName", obj.Spec.TargetName)
 		return apierrors.NewInternalError(errors.New("unable to list RestrictedBindDefinitions"))
 	}
