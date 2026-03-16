@@ -450,7 +450,6 @@ func DeletePolicyViolationContribution(controller, name string) {
 
 	resourceCounts, ok := policyViolationsByResource[controller]
 	if !ok {
-		PolicyViolationsActive.WithLabelValues(controller).Set(0)
 		return
 	}
 
