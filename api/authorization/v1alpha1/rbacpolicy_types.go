@@ -299,6 +299,20 @@ type DefaultPolicyAssignment struct {
 	ServiceAccounts []SARef `json:"serviceAccounts,omitempty"`
 }
 
+// ImpersonationConfig controls apply-time ServiceAccount impersonation for
+// RestrictedBindDefinition and RestrictedRoleDefinition reconciliation.
+type ImpersonationConfig struct {
+	// Enabled enables ServiceAccount impersonation during restricted resource apply operations.
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:default=false
+	Enabled bool `json:"enabled"`
+
+	// ServiceAccountRef is the ServiceAccount identity used for impersonated apply operations.
+	// Required when enabled is true.
+	// +kubebuilder:validation:Optional
+	ServiceAccountRef *SARef `json:"serviceAccountRef,omitempty"`
+}
+
 // RBACPolicySpec defines the desired state of RBACPolicy.
 // +kubebuilder:validation:XValidation:rule="has(self.appliesTo.namespaceSelector) || (has(self.appliesTo.namespaces) && size(self.appliesTo.namespaces) > 0)",message="appliesTo must specify at least namespaceSelector or namespaces"
 type RBACPolicySpec struct {
@@ -322,6 +336,11 @@ type RBACPolicySpec struct {
 	// when creating restricted resources.
 	// +kubebuilder:validation:Optional
 	DefaultAssignment *DefaultPolicyAssignment `json:"defaultAssignment,omitempty"`
+
+	// Impersonation configures ServiceAccount impersonation for restricted resource
+	// apply operations governed by this policy.
+	// +kubebuilder:validation:Optional
+	Impersonation *ImpersonationConfig `json:"impersonation,omitempty"`
 }
 
 // RBACPolicyStatus defines the observed state of RBACPolicy.

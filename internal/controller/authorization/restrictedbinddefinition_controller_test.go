@@ -14,7 +14,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -28,6 +30,106 @@ import (
 	"github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/helpers"
 )
+
+func TestRBD_Reconcile_ImpersonationEnabled_UsesImpersonatedClient(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	pol := &authorizationv1alpha1.RBACPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "impersonation-policy", Generation: 1},
+		Spec: authorizationv1alpha1.RBACPolicySpec{
+			AppliesTo: authorizationv1alpha1.PolicyScope{Namespaces: []string{"default"}},
+			BindingLimits: &authorizationv1alpha1.BindingLimits{
+				AllowClusterRoleBindings: true,
+			},
+			Impersonation: &authorizationv1alpha1.ImpersonationConfig{
+				Enabled: true,
+				ServiceAccountRef: &authorizationv1alpha1.SARef{
+					Name:      "rbac-applier",
+					Namespace: "team-alpha",
+				},
+			},
+		},
+	}
+
+	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "impersonated-rbd", Generation: 1},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			PolicyRef:  authorizationv1alpha1.RBACPolicyReference{Name: pol.Name},
+			TargetName: "impersonated-target",
+			Subjects: []rbacv1.Subject{
+				{Kind: rbacv1.UserKind, Name: "alice", APIGroup: rbacv1.GroupName},
+			},
+			ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{ClusterRoleRefs: []string{"view"}},
+		},
+	}
+
+	r, c := newRBDTestReconciler(pol, rbd)
+	r.restConfig = &rest.Config{Host: "https://cluster.local"}
+
+	var capturedUsername string
+	var impersonationFactoryCalled bool
+	r.impersonatedClientFactory = func(_ *rest.Config, _ *runtime.Scheme, username string) (client.Client, error) {
+		impersonationFactoryCalled = true
+		capturedUsername = username
+		return c, nil
+	}
+
+	result, err := r.Reconcile(rbdCtx(), ctrl.Request{NamespacedName: types.NamespacedName{Name: rbd.Name}})
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	g.Expect(result.RequeueAfter).To(gomega.Equal(DefaultRequeueInterval))
+	g.Expect(impersonationFactoryCalled).To(gomega.BeTrue())
+	g.Expect(capturedUsername).To(gomega.Equal("system:serviceaccount:team-alpha:rbac-applier"))
+
+	var crb rbacv1.ClusterRoleBinding
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: "impersonated-target-view-binding"}, &crb)).To(gomega.Succeed())
+}
+
+func TestRBD_Reconcile_ImpersonationFactoryError_MarksStalled(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	pol := &authorizationv1alpha1.RBACPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "impersonation-fail-policy", Generation: 1},
+		Spec: authorizationv1alpha1.RBACPolicySpec{
+			AppliesTo: authorizationv1alpha1.PolicyScope{Namespaces: []string{"default"}},
+			BindingLimits: &authorizationv1alpha1.BindingLimits{
+				AllowClusterRoleBindings: true,
+			},
+			Impersonation: &authorizationv1alpha1.ImpersonationConfig{
+				Enabled: true,
+				ServiceAccountRef: &authorizationv1alpha1.SARef{
+					Name:      "rbac-applier",
+					Namespace: "team-alpha",
+				},
+			},
+		},
+	}
+
+	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "impersonation-fail-rbd", Generation: 1},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			PolicyRef:  authorizationv1alpha1.RBACPolicyReference{Name: pol.Name},
+			TargetName: "impersonation-fail-target",
+			Subjects: []rbacv1.Subject{
+				{Kind: rbacv1.UserKind, Name: "alice", APIGroup: rbacv1.GroupName},
+			},
+			ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{ClusterRoleRefs: []string{"view"}},
+		},
+	}
+
+	r, c := newRBDTestReconciler(pol, rbd)
+	r.restConfig = &rest.Config{Host: "https://cluster.local"}
+	r.impersonatedClientFactory = func(_ *rest.Config, _ *runtime.Scheme, _ string) (client.Client, error) {
+		return nil, fmt.Errorf("failed to build impersonated client")
+	}
+
+	_, err := r.Reconcile(rbdCtx(), ctrl.Request{NamespacedName: types.NamespacedName{Name: rbd.Name}})
+	g.Expect(err).To(gomega.HaveOccurred())
+	g.Expect(err.Error()).To(gomega.ContainSubstring("resolve apply client"))
+
+	var updated authorizationv1alpha1.RestrictedBindDefinition
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: rbd.Name}, &updated)).To(gomega.Succeed())
+	g.Expect(conditions.IsStalled(&updated)).To(gomega.BeTrue())
+}
 
 func newRBDTestReconciler(objs ...client.Object) (*RestrictedBindDefinitionReconciler, client.Client) {
 	scheme := newTestScheme()
@@ -1075,7 +1177,7 @@ func TestRBD_ReconcileResources_NamespaceGetError(t *testing.T) {
 		Build()
 	r := NewRestrictedBindDefinitionReconciler(c, scheme, events.NewFakeRecorder(10))
 
-	err := r.rbdReconcileResources(rbdCtx(), rbd)
+	err := r.rbdReconcileResources(rbdCtx(), rbd, c)
 	g.Expect(err).To(gomega.HaveOccurred())
 	g.Expect(err.Error()).To(gomega.ContainSubstring("get namespace error-ns"))
 }

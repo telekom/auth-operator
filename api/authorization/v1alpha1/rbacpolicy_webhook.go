@@ -187,6 +187,8 @@ func validateRBACPolicySpec(obj *RBACPolicy) error {
 
 	allErrs = append(allErrs, validateDefaultAssignment(obj.Spec.DefaultAssignment,
 		field.NewPath("spec", "defaultAssignment"))...)
+	allErrs = append(allErrs, validateImpersonationConfig(obj.Spec.Impersonation,
+		field.NewPath("spec", "impersonation"))...)
 
 	if len(allErrs) > 0 {
 		return apierrors.NewInvalid(
@@ -226,6 +228,41 @@ func validateDefaultAssignment(da *DefaultPolicyAssignment, fldPath *field.Path)
 				fldPath.Child("serviceAccounts").Index(i).Child("namespace"),
 				"namespace is required for default policy serviceAccount matching"))
 		}
+	}
+
+	return allErrs
+}
+
+// validateImpersonationConfig validates optional impersonation settings.
+func validateImpersonationConfig(ic *ImpersonationConfig, fldPath *field.Path) field.ErrorList {
+	if ic == nil {
+		return nil
+	}
+
+	var allErrs field.ErrorList
+	if !ic.Enabled {
+		return allErrs
+	}
+
+	if ic.ServiceAccountRef == nil {
+		allErrs = append(allErrs, field.Required(
+			fldPath.Child("serviceAccountRef"),
+			"serviceAccountRef is required when impersonation.enabled is true",
+		))
+		return allErrs
+	}
+
+	if ic.ServiceAccountRef.Name == "" {
+		allErrs = append(allErrs, field.Required(
+			fldPath.Child("serviceAccountRef", "name"),
+			"name is required when impersonation is enabled",
+		))
+	}
+	if ic.ServiceAccountRef.Namespace == "" {
+		allErrs = append(allErrs, field.Required(
+			fldPath.Child("serviceAccountRef", "namespace"),
+			"namespace is required when impersonation is enabled",
+		))
 	}
 
 	return allErrs

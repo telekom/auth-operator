@@ -255,6 +255,67 @@ var _ = Describe("RBACPolicy Webhook", func() {
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("serviceAccounts[0].namespace"))
 		})
+
+		It("Should admit an RBACPolicy with enabled impersonation and valid serviceAccountRef", func() {
+			pol := &RBACPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rbacpol-impersonation-valid",
+				},
+				Spec: RBACPolicySpec{
+					AppliesTo: PolicyScope{
+						Namespaces: []string{"default"},
+					},
+					Impersonation: &ImpersonationConfig{
+						Enabled: true,
+						ServiceAccountRef: &SARef{
+							Name:      "rbac-applier",
+							Namespace: "team-a",
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, pol)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, pol)).To(Succeed())
+		})
+
+		It("Should deny an RBACPolicy with enabled impersonation and missing serviceAccountRef", func() {
+			pol := &RBACPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rbacpol-impersonation-missing-ref",
+				},
+				Spec: RBACPolicySpec{
+					AppliesTo: PolicyScope{
+						Namespaces: []string{"default"},
+					},
+					Impersonation: &ImpersonationConfig{
+						Enabled: true,
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, pol)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("serviceAccountRef"))
+		})
+
+		It("Should deny an RBACPolicy with enabled impersonation and missing serviceAccount namespace", func() {
+			pol := &RBACPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rbacpol-impersonation-missing-namespace",
+				},
+				Spec: RBACPolicySpec{
+					AppliesTo: PolicyScope{
+						Namespaces: []string{"default"},
+					},
+					Impersonation: &ImpersonationConfig{
+						Enabled:           true,
+						ServiceAccountRef: &SARef{Name: "rbac-applier"},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, pol)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("serviceAccountRef.namespace"))
+		})
 	})
 
 	Context("When updating RBACPolicy under Validating Webhook", func() {

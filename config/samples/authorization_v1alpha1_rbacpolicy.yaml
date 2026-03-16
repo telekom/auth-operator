@@ -41,6 +41,11 @@ spec:
     serviceAccounts:
       - name: team-alpha-rbac-applier
         namespace: team-alpha
+  impersonation:
+    enabled: true
+    serviceAccountRef:
+      name: team-alpha-rbac-applier
+      namespace: team-alpha
   bindingLimits:
     allowClusterRoleBindings: false
     roleBindingLimits:
@@ -153,6 +158,11 @@ spec:
     serviceAccounts:
       - name: ci-rbac-applier
         namespace: ci-runners
+  impersonation:
+    enabled: true
+    serviceAccountRef:
+      name: ci-rbac-applier
+      namespace: ci-runners
   bindingLimits:
     allowClusterRoleBindings: false
     roleBindingLimits:

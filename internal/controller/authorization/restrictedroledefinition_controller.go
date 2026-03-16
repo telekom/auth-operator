@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -53,6 +54,7 @@ import (
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=rbacpolicies,verbs=get;list;watch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,verbs=get;list;watch;create;update;patch;delete;escalate;bind
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch;create;update;patch;delete;escalate;bind
+// +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=impersonate
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch;update
 // +kubebuilder:rbac:groups="events.k8s.io",resources=events,verbs=create;patch;update
 
@@ -64,6 +66,9 @@ type RestrictedRoleDefinitionReconciler struct {
 	resourceTracker *discovery.ResourceTracker
 	trackerEvents   chan event.TypedGenericEvent[client.Object]
 	tracer          trace.Tracer
+
+	restConfig                *rest.Config
+	impersonatedClientFactory impersonatedClientFactory
 }
 
 // setTracer implements tracerSetter.
@@ -88,11 +93,12 @@ func NewRestrictedRoleDefinitionReconciler(
 	resourceTracker.AddSignalFunc(trackerCallback)
 
 	r := &RestrictedRoleDefinitionReconciler{
-		client:          cachedClient,
-		scheme:          scheme,
-		recorder:        recorder,
-		resourceTracker: resourceTracker,
-		trackerEvents:   trackerEvents,
+		client:                    cachedClient,
+		scheme:                    scheme,
+		recorder:                  recorder,
+		resourceTracker:           resourceTracker,
+		trackerEvents:             trackerEvents,
+		impersonatedClientFactory: newImpersonatedClient,
 	}
 	for _, opt := range opts {
 		opt(r)
@@ -102,6 +108,10 @@ func NewRestrictedRoleDefinitionReconciler(
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *RestrictedRoleDefinitionReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, concurrency int) error {
+	if r.restConfig == nil {
+		r.restConfig = mgr.GetConfig()
+	}
+
 	trackerChannel := source.Channel(r.trackerEvents, handler.EnqueueRequestsFromMapFunc(r.queueAll()))
 
 	return ctrl.NewControllerManagedBy(mgr).
@@ -115,6 +125,18 @@ func (r *RestrictedRoleDefinitionReconciler) SetupWithManager(ctx context.Contex
 		WatchesRawSource(trackerChannel).
 		WithOptions(controller.TypedOptions[reconcile.Request]{MaxConcurrentReconciles: concurrency}).
 		Complete(r)
+}
+
+func (r *RestrictedRoleDefinitionReconciler) rrdResolveApplyClient(
+	rbacPolicy *authorizationv1alpha1.RBACPolicy,
+) (client.Client, string, error) {
+	return resolvePolicyApplyClient(
+		r.client,
+		r.scheme,
+		r.restConfig,
+		rbacPolicy,
+		r.impersonatedClientFactory,
+	)
 }
 
 // queueAll enqueues all RestrictedRoleDefinitions for reconciliation.
@@ -298,9 +320,17 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 		})
 		return result, err
 	}
+	applyClient, impersonatedUser, err := r.rrdResolveApplyClient(rbacPolicy)
+	if err != nil {
+		r.rrdMarkStalled(ctx, rrd, err)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
+		return ctrl.Result{}, fmt.Errorf("resolve apply client for RestrictedRoleDefinition %s: %w", rrd.Name, err)
+	}
+	logger.V(1).Info("resolved apply identity", "restrictedRoleDefinition", rrd.Name, "impersonatedUser", impersonatedUser, "policy", rbacPolicy.Name)
 
 	// Step 8: Ensure the target role exists.
-	if err := r.rrdEnsureRole(ctx, rrd, finalRules); err != nil {
+	if err := r.rrdEnsureRole(ctx, rrd, finalRules, applyClient); err != nil {
 		r.rrdMarkStalled(ctx, rrd, err)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
@@ -437,6 +467,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdEnsureRole(
 	ctx context.Context,
 	rrd *authorizationv1alpha1.RestrictedRoleDefinition,
 	finalRules []rbacv1.PolicyRule,
+	applyClient client.Client,
 ) error {
 	logger := log.FromContext(ctx)
 
@@ -450,7 +481,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdEnsureRole(
 			rrd.Spec.TargetName, labelsMap, finalRules,
 		).WithOwnerReferences(ownerRef).WithAnnotations(annotations)
 
-		result, err := pkgssa.PatchApplyClusterRole(ctx, r.client, ac)
+		result, err := pkgssa.PatchApplyClusterRole(ctx, applyClient, ac)
 		if err != nil {
 			return fmt.Errorf("apply ClusterRole %s: %w", rrd.Spec.TargetName, err)
 		}
@@ -464,7 +495,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdEnsureRole(
 			rrd.Spec.TargetName, rrd.Spec.TargetNamespace, labelsMap, finalRules,
 		).WithOwnerReferences(ownerRef).WithAnnotations(annotations)
 
-		result, err := pkgssa.PatchApplyRole(ctx, r.client, ac)
+		result, err := pkgssa.PatchApplyRole(ctx, applyClient, ac)
 		if err != nil {
 			return fmt.Errorf("apply Role %s/%s: %w", rrd.Spec.TargetNamespace, rrd.Spec.TargetName, err)
 		}

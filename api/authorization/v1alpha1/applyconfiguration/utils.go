@@ -43,6 +43,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &authorizationv1alpha1.ClusterBindingApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("DefaultPolicyAssignment"):
 		return &authorizationv1alpha1.DefaultPolicyAssignmentApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("ImpersonationConfig"):
+		return &authorizationv1alpha1.ImpersonationConfigApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("NameMatchLimits"):
 		return &authorizationv1alpha1.NameMatchLimitsApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("NamespaceBinding"):

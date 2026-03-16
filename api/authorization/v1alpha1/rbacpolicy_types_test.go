@@ -103,6 +103,13 @@ func TestRBACPolicySpecFields(t *testing.T) {
 				},
 				Namespaces: []string{"ns-1", "ns-2"},
 			},
+			Impersonation: &ImpersonationConfig{
+				Enabled: true,
+				ServiceAccountRef: &SARef{
+					Name:      "rbac-applier",
+					Namespace: "team-a",
+				},
+			},
 			DefaultAssignment: &DefaultPolicyAssignment{
 				Groups:          []string{"oidc:team-a-admins"},
 				ServiceAccounts: []SARef{{Name: "rbac-applier", Namespace: "team-a"}},
@@ -187,6 +194,18 @@ func TestRBACPolicySpecFields(t *testing.T) {
 	// Verify SubjectLimits.
 	if len(policy.Spec.SubjectLimits.AllowedKinds) != 2 {
 		t.Errorf("expected 2 allowed kinds, got %d", len(policy.Spec.SubjectLimits.AllowedKinds))
+	}
+	if policy.Spec.Impersonation == nil {
+		t.Fatal("expected non-nil Impersonation")
+	}
+	if !policy.Spec.Impersonation.Enabled {
+		t.Error("expected impersonation to be enabled")
+	}
+	if policy.Spec.Impersonation.ServiceAccountRef == nil {
+		t.Fatal("expected non-nil impersonation ServiceAccountRef")
+	}
+	if policy.Spec.Impersonation.ServiceAccountRef.Namespace != "team-a" {
+		t.Errorf("expected impersonation ServiceAccountRef namespace team-a, got %q", policy.Spec.Impersonation.ServiceAccountRef.Namespace)
 	}
 	if policy.Spec.DefaultAssignment == nil {
 		t.Fatal("expected non-nil DefaultAssignment")

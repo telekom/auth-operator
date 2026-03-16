@@ -16,8 +16,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -247,6 +249,65 @@ func TestNewRestrictedRoleDefinitionReconciler_NilTracker(t *testing.T) {
 	g.Expect(err.Error()).To(ContainSubstring("resourceTracker cannot be nil"))
 }
 
+func TestRRD_ResolveApplyClient_ImpersonationEnabled_UsesFactory(t *testing.T) {
+	g := NewWithT(t)
+
+	r, c := newRRDTestReconcilerFake()
+	r.restConfig = &rest.Config{Host: "https://cluster.local"}
+
+	policy := &authorizationv1alpha1.RBACPolicy{
+		Spec: authorizationv1alpha1.RBACPolicySpec{
+			Impersonation: &authorizationv1alpha1.ImpersonationConfig{
+				Enabled: true,
+				ServiceAccountRef: &authorizationv1alpha1.SARef{
+					Name:      "rbac-applier",
+					Namespace: "team-a",
+				},
+			},
+		},
+	}
+
+	var capturedUsername string
+	r.impersonatedClientFactory = func(_ *rest.Config, _ *runtime.Scheme, username string) (client.Client, error) {
+		capturedUsername = username
+		return c, nil
+	}
+
+	applyClient, impersonatedUser, err := r.rrdResolveApplyClient(policy)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(impersonatedUser).To(Equal("system:serviceaccount:team-a:rbac-applier"))
+	g.Expect(capturedUsername).To(Equal(impersonatedUser))
+	g.Expect(applyClient).To(Equal(c))
+}
+
+func TestRRD_ResolveApplyClient_ImpersonationFactoryError(t *testing.T) {
+	g := NewWithT(t)
+
+	r, _ := newRRDTestReconcilerFake()
+	r.restConfig = &rest.Config{Host: "https://cluster.local"}
+
+	policy := &authorizationv1alpha1.RBACPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "rrd-impersonation-policy"},
+		Spec: authorizationv1alpha1.RBACPolicySpec{
+			Impersonation: &authorizationv1alpha1.ImpersonationConfig{
+				Enabled: true,
+				ServiceAccountRef: &authorizationv1alpha1.SARef{
+					Name:      "rbac-applier",
+					Namespace: "team-a",
+				},
+			},
+		},
+	}
+
+	r.impersonatedClientFactory = func(_ *rest.Config, _ *runtime.Scheme, _ string) (client.Client, error) {
+		return nil, fmt.Errorf("factory error")
+	}
+
+	_, _, err := r.rrdResolveApplyClient(policy)
+	g.Expect(err).To(HaveOccurred())
+	g.Expect(err.Error()).To(ContainSubstring("factory error"))
+}
+
 func TestRRD_Deprovision_ClusterRole(t *testing.T) {
 	g := NewWithT(t)
 
@@ -446,7 +507,7 @@ func TestRRD_EnsureRole_InvalidTargetRole(t *testing.T) {
 	r, _ := newRRDTestReconcilerFake(rrd)
 	err := r.rrdEnsureRole(rrdCtx(), rrd, []rbacv1.PolicyRule{
 		{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}},
-	})
+	}, r.client)
 	g.Expect(err).To(HaveOccurred())
 	g.Expect(err.Error()).To(ContainSubstring("invalid target role type"))
 }
@@ -466,7 +527,7 @@ func TestRRD_EnsureRole_ClusterRole(t *testing.T) {
 	rules := []rbacv1.PolicyRule{
 		{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get", "list"}},
 	}
-	err := r.rrdEnsureRole(rrdCtx(), rrd, rules)
+	err := r.rrdEnsureRole(rrdCtx(), rrd, rules, c)
 	g.Expect(err).NotTo(HaveOccurred())
 
 	var cr rbacv1.ClusterRole
@@ -506,7 +567,7 @@ func TestRRD_EnsureRole_NamespacedRole(t *testing.T) {
 	rules := []rbacv1.PolicyRule{
 		{APIGroups: []string{""}, Resources: []string{"services"}, Verbs: []string{"get"}},
 	}
-	err := r.rrdEnsureRole(rrdCtx(), rrd, rules)
+	err := r.rrdEnsureRole(rrdCtx(), rrd, rules, c)
 	g.Expect(err).NotTo(HaveOccurred())
 
 	var role rbacv1.Role

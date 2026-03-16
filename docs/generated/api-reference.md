@@ -140,6 +140,24 @@ _Appears in:_
 | `serviceAccounts` _[SARef](#saref) array_ | ServiceAccounts lists requester ServiceAccounts for which this policy is the default. |  | MaxItems: 128 <br />Optional: \{\} <br /> |
 
 
+#### ImpersonationConfig
+
+
+
+ImpersonationConfig controls apply-time ServiceAccount impersonation for
+RestrictedBindDefinition and RestrictedRoleDefinition reconciliation.
+
+
+
+_Appears in:_
+- [RBACPolicySpec](#rbacpolicyspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `enabled` _boolean_ | Enabled enables ServiceAccount impersonation during restricted resource apply operations. | false | Optional: \{\} <br /> |
+| `serviceAccountRef` _[SARef](#saref)_ | ServiceAccountRef is the ServiceAccount identity used for impersonated apply operations.<br />Required when enabled is true. |  | Optional: \{\} <br /> |
+
+
 
 
 #### NameMatchLimits
@@ -293,6 +311,7 @@ _Appears in:_
 | `roleLimits` _[RoleLimits](#rolelimits)_ | RoleLimits constrains roles that may be generated. |  | Optional: \{\} <br /> |
 | `subjectLimits` _[SubjectLimits](#subjectlimits)_ | SubjectLimits constrains the subjects a tenant may use. |  | Optional: \{\} <br /> |
 | `defaultAssignment` _[DefaultPolicyAssignment](#defaultpolicyassignment)_ | DefaultAssignment defines requester identities that must use this policy by default<br />when creating restricted resources. |  | Optional: \{\} <br /> |
+| `impersonation` _[ImpersonationConfig](#impersonationconfig)_ | Impersonation configures ServiceAccount impersonation for restricted resource<br />apply operations governed by this policy. |  | Optional: \{\} <br /> |
 
 
 #### RBACPolicyStatus
@@ -598,6 +617,7 @@ SARef is a reference to a specific ServiceAccount.
 
 _Appears in:_
 - [DefaultPolicyAssignment](#defaultpolicyassignment)
+- [ImpersonationConfig](#impersonationconfig)
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
