@@ -113,7 +113,7 @@ func (v *RestrictedRoleDefinitionValidator) validateRestrictedRoleDefinitionSpec
 			logger.Info("validation failed: duplicate targetName",
 				"name", obj.Name, "targetName", obj.Spec.TargetName, "conflictsWith", existing.Name)
 			return apierrors.NewBadRequest(
-				fmt.Sprintf("targetName %s is already in use by another RestrictedRoleDefinition", obj.Spec.TargetName))
+				fmt.Sprintf("targetName %s is already in use by RestrictedRoleDefinition %q", obj.Spec.TargetName, existing.Name))
 		}
 	}
 
@@ -129,7 +129,7 @@ func (v *RestrictedRoleDefinitionValidator) validateRestrictedRoleDefinitionSpec
 	for _, existing := range rdList.Items {
 		if roleTargetCollision(obj.Spec.TargetRole, obj.Spec.TargetNamespace, existing.Spec.TargetRole, existing.Spec.TargetNamespace) {
 			return apierrors.NewBadRequest(
-				fmt.Sprintf("targetName %s is already in use by a RoleDefinition", obj.Spec.TargetName))
+				fmt.Sprintf("targetName %s is already in use by RoleDefinition %q", obj.Spec.TargetName, existing.Name))
 		}
 	}
 

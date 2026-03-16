@@ -102,7 +102,7 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 		TargetNameField: r.Spec.TargetName,
 	}); err != nil {
 		logger.Error(err, "failed to list BindDefinitions", "targetName", r.Spec.TargetName)
-		return nil, apierrors.NewInternalError(errors.New("unable to list BindDefinitions"))
+		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list BindDefinitions: %w", err))
 	}
 
 	for _, bindDefinition := range bindDefinitionList.Items {
@@ -111,7 +111,7 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 		if bindDefinition.Name != r.Name {
 			logger.Info("validation failed: duplicate targetName",
 				"name", r.Name, "targetName", r.Spec.TargetName, "conflictsWith", bindDefinition.Name)
-			return nil, apierrors.NewBadRequest(fmt.Sprintf("targetName %s is already in use by another BindDefinition", r.Spec.TargetName))
+			return nil, apierrors.NewBadRequest(fmt.Sprintf("targetName %s is already in use by BindDefinition %q", r.Spec.TargetName, bindDefinition.Name))
 		}
 	}
 
@@ -121,11 +121,11 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 		TargetNameField: r.Spec.TargetName,
 	}, client.Limit(1)); err != nil {
 		logger.Error(err, "failed to list RestrictedBindDefinitions", "targetName", r.Spec.TargetName)
-		return nil, apierrors.NewInternalError(errors.New("unable to list RestrictedBindDefinitions"))
+		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RestrictedBindDefinitions: %w", err))
 	}
-	if len(rbdList.Items) > 0 {
+	for _, existing := range rbdList.Items {
 		return nil, apierrors.NewBadRequest(
-			fmt.Sprintf("targetName %s is already in use by a RestrictedBindDefinition", r.Spec.TargetName))
+			fmt.Sprintf("targetName %s is already in use by RestrictedBindDefinition %q", r.Spec.TargetName, existing.Name))
 	}
 
 	// Validate subject Kinds are one of the RBAC-supported types.
