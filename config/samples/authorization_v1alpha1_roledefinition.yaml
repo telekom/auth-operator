@@ -456,3 +456,54 @@ spec:
     - delete
     - deletecollection
     - watch
+
+---
+# -----------------------------------------------------------------------------
+# ClusterRole: Breakglass + AggregationLabels permutation
+# Tests breakglassAllowed label propagation and Kubernetes role aggregation labels
+# in a single valid ClusterRoleDefinition.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: rd-breakglass-aggregate-view
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/privilege-level: elevated
+    t-caas.telekom.com/scope: cluster
+spec:
+  targetRole: ClusterRole
+  targetName: t-caas-breakglass-aggregate-view
+  scopeNamespaced: false
+  breakglassAllowed: true
+  aggregationLabels:
+    rbac.authorization.k8s.io/aggregate-to-view: "true"
+  restrictedApis: []
+  restrictedResources: []
+  restrictedVerbs: []
+
+---
+# -----------------------------------------------------------------------------
+# ClusterRole: aggregateFrom permutation
+# Tests selector-based aggregation mode (mutually exclusive with restricted*).
+# The selected source roles are created in edge-case-prerequisites.yaml.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: rd-aggregate-from-team-fragments
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/privilege-level: viewer
+    t-caas.telekom.com/scope: cluster
+spec:
+  targetRole: ClusterRole
+  targetName: t-caas-aggregate-team-fragments
+  scopeNamespaced: false
+  aggregateFrom:
+    clusterRoleSelectors:
+      - matchLabels:
+          t-caas.telekom.com/rbac-fragment: "true"
+          t-caas.telekom.com/aggregate-scope: team

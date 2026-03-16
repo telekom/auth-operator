@@ -250,3 +250,27 @@ spec:
     - escalate
     - delete
     - patch
+
+---
+# -----------------------------------------------------------------------------
+# CASE: Blocked by policy (forbidden verb omission)
+# Policy forbids "escalate" but this definition does not list it in restrictedVerbs.
+# Expected: policy violation and deprovision/degraded status.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedRoleDefinition
+metadata:
+  name: rrd-case-blocked-forbidden-verb-omission
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/sample-case: blocked-forbidden-verb
+spec:
+  policyRef:
+    name: sample-policy-allow-all-paths
+  targetRole: Role
+  targetName: sample-blocked-forbidden-verb
+  targetNamespace: sample-tenant-a
+  scopeNamespaced: true
+  restrictedVerbs:
+    - delete
