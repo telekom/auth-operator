@@ -120,3 +120,157 @@ spec:
     - namespace: cd-deploy
       clusterRoleRefs:
         - t-caas-deploy-writer
+
+---
+# -----------------------------------------------------------------------------
+# CASE: Allowed
+# Uses a permissive sample policy and should reconcile cleanly.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedBindDefinition
+metadata:
+  name: rbd-case-allowed-all-paths
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/sample-case: allowed
+spec:
+  policyRef:
+    name: sample-policy-allow-all-paths
+  targetName: sample-allowed-binding
+  subjects:
+    - kind: ServiceAccount
+      name: sample-workload-a
+      namespace: sample-tenant-a
+      apiGroup: ""
+    - kind: Group
+      name: sample-app-operators
+      apiGroup: rbac.authorization.k8s.io
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - sample-existing-cluster-role
+  roleBindings:
+    - namespace: sample-tenant-a
+      clusterRoleRefs:
+        - sample-existing-cluster-role
+      roleRefs:
+        - sample-existing-role
+
+---
+# -----------------------------------------------------------------------------
+# CASE: Blocked by policy
+# This object is valid CRD input but should be deprovisioned/stalled because the
+# selected policy forbids clusterRoleBindings.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedBindDefinition
+metadata:
+  name: rbd-case-blocked-crb-by-policy
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/sample-case: blocked
+spec:
+  policyRef:
+    name: sample-policy-block-clusterrolebindings
+  targetName: sample-blocked-crb
+  subjects:
+    - kind: ServiceAccount
+      name: sample-workload-blocked
+      namespace: sample-tenant-a
+      apiGroup: ""
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - sample-existing-cluster-role
+
+---
+# -----------------------------------------------------------------------------
+# CASE: Partially allowed
+# Existing role refs are applied; missing refs are reflected in status.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedBindDefinition
+metadata:
+  name: rbd-case-partial-missing-role-refs
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/sample-case: partial
+spec:
+  policyRef:
+    name: sample-policy-partially-allowed-bindings
+  targetName: sample-partial-refs
+  subjects:
+    - kind: ServiceAccount
+      name: sample-workload-partial
+      namespace: sample-tenant-a
+      apiGroup: ""
+  roleBindings:
+    - namespace: sample-tenant-a
+      clusterRoleRefs:
+        - sample-existing-cluster-role
+        - sample-missing-cluster-role
+      roleRefs:
+        - sample-existing-role
+        - sample-missing-role
+
+---
+# -----------------------------------------------------------------------------
+# CASE: Impersonated apply success
+# Policy selects an impersonated SA with RBAC grants (see prerequisites).
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedBindDefinition
+metadata:
+  name: rbd-case-impersonated-allowed
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/sample-case: impersonated-allowed
+spec:
+  policyRef:
+    name: sample-policy-allow-all-paths
+  targetName: sample-impersonated-ok
+  subjects:
+    - kind: ServiceAccount
+      name: sample-workload-impersonated-ok
+      namespace: sample-tenant-b
+      apiGroup: ""
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - sample-existing-cluster-role
+  roleBindings:
+    - namespace: sample-tenant-b
+      clusterRoleRefs:
+        - sample-existing-cluster-role
+
+---
+# -----------------------------------------------------------------------------
+# CASE: Impersonated apply expected failure
+# Policy selects an impersonated SA without RBAC grants.
+# Expected outcome: reconcile should fail/stall with authorization errors.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedBindDefinition
+metadata:
+  name: rbd-case-impersonated-authz-failure
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/sample-case: impersonated-failed
+spec:
+  policyRef:
+    name: sample-policy-impersonation-authz-failure
+  targetName: sample-impersonated-fail
+  subjects:
+    - kind: ServiceAccount
+      name: sample-workload-impersonated-fail
+      namespace: sample-tenant-a
+      apiGroup: ""
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - sample-existing-cluster-role
+  roleBindings:
+    - namespace: sample-tenant-a
+      roleRefs:
+        - sample-existing-role

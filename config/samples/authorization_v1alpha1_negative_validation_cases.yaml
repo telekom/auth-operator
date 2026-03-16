@@ -1,0 +1,61 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# =============================================================================
+# Negative Validation Samples (INTENTIONALLY INVALID)
+# =============================================================================
+# IMPORTANT:
+# - These objects are expected to be rejected by webhook/schema validation.
+# - This file is intentionally NOT referenced by config/samples/kustomization.yaml.
+# - Apply objects one-by-one to verify rejection paths.
+# =============================================================================
+
+---
+# CASE: Invalid impersonation config (missing serviceAccountRef)
+# Expected: webhook rejection (serviceAccountRef required when enabled=true).
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RBACPolicy
+metadata:
+  name: sample-negative-rbacpolicy-impersonation-missing-ref
+  labels:
+    t-caas.telekom.com/sample-case: blocked-webhook
+spec:
+  appliesTo:
+    namespaces:
+      - sample-tenant-a
+  impersonation:
+    enabled: true
+
+---
+# CASE: Invalid default assignment (empty block)
+# Expected: webhook rejection (must define at least one group or serviceAccount).
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RBACPolicy
+metadata:
+  name: sample-negative-rbacpolicy-default-assignment-empty
+  labels:
+    t-caas.telekom.com/sample-case: blocked-webhook
+spec:
+  appliesTo:
+    namespaces:
+      - sample-tenant-a
+  defaultAssignment: {}
+
+---
+# CASE: Invalid ServiceAccountRef (missing namespace)
+# Expected: webhook rejection (serviceAccountRef.namespace required).
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RBACPolicy
+metadata:
+  name: sample-negative-rbacpolicy-impersonation-missing-namespace
+  labels:
+    t-caas.telekom.com/sample-case: blocked-webhook
+spec:
+  appliesTo:
+    namespaces:
+      - sample-tenant-a
+  impersonation:
+    enabled: true
+    serviceAccountRef:
+      name: sample-impersonation-admin
