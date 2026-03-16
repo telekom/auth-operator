@@ -185,6 +185,7 @@ spec:
                           AllowedRoleRefs is a list of allowed role names. Supports simple wildcards:
                           "prefix*" and "*suffix". An empty list means no role refs are allowed (default-deny).
                         items:
+                          minLength: 1
                           type: string
                         maxItems: 128
                         type: array
@@ -240,6 +241,7 @@ spec:
                           ForbiddenRoleRefs is a list of explicitly forbidden role names.
                           Takes precedence over AllowedRoleRefs.
                         items:
+                          minLength: 1
                           type: string
                         maxItems: 128
                         type: array
@@ -300,6 +302,7 @@ spec:
                           AllowedRoleRefs is a list of allowed role names. Supports simple wildcards:
                           "prefix*" and "*suffix". An empty list means no role refs are allowed (default-deny).
                         items:
+                          minLength: 1
                           type: string
                         maxItems: 128
                         type: array
@@ -355,6 +358,7 @@ spec:
                           ForbiddenRoleRefs is a list of explicitly forbidden role names.
                           Takes precedence over AllowedRoleRefs.
                         items:
+                          minLength: 1
                           type: string
                         maxItems: 128
                         type: array
@@ -414,6 +418,7 @@ spec:
                         description: ForbiddenNamespacePrefixes is a list of namespace
                           name prefixes that may not be targeted.
                         items:
+                          minLength: 1
                           type: string
                         maxItems: 64
                         type: array
@@ -421,6 +426,7 @@ spec:
                         description: ForbiddenNamespaces is a list of namespace names
                           that may not be targeted.
                         items:
+                          minLength: 1
                           type: string
                         maxItems: 128
                         type: array
@@ -445,6 +451,7 @@ spec:
                     description: ForbiddenAPIGroups is a list of API groups that must
                       not appear in generated roles.
                     items:
+                      minLength: 1
                       type: string
                     maxItems: 64
                     type: array
@@ -480,6 +487,7 @@ spec:
                     description: ForbiddenResources is a list of resources that must
                       not appear in generated roles.
                     items:
+                      minLength: 1
                       type: string
                     maxItems: 128
                     type: array
@@ -487,6 +495,7 @@ spec:
                     description: ForbiddenVerbs is a list of verbs that must not appear
                       in generated roles.
                     items:
+                      minLength: 1
                       type: string
                     maxItems: 16
                     type: array
@@ -506,6 +515,7 @@ spec:
                       Valid values: "User", "Group", "ServiceAccount".
                       An empty list means no subject kinds are allowed (default-deny).
                     items:
+                      minLength: 1
                       type: string
                     maxItems: 3
                     type: array
@@ -514,6 +524,7 @@ spec:
                       ForbiddenKinds lists subject kinds that are explicitly forbidden.
                       Takes precedence over AllowedKinds.
                     items:
+                      minLength: 1
                       type: string
                     maxItems: 3
                     type: array
@@ -523,18 +534,21 @@ spec:
                       allowedNames:
                         description: AllowedNames is a list of allowed subject names.
                         items:
+                          minLength: 1
                           type: string
                         maxItems: 128
                         type: array
                       allowedPrefixes:
                         description: AllowedPrefixes is a list of allowed name prefixes.
                         items:
+                          minLength: 1
                           type: string
                         maxItems: 64
                         type: array
                       allowedSuffixes:
                         description: AllowedSuffixes is a list of allowed name suffixes.
                         items:
+                          minLength: 1
                           type: string
                         maxItems: 64
                         type: array
@@ -542,6 +556,7 @@ spec:
                         description: ForbiddenNames is a list of forbidden subject
                           names.
                         items:
+                          minLength: 1
                           type: string
                         maxItems: 128
                         type: array
@@ -549,6 +564,7 @@ spec:
                         description: ForbiddenPrefixes is a list of forbidden name
                           prefixes.
                         items:
+                          minLength: 1
                           type: string
                         maxItems: 64
                         type: array
@@ -556,6 +572,7 @@ spec:
                         description: ForbiddenSuffixes is a list of forbidden name
                           suffixes.
                         items:
+                          minLength: 1
                           type: string
                         maxItems: 64
                         type: array
@@ -670,6 +687,7 @@ spec:
                             description: AllowedCreationNamespaces is an explicit
                               list of namespaces where SA creation is allowed.
                             items:
+                              minLength: 1
                               type: string
                             maxItems: 128
                             type: array
@@ -687,6 +705,7 @@ spec:
                         description: ForbiddenNamespacePrefixes is a list of namespace
                           prefixes to deny.
                         items:
+                          minLength: 1
                           type: string
                         maxItems: 64
                         type: array
@@ -694,6 +713,7 @@ spec:
                         description: ForbiddenNamespaces is a list of namespaces whose
                           SAs may not be referenced.
                         items:
+                          minLength: 1
                           type: string
                         maxItems: 128
                         type: array
@@ -704,18 +724,21 @@ spec:
                       allowedNames:
                         description: AllowedNames is a list of allowed subject names.
                         items:
+                          minLength: 1
                           type: string
                         maxItems: 128
                         type: array
                       allowedPrefixes:
                         description: AllowedPrefixes is a list of allowed name prefixes.
                         items:
+                          minLength: 1
                           type: string
                         maxItems: 64
                         type: array
                       allowedSuffixes:
                         description: AllowedSuffixes is a list of allowed name suffixes.
                         items:
+                          minLength: 1
                           type: string
                         maxItems: 64
                         type: array
@@ -723,6 +746,7 @@ spec:
                         description: ForbiddenNames is a list of forbidden subject
                           names.
                         items:
+                          minLength: 1
                           type: string
                         maxItems: 128
                         type: array
@@ -730,6 +754,7 @@ spec:
                         description: ForbiddenPrefixes is a list of forbidden name
                           prefixes.
                         items:
+                          minLength: 1
                           type: string
                         maxItems: 64
                         type: array
@@ -737,6 +762,7 @@ spec:
                         description: ForbiddenSuffixes is a list of forbidden name
                           suffixes.
                         items:
+                          minLength: 1
                           type: string
                         maxItems: 64
                         type: array

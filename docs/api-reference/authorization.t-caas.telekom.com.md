@@ -137,12 +137,12 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `allowedNames` _string array_ | AllowedNames is a list of allowed subject names. |  | MaxItems: 128 <br />Optional: \{\} <br /> |
-| `forbiddenNames` _string array_ | ForbiddenNames is a list of forbidden subject names. |  | MaxItems: 128 <br />Optional: \{\} <br /> |
-| `allowedPrefixes` _string array_ | AllowedPrefixes is a list of allowed name prefixes. |  | MaxItems: 64 <br />Optional: \{\} <br /> |
-| `forbiddenPrefixes` _string array_ | ForbiddenPrefixes is a list of forbidden name prefixes. |  | MaxItems: 64 <br />Optional: \{\} <br /> |
-| `allowedSuffixes` _string array_ | AllowedSuffixes is a list of allowed name suffixes. |  | MaxItems: 64 <br />Optional: \{\} <br /> |
-| `forbiddenSuffixes` _string array_ | ForbiddenSuffixes is a list of forbidden name suffixes. |  | MaxItems: 64 <br />Optional: \{\} <br /> |
+| `allowedNames` _string array_ | AllowedNames is a list of allowed subject names. |  | MaxItems: 128 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
+| `forbiddenNames` _string array_ | ForbiddenNames is a list of forbidden subject names. |  | MaxItems: 128 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
+| `allowedPrefixes` _string array_ | AllowedPrefixes is a list of allowed name prefixes. |  | MaxItems: 64 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
+| `forbiddenPrefixes` _string array_ | ForbiddenPrefixes is a list of forbidden name prefixes. |  | MaxItems: 64 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
+| `allowedSuffixes` _string array_ | AllowedSuffixes is a list of allowed name suffixes. |  | MaxItems: 64 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
+| `forbiddenSuffixes` _string array_ | ForbiddenSuffixes is a list of forbidden name suffixes. |  | MaxItems: 64 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
 
 
 #### NamespaceBinding
@@ -179,8 +179,8 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `allowedNamespaceSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#labelselector-v1-meta)_ | AllowedNamespaceSelector selects allowed namespaces by label. |  | Optional: \{\} <br /> |
-| `forbiddenNamespaces` _string array_ | ForbiddenNamespaces is a list of namespace names that may not be targeted. |  | MaxItems: 128 <br />Optional: \{\} <br /> |
-| `forbiddenNamespacePrefixes` _string array_ | ForbiddenNamespacePrefixes is a list of namespace name prefixes that may not be targeted. |  | MaxItems: 64 <br />Optional: \{\} <br /> |
+| `forbiddenNamespaces` _string array_ | ForbiddenNamespaces is a list of namespace names that may not be targeted. |  | MaxItems: 128 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
+| `forbiddenNamespacePrefixes` _string array_ | ForbiddenNamespacePrefixes is a list of namespace name prefixes that may not be targeted. |  | MaxItems: 64 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
 | `maxTargetNamespaces` _integer_ | MaxTargetNamespaces limits the number of target namespaces per binding. |  | Minimum: 0 <br />Optional: \{\} <br /> |
 
 
@@ -349,7 +349,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `policyRef` _[RBACPolicyReference](#rbacpolicyreference)_ | PolicyRef references the RBACPolicy that governs this binding. |  | Required: \{\} <br /> |
-| `targetName` _string_ | TargetName is the name prefix for generated bindings. Follows format<br />"targetName-clusterrole/role-binding".<br />This field is immutable after creation. |  | MaxLength: 63 <br />MinLength: 1 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` <br />Required: \{\} <br /> |
+| `targetName` _string_ | TargetName is the name prefix for generated bindings. Follows format<br />"targetName-clusterrole/role-binding".<br />This field is immutable after creation. |  | MaxLength: 253 <br />MinLength: 1 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` <br />Required: \{\} <br /> |
 | `subjects` _[Subject](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#subject-v1-rbac) array_ | Subjects lists the subjects that will be bound to the target ClusterRole/Role.<br />Can be "User", "Group" or "ServiceAccount". |  | MaxItems: 256 <br />Required: \{\} <br /> |
 | `clusterRoleBindings` _[ClusterBinding](#clusterbinding)_ | ClusterRoleBindings defines cluster-scoped role bindings. |  | Optional: \{\} <br /> |
 | `roleBindings` _[NamespaceBinding](#namespacebinding) array_ | RoleBindings defines namespace-scoped role bindings. |  | MaxItems: 64 <br />Optional: \{\} <br /> |
@@ -523,9 +523,9 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `allowClusterRoles` _boolean_ | AllowClusterRoles controls whether ClusterRoles may be generated.<br />Default is false (deny by default). | false | Optional: \{\} <br /> |
-| `forbiddenVerbs` _string array_ | ForbiddenVerbs is a list of verbs that must not appear in generated roles. |  | MaxItems: 16 <br />Optional: \{\} <br /> |
-| `forbiddenResources` _string array_ | ForbiddenResources is a list of resources that must not appear in generated roles. |  | MaxItems: 128 <br />Optional: \{\} <br /> |
-| `forbiddenAPIGroups` _string array_ | ForbiddenAPIGroups is a list of API groups that must not appear in generated roles. |  | MaxItems: 64 <br />Optional: \{\} <br /> |
+| `forbiddenVerbs` _string array_ | ForbiddenVerbs is a list of verbs that must not appear in generated roles. |  | MaxItems: 16 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
+| `forbiddenResources` _string array_ | ForbiddenResources is a list of resources that must not appear in generated roles. |  | MaxItems: 128 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
+| `forbiddenAPIGroups` _string array_ | ForbiddenAPIGroups is a list of API groups that must not appear in generated roles. |  | MaxItems: 64 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
 | `forbiddenResourceVerbs` _[ResourceVerbRule](#resourceverbrule) array_ | ForbiddenResourceVerbs is a list of specific resource+verb combinations that are forbidden. |  | MaxItems: 64 <br />Optional: \{\} <br /> |
 | `maxRulesPerRole` _integer_ | MaxRulesPerRole limits the number of rules in a single generated role. |  | Minimum: 1 <br />Optional: \{\} <br /> |
 
@@ -543,9 +543,9 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `allowedRoleRefs` _string array_ | AllowedRoleRefs is a list of allowed role names. Supports simple wildcards:<br />"prefix*" and "*suffix". An empty list means no role refs are allowed (default-deny). |  | MaxItems: 128 <br />Optional: \{\} <br /> |
+| `allowedRoleRefs` _string array_ | AllowedRoleRefs is a list of allowed role names. Supports simple wildcards:<br />"prefix*" and "*suffix". An empty list means no role refs are allowed (default-deny). |  | MaxItems: 128 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
 | `allowedRoleRefSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#labelselector-v1-meta)_ | AllowedRoleRefSelector selects allowed roles by label. |  | Optional: \{\} <br /> |
-| `forbiddenRoleRefs` _string array_ | ForbiddenRoleRefs is a list of explicitly forbidden role names.<br />Takes precedence over AllowedRoleRefs. |  | MaxItems: 128 <br />Optional: \{\} <br /> |
+| `forbiddenRoleRefs` _string array_ | ForbiddenRoleRefs is a list of explicitly forbidden role names.<br />Takes precedence over AllowedRoleRefs. |  | MaxItems: 128 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
 | `forbiddenRoleRefSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#labelselector-v1-meta)_ | ForbiddenRoleRefSelector selects forbidden roles by label. |  | Optional: \{\} <br /> |
 
 
@@ -564,7 +564,7 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `allowAutoCreate` _boolean_ | AllowAutoCreate controls whether ServiceAccounts may be auto-created. | false | Optional: \{\} <br /> |
 | `allowedCreationNamespaceSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#labelselector-v1-meta)_ | AllowedCreationNamespaceSelector selects namespaces where SA creation is allowed. |  | Optional: \{\} <br /> |
-| `allowedCreationNamespaces` _string array_ | AllowedCreationNamespaces is an explicit list of namespaces where SA creation is allowed. |  | MaxItems: 128 <br />Optional: \{\} <br /> |
+| `allowedCreationNamespaces` _string array_ | AllowedCreationNamespaces is an explicit list of namespaces where SA creation is allowed. |  | MaxItems: 128 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
 | `automountServiceAccountToken` _boolean_ | AutomountServiceAccountToken controls automount for auto-created SAs. |  | Optional: \{\} <br /> |
 | `disableAdoption` _boolean_ | DisableAdoption prevents adoption of pre-existing ServiceAccounts. | false | Optional: \{\} <br /> |
 
@@ -585,8 +585,8 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `allowedNamespaceSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#labelselector-v1-meta)_ | AllowedNamespaceSelector selects namespaces whose SAs may be referenced. |  | Optional: \{\} <br /> |
-| `forbiddenNamespaces` _string array_ | ForbiddenNamespaces is a list of namespaces whose SAs may not be referenced. |  | MaxItems: 128 <br />Optional: \{\} <br /> |
-| `forbiddenNamespacePrefixes` _string array_ | ForbiddenNamespacePrefixes is a list of namespace prefixes to deny. |  | MaxItems: 64 <br />Optional: \{\} <br /> |
+| `forbiddenNamespaces` _string array_ | ForbiddenNamespaces is a list of namespaces whose SAs may not be referenced. |  | MaxItems: 128 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
+| `forbiddenNamespacePrefixes` _string array_ | ForbiddenNamespacePrefixes is a list of namespace prefixes to deny. |  | MaxItems: 64 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
 | `creation` _[SACreationConfig](#sacreationconfig)_ | Creation constrains ServiceAccount auto-creation behaviour. |  | Optional: \{\} <br /> |
 
 
@@ -603,8 +603,8 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `allowedKinds` _string array_ | AllowedKinds controls which subject kinds are allowed.<br />Valid values: "User", "Group", "ServiceAccount".<br />An empty list means no subject kinds are allowed (default-deny). |  | MaxItems: 3 <br />Optional: \{\} <br /> |
-| `forbiddenKinds` _string array_ | ForbiddenKinds lists subject kinds that are explicitly forbidden.<br />Takes precedence over AllowedKinds. |  | MaxItems: 3 <br />Optional: \{\} <br /> |
+| `allowedKinds` _string array_ | AllowedKinds controls which subject kinds are allowed.<br />Valid values: "User", "Group", "ServiceAccount".<br />An empty list means no subject kinds are allowed (default-deny). |  | MaxItems: 3 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
+| `forbiddenKinds` _string array_ | ForbiddenKinds lists subject kinds that are explicitly forbidden.<br />Takes precedence over AllowedKinds. |  | MaxItems: 3 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
 | `userLimits` _[NameMatchLimits](#namematchlimits)_ | UserLimits constrains User subject names. |  | Optional: \{\} <br /> |
 | `groupLimits` _[NameMatchLimits](#namematchlimits)_ | GroupLimits constrains Group subject names. |  | Optional: \{\} <br /> |
 | `serviceAccountLimits` _[ServiceAccountLimits](#serviceaccountlimits)_ | ServiceAccountLimits constrains ServiceAccount subjects. |  | Optional: \{\} <br /> |

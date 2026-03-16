@@ -143,7 +143,7 @@ func (v *RestrictedRoleDefinitionValidator) validateRestrictedRoleDefinitionSpec
 func validateRestrictedRoleDefinitionAPIsVersions(obj *RestrictedRoleDefinition) error {
 	for i, group := range obj.Spec.RestrictedAPIs {
 		for j, gv := range group.Versions {
-			if !strings.HasPrefix(gv.Version, "v") || len(gv.Version) > 20 {
+			if !strings.HasPrefix(gv.Version, "v") || len(gv.Version) > maxVersionLength {
 				return apierrors.NewInvalid(
 					schema.GroupKind{Group: GroupVersion.Group, Kind: "RestrictedRoleDefinition"},
 					obj.Name,

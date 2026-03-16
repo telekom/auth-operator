@@ -29,7 +29,7 @@ type RestrictedBindDefinitionSpec struct {
 	// This field is immutable after creation.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:MaxLength=253
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	TargetName string `json:"targetName"`
 

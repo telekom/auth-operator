@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+//
+// SPDX-License-Identifier: Apache-2.0
+
 package v1alpha1
 
 import (
@@ -39,7 +43,7 @@ func (r *RoleDefinition) SetupWebhookWithManager(mgr ctrl.Manager) error {
 func validateRestrictedAPIsVersions(obj *RoleDefinition) error {
 	for i, group := range obj.Spec.RestrictedAPIs {
 		for j, gv := range group.Versions {
-			if !strings.HasPrefix(gv.Version, "v") || len(gv.Version) > 20 {
+			if !strings.HasPrefix(gv.Version, "v") || len(gv.Version) > maxVersionLength {
 				return fmt.Errorf("restrictedApis[%d].versions[%d].version %q: must start with 'v' and be at most 20 characters", i, j, gv.Version)
 			}
 		}
