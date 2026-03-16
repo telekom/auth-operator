@@ -356,14 +356,20 @@ jobs:
           sleep 5
 
           # Apply sample configs with retry (webhook may need additional time to be fully ready)
+          pr_samples_applied=false
           for i in 1 2 3 4 5; do
             if kubectl apply --server-side --force-conflicts -k config/samples/ 2>&1; then
+              pr_samples_applied=true
               echo "Samples applied successfully"
               break
             fi
             echo "Attempt $i failed, waiting before retry..."
             sleep 10
           done
+          if [ "$pr_samples_applied" = "false" ]; then
+            echo "::error::PR branch samples failed to apply after 5 attempts"
+            exit 1
+          fi
 
           kubectl wait --for=condition=Ready roledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RoleDefinitions not fully reconciled"
           kubectl wait --for=condition=Ready binddefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some BindDefinitions not fully reconciled"
@@ -531,6 +537,10 @@ jobs:
           for resource in roledefinitions-status binddefinitions-status rbacpolicies-status restrictedbinddefinitions-status restrictedroledefinitions-status; do
             if [ -f "/tmp/main-output/$resource.yaml" ] && [ -f "/tmp/pr-output/$resource.yaml" ]; then
               diff -u /tmp/main-output/$resource.yaml /tmp/pr-output/$resource.yaml > /tmp/diff-output/main/$resource.diff 2>&1 || true
+            elif [ -f "/tmp/pr-output/$resource.yaml" ]; then
+              diff -u /dev/null /tmp/pr-output/$resource.yaml > /tmp/diff-output/main/$resource.diff 2>&1 || true
+            elif [ -f "/tmp/main-output/$resource.yaml" ]; then
+              diff -u /tmp/main-output/$resource.yaml /dev/null > /tmp/diff-output/main/$resource.diff 2>&1 || true
             fi
           done
 
@@ -543,6 +553,10 @@ jobs:
             for resource in roledefinitions-status binddefinitions-status rbacpolicies-status restrictedbinddefinitions-status restrictedroledefinitions-status; do
               if [ -f "/tmp/tag-output/$resource.yaml" ] && [ -f "/tmp/pr-output/$resource.yaml" ]; then
                 diff -u /tmp/tag-output/$resource.yaml /tmp/pr-output/$resource.yaml > /tmp/diff-output/tag/$resource.diff 2>&1 || true
+              elif [ -f "/tmp/pr-output/$resource.yaml" ]; then
+                diff -u /dev/null /tmp/pr-output/$resource.yaml > /tmp/diff-output/tag/$resource.diff 2>&1 || true
+              elif [ -f "/tmp/tag-output/$resource.yaml" ]; then
+                diff -u /tmp/tag-output/$resource.yaml /dev/null > /tmp/diff-output/tag/$resource.diff 2>&1 || true
               fi
             done
 
