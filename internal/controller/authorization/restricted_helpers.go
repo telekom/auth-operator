@@ -75,8 +75,6 @@ func handlePolicyViolations(
 	logger := log.FromContext(ctx)
 
 	violationStrings := policy.ViolationStrings(violations)
-	logger.Info("policy violations detected",
-		"name", runtimeObj.GetName(), "violations", violationStrings)
 
 	// Cap the message to avoid oversized condition messages and events.
 	// The full list is stored in status.policyViolations.
@@ -85,6 +83,10 @@ func handlePolicyViolations(
 		msgStrings = append(msgStrings[:maxViolationsInMessage:maxViolationsInMessage],
 			fmt.Sprintf("and %d more", len(violationStrings)-maxViolationsInMessage))
 	}
+	logger.Info("policy violations detected",
+		"name", runtimeObj.GetName(),
+		"violationCount", len(violationStrings),
+		"violations", msgStrings)
 
 	conditions.MarkFalse(obj, authorizationv1alpha1.PolicyCompliantCondition, generation,
 		authorizationv1alpha1.PolicyCompliantReasonViolationsDetected, authorizationv1alpha1.PolicyCompliantMessageViolationsDetected, strings.Join(msgStrings, "; "))
