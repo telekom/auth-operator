@@ -137,3 +137,139 @@ spec:
     - escalate
     - impersonate
     - bind
+
+---
+# -----------------------------------------------------------------------------
+# CASE: Allowed cluster role generation
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedRoleDefinition
+metadata:
+  name: rrd-case-allowed-clusterrole
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/sample-case: allowed
+spec:
+  policyRef:
+    name: sample-policy-allow-all-paths
+  targetRole: ClusterRole
+  targetName: sample-cluster-reader
+  scopeNamespaced: false
+  restrictedResources:
+    - name: secrets
+      singularName: secret
+      namespaced: true
+      kind: Secret
+      verbs:
+        - all
+  restrictedVerbs:
+    - delete
+    - escalate
+    - impersonate
+    - bind
+
+---
+# -----------------------------------------------------------------------------
+# CASE: Blocked by policy (cluster roles forbidden)
+# Object admission should succeed; reconciliation should mark policy violation.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedRoleDefinition
+metadata:
+  name: rrd-case-blocked-clusterrole-by-policy
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/sample-case: blocked
+spec:
+  policyRef:
+    name: sample-policy-block-clusterrolebindings
+  targetRole: ClusterRole
+  targetName: sample-clusterrole-blocked
+  scopeNamespaced: false
+  restrictedVerbs:
+    - delete
+
+---
+# -----------------------------------------------------------------------------
+# CASE: Partially allowed API surface
+# Expected behavior: generated rules exclude restricted APIs/resources/verbs.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedRoleDefinition
+metadata:
+  name: rrd-case-partial-filtered-rules
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/sample-case: partial
+spec:
+  policyRef:
+    name: sample-policy-partially-allowed-bindings
+  targetRole: Role
+  targetName: sample-partial-role
+  targetNamespace: sample-tenant-a
+  scopeNamespaced: true
+  restrictedApis:
+    - name: apps
+      versions:
+        - groupVersion: apps/v1
+          version: v1
+  restrictedResources:
+    - name: secrets
+      singularName: secret
+      namespaced: true
+      kind: Secret
+      verbs:
+        - all
+  restrictedVerbs:
+    - delete
+    - patch
+
+---
+# -----------------------------------------------------------------------------
+# CASE: Impersonated apply success
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedRoleDefinition
+metadata:
+  name: rrd-case-impersonated-allowed
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/sample-case: impersonated-allowed
+spec:
+  policyRef:
+    name: sample-policy-allow-all-paths
+  targetRole: Role
+  targetName: sample-impersonated-role
+  targetNamespace: sample-tenant-b
+  scopeNamespaced: true
+  restrictedVerbs:
+    - delete
+    - patch
+
+---
+# -----------------------------------------------------------------------------
+# CASE: Impersonated apply expected failure
+# Policy uses an unprivileged impersonated SA.
+# Expected outcome: reconciliation stalls with authorization errors.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedRoleDefinition
+metadata:
+  name: rrd-case-impersonated-authz-failure
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/sample-case: impersonated-failed
+spec:
+  policyRef:
+    name: sample-policy-impersonation-authz-failure
+  targetRole: Role
+  targetName: sample-impersonated-fail-role
+  targetNamespace: sample-tenant-a
+  scopeNamespaced: true
+  restrictedVerbs:
+    - delete

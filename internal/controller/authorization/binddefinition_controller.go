@@ -74,7 +74,27 @@ const (
 	// permanently missing roles don't spin-loop endlessly yet still
 	// self-heal within a reasonable window once they appear.
 	roleRefRequeueMax = 5 * time.Minute
+
+	// maxActiveNamespaceNamesToLog bounds namespace-name logging to avoid
+	// oversized log lines that include large namespace sets.
+	maxActiveNamespaceNamesToLog = 20
 )
+
+func summarizeNamespaceNames(namespaces []corev1.Namespace, limit int) []string {
+	names := make([]string, 0, len(namespaces))
+	for _, ns := range namespaces {
+		names = append(names, ns.Name)
+	}
+	slices.Sort(names)
+
+	if limit <= 0 || len(names) <= limit {
+		return names
+	}
+
+	summary := append([]string{}, names[:limit]...)
+	summary = append(summary, fmt.Sprintf("... +%d more", len(names)-limit))
+	return summary
+}
 
 // ErrMissingRoleRefs indicates that one or more referenced roles do not exist in the cluster.
 var ErrMissingRoleRefs = errors.New("missing role references")
@@ -470,7 +490,7 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	logger.V(2).Info("Active namespaces filtered",
 		"bindDefinition", bindDefinition.Name,
 		"activeNamespaceCount", len(activeNamespaces),
-		"activeNamespaces", activeNamespaces)
+		"activeNamespaceNames", summarizeNamespaceNames(activeNamespaces, maxActiveNamespaceNamesToLog))
 	metrics.NamespacesActive.WithLabelValues(bindDefinition.Name).Set(float64(len(activeNamespaces)))
 
 	// Reconcile all resources using ensure pattern (create-or-update via SSA)
