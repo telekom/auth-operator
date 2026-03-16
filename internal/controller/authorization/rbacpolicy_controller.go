@@ -196,10 +196,9 @@ func (r *RBACPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, fmt.Errorf("apply RBACPolicy %s status: %w", policy.Name, err)
 	}
 
-	logger.V(1).Info("Reconcile completed successfully",
-		"rbacPolicy", policy.Name, "requeueAfter", DefaultRequeueInterval)
+	logger.V(1).Info("Reconcile completed successfully", "rbacPolicy", policy.Name)
 	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRBACPolicy, metrics.ResultSuccess).Inc()
-	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
+	return ctrl.Result{}, nil
 }
 
 // markStalled marks the RBACPolicy as stalled.

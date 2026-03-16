@@ -96,7 +96,7 @@ func TestRBACPolicy_Reconcile_NoBoundResources(t *testing.T) {
 	r, c := newRBACPolicyTestReconciler(pol)
 	result, err := r.Reconcile(rbacPolicyCtx(), rbacPolicyRequest("test-policy"))
 	g.Expect(err).NotTo(gomega.HaveOccurred())
-	g.Expect(result.RequeueAfter).To(gomega.Equal(DefaultRequeueInterval))
+	g.Expect(result).To(gomega.Equal(ctrl.Result{}))
 
 	var updated authorizationv1alpha1.RBACPolicy
 	g.Expect(c.Get(rbacPolicyCtx(), types.NamespacedName{Name: "test-policy"}, &updated)).To(gomega.Succeed())
@@ -144,7 +144,7 @@ func TestRBACPolicy_Reconcile_WithBoundResources(t *testing.T) {
 	r, c := newRBACPolicyTestReconciler(pol, rbd, rrd)
 	result, err := r.Reconcile(rbacPolicyCtx(), rbacPolicyRequest("team-policy"))
 	g.Expect(err).NotTo(gomega.HaveOccurred())
-	g.Expect(result.RequeueAfter).To(gomega.Equal(DefaultRequeueInterval))
+	g.Expect(result).To(gomega.Equal(ctrl.Result{}))
 
 	var updated authorizationv1alpha1.RBACPolicy
 	g.Expect(c.Get(rbacPolicyCtx(), types.NamespacedName{Name: "team-policy"}, &updated)).To(gomega.Succeed())
@@ -367,7 +367,7 @@ func TestRBACPolicy_Reconcile_WithTracer(t *testing.T) {
 		NamespacedName: types.NamespacedName{Name: "traced-pol"},
 	})
 	g.Expect(err).NotTo(gomega.HaveOccurred())
-	g.Expect(result.RequeueAfter).To(gomega.Equal(DefaultRequeueInterval))
+	g.Expect(result).To(gomega.Equal(ctrl.Result{}))
 }
 
 func TestRBACPolicy_Reconcile_WithTracer_Error(t *testing.T) {

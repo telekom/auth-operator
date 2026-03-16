@@ -2,7 +2,6 @@ package v1alpha1
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -84,7 +83,7 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 		TargetNameField: obj.Spec.TargetName,
 	}); err != nil {
 		logger.Error(err, "failed to list RoleDefinitions", "targetName", obj.Spec.TargetName)
-		return nil, apierrors.NewInternalError(errors.New("unable to list RoleDefinitions"))
+		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RoleDefinitions: %w", err))
 	}
 
 	for _, roleDefinition := range roleDefinitionList.Items {
@@ -103,7 +102,7 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 		TargetNameField: obj.Spec.TargetName,
 	}, client.Limit(1)); err != nil {
 		logger.Error(err, "failed to list RestrictedRoleDefinitions", "targetName", obj.Spec.TargetName)
-		return nil, apierrors.NewInternalError(errors.New("unable to list RestrictedRoleDefinitions"))
+		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RestrictedRoleDefinitions: %w", err))
 	}
 	for _, existing := range rrdList.Items {
 		if roleTargetCollision(obj.Spec.TargetRole, obj.Spec.TargetNamespace, existing.Spec.TargetRole, existing.Spec.TargetNamespace) {
@@ -166,7 +165,7 @@ func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 		TargetNameField: newObj.Spec.TargetName,
 	}); err != nil {
 		logger.Error(err, "failed to list RoleDefinitions", "targetName", newObj.Spec.TargetName)
-		return nil, apierrors.NewInternalError(errors.New("unable to list RoleDefinitions"))
+		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RoleDefinitions: %w", err))
 	}
 
 	for _, roleDefinition := range roleDefinitionList.Items {
@@ -176,6 +175,21 @@ func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 				"name", newObj.Name, "targetName", newObj.Spec.TargetName, "conflictsWith", roleDefinition.Name)
 			return nil, apierrors.NewBadRequest(
 				fmt.Sprintf("targetName %s is already in use by RoleDefinition %s", newObj.Spec.TargetName, roleDefinition.Name))
+		}
+	}
+
+	// Keep cross-type targetName collision checks aligned with ValidateCreate.
+	rrdList := &RestrictedRoleDefinitionList{}
+	if err := v.Client.List(ctx, rrdList, client.MatchingFields{
+		TargetNameField: newObj.Spec.TargetName,
+	}, client.Limit(1)); err != nil {
+		logger.Error(err, "failed to list RestrictedRoleDefinitions", "targetName", newObj.Spec.TargetName)
+		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RestrictedRoleDefinitions: %w", err))
+	}
+	for _, existing := range rrdList.Items {
+		if roleTargetCollision(newObj.Spec.TargetRole, newObj.Spec.TargetNamespace, existing.Spec.TargetRole, existing.Spec.TargetNamespace) {
+			return nil, apierrors.NewBadRequest(
+				fmt.Sprintf("targetName %s is already in use by a RestrictedRoleDefinition", newObj.Spec.TargetName))
 		}
 	}
 

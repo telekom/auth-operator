@@ -223,7 +223,7 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 	if err := r.client.Get(ctx, req.NamespacedName, rbd); err != nil {
 		if apierrors.IsNotFound(err) {
 			logger.V(1).Info("RestrictedBindDefinition not found (deleted), skipping", "name", req.Name)
-			metrics.DeletePolicyViolationSeries(metrics.ControllerRestrictedBindDefinition, req.Name)
+			metrics.DeletePolicyViolationContribution(metrics.ControllerRestrictedBindDefinition, req.Name)
 			metrics.RoleRefsMissing.DeleteLabelValues(req.Name)
 			metrics.NamespacesActive.DeleteLabelValues(req.Name)
 			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultSkipped).Inc()
@@ -578,7 +578,7 @@ func (r *RestrictedBindDefinitionReconciler) reconcileDelete(
 	}
 
 	// Clean up metric series.
-	metrics.DeletePolicyViolationSeries(metrics.ControllerRestrictedBindDefinition, rbd.Name)
+	metrics.DeletePolicyViolationContribution(metrics.ControllerRestrictedBindDefinition, rbd.Name)
 	metrics.RoleRefsMissing.DeleteLabelValues(rbd.Name)
 	metrics.NamespacesActive.DeleteLabelValues(rbd.Name)
 
