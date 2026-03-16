@@ -438,6 +438,38 @@ spec:
                         type: integer
                     type: object
                 type: object
+              defaultAssignment:
+                description: |-
+                  DefaultAssignment defines requester identities that must use this policy by default
+                  when creating restricted resources.
+                properties:
+                  groups:
+                    description: Groups lists requester group names for which this
+                      policy is the default.
+                    items:
+                      minLength: 1
+                      type: string
+                    maxItems: 128
+                    type: array
+                  serviceAccounts:
+                    description: ServiceAccounts lists requester ServiceAccounts for
+                      which this policy is the default.
+                    items:
+                      description: SARef is a reference to a specific ServiceAccount.
+                      properties:
+                        name:
+                          description: Name of the ServiceAccount.
+                          minLength: 1
+                          type: string
+                        namespace:
+                          description: Namespace of the ServiceAccount.
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    maxItems: 128
+                    type: array
+                type: object
               roleLimits:
                 description: RoleLimits constrains roles that may be generated.
                 properties:

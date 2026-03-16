@@ -21,6 +21,8 @@
 # Creates a read-only Role in a team namespace with restricted APIs.
 # Use case: Team-scoped read access within policy guardrails
 # Requires: team-workload-policy RBACPolicy
+# Requester default-policy example: can be submitted by
+# system:serviceaccount:team-alpha:team-alpha-rbac-applier.
 # -----------------------------------------------------------------------------
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: RestrictedRoleDefinition
@@ -61,6 +63,8 @@ spec:
 # Creates a ClusterRole for cross-namespace operator access.
 # Use case: Operator with cross-namespace visibility
 # Requires: operator-cross-namespace-policy RBACPolicy
+# Requester default-policy example: users in groups
+# oidc:platform-operators or oidc:infra-operators.
 # -----------------------------------------------------------------------------
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: RestrictedRoleDefinition
@@ -92,6 +96,8 @@ spec:
 # Creates a deploy-scoped Role for CI/CD pipelines.
 # Use case: CI/CD pipelines with minimal permissions
 # Requires: cicd-pipeline-policy RBACPolicy
+# Requester default-policy example: submitted by
+# system:serviceaccount:ci-runners:ci-rbac-applier.
 # -----------------------------------------------------------------------------
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: RestrictedRoleDefinition

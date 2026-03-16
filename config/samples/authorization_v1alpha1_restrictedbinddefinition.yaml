@@ -22,6 +22,8 @@
 # Binds a team ServiceAccount to allowed roles within the team-workload-policy.
 # Use case: ServiceAccount-only tenant access
 # Requires: team-workload-policy RBACPolicy
+# Requester default-policy example: can be submitted by
+# system:serviceaccount:team-alpha:team-alpha-rbac-applier.
 # -----------------------------------------------------------------------------
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: RestrictedBindDefinition
@@ -53,6 +55,8 @@ spec:
 # Binds an operator SA and group across multiple namespaces.
 # Use case: Cross-namespace operator access
 # Requires: operator-cross-namespace-policy RBACPolicy
+# Requester default-policy example: users in groups
+# oidc:platform-operators or oidc:infra-operators.
 # -----------------------------------------------------------------------------
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: RestrictedBindDefinition
@@ -91,6 +95,8 @@ spec:
 # Binds CI service accounts to deploy roles in CI namespaces.
 # Use case: CI/CD pipelines
 # Requires: cicd-pipeline-policy RBACPolicy
+# Requester default-policy example: submitted by
+# system:serviceaccount:ci-runners:ci-rbac-applier.
 # -----------------------------------------------------------------------------
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: RestrictedBindDefinition

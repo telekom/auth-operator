@@ -41,6 +41,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &authorizationv1alpha1.BindingLimitsApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("ClusterBinding"):
 		return &authorizationv1alpha1.ClusterBindingApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("DefaultPolicyAssignment"):
+		return &authorizationv1alpha1.DefaultPolicyAssignmentApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("NameMatchLimits"):
 		return &authorizationv1alpha1.NameMatchLimitsApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("NamespaceBinding"):
@@ -87,6 +89,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &authorizationv1alpha1.RoleRefLimitsApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("SACreationConfig"):
 		return &authorizationv1alpha1.SACreationConfigApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("SARef"):
+		return &authorizationv1alpha1.SARefApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("ServiceAccountLimits"):
 		return &authorizationv1alpha1.ServiceAccountLimitsApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("SubjectLimits"):

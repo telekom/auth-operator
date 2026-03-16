@@ -103,6 +103,10 @@ func TestRBACPolicySpecFields(t *testing.T) {
 				},
 				Namespaces: []string{"ns-1", "ns-2"},
 			},
+			DefaultAssignment: &DefaultPolicyAssignment{
+				Groups:          []string{"oidc:team-a-admins"},
+				ServiceAccounts: []SARef{{Name: "rbac-applier", Namespace: "team-a"}},
+			},
 			BindingLimits: &BindingLimits{
 				AllowClusterRoleBindings: true,
 				ClusterRoleBindingLimits: &RoleRefLimits{
@@ -183,6 +187,15 @@ func TestRBACPolicySpecFields(t *testing.T) {
 	// Verify SubjectLimits.
 	if len(policy.Spec.SubjectLimits.AllowedKinds) != 2 {
 		t.Errorf("expected 2 allowed kinds, got %d", len(policy.Spec.SubjectLimits.AllowedKinds))
+	}
+	if policy.Spec.DefaultAssignment == nil {
+		t.Fatal("expected non-nil DefaultAssignment")
+	}
+	if len(policy.Spec.DefaultAssignment.Groups) != 1 {
+		t.Errorf("expected 1 default-assignment group, got %d", len(policy.Spec.DefaultAssignment.Groups))
+	}
+	if len(policy.Spec.DefaultAssignment.ServiceAccounts) != 1 {
+		t.Errorf("expected 1 default-assignment serviceaccount, got %d", len(policy.Spec.DefaultAssignment.ServiceAccounts))
 	}
 	if !policy.Spec.SubjectLimits.ServiceAccountLimits.Creation.AllowAutoCreate {
 		t.Error("expected AllowAutoCreate to be true")

@@ -33,6 +33,14 @@ spec:
     namespaceSelector:
       matchLabels:
         t-caas.telekom.com/tenant: "true"
+  # Default policy assignment for identities that submit restricted resources.
+  # This is useful when restricted resources are applied via impersonated SAs.
+  defaultAssignment:
+    groups:
+      - "oidc:team-alpha-rbac-admins"
+    serviceAccounts:
+      - name: team-alpha-rbac-applier
+        namespace: team-alpha
   bindingLimits:
     allowClusterRoleBindings: false
     roleBindingLimits:
@@ -93,6 +101,10 @@ spec:
           values:
             - platform-team
             - infra-team
+  defaultAssignment:
+    groups:
+      - "oidc:platform-operators"
+      - "oidc:infra-operators"
   bindingLimits:
     allowClusterRoleBindings: true
     clusterRoleBindingLimits:
@@ -137,6 +149,10 @@ spec:
     namespaces:
       - ci-runners
       - cd-deploy
+  defaultAssignment:
+    serviceAccounts:
+      - name: ci-rbac-applier
+        namespace: ci-runners
   bindingLimits:
     allowClusterRoleBindings: false
     roleBindingLimits:

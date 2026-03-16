@@ -122,6 +122,24 @@ _Appears in:_
 | `clusterRoleRefs` _string array_ | ClusterRoleRefs references an existing ClusterRole |  | MaxItems: 64 <br />Optional: \{\} <br /> |
 
 
+#### DefaultPolicyAssignment
+
+
+
+DefaultPolicyAssignment defines identities that must use this policy by default
+when creating RestrictedBindDefinition/RestrictedRoleDefinition resources.
+
+
+
+_Appears in:_
+- [RBACPolicySpec](#rbacpolicyspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `groups` _string array_ | Groups lists requester group names for which this policy is the default. |  | MaxItems: 128 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
+| `serviceAccounts` _[SARef](#saref) array_ | ServiceAccounts lists requester ServiceAccounts for which this policy is the default. |  | MaxItems: 128 <br />Optional: \{\} <br /> |
+
+
 
 
 #### NameMatchLimits
@@ -274,6 +292,7 @@ _Appears in:_
 | `bindingLimits` _[BindingLimits](#bindinglimits)_ | BindingLimits constrains role bindings that may be created. |  | Optional: \{\} <br /> |
 | `roleLimits` _[RoleLimits](#rolelimits)_ | RoleLimits constrains roles that may be generated. |  | Optional: \{\} <br /> |
 | `subjectLimits` _[SubjectLimits](#subjectlimits)_ | SubjectLimits constrains the subjects a tenant may use. |  | Optional: \{\} <br /> |
+| `defaultAssignment` _[DefaultPolicyAssignment](#defaultpolicyassignment)_ | DefaultAssignment defines requester identities that must use this policy by default<br />when creating restricted resources. |  | Optional: \{\} <br /> |
 
 
 #### RBACPolicyStatus
@@ -569,6 +588,21 @@ _Appears in:_
 | `disableAdoption` _boolean_ | DisableAdoption prevents adoption of pre-existing ServiceAccounts. | false | Optional: \{\} <br /> |
 
 
+#### SARef
+
+
+
+SARef is a reference to a specific ServiceAccount.
+
+
+
+_Appears in:_
+- [DefaultPolicyAssignment](#defaultpolicyassignment)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `name` _string_ | Name of the ServiceAccount. |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `namespace` _string_ | Namespace of the ServiceAccount. |  | Optional: \{\} <br /> |
 
 
 #### ServiceAccountLimits
