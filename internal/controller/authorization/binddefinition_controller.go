@@ -487,10 +487,12 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		"totalNamespaces", len(namespaceSet))
 
 	activeNamespaces := r.filterActiveNamespaces(ctx, bindDefinition, namespaceSet)
-	logger.V(2).Info("Active namespaces filtered",
-		"bindDefinition", bindDefinition.Name,
-		"activeNamespaceCount", len(activeNamespaces),
-		"activeNamespaceNames", summarizeNamespaceNames(activeNamespaces, maxActiveNamespaceNamesToLog))
+	if logger.V(2).Enabled() {
+		logger.V(2).Info("Active namespaces filtered",
+			"bindDefinition", bindDefinition.Name,
+			"activeNamespaceCount", len(activeNamespaces),
+			"activeNamespaceNames", summarizeNamespaceNames(activeNamespaces, maxActiveNamespaceNamesToLog))
+	}
 	metrics.NamespacesActive.WithLabelValues(bindDefinition.Name).Set(float64(len(activeNamespaces)))
 
 	// Reconcile all resources using ensure pattern (create-or-update via SSA)
