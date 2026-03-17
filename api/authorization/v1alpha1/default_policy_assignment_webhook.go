@@ -82,6 +82,19 @@ func resolveDefaultPoliciesForRequester(ctx context.Context, c client.Client, us
 	return matchedPolicies, nil
 }
 
+func selectedPolicyMatchesRequester(ctx context.Context, c client.Client, selectedPolicy, username string, groups []string) (bool, error) {
+	if selectedPolicy == "" {
+		return false, nil
+	}
+
+	selected := &RBACPolicy{}
+	if err := c.Get(ctx, client.ObjectKey{Name: selectedPolicy}, selected); err != nil {
+		return false, fmt.Errorf("get selected RBACPolicy %q: %w", selectedPolicy, err)
+	}
+
+	return requesterMatchesDefaultAssignment(selected.Spec.DefaultAssignment, username, groups), nil
+}
+
 func validateDefaultPolicyForRequester(
 	ctx context.Context,
 	c client.Client,
@@ -92,6 +105,16 @@ func validateDefaultPolicyForRequester(
 	if !reqFound {
 		// Context without admission request (e.g. direct unit call) is treated as
 		// "no identity information", so default-policy enforcement is skipped.
+		return nil
+	}
+
+	selectedMatches, err := selectedPolicyMatchesRequester(ctx, c, selectedPolicy, req.UserInfo.Username, req.UserInfo.Groups)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to evaluate selected policy assignment", "selectedPolicy", selectedPolicy)
+		return apierrors.NewInternalError(errors.New("unable to resolve default policy assignments"))
+	}
+	if selectedMatches {
+		// Fast path: selected policy already matches requester assignment.
 		return nil
 	}
 

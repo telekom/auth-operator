@@ -48,6 +48,8 @@ type RBACPolicyReconciler struct {
 	tracer   trace.Tracer
 }
 
+const rbacPolicyListTimeout = 10 * time.Second
+
 // setTracer implements tracerSetter.
 func (r *RBACPolicyReconciler) setTracer(t trace.Tracer) { r.tracer = t }
 
@@ -154,7 +156,9 @@ func (r *RBACPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// Step 3: Count bound RestrictedBindDefinitions.
 	rbdList := &authorizationv1alpha1.RestrictedBindDefinitionList{}
-	if err := r.client.List(ctx, rbdList,
+	rbdListCtx, cancelRBDList := context.WithTimeout(ctx, rbacPolicyListTimeout)
+	defer cancelRBDList()
+	if err := r.client.List(rbdListCtx, rbdList,
 		client.MatchingFields{indexer.RestrictedBindDefinitionPolicyRefField: policy.Name}); err != nil {
 		logger.Error(err, "failed to list RestrictedBindDefinitions", "rbacPolicy", policy.Name)
 		r.markStalled(ctx, policy, err)
@@ -165,7 +169,9 @@ func (r *RBACPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// Step 4: Count bound RestrictedRoleDefinitions.
 	rrdList := &authorizationv1alpha1.RestrictedRoleDefinitionList{}
-	if err := r.client.List(ctx, rrdList,
+	rrdListCtx, cancelRRDList := context.WithTimeout(ctx, rbacPolicyListTimeout)
+	defer cancelRRDList()
+	if err := r.client.List(rrdListCtx, rrdList,
 		client.MatchingFields{indexer.RestrictedRoleDefinitionPolicyRefField: policy.Name}); err != nil {
 		logger.Error(err, "failed to list RestrictedRoleDefinitions", "rbacPolicy", policy.Name)
 		r.markStalled(ctx, policy, err)
