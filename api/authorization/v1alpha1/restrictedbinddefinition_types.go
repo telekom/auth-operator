@@ -21,6 +21,7 @@ const (
 // +kubebuilder:validation:XValidation:rule="self.subjects.all(s, s.kind != 'ServiceAccount' || (has(s.namespace) && size(s.namespace) > 0))",message="ServiceAccount subjects must specify a namespace"
 type RestrictedBindDefinitionSpec struct {
 	// PolicyRef references the RBACPolicy that governs this binding.
+	// This field is immutable after creation.
 	// +kubebuilder:validation:Required
 	PolicyRef RBACPolicyReference `json:"policyRef"`
 
@@ -81,6 +82,7 @@ type RestrictedBindDefinitionStatus struct {
 	ExternalServiceAccounts []string `json:"externalServiceAccounts,omitempty"`
 
 	// PolicyViolations lists policy violations detected during the last reconciliation.
+	// Format: "<fieldPath>: <message>" when a field path is available.
 	// Empty when all checks pass.
 	// +kubebuilder:validation:Optional
 	PolicyViolations []string `json:"policyViolations,omitempty"`

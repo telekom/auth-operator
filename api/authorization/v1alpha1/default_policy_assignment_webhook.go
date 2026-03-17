@@ -6,6 +6,7 @@ package v1alpha1
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -95,7 +96,7 @@ func validateDefaultPolicyForRequester(
 
 	matchedPolicies, err := resolveDefaultPoliciesForRequester(ctx, c, req.UserInfo.Username, req.UserInfo.Groups)
 	if err != nil {
-		return apierrors.NewInternalError(fmt.Errorf("unable to resolve default policy assignments: %w", err))
+		return apierrors.NewInternalError(errors.New("unable to resolve default policy assignments"))
 	}
 
 	if len(matchedPolicies) == 0 {

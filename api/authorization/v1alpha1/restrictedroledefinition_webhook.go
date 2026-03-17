@@ -6,6 +6,7 @@ package v1alpha1
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -134,7 +135,7 @@ func (v *RestrictedRoleDefinitionValidator) validateRestrictedRoleDefinitionSpec
 		TargetNameField: obj.Spec.TargetName,
 	}); err != nil {
 		logger.Error(err, "failed to list RestrictedRoleDefinitions", "targetName", obj.Spec.TargetName)
-		return apierrors.NewInternalError(fmt.Errorf("unable to list RestrictedRoleDefinitions: %w", err))
+		return apierrors.NewInternalError(errors.New("unable to list RestrictedRoleDefinitions"))
 	}
 
 	for _, existing := range rrdList.Items {
@@ -154,7 +155,7 @@ func (v *RestrictedRoleDefinitionValidator) validateRestrictedRoleDefinitionSpec
 		TargetNameField: obj.Spec.TargetName,
 	}); err != nil {
 		logger.Error(err, "failed to list RoleDefinitions", "targetName", obj.Spec.TargetName)
-		return apierrors.NewInternalError(fmt.Errorf("unable to list RoleDefinitions: %w", err))
+		return apierrors.NewInternalError(errors.New("unable to list RoleDefinitions"))
 	}
 	for _, existing := range rdList.Items {
 		if roleTargetCollision(obj.Spec.TargetRole, obj.Spec.TargetNamespace, existing.Spec.TargetRole, existing.Spec.TargetNamespace) {
@@ -197,7 +198,7 @@ func (v *RestrictedRoleDefinitionValidator) validatePolicyRefExists(ctx context.
 				fmt.Sprintf("referenced RBACPolicy %q does not exist", obj.Spec.PolicyRef.Name))
 		}
 		logger.Error(err, "failed to get RBACPolicy", "policyRef", obj.Spec.PolicyRef.Name)
-		return apierrors.NewInternalError(fmt.Errorf("unable to get RBACPolicy %q: %w", obj.Spec.PolicyRef.Name, err))
+		return apierrors.NewInternalError(errors.New("unable to validate policy reference"))
 	}
 
 	return nil

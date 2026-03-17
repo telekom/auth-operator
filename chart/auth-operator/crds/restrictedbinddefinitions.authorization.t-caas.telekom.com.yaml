@@ -84,8 +84,9 @@ spec:
                     type: array
                 type: object
               policyRef:
-                description: PolicyRef references the RBACPolicy that governs this
-                  binding.
+                description: |-
+                  PolicyRef references the RBACPolicy that governs this binding.
+                  This field is immutable after creation.
                 properties:
                   name:
                     description: Name of the RBACPolicy.
@@ -355,6 +356,7 @@ spec:
               policyViolations:
                 description: |-
                   PolicyViolations lists policy violations detected during the last reconciliation.
+                  Format: "<fieldPath>: <message>" when a field path is available.
                   Empty when all checks pass.
                 items:
                   type: string

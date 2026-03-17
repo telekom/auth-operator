@@ -114,6 +114,25 @@ The auth-operator consists of two main components:
 | BindDefinition | 60 seconds | Drift protection |
 | BindDefinition (missing refs) | 10s → 5min (exponential backoff) | Recovery with reduced API load |
 
+### Using Restricted CRDs
+
+Use the restricted CRD family when tenant-managed RBAC must stay inside
+platform guardrails.
+
+| Use Case | Recommended CRD |
+|----------|-----------------|
+| Single-team or trusted admin-managed RBAC without policy guardrails | `RoleDefinition` / `BindDefinition` |
+| Multi-tenant RBAC where role verbs/resources/subjects/namespaces must be constrained | `RBACPolicy` + `RestrictedRoleDefinition` / `RestrictedBindDefinition` |
+
+Restricted workflow:
+
+1. Platform admin creates an `RBACPolicy` that defines limits.
+2. Tenant creates `RestrictedRoleDefinition`/`RestrictedBindDefinition` with `spec.policyRef.name`.
+3. Admission webhook checks referenced policy existence and immutable fields.
+4. Controller enforces policy on every reconciliation and deprovisions managed RBAC resources on violations.
+
+Note: `spec.policyRef` on restricted resources is immutable after creation.
+
 ### BindDefinition Annotations
 
 | Annotation | Values | Default | Description |

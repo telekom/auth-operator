@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
-	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/pkg/metrics"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -83,7 +83,7 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 	// Only applies to CREATE/UPDATE — never to DELETE.
 	if len(labelsToAdd) == 0 && saInfo.IsServiceAccount &&
 		(req.Operation == admissionv1.Create || req.Operation == admissionv1.Update) {
-		saCtx, saCancel := context.WithTimeout(ctx, authzv1alpha1.WebhookCacheTimeout)
+		saCtx, saCancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
 		defer saCancel()
 		inherited, saErr := GetSANamespaceTrackedLabels(saCtx, m.Client, saInfo)
 		if saErr != nil {
@@ -137,8 +137,8 @@ func (m *NamespaceMutator) collectBindDefinitionLabels(ctx context.Context, nsNa
 	logger := logf.FromContext(ctx).WithName("namespace-mutator")
 
 	// Fetch all BindDefinition CRDs
-	bindDefinitions := &authzv1alpha1.BindDefinitionList{}
-	listCtx, cancel := context.WithTimeout(ctx, authzv1alpha1.WebhookCacheTimeout)
+	bindDefinitions := &authorizationv1alpha1.BindDefinitionList{}
+	listCtx, cancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
 	defer cancel()
 	if err := m.Client.List(listCtx, bindDefinitions); err != nil {
 		logger.Error(err, "failed to list BindDefinitions", "namespace", nsName)

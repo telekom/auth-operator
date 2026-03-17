@@ -27,6 +27,7 @@ import (
 // RestrictedRoleDefinitionSpec defines the desired state of RestrictedRoleDefinition.
 type RestrictedRoleDefinitionSpecApplyConfiguration struct {
 	// PolicyRef references the RBACPolicy that governs this role definition.
+	// This field is immutable after creation.
 	PolicyRef *RBACPolicyReferenceApplyConfiguration `json:"policyRef,omitempty"`
 	// TargetRole is the role type that will be reconciled: ClusterRole or Role.
 	// This field is immutable after creation.
