@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Breaking:** RestrictedRoleDefinition and RestrictedBindDefinition enforce immutable `spec.policyRef` and `spec.targetName` after creation. To change these fields, recreate the resource with the desired values.
+- RestrictedRoleDefinition and RestrictedBindDefinition enforce immutable `spec.policyRef` and `spec.targetName` after creation. To change these fields, recreate the resource with the desired values.
 
 ## [0.4.0-rc.13] — Pre-release
 

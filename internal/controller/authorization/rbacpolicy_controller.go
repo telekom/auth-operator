@@ -211,7 +211,7 @@ func (r *RBACPolicyReconciler) markStalled(ctx context.Context, policy *authoriz
 	logger := log.FromContext(ctx)
 	logger.V(1).Info("marking RBACPolicy as stalled", "rbacPolicy", policy.Name, "error", err)
 	conditions.MarkStalled(policy, policy.Generation,
-		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, "check operator logs for details")
+		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, stalledErrorDetail(err))
 	policy.Status.ObservedGeneration = policy.Generation
 	if updateErr := ssa.ApplyRBACPolicyStatus(ctx, r.client, policy); updateErr != nil {
 		logger.Error(updateErr, "failed to apply Stalled status via SSA", "rbacPolicy", policy.Name)

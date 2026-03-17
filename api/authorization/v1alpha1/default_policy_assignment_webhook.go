@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -96,6 +97,7 @@ func validateDefaultPolicyForRequester(
 
 	matchedPolicies, err := resolveDefaultPoliciesForRequester(ctx, c, req.UserInfo.Username, req.UserInfo.Groups)
 	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to resolve default policy assignments")
 		return apierrors.NewInternalError(errors.New("unable to resolve default policy assignments"))
 	}
 

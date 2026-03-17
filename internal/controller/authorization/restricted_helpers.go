@@ -61,10 +61,6 @@ type ViolationHandlerConfig struct {
 // status.policyViolations.
 const maxViolationsInMessage = 10
 
-// maxStalledErrorDetailLength caps the condition detail length for stalled
-// messages to keep status readable while still surfacing actionable context.
-const maxStalledErrorDetailLength = 220
-
 func stalledErrorDetail(err error) string {
 	if err == nil {
 		return "check operator logs for details"
@@ -82,21 +78,15 @@ func stalledErrorDetail(err error) string {
 	case errors.Is(err, context.Canceled):
 		return "reconciliation canceled (check operator logs for details)"
 	default:
-		detail := strings.TrimSpace(strings.ReplaceAll(err.Error(), "\n", " "))
-		if detail == "" {
-			return "check operator logs for details"
-		}
-		if len(detail) > maxStalledErrorDetailLength {
-			return detail[:maxStalledErrorDetailLength] + "..."
-		}
-		return detail
+		return "unexpected error (check operator logs for details)"
 	}
 }
 
 // handlePolicyViolations processes detected policy violations for a restricted resource.
-// It marks the resource as non-compliant, deprovisions RBAC resources, and returns
-// a requeue result. Returns (result, nil) on success, or (result, error) if
-// deprovisioning fails.
+// It marks the resource as non-compliant via conditions and events, deprovisions
+// RBAC resources, and returns a requeue result. The caller is responsible for
+// persisting violations into status.policyViolations before calling this helper.
+// Returns (result, nil) on success, or (result, error) if deprovisioning fails.
 func handlePolicyViolations(
 	ctx context.Context,
 	obj conditions.Setter,
