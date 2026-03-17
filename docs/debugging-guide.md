@@ -361,7 +361,7 @@ kubectl get rbacpolicy <policy-name>
 |-------|----------|
 | Forbidden verbs/resources configured in policy | Remove violating refs in restricted resource or update policy |
 | Namespace outside policy scope | Adjust `roleBindings.namespace` / `namespaceSelector` or update policy scope |
-| Referenced policy missing | Recreate policy or update `spec.policyRef.name` (requires recreating resource due immutability) |
+| Referenced policy missing | Recreate policy or update `spec.policyRef.name` (requires recreating resource due to immutability) |
 
 ### RBACPolicy Deletion Blocked
 

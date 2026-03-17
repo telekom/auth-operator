@@ -31,11 +31,11 @@ const (
 
 	// RestrictedBindDefinitionPolicyRefField indexes RestrictedBindDefinition
 	// by the referenced RBACPolicy name for efficient reverse lookups.
-	RestrictedBindDefinitionPolicyRefField = ".spec.policyRef.name"
+	RestrictedBindDefinitionPolicyRefField = authorizationv1alpha1.PolicyRefField
 
 	// RestrictedRoleDefinitionPolicyRefField indexes RestrictedRoleDefinition
 	// by the referenced RBACPolicy name for efficient reverse lookups.
-	RestrictedRoleDefinitionPolicyRefField = ".spec.policyRef.name"
+	RestrictedRoleDefinitionPolicyRefField = authorizationv1alpha1.PolicyRefField
 
 	// RestrictedBindDefinitionTargetNameField indexes RestrictedBindDefinition
 	// by TargetName for duplicate detection in webhook validation.
