@@ -175,6 +175,9 @@ func (r *RBACPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// Step 5: Update status.
+	// BoundResourceCount is eventually consistent: counts are computed from
+	// cache-backed lists and may briefly lag concurrent writes until the next
+	// watch-triggered reconciliation.
 	total := len(rbdList.Items) + len(rrdList.Items)
 	if total > math.MaxInt32 {
 		total = math.MaxInt32

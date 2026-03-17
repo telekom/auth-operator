@@ -41,6 +41,7 @@ type RestrictedBindDefinitionStatusApplyConfiguration struct {
 	// Format: "<namespace>/<name>".
 	ExternalServiceAccounts []string `json:"externalServiceAccounts,omitempty"`
 	// PolicyViolations lists policy violations detected during the last reconciliation.
+	// Format: "<fieldPath>: <message>" when a field path is available.
 	// Empty when all checks pass.
 	PolicyViolations []string `json:"policyViolations,omitempty"`
 	// Conditions defines current service state.

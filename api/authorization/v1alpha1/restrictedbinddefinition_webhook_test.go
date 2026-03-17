@@ -171,6 +171,67 @@ var _ = Describe("RestrictedBindDefinition Webhook", func() {
 		})
 	})
 
+	Context("When CEL validation rejects invalid RestrictedBindDefinitions", func() {
+
+		It("Should deny a RestrictedBindDefinition without clusterRoleBindings or roleBindings", func() {
+			rbd := &RestrictedBindDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rbd-cel-no-bindings",
+				},
+				Spec: RestrictedBindDefinitionSpec{
+					PolicyRef:  RBACPolicyReference{Name: policy.Name},
+					TargetName: "test-rbd-cel-no-bindings",
+					Subjects: []rbacv1.Subject{
+						{Kind: rbacv1.GroupKind, APIGroup: rbacv1.GroupName, Name: "test-group"},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, rbd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("at least one binding with a referenced role must be specified"))
+		})
+
+		It("Should deny a RestrictedBindDefinition with empty subjects", func() {
+			rbd := &RestrictedBindDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rbd-cel-no-subjects",
+				},
+				Spec: RestrictedBindDefinitionSpec{
+					PolicyRef:  RBACPolicyReference{Name: policy.Name},
+					TargetName: "test-rbd-cel-no-subjects",
+					Subjects:   []rbacv1.Subject{},
+					ClusterRoleBindings: ClusterBinding{
+						ClusterRoleRefs: []string{"view"},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, rbd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("at least one subject must be specified"))
+		})
+
+		It("Should deny a RestrictedBindDefinition with ServiceAccount subject missing namespace", func() {
+			rbd := &RestrictedBindDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rbd-cel-sa-no-ns",
+				},
+				Spec: RestrictedBindDefinitionSpec{
+					PolicyRef:  RBACPolicyReference{Name: policy.Name},
+					TargetName: "test-rbd-cel-sa-no-ns",
+					Subjects: []rbacv1.Subject{
+						{Kind: rbacv1.ServiceAccountKind, Name: "my-sa"},
+					},
+					ClusterRoleBindings: ClusterBinding{
+						ClusterRoleRefs: []string{"view"},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, rbd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("ServiceAccount subjects must specify a namespace"))
+		})
+	})
+
 	Context("When updating RestrictedBindDefinition under Validating Webhook", func() {
 
 		It("Should deny changing targetName (immutable)", func() {

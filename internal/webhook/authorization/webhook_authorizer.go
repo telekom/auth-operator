@@ -19,7 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/pkg/helpers"
 	"github.com/telekom/auth-operator/pkg/indexer"
 	pkgmetrics "github.com/telekom/auth-operator/pkg/metrics"
@@ -129,7 +129,7 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Prepare a shared fallback cache in case the field index is unavailable,
 	// so global and scoped queries share a single fallback API call.
-	var fallbackCache []authzv1alpha1.WebhookAuthorizer
+	var fallbackCache []authorizationv1alpha1.WebhookAuthorizer
 
 	globalItems, err := wa.listGlobalAuthorizers(ctx, &fallbackCache)
 	if err != nil {
@@ -170,7 +170,7 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Sort authorizers by name for deterministic first-match evaluation order
 	// regardless of whether the client is backed by a cache (random map
 	// iteration) or the API server (alphabetical order).
-	slices.SortFunc(items, func(a, b authzv1alpha1.WebhookAuthorizer) int {
+	slices.SortFunc(items, func(a, b authorizationv1alpha1.WebhookAuthorizer) int {
 		return strings.Compare(a.Name, b.Name)
 	})
 
@@ -346,7 +346,7 @@ func (wa *Authorizer) logDecision(sar *authzv1.SubjectAccessReview, res *evaluat
 // across the provided authorizers. The caller is responsible for passing the
 // complete set of authorizers to get a request-independent count suitable for
 // the AuthorizerActiveRules gauge.
-func countTotalRules(authorizers []authzv1alpha1.WebhookAuthorizer) int {
+func countTotalRules(authorizers []authorizationv1alpha1.WebhookAuthorizer) int {
 	total := 0
 	for i := range authorizers {
 		total += len(authorizers[i].Spec.ResourceRules) + len(authorizers[i].Spec.NonResourceRules)
@@ -354,9 +354,9 @@ func countTotalRules(authorizers []authzv1alpha1.WebhookAuthorizer) int {
 	return total
 }
 
-func (wa *Authorizer) listGlobalAuthorizers(ctx context.Context, cachedAll *[]authzv1alpha1.WebhookAuthorizer) ([]authzv1alpha1.WebhookAuthorizer, error) {
-	var globalAuth authzv1alpha1.WebhookAuthorizerList
-	listCtx, cancel := context.WithTimeout(ctx, authzv1alpha1.WebhookCacheTimeout)
+func (wa *Authorizer) listGlobalAuthorizers(ctx context.Context, cachedAll *[]authorizationv1alpha1.WebhookAuthorizer) ([]authorizationv1alpha1.WebhookAuthorizer, error) {
+	var globalAuth authorizationv1alpha1.WebhookAuthorizerList
+	listCtx, cancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
 	defer cancel()
 	if err := wa.Client.List(listCtx, &globalAuth, client.MatchingFields{
 		indexer.WebhookAuthorizerHasNamespaceSelectorField: "false",
@@ -380,7 +380,7 @@ func (wa *Authorizer) listGlobalAuthorizers(ctx context.Context, cachedAll *[]au
 		if cachedAll != nil {
 			*cachedAll = all
 		}
-		globalItems := make([]authzv1alpha1.WebhookAuthorizer, 0, len(all))
+		globalItems := make([]authorizationv1alpha1.WebhookAuthorizer, 0, len(all))
 		for _, candidate := range all {
 			if helpers.IsLabelSelectorEmpty(&candidate.Spec.NamespaceSelector) {
 				globalItems = append(globalItems, candidate)
@@ -389,7 +389,7 @@ func (wa *Authorizer) listGlobalAuthorizers(ctx context.Context, cachedAll *[]au
 		return globalItems, nil
 	}
 
-	globalItems := make([]authzv1alpha1.WebhookAuthorizer, 0, len(*cachedAll))
+	globalItems := make([]authorizationv1alpha1.WebhookAuthorizer, 0, len(*cachedAll))
 	for _, candidate := range *cachedAll {
 		if helpers.IsLabelSelectorEmpty(&candidate.Spec.NamespaceSelector) {
 			globalItems = append(globalItems, candidate)
@@ -399,9 +399,9 @@ func (wa *Authorizer) listGlobalAuthorizers(ctx context.Context, cachedAll *[]au
 	return globalItems, nil
 }
 
-func (wa *Authorizer) listScopedAuthorizers(ctx context.Context, cachedAll *[]authzv1alpha1.WebhookAuthorizer) ([]authzv1alpha1.WebhookAuthorizer, error) {
-	var scopedAuth authzv1alpha1.WebhookAuthorizerList
-	listCtx, cancel := context.WithTimeout(ctx, authzv1alpha1.WebhookCacheTimeout)
+func (wa *Authorizer) listScopedAuthorizers(ctx context.Context, cachedAll *[]authorizationv1alpha1.WebhookAuthorizer) ([]authorizationv1alpha1.WebhookAuthorizer, error) {
+	var scopedAuth authorizationv1alpha1.WebhookAuthorizerList
+	listCtx, cancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
 	defer cancel()
 	if err := wa.Client.List(listCtx, &scopedAuth, client.MatchingFields{
 		indexer.WebhookAuthorizerHasNamespaceSelectorField: "true",
@@ -423,7 +423,7 @@ func (wa *Authorizer) listScopedAuthorizers(ctx context.Context, cachedAll *[]au
 		if cachedAll != nil {
 			*cachedAll = all
 		}
-		scopedItems := make([]authzv1alpha1.WebhookAuthorizer, 0, len(all))
+		scopedItems := make([]authorizationv1alpha1.WebhookAuthorizer, 0, len(all))
 		for _, candidate := range all {
 			if !helpers.IsLabelSelectorEmpty(&candidate.Spec.NamespaceSelector) {
 				scopedItems = append(scopedItems, candidate)
@@ -432,7 +432,7 @@ func (wa *Authorizer) listScopedAuthorizers(ctx context.Context, cachedAll *[]au
 		return scopedItems, nil
 	}
 
-	scopedItems := make([]authzv1alpha1.WebhookAuthorizer, 0, len(*cachedAll))
+	scopedItems := make([]authorizationv1alpha1.WebhookAuthorizer, 0, len(*cachedAll))
 	for _, candidate := range *cachedAll {
 		if !helpers.IsLabelSelectorEmpty(&candidate.Spec.NamespaceSelector) {
 			scopedItems = append(scopedItems, candidate)
@@ -442,10 +442,10 @@ func (wa *Authorizer) listScopedAuthorizers(ctx context.Context, cachedAll *[]au
 	return scopedItems, nil
 }
 
-func (wa *Authorizer) listAllAuthorizers(ctx context.Context) ([]authzv1alpha1.WebhookAuthorizer, error) {
-	listCtx, cancel := context.WithTimeout(ctx, authzv1alpha1.WebhookCacheTimeout)
+func (wa *Authorizer) listAllAuthorizers(ctx context.Context) ([]authorizationv1alpha1.WebhookAuthorizer, error) {
+	listCtx, cancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
 	defer cancel()
-	var allAuth authzv1alpha1.WebhookAuthorizerList
+	var allAuth authorizationv1alpha1.WebhookAuthorizerList
 	if err := wa.Client.List(listCtx, &allAuth); err != nil {
 		return nil, fmt.Errorf("list WebhookAuthorizers: %w", err)
 	}
@@ -471,7 +471,7 @@ func isFieldIndexError(err error) bool {
 	return strings.Contains(msg, "does not exist") && strings.Contains(msg, "index")
 }
 
-func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAccessReview, items []authzv1alpha1.WebhookAuthorizer) evaluationResult {
+func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAccessReview, items []authorizationv1alpha1.WebhookAuthorizer) evaluationResult {
 	evaluated := 0
 	skipped := 0
 
@@ -592,7 +592,7 @@ func (wa *Authorizer) namespaceMatches(ctx context.Context, namespace string, se
 }
 
 // principalMatches checks if the user or groups match the principals.
-func (wa *Authorizer) principalMatches(user string, groups []string, principals []authzv1alpha1.Principal) bool {
+func (wa *Authorizer) principalMatches(user string, groups []string, principals []authorizationv1alpha1.Principal) bool {
 	for _, principal := range principals {
 		if principal.User != "" && principal.User == user {
 			return true

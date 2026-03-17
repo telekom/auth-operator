@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -162,26 +163,76 @@ func (r *RestrictedBindDefinitionReconciler) namespaceToRestrictedBindDefinition
 		return nil
 	}
 
-	rbdList := &authorizationv1alpha1.RestrictedBindDefinitionList{}
 	listCtx, cancel := context.WithTimeout(ctx, queueAllTimeout)
 	defer cancel()
-	if err := r.client.List(listCtx, rbdList); err != nil {
-		logger.Error(err, "failed to list RestrictedBindDefinitions")
+
+	explicitNamespaceList := &authorizationv1alpha1.RestrictedBindDefinitionList{}
+	explicitErr := r.client.List(listCtx, explicitNamespaceList,
+		client.MatchingFields{indexer.RestrictedBindDefinitionRoleBindingNamespaceField: namespace.Name})
+
+	selectorList := &authorizationv1alpha1.RestrictedBindDefinitionList{}
+	selectorErr := r.client.List(listCtx, selectorList,
+		client.MatchingFields{indexer.RestrictedBindDefinitionHasNamespaceSelectorField: "true"})
+
+	optimizedIndexPathAvailable := explicitErr == nil && selectorErr == nil
+	if !optimizedIndexPathAvailable &&
+		(!isMissingFieldIndexError(explicitErr) || !isMissingFieldIndexError(selectorErr)) {
+		if explicitErr != nil {
+			logger.Error(explicitErr, "failed to list RestrictedBindDefinitions by explicit namespace index", "namespace", namespace.Name)
+		}
+		if selectorErr != nil {
+			logger.Error(selectorErr, "failed to list RestrictedBindDefinitions by selector index")
+		}
 		return nil
 	}
 
-	requests := make([]reconcile.Request, 0, len(rbdList.Items))
-	for i := range rbdList.Items {
-		rbd := &rbdList.Items[i]
+	if !optimizedIndexPathAvailable {
+		logger.V(2).Info("field indexes not available, falling back to full RestrictedBindDefinition scan")
+		fullList := &authorizationv1alpha1.RestrictedBindDefinitionList{}
+		if err := r.client.List(listCtx, fullList); err != nil {
+			logger.Error(err, "failed to list RestrictedBindDefinitions")
+			return nil
+		}
+
+		requests := make([]reconcile.Request, 0, len(fullList.Items))
+		for i := range fullList.Items {
+			rbd := &fullList.Items[i]
+			if !restrictedBindDefinitionMatchesNamespace(rbd, namespace) {
+				metrics.NamespaceFanoutSkipped.Inc()
+				continue
+			}
+			metrics.NamespaceFanoutEnqueued.Inc()
+			requests = append(requests, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: rbd.Name},
+			})
+		}
+		return requests
+	}
+
+	queued := make(map[string]struct{}, len(explicitNamespaceList.Items)+len(selectorList.Items))
+	requests := make([]reconcile.Request, 0, len(explicitNamespaceList.Items)+len(selectorList.Items))
+	queueRequest := func(name string) {
+		if _, exists := queued[name]; exists {
+			return
+		}
+		queued[name] = struct{}{}
+		metrics.NamespaceFanoutEnqueued.Inc()
+		requests = append(requests, reconcile.Request{NamespacedName: types.NamespacedName{Name: name}})
+	}
+
+	for i := range explicitNamespaceList.Items {
+		queueRequest(explicitNamespaceList.Items[i].Name)
+	}
+
+	for i := range selectorList.Items {
+		rbd := &selectorList.Items[i]
 		if !restrictedBindDefinitionMatchesNamespace(rbd, namespace) {
 			metrics.NamespaceFanoutSkipped.Inc()
 			continue
 		}
-		metrics.NamespaceFanoutEnqueued.Inc()
-		requests = append(requests, reconcile.Request{
-			NamespacedName: types.NamespacedName{Name: rbd.Name},
-		})
+		queueRequest(rbd.Name)
 	}
+
 	return requests
 }
 
@@ -194,16 +245,24 @@ func restrictedBindDefinitionMatchesNamespace(rbd *authorizationv1alpha1.Restric
 	if conditions.IsNamespaceTerminating(ns) {
 		return true
 	}
+	nsLabels := labels.Set(ns.GetLabels())
+	selectorCache := make(map[string]labels.Selector)
 	for _, rb := range rbd.Spec.RoleBindings {
 		if rb.Namespace == ns.Name {
 			return true
 		}
 		for _, sel := range rb.NamespaceSelector {
-			selector, err := metav1.LabelSelectorAsSelector(&sel)
-			if err != nil {
-				return true
+			cacheKey := metav1.FormatLabelSelector(&sel)
+			selector, ok := selectorCache[cacheKey]
+			if !ok {
+				var err error
+				selector, err = metav1.LabelSelectorAsSelector(&sel)
+				if err != nil {
+					return true
+				}
+				selectorCache[cacheKey] = selector
 			}
-			if selector.Matches(labels.Set(ns.GetLabels())) {
+			if selector.Matches(nsLabels) {
 				return true
 			}
 		}
@@ -395,7 +454,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdReconcileResources(
 		ac.WithOwnerReferences(ownerRefForRestricted(rbd, "RestrictedBindDefinition")).
 			WithAnnotations(helpers.BuildResourceAnnotations("RestrictedBindDefinition", rbd.Name))
 
-		if result, err := pkgssa.PatchApplyClusterRoleBinding(ctx, applyClient, ac); err != nil {
+		if result, err := pkgssa.PatchApplyClusterRoleBinding(ctx, applyClient, ac, pkgssa.FieldOwnerFor(rbd.Name)); err != nil {
 			return fmt.Errorf("ensure ClusterRoleBinding %s: %w", crbName, err)
 		} else if result == pkgssa.PatchApplyResultSkipped {
 			metrics.RBACResourcesSkipped.WithLabelValues(metrics.ResourceClusterRoleBinding).Inc()
@@ -507,7 +566,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdEnsureRoleBinding(
 	ac.WithOwnerReferences(ownerRefForRestricted(rbd, "RestrictedBindDefinition")).
 		WithAnnotations(helpers.BuildResourceAnnotations("RestrictedBindDefinition", rbd.Name))
 
-	if result, err := pkgssa.PatchApplyRoleBinding(ctx, applyClient, ac); err != nil {
+	if result, err := pkgssa.PatchApplyRoleBinding(ctx, applyClient, ac, pkgssa.FieldOwnerFor(rbd.Name)); err != nil {
 		return fmt.Errorf("ensure RoleBinding %s/%s: %w", namespace, rbName, err)
 	} else if result == pkgssa.PatchApplyResultSkipped {
 		metrics.RBACResourcesSkipped.WithLabelValues(metrics.ResourceRoleBinding).Inc()
@@ -566,8 +625,16 @@ func (r *RestrictedBindDefinitionReconciler) rbdDeprovision(
 
 	// Delete owned ClusterRoleBindings.
 	crbList := &rbacv1.ClusterRoleBindingList{}
-	if err := r.client.List(ctx, crbList, client.MatchingLabels{helpers.ManagedByLabelStandard: helpers.ManagedByValue}); err != nil {
-		return fmt.Errorf("list ClusterRoleBindings: %w", err)
+	if err := r.client.List(ctx, crbList,
+		client.MatchingFields{indexer.RestrictedBindDefinitionOwnerRefField: rbd.Name}); err != nil {
+		if !isMissingFieldIndexError(err) {
+			return fmt.Errorf("list ClusterRoleBindings by owner index: %w", err)
+		}
+		logger.V(2).Info("owner-reference index unavailable for ClusterRoleBinding cleanup, falling back to label scan")
+		if listErr := r.client.List(ctx, crbList,
+			client.MatchingLabels{helpers.ManagedByLabelStandard: helpers.ManagedByValue}); listErr != nil {
+			return fmt.Errorf("list ClusterRoleBindings: %w", listErr)
+		}
 	}
 	for i := range crbList.Items {
 		if hasOwnerRef(&crbList.Items[i], rbd) {
@@ -579,8 +646,16 @@ func (r *RestrictedBindDefinitionReconciler) rbdDeprovision(
 
 	// Delete owned RoleBindings.
 	rbList := &rbacv1.RoleBindingList{}
-	if err := r.client.List(ctx, rbList, client.MatchingLabels{helpers.ManagedByLabelStandard: helpers.ManagedByValue}); err != nil {
-		return fmt.Errorf("list RoleBindings: %w", err)
+	if err := r.client.List(ctx, rbList,
+		client.MatchingFields{indexer.RestrictedBindDefinitionOwnerRefField: rbd.Name}); err != nil {
+		if !isMissingFieldIndexError(err) {
+			return fmt.Errorf("list RoleBindings by owner index: %w", err)
+		}
+		logger.V(2).Info("owner-reference index unavailable for RoleBinding cleanup, falling back to label scan")
+		if listErr := r.client.List(ctx, rbList,
+			client.MatchingLabels{helpers.ManagedByLabelStandard: helpers.ManagedByValue}); listErr != nil {
+			return fmt.Errorf("list RoleBindings: %w", listErr)
+		}
 	}
 	for i := range rbList.Items {
 		if hasOwnerRef(&rbList.Items[i], rbd) {
@@ -671,45 +746,45 @@ func (r *RestrictedBindDefinitionReconciler) rbdValidateRoleReferences(
 	rbd *authorizationv1alpha1.RestrictedBindDefinition,
 ) ([]string, error) {
 	logger := log.FromContext(ctx)
-	var missingRoles []string
+	missingRoleSet := make(map[string]struct{})
+	clusterRoleExists := make(map[string]bool)
+	roleExists := make(map[string]bool)
+
+	addMissingRole := func(roleName string, logKeysAndValues ...interface{}) {
+		if _, exists := missingRoleSet[roleName]; exists {
+			return
+		}
+		logger.V(1).Info("referenced role not found", logKeysAndValues...)
+		missingRoleSet[roleName] = struct{}{}
+	}
 
 	// Check ClusterRoleRefs in ClusterRoleBindings.
 	for _, clusterRoleRef := range rbd.Spec.ClusterRoleBindings.ClusterRoleRefs {
-		cr := &rbacv1.ClusterRole{}
-		if err := r.client.Get(ctx, types.NamespacedName{Name: clusterRoleRef}, cr); err != nil {
-			if apierrors.IsNotFound(err) {
-				roleName := fmt.Sprintf("ClusterRole/%s", clusterRoleRef)
-				if !slices.Contains(missingRoles, roleName) {
-					logger.V(1).Info("ClusterRole not found", "clusterRole", clusterRoleRef)
-					missingRoles = append(missingRoles, roleName)
-				}
-			} else {
-				return missingRoles, fmt.Errorf("check ClusterRole %q existence: %w", clusterRoleRef, err)
-			}
+		exists, err := r.clusterRoleExists(ctx, clusterRoleRef, clusterRoleExists)
+		if err != nil {
+			return sortedMissingRoles(missingRoleSet), err
+		}
+		if !exists {
+			addMissingRole(fmt.Sprintf("ClusterRole/%s", clusterRoleRef), "clusterRole", clusterRoleRef)
 		}
 	}
 
 	// Check ClusterRoleRefs and RoleRefs in RoleBindings.
 	for _, roleBinding := range rbd.Spec.RoleBindings {
 		for _, clusterRoleRef := range roleBinding.ClusterRoleRefs {
-			cr := &rbacv1.ClusterRole{}
-			if err := r.client.Get(ctx, types.NamespacedName{Name: clusterRoleRef}, cr); err != nil {
-				if apierrors.IsNotFound(err) {
-					roleName := fmt.Sprintf("ClusterRole/%s", clusterRoleRef)
-					if !slices.Contains(missingRoles, roleName) {
-						logger.V(1).Info("ClusterRole not found", "clusterRole", clusterRoleRef)
-						missingRoles = append(missingRoles, roleName)
-					}
-				} else {
-					return missingRoles, fmt.Errorf("check ClusterRole %q existence: %w", clusterRoleRef, err)
-				}
+			exists, err := r.clusterRoleExists(ctx, clusterRoleRef, clusterRoleExists)
+			if err != nil {
+				return sortedMissingRoles(missingRoleSet), err
+			}
+			if !exists {
+				addMissingRole(fmt.Sprintf("ClusterRole/%s", clusterRoleRef), "clusterRole", clusterRoleRef)
 			}
 		}
 
 		// Resolve namespaces for this roleBinding to check RoleRefs.
 		targetNamespaces, err := r.rbdResolveNamespaces(ctx, roleBinding)
 		if err != nil {
-			return missingRoles, fmt.Errorf("resolve namespaces for roleBinding during validation: %w", err)
+			return sortedMissingRoles(missingRoleSet), fmt.Errorf("resolve namespaces for roleBinding during validation: %w", err)
 		}
 
 		for _, roleRef := range roleBinding.RoleRefs {
@@ -717,22 +792,87 @@ func (r *RestrictedBindDefinitionReconciler) rbdValidateRoleReferences(
 				if conditions.IsNamespaceTerminating(&ns) {
 					continue
 				}
-				role := &rbacv1.Role{}
-				if err := r.client.Get(ctx, types.NamespacedName{Name: roleRef, Namespace: ns.Name}, role); err != nil {
-					if apierrors.IsNotFound(err) {
-						roleName := fmt.Sprintf("Role/%s/%s", ns.Name, roleRef)
-						if !slices.Contains(missingRoles, roleName) {
-							logger.V(1).Info("Role not found", "role", roleRef, "namespace", ns.Name)
-							missingRoles = append(missingRoles, roleName)
-						}
-					} else {
-						return missingRoles, fmt.Errorf("check Role %s/%s existence: %w", ns.Name, roleRef, err)
-					}
+				exists, err := r.roleExists(ctx, ns.Name, roleRef, roleExists)
+				if err != nil {
+					return sortedMissingRoles(missingRoleSet), err
+				}
+				if !exists {
+					addMissingRole(fmt.Sprintf("Role/%s/%s", ns.Name, roleRef), "role", roleRef, "namespace", ns.Name)
 				}
 			}
 		}
 	}
 
+	return sortedMissingRoles(missingRoleSet), nil
+}
+
+func sortedMissingRoles(missingRoleSet map[string]struct{}) []string {
+	missingRoles := make([]string, 0, len(missingRoleSet))
+	for roleName := range missingRoleSet {
+		missingRoles = append(missingRoles, roleName)
+	}
 	slices.Sort(missingRoles)
-	return missingRoles, nil
+	return missingRoles
+}
+
+func (r *RestrictedBindDefinitionReconciler) clusterRoleExists(
+	ctx context.Context,
+	clusterRoleRef string,
+	cache map[string]bool,
+) (bool, error) {
+	if exists, ok := cache[clusterRoleRef]; ok {
+		return exists, nil
+	}
+
+	cr := &rbacv1.ClusterRole{}
+	if err := r.client.Get(ctx, types.NamespacedName{Name: clusterRoleRef}, cr); err != nil {
+		if apierrors.IsNotFound(err) {
+			cache[clusterRoleRef] = false
+			return false, nil
+		}
+		return false, fmt.Errorf("check ClusterRole %q existence: %w", clusterRoleRef, err)
+	}
+
+	cache[clusterRoleRef] = true
+	return true, nil
+}
+
+func (r *RestrictedBindDefinitionReconciler) roleExists(
+	ctx context.Context,
+	namespace, roleRef string,
+	cache map[string]bool,
+) (bool, error) {
+	cacheKey := fmt.Sprintf("%s/%s", namespace, roleRef)
+	if exists, ok := cache[cacheKey]; ok {
+		return exists, nil
+	}
+
+	role := &rbacv1.Role{}
+	if err := r.client.Get(ctx, types.NamespacedName{Name: roleRef, Namespace: namespace}, role); err != nil {
+		if apierrors.IsNotFound(err) {
+			cache[cacheKey] = false
+			return false, nil
+		}
+		return false, fmt.Errorf("check Role %s/%s existence: %w", namespace, roleRef, err)
+	}
+
+	cache[cacheKey] = true
+	return true, nil
+}
+
+func isMissingFieldIndexError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "no index with name") {
+		return true
+	}
+	if strings.Contains(msg, "index with name") && strings.Contains(msg, "does not exist") {
+		return true
+	}
+	if strings.Contains(msg, "index with name") && strings.Contains(msg, "has been registered") {
+		return true
+	}
+	return false
 }

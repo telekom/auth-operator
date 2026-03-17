@@ -401,7 +401,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `policyRef` _[RBACPolicyReference](#rbacpolicyreference)_ | PolicyRef references the RBACPolicy that governs this binding. |  | Required: \{\} <br /> |
+| `policyRef` _[RBACPolicyReference](#rbacpolicyreference)_ | PolicyRef references the RBACPolicy that governs this binding.<br />This field is immutable after creation. |  | Required: \{\} <br /> |
 | `targetName` _string_ | TargetName is the name prefix for generated bindings. Follows format<br />"targetName-clusterrole/role-binding".<br />This field is immutable after creation. |  | MaxLength: 253 <br />MinLength: 1 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` <br />Required: \{\} <br /> |
 | `subjects` _[Subject](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#subject-v1-rbac) array_ | Subjects lists the subjects that will be bound to the target ClusterRole/Role.<br />Can be "User", "Group" or "ServiceAccount". |  | MaxItems: 256 <br />Required: \{\} <br /> |
 | `clusterRoleBindings` _[ClusterBinding](#clusterbinding)_ | ClusterRoleBindings defines cluster-scoped role bindings. |  | Optional: \{\} <br /> |
@@ -427,7 +427,7 @@ _Appears in:_
 | `generatedServiceAccounts` _[Subject](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#subject-v1-rbac) array_ | GeneratedServiceAccounts lists ServiceAccounts that were auto-created. |  | Optional: \{\} <br /> |
 | `missingRoleRefs` _string array_ | MissingRoleRefs lists role references that could not be resolved.<br />Format: "ClusterRole/<name>" or "Role/<namespace>/<name>". |  | Optional: \{\} <br /> |
 | `externalServiceAccounts` _string array_ | ExternalServiceAccounts lists ServiceAccounts referenced by this RestrictedBindDefinition<br />that were not created by the controller.<br />Format: "<namespace>/<name>". |  | Optional: \{\} <br /> |
-| `policyViolations` _string array_ | PolicyViolations lists policy violations detected during the last reconciliation.<br />Empty when all checks pass. |  | Optional: \{\} <br /> |
+| `policyViolations` _string array_ | PolicyViolations lists policy violations detected during the last reconciliation.<br />Format: "<fieldPath>: <message>" when a field path is available.<br />Empty when all checks pass. |  | Optional: \{\} <br /> |
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#condition-v1-meta) array_ | Conditions defines current service state. |  | Optional: \{\} <br /> |
 
 
@@ -467,7 +467,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `policyRef` _[RBACPolicyReference](#rbacpolicyreference)_ | PolicyRef references the RBACPolicy that governs this role definition. |  | Required: \{\} <br /> |
+| `policyRef` _[RBACPolicyReference](#rbacpolicyreference)_ | PolicyRef references the RBACPolicy that governs this role definition.<br />This field is immutable after creation. |  | Required: \{\} <br /> |
 | `targetRole` _string_ | TargetRole is the role type that will be reconciled: ClusterRole or Role.<br />This field is immutable after creation. |  | Enum: [ClusterRole Role] <br />Required: \{\} <br /> |
 | `targetName` _string_ | TargetName is the name of the target role.<br />This field is immutable after creation. |  | MaxLength: 63 <br />MinLength: 5 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` <br />Required: \{\} <br /> |
 | `targetNamespace` _string_ | TargetNamespace is the target namespace for the Role.<br />Required when "TargetRole" is "Role". |  | Optional: \{\} <br /> |

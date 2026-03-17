@@ -76,8 +76,9 @@ spec:
               RestrictedRoleDefinition.
             properties:
               policyRef:
-                description: PolicyRef references the RBACPolicy that governs this
-                  role definition.
+                description: |-
+                  PolicyRef references the RBACPolicy that governs this role definition.
+                  This field is immutable after creation.
                 properties:
                   name:
                     description: Name of the RBACPolicy.

@@ -349,7 +349,9 @@ PolicyCompliant → Discover APIs → Filter APIs → EnsureRole → Ready
 ### Reconciliation Sequence (RestrictedBindDefinition)
 
 ```
-PolicyCompliant → EnsureServiceAccounts → EnsureBindings → Ready
+Reconciling → Finalizer → FetchPolicy → PolicyCompliant
+  │
+  └─ (compliant) → EnsureServiceAccounts → EnsureBindings → ValidateRoles → Ready
     │
     └─ (violations) → Deprovision → Ready=False (Deprovisioned)
 ```

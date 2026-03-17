@@ -19,6 +19,7 @@ const (
 // +kubebuilder:validation:XValidation:rule="self.targetRole != 'ClusterRole' || !has(self.targetNamespace) || size(self.targetNamespace) == 0",message="targetNamespace must be empty when targetRole is 'ClusterRole'"
 type RestrictedRoleDefinitionSpec struct {
 	// PolicyRef references the RBACPolicy that governs this role definition.
+	// This field is immutable after creation.
 	// +kubebuilder:validation:Required
 	PolicyRef RBACPolicyReference `json:"policyRef"`
 

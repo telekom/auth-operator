@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	admissionv1 "k8s.io/api/admission/v1"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -307,10 +307,10 @@ func TestDetectOwnerReclassification(t *testing.T) {
 			req := admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{Name: "test-ns"}}
 
 			oldNs := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{authzv1alpha1.LabelKeyOwner: tt.oldOwner},
+				Labels: map[string]string{authorizationv1alpha1.LabelKeyOwner: tt.oldOwner},
 			}}
 			newNs := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{authzv1alpha1.LabelKeyOwner: tt.newOwner},
+				Labels: map[string]string{authorizationv1alpha1.LabelKeyOwner: tt.newOwner},
 			}}
 
 			result := v.detectOwnerReclassification(logger, req, newNs, oldNs, tt.bypass)
@@ -340,27 +340,27 @@ func TestValidateLabelImmutability(t *testing.T) {
 		{
 			name:       "initial adoption - allowed",
 			oldLabels:  map[string]string{},
-			newLabels:  map[string]string{authzv1alpha1.LabelKeyOwner: "tenant"},
+			newLabels:  map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"},
 			expectDeny: false,
 		},
 		{
 			name:       "modify owner label - denied",
-			oldLabels:  map[string]string{authzv1alpha1.LabelKeyOwner: "tenant"},
-			newLabels:  map[string]string{authzv1alpha1.LabelKeyOwner: "platform"},
+			oldLabels:  map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"},
+			newLabels:  map[string]string{authorizationv1alpha1.LabelKeyOwner: "platform"},
 			expectDeny: true,
-			denySubstr: authzv1alpha1.LabelKeyOwner,
+			denySubstr: authorizationv1alpha1.LabelKeyOwner,
 		},
 		{
 			name:       "remove tenant label - denied",
-			oldLabels:  map[string]string{authzv1alpha1.LabelKeyTenant: "team-a"},
+			oldLabels:  map[string]string{authorizationv1alpha1.LabelKeyTenant: "team-a"},
 			newLabels:  map[string]string{},
 			expectDeny: true,
-			denySubstr: authzv1alpha1.LabelKeyTenant,
+			denySubstr: authorizationv1alpha1.LabelKeyTenant,
 		},
 		{
 			name:       "unchanged labels - allowed",
-			oldLabels:  map[string]string{authzv1alpha1.LabelKeyOwner: "tenant", authzv1alpha1.LabelKeyTenant: "team-a"},
-			newLabels:  map[string]string{authzv1alpha1.LabelKeyOwner: "tenant", authzv1alpha1.LabelKeyTenant: "team-a"},
+			oldLabels:  map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant", authorizationv1alpha1.LabelKeyTenant: "team-a"},
+			newLabels:  map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant", authorizationv1alpha1.LabelKeyTenant: "team-a"},
 			expectDeny: false,
 		},
 		{
@@ -374,13 +374,13 @@ func TestValidateLabelImmutability(t *testing.T) {
 			tdg:    true,
 			bypass: BypassCheckResult{ShouldBypass: true},
 			oldLabels: map[string]string{
-				legacyOwnerLabel:             "tenant",
-				authzv1alpha1.LabelKeyOwner:  "tenant",
-				authzv1alpha1.LabelKeyTenant: "team-a",
+				legacyOwnerLabel:                     "tenant",
+				authorizationv1alpha1.LabelKeyOwner:  "tenant",
+				authorizationv1alpha1.LabelKeyTenant: "team-a",
 			},
 			newLabels: map[string]string{
-				authzv1alpha1.LabelKeyOwner:  "tenant",
-				authzv1alpha1.LabelKeyTenant: "team-a",
+				authorizationv1alpha1.LabelKeyOwner:  "tenant",
+				authorizationv1alpha1.LabelKeyTenant: "team-a",
 			},
 			expectDeny: false,
 		},
@@ -444,63 +444,63 @@ func TestCrossValidateLegacyLabels(t *testing.T) {
 			name:       "TDG disabled - always passes",
 			tdg:        false,
 			oldLabels:  map[string]string{legacyOwnerLabel: "platform"},
-			newLabels:  map[string]string{authzv1alpha1.LabelKeyOwner: "tenant"},
+			newLabels:  map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"},
 			expectDeny: false,
 		},
 		{
 			name:       "no legacy label - passes",
 			tdg:        true,
 			oldLabels:  map[string]string{},
-			newLabels:  map[string]string{authzv1alpha1.LabelKeyOwner: "tenant"},
+			newLabels:  map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"},
 			expectDeny: false,
 		},
 		{
 			name:       "old owner already exists - skip validation",
 			tdg:        true,
-			oldLabels:  map[string]string{legacyOwnerLabel: "platform", authzv1alpha1.LabelKeyOwner: "platform"},
-			newLabels:  map[string]string{legacyOwnerLabel: "platform", authzv1alpha1.LabelKeyOwner: "platform"},
+			oldLabels:  map[string]string{legacyOwnerLabel: "platform", authorizationv1alpha1.LabelKeyOwner: "platform"},
+			newLabels:  map[string]string{legacyOwnerLabel: "platform", authorizationv1alpha1.LabelKeyOwner: "platform"},
 			expectDeny: false,
 		},
 		{
 			name:       "legacy platform to new platform - allowed",
 			tdg:        true,
 			oldLabels:  map[string]string{legacyOwnerLabel: "platform"},
-			newLabels:  map[string]string{legacyOwnerLabel: "platform", authzv1alpha1.LabelKeyOwner: "platform"},
+			newLabels:  map[string]string{legacyOwnerLabel: "platform", authorizationv1alpha1.LabelKeyOwner: "platform"},
 			expectDeny: false,
 		},
 		{
 			name:       "legacy schiff to new platform - allowed",
 			tdg:        true,
 			oldLabels:  map[string]string{legacyOwnerLabel: "schiff"},
-			newLabels:  map[string]string{legacyOwnerLabel: "schiff", authzv1alpha1.LabelKeyOwner: "platform"},
+			newLabels:  map[string]string{legacyOwnerLabel: "schiff", authorizationv1alpha1.LabelKeyOwner: "platform"},
 			expectDeny: false,
 		},
 		{
 			name:       "legacy platform to new tenant - denied",
 			tdg:        true,
 			oldLabels:  map[string]string{legacyOwnerLabel: "platform"},
-			newLabels:  map[string]string{legacyOwnerLabel: "platform", authzv1alpha1.LabelKeyOwner: "tenant"},
+			newLabels:  map[string]string{legacyOwnerLabel: "platform", authorizationv1alpha1.LabelKeyOwner: "tenant"},
 			expectDeny: true,
 		},
 		{
 			name:       "legacy tenant to new platform - denied",
 			tdg:        true,
 			oldLabels:  map[string]string{legacyOwnerLabel: "tenant"},
-			newLabels:  map[string]string{legacyOwnerLabel: "tenant", authzv1alpha1.LabelKeyOwner: "platform"},
+			newLabels:  map[string]string{legacyOwnerLabel: "tenant", authorizationv1alpha1.LabelKeyOwner: "platform"},
 			expectDeny: true,
 		},
 		{
 			name:       "legacy tenant to new tenant - allowed",
 			tdg:        true,
 			oldLabels:  map[string]string{legacyOwnerLabel: "tenant"},
-			newLabels:  map[string]string{legacyOwnerLabel: "tenant", authzv1alpha1.LabelKeyOwner: "tenant"},
+			newLabels:  map[string]string{legacyOwnerLabel: "tenant", authorizationv1alpha1.LabelKeyOwner: "tenant"},
 			expectDeny: false,
 		},
 		{
 			name:       "legacy tenant to new thirdparty - allowed",
 			tdg:        true,
 			oldLabels:  map[string]string{legacyOwnerLabel: "tenant"},
-			newLabels:  map[string]string{legacyOwnerLabel: "tenant", authzv1alpha1.LabelKeyOwner: "thirdparty"},
+			newLabels:  map[string]string{legacyOwnerLabel: "tenant", authorizationv1alpha1.LabelKeyOwner: "thirdparty"},
 			expectDeny: false,
 		},
 	}
@@ -537,19 +537,19 @@ func TestCrossValidateLegacyLabels(t *testing.T) {
 func TestAuthorizeViaBindDefinitions(t *testing.T) {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(authzv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(authorizationv1alpha1.AddToScheme(scheme))
 
-	bd := authzv1alpha1.BindDefinition{
+	bd := authorizationv1alpha1.BindDefinition{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-bd"},
-		Spec: authzv1alpha1.BindDefinitionSpec{
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
 			TargetName: "test-target",
 			Subjects: []rbacv1.Subject{
 				{APIGroup: rbacv1.GroupName, Kind: "Group", Name: "allowed-group"},
 			},
-			RoleBindings: []authzv1alpha1.NamespaceBinding{{
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{{
 				ClusterRoleRefs: []string{"admin"},
 				NamespaceSelector: []metav1.LabelSelector{
-					{MatchLabels: map[string]string{authzv1alpha1.LabelKeyOwner: "tenant"}},
+					{MatchLabels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"}},
 				},
 			}},
 		},
@@ -557,7 +557,7 @@ func TestAuthorizeViaBindDefinitions(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		bindDefs []authzv1alpha1.BindDefinition
+		bindDefs []authorizationv1alpha1.BindDefinition
 		username string
 		groups   []string
 		nsLabels map[string]string
@@ -565,56 +565,56 @@ func TestAuthorizeViaBindDefinitions(t *testing.T) {
 	}{
 		{
 			name:     "authorized group member",
-			bindDefs: []authzv1alpha1.BindDefinition{bd},
+			bindDefs: []authorizationv1alpha1.BindDefinition{bd},
 			username: "user1",
 			groups:   []string{"allowed-group"},
-			nsLabels: map[string]string{authzv1alpha1.LabelKeyOwner: "tenant"},
+			nsLabels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"},
 			expectOK: true,
 		},
 		{
 			name:     "unauthorized user - no matching group",
-			bindDefs: []authzv1alpha1.BindDefinition{bd},
+			bindDefs: []authorizationv1alpha1.BindDefinition{bd},
 			username: "user2",
 			groups:   []string{"other-group"},
-			nsLabels: map[string]string{authzv1alpha1.LabelKeyOwner: "tenant"},
+			nsLabels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"},
 			expectOK: false,
 		},
 		{
 			name:     "authorized group but namespace labels don't match",
-			bindDefs: []authzv1alpha1.BindDefinition{bd},
+			bindDefs: []authorizationv1alpha1.BindDefinition{bd},
 			username: "user1",
 			groups:   []string{"allowed-group"},
-			nsLabels: map[string]string{authzv1alpha1.LabelKeyOwner: "platform"},
+			nsLabels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "platform"},
 			expectOK: false,
 		},
 		{
 			name:     "no BindDefinitions - denied",
-			bindDefs: []authzv1alpha1.BindDefinition{},
+			bindDefs: []authorizationv1alpha1.BindDefinition{},
 			username: "user1",
 			groups:   []string{"allowed-group"},
-			nsLabels: map[string]string{authzv1alpha1.LabelKeyOwner: "tenant"},
+			nsLabels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"},
 			expectOK: false,
 		},
 		{
 			name: "service account match",
-			bindDefs: []authzv1alpha1.BindDefinition{{
+			bindDefs: []authorizationv1alpha1.BindDefinition{{
 				ObjectMeta: metav1.ObjectMeta{Name: "sa-bd"},
-				Spec: authzv1alpha1.BindDefinitionSpec{
+				Spec: authorizationv1alpha1.BindDefinitionSpec{
 					TargetName: "sa-target",
 					Subjects: []rbacv1.Subject{
 						{Kind: "ServiceAccount", Name: "my-sa", Namespace: "my-ns"},
 					},
-					RoleBindings: []authzv1alpha1.NamespaceBinding{{
+					RoleBindings: []authorizationv1alpha1.NamespaceBinding{{
 						ClusterRoleRefs: []string{"admin"},
 						NamespaceSelector: []metav1.LabelSelector{
-							{MatchLabels: map[string]string{authzv1alpha1.LabelKeyOwner: "tenant"}},
+							{MatchLabels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"}},
 						},
 					}},
 				},
 			}},
 			username: "system:serviceaccount:my-ns:my-sa",
 			groups:   []string{},
-			nsLabels: map[string]string{authzv1alpha1.LabelKeyOwner: "tenant"},
+			nsLabels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"},
 			expectOK: true,
 		},
 	}
@@ -657,21 +657,21 @@ func TestAuthorizeViaBindDefinitions(t *testing.T) {
 func TestAuthorizeViaBindDefinitions_SkipsRestricted(t *testing.T) {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(authzv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(authorizationv1alpha1.AddToScheme(scheme))
 
 	// Create a BindDefinition with a restricted name that should be skipped.
 	// The user would match this BD's subjects, but it should be ignored.
-	restrictedBD := authzv1alpha1.BindDefinition{
+	restrictedBD := authorizationv1alpha1.BindDefinition{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-namespaced-reader-restricted"},
-		Spec: authzv1alpha1.BindDefinitionSpec{
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
 			TargetName: "restricted-target",
 			Subjects: []rbacv1.Subject{
 				{APIGroup: rbacv1.GroupName, Kind: "Group", Name: "test-group"},
 			},
-			RoleBindings: []authzv1alpha1.NamespaceBinding{{
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{{
 				ClusterRoleRefs: []string{"admin"},
 				NamespaceSelector: []metav1.LabelSelector{
-					{MatchLabels: map[string]string{authzv1alpha1.LabelKeyOwner: "tenant"}},
+					{MatchLabels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"}},
 				},
 			}},
 		},
@@ -684,7 +684,7 @@ func TestAuthorizeViaBindDefinitions_SkipsRestricted(t *testing.T) {
 	logger := logf.FromContext(context.Background())
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
 		Name:   "test-ns",
-		Labels: map[string]string{authzv1alpha1.LabelKeyOwner: "tenant"},
+		Labels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"},
 	}}
 
 	req := admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{
@@ -730,7 +730,7 @@ func TestDecodeNamespaces_InvalidOldObject(t *testing.T) {
 func TestAuthorizeViaBindDefinitions_ListError(t *testing.T) {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	// Intentionally NOT registering authzv1alpha1 so that List fails
+	// Intentionally NOT registering authorizationv1alpha1 so that List fails
 
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 	v := &NamespaceValidator{Client: fakeClient}

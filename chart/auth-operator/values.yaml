@@ -47,9 +47,11 @@ controller:
   webhookAuthorizerConcurrency: 1
   # Number of concurrent reconcilers for RBACPolicy controller (0 to disable)
   rbacPolicyConcurrency: 5
-  # Number of concurrent reconcilers for RestrictedBindDefinition controller (0 to disable)
+  # Number of concurrent reconcilers for RestrictedBindDefinition controller (0 to disable).
+  # Tune independently from bindDefinitionConcurrency for policy-governed workloads.
   restrictedBindDefinitionConcurrency: 5
-  # Number of concurrent reconcilers for RestrictedRoleDefinition controller (0 to disable)
+  # Number of concurrent reconcilers for RestrictedRoleDefinition controller (0 to disable).
+  # Tune independently from roleDefinitionConcurrency for policy-governed workloads.
   restrictedRoleDefinitionConcurrency: 5
   resources:
     limits:

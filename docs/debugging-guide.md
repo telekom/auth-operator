@@ -332,6 +332,57 @@ kubectl get namespace <ns> --show-labels
 
 ---
 
+## Restricted CRD Troubleshooting
+
+### PolicyCompliance Failures (RestrictedRoleDefinition / RestrictedBindDefinition)
+
+**Symptoms:**
+- `PolicyCompliant=False`
+- `Ready=False` with deprovisioning message
+- `status.policyViolations` contains violation entries
+
+**Diagnostics:**
+
+```bash
+# Inspect policy compliance condition and violation details
+kubectl get restrictedroledefinition <name> -o jsonpath='{.status.conditions[?(@.type=="PolicyCompliant")]}' | jq .
+kubectl get restrictedbinddefinition <name> -o jsonpath='{.status.conditions[?(@.type=="PolicyCompliant")]}' | jq .
+
+kubectl get restrictedroledefinition <name> -o jsonpath='{.status.policyViolations}' | jq .
+kubectl get restrictedbinddefinition <name> -o jsonpath='{.status.policyViolations}' | jq .
+
+# Confirm referenced policy exists
+kubectl get rbacpolicy <policy-name>
+```
+
+**Common Causes:**
+
+| Issue | Solution |
+|-------|----------|
+| Forbidden verbs/resources configured in policy | Remove violating refs in restricted resource or update policy |
+| Namespace outside policy scope | Adjust `roleBindings.namespace` / `namespaceSelector` or update policy scope |
+| Referenced policy missing | Recreate policy or update `spec.policyRef.name` (requires recreating resource due immutability) |
+
+### RBACPolicy Deletion Blocked
+
+**Symptoms:**
+- `kubectl delete rbacpolicy <name>` returns forbidden error
+
+**Diagnostics:**
+
+```bash
+# Find restricted resources still referencing the policy
+kubectl get restrictedbinddefinitions,restrictedroledefinitions -o json | \
+  jq '.items[] | select(.spec.policyRef.name=="<policy-name>") | .kind + "/" + .metadata.name'
+```
+
+**Resolution:**
+
+1. Delete or migrate all referencing restricted resources.
+2. Retry deleting the policy.
+
+---
+
 ## Certificate Issues
 
 ### TLS Certificate Errors

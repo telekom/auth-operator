@@ -27,6 +27,7 @@ import (
 // RestrictedBindDefinitionSpec defines the desired state of RestrictedBindDefinition.
 type RestrictedBindDefinitionSpecApplyConfiguration struct {
 	// PolicyRef references the RBACPolicy that governs this binding.
+	// This field is immutable after creation.
 	PolicyRef *RBACPolicyReferenceApplyConfiguration `json:"policyRef,omitempty"`
 	// TargetName is the name prefix for generated bindings. Follows format
 	// "targetName-clusterrole/role-binding".
