@@ -2,6 +2,7 @@ package v1alpha1
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -120,7 +121,7 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 		TargetNameField: r.Spec.TargetName,
 	}, client.Limit(1)); err != nil {
 		logger.Error(err, "failed to list RestrictedBindDefinitions", "targetName", r.Spec.TargetName)
-		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RestrictedBindDefinitions: %w", err))
+		return nil, apierrors.NewInternalError(errors.New("unable to list RestrictedBindDefinitions"))
 	}
 	for _, existing := range rbdList.Items {
 		return nil, apierrors.NewBadRequest(

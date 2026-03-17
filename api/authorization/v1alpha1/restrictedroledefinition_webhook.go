@@ -133,7 +133,7 @@ func (v *RestrictedRoleDefinitionValidator) validateRestrictedRoleDefinitionSpec
 	rrdList := &RestrictedRoleDefinitionList{}
 	if err := v.Client.List(ctx, rrdList, client.MatchingFields{
 		TargetNameField: obj.Spec.TargetName,
-	}); err != nil {
+	}, client.Limit(2)); err != nil {
 		logger.Error(err, "failed to list RestrictedRoleDefinitions", "targetName", obj.Spec.TargetName)
 		return apierrors.NewInternalError(errors.New("unable to list RestrictedRoleDefinitions"))
 	}
@@ -153,7 +153,7 @@ func (v *RestrictedRoleDefinitionValidator) validateRestrictedRoleDefinitionSpec
 	rdList := &RoleDefinitionList{}
 	if err := v.Client.List(ctx, rdList, client.MatchingFields{
 		TargetNameField: obj.Spec.TargetName,
-	}); err != nil {
+	}, client.Limit(1)); err != nil {
 		logger.Error(err, "failed to list RoleDefinitions", "targetName", obj.Spec.TargetName)
 		return apierrors.NewInternalError(errors.New("unable to list RoleDefinitions"))
 	}
