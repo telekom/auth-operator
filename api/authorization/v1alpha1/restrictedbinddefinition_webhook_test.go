@@ -47,7 +47,7 @@ var _ = Describe("RestrictedBindDefinition Webhook", func() {
 				PolicyRef:           RBACPolicyReference{Name: policy.Name},
 				TargetName:          "cache-sync-probe-rbd",
 				Subjects:            []rbacv1.Subject{{Kind: rbacv1.GroupKind, APIGroup: rbacv1.GroupName, Name: "probe"}},
-				ClusterRoleBindings: ClusterBinding{ClusterRoleRefs: []string{"probe"}},
+				ClusterRoleBindings: &ClusterBinding{ClusterRoleRefs: []string{"probe"}},
 			},
 		}
 		Eventually(func() error {
@@ -68,7 +68,7 @@ var _ = Describe("RestrictedBindDefinition Webhook", func() {
 					Subjects: []rbacv1.Subject{
 						{Kind: rbacv1.GroupKind, APIGroup: rbacv1.GroupName, Name: "test-group"},
 					},
-					ClusterRoleBindings: ClusterBinding{
+					ClusterRoleBindings: &ClusterBinding{
 						ClusterRoleRefs: []string{"some-role"},
 					},
 				},
@@ -88,7 +88,7 @@ var _ = Describe("RestrictedBindDefinition Webhook", func() {
 					Subjects: []rbacv1.Subject{
 						{Kind: rbacv1.GroupKind, APIGroup: rbacv1.GroupName, Name: "test-group"},
 					},
-					ClusterRoleBindings: ClusterBinding{
+					ClusterRoleBindings: &ClusterBinding{
 						ClusterRoleRefs: []string{"some-role"},
 					},
 				},
@@ -109,7 +109,7 @@ var _ = Describe("RestrictedBindDefinition Webhook", func() {
 					Subjects: []rbacv1.Subject{
 						{Kind: rbacv1.GroupKind, APIGroup: rbacv1.GroupName, Name: "test-group"},
 					},
-					ClusterRoleBindings: ClusterBinding{
+					ClusterRoleBindings: &ClusterBinding{
 						ClusterRoleRefs: []string{"some-role"},
 					},
 				},
@@ -126,7 +126,7 @@ var _ = Describe("RestrictedBindDefinition Webhook", func() {
 					Subjects: []rbacv1.Subject{
 						{Kind: rbacv1.GroupKind, APIGroup: rbacv1.GroupName, Name: "test-group"},
 					},
-					ClusterRoleBindings: ClusterBinding{
+					ClusterRoleBindings: &ClusterBinding{
 						ClusterRoleRefs: []string{"some-role"},
 					},
 				},
@@ -200,7 +200,7 @@ var _ = Describe("RestrictedBindDefinition Webhook", func() {
 					PolicyRef:  RBACPolicyReference{Name: policy.Name},
 					TargetName: "test-rbd-cel-no-subjects",
 					Subjects:   []rbacv1.Subject{},
-					ClusterRoleBindings: ClusterBinding{
+					ClusterRoleBindings: &ClusterBinding{
 						ClusterRoleRefs: []string{"view"},
 					},
 				},
@@ -221,7 +221,7 @@ var _ = Describe("RestrictedBindDefinition Webhook", func() {
 					Subjects: []rbacv1.Subject{
 						{Kind: rbacv1.ServiceAccountKind, Name: "my-sa"},
 					},
-					ClusterRoleBindings: ClusterBinding{
+					ClusterRoleBindings: &ClusterBinding{
 						ClusterRoleRefs: []string{"view"},
 					},
 				},
@@ -245,7 +245,7 @@ var _ = Describe("RestrictedBindDefinition Webhook", func() {
 					Subjects: []rbacv1.Subject{
 						{Kind: rbacv1.GroupKind, APIGroup: rbacv1.GroupName, Name: "test-group"},
 					},
-					ClusterRoleBindings: ClusterBinding{
+					ClusterRoleBindings: &ClusterBinding{
 						ClusterRoleRefs: []string{"some-role"},
 					},
 				},
@@ -275,7 +275,7 @@ var _ = Describe("RestrictedBindDefinition Webhook", func() {
 					Subjects: []rbacv1.Subject{
 						{Kind: rbacv1.GroupKind, APIGroup: rbacv1.GroupName, Name: "test-group"},
 					},
-					ClusterRoleBindings: ClusterBinding{
+					ClusterRoleBindings: &ClusterBinding{
 						ClusterRoleRefs: []string{"some-role"},
 					},
 				},
@@ -305,7 +305,7 @@ var _ = Describe("RestrictedBindDefinition Webhook", func() {
 					Subjects: []rbacv1.Subject{
 						{Kind: rbacv1.GroupKind, APIGroup: rbacv1.GroupName, Name: "test-group"},
 					},
-					ClusterRoleBindings: ClusterBinding{
+					ClusterRoleBindings: &ClusterBinding{
 						ClusterRoleRefs: []string{"some-role"},
 					},
 				},
@@ -339,7 +339,7 @@ var _ = Describe("RestrictedBindDefinition Webhook", func() {
 					Subjects: []rbacv1.Subject{
 						{Kind: rbacv1.GroupKind, APIGroup: rbacv1.GroupName, Name: "test-group"},
 					},
-					ClusterRoleBindings: ClusterBinding{
+					ClusterRoleBindings: &ClusterBinding{
 						ClusterRoleRefs: []string{"some-role"},
 					},
 				},

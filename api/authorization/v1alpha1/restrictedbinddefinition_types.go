@@ -42,7 +42,7 @@ type RestrictedBindDefinitionSpec struct {
 
 	// ClusterRoleBindings defines cluster-scoped role bindings.
 	// +kubebuilder:validation:Optional
-	ClusterRoleBindings ClusterBinding `json:"clusterRoleBindings,omitempty"`
+	ClusterRoleBindings *ClusterBinding `json:"clusterRoleBindings,omitempty"`
 
 	// RoleBindings defines namespace-scoped role bindings.
 	// +kubebuilder:validation:Optional

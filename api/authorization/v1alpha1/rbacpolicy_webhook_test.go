@@ -414,7 +414,7 @@ var _ = Describe("RBACPolicy Webhook", func() {
 					Subjects: []rbacv1.Subject{
 						{Kind: rbacv1.GroupKind, APIGroup: rbacv1.GroupName, Name: "test-group"},
 					},
-					ClusterRoleBindings: ClusterBinding{
+					ClusterRoleBindings: &ClusterBinding{
 						ClusterRoleRefs: []string{"some-role"},
 					},
 				},

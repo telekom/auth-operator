@@ -62,7 +62,7 @@ func TestEvaluateBindDefinition_CRBNotAllowed(t *testing.T) {
 	}
 	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
 		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
-			ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+			ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
 				ClusterRoleRefs: []string{"admin"},
 			},
 			Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
@@ -88,7 +88,7 @@ func TestEvaluateBindDefinition_CRBAllowed(t *testing.T) {
 	}
 	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
 		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
-			ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+			ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
 				ClusterRoleRefs: []string{"viewer"},
 			},
 			Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
@@ -130,7 +130,7 @@ func TestEvaluateBindDefinition_RoleRefAllowedAndForbidden(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			rbd := &authorizationv1alpha1.RestrictedBindDefinition{
 				Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
-					ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+					ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
 						ClusterRoleRefs: tt.roleRefs,
 					},
 					Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
@@ -436,7 +436,7 @@ func TestEvaluateBindDefinition_AllDimensions(t *testing.T) {
 
 	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
 		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
-			ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+			ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
 				ClusterRoleRefs: []string{"admin"},
 			},
 			RoleBindings: []authorizationv1alpha1.NamespaceBinding{
@@ -584,7 +584,7 @@ func TestEvaluateBindDefinition_RoleRefDefaultDenyEmpty(t *testing.T) {
 
 	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
 		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
-			ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+			ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
 				ClusterRoleRefs: []string{"viewer"},
 			},
 			Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
@@ -616,7 +616,7 @@ func TestEvaluateBindDefinition_AllowedRoleRefSelector(t *testing.T) {
 		}
 		rbd := &authorizationv1alpha1.RestrictedBindDefinition{
 			Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
-				ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+				ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
 					ClusterRoleRefs: []string{"viewer"},
 				},
 				Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
@@ -648,7 +648,7 @@ func TestEvaluateBindDefinition_AllowedRoleRefSelector(t *testing.T) {
 		}
 		rbd := &authorizationv1alpha1.RestrictedBindDefinition{
 			Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
-				ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+				ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
 					ClusterRoleRefs: []string{"viewer"},
 				},
 				Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
@@ -681,7 +681,7 @@ func TestEvaluateBindDefinition_AllowedRoleRefSelector(t *testing.T) {
 		}
 		rbd := &authorizationv1alpha1.RestrictedBindDefinition{
 			Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
-				ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+				ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
 					ClusterRoleRefs: []string{"viewer"},
 				},
 				Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
@@ -715,7 +715,7 @@ func TestEvaluateBindDefinition_AllowedRoleRefSelector(t *testing.T) {
 		}
 		rbd := &authorizationv1alpha1.RestrictedBindDefinition{
 			Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
-				ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+				ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
 					ClusterRoleRefs: []string{"viewer"},
 				},
 				Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
@@ -749,7 +749,7 @@ func TestEvaluateBindDefinition_AllowedRoleRefSelector(t *testing.T) {
 		}
 		rbd := &authorizationv1alpha1.RestrictedBindDefinition{
 			Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
-				ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+				ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
 					ClusterRoleRefs: []string{"viewer"},
 				},
 				Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
@@ -782,7 +782,7 @@ func TestEvaluateBindDefinition_AllowedRoleRefSelector(t *testing.T) {
 		}
 		rbd := &authorizationv1alpha1.RestrictedBindDefinition{
 			Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
-				ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+				ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
 					ClusterRoleRefs: []string{"viewer"},
 				},
 				Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
@@ -811,7 +811,7 @@ func TestEvaluateBindDefinition_AllowedRoleRefSelector(t *testing.T) {
 		}
 		rbd := &authorizationv1alpha1.RestrictedBindDefinition{
 			Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
-				ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+				ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
 					ClusterRoleRefs: []string{"viewer"},
 				},
 				Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
@@ -842,7 +842,7 @@ func TestEvaluateBindDefinition_ForbiddenRoleRefSelector(t *testing.T) {
 
 	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
 		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
-			ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+			ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
 				ClusterRoleRefs: []string{"admin"},
 			},
 			Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},

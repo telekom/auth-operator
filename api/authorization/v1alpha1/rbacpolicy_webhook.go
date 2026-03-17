@@ -19,9 +19,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
-// PolicyRefField is the field index path for lookups by policy reference name.
-// This must match the index registered in pkg/indexer.
-const PolicyRefField = ".spec.policyRef.name"
+const (
+	// PolicyRefField is the field index path for lookups by policy reference name.
+	// This must match the index registered in pkg/indexer.
+	PolicyRefField = ".spec.policyRef.name"
+
+	// HasDefaultAssignmentField indexes RBACPolicy by whether defaultAssignment is set.
+	// Used by admission-time default-policy enforcement to avoid full-policy scans.
+	HasDefaultAssignmentField = ".spec.hasDefaultAssignment"
+)
 
 // RBACPolicyValidator implements admission.Validator for RBACPolicy.
 // +kubebuilder:object:generate=false

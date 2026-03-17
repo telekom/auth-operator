@@ -633,7 +633,11 @@ func (in *RestrictedBindDefinitionSpec) DeepCopyInto(out *RestrictedBindDefiniti
 		*out = make([]rbacv1.Subject, len(*in))
 		copy(*out, *in)
 	}
-	in.ClusterRoleBindings.DeepCopyInto(&out.ClusterRoleBindings)
+	if in.ClusterRoleBindings != nil {
+		in, out := &in.ClusterRoleBindings, &out.ClusterRoleBindings
+		*out = new(ClusterBinding)
+		(*in).DeepCopyInto(*out)
+	}
 	if in.RoleBindings != nil {
 		in, out := &in.RoleBindings, &out.RoleBindings
 		*out = make([]NamespaceBinding, len(*in))

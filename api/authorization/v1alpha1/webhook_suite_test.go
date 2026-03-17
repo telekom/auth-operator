@@ -189,6 +189,19 @@ var _ = BeforeSuite(func() {
 		})
 	Expect(err).NotTo(HaveOccurred())
 
+	err = mgr.GetFieldIndexer().IndexField(ctx, &RBACPolicy{}, HasDefaultAssignmentField,
+		func(obj client.Object) []string {
+			policy, ok := obj.(*RBACPolicy)
+			if !ok {
+				return nil
+			}
+			if policy.Spec.DefaultAssignment == nil {
+				return []string{"false"}
+			}
+			return []string{"true"}
+		})
+	Expect(err).NotTo(HaveOccurred())
+
 	// +kubebuilder:scaffold:webhook
 
 	go func() {

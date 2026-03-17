@@ -59,6 +59,10 @@ const (
 	// RestrictedRoleDefinitionTargetNameField indexes RestrictedRoleDefinition
 	// by TargetName for duplicate detection in webhook validation.
 	RestrictedRoleDefinitionTargetNameField = authorizationv1alpha1.TargetNameField
+
+	// RBACPolicyHasDefaultAssignmentField indexes RBACPolicy resources by whether
+	// defaultAssignment is configured.
+	RBACPolicyHasDefaultAssignmentField = authorizationv1alpha1.HasDefaultAssignmentField
 )
 
 // SetupIndexes registers field indexes shared by controllers and webhooks.
@@ -179,6 +183,16 @@ func SetupIndexes(ctx context.Context, mgr manager.Manager) error {
 		},
 	); err != nil {
 		return fmt.Errorf("failed to create index for RestrictedRoleDefinition.Spec.TargetName: %w", err)
+	}
+
+	// Index RBACPolicy by whether defaultAssignment is set.
+	if err := mgr.GetFieldIndexer().IndexField(
+		ctx,
+		&authorizationv1alpha1.RBACPolicy{},
+		RBACPolicyHasDefaultAssignmentField,
+		RBACPolicyHasDefaultAssignmentFunc,
+	); err != nil {
+		return fmt.Errorf("failed to create index for RBACPolicy.Spec.DefaultAssignment presence: %w", err)
 	}
 
 	return nil
@@ -319,4 +333,17 @@ func RestrictedRoleDefinitionPolicyRefFunc(obj client.Object) []string {
 		return nil
 	}
 	return []string{rrd.Spec.PolicyRef.Name}
+}
+
+// RBACPolicyHasDefaultAssignmentFunc extracts whether an RBACPolicy has
+// defaultAssignment configured for field indexing.
+func RBACPolicyHasDefaultAssignmentFunc(obj client.Object) []string {
+	policy, ok := obj.(*authorizationv1alpha1.RBACPolicy)
+	if !ok {
+		return nil
+	}
+	if policy.Spec.DefaultAssignment == nil {
+		return []string{"false"}
+	}
+	return []string{"true"}
 }
