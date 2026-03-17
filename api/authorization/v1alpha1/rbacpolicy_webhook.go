@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -333,7 +334,7 @@ func validateNameMatchLimits(limits *NameMatchLimits, fldPath *field.Path) field
 }
 
 // validSubjectKinds lists the valid RBAC subject kinds.
-var validSubjectKinds = []string{"User", "Group", "ServiceAccount"}
+var validSubjectKinds = []string{rbacv1.UserKind, rbacv1.GroupKind, rbacv1.ServiceAccountKind}
 
 // validateSubjectKinds validates that all entries in a subject kind list are valid.
 func validateSubjectKinds(kinds []string, fldPath *field.Path) field.ErrorList {

@@ -105,7 +105,7 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 	rrdList := &RestrictedRoleDefinitionList{}
 	if err := v.Client.List(ctx, rrdList, client.MatchingFields{
 		TargetNameField: obj.Spec.TargetName,
-	}); err != nil {
+	}, client.Limit(1)); err != nil {
 		logger.Error(err, "failed to list RestrictedRoleDefinitions", "targetName", obj.Spec.TargetName)
 		return nil, apierrors.NewInternalError(errors.New("unable to list RestrictedRoleDefinitions"))
 	}
@@ -187,7 +187,7 @@ func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 	rrdList := &RestrictedRoleDefinitionList{}
 	if err := v.Client.List(ctx, rrdList, client.MatchingFields{
 		TargetNameField: newObj.Spec.TargetName,
-	}); err != nil {
+	}, client.Limit(1)); err != nil {
 		logger.Error(err, "failed to list RestrictedRoleDefinitions", "targetName", newObj.Spec.TargetName)
 		return nil, apierrors.NewInternalError(errors.New("unable to list RestrictedRoleDefinitions"))
 	}
