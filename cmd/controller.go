@@ -143,9 +143,11 @@ and their status is kept up to date.`,
 			}
 		}
 
-		// Setup field indexes for efficient lookups
-		if err := indexer.SetupIndexes(ctx, mgr); err != nil {
-			return fmt.Errorf("unable to setup field indexes: %w", err)
+		// Setup field indexes for efficient lookups.
+		// Controller-specific indexes may watch RBAC binding types and therefore
+		// must not be registered in the webhook-only manager.
+		if err := indexer.SetupControllerIndexes(ctx, mgr); err != nil {
+			return fmt.Errorf("unable to setup controller field indexes: %w", err)
 		}
 		setupLog.Info("field indexes configured for cached client")
 

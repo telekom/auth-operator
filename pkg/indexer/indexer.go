@@ -61,7 +61,7 @@ const (
 	RestrictedRoleDefinitionTargetNameField = authorizationv1alpha1.TargetNameField
 )
 
-// SetupIndexes registers field indexes on the manager's cache for efficient lookups.
+// SetupIndexes registers field indexes shared by controllers and webhooks.
 // This should be called before starting the manager.
 func SetupIndexes(ctx context.Context, mgr manager.Manager) error {
 	// Index RoleDefinition by Spec.TargetName for duplicate detection in webhook validation
@@ -179,6 +179,20 @@ func SetupIndexes(ctx context.Context, mgr manager.Manager) error {
 		},
 	); err != nil {
 		return fmt.Errorf("failed to create index for RestrictedRoleDefinition.Spec.TargetName: %w", err)
+	}
+
+	return nil
+}
+
+// SetupControllerIndexes registers controller-only field indexes on the
+// manager's cache for efficient reconciliation lookups.
+//
+// These indexes intentionally exclude webhook managers because they would start
+// additional informers for RBAC binding types, requiring broader permissions
+// than admission webhooks otherwise need.
+func SetupControllerIndexes(ctx context.Context, mgr manager.Manager) error {
+	if err := SetupIndexes(ctx, mgr); err != nil {
+		return err
 	}
 
 	// Index ClusterRoleBinding by RestrictedBindDefinition owner name.
