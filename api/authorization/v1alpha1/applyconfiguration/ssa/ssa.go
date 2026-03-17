@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	metav1ac "k8s.io/client-go/applyconfigurations/meta/v1"
@@ -94,7 +95,9 @@ func BindDefinitionStatusFrom(status *authorizationv1alpha1.BindDefinitionStatus
 	// Set BindReconciled
 	result.WithBindReconciled(status.BindReconciled)
 
-	// Set GeneratedServiceAccounts
+	// Set GeneratedServiceAccounts — always initialise the slice (even when empty)
+	// so that SSA retains field ownership and can clear a previously populated list.
+	result.GeneratedServiceAccounts = make([]rbacv1.Subject, 0, len(status.GeneratedServiceAccounts))
 	for _, sa := range status.GeneratedServiceAccounts {
 		result.WithGeneratedServiceAccounts(sa)
 	}
@@ -106,7 +109,9 @@ func BindDefinitionStatusFrom(status *authorizationv1alpha1.BindDefinitionStatus
 		result.WithMissingRoleRefs(ref)
 	}
 
-	// Set ExternalServiceAccounts
+	// Set ExternalServiceAccounts — always initialise the slice (even when empty)
+	// so that SSA retains field ownership and can clear a previously populated list.
+	result.ExternalServiceAccounts = make([]string, 0, len(status.ExternalServiceAccounts))
 	for _, sa := range status.ExternalServiceAccounts {
 		result.WithExternalServiceAccounts(sa)
 	}
@@ -192,6 +197,7 @@ func RestrictedBindDefinitionStatusFrom(status *authorizationv1alpha1.Restricted
 	result.WithObservedGeneration(status.ObservedGeneration)
 	result.WithBindReconciled(status.BindReconciled)
 
+	result.GeneratedServiceAccounts = make([]rbacv1.Subject, 0, len(status.GeneratedServiceAccounts))
 	for _, sa := range status.GeneratedServiceAccounts {
 		result.WithGeneratedServiceAccounts(sa)
 	}
@@ -201,6 +207,7 @@ func RestrictedBindDefinitionStatusFrom(status *authorizationv1alpha1.Restricted
 		result.WithMissingRoleRefs(ref)
 	}
 
+	result.ExternalServiceAccounts = make([]string, 0, len(status.ExternalServiceAccounts))
 	for _, sa := range status.ExternalServiceAccounts {
 		result.WithExternalServiceAccounts(sa)
 	}
