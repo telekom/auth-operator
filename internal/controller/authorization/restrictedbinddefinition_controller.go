@@ -445,7 +445,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdReconcileResources(
 	}
 
 	// Ensure ClusterRoleBindings.
-	for _, clusterRoleRef := range rbd.Spec.ClusterRoleBindings.ClusterRoleRefs {
+	for _, clusterRoleRef := range restrictedClusterRoleRefs(rbd.Spec.ClusterRoleBindings) {
 		crbName := helpers.BuildBindingName(rbd.Spec.TargetName, clusterRoleRef)
 		ac := pkgssa.ClusterRoleBindingWithSubjectsAndRoleRef(
 			crbName, helpers.BuildResourceLabels(rbd.Labels), rbd.Spec.Subjects,
@@ -759,7 +759,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdValidateRoleReferences(
 	}
 
 	// Check ClusterRoleRefs in ClusterRoleBindings.
-	for _, clusterRoleRef := range rbd.Spec.ClusterRoleBindings.ClusterRoleRefs {
+	for _, clusterRoleRef := range restrictedClusterRoleRefs(rbd.Spec.ClusterRoleBindings) {
 		exists, err := r.clusterRoleExists(ctx, clusterRoleRef, clusterRoleExists)
 		if err != nil {
 			return sortedMissingRoles(missingRoleSet), err
@@ -813,6 +813,13 @@ func sortedMissingRoles(missingRoleSet map[string]struct{}) []string {
 	}
 	slices.Sort(missingRoles)
 	return missingRoles
+}
+
+func restrictedClusterRoleRefs(binding *authorizationv1alpha1.ClusterBinding) []string {
+	if binding == nil {
+		return nil
+	}
+	return binding.ClusterRoleRefs
 }
 
 func (r *RestrictedBindDefinitionReconciler) clusterRoleExists(

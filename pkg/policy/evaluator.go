@@ -42,9 +42,10 @@ func EvaluateBindDefinition(
 // evaluateBindingLimits checks binding-related constraints.
 func evaluateBindingLimits(ctx context.Context, limits *authorizationv1alpha1.BindingLimits, rbd *authorizationv1alpha1.RestrictedBindDefinition, lg LabelGetter) []Violation {
 	var violations []Violation
+	clusterRoleRefs := restrictedBindClusterRoleRefs(rbd.Spec.ClusterRoleBindings)
 
 	// Check ClusterRoleBinding permission.
-	if !limits.AllowClusterRoleBindings && len(rbd.Spec.ClusterRoleBindings.ClusterRoleRefs) > 0 {
+	if !limits.AllowClusterRoleBindings && len(clusterRoleRefs) > 0 {
 		violations = append(violations, Violation{
 			Field:   "spec.clusterRoleBindings",
 			Message: "ClusterRoleBindings are not allowed by policy",
@@ -53,7 +54,7 @@ func evaluateBindingLimits(ctx context.Context, limits *authorizationv1alpha1.Bi
 
 	// Check CRB role ref limits.
 	if limits.AllowClusterRoleBindings && limits.ClusterRoleBindingLimits != nil {
-		for i, ref := range rbd.Spec.ClusterRoleBindings.ClusterRoleRefs {
+		for i, ref := range clusterRoleRefs {
 			var roleLabels map[string]string
 			if lg != nil {
 				roleLabels, _ = lg.GetClusterRoleLabels(ctx, ref)
@@ -106,6 +107,13 @@ func evaluateBindingLimits(ctx context.Context, limits *authorizationv1alpha1.Bi
 	}
 
 	return violations
+}
+
+func restrictedBindClusterRoleRefs(binding *authorizationv1alpha1.ClusterBinding) []string {
+	if binding == nil {
+		return nil
+	}
+	return binding.ClusterRoleRefs
 }
 
 // checkRoleRef validates a single role reference against role ref limits.

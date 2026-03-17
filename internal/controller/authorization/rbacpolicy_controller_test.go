@@ -126,7 +126,7 @@ func TestRBACPolicy_Reconcile_WithBoundResources(t *testing.T) {
 			PolicyRef:  authorizationv1alpha1.RBACPolicyReference{Name: "team-policy"},
 			TargetName: "team-a",
 			Subjects:   []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "user1", APIGroup: rbacv1.GroupName}},
-			ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+			ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
 				ClusterRoleRefs: []string{"view"},
 			},
 		},

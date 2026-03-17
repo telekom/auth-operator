@@ -67,12 +67,23 @@ func requesterMatchesDefaultAssignment(da *DefaultPolicyAssignment, username str
 
 func resolveDefaultPoliciesForRequester(ctx context.Context, c client.Client, username string, groups []string) ([]string, error) {
 	policyList := &RBACPolicyList{}
-	if err := c.List(ctx, policyList); err != nil {
-		return nil, fmt.Errorf("list RBACPolicies: %w", err)
+	if err := c.List(ctx, policyList, client.MatchingFields{HasDefaultAssignmentField: "true"}); err != nil {
+		if !isMissingFieldIndexError(err) {
+			return nil, fmt.Errorf("list RBACPolicies with default assignment: %w", err)
+		}
+
+		// Fallback for tests/misconfigured managers without the RBACPolicy
+		// default-assignment field index.
+		if listErr := c.List(ctx, policyList); listErr != nil {
+			return nil, fmt.Errorf("list RBACPolicies: %w", listErr)
+		}
 	}
 
 	matchedPolicies := make([]string, 0)
 	for _, policy := range policyList.Items {
+		if policy.Spec.DefaultAssignment == nil {
+			continue
+		}
 		if requesterMatchesDefaultAssignment(policy.Spec.DefaultAssignment, username, groups) {
 			matchedPolicies = append(matchedPolicies, policy.Name)
 		}
@@ -156,4 +167,12 @@ func requestFromAdmissionContext(ctx context.Context) (admission.Request, bool) 
 	}
 
 	return req, true
+}
+
+func isMissingFieldIndexError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "index") && strings.Contains(msg, "field")
 }

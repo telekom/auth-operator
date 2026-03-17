@@ -59,7 +59,7 @@ func TestRBD_Reconcile_ImpersonationEnabled_UsesImpersonatedClient(t *testing.T)
 			Subjects: []rbacv1.Subject{
 				{Kind: rbacv1.UserKind, Name: "alice", APIGroup: rbacv1.GroupName},
 			},
-			ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{ClusterRoleRefs: []string{"view"}},
+			ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{ClusterRoleRefs: []string{"view"}},
 		},
 	}
 
@@ -112,7 +112,7 @@ func TestRBD_Reconcile_ImpersonationFactoryError_MarksStalled(t *testing.T) {
 			Subjects: []rbacv1.Subject{
 				{Kind: rbacv1.UserKind, Name: "alice", APIGroup: rbacv1.GroupName},
 			},
-			ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{ClusterRoleRefs: []string{"view"}},
+			ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{ClusterRoleRefs: []string{"view"}},
 		},
 	}
 
@@ -174,7 +174,7 @@ func TestRBD_Reconcile_PolicyNotFound(t *testing.T) {
 			Subjects: []rbacv1.Subject{
 				{Kind: rbacv1.UserKind, Name: "user1", APIGroup: rbacv1.GroupName},
 			},
-			ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+			ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
 				ClusterRoleRefs: []string{"view"},
 			},
 		},
@@ -224,7 +224,7 @@ func TestRBD_Reconcile_PolicyViolation_Deprovision(t *testing.T) {
 			Subjects: []rbacv1.Subject{
 				{Kind: rbacv1.UserKind, Name: "user1", APIGroup: rbacv1.GroupName},
 			},
-			ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+			ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
 				ClusterRoleRefs: []string{"admin"},
 			},
 		},
@@ -261,7 +261,7 @@ func TestRBD_Reconcile_Deletion(t *testing.T) {
 			Subjects: []rbacv1.Subject{
 				{Kind: rbacv1.UserKind, Name: "user1", APIGroup: rbacv1.GroupName},
 			},
-			ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+			ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
 				ClusterRoleRefs: []string{"view"},
 			},
 		},
@@ -446,7 +446,7 @@ func TestRBD_Reconcile_PolicyCompliant_CreatesClusterRoleBindings(t *testing.T) 
 			Subjects: []rbacv1.Subject{
 				{Kind: rbacv1.UserKind, Name: "testuser", APIGroup: rbacv1.GroupName},
 			},
-			ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+			ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
 				ClusterRoleRefs: []string{"view"},
 			},
 		},
@@ -570,7 +570,7 @@ func TestRBD_Reconcile_PolicyCompliant_CreatesServiceAccount(t *testing.T) {
 					Namespace: "sa-ns",
 				},
 			},
-			ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+			ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
 				ClusterRoleRefs: []string{"view"},
 			},
 		},
@@ -623,7 +623,7 @@ func TestRBD_Reconcile_DetectsExternalServiceAccount(t *testing.T) {
 			Subjects: []rbacv1.Subject{
 				{Kind: rbacv1.ServiceAccountKind, Name: "ext-sa", Namespace: "ext-ns"},
 			},
-			ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+			ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
 				ClusterRoleRefs: []string{"view"},
 			},
 		},
@@ -809,7 +809,7 @@ func TestRBD_Reconcile_TerminatingNamespaceSkipped(t *testing.T) {
 			Subjects: []rbacv1.Subject{
 				{Kind: rbacv1.ServiceAccountKind, Name: "my-sa", Namespace: "terminating-ns"},
 			},
-			ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+			ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
 				ClusterRoleRefs: []string{"view"},
 			},
 		},
@@ -845,7 +845,7 @@ func TestRBD_Reconcile_WithTracer(t *testing.T) {
 			Subjects: []rbacv1.Subject{
 				{Kind: rbacv1.GroupKind, Name: "devs"},
 			},
-			ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+			ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
 				ClusterRoleRefs: []string{"view"},
 			},
 		},
@@ -1079,7 +1079,7 @@ func TestRBD_Reconcile_FinalizerAlreadyPresent(t *testing.T) {
 			Subjects: []rbacv1.Subject{
 				{Kind: rbacv1.GroupKind, Name: "devs"},
 			},
-			ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+			ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
 				ClusterRoleRefs: []string{"view"},
 			},
 		},

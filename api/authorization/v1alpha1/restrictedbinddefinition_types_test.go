@@ -104,7 +104,7 @@ func TestRestrictedBindDefinitionSpecFields(t *testing.T) {
 					Name:     "developers",
 				},
 			},
-			ClusterRoleBindings: ClusterBinding{
+			ClusterRoleBindings: &ClusterBinding{
 				ClusterRoleRefs: []string{"view"},
 			},
 			RoleBindings: []NamespaceBinding{
@@ -185,7 +185,7 @@ func TestRestrictedBindDefinitionDeepCopy(t *testing.T) {
 			Subjects: []rbacv1.Subject{
 				{Kind: "Group", Name: "devs"},
 			},
-			ClusterRoleBindings: ClusterBinding{
+			ClusterRoleBindings: &ClusterBinding{
 				ClusterRoleRefs: []string{"view"},
 			},
 			RoleBindings: []NamespaceBinding{
