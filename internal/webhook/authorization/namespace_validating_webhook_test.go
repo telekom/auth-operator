@@ -169,6 +169,67 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 			expectedAllow: true,
 		},
 		{
+			name:     "allow system:masters user to create any namespace",
+			bindDefs: []authzv1alpha1.BindDefinition{},
+			request: crAdmission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
+					Name:      "new-ns",
+					Operation: admissionv1.Create,
+					UserInfo: authenticationv1.UserInfo{
+						Username: "cluster-admin-user",
+						Groups:   []string{"system:masters"},
+					},
+					Object: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "new-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner": "tenant",
+								},
+							},
+						}),
+					},
+				},
+			},
+			expectedAllow: true,
+		},
+		{
+			name:     "allow kubernetes-admin user to delete any namespace",
+			bindDefs: []authzv1alpha1.BindDefinition{bindDefPlatform},
+			request: crAdmission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
+					Name:      "platform-ns",
+					Operation: admissionv1.Delete,
+					UserInfo: authenticationv1.UserInfo{
+						Username: "kubernetes-admin",
+					},
+					Object: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "platform-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner": "platform",
+								},
+							},
+						}),
+					},
+					OldObject: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "platform-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner": "platform",
+								},
+							},
+						}),
+					},
+				},
+			},
+			expectedAllow: true,
+		},
+		{
 			name:     "allow system:masters user to reclassify tenant namespace to platform",
 			bindDefs: []authzv1alpha1.BindDefinition{},
 			request: crAdmission.Request{
@@ -206,7 +267,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 			expectedAllow: true,
 		},
 		{
-			name:     "allow system:masters user to delete namespace without ownership",
+			name:     "allow system:masters user to delete any namespace regardless of ownership labels",
 			bindDefs: []authzv1alpha1.BindDefinition{},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
