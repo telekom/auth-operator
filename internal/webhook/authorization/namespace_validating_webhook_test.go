@@ -466,7 +466,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 			expectedAllow: true,
 		},
 		{
-			name:     "allow delete for unauthorized user when tenant selector matches but owner label is unclaimed",
+			name:     "deny delete for unauthorized user when tenant selector matches namespace",
 			bindDefs: []authzv1alpha1.BindDefinition{bindDefTenant},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -501,7 +501,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 					},
 				},
 			},
-			expectedAllow: true,
+			expectedAllow: false,
 		},
 		{
 			name:     "deny delete for unauthorized user when owner label is missing",

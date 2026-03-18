@@ -347,12 +347,12 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 		return admission.Allowed("")
 	}
 
-	// Allow orphan cleanup: if the namespace has a non-empty owner label that is
-	// not claimed by any BindDefinition, DELETE operations are allowed even when
-	// no subject authorization matched.
+	// Allow orphan cleanup only when the namespace has a non-empty owner label
+	// and does not match any BindDefinition selector. This keeps delete
+	// authorization conservative for namespaces that are still targeted.
 	if req.Operation == admissionv1.Delete {
 		ownerValue, hasOwner := ns.Labels[authzv1alpha1.LabelKeyOwner]
-		if hasOwner && ownerValue != "" && !ownerLabelClaimedByAnyBindDefinition(logger, ns.Name, ownerValue, bindDefinitions.Items) {
+		if hasOwner && ownerValue != "" && !namespaceMatchedByAnyBindDefinition(logger, ns, bindDefinitions.Items) {
 			logger.V(1).Info("namespace delete allowed - owner label is unclaimed by any BindDefinition",
 				"namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username)
 			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
@@ -415,7 +415,7 @@ func namespaceMatchesSelector(ns *corev1.Namespace, selector *metav1.LabelSelect
 	return labelSelector.Matches(labels.Set(ns.Labels)), nil
 }
 
-func ownerLabelClaimedByAnyBindDefinition(logger logr.Logger, namespaceName, ownerValue string, bindDefs []authzv1alpha1.BindDefinition) bool {
+func namespaceMatchedByAnyBindDefinition(logger logr.Logger, ns *corev1.Namespace, bindDefs []authzv1alpha1.BindDefinition) bool {
 	for _, bindDef := range bindDefs {
 		if IsRestrictedBindDefinition(bindDef.Name) {
 			continue
@@ -423,16 +423,16 @@ func ownerLabelClaimedByAnyBindDefinition(logger logr.Logger, namespaceName, own
 
 		for _, roleBinding := range bindDef.Spec.RoleBindings {
 			for _, namespaceSelector := range roleBinding.NamespaceSelector {
-				claimsOwner, err := selectorClaimsOwnerValue(&namespaceSelector, ownerValue)
+				matches, err := namespaceMatchesSelector(ns, &namespaceSelector)
 				if err != nil {
-					// Fail closed: if selector evaluation fails, treat namespace as claimed
+					// Fail closed: if selector evaluation fails, treat namespace as matched
 					// to avoid accidentally allowing deletion.
-					logger.Error(err, "failed to evaluate owner claim while checking namespace delete; treating owner as claimed",
-						"namespace", namespaceName, "bindDefinition", bindDef.Name)
+					logger.Error(err, "failed to evaluate namespace selector while checking namespace delete; treating namespace as matched",
+						"namespace", ns.Name, "bindDefinition", bindDef.Name)
 					return true
 				}
 
-				if claimsOwner {
+				if matches {
 					return true
 				}
 			}
@@ -440,41 +440,4 @@ func ownerLabelClaimedByAnyBindDefinition(logger logr.Logger, namespaceName, own
 	}
 
 	return false
-}
-
-func selectorClaimsOwnerValue(selector *metav1.LabelSelector, ownerValue string) (bool, error) {
-	if selector == nil {
-		return false, nil
-	}
-
-	ownerOnlySelector := &metav1.LabelSelector{
-		MatchLabels:      map[string]string{},
-		MatchExpressions: []metav1.LabelSelectorRequirement{},
-	}
-
-	hasOwnerConstraint := false
-	if selector.MatchLabels != nil {
-		if ownerMatchValue, ok := selector.MatchLabels[authzv1alpha1.LabelKeyOwner]; ok {
-			ownerOnlySelector.MatchLabels[authzv1alpha1.LabelKeyOwner] = ownerMatchValue
-			hasOwnerConstraint = true
-		}
-	}
-
-	for _, expr := range selector.MatchExpressions {
-		if expr.Key == authzv1alpha1.LabelKeyOwner {
-			ownerOnlySelector.MatchExpressions = append(ownerOnlySelector.MatchExpressions, expr)
-			hasOwnerConstraint = true
-		}
-	}
-
-	if !hasOwnerConstraint {
-		return false, nil
-	}
-
-	parsedSelector, err := metav1.LabelSelectorAsSelector(ownerOnlySelector)
-	if err != nil {
-		return false, err
-	}
-
-	return parsedSelector.Matches(labels.Set{authzv1alpha1.LabelKeyOwner: ownerValue}), nil
 }
