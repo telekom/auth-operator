@@ -42,7 +42,7 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 		"namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username)
 
 	// Check for bypass conditions
-	bypassResult := CheckBypass(req.UserInfo.Username, req.Operation, req.Name, m.TDGMigration)
+	bypassResult := CheckBypass(req.UserInfo.Username, req.UserInfo.Groups, req.Operation, req.Name, m.TDGMigration)
 	if bypassResult.ShouldBypass {
 		// Log bypass at Info level for security auditing
 		logger.Info("AUDIT: webhook bypass granted",

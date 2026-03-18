@@ -47,13 +47,12 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 		"namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username)
 
 	// Check for bypass conditions
-	bypassResult := CheckBypass(req.UserInfo.Username, req.Operation, req.Name, v.TDGMigration)
+	bypassResult := CheckBypass(req.UserInfo.Username, req.UserInfo.Groups, req.Operation, req.Name, v.TDGMigration)
 	if bypassResult.ShouldBypass {
 		logger.Info("AUDIT: webhook bypass granted",
 			"namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username,
 			"bypassReason", bypassResult.Reason, "webhook", "validator")
 
-		// Even bypass users must go through label immutability checks on updates.
 		// For Create and Delete operations, bypass users skip all validation.
 		if req.Operation != admissionv1.Update {
 			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
@@ -69,19 +68,25 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 	if req.Operation == admissionv1.Update {
 		logger.V(2).Info("validating namespace update", "namespace", req.Name)
 
-		if resp := v.validateLabelImmutability(logger, req, &ns, &oldNs, bypassResult); resp != nil {
-			return *resp
-		}
+		if !bypassResult.SkipUpdateLabelChecks {
+			if resp := v.validateLabelImmutability(logger, req, &ns, &oldNs, bypassResult); resp != nil {
+				return *resp
+			}
 
-		if resp := v.crossValidateLegacyLabels(logger, req, &ns, &oldNs); resp != nil {
-			return *resp
-		}
+			if resp := v.crossValidateLegacyLabels(logger, req, &ns, &oldNs); resp != nil {
+				return *resp
+			}
 
-		logger.V(3).Info("namespace labels validated", "namespace", req.Name)
+			logger.V(3).Info("namespace labels validated", "namespace", req.Name)
+		} else {
+			logger.V(1).Info("AUDIT: privileged bypass skipped update label checks",
+				"namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username,
+				"bypassReason", bypassResult.Reason)
+		}
 	}
 
-	// Bypass users that passed the label immutability check above can skip
-	// the BindDefinition authorization check.
+	// Bypass users can skip the BindDefinition authorization check once
+	// any required update-label checks have been processed.
 	if bypassResult.ShouldBypass {
 		logger.V(2).Info("bypass user passed label immutability check - allowing",
 			"namespace", req.Name, "bypassReason", bypassResult.Reason)
@@ -332,6 +337,19 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 		return admission.Allowed("")
 	}
 
+	// Allow orphan cleanup: if the namespace owner label is not claimed by any
+	// BindDefinition, DELETE operations are allowed even when no subject
+	// authorization matched.
+	if req.Operation == admissionv1.Delete {
+		ownerClaimed := ownerLabelClaimedByAnyBindDefinition(logger, ns, bindDefinitions.Items)
+		if !ownerClaimed {
+			logger.V(1).Info("namespace delete allowed - owner label is unclaimed by any BindDefinition",
+				"namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username)
+			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
+			return admission.Allowed("")
+		}
+	}
+
 	// Last resort: if the user is a ServiceAccount performing CREATE/UPDATE, check if
 	// its source namespace has the same tracked ownership labels as the target namespace (issue #202).
 	// This is restricted to CREATE/UPDATE — DELETE is intentionally excluded.
@@ -385,4 +403,73 @@ func namespaceMatchesSelector(ns *corev1.Namespace, selector *metav1.LabelSelect
 
 	// Check if the namespace's labels match the selector
 	return labelSelector.Matches(labels.Set(ns.Labels)), nil
+}
+
+func ownerLabelClaimedByAnyBindDefinition(logger logr.Logger, ns *corev1.Namespace, bindDefs []authzv1alpha1.BindDefinition) bool {
+	ownerValue, hasOwner := ns.Labels[authzv1alpha1.LabelKeyOwner]
+	if !hasOwner || ownerValue == "" {
+		return false
+	}
+
+	for _, bindDef := range bindDefs {
+		if IsRestrictedBindDefinition(bindDef.Name) {
+			continue
+		}
+
+		for _, roleBinding := range bindDef.Spec.RoleBindings {
+			for _, namespaceSelector := range roleBinding.NamespaceSelector {
+				claimsOwner, err := selectorClaimsOwnerValue(&namespaceSelector, ownerValue)
+				if err != nil {
+					// Fail closed: if selector evaluation fails, treat namespace as claimed
+					// to avoid accidentally allowing deletion.
+					logger.Error(err, "failed to evaluate owner claim while checking namespace delete; treating owner as claimed",
+						"namespace", ns.Name, "bindDefinition", bindDef.Name)
+					return true
+				}
+
+				if claimsOwner {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
+}
+
+func selectorClaimsOwnerValue(selector *metav1.LabelSelector, ownerValue string) (bool, error) {
+	if selector == nil {
+		return false, nil
+	}
+
+	ownerOnlySelector := &metav1.LabelSelector{
+		MatchLabels:      map[string]string{},
+		MatchExpressions: []metav1.LabelSelectorRequirement{},
+	}
+
+	hasOwnerConstraint := false
+	if selector.MatchLabels != nil {
+		if ownerMatchValue, ok := selector.MatchLabels[authzv1alpha1.LabelKeyOwner]; ok {
+			ownerOnlySelector.MatchLabels[authzv1alpha1.LabelKeyOwner] = ownerMatchValue
+			hasOwnerConstraint = true
+		}
+	}
+
+	for _, expr := range selector.MatchExpressions {
+		if expr.Key == authzv1alpha1.LabelKeyOwner {
+			ownerOnlySelector.MatchExpressions = append(ownerOnlySelector.MatchExpressions, expr)
+			hasOwnerConstraint = true
+		}
+	}
+
+	if !hasOwnerConstraint {
+		return false, nil
+	}
+
+	parsedSelector, err := metav1.LabelSelectorAsSelector(ownerOnlySelector)
+	if err != nil {
+		return false, err
+	}
+
+	return parsedSelector.Matches(labels.Set{authzv1alpha1.LabelKeyOwner: ownerValue}), nil
 }

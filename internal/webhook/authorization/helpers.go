@@ -38,10 +38,12 @@ SECURITY CONSIDERATIONS:
 
 BYPASS CATEGORIES:
 
-1. kubernetes-admin:
+1. Privileged cluster admins:
+	- Account: kubernetes-admin
+	- Group: system:masters
    - Full bypass for all operations
-   - This is the cluster administrator account
-   - Rationale: Admin needs unrestricted access for cluster management
+	- Rationale: Cluster admins need unrestricted access for emergency and
+	  break-glass operations
 
 2. Trident Operator (storage):
    - Account: system:serviceaccount:t-caas-storage:trident-operator
@@ -70,6 +72,7 @@ MODIFYING BYPASS ACCOUNTS:
 // Common service account constants.
 const (
 	kubernetesAdmin            = "kubernetes-admin"
+	systemMastersGroup         = "system:masters"
 	tridentOperatorStorageSA   = "system:serviceaccount:t-caas-storage:trident-operator"
 	tridentOperatorSystemSA    = "system:serviceaccount:trident-system:trident-operator"
 	helmControllerSA           = "system:serviceaccount:flux-system:helm-controller"
@@ -106,16 +109,30 @@ func ParseServiceAccount(username string) ServiceAccountInfo {
 
 // BypassCheckResult represents the result of a bypass check.
 type BypassCheckResult struct {
-	ShouldBypass bool
-	Reason       string
+	ShouldBypass          bool
+	SkipUpdateLabelChecks bool
+	Reason                string
 }
 
 // CheckBypass checks if a request should bypass the namespace webhook (both mutator and validator).
-// Returns true if the user is a known system account that should be allowed without processing.
-func CheckBypass(username string, operation admissionv1.Operation, namespace string, tdgMigration bool) BypassCheckResult {
+// Returns bypass metadata for known principals that should be allowed without full processing.
+func CheckBypass(username string, groups []string, operation admissionv1.Operation, namespace string, tdgMigration bool) BypassCheckResult {
 	// Allow kubernetes-admin without processing.
 	if username == kubernetesAdmin {
-		return BypassCheckResult{ShouldBypass: true, Reason: "kubernetes-admin"}
+		return BypassCheckResult{
+			ShouldBypass:          true,
+			SkipUpdateLabelChecks: true,
+			Reason:                "kubernetes-admin",
+		}
+	}
+
+	// Allow any principal in system:masters without processing.
+	if hasGroup(groups, systemMastersGroup) {
+		return BypassCheckResult{
+			ShouldBypass:          true,
+			SkipUpdateLabelChecks: true,
+			Reason:                "system:masters",
+		}
 	}
 
 	// Allow trident-operator for its own namespace
@@ -149,6 +166,16 @@ func CheckBypass(username string, operation admissionv1.Operation, namespace str
 	}
 
 	return BypassCheckResult{ShouldBypass: false}
+}
+
+func hasGroup(groups []string, expected string) bool {
+	for _, group := range groups {
+		if group == expected {
+			return true
+		}
+	}
+
+	return false
 }
 
 // MatchesSubjects checks if the user (via groups or service account) matches any of the subjects.

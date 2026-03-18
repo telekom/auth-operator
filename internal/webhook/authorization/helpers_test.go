@@ -86,6 +86,7 @@ func TestCheckBypass(t *testing.T) {
 	tests := []struct {
 		name         string
 		username     string
+		groups       []string
 		operation    admissionv1.Operation
 		namespace    string
 		tdgMigration bool
@@ -99,6 +100,15 @@ func TestCheckBypass(t *testing.T) {
 			namespace:  "test-ns",
 			wantBypass: true,
 			wantReason: "kubernetes-admin",
+		},
+		{
+			name:       "system:masters group always bypasses",
+			username:   "cluster-admin-user",
+			groups:     []string{"system:masters"},
+			operation:  admissionv1.Update,
+			namespace:  "test-ns",
+			wantBypass: true,
+			wantReason: "system:masters",
 		},
 		{
 			name:       "trident-operator for t-caas-storage update",
@@ -234,7 +244,7 @@ func TestCheckBypass(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := CheckBypass(tt.username, tt.operation, tt.namespace, tt.tdgMigration)
+			result := CheckBypass(tt.username, tt.groups, tt.operation, tt.namespace, tt.tdgMigration)
 			if result.ShouldBypass != tt.wantBypass {
 				t.Errorf("CheckBypass() ShouldBypass = %v, want %v", result.ShouldBypass, tt.wantBypass)
 			}
@@ -249,6 +259,7 @@ func TestCheckBypassValidatorCases(t *testing.T) {
 	tests := []struct {
 		name         string
 		username     string
+		groups       []string
 		operation    admissionv1.Operation
 		namespace    string
 		tdgMigration bool
@@ -262,6 +273,15 @@ func TestCheckBypassValidatorCases(t *testing.T) {
 			namespace:  "test-ns",
 			wantBypass: true,
 			wantReason: "kubernetes-admin",
+		},
+		{
+			name:       "system:masters group always bypasses",
+			username:   "cluster-admin-user",
+			groups:     []string{"system:masters"},
+			operation:  admissionv1.Update,
+			namespace:  "test-ns",
+			wantBypass: true,
+			wantReason: "system:masters",
 		},
 		{
 			name:       "trident-operator for t-caas-storage update",
@@ -366,7 +386,7 @@ func TestCheckBypassValidatorCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := CheckBypass(tt.username, tt.operation, tt.namespace, tt.tdgMigration)
+			result := CheckBypass(tt.username, tt.groups, tt.operation, tt.namespace, tt.tdgMigration)
 			if result.ShouldBypass != tt.wantBypass {
 				t.Errorf("CheckBypass() ShouldBypass = %v, want %v", result.ShouldBypass, tt.wantBypass)
 			}
