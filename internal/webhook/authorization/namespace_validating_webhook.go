@@ -88,8 +88,11 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 	// Bypass users can skip the BindDefinition authorization check once
 	// any required update-label checks have been processed.
 	if bypassResult.ShouldBypass {
-		logger.V(2).Info("bypass user passed label immutability check - allowing",
-			"namespace", req.Name, "bypassReason", bypassResult.Reason)
+		logger.V(2).Info("bypass granted - allowing namespace operation",
+			"namespace", req.Name,
+			"operation", req.Operation,
+			"bypassReason", bypassResult.Reason,
+			"skipUpdateLabelChecks", bypassResult.SkipUpdateLabelChecks)
 		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
 		return admission.Allowed("")
 	}
@@ -110,7 +113,14 @@ func (v *NamespaceValidator) decodeNamespaces(logger logr.Logger, req admission.
 		err = v.Decoder.Decode(req, &ns)
 		oldErr = v.Decoder.DecodeRaw(req.OldObject, &oldNs)
 	case admissionv1.Delete:
-		err = v.Decoder.DecodeRaw(req.OldObject, &ns)
+		switch {
+		case len(req.OldObject.Raw) > 0:
+			err = v.Decoder.DecodeRaw(req.OldObject, &ns)
+		case len(req.Object.Raw) > 0:
+			err = v.Decoder.DecodeRaw(req.Object, &ns)
+		default:
+			err = fmt.Errorf("missing namespace object for delete operation")
+		}
 	default:
 		logger.V(3).Info("unknown operation type - allowing", "namespace", req.Name, "operation", req.Operation)
 		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
@@ -337,12 +347,12 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 		return admission.Allowed("")
 	}
 
-	// Allow orphan cleanup: if the namespace owner label is not claimed by any
-	// BindDefinition, DELETE operations are allowed even when no subject
-	// authorization matched.
+	// Allow orphan cleanup: if the namespace has a non-empty owner label that is
+	// not claimed by any BindDefinition, DELETE operations are allowed even when
+	// no subject authorization matched.
 	if req.Operation == admissionv1.Delete {
-		ownerClaimed := ownerLabelClaimedByAnyBindDefinition(logger, ns, bindDefinitions.Items)
-		if !ownerClaimed {
+		ownerValue, hasOwner := ns.Labels[authzv1alpha1.LabelKeyOwner]
+		if hasOwner && ownerValue != "" && !ownerLabelClaimedByAnyBindDefinition(logger, ns.Name, ownerValue, bindDefinitions.Items) {
 			logger.V(1).Info("namespace delete allowed - owner label is unclaimed by any BindDefinition",
 				"namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username)
 			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
@@ -405,12 +415,7 @@ func namespaceMatchesSelector(ns *corev1.Namespace, selector *metav1.LabelSelect
 	return labelSelector.Matches(labels.Set(ns.Labels)), nil
 }
 
-func ownerLabelClaimedByAnyBindDefinition(logger logr.Logger, ns *corev1.Namespace, bindDefs []authzv1alpha1.BindDefinition) bool {
-	ownerValue, hasOwner := ns.Labels[authzv1alpha1.LabelKeyOwner]
-	if !hasOwner || ownerValue == "" {
-		return false
-	}
-
+func ownerLabelClaimedByAnyBindDefinition(logger logr.Logger, namespaceName, ownerValue string, bindDefs []authzv1alpha1.BindDefinition) bool {
 	for _, bindDef := range bindDefs {
 		if IsRestrictedBindDefinition(bindDef.Name) {
 			continue
@@ -423,7 +428,7 @@ func ownerLabelClaimedByAnyBindDefinition(logger logr.Logger, ns *corev1.Namespa
 					// Fail closed: if selector evaluation fails, treat namespace as claimed
 					// to avoid accidentally allowing deletion.
 					logger.Error(err, "failed to evaluate owner claim while checking namespace delete; treating owner as claimed",
-						"namespace", ns.Name, "bindDefinition", bindDef.Name)
+						"namespace", namespaceName, "bindDefinition", bindDef.Name)
 					return true
 				}
 

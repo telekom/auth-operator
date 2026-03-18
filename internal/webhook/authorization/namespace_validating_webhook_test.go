@@ -217,6 +217,17 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 						Username: "cluster-admin-user",
 						Groups:   []string{"system:masters"},
 					},
+					Object: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "tenant-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner":  "tenant",
+									"t-caas.telekom.com/tenant": "tenant-a",
+								},
+							},
+						}),
+					},
 					OldObject: runtime.RawExtension{
 						Raw: mustMarshalJSON(t, &corev1.Namespace{
 							ObjectMeta: metav1.ObjectMeta{
@@ -394,6 +405,16 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 						Username: "platform-user",
 						Groups:   []string{"oidc:platform-admins"},
 					},
+					Object: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "platform-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner": "platform",
+								},
+							},
+						}),
+					},
 					OldObject: runtime.RawExtension{
 						Raw: mustMarshalJSON(t, &corev1.Namespace{
 							ObjectMeta: metav1.ObjectMeta{
@@ -419,6 +440,16 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 					UserInfo: authenticationv1.UserInfo{
 						Username: "unauthorized-user",
 						Groups:   []string{"oidc:random-group"},
+					},
+					Object: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "invalid-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner": "invalid-owner",
+								},
+							},
+						}),
 					},
 					OldObject: runtime.RawExtension{
 						Raw: mustMarshalJSON(t, &corev1.Namespace{
@@ -446,6 +477,17 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 						Username: "unauthorized-user",
 						Groups:   []string{"oidc:random-group"},
 					},
+					Object: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "invalid-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner":  "invalid-owner",
+									"t-caas.telekom.com/tenant": "tenant-a",
+								},
+							},
+						}),
+					},
 					OldObject: runtime.RawExtension{
 						Raw: mustMarshalJSON(t, &corev1.Namespace{
 							ObjectMeta: metav1.ObjectMeta{
@@ -462,7 +504,79 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 			expectedAllow: true,
 		},
 		{
-			name:     "deny delete for unauthorized user when namespace is claimed by a BindDefinition",
+			name:     "deny delete for unauthorized user when owner label is missing",
+			bindDefs: []authzv1alpha1.BindDefinition{bindDefPlatform},
+			request: crAdmission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
+					Name:      "invalid-ns-no-owner",
+					Operation: admissionv1.Delete,
+					UserInfo: authenticationv1.UserInfo{
+						Username: "unauthorized-user",
+						Groups:   []string{"oidc:random-group"},
+					},
+					Object: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "invalid-ns-no-owner",
+								Labels: map[string]string{
+									"t-caas.telekom.com/tenant": "tenant-a",
+								},
+							},
+						}),
+					},
+					OldObject: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "invalid-ns-no-owner",
+								Labels: map[string]string{
+									"t-caas.telekom.com/tenant": "tenant-a",
+								},
+							},
+						}),
+					},
+				},
+			},
+			expectedAllow: false,
+		},
+		{
+			name:     "deny delete for unauthorized user when owner label is empty",
+			bindDefs: []authzv1alpha1.BindDefinition{bindDefPlatform},
+			request: crAdmission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
+					Name:      "invalid-ns-empty-owner",
+					Operation: admissionv1.Delete,
+					UserInfo: authenticationv1.UserInfo{
+						Username: "unauthorized-user",
+						Groups:   []string{"oidc:random-group"},
+					},
+					Object: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "invalid-ns-empty-owner",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner": "",
+								},
+							},
+						}),
+					},
+					OldObject: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "invalid-ns-empty-owner",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner": "",
+								},
+							},
+						}),
+					},
+				},
+			},
+			expectedAllow: false,
+		},
+		{
+			name:     "deny delete for unauthorized user when owner label is claimed by MatchLabels",
 			bindDefs: []authzv1alpha1.BindDefinition{bindDefPlatform},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -472,6 +586,16 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 					UserInfo: authenticationv1.UserInfo{
 						Username: "unauthorized-user",
 						Groups:   []string{"oidc:random-group"},
+					},
+					Object: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "platform-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner": "platform",
+								},
+							},
+						}),
 					},
 					OldObject: runtime.RawExtension{
 						Raw: mustMarshalJSON(t, &corev1.Namespace{
@@ -498,6 +622,16 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 					UserInfo: authenticationv1.UserInfo{
 						Username: "unauthorized-user",
 						Groups:   []string{"oidc:random-group"},
+					},
+					Object: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "invalid-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner": "invalid-owner",
+								},
+							},
+						}),
 					},
 					OldObject: runtime.RawExtension{
 						Raw: mustMarshalJSON(t, &corev1.Namespace{
