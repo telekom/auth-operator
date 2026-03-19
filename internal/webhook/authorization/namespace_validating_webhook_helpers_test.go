@@ -135,6 +135,49 @@ func TestDecodeNamespaces_Delete(t *testing.T) {
 	}
 }
 
+func TestDecodeNamespaces_DeleteObjectFallback(t *testing.T) {
+	v := &NamespaceValidator{Decoder: newDecoder()}
+	logger := logf.FromContext(context.Background())
+
+	objNs := mustMarshal(t, &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{Name: "deleted-ns-object"},
+	})
+
+	req := admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Operation: admissionv1.Delete,
+			Object:    runtime.RawExtension{Raw: objNs},
+		},
+	}
+
+	ns, _, errResp := v.decodeNamespaces(logger, req)
+	if errResp != nil {
+		t.Fatalf("unexpected error response: %v", errResp.Result)
+	}
+	if ns.Name != "deleted-ns-object" {
+		t.Errorf("expected namespace name 'deleted-ns-object', got %q", ns.Name)
+	}
+}
+
+func TestDecodeNamespaces_DeleteMissingObject(t *testing.T) {
+	v := &NamespaceValidator{Decoder: newDecoder()}
+	logger := logf.FromContext(context.Background())
+
+	req := admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Operation: admissionv1.Delete,
+		},
+	}
+
+	_, _, errResp := v.decodeNamespaces(logger, req)
+	if errResp == nil {
+		t.Fatal("expected error response for missing delete object")
+	}
+	if errResp.Allowed {
+		t.Error("expected missing delete object to deny the request")
+	}
+}
+
 func TestDecodeNamespaces_UnknownOperation(t *testing.T) {
 	v := &NamespaceValidator{Decoder: newDecoder()}
 	logger := logf.FromContext(context.Background())

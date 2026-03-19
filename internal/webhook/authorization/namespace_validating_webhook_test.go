@@ -104,6 +104,36 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 	}
 
+	bindDefOwnerExpression := authzv1alpha1.BindDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "owner-expression-binddefinition",
+		},
+		Spec: authzv1alpha1.BindDefinitionSpec{
+			TargetName: "bd-owner-expression",
+			Subjects: []rbacv1.Subject{
+				{
+					APIGroup: "rbac.authorization.k8s.io",
+					Kind:     "Group",
+					Name:     "oidc:platform-admins",
+				},
+			},
+			RoleBindings: []authzv1alpha1.NamespaceBinding{{
+				ClusterRoleRefs: []string{"platform-admin"},
+				NamespaceSelector: []metav1.LabelSelector{
+					{
+						MatchExpressions: []metav1.LabelSelectorRequirement{
+							{
+								Key:      "t-caas.telekom.com/owner",
+								Operator: metav1.LabelSelectorOpIn,
+								Values:   []string{"invalid-owner"},
+							},
+						},
+					},
+				},
+			}},
+		},
+	}
+
 	tests := []struct {
 		name           string
 		bindDefs       []authzv1alpha1.BindDefinition
@@ -133,6 +163,142 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 					Operation: admissionv1.Create,
 					UserInfo: authenticationv1.UserInfo{
 						Username: "kubernetes-admin",
+					},
+				},
+			},
+			expectedAllow: true,
+		},
+		{
+			name:     "allow system:masters user to create any namespace",
+			bindDefs: []authzv1alpha1.BindDefinition{},
+			request: crAdmission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
+					Name:      "new-ns",
+					Operation: admissionv1.Create,
+					UserInfo: authenticationv1.UserInfo{
+						Username: "cluster-admin-user",
+						Groups:   []string{"system:masters"},
+					},
+					Object: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "new-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner": "tenant",
+								},
+							},
+						}),
+					},
+				},
+			},
+			expectedAllow: true,
+		},
+		{
+			name:     "allow kubernetes-admin user to delete any namespace",
+			bindDefs: []authzv1alpha1.BindDefinition{bindDefPlatform},
+			request: crAdmission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
+					Name:      "platform-ns",
+					Operation: admissionv1.Delete,
+					UserInfo: authenticationv1.UserInfo{
+						Username: "kubernetes-admin",
+					},
+					Object: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "platform-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner": "platform",
+								},
+							},
+						}),
+					},
+					OldObject: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "platform-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner": "platform",
+								},
+							},
+						}),
+					},
+				},
+			},
+			expectedAllow: true,
+		},
+		{
+			name:     "allow system:masters user to reclassify tenant namespace to platform",
+			bindDefs: []authzv1alpha1.BindDefinition{},
+			request: crAdmission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
+					Name:      "tenant-ns",
+					Operation: admissionv1.Update,
+					UserInfo: authenticationv1.UserInfo{
+						Username: "cluster-admin-user",
+						Groups:   []string{"system:masters"},
+					},
+					Object: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "tenant-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner": "platform",
+								},
+							},
+						}),
+					},
+					OldObject: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "tenant-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner":  "tenant",
+									"t-caas.telekom.com/tenant": "tenant-a",
+								},
+							},
+						}),
+					},
+				},
+			},
+			expectedAllow: true,
+		},
+		{
+			name:     "allow system:masters user to delete any namespace regardless of ownership labels",
+			bindDefs: []authzv1alpha1.BindDefinition{},
+			request: crAdmission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
+					Name:      "tenant-ns",
+					Operation: admissionv1.Delete,
+					UserInfo: authenticationv1.UserInfo{
+						Username: "cluster-admin-user",
+						Groups:   []string{"system:masters"},
+					},
+					Object: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "tenant-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner":  "tenant",
+									"t-caas.telekom.com/tenant": "tenant-a",
+								},
+							},
+						}),
+					},
+					OldObject: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "tenant-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner":  "tenant",
+									"t-caas.telekom.com/tenant": "tenant-a",
+								},
+							},
+						}),
 					},
 				},
 			},
@@ -300,6 +466,16 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 						Username: "platform-user",
 						Groups:   []string{"oidc:platform-admins"},
 					},
+					Object: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "platform-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner": "platform",
+								},
+							},
+						}),
+					},
 					OldObject: runtime.RawExtension{
 						Raw: mustMarshalJSON(t, &corev1.Namespace{
 							ObjectMeta: metav1.ObjectMeta{
@@ -313,6 +489,224 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 				},
 			},
 			expectedAllow: true,
+		},
+		{
+			name:     "allow delete for unauthorized user when namespace is unclaimed by any BindDefinition",
+			bindDefs: []authzv1alpha1.BindDefinition{bindDefPlatform},
+			request: crAdmission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
+					Name:      "invalid-ns",
+					Operation: admissionv1.Delete,
+					UserInfo: authenticationv1.UserInfo{
+						Username: "unauthorized-user",
+						Groups:   []string{"oidc:random-group"},
+					},
+					Object: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "invalid-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner": "invalid-owner",
+								},
+							},
+						}),
+					},
+					OldObject: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "invalid-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner": "invalid-owner",
+								},
+							},
+						}),
+					},
+				},
+			},
+			expectedAllow: true,
+		},
+		{
+			name:     "deny delete for unauthorized user when tenant selector matches namespace",
+			bindDefs: []authzv1alpha1.BindDefinition{bindDefTenant},
+			request: crAdmission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
+					Name:      "invalid-ns",
+					Operation: admissionv1.Delete,
+					UserInfo: authenticationv1.UserInfo{
+						Username: "unauthorized-user",
+						Groups:   []string{"oidc:random-group"},
+					},
+					Object: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "invalid-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner":  "invalid-owner",
+									"t-caas.telekom.com/tenant": "tenant-a",
+								},
+							},
+						}),
+					},
+					OldObject: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "invalid-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner":  "invalid-owner",
+									"t-caas.telekom.com/tenant": "tenant-a",
+								},
+							},
+						}),
+					},
+				},
+			},
+			expectedAllow: false,
+		},
+		{
+			name:     "deny delete for unauthorized user when owner label is missing",
+			bindDefs: []authzv1alpha1.BindDefinition{bindDefPlatform},
+			request: crAdmission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
+					Name:      "invalid-ns-no-owner",
+					Operation: admissionv1.Delete,
+					UserInfo: authenticationv1.UserInfo{
+						Username: "unauthorized-user",
+						Groups:   []string{"oidc:random-group"},
+					},
+					Object: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "invalid-ns-no-owner",
+								Labels: map[string]string{
+									"t-caas.telekom.com/tenant": "tenant-a",
+								},
+							},
+						}),
+					},
+					OldObject: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "invalid-ns-no-owner",
+								Labels: map[string]string{
+									"t-caas.telekom.com/tenant": "tenant-a",
+								},
+							},
+						}),
+					},
+				},
+			},
+			expectedAllow: false,
+		},
+		{
+			name:     "deny delete for unauthorized user when owner label is empty",
+			bindDefs: []authzv1alpha1.BindDefinition{bindDefPlatform},
+			request: crAdmission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
+					Name:      "invalid-ns-empty-owner",
+					Operation: admissionv1.Delete,
+					UserInfo: authenticationv1.UserInfo{
+						Username: "unauthorized-user",
+						Groups:   []string{"oidc:random-group"},
+					},
+					Object: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "invalid-ns-empty-owner",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner": "",
+								},
+							},
+						}),
+					},
+					OldObject: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "invalid-ns-empty-owner",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner": "",
+								},
+							},
+						}),
+					},
+				},
+			},
+			expectedAllow: false,
+		},
+		{
+			name:     "deny delete for unauthorized user when owner label is claimed by MatchLabels",
+			bindDefs: []authzv1alpha1.BindDefinition{bindDefPlatform},
+			request: crAdmission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
+					Name:      "platform-ns",
+					Operation: admissionv1.Delete,
+					UserInfo: authenticationv1.UserInfo{
+						Username: "unauthorized-user",
+						Groups:   []string{"oidc:random-group"},
+					},
+					Object: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "platform-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner": "platform",
+								},
+							},
+						}),
+					},
+					OldObject: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "platform-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner": "platform",
+								},
+							},
+						}),
+					},
+				},
+			},
+			expectedAllow: false,
+		},
+		{
+			name:     "deny delete for unauthorized user when owner label is claimed by owner matchExpression",
+			bindDefs: []authzv1alpha1.BindDefinition{bindDefOwnerExpression},
+			request: crAdmission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
+					Name:      "invalid-ns",
+					Operation: admissionv1.Delete,
+					UserInfo: authenticationv1.UserInfo{
+						Username: "unauthorized-user",
+						Groups:   []string{"oidc:random-group"},
+					},
+					Object: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "invalid-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner": "invalid-owner",
+								},
+							},
+						}),
+					},
+					OldObject: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "invalid-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner": "invalid-owner",
+								},
+							},
+						}),
+					},
+				},
+			},
+			expectedAllow: false,
 		},
 		{
 			name:         "allow TDG migration label adoption when TDGMigration enabled for helm-controller",
@@ -2190,7 +2584,7 @@ func TestNamespaceValidatorSANamespaceInheritance(t *testing.T) {
 			expectedAllow: false,
 		},
 		{
-			name:      "SA DELETE operation - SA fallback not applied - denied",
+			name:      "SA DELETE operation on unclaimed namespace - allowed for orphan cleanup",
 			operation: admissionv1.Delete,
 			username:  "system:serviceaccount:tenant-alpha:my-operator",
 			targetNS: &corev1.Namespace{
@@ -2211,7 +2605,7 @@ func TestNamespaceValidatorSANamespaceInheritance(t *testing.T) {
 					},
 				},
 			},
-			expectedAllow: false,
+			expectedAllow: true,
 		},
 	}
 
@@ -2239,7 +2633,7 @@ func TestNamespaceValidatorSANamespaceInheritance(t *testing.T) {
 				},
 				Object: runtime.RawExtension{Raw: targetNSRaw},
 			}
-			if tt.operation == admissionv1.Update {
+			if tt.operation == admissionv1.Update || tt.operation == admissionv1.Delete {
 				admissionReq.OldObject = runtime.RawExtension{Raw: targetNSRaw}
 			}
 			req := crAdmission.Request{
