@@ -89,7 +89,7 @@ var _ = Describe("BindDefinition Webhook", func() {
 			Eventually(func(g Gomega) {
 				err := k8sClient.Create(ctx, bd2.DeepCopy(), client.DryRunAll)
 				g.Expect(err).To(HaveOccurred())
-				g.Expect(err.Error()).To(ContainSubstring("targetName shared-bd-target already exists"))
+				g.Expect(err.Error()).To(ContainSubstring("targetName shared-bd-target is already in use"))
 			}).WithTimeout(10 * time.Second).WithPolling(250 * time.Millisecond).Should(Succeed())
 
 			// Cleanup

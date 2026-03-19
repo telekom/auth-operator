@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	webhooks "github.com/telekom/auth-operator/internal/webhook/authorization"
 
 	admissionv1 "k8s.io/api/admission/v1"
@@ -23,14 +23,14 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 	// Setup the scheme for our fake client
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(authzv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(authorizationv1alpha1.AddToScheme(scheme))
 
 	// Create a BindDefinition that allows certain groups to operate on specific namespaces
-	bindDefPlatform := authzv1alpha1.BindDefinition{
+	bindDefPlatform := authorizationv1alpha1.BindDefinition{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "platform-binddefinition",
 		},
-		Spec: authzv1alpha1.BindDefinitionSpec{
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
 			TargetName: "bd-platform",
 			Subjects: []rbacv1.Subject{
 				{
@@ -39,7 +39,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 					Name:     "oidc:platform-admins",
 				},
 			},
-			RoleBindings: []authzv1alpha1.NamespaceBinding{{
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{{
 				ClusterRoleRefs: []string{"platform-admin"},
 				NamespaceSelector: []metav1.LabelSelector{
 					{
@@ -52,11 +52,11 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 	}
 
-	bindDefTenant := authzv1alpha1.BindDefinition{
+	bindDefTenant := authorizationv1alpha1.BindDefinition{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "tenant-binddefinition",
 		},
-		Spec: authzv1alpha1.BindDefinitionSpec{
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
 			TargetName: "bd-tenant",
 			Subjects: []rbacv1.Subject{
 				{
@@ -65,7 +65,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 					Namespace: "tenant-system",
 				},
 			},
-			RoleBindings: []authzv1alpha1.NamespaceBinding{{
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{{
 				ClusterRoleRefs: []string{"tenant-admin"},
 				NamespaceSelector: []metav1.LabelSelector{
 					{
@@ -78,11 +78,11 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 	}
 
-	bindDefThirdparty := authzv1alpha1.BindDefinition{
+	bindDefThirdparty := authorizationv1alpha1.BindDefinition{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "thirdparty-binddefinition",
 		},
-		Spec: authzv1alpha1.BindDefinitionSpec{
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
 			TargetName: "bd-thirdparty",
 			Subjects: []rbacv1.Subject{
 				{
@@ -91,7 +91,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 					Namespace: "thirdparty-system",
 				},
 			},
-			RoleBindings: []authzv1alpha1.NamespaceBinding{{
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{{
 				ClusterRoleRefs: []string{"thirdparty-admin"},
 				NamespaceSelector: []metav1.LabelSelector{
 					{
@@ -136,7 +136,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 
 	tests := []struct {
 		name           string
-		bindDefs       []authzv1alpha1.BindDefinition
+		bindDefs       []authorizationv1alpha1.BindDefinition
 		request        crAdmission.Request
 		expectedAllow  bool
 		expectedReason metav1.StatusReason
@@ -144,7 +144,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 	}{
 		{
 			name:     "allow non-namespace resource",
-			bindDefs: []authzv1alpha1.BindDefinition{},
+			bindDefs: []authorizationv1alpha1.BindDefinition{},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
 					Kind: metav1.GroupVersionKind{Kind: "Pod"},
@@ -155,7 +155,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:     "allow kubernetes-admin user",
-			bindDefs: []authzv1alpha1.BindDefinition{},
+			bindDefs: []authorizationv1alpha1.BindDefinition{},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
 					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
@@ -306,7 +306,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:     "deny create for unauthorized user",
-			bindDefs: []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs: []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
 					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
@@ -332,7 +332,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:     "allow create for platform admin on platform namespace",
-			bindDefs: []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs: []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
 					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
@@ -358,7 +358,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:     "allow create for service account with matching BindDefinition",
-			bindDefs: []authzv1alpha1.BindDefinition{bindDefTenant},
+			bindDefs: []authorizationv1alpha1.BindDefinition{bindDefTenant},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
 					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
@@ -383,7 +383,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:     "deny label modification on update",
-			bindDefs: []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs: []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
 					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
@@ -419,7 +419,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:     "allow update without label change",
-			bindDefs: []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs: []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
 					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
@@ -456,7 +456,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:     "allow delete for authorized user",
-			bindDefs: []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs: []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
 					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
@@ -710,7 +710,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:         "allow TDG migration label adoption when TDGMigration enabled for helm-controller",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			tdgMigration: true,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -752,7 +752,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		// contract by adding t-caas labels for the first time.
 		{
 			name:     "deny adoption: adding owner label to namespace without any t-caas labels (non-bypass user)",
-			bindDefs: []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs: []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
 					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
@@ -793,7 +793,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:     "allow adoption: authorized SA adding tenant label to namespace without t-caas labels",
-			bindDefs: []authzv1alpha1.BindDefinition{bindDefTenant},
+			bindDefs: []authorizationv1alpha1.BindDefinition{bindDefTenant},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
 					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
@@ -829,7 +829,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:     "deny adoption: adding thirdparty label to namespace without any t-caas labels",
-			bindDefs: []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs: []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
 					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
@@ -866,7 +866,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:     "deny adoption: removing existing owner label from namespace",
-			bindDefs: []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs: []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
 					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
@@ -903,7 +903,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:         "allow adoption: adding multiple t-caas labels when none existed (via TDG migration bypass)",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			tdgMigration: true,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -943,7 +943,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:         "deny adoption: adding owner label via TDG migration bypass user when TDGMigration disabled",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			tdgMigration: false,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -983,7 +983,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:     "allow update on legacy namespace when no t-caas labels are touched",
-			bindDefs: []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs: []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
 					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
@@ -1029,7 +1029,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		// thirdparty concept did not exist in the legacy system.
 		{
 			name:         "deny bypass user switching owner from platform to tenant",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			tdgMigration: true,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -1065,7 +1065,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:         "deny bypass user switching owner from platform to thirdparty",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			tdgMigration: true,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -1101,7 +1101,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:         "deny bypass user switching owner from tenant to platform",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefTenant},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefTenant},
 			tdgMigration: true,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -1137,7 +1137,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:         "deny bypass user removing existing owner label",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			tdgMigration: true,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -1174,7 +1174,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:         "deny bypass user removing tenant owner label",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefTenant},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefTenant},
 			tdgMigration: true,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -1213,7 +1213,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:         "deny bypass user removing thirdparty owner label",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefThirdparty},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefThirdparty},
 			tdgMigration: true,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -1256,7 +1256,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		// tenant and thirdparty, including changing the associated name labels.
 		{
 			name:         "allow bypass user reclassifying tenant to thirdparty",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefTenant},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefTenant},
 			tdgMigration: true,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -1294,7 +1294,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:         "allow bypass user reclassifying thirdparty to tenant",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefTenant},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefTenant},
 			tdgMigration: true,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -1332,7 +1332,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:         "allow bypass user reclassifying tenant to thirdparty with tenant name change",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefTenant},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefTenant},
 			tdgMigration: true,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -1370,7 +1370,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:         "deny non-bypass user reclassifying tenant to thirdparty",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefTenant},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefTenant},
 			tdgMigration: true,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -1409,7 +1409,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:         "deny reclassification when TDGMigration is disabled",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefTenant},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefTenant},
 			tdgMigration: false,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -1453,7 +1453,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		// - Legacy anything else (e.g. "cas") → must adopt as "tenant" or "thirdparty"
 		{
 			name:         "deny adoption: legacy platform NS adopted as tenant",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			tdgMigration: true,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -1490,7 +1490,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:         "deny adoption: legacy platform NS adopted as thirdparty",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			tdgMigration: true,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -1527,7 +1527,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:         "deny adoption: legacy schiff-owner NS adopted as tenant",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			tdgMigration: true,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -1564,7 +1564,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:         "deny adoption: legacy non-platform NS adopted as platform",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			tdgMigration: true,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -1601,7 +1601,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:         "allow adoption: legacy platform NS adopted as platform",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			tdgMigration: true,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -1638,7 +1638,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:         "allow adoption: legacy schiff-owner NS adopted as platform",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			tdgMigration: true,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -1675,7 +1675,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:         "allow adoption: legacy non-platform NS adopted as tenant",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			tdgMigration: true,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -1712,7 +1712,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:         "allow adoption: legacy non-platform NS adopted as thirdparty",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			tdgMigration: true,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -1750,7 +1750,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:         "deny bypass user adopting platform label on legacy non-platform namespace",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			tdgMigration: true,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -1789,7 +1789,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:         "allow bypass user updating non-t-caas labels on already-adopted namespace",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			tdgMigration: true,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -1829,7 +1829,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		// to remove the old schiff.telekom.de/owner label as the final migration step.
 		{
 			name:         "allow bypass user removing legacy schiff label when t-caas owner exists",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			tdgMigration: true,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -1866,7 +1866,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:         "allow bypass user removing legacy schiff label from tenant namespace",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefTenant},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefTenant},
 			tdgMigration: true,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -1905,7 +1905,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:         "deny bypass user removing legacy schiff label when no t-caas owner exists",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			tdgMigration: true,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -1942,7 +1942,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:         "deny non-bypass user removing legacy schiff label even with t-caas owner",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			tdgMigration: true,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -1981,7 +1981,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		// === Combined migration: adopt + cleanup in single update ===
 		{
 			name:         "allow bypass user adopting t-caas labels and removing schiff label in one update",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			tdgMigration: true,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -2018,7 +2018,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		// === Reclassification with legacy cleanup combined ===
 		{
 			name:         "allow bypass user reclassifying tenant to thirdparty and removing schiff label",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefTenant},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefTenant},
 			tdgMigration: true,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -2058,7 +2058,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		// === Reclassification with tenant label removal (not just swap) ===
 		{
 			name:         "allow bypass user reclassifying: remove tenant label when switching to thirdparty",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefTenant},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefTenant},
 			tdgMigration: true,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -2096,7 +2096,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:         "allow legacy schiff label removal when TDGMigration is disabled",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			tdgMigration: false,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -2135,7 +2135,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		// --- Edge case: thirdparty → platform switch ---
 		{
 			name:         "deny bypass user switching owner from thirdparty to platform",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			tdgMigration: true,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -2174,7 +2174,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		// --- Edge case: modifying (not removing) legacy schiff label value ---
 		{
 			name:         "deny bypass user modifying legacy schiff label value",
-			bindDefs:     []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			tdgMigration: true,
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -2218,7 +2218,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		// they did, changing immutable labels should still be denied.
 		{
 			name:     "deny authorized SA modifying tenant label on managed namespace",
-			bindDefs: []authzv1alpha1.BindDefinition{bindDefTenant},
+			bindDefs: []authorizationv1alpha1.BindDefinition{bindDefTenant},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
 					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
@@ -2255,7 +2255,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:     "deny authorized user removing thirdparty label from managed namespace",
-			bindDefs: []authzv1alpha1.BindDefinition{bindDefThirdparty},
+			bindDefs: []authorizationv1alpha1.BindDefinition{bindDefThirdparty},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
 					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
@@ -2292,7 +2292,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:     "deny authorized group member changing owner label on managed namespace",
-			bindDefs: []authzv1alpha1.BindDefinition{bindDefPlatform, bindDefTenant},
+			bindDefs: []authorizationv1alpha1.BindDefinition{bindDefPlatform, bindDefTenant},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
 					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
@@ -2382,7 +2382,7 @@ func mustMarshalJSON(t *testing.T, obj interface{}) []byte {
 func TestNamespaceValidatorSANamespaceInheritance(t *testing.T) {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(authzv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(authorizationv1alpha1.AddToScheme(scheme))
 
 	tests := []struct {
 		name          string

@@ -107,27 +107,39 @@ func TestInitScheme(t *testing.T) {
 func TestControllerCmdFlagValidation(t *testing.T) {
 	tests := []struct {
 		name        string
-		bdConc      int
-		rdConc      int
-		waConc      int
+		flags       map[string]int
 		expectError bool
 	}{
-		{"all positive", 5, 5, 5, false},
-		{"all zero (disabled)", 0, 0, 0, false},
-		{"bd zero others positive", 0, 5, 5, false},
-		{"bd positive others zero", 5, 0, 0, false},
-		{"bd negative", -1, 5, 5, true},
-		{"rd negative", 5, -1, 5, true},
-		{"wa negative", 5, 5, -1, true},
-		{"all negative", -1, -1, -1, true},
+		{"all positive", map[string]int{"--binddefinition-concurrency": 5, "--roledefinition-concurrency": 5, "--webhookauthorizer-concurrency": 5}, false},
+		{"all zero (disabled)", map[string]int{"--binddefinition-concurrency": 0, "--roledefinition-concurrency": 0, "--webhookauthorizer-concurrency": 0}, false},
+		{"bd zero others positive", map[string]int{"--binddefinition-concurrency": 0, "--roledefinition-concurrency": 5, "--webhookauthorizer-concurrency": 5}, false},
+		{"bd positive others zero", map[string]int{"--binddefinition-concurrency": 5, "--roledefinition-concurrency": 0, "--webhookauthorizer-concurrency": 0}, false},
+		{"bd negative", map[string]int{"--binddefinition-concurrency": -1, "--roledefinition-concurrency": 5, "--webhookauthorizer-concurrency": 5}, true},
+		{"rd negative", map[string]int{"--binddefinition-concurrency": 5, "--roledefinition-concurrency": -1, "--webhookauthorizer-concurrency": 5}, true},
+		{"wa negative", map[string]int{"--binddefinition-concurrency": 5, "--roledefinition-concurrency": 5, "--webhookauthorizer-concurrency": -1}, true},
+		{"all negative", map[string]int{"--binddefinition-concurrency": -1, "--roledefinition-concurrency": -1, "--webhookauthorizer-concurrency": -1}, true},
+		{"rbacpolicy positive", map[string]int{"--rbacpolicy-concurrency": 5}, false},
+		{"rbacpolicy negative", map[string]int{"--rbacpolicy-concurrency": -1}, true},
+		{"restrictedbinddefinition positive", map[string]int{"--restrictedbinddefinition-concurrency": 5}, false},
+		{"restrictedbinddefinition negative", map[string]int{"--restrictedbinddefinition-concurrency": -1}, true},
+		{"restrictedroledefinition positive", map[string]int{"--restrictedroledefinition-concurrency": 5}, false},
+		{"restrictedroledefinition negative", map[string]int{"--restrictedroledefinition-concurrency": -1}, true},
+		{"all six flags positive", map[string]int{
+			"--binddefinition-concurrency":           5,
+			"--roledefinition-concurrency":           5,
+			"--webhookauthorizer-concurrency":        1,
+			"--rbacpolicy-concurrency":               5,
+			"--restrictedbinddefinition-concurrency": 5,
+			"--restrictedroledefinition-concurrency": 5,
+		}, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateConcurrency(tt.bdConc, tt.rdConc, tt.waConc)
+			err := validateConcurrency(tt.flags)
 			if (err != nil) != tt.expectError {
-				t.Errorf("validateConcurrency(%d, %d, %d): expected error=%v, got %v",
-					tt.bdConc, tt.rdConc, tt.waConc, tt.expectError, err)
+				t.Errorf("validateConcurrency(%v): expected error=%v, got %v",
+					tt.flags, tt.expectError, err)
 			}
 		})
 	}
@@ -184,6 +196,10 @@ func TestControllerCmdFlags(t *testing.T) {
 		"leader-elect",
 		"binddefinition-concurrency",
 		"roledefinition-concurrency",
+		"webhookauthorizer-concurrency",
+		"rbacpolicy-concurrency",
+		"restrictedbinddefinition-concurrency",
+		"restrictedroledefinition-concurrency",
 		"cache-sync-timeout",
 		"graceful-shutdown-timeout",
 		"wait-for-crds",
@@ -253,6 +269,10 @@ func TestFlagDefaults(t *testing.T) {
 	}{
 		{"controller", "binddefinition-concurrency", "5"},
 		{"controller", "roledefinition-concurrency", "5"},
+		{"controller", "webhookauthorizer-concurrency", "1"},
+		{"controller", "rbacpolicy-concurrency", "5"},
+		{"controller", "restrictedbinddefinition-concurrency", "5"},
+		{"controller", "restrictedroledefinition-concurrency", "5"},
 		{"controller", "leader-elect", "true"},
 		{"controller", "wait-for-crds", "true"},
 		{"controller", "cache-sync-timeout", "2m0s"},

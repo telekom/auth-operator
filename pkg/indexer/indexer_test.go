@@ -370,3 +370,194 @@ func TestWebhookAuthorizerIndexWithFakeClient(t *testing.T) {
 		t.Errorf("expected 0 authorizers for invalid index value, got %d", len(emptyList.Items))
 	}
 }
+
+func TestRestrictedBindDefinitionPolicyRefFunc(t *testing.T) {
+	tests := []indexExtractorTest{
+		{
+			name: "with policy ref returns name",
+			object: &authorizationv1alpha1.RestrictedBindDefinition{
+				ObjectMeta: metav1.ObjectMeta{Name: "rbd-1"},
+				Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+					PolicyRef: authorizationv1alpha1.RBACPolicyReference{Name: "my-policy"},
+				},
+			},
+			indexFunc:  RestrictedBindDefinitionPolicyRefFunc,
+			wantValues: []string{"my-policy"},
+		},
+		{
+			name: "with empty policy ref returns nil",
+			object: &authorizationv1alpha1.RestrictedBindDefinition{
+				ObjectMeta: metav1.ObjectMeta{Name: "rbd-2"},
+				Spec:       authorizationv1alpha1.RestrictedBindDefinitionSpec{},
+			},
+			indexFunc:  RestrictedBindDefinitionPolicyRefFunc,
+			wantValues: nil,
+		},
+		{
+			name:       "wrong object type returns nil",
+			object:     &authorizationv1alpha1.RoleDefinition{ObjectMeta: metav1.ObjectMeta{Name: "rd"}},
+			indexFunc:  RestrictedBindDefinitionPolicyRefFunc,
+			wantValues: nil,
+		},
+	}
+
+	runIndexExtractorTests(t, tests)
+}
+
+func TestRestrictedRoleDefinitionPolicyRefFunc(t *testing.T) {
+	tests := []indexExtractorTest{
+		{
+			name: "with policy ref returns name",
+			object: &authorizationv1alpha1.RestrictedRoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{Name: "rrd-1"},
+				Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+					PolicyRef: authorizationv1alpha1.RBACPolicyReference{Name: "team-policy"},
+				},
+			},
+			indexFunc:  RestrictedRoleDefinitionPolicyRefFunc,
+			wantValues: []string{"team-policy"},
+		},
+		{
+			name: "with empty policy ref returns nil",
+			object: &authorizationv1alpha1.RestrictedRoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{Name: "rrd-2"},
+				Spec:       authorizationv1alpha1.RestrictedRoleDefinitionSpec{},
+			},
+			indexFunc:  RestrictedRoleDefinitionPolicyRefFunc,
+			wantValues: nil,
+		},
+		{
+			name:       "wrong object type returns nil",
+			object:     &authorizationv1alpha1.BindDefinition{ObjectMeta: metav1.ObjectMeta{Name: "bd"}},
+			indexFunc:  RestrictedRoleDefinitionPolicyRefFunc,
+			wantValues: nil,
+		},
+	}
+
+	runIndexExtractorTests(t, tests)
+}
+
+func TestRestrictedBindDefinitionPolicyRefWithFakeClient(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := authorizationv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add scheme: %v", err)
+	}
+
+	rbd1 := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "rbd-1"},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			PolicyRef: authorizationv1alpha1.RBACPolicyReference{Name: "shared-policy"},
+		},
+	}
+	rbd2 := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "rbd-2"},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			PolicyRef: authorizationv1alpha1.RBACPolicyReference{Name: "shared-policy"},
+		},
+	}
+	rbd3 := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "rbd-3"},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			PolicyRef: authorizationv1alpha1.RBACPolicyReference{Name: "other-policy"},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(rbd1, rbd2, rbd3).
+		WithIndex(
+			&authorizationv1alpha1.RestrictedBindDefinition{},
+			RestrictedBindDefinitionPolicyRefField,
+			RestrictedBindDefinitionPolicyRefFunc,
+		).
+		Build()
+
+	ctx := context.Background()
+
+	var list authorizationv1alpha1.RestrictedBindDefinitionList
+	err := fakeClient.List(ctx, &list, client.MatchingFields{
+		RestrictedBindDefinitionPolicyRefField: "shared-policy",
+	})
+	if err != nil {
+		t.Fatalf("failed to list: %v", err)
+	}
+	if len(list.Items) != 2 {
+		t.Errorf("expected 2 RestrictedBindDefinitions with shared-policy, got %d", len(list.Items))
+	}
+
+	list = authorizationv1alpha1.RestrictedBindDefinitionList{}
+	err = fakeClient.List(ctx, &list, client.MatchingFields{
+		RestrictedBindDefinitionPolicyRefField: "other-policy",
+	})
+	if err != nil {
+		t.Fatalf("failed to list: %v", err)
+	}
+	if len(list.Items) != 1 {
+		t.Errorf("expected 1 RestrictedBindDefinition with other-policy, got %d", len(list.Items))
+	}
+
+	list = authorizationv1alpha1.RestrictedBindDefinitionList{}
+	err = fakeClient.List(ctx, &list, client.MatchingFields{
+		RestrictedBindDefinitionPolicyRefField: "nonexistent",
+	})
+	if err != nil {
+		t.Fatalf("failed to list: %v", err)
+	}
+	if len(list.Items) != 0 {
+		t.Errorf("expected 0 RestrictedBindDefinitions with nonexistent, got %d", len(list.Items))
+	}
+}
+
+func TestRestrictedRoleDefinitionPolicyRefWithFakeClient(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := authorizationv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add scheme: %v", err)
+	}
+
+	rrd1 := &authorizationv1alpha1.RestrictedRoleDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "rrd-1"},
+		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+			PolicyRef: authorizationv1alpha1.RBACPolicyReference{Name: "shared-policy"},
+		},
+	}
+	rrd2 := &authorizationv1alpha1.RestrictedRoleDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "rrd-2"},
+		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+			PolicyRef: authorizationv1alpha1.RBACPolicyReference{Name: "unique-policy"},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(rrd1, rrd2).
+		WithIndex(
+			&authorizationv1alpha1.RestrictedRoleDefinition{},
+			RestrictedRoleDefinitionPolicyRefField,
+			RestrictedRoleDefinitionPolicyRefFunc,
+		).
+		Build()
+
+	ctx := context.Background()
+
+	var list authorizationv1alpha1.RestrictedRoleDefinitionList
+	err := fakeClient.List(ctx, &list, client.MatchingFields{
+		RestrictedRoleDefinitionPolicyRefField: "shared-policy",
+	})
+	if err != nil {
+		t.Fatalf("failed to list: %v", err)
+	}
+	if len(list.Items) != 1 {
+		t.Errorf("expected 1 RestrictedRoleDefinition with shared-policy, got %d", len(list.Items))
+	}
+
+	list = authorizationv1alpha1.RestrictedRoleDefinitionList{}
+	err = fakeClient.List(ctx, &list, client.MatchingFields{
+		RestrictedRoleDefinitionPolicyRefField: "nonexistent",
+	})
+	if err != nil {
+		t.Fatalf("failed to list: %v", err)
+	}
+	if len(list.Items) != 0 {
+		t.Errorf("expected 0 RestrictedRoleDefinitions with nonexistent, got %d", len(list.Items))
+	}
+}

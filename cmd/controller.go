@@ -6,6 +6,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -30,13 +31,16 @@ import (
 )
 
 var (
-	enableLeaderElection         bool
-	bindDefinitionConcurrency    int
-	roleDefinitionConcurrency    int
-	webhookAuthorizerConcurrency int
-	cacheSyncTimeout             time.Duration
-	gracefulShutdownTimeout      time.Duration
-	waitForCRDs                  bool
+	enableLeaderElection                bool
+	bindDefinitionConcurrency           int
+	roleDefinitionConcurrency           int
+	webhookAuthorizerConcurrency        int
+	rbacPolicyConcurrency               int
+	restrictedBindDefinitionConcurrency int
+	restrictedRoleDefinitionConcurrency int
+	cacheSyncTimeout                    time.Duration
+	gracefulShutdownTimeout             time.Duration
+	waitForCRDs                         bool
 )
 
 // controllerCmd represents the controller command.
@@ -52,7 +56,14 @@ the corresponding ClusterRoles, Roles, ClusterRoleBindings, and RoleBindings
 are created and kept in sync, and that WebhookAuthorizer resources are validated
 and their status is kept up to date.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := validateConcurrency(bindDefinitionConcurrency, roleDefinitionConcurrency, webhookAuthorizerConcurrency); err != nil {
+		if err := validateConcurrency(map[string]int{
+			"--binddefinition-concurrency":           bindDefinitionConcurrency,
+			"--roledefinition-concurrency":           roleDefinitionConcurrency,
+			"--webhookauthorizer-concurrency":        webhookAuthorizerConcurrency,
+			"--rbacpolicy-concurrency":               rbacPolicyConcurrency,
+			"--restrictedbinddefinition-concurrency": restrictedBindDefinitionConcurrency,
+			"--restrictedroledefinition-concurrency": restrictedRoleDefinitionConcurrency,
+		}); err != nil {
 			return err
 		}
 
@@ -62,6 +73,9 @@ and their status is kept up to date.`,
 			"bindDefinitionConcurrency", bindDefinitionConcurrency,
 			"roleDefinitionConcurrency", roleDefinitionConcurrency,
 			"webhookAuthorizerConcurrency", webhookAuthorizerConcurrency,
+			"rbacPolicyConcurrency", rbacPolicyConcurrency,
+			"restrictedBindDefinitionConcurrency", restrictedBindDefinitionConcurrency,
+			"restrictedRoleDefinitionConcurrency", restrictedRoleDefinitionConcurrency,
 			"cacheSyncTimeout", cacheSyncTimeout,
 			"gracefulShutdownTimeout", gracefulShutdownTimeout,
 			"namespace", namespace,
@@ -122,14 +136,18 @@ and their status is kept up to date.`,
 		// Wait for CRDs to be available before setting up controllers
 		// This prevents cache sync timeout errors when CRDs are not yet installed
 		if waitForCRDs {
-			if err := waitForRequiredCRDs(ctx, cfg, cacheSyncTimeout, webhookAuthorizerConcurrency > 0); err != nil {
+			includeWA := webhookAuthorizerConcurrency > 0
+			includeRestricted := rbacPolicyConcurrency > 0 || restrictedBindDefinitionConcurrency > 0 || restrictedRoleDefinitionConcurrency > 0
+			if err := waitForRequiredCRDs(ctx, cfg, cacheSyncTimeout, includeWA, includeRestricted); err != nil {
 				return fmt.Errorf("failed waiting for required CRDs: %w", err)
 			}
 		}
 
-		// Setup field indexes for efficient lookups
-		if err := indexer.SetupIndexes(ctx, mgr); err != nil {
-			return fmt.Errorf("unable to setup field indexes: %w", err)
+		// Setup field indexes for efficient lookups.
+		// Controller-specific indexes may watch RBAC binding types and therefore
+		// must not be registered in the webhook-only manager.
+		if err := indexer.SetupControllerIndexes(ctx, mgr); err != nil {
+			return fmt.Errorf("unable to setup controller field indexes: %w", err)
 		}
 		setupLog.Info("field indexes configured for cached client")
 
@@ -195,6 +213,55 @@ and their status is kept up to date.`,
 			setupLog.Info("WebhookAuthorizer reconciler is disabled")
 		}
 
+		if rbacPolicyConcurrency > 0 {
+			setupLog.Info("creating RBACPolicy reconciler", "concurrency", rbacPolicyConcurrency)
+			rbacPolicyController := authorizationcontroller.NewRBACPolicyReconciler(
+				mgr.GetClient(),
+				mgr.GetScheme(),
+				mgr.GetEventRecorder("RBACPolicyReconciler"),
+				reconcilerOpts...)
+			if err := rbacPolicyController.SetupWithManager(ctx, mgr, rbacPolicyConcurrency); err != nil {
+				return fmt.Errorf("unable to setup controller RBACPolicy with manager: %w", err)
+			}
+			setupLog.Info("RBACPolicy reconciler configured successfully")
+		} else {
+			setupLog.Info("RBACPolicy reconciler is disabled")
+		}
+
+		if restrictedBindDefinitionConcurrency > 0 {
+			setupLog.Info("creating RestrictedBindDefinition reconciler", "concurrency", restrictedBindDefinitionConcurrency)
+			restrictedBindDefinitionController := authorizationcontroller.NewRestrictedBindDefinitionReconciler(
+				mgr.GetClient(),
+				mgr.GetScheme(),
+				mgr.GetEventRecorder("RestrictedBindDefinitionReconciler"),
+				reconcilerOpts...)
+			if err := restrictedBindDefinitionController.SetupWithManager(mgr, restrictedBindDefinitionConcurrency); err != nil {
+				return fmt.Errorf("unable to setup controller RestrictedBindDefinition with manager: %w", err)
+			}
+			setupLog.Info("RestrictedBindDefinition reconciler configured successfully")
+		} else {
+			setupLog.Info("RestrictedBindDefinition reconciler is disabled")
+		}
+
+		if restrictedRoleDefinitionConcurrency > 0 {
+			setupLog.Info("creating RestrictedRoleDefinition reconciler", "concurrency", restrictedRoleDefinitionConcurrency)
+			restrictedRoleDefinitionController, err := authorizationcontroller.NewRestrictedRoleDefinitionReconciler(
+				mgr.GetClient(),
+				mgr.GetScheme(),
+				mgr.GetEventRecorder("RestrictedRoleDefinitionReconciler"),
+				resourceTracker,
+				reconcilerOpts...)
+			if err != nil {
+				return fmt.Errorf("unable to create RestrictedRoleDefinition reconciler: %w", err)
+			}
+			if err := restrictedRoleDefinitionController.SetupWithManager(mgr, restrictedRoleDefinitionConcurrency); err != nil {
+				return fmt.Errorf("unable to setup controller RestrictedRoleDefinition with manager: %w", err)
+			}
+			setupLog.Info("RestrictedRoleDefinition reconciler configured successfully")
+		} else {
+			setupLog.Info("RestrictedRoleDefinition reconciler is disabled")
+		}
+
 		setupLog.Info("starting manager - waiting for cache sync", "timeout", cacheSyncTimeout)
 		if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 			return fmt.Errorf("unable to set up health check: %w", err)
@@ -221,6 +288,12 @@ func init() {
 		"Number of concurrent workers for RoleDefinition reconciler. Default is 5. Use 0 to disable the reconciler.")
 	controllerCmd.Flags().IntVar(&webhookAuthorizerConcurrency, "webhookauthorizer-concurrency", 1,
 		"Number of concurrent workers for WebhookAuthorizer reconciler. Default is 1. Use 0 to disable the reconciler.")
+	controllerCmd.Flags().IntVar(&rbacPolicyConcurrency, "rbacpolicy-concurrency", 5,
+		"Number of concurrent workers for RBACPolicy reconciler. Default is 5. Use 0 to disable the reconciler.")
+	controllerCmd.Flags().IntVar(&restrictedBindDefinitionConcurrency, "restrictedbinddefinition-concurrency", 5,
+		"Number of concurrent workers for RestrictedBindDefinition reconciler. Default is 5. Use 0 to disable the reconciler.")
+	controllerCmd.Flags().IntVar(&restrictedRoleDefinitionConcurrency, "restrictedroledefinition-concurrency", 5,
+		"Number of concurrent workers for RestrictedRoleDefinition reconciler. Default is 5. Use 0 to disable the reconciler.")
 	controllerCmd.Flags().DurationVar(&cacheSyncTimeout, "cache-sync-timeout", 2*time.Minute,
 		"Timeout for waiting for CRDs to become available. "+
 			"Increase this if CRDs take time to become available. Default is 2 minutes.")
@@ -234,7 +307,7 @@ func init() {
 // waitForRequiredCRDs waits for all required CRDs to be established before starting controllers.
 // This prevents the "timed out waiting for cache to be synced" errors that occur when
 // CRDs are not yet installed or not yet established.
-func waitForRequiredCRDs(ctx context.Context, cfg *rest.Config, timeout time.Duration, includeWebhookAuthorizer bool) error {
+func waitForRequiredCRDs(ctx context.Context, cfg *rest.Config, timeout time.Duration, includeWebhookAuthorizer, includeRestricted bool) error {
 	setupLog.Info("waiting for required CRDs to be established", "timeout", timeout)
 
 	// Create a client for CRD checking (uses direct API calls, not cached)
@@ -252,6 +325,13 @@ func waitForRequiredCRDs(ctx context.Context, cfg *rest.Config, timeout time.Dur
 		requiredGVKs = append(requiredGVKs,
 			authorizationv1alpha1.GroupVersion.WithKind("WebhookAuthorizer"))
 	}
+	if includeRestricted {
+		requiredGVKs = append(requiredGVKs,
+			authorizationv1alpha1.GroupVersion.WithKind("RBACPolicy"),
+			authorizationv1alpha1.GroupVersion.WithKind("RestrictedBindDefinition"),
+			authorizationv1alpha1.GroupVersion.WithKind("RestrictedRoleDefinition"),
+		)
+	}
 
 	waiter := discovery.NewCRDWaiter(c, setupLog)
 	if err := waiter.WaitForCRDs(ctx, requiredGVKs, timeout); err != nil {
@@ -263,10 +343,17 @@ func waitForRequiredCRDs(ctx context.Context, cfg *rest.Config, timeout time.Dur
 }
 
 // validateConcurrency checks that all concurrency values are non-negative.
-func validateConcurrency(bdConcurrency, rdConcurrency, waConcurrency int) error {
-	if bdConcurrency < 0 || rdConcurrency < 0 || waConcurrency < 0 {
-		return fmt.Errorf("concurrency values must be >= 0, got bdConcurrency=%d, rdConcurrency=%d, waConcurrency=%d",
-			bdConcurrency, rdConcurrency, waConcurrency)
+func validateConcurrency(flags map[string]int) error {
+	names := make([]string, 0, len(flags))
+	for name := range flags {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+
+	for _, name := range names {
+		if flags[name] < 0 {
+			return fmt.Errorf("concurrency value for %s must be >= 0, got %d", name, flags[name])
+		}
 	}
 	return nil
 }

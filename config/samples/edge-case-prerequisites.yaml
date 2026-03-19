@@ -47,3 +47,138 @@ metadata:
   namespace: t-caas-monitoring
   labels:
     t-caas.telekom.com/purpose: edge-case
+
+---
+# Namespaces used by extended restricted sample scenarios.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sample-authz
+  labels:
+    t-caas.telekom.com/purpose: sample-scenarios
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sample-tenant-a
+  labels:
+    t-caas.telekom.com/tenant: "true"
+    t-caas.telekom.com/purpose: sample-scenarios
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sample-tenant-b
+  labels:
+    t-caas.telekom.com/tenant: "true"
+    t-caas.telekom.com/purpose: sample-scenarios
+
+---
+# Existing RBAC objects used by "partially allowed" sample scenarios.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sample-existing-cluster-role
+  labels:
+    t-caas.telekom.com/purpose: sample-scenarios
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sample-existing-role
+  namespace: sample-tenant-a
+  labels:
+    t-caas.telekom.com/purpose: sample-scenarios
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+
+---
+# ServiceAccount used by impersonation-success policy/sample cases.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sample-impersonation-admin
+  namespace: sample-authz
+  labels:
+    t-caas.telekom.com/purpose: sample-scenarios
+
+---
+# ServiceAccount intentionally left without RBAC grants for impersonation-failure
+# sample cases (expected forbidden errors during apply).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sample-impersonation-denied
+  namespace: sample-authz
+  labels:
+    t-caas.telekom.com/purpose: sample-scenarios
+
+---
+# RBAC grant for the impersonation-success ServiceAccount.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sample-impersonation-rbac-manager
+  labels:
+    t-caas.telekom.com/purpose: sample-scenarios
+rules:
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles", "roles", "clusterrolebindings", "rolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete", "bind", "escalate"]
+  - apiGroups: [""]
+    resources: ["serviceaccounts", "namespaces"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: sample-impersonation-admin-manager
+  labels:
+    t-caas.telekom.com/purpose: sample-scenarios
+subjects:
+  - kind: ServiceAccount
+    name: sample-impersonation-admin
+    namespace: sample-authz
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: sample-impersonation-rbac-manager
+
+---
+# ClusterRole fragments used by aggregateFrom RoleDefinition sample cases.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sample-aggregate-fragment-configmaps
+  labels:
+    t-caas.telekom.com/purpose: sample-scenarios
+    t-caas.telekom.com/rbac-fragment: "true"
+    t-caas.telekom.com/aggregate-scope: team
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sample-aggregate-fragment-pods
+  labels:
+    t-caas.telekom.com/purpose: sample-scenarios
+    t-caas.telekom.com/rbac-fragment: "true"
+    t-caas.telekom.com/aggregate-scope: team
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]

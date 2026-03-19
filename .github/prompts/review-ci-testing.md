@@ -119,6 +119,17 @@ actually assert what they claim, and that CI configuration is correct.
   - `helm lint chart/auth-operator --strict` passes
   - `helm template` renders valid YAML
 
+### 8a. Broken-Sample Apply Semantics
+
+- Validate sample-set intent in CI workflows:
+  - `config/samples/` should represent structurally valid baseline objects.
+  - `config/samples/broken/` should contain structurally valid runtime-failure
+    objects that **must apply successfully** and then stall/partially reconcile.
+  - Schema/webhook-invalid examples must not be mixed into the broken apply set.
+- Flag workflows that treat expected runtime-failure samples as apply failures.
+- Flag workflows that hard-reference new sample paths on historical branches
+  (main/tag baselines) without existence guards.
+
 ### 9. Golden File Tests
 
 - If the project uses golden files, verify they are regenerated after

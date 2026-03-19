@@ -1,0 +1,276 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# =============================================================================
+# RestrictedRoleDefinition Samples - Comprehensive Feature Coverage
+# =============================================================================
+# Prerequisite: Apply authorization_v1alpha1_rbacpolicy.yaml first.
+#
+# These samples demonstrate all features of the RestrictedRoleDefinition CRD:
+# - Policy reference (policyRef)
+# - Namespaced Role generation within policy limits
+# - ClusterRole generation (when allowed by policy)
+# - Restricted APIs, resources, and verbs
+# - Scoped to namespaced or cluster-scoped resources
+# =============================================================================
+
+---
+# -----------------------------------------------------------------------------
+# RestrictedRoleDefinition: Team Reader Role (Namespaced)
+# Creates a read-only Role in a team namespace with restricted APIs.
+# Use case: Team-scoped read access within policy guardrails
+# Requires: team-workload-policy RBACPolicy
+# Requester default-policy example: can be submitted by
+# system:serviceaccount:team-alpha:team-alpha-rbac-applier.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedRoleDefinition
+metadata:
+  name: rrd-team-alpha-reader
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/tenant: team-alpha
+spec:
+  policyRef:
+    name: team-workload-policy
+  targetRole: Role
+  targetName: t-caas-team-alpha-reader
+  targetNamespace: team-alpha
+  scopeNamespaced: true
+  restrictedApis:
+    - name: velero.io
+      versions:
+        - groupVersion: velero.io/v1
+          version: v1
+  restrictedResources:
+    - name: secrets
+      singularName: secret
+      namespaced: true
+      kind: Secret
+      verbs:
+        - all
+  restrictedVerbs:
+    - create
+    - update
+    - delete
+    - patch
+
+---
+# -----------------------------------------------------------------------------
+# RestrictedRoleDefinition: Operator ClusterRole
+# Creates a ClusterRole for cross-namespace operator access.
+# Use case: Operator with cross-namespace visibility
+# Requires: operator-cross-namespace-policy RBACPolicy
+# Requester default-policy example: users in groups
+# oidc:platform-operators or oidc:infra-operators.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedRoleDefinition
+metadata:
+  name: rrd-operator-reader
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/tenant: platform-team
+spec:
+  policyRef:
+    name: operator-cross-namespace-policy
+  targetRole: ClusterRole
+  targetName: t-caas-operator-reader
+  scopeNamespaced: false
+  restrictedApis:
+    - name: certificates.k8s.io
+      versions:
+        - groupVersion: certificates.k8s.io/v1
+          version: v1
+  restrictedVerbs:
+    - escalate
+    - impersonate
+    - bind
+
+---
+# -----------------------------------------------------------------------------
+# RestrictedRoleDefinition: CI Deploy Role (Namespaced)
+# Creates a deploy-scoped Role for CI/CD pipelines.
+# Use case: CI/CD pipelines with minimal permissions
+# Requires: cicd-pipeline-policy RBACPolicy
+# Requester default-policy example: submitted by
+# system:serviceaccount:ci-runners:ci-rbac-applier.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedRoleDefinition
+metadata:
+  name: rrd-ci-deploy-writer
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/tenant: cicd
+spec:
+  policyRef:
+    name: cicd-pipeline-policy
+  targetRole: Role
+  targetName: t-caas-ci-deploy-writer
+  targetNamespace: cd-deploy
+  scopeNamespaced: true
+  restrictedApis:
+    - name: admissionregistration.k8s.io
+      versions:
+        - groupVersion: admissionregistration.k8s.io/v1
+          version: v1
+  restrictedResources:
+    - name: secrets
+      singularName: secret
+      namespaced: true
+      kind: Secret
+      verbs:
+        - all
+    - name: persistentvolumes
+      singularName: persistentvolume
+      namespaced: false
+      kind: PersistentVolume
+      verbs:
+        - all
+  restrictedVerbs:
+    - delete
+    - escalate
+    - impersonate
+    - bind
+
+---
+# -----------------------------------------------------------------------------
+# CASE: Allowed cluster role generation
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedRoleDefinition
+metadata:
+  name: rrd-case-allowed-clusterrole
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/sample-case: allowed
+spec:
+  policyRef:
+    name: sample-policy-allow-all-paths
+  targetRole: ClusterRole
+  targetName: sample-cluster-reader
+  scopeNamespaced: false
+  restrictedResources:
+    - name: secrets
+      singularName: secret
+      namespaced: true
+      kind: Secret
+      verbs:
+        - all
+  restrictedVerbs:
+    - delete
+    - escalate
+    - impersonate
+    - bind
+
+---
+# -----------------------------------------------------------------------------
+# CASE: Blocked by policy (cluster roles forbidden)
+# Object admission should succeed; reconciliation should mark policy violation.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedRoleDefinition
+metadata:
+  name: rrd-case-blocked-clusterrole-by-policy
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/sample-case: blocked
+spec:
+  policyRef:
+    name: sample-policy-block-clusterrolebindings
+  targetRole: ClusterRole
+  targetName: sample-clusterrole-blocked
+  scopeNamespaced: false
+  restrictedVerbs:
+    - delete
+
+---
+# -----------------------------------------------------------------------------
+# CASE: Partially allowed API surface
+# Expected behavior: generated rules exclude restricted APIs/resources/verbs.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedRoleDefinition
+metadata:
+  name: rrd-case-partial-filtered-rules
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/sample-case: partial
+spec:
+  policyRef:
+    name: sample-policy-partially-allowed-bindings
+  targetRole: Role
+  targetName: sample-partial-role
+  targetNamespace: sample-tenant-a
+  scopeNamespaced: true
+  restrictedApis:
+    - name: apps
+      versions:
+        - groupVersion: apps/v1
+          version: v1
+  restrictedResources:
+    - name: secrets
+      singularName: secret
+      namespaced: true
+      kind: Secret
+      verbs:
+        - all
+  restrictedVerbs:
+    - delete
+    - patch
+
+---
+# -----------------------------------------------------------------------------
+# CASE: Impersonated apply success
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedRoleDefinition
+metadata:
+  name: rrd-case-impersonated-allowed
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/sample-case: impersonated-allowed
+spec:
+  policyRef:
+    name: sample-policy-allow-all-paths
+  targetRole: Role
+  targetName: sample-impersonated-role
+  targetNamespace: sample-tenant-b
+  scopeNamespaced: true
+  restrictedVerbs:
+    - escalate
+    - delete
+    - patch
+
+---
+# -----------------------------------------------------------------------------
+# CASE: Blocked by policy (forbidden verb omission)
+# Policy forbids "escalate" but this definition does not list it in restrictedVerbs.
+# Expected: policy violation and deprovision/degraded status.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedRoleDefinition
+metadata:
+  name: rrd-case-blocked-forbidden-verb-omission
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/sample-case: blocked-forbidden-verb
+spec:
+  policyRef:
+    name: sample-policy-allow-all-paths
+  targetRole: Role
+  targetName: sample-blocked-forbidden-verb
+  targetNamespace: sample-tenant-a
+  scopeNamespaced: true
+  restrictedVerbs:
+    - delete
