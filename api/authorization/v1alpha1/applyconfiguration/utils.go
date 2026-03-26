@@ -43,6 +43,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &authorizationv1alpha1.NamespaceBindingApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("Principal"):
 		return &authorizationv1alpha1.PrincipalApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("RestrictedAPIGroup"):
+		return &authorizationv1alpha1.RestrictedAPIGroupApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("RoleDefinition"):
 		return &authorizationv1alpha1.RoleDefinitionApplyConfiguration{}
 	case v1alpha1.SchemeGroupVersion.WithKind("RoleDefinitionSpec"):

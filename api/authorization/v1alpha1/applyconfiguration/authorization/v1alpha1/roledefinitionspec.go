@@ -43,9 +43,11 @@ type RoleDefinitionSpecApplyConfiguration struct {
 	// The RBAC operator discovers all API groups available and removes those which are defined here.
 	// When Versions is empty (versions: []), all versions of that group are restricted.
 	// When Versions is specified, only those API versions are excluded from resource discovery.
+	// When Verbs is empty, the entire API group is blocked (all verbs).
+	// When Verbs is specified, only those verbs are restricted for all resources in the group.
 	// Note: Kubernetes RBAC PolicyRules are version-agnostic. If the same resource exists in
 	// a non-restricted version of the same group, it will still appear in the generated role.
-	RestrictedAPIs []v1.APIGroup `json:"restrictedApis,omitempty"`
+	RestrictedAPIs []RestrictedAPIGroupApplyConfiguration `json:"restrictedApis,omitempty"`
 	// RestrictedResources holds all resources which will *NOT* be reconciled into the "TargetRole".
 	// The RBAC operator discovers all API resources available and removes those listed here.
 	RestrictedResources []v1.APIResource `json:"restrictedResources,omitempty"`
@@ -114,9 +116,12 @@ func (b *RoleDefinitionSpecApplyConfiguration) WithScopeNamespaced(value bool) *
 // WithRestrictedAPIs adds the given value to the RestrictedAPIs field in the declarative configuration
 // and returns the receiver, so that objects can be build by chaining "With" function invocations.
 // If called multiple times, values provided by each call will be appended to the RestrictedAPIs field.
-func (b *RoleDefinitionSpecApplyConfiguration) WithRestrictedAPIs(values ...v1.APIGroup) *RoleDefinitionSpecApplyConfiguration {
+func (b *RoleDefinitionSpecApplyConfiguration) WithRestrictedAPIs(values ...*RestrictedAPIGroupApplyConfiguration) *RoleDefinitionSpecApplyConfiguration {
 	for i := range values {
-		b.RestrictedAPIs = append(b.RestrictedAPIs, values[i])
+		if values[i] == nil {
+			panic("nil value passed to WithRestrictedAPIs")
+		}
+		b.RestrictedAPIs = append(b.RestrictedAPIs, *values[i])
 	}
 	return b
 }

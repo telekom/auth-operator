@@ -456,3 +456,57 @@ spec:
     - delete
     - deletecollection
     - watch
+
+---
+# -----------------------------------------------------------------------------
+# ClusterRole: Poweruser - Per-API-group verb restrictions (Issue #236)
+# Uses per-API-group verb restrictions to make specific API groups read-only
+# without enumerating every resource individually in restrictedResources.
+# This enables cleaner self-contained role definitions without cascading.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: rd-poweruser-self-contained
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/privilege-level: poweruser
+    t-caas.telekom.com/scope: cluster
+spec:
+  targetRole: ClusterRole
+  targetName: t-caas-poweruser-self-contained
+  scopeNamespaced: false
+  restrictedApis:
+    # Fully block backup APIs - no access at all
+    - name: velero.io
+    # Make storage APIs read-only (restrict write verbs for all resources in this group)
+    # New resources added to storage.k8s.io are automatically covered
+    - name: storage.k8s.io
+      verbs:
+        - create
+        - update
+        - patch
+        - delete
+        - deletecollection
+      versions:
+        - groupVersion: storage.k8s.io/v1
+          version: v1
+    # Make Kyverno policy APIs read-only
+    - name: kyverno.io
+      verbs:
+        - create
+        - update
+        - patch
+        - delete
+        - deletecollection
+    # Make cert-manager APIs read-only
+    - name: cert-manager.io
+      verbs:
+        - create
+        - update
+        - patch
+        - delete
+        - deletecollection
+  restrictedResources: []
+  restrictedVerbs: []

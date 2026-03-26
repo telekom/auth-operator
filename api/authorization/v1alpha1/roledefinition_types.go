@@ -5,6 +5,34 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// RestrictedAPIGroup defines an API group restriction with optional verb-level filtering.
+// When Verbs is empty, the entire API group is blocked (all verbs restricted).
+// When Verbs is specified, only the listed verbs are restricted across all resources in the group,
+// and the remaining verbs are still allowed.
+type RestrictedAPIGroup struct {
+	// Name is the name of the API group (e.g., "storage.k8s.io", "velero.io").
+	// +kubebuilder:validation:Required
+	Name string `json:"name"`
+
+	// Versions restricts only the specified API versions within this group.
+	// When empty, all versions of the group are affected.
+	// +kubebuilder:validation:Optional
+	Versions []metav1.GroupVersionForDiscovery `json:"versions,omitempty"`
+
+	// Verbs restricts only the specified verbs across all resources in this API group.
+	// When empty, the entire API group is fully blocked (existing behavior).
+	// When specified, only the listed verbs are removed from the generated role for resources
+	// in this group — remaining verbs are still allowed.
+	// This enables per-API-group read-only restrictions without enumerating every resource.
+	// Note: "*" matches only the literal wildcard verb, not all verbs.
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:items:MaxLength=63
+	// +kubebuilder:validation:items:Pattern=`^([a-z]+|\*)$`
+	Verbs []string `json:"verbs,omitempty"`
+}
+
 // RoleDefinition-related constants for finalizers and role types.
 const (
 	// RoleDefinitionFinalizer is the finalizer used to prevent orphaned resources.
@@ -52,11 +80,13 @@ type RoleDefinitionSpec struct {
 	// The RBAC operator discovers all API groups available and removes those which are defined here.
 	// When Versions is empty (versions: []), all versions of that group are restricted.
 	// When Versions is specified, only those API versions are excluded from resource discovery.
+	// When Verbs is empty, the entire API group is blocked (all verbs).
+	// When Verbs is specified, only those verbs are restricted for all resources in the group.
 	// Note: Kubernetes RBAC PolicyRules are version-agnostic. If the same resource exists in
 	// a non-restricted version of the same group, it will still appear in the generated role.
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=64
-	RestrictedAPIs []metav1.APIGroup `json:"restrictedApis,omitempty"`
+	RestrictedAPIs []RestrictedAPIGroup `json:"restrictedApis,omitempty"`
 
 	// RestrictedResources holds all resources which will *NOT* be reconciled into the "TargetRole".
 	// The RBAC operator discovers all API resources available and removes those listed here.

@@ -153,81 +153,40 @@ spec:
                   The RBAC operator discovers all API groups available and removes those which are defined here.
                   When Versions is empty (versions: []), all versions of that group are restricted.
                   When Versions is specified, only those API versions are excluded from resource discovery.
+                  When Verbs is empty, the entire API group is blocked (all verbs).
+                  When Verbs is specified, only those verbs are restricted for all resources in the group.
                   Note: Kubernetes RBAC PolicyRules are version-agnostic. If the same resource exists in
                   a non-restricted version of the same group, it will still appear in the generated role.
                 items:
                   description: |-
-                    APIGroup contains the name, the supported versions, and the preferred version
-                    of a group.
+                    RestrictedAPIGroup defines an API group restriction with optional verb-level filtering.
+                    When Verbs is empty, the entire API group is blocked (all verbs restricted).
+                    When Verbs is specified, only the listed verbs are restricted across all resources in the group,
+                    and the remaining verbs are still allowed.
                   properties:
-                    apiVersion:
-                      description: |-
-                        APIVersion defines the versioned schema of this representation of an object.
-                        Servers should convert recognized schemas to the latest internal value, and
-                        may reject unrecognized values.
-                        More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
-                      type: string
-                    kind:
-                      description: |-
-                        Kind is a string value representing the REST resource this object represents.
-                        Servers may infer this from the endpoint the client submits requests to.
-                        Cannot be updated.
-                        In CamelCase.
-                        More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
-                      type: string
                     name:
-                      description: name is the name of the group.
+                      description: Name is the name of the API group (e.g., "storage.k8s.io",
+                        "velero.io").
                       type: string
-                    preferredVersion:
+                    verbs:
                       description: |-
-                        preferredVersion is the version preferred by the API server, which
-                        probably is the storage version.
-                      properties:
-                        groupVersion:
-                          description: groupVersion specifies the API group and version
-                            in the form "group/version"
-                          type: string
-                        version:
-                          description: |-
-                            version specifies the version in the form of "version". This is to save
-                            the clients the trouble of splitting the GroupVersion.
-                          type: string
-                      required:
-                      - groupVersion
-                      - version
-                      type: object
-                    serverAddressByClientCIDRs:
-                      description: |-
-                        a map of client CIDR to server address that is serving this group.
-                        This is to help clients reach servers in the most network-efficient way possible.
-                        Clients can use the appropriate server address as per the CIDR that they match.
-                        In case of multiple matches, clients should use the longest matching CIDR.
-                        The server returns only those CIDRs that it thinks that the client can match.
-                        For example: the master will return an internal IP CIDR only, if the client reaches the server using an internal IP.
-                        Server looks at X-Forwarded-For header or X-Real-Ip header or request.RemoteAddr (in that order) to get the client IP.
+                        Verbs restricts only the specified verbs across all resources in this API group.
+                        When empty, the entire API group is fully blocked (existing behavior).
+                        When specified, only the listed verbs are removed from the generated role for resources
+                        in this group — remaining verbs are still allowed.
+                        This enables per-API-group read-only restrictions without enumerating every resource.
+                        Note: "*" matches only the literal wildcard verb, not all verbs.
                       items:
-                        description: ServerAddressByClientCIDR helps the client to
-                          determine the server address that they should use, depending
-                          on the clientCIDR that they match.
-                        properties:
-                          clientCIDR:
-                            description: The CIDR with which clients can match their
-                              IP to figure out the server address that they should
-                              use.
-                            type: string
-                          serverAddress:
-                            description: |-
-                              Address of this server, suitable for a client that matches the above CIDR.
-                              This can be a hostname, hostname:port, IP or IP:port.
-                            type: string
-                        required:
-                        - clientCIDR
-                        - serverAddress
-                        type: object
+                        maxLength: 63
+                        minLength: 1
+                        pattern: ^([a-z]+|\*)$
+                        type: string
+                      maxItems: 16
                       type: array
-                      x-kubernetes-list-type: atomic
                     versions:
-                      description: versions are the versions supported in this group.
+                      description: |-
+                        Versions restricts only the specified API versions within this group.
+                        When empty, all versions of the group are affected.
                       items:
                         description: |-
                           GroupVersion contains the "group/version" and "version" string of a version.
@@ -247,10 +206,8 @@ spec:
                         - version
                         type: object
                       type: array
-                      x-kubernetes-list-type: atomic
                   required:
                   - name
-                  - versions
                   type: object
                 maxItems: 64
                 type: array
