@@ -449,26 +449,34 @@ func (r *RoleDefinitionReconciler) filterAPIResourcesForRoleDefinition(
 			return nil, fmt.Errorf("failed to parse GroupVersion %q: %w", gv, err)
 		}
 
-		// Check if this group/version is restricted.
+		// Check if this group/version is restricted and collect per-API-group verb restrictions.
 		// When Versions is empty, restrict all versions of the group.
 		// When Versions is specified, restrict only the listed versions.
-		apiIsRestricted := slices.ContainsFunc(roleDefinition.Spec.RestrictedAPIs, func(ag metav1.APIGroup) bool {
+		// When Verbs is empty, the entire API group is fully blocked.
+		// When Verbs is specified, only those verbs are restricted (group remains partially allowed).
+		var apiGroupRestrictedVerbs []string
+		var apiIsRestricted bool
+		for _, ag := range roleDefinition.Spec.RestrictedAPIs {
 			if ag.Name != groupVersion.Group {
-				return false
+				continue
 			}
-			// No versions specified means restrict all versions of this group.
-			if len(ag.Versions) == 0 {
-				return true
+			if len(ag.Versions) > 0 {
+				if !slices.ContainsFunc(ag.Versions, func(v metav1.GroupVersionForDiscovery) bool {
+					return v.Version == groupVersion.Version
+				}) {
+					continue
+				}
 			}
-			// Restrict only if the current version is in the specified list.
-			return slices.ContainsFunc(ag.Versions, func(v metav1.GroupVersionForDiscovery) bool {
-				return v.Version == groupVersion.Version
-			})
-		})
-		// Skip restricted API groups
-		if apiIsRestricted {
+			apiIsRestricted = true
+			apiGroupRestrictedVerbs = ag.Verbs
+			break
+		}
+
+		// Skip fully restricted API groups (no verb-level granularity)
+		if apiIsRestricted && len(apiGroupRestrictedVerbs) == 0 {
 			continue
 		}
+
 		resourceIsRestrictedByRuleFunc := func(res metav1.APIResource) func(metav1.APIResource) bool {
 			return func(rule metav1.APIResource) bool {
 				return res.Name == rule.Name && groupVersion.Group == rule.Group
@@ -487,10 +495,11 @@ func (r *RoleDefinitionReconciler) filterAPIResourcesForRoleDefinition(
 				continue
 			}
 
-			// Filter verbs
+			// Filter verbs: remove globally restricted verbs AND per-API-group restricted verbs
 			verbs := make([]string, 0)
 			for _, verb := range res.Verbs {
-				if !slices.Contains(roleDefinition.Spec.RestrictedVerbs, verb) {
+				if !slices.Contains(roleDefinition.Spec.RestrictedVerbs, verb) &&
+					!slices.Contains(apiGroupRestrictedVerbs, verb) {
 					verbs = append(verbs, verb)
 				}
 			}

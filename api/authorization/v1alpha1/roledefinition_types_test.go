@@ -94,7 +94,7 @@ func TestValidateRoleDefinitionSpec(t *testing.T) {
 							{MatchLabels: map[string]string{"role": "viewer"}},
 						},
 					},
-					RestrictedAPIs: []metav1.APIGroup{{Name: "apps"}},
+					RestrictedAPIs: []RestrictedAPIGroup{{Name: "apps"}},
 				},
 			},
 			wantErr: "aggregateFrom is mutually exclusive",

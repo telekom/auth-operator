@@ -39,7 +39,7 @@ func (r *RoleDefinition) SetupWebhookWithManager(mgr ctrl.Manager) error {
 
 // validateRestrictedAPIsVersions ensures every version entry starts with 'v'
 // and is at most 20 characters. This was previously a CEL XValidation rule but
-// the nested iteration over upstream metav1.APIGroup exceeded the CEL cost budget.
+// the nested iteration over the RestrictedAPIGroup type exceeded the CEL cost budget.
 func validateRestrictedAPIsVersions(obj *RoleDefinition) error {
 	for i, group := range obj.Spec.RestrictedAPIs {
 		for j, gv := range group.Versions {
@@ -47,6 +47,22 @@ func validateRestrictedAPIsVersions(obj *RoleDefinition) error {
 				return fmt.Errorf("restrictedApis[%d].versions[%d].version %q: must start with 'v' and be at most 20 characters", i, j, gv.Version)
 			}
 		}
+	}
+	return nil
+}
+
+// validateNoDuplicateRestrictedAPIs rejects duplicate API group names in RestrictedAPIs.
+// Duplicate entries are ambiguous because only the first match is used during
+// filtering — subsequent entries for the same group name are silently ignored.
+func validateNoDuplicateRestrictedAPIs(obj *RoleDefinition) error {
+	seen := make(map[string]int, len(obj.Spec.RestrictedAPIs))
+	for i, group := range obj.Spec.RestrictedAPIs {
+		if prev, ok := seen[group.Name]; ok {
+			return apierrors.NewBadRequest(
+				fmt.Sprintf("restrictedApis[%d].name %q is a duplicate of restrictedApis[%d]", i, group.Name, prev),
+			)
+		}
+		seen[group.Name] = i
 	}
 	return nil
 }
@@ -154,6 +170,12 @@ func validateRoleDefinitionSpec(obj *RoleDefinition) error {
 	// Validate version format in RestrictedAPIs.
 	if err := validateRestrictedAPIsVersions(obj); err != nil {
 		return apierrors.NewBadRequest(err.Error())
+	}
+
+	// Reject duplicate API group names in RestrictedAPIs — only the first entry
+	// would take effect and subsequent entries would be silently ignored.
+	if err := validateNoDuplicateRestrictedAPIs(obj); err != nil {
+		return err
 	}
 
 	// Validate TargetNamespace is required when TargetRole is Role

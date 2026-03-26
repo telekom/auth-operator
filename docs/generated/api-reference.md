@@ -138,6 +138,27 @@ _Appears in:_
 | `namespace` _string_ | Namespace is the requesting user namespace in case the requesting user is a ServiceAccount. |  | MaxLength: 253 <br />Optional: \{\} <br /> |
 
 
+#### RestrictedAPIGroup
+
+
+
+RestrictedAPIGroup defines an API group restriction with optional verb-level filtering.
+When Verbs is empty, the entire API group is blocked (all verbs restricted).
+When Verbs is specified, only the listed verbs are restricted across all resources in the group,
+and the remaining verbs are still allowed.
+
+
+
+_Appears in:_
+- [RoleDefinitionSpec](#roledefinitionspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `name` _string_ | Name is the name of the API group (e.g., "storage.k8s.io", "velero.io"). |  | Required: \{\} <br /> |
+| `versions` _[GroupVersionForDiscovery](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#groupversionfordiscovery-v1-meta) array_ | Versions restricts only the specified API versions within this group.<br />When empty, all versions of the group are affected. |  | Optional: \{\} <br /> |
+| `verbs` _string array_ | Verbs restricts only the specified verbs across all resources in this API group.<br />When empty, the entire API group is fully blocked (existing behavior).<br />When specified, only the listed verbs are removed from the generated role for resources<br />in this group — remaining verbs are still allowed.<br />This enables per-API-group read-only restrictions without enumerating every resource.<br />Note: "*" matches only the literal wildcard verb, not all verbs. |  | MaxItems: 16 <br />Optional: \{\} <br />items:MaxLength: 63 <br />items:MinLength: 1 <br />items:Pattern: ^([a-z]+\|\*)$ <br /> |
+
+
 #### RoleDefinition
 
 
@@ -174,7 +195,7 @@ _Appears in:_
 | `targetName` _string_ | TargetName is the name of the target role. This can be any name that accurately describes the ClusterRole/Role.<br />Must be a valid Kubernetes name (max 63 characters for most resources).<br />This field is immutable after creation; changing it would orphan the generated role and its bindings. |  | MaxLength: 63 <br />MinLength: 5 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` <br />Required: \{\} <br /> |
 | `targetNamespace` _string_ | TargetNamespace is the target namespace for the Role. Required when "TargetRole" is "Role". |  | Optional: \{\} <br /> |
 | `scopeNamespaced` _boolean_ | ScopeNamespaced controls whether the API resource is namespaced or not. This can also be checked by<br />running `kubectl api-resources --namespaced=true/false`. |  | Required: \{\} <br /> |
-| `restrictedApis` _[APIGroup](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#apigroup-v1-meta) array_ | RestrictedAPIs holds all API groups which will *NOT* be reconciled into the "TargetRole".<br />The RBAC operator discovers all API groups available and removes those which are defined here.<br />When Versions is empty (versions: []), all versions of that group are restricted.<br />When Versions is specified, only those API versions are excluded from resource discovery.<br />Note: Kubernetes RBAC PolicyRules are version-agnostic. If the same resource exists in<br />a non-restricted version of the same group, it will still appear in the generated role. |  | MaxItems: 64 <br />Optional: \{\} <br /> |
+| `restrictedApis` _[RestrictedAPIGroup](#restrictedapigroup) array_ | RestrictedAPIs defines API group-level restrictions for the generated role.<br />Each entry can either fully block an API group or restrict only certain verbs:<br />  - When Verbs is empty or omitted, the entire API group is fully blocked<br />    (no resources from that group appear in the generated role).<br />  - When Verbs is specified, only those verbs are removed for resources in<br />    the group — the remaining verbs are still allowed (partial restriction).<br />Version filtering narrows which API versions are affected:<br />  - When Versions is empty, all versions of the group are affected.<br />  - When Versions is specified, only those API versions are restricted.<br />Note: Kubernetes RBAC PolicyRules are version-agnostic. If the same resource<br />exists in a non-restricted version of the same group, it will still appear<br />in the generated role. |  | MaxItems: 64 <br />Optional: \{\} <br /> |
 | `restrictedResources` _[APIResource](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#apiresource-v1-meta) array_ | RestrictedResources holds all resources which will *NOT* be reconciled into the "TargetRole".<br />The RBAC operator discovers all API resources available and removes those listed here. |  | MaxItems: 128 <br />Optional: \{\} <br /> |
 | `restrictedVerbs` _string array_ | RestrictedVerbs holds all verbs which will *NOT* be reconciled into the "TargetRole".<br />The RBAC operator discovers all resource verbs available and removes those listed here. |  | MaxItems: 16 <br />Optional: \{\} <br />items:MaxLength: 63 <br />items:MinLength: 1 <br />items:Pattern: ^([a-z]+\|\*)$ <br /> |
 | `breakglassAllowed` _boolean_ | BreakglassAllowed marks generated ClusterRoles as eligible for temporary<br />privilege escalation via k8s-breakglass. The generated ClusterRole always<br />receives the label t-caas.telekom.com/breakglass-compatible set to "true"<br />or "false" based on this field's value.<br />Only applicable when TargetRole is ClusterRole. Defaults to false. | false | Optional: \{\} <br /> |

@@ -140,6 +140,12 @@ jobs:
           kubectl wait --for=condition=Ready roledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RoleDefinitions not fully reconciled"
           kubectl wait --for=condition=Ready binddefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some BindDefinitions not fully reconciled"
 
+          # Allow extra settle time for cross-resource dependencies (e.g. BDs
+          # re-reconcile after RD-generated ClusterRoles appear).
+          echo "Waiting 15s for reconciliation to fully settle..."
+          sleep 15
+          kubectl wait --for=condition=Ready binddefinition --all --timeout=60s 2>/dev/null || true
+
           # Capture generated resources (yq strips volatile K8s internal fields)
           bash ../pr-branch/hack/ci/capture-operator-output.sh /tmp/main-output
 
@@ -205,6 +211,10 @@ jobs:
           # Wait for reconciliation
           kubectl wait --for=condition=Ready roledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RoleDefinitions not fully reconciled"
           kubectl wait --for=condition=Ready binddefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some BindDefinitions not fully reconciled"
+
+          echo "Waiting 15s for reconciliation to fully settle..."
+          sleep 15
+          kubectl wait --for=condition=Ready binddefinition --all --timeout=60s 2>/dev/null || true
 
           bash hack/ci/capture-operator-output.sh /tmp/main-output
 
@@ -274,6 +284,10 @@ jobs:
           kubectl wait --for=condition=Ready roledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RoleDefinitions not fully reconciled"
           kubectl wait --for=condition=Ready binddefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some BindDefinitions not fully reconciled"
 
+          echo "Waiting 15s for reconciliation to fully settle..."
+          sleep 15
+          kubectl wait --for=condition=Ready binddefinition --all --timeout=60s 2>/dev/null || true
+
           bash ../pr-branch/hack/ci/capture-operator-output.sh /tmp/tag-output
 
           # Capture controller logs before undeploy (they're lost once pods are deleted)
@@ -335,6 +349,10 @@ jobs:
 
           kubectl wait --for=condition=Ready roledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RoleDefinitions not fully reconciled"
           kubectl wait --for=condition=Ready binddefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some BindDefinitions not fully reconciled"
+
+          echo "Waiting 15s for reconciliation to fully settle..."
+          sleep 15
+          kubectl wait --for=condition=Ready binddefinition --all --timeout=60s 2>/dev/null || true
 
           bash hack/ci/capture-operator-output.sh /tmp/pr-output
 
@@ -674,8 +692,16 @@ jobs:
             let currentBody = header;
             let currentPart = 1;
 
+            // If the header alone is too large, flush it before adding sections
+            // so RBAC resource diffs don't get truncated away.
+            if (sections.length > 0 && currentBody.length + MARKER_OVERHEAD > MAX_COMMENT_LENGTH) {
+              comments.push({ tag: 'part' + currentPart, body: currentBody });
+              currentPart++;
+              currentBody = '## :bar_chart: Output Delta Report (cont.)\n\n';
+            }
+
             for (const section of sections) {
-              if (currentBody.length + section.body.length + MARKER_OVERHEAD > MAX_COMMENT_LENGTH && currentBody !== header) {
+              if (currentBody.length + section.body.length + MARKER_OVERHEAD > MAX_COMMENT_LENGTH) {
                 // Flush current comment
                 comments.push({ tag: 'part' + currentPart, body: currentBody });
                 currentPart++;

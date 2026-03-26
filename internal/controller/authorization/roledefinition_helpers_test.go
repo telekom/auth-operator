@@ -410,7 +410,7 @@ func TestFilterAPIResourcesForRoleDefinition(t *testing.T) {
 			Spec: authorizationv1alpha1.RoleDefinitionSpec{
 				TargetRole:      authorizationv1alpha1.DefinitionClusterRole,
 				ScopeNamespaced: false,
-				RestrictedAPIs: []metav1.APIGroup{
+				RestrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{
 					{Name: "apps"},
 				},
 			},

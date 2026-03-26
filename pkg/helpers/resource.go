@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -98,22 +99,24 @@ func BuildManagedSAAnnotations(sourceNames string) map[string]string {
 }
 
 // MergeSourceNames adds a name to a comma-separated list if not already present.
-// Returns the updated comma-separated string.
+// The result is always sorted lexicographically for stable annotation output.
 func MergeSourceNames(existing, newName string) string {
 	if existing == "" {
 		return newName
 	}
 	names := strings.Split(existing, ",")
-	for _, n := range names {
-		if strings.TrimSpace(n) == newName {
-			return existing // Already present
-		}
+	for i := range names {
+		names[i] = strings.TrimSpace(names[i])
 	}
-	return existing + "," + newName
+	if !slices.Contains(names, newName) {
+		names = append(names, newName)
+	}
+	slices.Sort(names)
+	return strings.Join(names, ",")
 }
 
 // RemoveSourceName removes a name from a comma-separated list.
-// Returns the updated comma-separated string.
+// The result is always sorted lexicographically for stable annotation output.
 func RemoveSourceName(existing, nameToRemove string) string {
 	if existing == "" {
 		return ""
@@ -121,10 +124,12 @@ func RemoveSourceName(existing, nameToRemove string) string {
 	names := strings.Split(existing, ",")
 	var result []string
 	for _, n := range names {
-		if strings.TrimSpace(n) != nameToRemove {
-			result = append(result, strings.TrimSpace(n))
+		trimmed := strings.TrimSpace(n)
+		if trimmed != nameToRemove {
+			result = append(result, trimmed)
 		}
 	}
+	slices.Sort(result)
 	return strings.Join(result, ",")
 }
 

@@ -225,3 +225,125 @@ func TestBuildResourceAnnotations(t *testing.T) {
 		}
 	}
 }
+
+func TestMergeSourceNames(t *testing.T) {
+	tests := []struct {
+		name     string
+		existing string
+		newName  string
+		want     string
+	}{
+		{
+			name:     "empty existing",
+			existing: "",
+			newName:  "bd-alpha",
+			want:     "bd-alpha",
+		},
+		{
+			name:     "add to single entry",
+			existing: "bd-alpha",
+			newName:  "bd-beta",
+			want:     "bd-alpha,bd-beta",
+		},
+		{
+			name:     "already present",
+			existing: "bd-alpha,bd-beta",
+			newName:  "bd-alpha",
+			want:     "bd-alpha,bd-beta",
+		},
+		{
+			name:     "result is sorted",
+			existing: "bd-charlie",
+			newName:  "bd-alpha",
+			want:     "bd-alpha,bd-charlie",
+		},
+		{
+			name:     "unsorted input is normalized",
+			existing: "bd-charlie,bd-alpha",
+			newName:  "bd-beta",
+			want:     "bd-alpha,bd-beta,bd-charlie",
+		},
+		{
+			name:     "handles whitespace in existing",
+			existing: "bd-alpha, bd-beta",
+			newName:  "bd-gamma",
+			want:     "bd-alpha,bd-beta,bd-gamma",
+		},
+		{
+			name:     "duplicate detection handles whitespace",
+			existing: "bd-alpha, bd-beta",
+			newName:  "bd-beta",
+			want:     "bd-alpha,bd-beta",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := MergeSourceNames(tt.existing, tt.newName)
+			if got != tt.want {
+				t.Errorf("MergeSourceNames(%q, %q) = %q, want %q", tt.existing, tt.newName, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRemoveSourceName(t *testing.T) {
+	tests := []struct {
+		name         string
+		existing     string
+		nameToRemove string
+		want         string
+	}{
+		{
+			name:         "empty existing",
+			existing:     "",
+			nameToRemove: "bd-alpha",
+			want:         "",
+		},
+		{
+			name:         "remove only entry",
+			existing:     "bd-alpha",
+			nameToRemove: "bd-alpha",
+			want:         "",
+		},
+		{
+			name:         "remove first of two",
+			existing:     "bd-alpha,bd-beta",
+			nameToRemove: "bd-alpha",
+			want:         "bd-beta",
+		},
+		{
+			name:         "remove second of two",
+			existing:     "bd-alpha,bd-beta",
+			nameToRemove: "bd-beta",
+			want:         "bd-alpha",
+		},
+		{
+			name:         "name not present",
+			existing:     "bd-alpha,bd-beta",
+			nameToRemove: "bd-gamma",
+			want:         "bd-alpha,bd-beta",
+		},
+		{
+			name:         "result is sorted",
+			existing:     "bd-charlie,bd-alpha,bd-beta",
+			nameToRemove: "bd-beta",
+			want:         "bd-alpha,bd-charlie",
+		},
+		{
+			name:         "handles whitespace",
+			existing:     "bd-alpha, bd-beta, bd-gamma",
+			nameToRemove: "bd-beta",
+			want:         "bd-alpha,bd-gamma",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := RemoveSourceName(tt.existing, tt.nameToRemove)
+			if got != tt.want {
+				t.Errorf("RemoveSourceName(%q, %q) = %q, want %q", tt.existing, tt.nameToRemove, got, tt.want)
+			}
+		})
+	}
+}

@@ -127,7 +127,7 @@ var _ = Describe("RoleDefinition Drift Detection and Rollback", func() {
 					TargetRole:      authorizationv1alpha1.DefinitionClusterRole,
 					ScopeNamespaced: false,
 					RestrictedVerbs: []string{"delete", "deletecollection"},
-					RestrictedAPIs: []metav1.APIGroup{
+					RestrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{
 						{
 							Name: "certificates.k8s.io",
 							Versions: []metav1.GroupVersionForDiscovery{
@@ -712,7 +712,7 @@ func TestFilterAPIResourcesAdditionalCases(t *testing.T) {
 
 		rd := &authorizationv1alpha1.RoleDefinition{
 			Spec: authorizationv1alpha1.RoleDefinitionSpec{
-				RestrictedAPIs: []metav1.APIGroup{{Name: "apps"}},
+				RestrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{{Name: "apps"}},
 			},
 		}
 
@@ -859,7 +859,7 @@ func TestFilterAPIResourcesAdditionalCases(t *testing.T) {
 
 		rd := &authorizationv1alpha1.RoleDefinition{
 			Spec: authorizationv1alpha1.RoleDefinitionSpec{
-				RestrictedAPIs: []metav1.APIGroup{{Name: "apps"}},
+				RestrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{{Name: "apps"}},
 			},
 		}
 
@@ -883,7 +883,7 @@ func TestFilterAPIResourcesAdditionalCases(t *testing.T) {
 
 		rd := &authorizationv1alpha1.RoleDefinition{
 			Spec: authorizationv1alpha1.RoleDefinitionSpec{
-				RestrictedAPIs: []metav1.APIGroup{
+				RestrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{
 					{
 						Name: "apps",
 						Versions: []metav1.GroupVersionForDiscovery{
@@ -919,7 +919,7 @@ func TestFilterAPIResourcesAdditionalCases(t *testing.T) {
 
 		rd := &authorizationv1alpha1.RoleDefinition{
 			Spec: authorizationv1alpha1.RoleDefinitionSpec{
-				RestrictedAPIs: []metav1.APIGroup{
+				RestrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{
 					{
 						Name: "batch",
 						Versions: []metav1.GroupVersionForDiscovery{
@@ -964,7 +964,7 @@ func TestFilterAPIResourcesAdditionalCases(t *testing.T) {
 
 		rd := &authorizationv1alpha1.RoleDefinition{
 			Spec: authorizationv1alpha1.RoleDefinitionSpec{
-				RestrictedAPIs: []metav1.APIGroup{
+				RestrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{
 					{
 						Name: "apps",
 						Versions: []metav1.GroupVersionForDiscovery{
@@ -1003,7 +1003,7 @@ func TestFilterAPIResourcesAdditionalCases(t *testing.T) {
 
 		rd := &authorizationv1alpha1.RoleDefinition{
 			Spec: authorizationv1alpha1.RoleDefinitionSpec{
-				RestrictedAPIs: []metav1.APIGroup{
+				RestrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{
 					{
 						Name: "apps",
 						Versions: []metav1.GroupVersionForDiscovery{
@@ -1035,7 +1035,7 @@ func TestFilterAPIResourcesAdditionalCases(t *testing.T) {
 
 		rd := &authorizationv1alpha1.RoleDefinition{
 			Spec: authorizationv1alpha1.RoleDefinitionSpec{
-				RestrictedAPIs: []metav1.APIGroup{},
+				RestrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{},
 			},
 		}
 
@@ -1065,7 +1065,7 @@ func TestFilterAPIResourcesAdditionalCases(t *testing.T) {
 
 		rd := &authorizationv1alpha1.RoleDefinition{
 			Spec: authorizationv1alpha1.RoleDefinitionSpec{
-				RestrictedAPIs: []metav1.APIGroup{
+				RestrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{
 					{Name: "apps"},
 					{Name: "apps"}, // duplicate
 				},
@@ -1095,6 +1095,419 @@ func TestFilterAPIResourcesAdditionalCases(t *testing.T) {
 			allResources = append(allResources, rule.Resources...)
 		}
 		g.Expect(allResources).To(ContainElement("pods"))
+	})
+}
+
+// TestFilterAPIResourcesPerAPIGroupVerbRestrictions tests the per-API-group verb restriction
+// feature (Issue #236) where restrictedApis entries can specify a verbs field to restrict
+// only certain verbs instead of fully blocking the API group.
+func TestFilterAPIResourcesPerAPIGroupVerbRestrictions(t *testing.T) {
+	ctx := context.Background()
+	const appsGroup = "apps"
+
+	t.Run("restricts only specified verbs for an API group when Verbs is set", func(t *testing.T) {
+		g := NewWithT(t)
+
+		rd := &authorizationv1alpha1.RoleDefinition{
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				RestrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{
+					{
+						Name:  "storage.k8s.io",
+						Verbs: []string{"create", "update", "patch", "delete", "deletecollection"},
+					},
+				},
+			},
+		}
+
+		apiResources := discovery.APIResourcesByGroupVersion{
+			"storage.k8s.io/v1": []metav1.APIResource{
+				{Name: "storageclasses", Verbs: metav1.Verbs{"get", "list", "watch", "create", "update", "patch", "delete"}},
+				{Name: "volumeattachments", Verbs: metav1.Verbs{"get", "list", "watch", "create", "delete"}},
+			},
+		}
+
+		r := &RoleDefinitionReconciler{}
+		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(rules).NotTo(BeEmpty(), "resources should remain with read-only verbs")
+
+		for _, rule := range rules {
+			g.Expect(rule.Verbs).NotTo(ContainElement("create"))
+			g.Expect(rule.Verbs).NotTo(ContainElement("update"))
+			g.Expect(rule.Verbs).NotTo(ContainElement("patch"))
+			g.Expect(rule.Verbs).NotTo(ContainElement("delete"))
+			g.Expect(rule.Verbs).NotTo(ContainElement("deletecollection"))
+			// Read verbs should remain
+			g.Expect(rule.Verbs).To(ContainElement("get"))
+			g.Expect(rule.Verbs).To(ContainElement("list"))
+			g.Expect(rule.Verbs).To(ContainElement("watch"))
+		}
+	})
+
+	t.Run("fully blocks API group when Verbs is empty (backward compatible)", func(t *testing.T) {
+		g := NewWithT(t)
+
+		rd := &authorizationv1alpha1.RoleDefinition{
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				RestrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{
+					{Name: "velero.io"},
+				},
+			},
+		}
+
+		apiResources := discovery.APIResourcesByGroupVersion{
+			"velero.io/v1": []metav1.APIResource{
+				{Name: "backups", Verbs: metav1.Verbs{"get", "list", "create", "delete"}},
+			},
+		}
+
+		r := &RoleDefinitionReconciler{}
+		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(rules).To(BeEmpty(), "entire API group should be blocked when Verbs is empty")
+	})
+
+	t.Run("verb restrictions apply only to matching API group", func(t *testing.T) {
+		g := NewWithT(t)
+
+		rd := &authorizationv1alpha1.RoleDefinition{
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				RestrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{
+					{
+						Name:  appsGroup,
+						Verbs: []string{"delete"},
+					},
+				},
+			},
+		}
+
+		apiResources := discovery.APIResourcesByGroupVersion{
+			"apps/v1": []metav1.APIResource{
+				{Name: "deployments", Verbs: metav1.Verbs{"get", "list", "delete"}},
+			},
+			"v1": []metav1.APIResource{
+				{Name: "pods", Verbs: metav1.Verbs{"get", "list", "delete"}},
+			},
+		}
+
+		r := &RoleDefinitionReconciler{}
+		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
+		g.Expect(err).NotTo(HaveOccurred())
+
+		appsGroupSeen := false
+		coreGroupSeen := false
+
+		for _, rule := range rules {
+			if len(rule.APIGroups) > 0 && rule.APIGroups[0] == appsGroup {
+				appsGroupSeen = true
+				// apps group should NOT have delete
+				g.Expect(rule.Verbs).NotTo(ContainElement("delete"))
+				g.Expect(rule.Verbs).To(ContainElement("get"))
+			}
+			if len(rule.APIGroups) > 0 && rule.APIGroups[0] == "" {
+				coreGroupSeen = true
+				// core group should still have delete (not restricted)
+				g.Expect(rule.Verbs).To(ContainElement("delete"))
+			}
+		}
+
+		g.Expect(appsGroupSeen).To(BeTrue(), "expected a rule for the apps API group")
+		g.Expect(coreGroupSeen).To(BeTrue(), "expected a rule for the core API group")
+	})
+
+	t.Run("per-API-group verb restriction combined with global restricted verbs", func(t *testing.T) {
+		g := NewWithT(t)
+
+		rd := &authorizationv1alpha1.RoleDefinition{
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				RestrictedVerbs: []string{"deletecollection"},
+				RestrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{
+					{
+						Name:  appsGroup,
+						Verbs: []string{"create", "update"},
+					},
+				},
+			},
+		}
+
+		apiResources := discovery.APIResourcesByGroupVersion{
+			"apps/v1": []metav1.APIResource{
+				{Name: "deployments", Verbs: metav1.Verbs{"get", "list", "create", "update", "deletecollection"}},
+			},
+			"v1": []metav1.APIResource{
+				{Name: "pods", Verbs: metav1.Verbs{"get", "list", "create", "deletecollection"}},
+			},
+		}
+
+		r := &RoleDefinitionReconciler{}
+		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
+		g.Expect(err).NotTo(HaveOccurred())
+
+		for _, rule := range rules {
+			// Global restriction: deletecollection should be removed everywhere
+			g.Expect(rule.Verbs).NotTo(ContainElement("deletecollection"))
+
+			if len(rule.APIGroups) > 0 && rule.APIGroups[0] == appsGroup {
+				// Per-group restriction: create and update should be removed
+				g.Expect(rule.Verbs).NotTo(ContainElement("create"))
+				g.Expect(rule.Verbs).NotTo(ContainElement("update"))
+				g.Expect(rule.Verbs).To(ContainElement("get"))
+				g.Expect(rule.Verbs).To(ContainElement("list"))
+			}
+			if len(rule.APIGroups) > 0 && rule.APIGroups[0] == "" {
+				// Core group: create should still be there
+				g.Expect(rule.Verbs).To(ContainElement("create"))
+			}
+		}
+	})
+
+	t.Run("per-API-group verb restriction removes all verbs for a resource", func(t *testing.T) {
+		g := NewWithT(t)
+
+		rd := &authorizationv1alpha1.RoleDefinition{
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				RestrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{
+					{
+						Name:  appsGroup,
+						Verbs: []string{"get", "list"},
+					},
+				},
+			},
+		}
+
+		apiResources := discovery.APIResourcesByGroupVersion{
+			"apps/v1": []metav1.APIResource{
+				// This resource only has get and list - both are restricted
+				{Name: "deployments", Verbs: metav1.Verbs{"get", "list"}},
+			},
+		}
+
+		r := &RoleDefinitionReconciler{}
+		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(rules).To(BeEmpty(), "resource with all verbs restricted should be excluded")
+	})
+}
+
+// TestFilterAPIResourcesVerbRestrictionCombinations tests advanced combinations of
+// per-API-group verb restrictions including version-specific, multi-group, wildcard,
+// and mixed restriction scenarios (Issue #236).
+func TestFilterAPIResourcesVerbRestrictionCombinations(t *testing.T) {
+	ctx := context.Background()
+	const appsGroup = "apps"
+
+	t.Run("per-API-group verb restriction with version-specific restriction", func(t *testing.T) {
+		g := NewWithT(t)
+
+		rd := &authorizationv1alpha1.RoleDefinition{
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				RestrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{
+					{
+						Name: appsGroup,
+						Versions: []metav1.GroupVersionForDiscovery{
+							{GroupVersion: "apps/v1", Version: "v1"},
+						},
+						Verbs: []string{"create", "delete"},
+					},
+				},
+			},
+		}
+
+		apiResources := discovery.APIResourcesByGroupVersion{
+			"apps/v1": []metav1.APIResource{
+				{Name: "deployments", Verbs: metav1.Verbs{"get", "list", "create", "delete"}},
+			},
+			"apps/v1beta1": []metav1.APIResource{
+				{Name: "deployments", Verbs: metav1.Verbs{"get", "list", "create", "delete"}},
+			},
+		}
+
+		r := &RoleDefinitionReconciler{}
+		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(rules).NotTo(BeEmpty())
+
+		// Collect all verb sets for the apps group
+		restrictedVersionSeen := false
+		unrestrictedVersionSeen := false
+		for _, rule := range rules {
+			if len(rule.APIGroups) > 0 && rule.APIGroups[0] == appsGroup {
+				if len(rule.Verbs) == 2 {
+					// apps/v1 (restricted): only get, list should remain
+					restrictedVersionSeen = true
+					g.Expect(rule.Verbs).To(ContainElement("get"))
+					g.Expect(rule.Verbs).To(ContainElement("list"))
+					g.Expect(rule.Verbs).NotTo(ContainElement("create"))
+					g.Expect(rule.Verbs).NotTo(ContainElement("delete"))
+				} else {
+					// apps/v1beta1 (unrestricted): all verbs should remain
+					unrestrictedVersionSeen = true
+					g.Expect(rule.Verbs).To(ContainElement("create"))
+					g.Expect(rule.Verbs).To(ContainElement("delete"))
+				}
+			}
+		}
+		g.Expect(restrictedVersionSeen).To(BeTrue(), "expected a rule with restricted verbs from apps/v1")
+		g.Expect(unrestrictedVersionSeen).To(BeTrue(), "expected a rule with unrestricted verbs from apps/v1beta1")
+	})
+
+	t.Run("multiple API groups with different verb restrictions", func(t *testing.T) {
+		g := NewWithT(t)
+
+		rd := &authorizationv1alpha1.RoleDefinition{
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				RestrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{
+					{
+						Name:  appsGroup,
+						Verbs: []string{"delete"},
+					},
+					{
+						Name:  "batch",
+						Verbs: []string{"create", "update"},
+					},
+				},
+			},
+		}
+
+		apiResources := discovery.APIResourcesByGroupVersion{
+			"apps/v1": []metav1.APIResource{
+				{Name: "deployments", Verbs: metav1.Verbs{"get", "create", "delete"}},
+			},
+			"batch/v1": []metav1.APIResource{
+				{Name: "jobs", Verbs: metav1.Verbs{"get", "create", "update"}},
+			},
+		}
+
+		r := &RoleDefinitionReconciler{}
+		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
+		g.Expect(err).NotTo(HaveOccurred())
+
+		for _, rule := range rules {
+			if len(rule.APIGroups) > 0 && rule.APIGroups[0] == appsGroup {
+				g.Expect(rule.Verbs).NotTo(ContainElement("delete"))
+				g.Expect(rule.Verbs).To(ContainElement("get"))
+				g.Expect(rule.Verbs).To(ContainElement("create"))
+			}
+			if len(rule.APIGroups) > 0 && rule.APIGroups[0] == "batch" {
+				g.Expect(rule.Verbs).NotTo(ContainElement("create"))
+				g.Expect(rule.Verbs).NotTo(ContainElement("update"))
+				g.Expect(rule.Verbs).To(ContainElement("get"))
+			}
+		}
+	})
+
+	t.Run("per-API-group verb restriction with wildcard verb", func(t *testing.T) {
+		g := NewWithT(t)
+
+		rd := &authorizationv1alpha1.RoleDefinition{
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				RestrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{
+					{
+						Name:  appsGroup,
+						Verbs: []string{"*"},
+					},
+				},
+			},
+		}
+
+		// Include a resource with a literal "*" verb alongside normal verbs.
+		// The restriction should remove only the literal "*", leaving the rest.
+		apiResources := discovery.APIResourcesByGroupVersion{
+			"apps/v1": []metav1.APIResource{
+				{Name: "deployments", Verbs: metav1.Verbs{"get", "list", "create", "*"}},
+			},
+		}
+
+		r := &RoleDefinitionReconciler{}
+		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
+		g.Expect(err).NotTo(HaveOccurred())
+		// Wildcard in restricted verbs removes the literal "*" verb only, not all verbs.
+		// This matches the existing behavior of RestrictedVerbs — it does literal matching.
+		g.Expect(rules).NotTo(BeEmpty(), "wildcard restriction should only remove literal '*' verb")
+		for _, rule := range rules {
+			g.Expect(rule.Verbs).NotTo(ContainElement("*"), "literal '*' should be removed")
+			g.Expect(rule.Verbs).To(ContainElement("get"))
+			g.Expect(rule.Verbs).To(ContainElement("list"))
+			g.Expect(rule.Verbs).To(ContainElement("create"))
+		}
+	})
+
+	t.Run("empty Verbs on RestrictedAPIGroup fully blocks group", func(t *testing.T) {
+		g := NewWithT(t)
+
+		rd := &authorizationv1alpha1.RoleDefinition{
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				RestrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{
+					{
+						Name:  appsGroup,
+						Verbs: []string{}, // explicitly empty
+					},
+				},
+			},
+		}
+
+		apiResources := discovery.APIResourcesByGroupVersion{
+			"apps/v1": []metav1.APIResource{
+				{Name: "deployments", Verbs: metav1.Verbs{"get", "list"}},
+			},
+		}
+
+		r := &RoleDefinitionReconciler{}
+		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(rules).To(BeEmpty(), "explicitly empty Verbs should fully block the API group")
+	})
+
+	t.Run("mix of fully blocked and verb-restricted API groups", func(t *testing.T) {
+		g := NewWithT(t)
+
+		rd := &authorizationv1alpha1.RoleDefinition{
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				RestrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{
+					{Name: "velero.io"}, // fully blocked (no Verbs)
+					{
+						Name:  "storage.k8s.io",
+						Verbs: []string{"create", "delete"},
+					},
+				},
+			},
+		}
+
+		apiResources := discovery.APIResourcesByGroupVersion{
+			"velero.io/v1": []metav1.APIResource{
+				{Name: "backups", Verbs: metav1.Verbs{"get", "list", "create"}},
+			},
+			"storage.k8s.io/v1": []metav1.APIResource{
+				{Name: "storageclasses", Verbs: metav1.Verbs{"get", "list", "create", "delete"}},
+			},
+			"v1": []metav1.APIResource{
+				{Name: "pods", Verbs: metav1.Verbs{"get", "list", "create", "delete"}},
+			},
+		}
+
+		r := &RoleDefinitionReconciler{}
+		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
+		g.Expect(err).NotTo(HaveOccurred())
+
+		allResources := make([]string, 0, len(rules))
+		for _, rule := range rules {
+			allResources = append(allResources, rule.Resources...)
+		}
+		// velero.io should be fully blocked
+		g.Expect(allResources).NotTo(ContainElement("backups"))
+		// storage.k8s.io should remain with restricted verbs
+		g.Expect(allResources).To(ContainElement("storageclasses"))
+		// core API group should be unaffected
+		g.Expect(allResources).To(ContainElement("pods"))
+
+		for _, rule := range rules {
+			if len(rule.APIGroups) > 0 && rule.APIGroups[0] == "storage.k8s.io" {
+				g.Expect(rule.Verbs).NotTo(ContainElement("create"))
+				g.Expect(rule.Verbs).NotTo(ContainElement("delete"))
+				g.Expect(rule.Verbs).To(ContainElement("get"))
+				g.Expect(rule.Verbs).To(ContainElement("list"))
+			}
+		}
 	})
 }
 

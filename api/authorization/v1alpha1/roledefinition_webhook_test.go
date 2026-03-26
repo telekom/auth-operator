@@ -361,7 +361,7 @@ var _ = Describe("RoleDefinition Webhook", func() {
 					TargetRole:      DefinitionClusterRole,
 					TargetName:      "test-valid-versions",
 					ScopeNamespaced: false,
-					RestrictedAPIs: []metav1.APIGroup{
+					RestrictedAPIs: []RestrictedAPIGroup{
 						{
 							Name: "apps",
 							Versions: []metav1.GroupVersionForDiscovery{
@@ -385,7 +385,7 @@ var _ = Describe("RoleDefinition Webhook", func() {
 					TargetRole:      DefinitionClusterRole,
 					TargetName:      "test-bad-version-prefix",
 					ScopeNamespaced: false,
-					RestrictedAPIs: []metav1.APIGroup{
+					RestrictedAPIs: []RestrictedAPIGroup{
 						{
 							Name: "apps",
 							Versions: []metav1.GroupVersionForDiscovery{
@@ -409,7 +409,7 @@ var _ = Describe("RoleDefinition Webhook", func() {
 					TargetRole:      DefinitionClusterRole,
 					TargetName:      "test-version-too-long",
 					ScopeNamespaced: false,
-					RestrictedAPIs: []metav1.APIGroup{
+					RestrictedAPIs: []RestrictedAPIGroup{
 						{
 							Name: "apps",
 							Versions: []metav1.GroupVersionForDiscovery{
@@ -433,7 +433,7 @@ var _ = Describe("RoleDefinition Webhook", func() {
 					TargetRole:      DefinitionClusterRole,
 					TargetName:      "test-version-boundary",
 					ScopeNamespaced: false,
-					RestrictedAPIs: []metav1.APIGroup{
+					RestrictedAPIs: []RestrictedAPIGroup{
 						{
 							Name: "apps",
 							Versions: []metav1.GroupVersionForDiscovery{
@@ -645,6 +645,161 @@ var _ = Describe("RoleDefinition Webhook", func() {
 					return c.Field == "spec.restrictedResources"
 				}),
 			), "expected cause targeting spec.restrictedResources")
+		})
+	})
+
+	Context("RestrictedAPIs verb restrictions (Issue #236)", func() {
+
+		It("Should admit a RoleDefinition with per-API-group verb restrictions", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-api-group-verbs",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-api-group-verbs",
+					ScopeNamespaced: false,
+					RestrictedAPIs: []RestrictedAPIGroup{
+						{
+							Name:  "storage.k8s.io",
+							Verbs: []string{"create", "update", "patch", "delete"},
+							Versions: []metav1.GroupVersionForDiscovery{
+								{GroupVersion: "storage.k8s.io/v1", Version: "v1"},
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, rd)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, rd)).To(Succeed())
+		})
+
+		It("Should admit a RoleDefinition with empty Verbs (backward compatible full block)", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-empty-verbs-block",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-empty-verbs-block",
+					ScopeNamespaced: false,
+					RestrictedAPIs: []RestrictedAPIGroup{
+						{Name: "velero.io"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, rd)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, rd)).To(Succeed())
+		})
+
+		It("Should admit mixed fully blocked and verb-restricted API groups", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-mixed-api-verbs",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-mixed-api-verbs",
+					ScopeNamespaced: false,
+					RestrictedAPIs: []RestrictedAPIGroup{
+						{Name: "velero.io"}, // fully blocked
+						{
+							Name:  "storage.k8s.io",
+							Verbs: []string{"create", "delete", "deletecollection"},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, rd)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, rd)).To(Succeed())
+		})
+
+		It("Should still reject aggregateFrom with restrictedApis that have Verbs", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-agg-with-api-verbs",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole: DefinitionClusterRole,
+					TargetName: "test-agg-with-api-verbs",
+					AggregateFrom: &rbacv1.AggregationRule{
+						ClusterRoleSelectors: []metav1.LabelSelector{
+							{MatchLabels: map[string]string{"role": "viewer"}},
+						},
+					},
+					RestrictedAPIs: []RestrictedAPIGroup{
+						{
+							Name:  "apps",
+							Verbs: []string{"delete"},
+						},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, rd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("aggregateFrom is mutually exclusive"))
+		})
+
+		It("Should reject duplicate API group names in RestrictedAPIs", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-dup-api-group",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-dup-api-group",
+					ScopeNamespaced: false,
+					RestrictedAPIs: []RestrictedAPIGroup{
+						{Name: "apps", Verbs: []string{"delete"}},
+						{Name: "apps", Verbs: []string{"create"}},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, rd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("duplicate"))
+		})
+
+		It("Should reject RestrictedAPIs verbs with invalid pattern (uppercase)", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-invalid-verb-pattern",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-invalid-verb-pattern",
+					ScopeNamespaced: false,
+					RestrictedAPIs: []RestrictedAPIGroup{
+						{Name: "apps", Verbs: []string{"GET"}},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, rd)
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("Should reject RestrictedAPIs verbs exceeding MaxItems=16", func() {
+			// Use 17 distinct lowercase-letter-only verbs to match the CRD regex ^([a-z]+|\\*)$
+			manyVerbs := []string{
+				"get", "list", "create", "update", "patch", "delete", "watch",
+				"deletecollection", "proxy", "bind", "escalate", "impersonate",
+				"approve", "sign", "attest", "audit", "manage",
+			}
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-too-many-verbs",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-too-many-verbs",
+					ScopeNamespaced: false,
+					RestrictedAPIs: []RestrictedAPIGroup{
+						{Name: "apps", Verbs: manyVerbs},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, rd)
+			Expect(err).To(HaveOccurred())
 		})
 	})
 })

@@ -3,6 +3,7 @@ package authorization
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -418,8 +419,9 @@ func (r *BindDefinitionReconciler) addExternalSAReference(
 		}
 	}
 
-	// Add our reference
+	// Add our reference and sort for stable annotation output
 	refs = append(refs, bdName)
+	slices.Sort(refs)
 	newValue := strings.Join(refs, ",")
 
 	// Patch the ServiceAccount to add/update the annotation
@@ -491,6 +493,7 @@ func (r *BindDefinitionReconciler) removeExternalSAReference(
 	if len(newRefs) == 0 {
 		delete(sa.Annotations, authorizationv1alpha1.AnnotationKeyReferencedBy)
 	} else {
+		slices.Sort(newRefs)
 		sa.Annotations[authorizationv1alpha1.AnnotationKeyReferencedBy] = strings.Join(newRefs, ",")
 	}
 
