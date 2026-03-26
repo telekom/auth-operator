@@ -56,7 +56,8 @@ YQ_STRIP_CRD='del(
   .items[].metadata.managedFields,
   .items[].metadata.ownerReferences[].uid,
   .items[].status.observedGeneration,
-  .items[].status.conditions[].lastTransitionTime
+  .items[].status.conditions[].lastTransitionTime,
+  .items[].status.conditions[].observedGeneration
 ) | (.items[].status.conditions |= sort_by(.type))'
 
 # --- RBAC resources ---

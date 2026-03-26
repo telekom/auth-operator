@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -310,9 +311,29 @@ func supportsList(verbs []string) bool {
 
 // formatBlockingResourcesMessage creates a detailed event message about what resources are blocking namespace deletion.
 func formatBlockingResourcesMessage(blockingResources []namespaceDeletionResourceBlocking) string {
+	// Sort for deterministic event messages across reconciliation runs.
+	slices.SortFunc(blockingResources, func(a, b namespaceDeletionResourceBlocking) int {
+		if a.ResourceType != b.ResourceType {
+			if a.ResourceType < b.ResourceType {
+				return -1
+			}
+			return 1
+		}
+		if a.APIGroup < b.APIGroup {
+			return -1
+		}
+		if a.APIGroup > b.APIGroup {
+			return 1
+		}
+		return 0
+	})
+
 	resourceDetails := make([]string, 0, len(blockingResources))
 
 	for _, rb := range blockingResources {
+		// Sort names within each entry for stable output.
+		slices.Sort(rb.Names)
+
 		var resourceType string
 		if rb.APIGroup == "" {
 			resourceType = rb.ResourceType
