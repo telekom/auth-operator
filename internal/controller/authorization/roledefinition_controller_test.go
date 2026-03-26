@@ -1194,17 +1194,25 @@ func TestFilterAPIResourcesPerAPIGroupVerbRestrictions(t *testing.T) {
 		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
 		g.Expect(err).NotTo(HaveOccurred())
 
+		appsGroupSeen := false
+		coreGroupSeen := false
+
 		for _, rule := range rules {
 			if len(rule.APIGroups) > 0 && rule.APIGroups[0] == appsGroup {
+				appsGroupSeen = true
 				// apps group should NOT have delete
 				g.Expect(rule.Verbs).NotTo(ContainElement("delete"))
 				g.Expect(rule.Verbs).To(ContainElement("get"))
 			}
 			if len(rule.APIGroups) > 0 && rule.APIGroups[0] == "" {
+				coreGroupSeen = true
 				// core group should still have delete (not restricted)
 				g.Expect(rule.Verbs).To(ContainElement("delete"))
 			}
 		}
+
+		g.Expect(appsGroupSeen).To(BeTrue(), "expected a rule for the apps API group")
+		g.Expect(coreGroupSeen).To(BeTrue(), "expected a rule for the core API group")
 	})
 
 	t.Run("per-API-group verb restriction combined with global restricted verbs", func(t *testing.T) {
@@ -1317,18 +1325,30 @@ func TestFilterAPIResourcesVerbRestrictionCombinations(t *testing.T) {
 		r := &RoleDefinitionReconciler{}
 		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
 		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(rules).NotTo(BeEmpty())
 
-		// Expect rules from both versions, but apps/v1 should have restricted verbs
+		// Collect all verb sets for the apps group
+		restrictedVersionSeen := false
+		unrestrictedVersionSeen := false
 		for _, rule := range rules {
 			if len(rule.APIGroups) > 0 && rule.APIGroups[0] == appsGroup {
-				// At least one rule should have all verbs (from v1beta1)
-				// and another should only have get,list (from v1)
 				if len(rule.Verbs) == 2 {
+					// apps/v1 (restricted): only get, list should remain
+					restrictedVersionSeen = true
 					g.Expect(rule.Verbs).To(ContainElement("get"))
 					g.Expect(rule.Verbs).To(ContainElement("list"))
+					g.Expect(rule.Verbs).NotTo(ContainElement("create"))
+					g.Expect(rule.Verbs).NotTo(ContainElement("delete"))
+				} else {
+					// apps/v1beta1 (unrestricted): all verbs should remain
+					unrestrictedVersionSeen = true
+					g.Expect(rule.Verbs).To(ContainElement("create"))
+					g.Expect(rule.Verbs).To(ContainElement("delete"))
 				}
 			}
 		}
+		g.Expect(restrictedVersionSeen).To(BeTrue(), "expected a rule with restricted verbs from apps/v1")
+		g.Expect(unrestrictedVersionSeen).To(BeTrue(), "expected a rule with unrestricted verbs from apps/v1beta1")
 	})
 
 	t.Run("multiple API groups with different verb restrictions", func(t *testing.T) {

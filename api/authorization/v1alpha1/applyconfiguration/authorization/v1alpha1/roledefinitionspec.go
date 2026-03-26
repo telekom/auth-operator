@@ -39,14 +39,18 @@ type RoleDefinitionSpecApplyConfiguration struct {
 	// ScopeNamespaced controls whether the API resource is namespaced or not. This can also be checked by
 	// running `kubectl api-resources --namespaced=true/false`.
 	ScopeNamespaced *bool `json:"scopeNamespaced,omitempty"`
-	// RestrictedAPIs holds all API groups which will *NOT* be reconciled into the "TargetRole".
-	// The RBAC operator discovers all API groups available and removes those which are defined here.
-	// When Versions is empty (versions: []), all versions of that group are restricted.
-	// When Versions is specified, only those API versions are excluded from resource discovery.
-	// When Verbs is empty, the entire API group is blocked (all verbs).
-	// When Verbs is specified, only those verbs are restricted for all resources in the group.
-	// Note: Kubernetes RBAC PolicyRules are version-agnostic. If the same resource exists in
-	// a non-restricted version of the same group, it will still appear in the generated role.
+	// RestrictedAPIs defines API group-level restrictions for the generated role.
+	// Each entry can either fully block an API group or restrict only certain verbs:
+	// - When Verbs is empty or omitted, the entire API group is fully blocked
+	// (no resources from that group appear in the generated role).
+	// - When Verbs is specified, only those verbs are removed for resources in
+	// the group — the remaining verbs are still allowed (partial restriction).
+	// Version filtering narrows which API versions are affected:
+	// - When Versions is empty, all versions of the group are affected.
+	// - When Versions is specified, only those API versions are restricted.
+	// Note: Kubernetes RBAC PolicyRules are version-agnostic. If the same resource
+	// exists in a non-restricted version of the same group, it will still appear
+	// in the generated role.
 	RestrictedAPIs []RestrictedAPIGroupApplyConfiguration `json:"restrictedApis,omitempty"`
 	// RestrictedResources holds all resources which will *NOT* be reconciled into the "TargetRole".
 	// The RBAC operator discovers all API resources available and removes those listed here.
