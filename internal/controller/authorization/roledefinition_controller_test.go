@@ -1410,20 +1410,22 @@ func TestFilterAPIResourcesVerbRestrictionCombinations(t *testing.T) {
 			},
 		}
 
+		// Include a resource with a literal "*" verb alongside normal verbs.
+		// The restriction should remove only the literal "*", leaving the rest.
 		apiResources := discovery.APIResourcesByGroupVersion{
 			"apps/v1": []metav1.APIResource{
-				{Name: "deployments", Verbs: metav1.Verbs{"get", "list", "create"}},
+				{Name: "deployments", Verbs: metav1.Verbs{"get", "list", "create", "*"}},
 			},
 		}
 
 		r := &RoleDefinitionReconciler{}
 		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
 		g.Expect(err).NotTo(HaveOccurred())
-		// Wildcard in restricted verbs removes the * verb only, not all verbs
-		// (this matches the existing behavior of RestrictedVerbs)
+		// Wildcard in restricted verbs removes the literal "*" verb only, not all verbs.
+		// This matches the existing behavior of RestrictedVerbs — it does literal matching.
 		g.Expect(rules).NotTo(BeEmpty(), "wildcard restriction should only remove literal '*' verb")
 		for _, rule := range rules {
-			g.Expect(rule.Verbs).NotTo(ContainElement("*"))
+			g.Expect(rule.Verbs).NotTo(ContainElement("*"), "literal '*' should be removed")
 			g.Expect(rule.Verbs).To(ContainElement("get"))
 			g.Expect(rule.Verbs).To(ContainElement("list"))
 			g.Expect(rule.Verbs).To(ContainElement("create"))

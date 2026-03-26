@@ -692,8 +692,16 @@ jobs:
             let currentBody = header;
             let currentPart = 1;
 
+            // If the header alone is too large, flush it before adding sections
+            // so RBAC resource diffs don't get truncated away.
+            if (sections.length > 0 && currentBody.length + MARKER_OVERHEAD > MAX_COMMENT_LENGTH) {
+              comments.push({ tag: 'part' + currentPart, body: currentBody });
+              currentPart++;
+              currentBody = '## :bar_chart: Output Delta Report (cont.)\n\n';
+            }
+
             for (const section of sections) {
-              if (currentBody.length + section.body.length + MARKER_OVERHEAD > MAX_COMMENT_LENGTH && currentBody !== header) {
+              if (currentBody.length + section.body.length + MARKER_OVERHEAD > MAX_COMMENT_LENGTH) {
                 // Flush current comment
                 comments.push({ tag: 'part' + currentPart, body: currentBody });
                 currentPart++;

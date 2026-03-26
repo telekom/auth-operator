@@ -779,9 +779,11 @@ var _ = Describe("RoleDefinition Webhook", func() {
 		})
 
 		It("Should reject RestrictedAPIs verbs exceeding MaxItems=16", func() {
-			manyVerbs := make([]string, 17)
-			for i := range manyVerbs {
-				manyVerbs[i] = fmt.Sprintf("verb%d", i)
+			// Use 17 distinct lowercase-letter-only verbs to match the CRD regex ^([a-z]+|\\*)$
+			manyVerbs := []string{
+				"get", "list", "create", "update", "patch", "delete", "watch",
+				"deletecollection", "proxy", "bind", "escalate", "impersonate",
+				"approve", "sign", "attest", "audit", "manage",
 			}
 			rd := &RoleDefinition{
 				ObjectMeta: metav1.ObjectMeta{
