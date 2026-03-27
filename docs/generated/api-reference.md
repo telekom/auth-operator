@@ -255,14 +255,6 @@ _Appears in:_
 | `namespace` _string_ | Namespace is the requesting user namespace in case the requesting user is a ServiceAccount. |  | MaxLength: 253 <br />Optional: \{\} <br /> |
 
 
-#### RestrictedAPIGroup
-
-
-
-RestrictedAPIGroup defines an API group restriction with optional verb-level filtering.
-When Verbs is empty, the entire API group is blocked (all verbs restricted).
-When Verbs is specified, only the listed verbs are restricted across all resources in the group,
-and the remaining verbs are still allowed.
 #### RBACPolicy
 
 
@@ -293,13 +285,6 @@ RBACPolicyReference is a reference to an RBACPolicy that governs a restricted re
 
 
 _Appears in:_
-- [RoleDefinitionSpec](#roledefinitionspec)
-
-| Field | Description | Default | Validation |
-| --- | --- | --- | --- |
-| `name` _string_ | Name is the name of the API group (e.g., "storage.k8s.io", "velero.io"). |  | Required: \{\} <br /> |
-| `versions` _[GroupVersionForDiscovery](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#groupversionfordiscovery-v1-meta) array_ | Versions restricts only the specified API versions within this group.<br />When empty, all versions of the group are affected. |  | Optional: \{\} <br /> |
-| `verbs` _string array_ | Verbs restricts only the specified verbs across all resources in this API group.<br />When empty, the entire API group is fully blocked (existing behavior).<br />When specified, only the listed verbs are removed from the generated role for resources<br />in this group — remaining verbs are still allowed.<br />This enables per-API-group read-only restrictions without enumerating every resource.<br />Note: "*" matches only the literal wildcard verb, not all verbs. |  | MaxItems: 16 <br />Optional: \{\} <br />items:MaxLength: 63 <br />items:MinLength: 1 <br />items:Pattern: ^([a-z]+\|\*)$ <br /> |
 - [RestrictedBindDefinitionSpec](#restrictedbinddefinitionspec)
 - [RestrictedRoleDefinitionSpec](#restrictedroledefinitionspec)
 
@@ -365,6 +350,28 @@ _Appears in:_
 | `resource` _string_ | Resource is the resource name (e.g., "pods", "secrets"). |  | MinLength: 1 <br />Required: \{\} <br /> |
 | `apiGroup` _string_ | APIGroup is the API group of the resource. Empty string means core group. |  | Optional: \{\} <br /> |
 | `verbs` _string array_ | Verbs are the verbs forbidden on this resource. |  | MinItems: 1 <br />Required: \{\} <br /> |
+
+
+#### RestrictedAPIGroup
+
+
+
+RestrictedAPIGroup defines an API group restriction with optional verb-level filtering.
+When Verbs is empty, the entire API group is blocked (all verbs restricted).
+When Verbs is specified, only the listed verbs are restricted across all resources in the group,
+and the remaining verbs are still allowed.
+
+
+
+_Appears in:_
+- [RestrictedRoleDefinitionSpec](#restrictedroledefinitionspec)
+- [RoleDefinitionSpec](#roledefinitionspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `name` _string_ | Name is the name of the API group (e.g., "storage.k8s.io", "velero.io"). |  | Required: \{\} <br /> |
+| `versions` _[GroupVersionForDiscovery](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#groupversionfordiscovery-v1-meta) array_ | Versions restricts only the specified API versions within this group.<br />When empty, all versions of the group are affected. |  | Optional: \{\} <br /> |
+| `verbs` _string array_ | Verbs restricts only the specified verbs across all resources in this API group.<br />When empty, the entire API group is fully blocked (existing behavior).<br />When specified, only the listed verbs are removed from the generated role for resources<br />in this group — remaining verbs are still allowed.<br />This enables per-API-group read-only restrictions without enumerating every resource.<br />Note: "*" matches only the literal wildcard verb, not all verbs. |  | MaxItems: 16 <br />Optional: \{\} <br />items:MaxLength: 63 <br />items:MinLength: 1 <br />items:Pattern: ^([a-z]+\|\*)$ <br /> |
 
 
 #### RestrictedBindDefinition
@@ -472,7 +479,7 @@ _Appears in:_
 | `targetName` _string_ | TargetName is the name of the target role.<br />This field is immutable after creation. |  | MaxLength: 63 <br />MinLength: 5 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` <br />Required: \{\} <br /> |
 | `targetNamespace` _string_ | TargetNamespace is the target namespace for the Role.<br />Required when "TargetRole" is "Role". |  | Optional: \{\} <br /> |
 | `scopeNamespaced` _boolean_ | ScopeNamespaced controls whether the API resource filter includes<br />namespaced or cluster-scoped resources. |  | Required: \{\} <br /> |
-| `restrictedApis` _[APIGroup](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#apigroup-v1-meta) array_ | RestrictedAPIs holds API groups which will NOT be included in the generated role. |  | MaxItems: 64 <br />Optional: \{\} <br /> |
+| `restrictedApis` _[RestrictedAPIGroup](#restrictedapigroup) array_ | RestrictedAPIs defines API group-level restrictions for the generated role.<br />Each entry can either fully block an API group or restrict only certain verbs:<br />  - When Verbs is empty or omitted, the entire API group is fully blocked<br />    (no resources from that group appear in the generated role).<br />  - When Verbs is specified, only those verbs are removed for resources in<br />    the group — the remaining verbs are still allowed (partial restriction).<br />Version filtering narrows which API versions are affected:<br />  - When Versions is empty, all versions of the group are affected.<br />  - When Versions is specified, only those API versions are restricted.<br />Note: Kubernetes RBAC PolicyRules are version-agnostic. If the same resource<br />exists in a non-restricted version of the same group, it will still appear<br />in the generated role. |  | MaxItems: 64 <br />Optional: \{\} <br /> |
 | `restrictedResources` _[APIResource](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#apiresource-v1-meta) array_ | RestrictedResources holds resources which will NOT be included in the generated role. |  | MaxItems: 128 <br />Optional: \{\} <br /> |
 | `restrictedVerbs` _string array_ | RestrictedVerbs holds verbs which will NOT be included in the generated role. |  | MaxItems: 16 <br />Optional: \{\} <br />items:MaxLength: 63 <br />items:MinLength: 1 <br />items:Pattern: ^([a-z]+\|\*)$ <br /> |
 

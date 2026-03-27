@@ -104,11 +104,11 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 	}
 
-	bindDefOwnerExpression := authzv1alpha1.BindDefinition{
+	bindDefOwnerExpression := authorizationv1alpha1.BindDefinition{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "owner-expression-binddefinition",
 		},
-		Spec: authzv1alpha1.BindDefinitionSpec{
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
 			TargetName: "bd-owner-expression",
 			Subjects: []rbacv1.Subject{
 				{
@@ -117,7 +117,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 					Name:     "oidc:platform-admins",
 				},
 			},
-			RoleBindings: []authzv1alpha1.NamespaceBinding{{
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{{
 				ClusterRoleRefs: []string{"platform-admin"},
 				NamespaceSelector: []metav1.LabelSelector{
 					{
@@ -170,7 +170,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:     "allow system:masters user to create any namespace",
-			bindDefs: []authzv1alpha1.BindDefinition{},
+			bindDefs: []authorizationv1alpha1.BindDefinition{},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
 					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
@@ -196,7 +196,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:     "allow kubernetes-admin user to delete any namespace",
-			bindDefs: []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs: []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
 					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
@@ -231,7 +231,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:     "allow system:masters user to reclassify tenant namespace to platform",
-			bindDefs: []authzv1alpha1.BindDefinition{},
+			bindDefs: []authorizationv1alpha1.BindDefinition{},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
 					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
@@ -268,7 +268,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:     "allow system:masters user to delete any namespace regardless of ownership labels",
-			bindDefs: []authzv1alpha1.BindDefinition{},
+			bindDefs: []authorizationv1alpha1.BindDefinition{},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
 					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
@@ -492,7 +492,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:     "allow delete for unauthorized user when namespace is unclaimed by any BindDefinition",
-			bindDefs: []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs: []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
 					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
@@ -528,7 +528,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:     "deny delete for unauthorized user when tenant selector matches namespace",
-			bindDefs: []authzv1alpha1.BindDefinition{bindDefTenant},
+			bindDefs: []authorizationv1alpha1.BindDefinition{bindDefTenant},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
 					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
@@ -566,7 +566,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:     "deny delete for unauthorized user when owner label is missing",
-			bindDefs: []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs: []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
 					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
@@ -602,7 +602,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:     "deny delete for unauthorized user when owner label is empty",
-			bindDefs: []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs: []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
 					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
@@ -638,7 +638,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:     "deny delete for unauthorized user when owner label is claimed by MatchLabels",
-			bindDefs: []authzv1alpha1.BindDefinition{bindDefPlatform},
+			bindDefs: []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
 					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
@@ -674,7 +674,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 		},
 		{
 			name:     "deny delete for unauthorized user when owner label is claimed by owner matchExpression",
-			bindDefs: []authzv1alpha1.BindDefinition{bindDefOwnerExpression},
+			bindDefs: []authorizationv1alpha1.BindDefinition{bindDefOwnerExpression},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
 					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},

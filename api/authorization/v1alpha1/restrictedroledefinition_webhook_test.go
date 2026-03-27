@@ -191,6 +191,47 @@ var _ = Describe("RestrictedRoleDefinition Webhook", func() {
 			Expect(k8sClient.Delete(ctx, rrd1)).To(Succeed())
 			Expect(k8sClient.Delete(ctx, rrd2)).To(Succeed())
 		})
+
+		It("Should reject duplicate API group names in RestrictedAPIs", func() {
+			rrd := &RestrictedRoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rrd-dup-api-group",
+				},
+				Spec: RestrictedRoleDefinitionSpec{
+					PolicyRef:       RBACPolicyReference{Name: policy.Name},
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-rrd-dup-api-group",
+					ScopeNamespaced: false,
+					RestrictedAPIs: []RestrictedAPIGroup{
+						{Name: "apps", Verbs: []string{"delete"}},
+						{Name: "apps", Verbs: []string{"create"}},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, rrd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("duplicate"))
+		})
+
+		It("Should allow RestrictedAPIs with verb restrictions", func() {
+			rrd := &RestrictedRoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rrd-verb-restriction",
+				},
+				Spec: RestrictedRoleDefinitionSpec{
+					PolicyRef:       RBACPolicyReference{Name: policy.Name},
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-rrd-verb-restriction",
+					ScopeNamespaced: false,
+					RestrictedAPIs: []RestrictedAPIGroup{
+						{Name: "apps", Verbs: []string{"delete", "create"}},
+						{Name: "batch"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, rrd)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, rrd)).To(Succeed())
+		})
 	})
 
 	Context("When updating RestrictedRoleDefinition under Validating Webhook", func() {

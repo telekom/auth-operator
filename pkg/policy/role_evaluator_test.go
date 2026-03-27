@@ -125,7 +125,7 @@ func TestEvaluateRoleDefinition_ForbiddenAPIGroups(t *testing.T) {
 			TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
 			TargetName:      "test-role",
 			TargetNamespace: "default",
-			RestrictedAPIs: []metav1.APIGroup{
+			RestrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{
 				{Name: "apps"},
 				{Name: "certificates.k8s.io"},
 			},
@@ -152,7 +152,7 @@ func TestEvaluateRoleDefinition_ForbiddenAPIGroups_Missing(t *testing.T) {
 			TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
 			TargetName:      "test-role",
 			TargetNamespace: "default",
-			RestrictedAPIs: []metav1.APIGroup{
+			RestrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{
 				{Name: "apps"},
 			},
 		},
@@ -183,7 +183,7 @@ func TestEvaluateRoleDefinition_ForbiddenAPIGroups_VersionBypass(t *testing.T) {
 			TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
 			TargetName:      "test-role",
 			TargetNamespace: "default",
-			RestrictedAPIs: []metav1.APIGroup{
+			RestrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{
 				{Name: "certificates.k8s.io", Versions: []metav1.GroupVersionForDiscovery{
 					{Version: "v999"},
 				}},
@@ -314,7 +314,7 @@ func TestEvaluateRoleDefinition_ForbiddenResourceVerbs(t *testing.T) {
 		name            string
 		rules           []authorizationv1alpha1.ResourceVerbRule
 		restrictedVerbs []string
-		restrictedAPIs  []metav1.APIGroup
+		restrictedAPIs  []authorizationv1alpha1.RestrictedAPIGroup
 		restrictedRes   []metav1.APIResource
 		wantViolations  int
 	}{
@@ -347,7 +347,7 @@ func TestEvaluateRoleDefinition_ForbiddenResourceVerbs(t *testing.T) {
 			rules: []authorizationv1alpha1.ResourceVerbRule{
 				{Resource: "certificates", APIGroup: "certificates.k8s.io", Verbs: []string{"create"}},
 			},
-			restrictedAPIs: []metav1.APIGroup{{Name: "certificates.k8s.io"}},
+			restrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{{Name: "certificates.k8s.io"}},
 			wantViolations: 0,
 		},
 		{

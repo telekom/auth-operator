@@ -65,6 +65,9 @@ spec:
 # Requires: operator-cross-namespace-policy RBACPolicy
 # Requester default-policy example: users in groups
 # oidc:platform-operators or oidc:infra-operators.
+# Demonstrates per-API-group verb restrictions: certificates.k8s.io is
+# restricted to read-only verbs (create/update/delete/patch removed), while
+# the storage.k8s.io group is fully blocked.
 # -----------------------------------------------------------------------------
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: RestrictedRoleDefinition
@@ -85,6 +88,14 @@ spec:
       versions:
         - groupVersion: certificates.k8s.io/v1
           version: v1
+      # Per-API-group verb restriction: only remove write verbs, keep read access
+      verbs:
+        - create
+        - update
+        - delete
+        - patch
+    - name: storage.k8s.io
+      # No verbs field → fully blocked (no resources from this group appear)
   restrictedVerbs:
     - escalate
     - impersonate

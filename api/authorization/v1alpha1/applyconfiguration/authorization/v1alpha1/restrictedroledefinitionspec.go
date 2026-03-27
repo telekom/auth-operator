@@ -41,8 +41,19 @@ type RestrictedRoleDefinitionSpecApplyConfiguration struct {
 	// ScopeNamespaced controls whether the API resource filter includes
 	// namespaced or cluster-scoped resources.
 	ScopeNamespaced *bool `json:"scopeNamespaced,omitempty"`
-	// RestrictedAPIs holds API groups which will NOT be included in the generated role.
-	RestrictedAPIs []v1.APIGroup `json:"restrictedApis,omitempty"`
+	// RestrictedAPIs defines API group-level restrictions for the generated role.
+	// Each entry can either fully block an API group or restrict only certain verbs:
+	// - When Verbs is empty or omitted, the entire API group is fully blocked
+	// (no resources from that group appear in the generated role).
+	// - When Verbs is specified, only those verbs are removed for resources in
+	// the group — the remaining verbs are still allowed (partial restriction).
+	// Version filtering narrows which API versions are affected:
+	// - When Versions is empty, all versions of the group are affected.
+	// - When Versions is specified, only those API versions are restricted.
+	// Note: Kubernetes RBAC PolicyRules are version-agnostic. If the same resource
+	// exists in a non-restricted version of the same group, it will still appear
+	// in the generated role.
+	RestrictedAPIs []RestrictedAPIGroupApplyConfiguration `json:"restrictedApis,omitempty"`
 	// RestrictedResources holds resources which will NOT be included in the generated role.
 	RestrictedResources []v1.APIResource `json:"restrictedResources,omitempty"`
 	// RestrictedVerbs holds verbs which will NOT be included in the generated role.
@@ -98,9 +109,12 @@ func (b *RestrictedRoleDefinitionSpecApplyConfiguration) WithScopeNamespaced(val
 // WithRestrictedAPIs adds the given value to the RestrictedAPIs field in the declarative configuration
 // and returns the receiver, so that objects can be build by chaining "With" function invocations.
 // If called multiple times, values provided by each call will be appended to the RestrictedAPIs field.
-func (b *RestrictedRoleDefinitionSpecApplyConfiguration) WithRestrictedAPIs(values ...v1.APIGroup) *RestrictedRoleDefinitionSpecApplyConfiguration {
+func (b *RestrictedRoleDefinitionSpecApplyConfiguration) WithRestrictedAPIs(values ...*RestrictedAPIGroupApplyConfiguration) *RestrictedRoleDefinitionSpecApplyConfiguration {
 	for i := range values {
-		b.RestrictedAPIs = append(b.RestrictedAPIs, values[i])
+		if values[i] == nil {
+			panic("nil value passed to WithRestrictedAPIs")
+		}
+		b.RestrictedAPIs = append(b.RestrictedAPIs, *values[i])
 	}
 	return b
 }

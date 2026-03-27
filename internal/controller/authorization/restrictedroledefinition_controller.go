@@ -377,46 +377,16 @@ func (r *RestrictedRoleDefinitionReconciler) rrdDiscoverAndFilter(
 			return nil, false, fmt.Errorf("parse GroupVersion %q: %w", gv, err)
 		}
 
-		if rrdIsAPIRestricted(rrd, groupVersion) {
+		// Check if this group/version is restricted and collect per-API-group verb restrictions.
+		apiIsRestricted, apiGroupRestrictedVerbs := rrdCheckAPIRestriction(rrd.Spec.RestrictedAPIs, groupVersion)
+
+		// Skip fully restricted API groups (no verb-level granularity)
+		if apiIsRestricted && len(apiGroupRestrictedVerbs) == 0 {
 			continue
 		}
 
 		for _, res := range resources {
-			// Check restricted resources.
-			// An empty Group in the restriction matches all API groups.
-			resourceIsRestricted := slices.ContainsFunc(rrd.Spec.RestrictedResources, func(rule metav1.APIResource) bool {
-				return res.Name == rule.Name && (rule.Group == "" || groupVersion.Group == rule.Group)
-			})
-			if resourceIsRestricted {
-				continue
-			}
-
-			// Filter by namespace scope.
-			if res.Namespaced && !rrd.Spec.ScopeNamespaced {
-				continue
-			}
-
-			// Filter verbs.
-			verbs := make([]string, 0, len(res.Verbs))
-			for _, verb := range res.Verbs {
-				if !slices.Contains(rrd.Spec.RestrictedVerbs, verb) {
-					verbs = append(verbs, verb)
-				}
-			}
-			if len(verbs) == 0 {
-				continue
-			}
-
-			key := gv + "|" + strings.Join(verbs, ",")
-			existing, exists := rulesByKey[key]
-			if !exists {
-				existing = &rbacv1.PolicyRule{
-					APIGroups: []string{groupVersion.Group},
-					Verbs:     verbs,
-				}
-				rulesByKey[key] = existing
-			}
-			existing.Resources = append(existing.Resources, res.Name)
+			rrdFilterResource(rrd, groupVersion, gv, res, apiGroupRestrictedVerbs, rulesByKey)
 		}
 	}
 
@@ -448,19 +418,75 @@ func (r *RestrictedRoleDefinitionReconciler) rrdDiscoverAndFilter(
 	return finalRules, false, nil
 }
 
-// rrdIsAPIRestricted checks whether the given group/version is in the restricted APIs list.
-func rrdIsAPIRestricted(rrd *authorizationv1alpha1.RestrictedRoleDefinition, gv schema.GroupVersion) bool {
-	return slices.ContainsFunc(rrd.Spec.RestrictedAPIs, func(ag metav1.APIGroup) bool {
-		if ag.Name != gv.Group {
-			return false
-		}
-		if len(ag.Versions) == 0 {
-			return true
-		}
-		return slices.ContainsFunc(ag.Versions, func(v metav1.GroupVersionForDiscovery) bool {
-			return v.Version == gv.Version
-		})
+// rrdFilterResource evaluates a single API resource against the spec restrictions
+// and adds matching verbs to the rulesByKey map.
+func rrdFilterResource(
+	rrd *authorizationv1alpha1.RestrictedRoleDefinition,
+	groupVersion schema.GroupVersion,
+	gv string,
+	res metav1.APIResource,
+	apiGroupRestrictedVerbs []string,
+	rulesByKey map[string]*rbacv1.PolicyRule,
+) {
+	// Check restricted resources.
+	// An empty Group in the restriction matches all API groups.
+	resourceIsRestricted := slices.ContainsFunc(rrd.Spec.RestrictedResources, func(rule metav1.APIResource) bool {
+		return res.Name == rule.Name && (rule.Group == "" || groupVersion.Group == rule.Group)
 	})
+	if resourceIsRestricted {
+		return
+	}
+
+	// Filter by namespace scope.
+	if res.Namespaced && !rrd.Spec.ScopeNamespaced {
+		return
+	}
+
+	// Filter verbs: remove globally restricted verbs AND per-API-group restricted verbs.
+	verbs := make([]string, 0, len(res.Verbs))
+	for _, verb := range res.Verbs {
+		if !slices.Contains(rrd.Spec.RestrictedVerbs, verb) &&
+			!slices.Contains(apiGroupRestrictedVerbs, verb) {
+			verbs = append(verbs, verb)
+		}
+	}
+	if len(verbs) == 0 {
+		return
+	}
+
+	key := gv + "|" + strings.Join(verbs, ",")
+	existing, exists := rulesByKey[key]
+	if !exists {
+		existing = &rbacv1.PolicyRule{
+			APIGroups: []string{groupVersion.Group},
+			Verbs:     verbs,
+		}
+		rulesByKey[key] = existing
+	}
+	existing.Resources = append(existing.Resources, res.Name)
+}
+
+// rrdCheckAPIRestriction checks whether a given group/version matches any entry
+// in the RestrictedAPIs list. It returns whether the API is restricted and the
+// per-API-group restricted verbs (empty means fully blocked).
+func rrdCheckAPIRestriction(
+	restrictedAPIs []authorizationv1alpha1.RestrictedAPIGroup,
+	groupVersion schema.GroupVersion,
+) (restricted bool, verbs []string) {
+	for _, ag := range restrictedAPIs {
+		if ag.Name != groupVersion.Group {
+			continue
+		}
+		if len(ag.Versions) > 0 {
+			if !slices.ContainsFunc(ag.Versions, func(v metav1.GroupVersionForDiscovery) bool {
+				return v.Version == groupVersion.Version
+			}) {
+				continue
+			}
+		}
+		return true, ag.Verbs
+	}
+	return false, nil
 }
 
 // rrdEnsureRole ensures the target role exists with the computed rules.

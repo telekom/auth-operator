@@ -47,10 +47,21 @@ type RestrictedRoleDefinitionSpec struct {
 	// +kubebuilder:validation:Required
 	ScopeNamespaced bool `json:"scopeNamespaced"`
 
-	// RestrictedAPIs holds API groups which will NOT be included in the generated role.
+	// RestrictedAPIs defines API group-level restrictions for the generated role.
+	// Each entry can either fully block an API group or restrict only certain verbs:
+	//   - When Verbs is empty or omitted, the entire API group is fully blocked
+	//     (no resources from that group appear in the generated role).
+	//   - When Verbs is specified, only those verbs are removed for resources in
+	//     the group — the remaining verbs are still allowed (partial restriction).
+	// Version filtering narrows which API versions are affected:
+	//   - When Versions is empty, all versions of the group are affected.
+	//   - When Versions is specified, only those API versions are restricted.
+	// Note: Kubernetes RBAC PolicyRules are version-agnostic. If the same resource
+	// exists in a non-restricted version of the same group, it will still appear
+	// in the generated role.
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=64
-	RestrictedAPIs []metav1.APIGroup `json:"restrictedApis,omitempty"`
+	RestrictedAPIs []RestrictedAPIGroup `json:"restrictedApis,omitempty"`
 
 	// RestrictedResources holds resources which will NOT be included in the generated role.
 	// +kubebuilder:validation:Optional

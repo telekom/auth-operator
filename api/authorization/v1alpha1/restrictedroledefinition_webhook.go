@@ -164,8 +164,30 @@ func (v *RestrictedRoleDefinitionValidator) validateRestrictedRoleDefinitionSpec
 		}
 	}
 
+	// Reject duplicate API group names in RestrictedAPIs — only the first entry
+	// would take effect and subsequent entries would be silently ignored.
+	if err := validateNoDuplicateRestrictedRRDAPIs(obj); err != nil {
+		return err
+	}
+
 	// Validate restrictedAPIs versions follow the expected format.
 	return validateRestrictedRoleDefinitionAPIsVersions(obj)
+}
+
+// validateNoDuplicateRestrictedRRDAPIs rejects duplicate API group names in RestrictedAPIs.
+// Duplicate entries are ambiguous because only the first match is used during
+// filtering — subsequent entries for the same group name are silently ignored.
+func validateNoDuplicateRestrictedRRDAPIs(obj *RestrictedRoleDefinition) error {
+	seen := make(map[string]int, len(obj.Spec.RestrictedAPIs))
+	for i, group := range obj.Spec.RestrictedAPIs {
+		if prev, ok := seen[group.Name]; ok {
+			return apierrors.NewBadRequest(
+				fmt.Sprintf("restrictedApis[%d].name %q is a duplicate of restrictedApis[%d]", i, group.Name, prev),
+			)
+		}
+		seen[group.Name] = i
+	}
+	return nil
 }
 
 // validateRestrictedRoleDefinitionAPIsVersions ensures every version entry

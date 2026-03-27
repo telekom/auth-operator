@@ -94,7 +94,7 @@ func TestRestrictedRoleDefinitionSpecFields(t *testing.T) {
 			TargetName:      "tenant-role",
 			TargetNamespace: "tenant-ns",
 			ScopeNamespaced: true,
-			RestrictedAPIs: []metav1.APIGroup{
+			RestrictedAPIs: []RestrictedAPIGroup{
 				{Name: "apps"},
 			},
 			RestrictedResources: []metav1.APIResource{
@@ -181,7 +181,7 @@ func TestRestrictedRoleDefinitionDeepCopy(t *testing.T) {
 			TargetRole:      DefinitionClusterRole,
 			TargetName:      "target-role",
 			ScopeNamespaced: false,
-			RestrictedAPIs: []metav1.APIGroup{
+			RestrictedAPIs: []RestrictedAPIGroup{
 				{Name: "apps"},
 			},
 			RestrictedVerbs: []string{"delete"},

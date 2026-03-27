@@ -353,7 +353,7 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 	// and does not match any BindDefinition selector. This keeps delete
 	// authorization conservative for namespaces that are still targeted.
 	if req.Operation == admissionv1.Delete {
-		ownerValue, hasOwner := ns.Labels[authzv1alpha1.LabelKeyOwner]
+		ownerValue, hasOwner := ns.Labels[authorizationv1alpha1.LabelKeyOwner]
 		if hasOwner && ownerValue != "" && !namespaceMatchedByAnyBindDefinition(logger, ns, bindDefinitions.Items) {
 			logger.V(1).Info("namespace delete allowed - owner label is unclaimed by any BindDefinition",
 				"namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username)
@@ -419,7 +419,7 @@ func namespaceMatchesSelector(ns *corev1.Namespace, selector *metav1.LabelSelect
 	return labelSelector.Matches(labels.Set(ns.Labels)), nil
 }
 
-func namespaceMatchedByAnyBindDefinition(logger logr.Logger, ns *corev1.Namespace, bindDefs []authzv1alpha1.BindDefinition) bool {
+func namespaceMatchedByAnyBindDefinition(logger logr.Logger, ns *corev1.Namespace, bindDefs []authorizationv1alpha1.BindDefinition) bool {
 	for _, bindDef := range bindDefs {
 		if IsRestrictedBindDefinition(bindDef.Name) {
 			continue
