@@ -386,7 +386,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdDiscoverAndFilter(
 		}
 
 		for _, res := range resources {
-			rrdFilterResource(rrd, groupVersion, gv, res, apiGroupRestrictedVerbs, rulesByKey)
+			rrdFilterResource(rrd, groupVersion, res, apiGroupRestrictedVerbs, rulesByKey)
 		}
 	}
 
@@ -423,7 +423,6 @@ func (r *RestrictedRoleDefinitionReconciler) rrdDiscoverAndFilter(
 func rrdFilterResource(
 	rrd *authorizationv1alpha1.RestrictedRoleDefinition,
 	groupVersion schema.GroupVersion,
-	gv string,
 	res metav1.APIResource,
 	apiGroupRestrictedVerbs []string,
 	rulesByKey map[string]*rbacv1.PolicyRule,
@@ -454,7 +453,7 @@ func rrdFilterResource(
 		return
 	}
 
-	key := gv + "|" + strings.Join(verbs, ",")
+	key := fmt.Sprintf("%s|%v", groupVersion.Group, verbs)
 	existing, exists := rulesByKey[key]
 	if !exists {
 		existing = &rbacv1.PolicyRule{
@@ -463,7 +462,9 @@ func rrdFilterResource(
 		}
 		rulesByKey[key] = existing
 	}
-	existing.Resources = append(existing.Resources, res.Name)
+	if !slices.Contains(existing.Resources, res.Name) {
+		existing.Resources = append(existing.Resources, res.Name)
+	}
 }
 
 // rrdCheckAPIRestriction checks whether a given group/version matches any entry
