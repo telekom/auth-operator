@@ -1098,6 +1098,82 @@ func TestFilterAPIResourcesAdditionalCases(t *testing.T) {
 	})
 }
 
+func TestFilterAPIResourcesDeduplication(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("deduplicates resources across multiple versions of the same API group", func(t *testing.T) {
+		g := NewWithT(t)
+
+		rd := &authorizationv1alpha1.RoleDefinition{
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{},
+		}
+
+		// Same resource "virtualservers" exposed in two versions of the same API group.
+		// RBAC PolicyRules are version-agnostic, so this must produce a single rule
+		// with "virtualservers" listed only once.
+		apiResources := discovery.APIResourcesByGroupVersion{
+			"k8s.nginx.org/v1": []metav1.APIResource{
+				{Name: "virtualservers", Verbs: metav1.Verbs{"get", "list", "watch"}},
+				{Name: "virtualservers/status", Verbs: metav1.Verbs{"get"}},
+			},
+			"k8s.nginx.org/v1beta1": []metav1.APIResource{
+				{Name: "virtualservers", Verbs: metav1.Verbs{"get", "list", "watch"}},
+				{Name: "virtualservers/status", Verbs: metav1.Verbs{"get"}},
+			},
+		}
+
+		r := &RoleDefinitionReconciler{}
+		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
+		g.Expect(err).NotTo(HaveOccurred())
+
+		// Collect all resources across rules for the k8s.nginx.org group.
+		for _, rule := range rules {
+			if len(rule.APIGroups) == 1 && rule.APIGroups[0] == "k8s.nginx.org" {
+				// Each resource name should appear exactly once per rule.
+				seen := make(map[string]int)
+				for _, res := range rule.Resources {
+					seen[res]++
+				}
+				for res, count := range seen {
+					g.Expect(count).To(Equal(1),
+						fmt.Sprintf("resource %q should appear once, found %d times", res, count))
+				}
+			}
+		}
+	})
+
+	t.Run("merges resources from multiple versions into a single rule per API group", func(t *testing.T) {
+		g := NewWithT(t)
+
+		rd := &authorizationv1alpha1.RoleDefinition{
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{},
+		}
+
+		// v1 has "deployments", v1beta1 has "deployments" too (same),
+		// plus v1 has "statefulsets" that v1beta1 does not.
+		apiResources := discovery.APIResourcesByGroupVersion{
+			"apps/v1": []metav1.APIResource{
+				{Name: "deployments", Verbs: metav1.Verbs{"get", "list"}},
+				{Name: "statefulsets", Verbs: metav1.Verbs{"get", "list"}},
+			},
+			"apps/v1beta1": []metav1.APIResource{
+				{Name: "deployments", Verbs: metav1.Verbs{"get", "list"}},
+			},
+		}
+
+		r := &RoleDefinitionReconciler{}
+		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
+		g.Expect(err).NotTo(HaveOccurred())
+
+		// Should produce a single rule for the "apps" group with [get, list] verbs.
+		g.Expect(rules).To(HaveLen(1))
+		for _, rule := range rules {
+			g.Expect(rule.APIGroups).To(ConsistOf("apps"))
+			g.Expect(rule.Resources).To(ConsistOf("deployments", "statefulsets"))
+		}
+	})
+}
+
 // TestFilterAPIResourcesPerAPIGroupVerbRestrictions tests the per-API-group verb restriction
 // feature (Issue #236) where restrictedApis entries can specify a verbs field to restrict
 // only certain verbs instead of fully blocking the API group.

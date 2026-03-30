@@ -123,7 +123,7 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 
 		// Use centralized cleanup
 		By("Cleaning up test resources")
-		clusterRoles := []string{"complex-filtered-role"}
+		clusterRoles := []string{"complex-filtered-role", "complex-multiversion-dedup-role"}
 		clusterRoleBindings := []string{
 			"complex-filtered-role",
 		}
@@ -147,7 +147,10 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 
 		By("Cleaning up cluster-scoped resources")
 		cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "clusterrole",
-			"complex-filtered-role", "--ignore-not-found=true")
+			"complex-filtered-role", "complex-multiversion-dedup-role", "--ignore-not-found=true")
+		_, _ = utils.Run(cmd)
+		cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "-f",
+			"test/e2e/testdata/complex/multiversion-crd.yaml", "--ignore-not-found=true")
 		_, _ = utils.Run(cmd)
 		cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "clusterrolebinding",
 			"-l", "app.kubernetes.io/managed-by=auth-operator", "--ignore-not-found=true")
@@ -529,6 +532,232 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 		})
 	})
 
+	Context("Multi-version CRD resource deduplication (regression: duplicate resources in ClusterRole)", func() {
+		const (
+			multiversionCRDPath = "test/e2e/testdata/complex/multiversion-crd.yaml"
+			dedupRoleDefName    = "complex-multiversion-dedup"
+			dedupClusterRole    = "complex-multiversion-dedup-role"
+		)
+
+		// checkClusterRoleHasNoDuplicateResources verifies that no rule in the
+		// given ClusterRole contains a resource name more than once. Returns
+		// an error describing the first duplicate found, or nil.
+		checkClusterRoleHasNoDuplicateResources := func(clusterRoleName string) error {
+			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrole", clusterRoleName, "-o", "json")
+			output, err := utils.Run(cmd)
+			if err != nil {
+				return fmt.Errorf("failed to get ClusterRole %s: %w", clusterRoleName, err)
+			}
+			var role map[string]interface{}
+			if err := json.Unmarshal(output, &role); err != nil {
+				return fmt.Errorf("failed to unmarshal ClusterRole: %w", err)
+			}
+			rulesRaw, ok := role["rules"].([]interface{})
+			if !ok || len(rulesRaw) == 0 {
+				return fmt.Errorf("ClusterRole %s has no rules", clusterRoleName)
+			}
+			for i, ruleRaw := range rulesRaw {
+				ruleMap, _ := ruleRaw.(map[string]interface{})
+				resources, _ := ruleMap["resources"].([]interface{})
+				seen := make(map[string]int, len(resources))
+				for _, r := range resources {
+					name := r.(string)
+					seen[name]++
+					if seen[name] > 1 {
+						apiGroups, _ := ruleMap["apiGroups"].([]interface{})
+						return fmt.Errorf("rule %d (apiGroups=%v) has duplicate resource %q (%d occurrences)",
+							i, apiGroups, name, seen[name])
+					}
+				}
+			}
+			return nil
+		}
+
+		It("should not produce duplicate resources when a CRD serves multiple versions", func() {
+			By("Installing multi-version CRD (v1 + v1alpha1)")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", multiversionCRDPath)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Waiting for CRD to be established")
+			Eventually(func() error {
+				cmd := exec.CommandContext(context.Background(), "kubectl", "wait", "--for=condition=Established",
+					"crd/multiwidgets.e2etest.auth-operator.io", "--timeout=30s")
+				_, err := utils.Run(cmd)
+				return err
+			}, complexReconcileTime, complexPollInterval).Should(Succeed())
+
+			By("Creating a RoleDefinition targeting a new ClusterRole")
+			roleDefYAML := fmt.Sprintf(`
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: %s
+spec:
+  targetRole: ClusterRole
+  targetName: %s
+  scopeNamespaced: true
+  restrictedVerbs:
+    - create
+    - update
+    - delete
+    - patch
+    - deletecollection
+`, dedupRoleDefName, dedupClusterRole)
+
+			cmd = exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(roleDefYAML)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Waiting for RoleDefinition to be reconciled")
+			Eventually(func() bool {
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "roledefinition", dedupRoleDefName,
+					"-o", "jsonpath={.status.conditions[?(@.type=='Created')].status}")
+				output, err := utils.Run(cmd)
+				if err != nil {
+					return false
+				}
+				return strings.TrimSpace(string(output)) == statusTrue
+			}, complexReconcileTime, complexPollInterval).Should(BeTrue())
+
+			By("Verifying ClusterRole exists and has no duplicate resources")
+			Eventually(func() error {
+				return checkClusterRoleHasNoDuplicateResources(dedupClusterRole)
+			}, complexReconcileTime, complexPollInterval).Should(Succeed())
+
+			By("Verifying the test CRD resources (multiwidgets) appear exactly once")
+			cmd = exec.CommandContext(context.Background(), "kubectl", "get", "clusterrole", dedupClusterRole, "-o", "json")
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			var role map[string]interface{}
+			Expect(json.Unmarshal(output, &role)).To(Succeed())
+			multiwidgetCount := 0
+			for _, ruleRaw := range role["rules"].([]interface{}) {
+				ruleMap := ruleRaw.(map[string]interface{})
+				if resources, ok := ruleMap["resources"].([]interface{}); ok {
+					for _, r := range resources {
+						if r.(string) == "multiwidgets" {
+							multiwidgetCount++
+						}
+					}
+				}
+			}
+			Expect(multiwidgetCount).To(Equal(1),
+				"multiwidgets should appear exactly once across all rules, got %d", multiwidgetCount)
+		})
+
+		It("should remove CRD resources from ClusterRole when CRD is deleted", func() {
+			By("Verifying multiwidgets currently exist in ClusterRole")
+			Eventually(func() int {
+				return countResourceInClusterRole(dedupClusterRole, "multiwidgets")
+			}, complexReconcileTime, complexPollInterval).Should(Equal(1),
+				"multiwidgets should be present before CRD deletion")
+
+			By("Verifying the API group is present before deletion")
+			Expect(countAPIGroupInClusterRole(dedupClusterRole, "e2etest.auth-operator.io")).To(
+				BeNumerically(">", 0), "API group should be present before CRD deletion")
+
+			By("Deleting the multi-version CRD")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "-f", multiversionCRDPath, "--ignore-not-found=true")
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Waiting for CRD removal to propagate and controller to reconcile")
+			// The resource tracker watches CRD events and re-discovers API
+			// resources; after the CRD is fully deleted the controller should
+			// reconcile and remove the stale resources from the ClusterRole.
+			Eventually(func() int {
+				return countResourceInClusterRole(dedupClusterRole, "multiwidgets")
+			}, complexReconcileTime, complexPollInterval).Should(Equal(0),
+				"multiwidgets should be removed from ClusterRole after CRD deletion")
+
+			By("Verifying multiwidgets/status is also removed")
+			Expect(countResourceInClusterRole(dedupClusterRole, "multiwidgets/status")).To(Equal(0),
+				"multiwidgets/status should be removed after CRD deletion")
+
+			By("Verifying multiwidgets/finalizers is also removed")
+			Expect(countResourceInClusterRole(dedupClusterRole, "multiwidgets/finalizers")).To(Equal(0),
+				"multiwidgets/finalizers should be removed after CRD deletion")
+
+			By("Verifying the entire API group is removed from ClusterRole rules")
+			Expect(countAPIGroupInClusterRole(dedupClusterRole, "e2etest.auth-operator.io")).To(Equal(0),
+				"API group e2etest.auth-operator.io should have no rules after CRD deletion")
+		})
+
+		It("should not accumulate duplicates after CRD re-creation (install/uninstall cycle)", func() {
+			By("Re-installing the multi-version CRD")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", multiversionCRDPath)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Waiting for CRD to be established")
+			Eventually(func() error {
+				cmd := exec.CommandContext(context.Background(), "kubectl", "wait", "--for=condition=Established",
+					"crd/multiwidgets.e2etest.auth-operator.io", "--timeout=30s")
+				_, err := utils.Run(cmd)
+				return err
+			}, complexReconcileTime, complexPollInterval).Should(Succeed())
+
+			By("Waiting for multiwidgets to reappear in ClusterRole")
+			Eventually(func() int {
+				return countResourceInClusterRole(dedupClusterRole, "multiwidgets")
+			}, complexReconcileTime, complexPollInterval).Should(Equal(1),
+				"multiwidgets should reappear exactly once after CRD re-creation")
+
+			By("Verifying no duplicate resources in any rule")
+			Expect(checkClusterRoleHasNoDuplicateResources(dedupClusterRole)).To(Succeed())
+
+			By("Performing a second remove/re-add cycle to catch accumulation")
+			cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "-f", multiversionCRDPath, "--ignore-not-found=true")
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(func() int {
+				return countResourceInClusterRole(dedupClusterRole, "multiwidgets")
+			}, complexReconcileTime, complexPollInterval).Should(Equal(0),
+				"multiwidgets should be removed after second CRD deletion")
+
+			cmd = exec.CommandContext(context.Background(), "kubectl", "apply", "-f", multiversionCRDPath)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(func() error {
+				cmd := exec.CommandContext(context.Background(), "kubectl", "wait", "--for=condition=Established",
+					"crd/multiwidgets.e2etest.auth-operator.io", "--timeout=30s")
+				_, err := utils.Run(cmd)
+				return err
+			}, complexReconcileTime, complexPollInterval).Should(Succeed())
+
+			By("Verifying multiwidgets appears exactly once after second re-creation (no accumulation)")
+			Eventually(func() int {
+				return countResourceInClusterRole(dedupClusterRole, "multiwidgets")
+			}, complexReconcileTime, complexPollInterval).Should(Equal(1),
+				"multiwidgets must not accumulate across install/uninstall cycles")
+
+			By("Final duplicate check across all rules")
+			Expect(checkClusterRoleHasNoDuplicateResources(dedupClusterRole)).To(Succeed())
+		})
+
+		AfterAll(func() {
+			By("Cleaning up multi-version dedup test resources")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "roledefinition", dedupRoleDefName, "--ignore-not-found=true")
+			_, _ = utils.Run(cmd)
+			Eventually(func() error {
+				err := checkResourceExists("clusterrole", dedupClusterRole, "")
+				if err != nil {
+					return nil
+				}
+				return fmt.Errorf("ClusterRole %s still exists", dedupClusterRole)
+			}, complexReconcileTime, complexPollInterval).ShouldNot(HaveOccurred())
+			cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "clusterrole", dedupClusterRole, "--ignore-not-found=true")
+			_, _ = utils.Run(cmd)
+			cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "-f", multiversionCRDPath, "--ignore-not-found=true")
+			_, _ = utils.Run(cmd)
+		})
+	})
+
 	Context("Cleanup and Finalizers", func() {
 		It("should properly clean up child resources when RoleDefinition is deleted", func() {
 			By("Verifying ClusterRole exists")
@@ -585,4 +814,65 @@ func containsString(slice []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// countResourceInClusterRole counts how many times a resource name appears
+// across all rules in the given ClusterRole. Returns -1 if the ClusterRole
+// cannot be fetched (e.g. not found).
+//
+//nolint:unparam // clusterRoleName is intentionally a parameter for reusability.
+func countResourceInClusterRole(clusterRoleName, resourceName string) int {
+	cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrole", clusterRoleName, "-o", "json")
+	output, err := utils.Run(cmd)
+	if err != nil {
+		return -1
+	}
+	var role map[string]interface{}
+	if err := json.Unmarshal(output, &role); err != nil {
+		return -1
+	}
+	rulesRaw, ok := role["rules"].([]interface{})
+	if !ok {
+		return 0
+	}
+	count := 0
+	for _, ruleRaw := range rulesRaw {
+		ruleMap, _ := ruleRaw.(map[string]interface{})
+		resources, _ := ruleMap["resources"].([]interface{})
+		for _, r := range resources {
+			if r.(string) == resourceName {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+// countAPIGroupInClusterRole counts how many rules reference a given API group
+// in the ClusterRole. Returns -1 if the ClusterRole cannot be fetched.
+func countAPIGroupInClusterRole(clusterRoleName, apiGroup string) int {
+	cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrole", clusterRoleName, "-o", "json")
+	output, err := utils.Run(cmd)
+	if err != nil {
+		return -1
+	}
+	var role map[string]interface{}
+	if err := json.Unmarshal(output, &role); err != nil {
+		return -1
+	}
+	rulesRaw, ok := role["rules"].([]interface{})
+	if !ok {
+		return 0
+	}
+	count := 0
+	for _, ruleRaw := range rulesRaw {
+		ruleMap, _ := ruleRaw.(map[string]interface{})
+		apiGroups, _ := ruleMap["apiGroups"].([]interface{})
+		for _, ag := range apiGroups {
+			if ag.(string) == apiGroup {
+				count++
+			}
+		}
+	}
+	return count
 }
