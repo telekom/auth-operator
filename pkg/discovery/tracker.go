@@ -573,15 +573,18 @@ func (r *ResourceTracker) watchAPIResources(ctx context.Context) {
 				continue
 			}
 
-			// Trigger rate-limited collection
-			// for ADDED, DELETED, and MODIFIED events
-			// Note: we do not differentiate between these events here
-			// as any of them may impact the available API resources
-			// (e.g., a CRD modification may add/remove versions)
-			// and we want to keep the cache up-to-date.
-			// The rate limiter will ensure we do not overload the API server
-			// with discovery requests in case of bursts of events.
-			r.rateLimit.Do(r.collectAndNotify(ctx))
+			switch event.Type {
+			case watch.Added, watch.Deleted:
+				// New and deleted CRDs must always trigger an immediate collection
+				// so that RoleDefinitions are reconciled with up-to-date API resources.
+				// ADDED events for pre-existing CRDs are already filtered by hasCRDUUID above,
+				// so only genuinely new CRDs reach this point.
+				r.collectAndNotify(ctx)()
+			default:
+				// MODIFIED events (e.g. status/condition updates) can arrive in bursts,
+				// so rate-limit them to avoid overloading the API server with discovery requests.
+				r.rateLimit.Do(r.collectAndNotify(ctx))
+			}
 
 		case <-ctx.Done():
 			logger.Info("stopping CRD watch after context done")

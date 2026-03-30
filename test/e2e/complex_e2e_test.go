@@ -621,12 +621,9 @@ spec:
 			}, complexReconcileTime, complexPollInterval).Should(BeTrue())
 
 			By("Verifying the test CRD resources (multiwidgets) appear exactly once")
-			// Use a longer timeout for the first check: the resource tracker may need up to
-			// 5 minutes (defaultCollectionInterval) to discover the new CRD's API resources
-			// plus 1 minute for the controller's requeueAfter to reconcile with the updated cache.
 			Eventually(func() int {
 				return countResourceInClusterRole(dedupClusterRole, "multiwidgets")
-			}, 7*time.Minute, complexPollInterval).Should(Equal(1),
+			}, complexReconcileTime, complexPollInterval).Should(Equal(1),
 				"multiwidgets should appear exactly once across all rules")
 
 			By("Verifying ClusterRole has no duplicate resources")
@@ -686,11 +683,9 @@ spec:
 			}, complexReconcileTime, complexPollInterval).Should(Succeed())
 
 			By("Waiting for multiwidgets to reappear in ClusterRole")
-			// The CRD ADDED event may be rate-limited by the tracker; use a long timeout
-			// to cover the periodic collection interval (5m) + controller requeue (1m).
 			Eventually(func() int {
 				return countResourceInClusterRole(dedupClusterRole, "multiwidgets")
-			}, 7*time.Minute, complexPollInterval).Should(Equal(1),
+			}, complexReconcileTime, complexPollInterval).Should(Equal(1),
 				"multiwidgets should reappear exactly once after CRD re-creation")
 
 			By("Verifying no duplicate resources in any rule")
