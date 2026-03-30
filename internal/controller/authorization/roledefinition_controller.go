@@ -506,7 +506,11 @@ func (r *RoleDefinitionReconciler) filterAPIResourcesForRoleDefinition(
 			if len(verbs) == 0 {
 				continue
 			}
-			key := fmt.Sprintf("%s|%v", gv, verbs)
+			// Use API group (not group/version) as the key because RBAC
+			// PolicyRules are version-agnostic. Multiple versions of the
+			// same group exposing the same resource must be merged into a
+			// single rule to avoid duplicate entries in the ClusterRole.
+			key := fmt.Sprintf("%s|%v", groupVersion.Group, verbs)
 			existingRule, exists := rulesByAPIGroupAndVerbs[key]
 			if !exists {
 				existingRule = &rbacv1.PolicyRule{
@@ -516,7 +520,11 @@ func (r *RoleDefinitionReconciler) filterAPIResourcesForRoleDefinition(
 				rulesByAPIGroupAndVerbs[key] = existingRule
 			}
 
-			existingRule.Resources = append(existingRule.Resources, res.Name)
+			// Deduplicate: the same resource may appear in multiple
+			// versions of the API group.
+			if !slices.Contains(existingRule.Resources, res.Name) {
+				existingRule.Resources = append(existingRule.Resources, res.Name)
+			}
 		}
 	}
 	return rulesByAPIGroupAndVerbs, nil

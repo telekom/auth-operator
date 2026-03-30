@@ -1,0 +1,46 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# Multi-version CRD fixture for testing that the RoleDefinition controller
+# correctly deduplicates resources when an API group serves multiple versions.
+# This CRD deliberately exposes both v1 and v1alpha1 so the same resource name
+# appears in both group/version entries of the API discovery.
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: multiwidgets.e2etest.auth-operator.io
+spec:
+  group: e2etest.auth-operator.io
+  names:
+    kind: MultiWidget
+    listKind: MultiWidgetList
+    plural: multiwidgets
+    singular: multiwidget
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                name:
+                  type: string
+    - name: v1alpha1
+      served: true
+      storage: false
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                name:
+                  type: string
