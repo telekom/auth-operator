@@ -621,31 +621,14 @@ spec:
 				return strings.TrimSpace(string(output)) == statusTrue
 			}, complexReconcileTime, complexPollInterval).Should(BeTrue())
 
-			By("Verifying ClusterRole exists and has no duplicate resources")
-			Eventually(func() error {
-				return checkClusterRoleHasNoDuplicateResources(dedupClusterRole)
-			}, complexReconcileTime, complexPollInterval).Should(Succeed())
-
 			By("Verifying the test CRD resources (multiwidgets) appear exactly once")
-			cmd = exec.CommandContext(context.Background(), "kubectl", "get", "clusterrole", dedupClusterRole, "-o", "json")
-			output, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred())
+			Eventually(func() int {
+				return countResourceInClusterRole(dedupClusterRole, "multiwidgets")
+			}, complexReconcileTime, complexPollInterval).Should(Equal(1),
+				"multiwidgets should appear exactly once across all rules")
 
-			var role map[string]interface{}
-			Expect(json.Unmarshal(output, &role)).To(Succeed())
-			multiwidgetCount := 0
-			for _, ruleRaw := range role["rules"].([]interface{}) {
-				ruleMap := ruleRaw.(map[string]interface{})
-				if resources, ok := ruleMap["resources"].([]interface{}); ok {
-					for _, r := range resources {
-						if r.(string) == "multiwidgets" {
-							multiwidgetCount++
-						}
-					}
-				}
-			}
-			Expect(multiwidgetCount).To(Equal(1),
-				"multiwidgets should appear exactly once across all rules, got %d", multiwidgetCount)
+			By("Verifying ClusterRole has no duplicate resources")
+			Expect(checkClusterRoleHasNoDuplicateResources(dedupClusterRole)).To(Succeed())
 		})
 
 		It("should remove CRD resources from ClusterRole when CRD is deleted", func() {
