@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	metav1ac "k8s.io/client-go/applyconfigurations/meta/v1"
@@ -170,4 +171,55 @@ func isOwnedByRestrictedBindDefinition(ownerReferences []metav1.OwnerReference) 
 		}
 	}
 	return false
+}
+
+// checkRestrictedRoleOwnership verifies that the target role (if it already exists)
+// is not controlled by a different owner. This prevents silently taking over roles
+// managed by other controllers or other restricted definitions.
+func checkRestrictedRoleOwnership(
+	ctx context.Context,
+	c client.Client,
+	recorder events.EventRecorder,
+	owner client.Object,
+	targetRole string,
+	targetName string,
+	targetNamespace string,
+) error {
+	logger := log.FromContext(ctx)
+
+	var existing client.Object
+	key := client.ObjectKey{Name: targetName}
+
+	switch targetRole {
+	case authorizationv1alpha1.DefinitionClusterRole:
+		existing = &rbacv1.ClusterRole{}
+	case authorizationv1alpha1.DefinitionNamespacedRole:
+		existing = &rbacv1.Role{}
+		key.Namespace = targetNamespace
+	default:
+		return nil
+	}
+
+	if err := c.Get(ctx, key, existing); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil // Target doesn't exist yet — will be created by SSA.
+		}
+		return fmt.Errorf("check existing %s %s: %w", targetRole, key, err)
+	}
+
+	for _, ref := range existing.GetOwnerReferences() {
+		if ref.Controller != nil && *ref.Controller && ref.UID != owner.GetUID() {
+			logger.Info("Target role is already controlled by a different owner",
+				"roleName", targetName,
+				"existingOwnerKind", ref.Kind, "existingOwner", ref.Name, "existingOwnerUID", ref.UID)
+			recorder.Eventf(owner, nil, corev1.EventTypeWarning,
+				authorizationv1alpha1.EventReasonOwnership, authorizationv1alpha1.EventActionReconcile,
+				"Target %s %s is already controlled by %s %s (UID: %s)",
+				targetRole, targetName, ref.Kind, ref.Name, ref.UID)
+			return fmt.Errorf("target %s %s is already controlled by %s %s (UID: %s)",
+				targetRole, targetName, ref.Kind, ref.Name, ref.UID)
+		}
+	}
+
+	return nil
 }

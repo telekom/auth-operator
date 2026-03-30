@@ -499,6 +499,15 @@ func (r *RestrictedRoleDefinitionReconciler) rrdEnsureRole(
 ) error {
 	logger := log.FromContext(ctx)
 
+	// Pre-flight ownership check: verify the target role is not already controlled
+	// by a different owner. This produces a clearer error/event than the raw API rejection.
+	if err := checkRestrictedRoleOwnership(ctx, r.client, r.recorder, rrd,
+		rrd.Spec.TargetRole, rrd.Spec.TargetName, rrd.Spec.TargetNamespace); err != nil {
+		conditions.MarkFalse(rrd, authorizationv1alpha1.OwnerRefCondition, rrd.Generation,
+			authorizationv1alpha1.OwnerRefReason, "ownership conflict (check operator logs for details)")
+		return err
+	}
+
 	ownerRef := ownerRefForRestricted(rrd, "RestrictedRoleDefinition")
 	labelsMap := helpers.BuildResourceLabels(rrd.Labels)
 	annotations := helpers.BuildResourceAnnotations("RestrictedRoleDefinition", rrd.Name)

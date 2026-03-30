@@ -11,9 +11,12 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/onsi/gomega"
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/events"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
@@ -193,4 +196,139 @@ func TestIsOwnedByRestrictedBindDefinition(t *testing.T) {
 			g.Expect(isOwnedByRestrictedBindDefinition(tt.refs)).To(gomega.Equal(tt.expect))
 		})
 	}
+}
+
+func newFakeClient(objs ...client.Object) client.Client {
+	return fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		WithObjects(objs...).
+		Build()
+}
+
+func TestCheckRestrictedRoleOwnership_Conflict(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-rrd",
+			UID:  "rrd-uid-111",
+		},
+		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+			TargetName: "conflicting-role",
+			TargetRole: authorizationv1alpha1.DefinitionClusterRole,
+		},
+	}
+
+	controller := true
+	existingRole := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "conflicting-role",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: authorizationv1alpha1.GroupVersion.String(),
+					Kind:       "RoleDefinition",
+					Name:       "other-owner",
+					UID:        "other-uid-999",
+					Controller: &controller,
+				},
+			},
+		},
+	}
+
+	c := newFakeClient(existingRole)
+	recorder := events.NewFakeRecorder(10)
+	err := checkRestrictedRoleOwnership(helperCtx(), c, recorder, rrd,
+		rrd.Spec.TargetRole, rrd.Spec.TargetName, "")
+	g.Expect(err).To(gomega.HaveOccurred())
+	g.Expect(err.Error()).To(gomega.ContainSubstring("already controlled by"))
+	g.Expect(err.Error()).To(gomega.ContainSubstring("other-owner"))
+}
+
+func TestCheckRestrictedRoleOwnership_NoConflict(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-rrd",
+			UID:  "rrd-uid-111",
+		},
+		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+			TargetName: "my-role",
+			TargetRole: authorizationv1alpha1.DefinitionClusterRole,
+		},
+	}
+
+	controller := true
+	existingRole := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "my-role",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: authorizationv1alpha1.GroupVersion.String(),
+					Kind:       "RestrictedRoleDefinition",
+					Name:       "test-rrd",
+					UID:        "rrd-uid-111",
+					Controller: &controller,
+				},
+			},
+		},
+	}
+
+	c := newFakeClient(existingRole)
+	recorder := events.NewFakeRecorder(10)
+	err := checkRestrictedRoleOwnership(helperCtx(), c, recorder, rrd,
+		rrd.Spec.TargetRole, rrd.Spec.TargetName, "")
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+}
+
+func TestCheckRestrictedRoleOwnership_NotFound(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-rrd",
+			UID:  "rrd-uid-111",
+		},
+	}
+
+	c := newFakeClient() // no existing roles
+	recorder := events.NewFakeRecorder(10)
+	err := checkRestrictedRoleOwnership(helperCtx(), c, recorder, rrd,
+		authorizationv1alpha1.DefinitionClusterRole, "nonexistent-role", "")
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+}
+
+func TestCheckRestrictedRoleOwnership_NamespacedRole(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-rrd",
+			UID:  "rrd-uid-111",
+		},
+	}
+
+	controller := true
+	existingRole := &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ns-role",
+			Namespace: "test-ns",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: authorizationv1alpha1.GroupVersion.String(),
+					Kind:       "RoleDefinition",
+					Name:       "other-rd",
+					UID:        "other-uid",
+					Controller: &controller,
+				},
+			},
+		},
+	}
+
+	c := newFakeClient(existingRole)
+	recorder := events.NewFakeRecorder(10)
+	err := checkRestrictedRoleOwnership(helperCtx(), c, recorder, rrd,
+		authorizationv1alpha1.DefinitionNamespacedRole, "ns-role", "test-ns")
+	g.Expect(err).To(gomega.HaveOccurred())
+	g.Expect(err.Error()).To(gomega.ContainSubstring("already controlled by"))
 }
