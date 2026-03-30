@@ -587,6 +587,22 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 				return err
 			}, complexReconcileTime, complexPollInterval).Should(Succeed())
 
+			By("Waiting for CRD resources to be discoverable via the API server")
+			Eventually(func() error {
+				cmd := exec.CommandContext(context.Background(), "kubectl", "api-resources", "--api-group=e2etest.auth-operator.io", "-o", "name")
+				output, err := utils.Run(cmd)
+				if err != nil {
+					return fmt.Errorf("api-resources failed: %w", err)
+				}
+				if !strings.Contains(string(output), "multiwidgets") {
+					return fmt.Errorf("multiwidgets not yet discoverable, got: %s", string(output))
+				}
+				return nil
+			}, complexReconcileTime, complexPollInterval).Should(Succeed())
+
+			By("Waiting for the resource tracker to collect the new API resources")
+			time.Sleep(10 * time.Second)
+
 			By("Creating a RoleDefinition targeting a new ClusterRole")
 			roleDefYAML := fmt.Sprintf(`
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
