@@ -110,6 +110,18 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 			}
 			return nil
 		}, complexDeployTimeout, complexPollInterval).Should(Succeed())
+
+		By("Pre-installing multi-version CRD for dedup tests (allows tracker discovery before tests run)")
+		cmd = exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "test/e2e/testdata/complex/multiversion-crd.yaml")
+		_, err = utils.Run(cmd)
+		Expect(err).NotTo(HaveOccurred(), "Failed to pre-install multi-version CRD")
+
+		Eventually(func() error {
+			cmd := exec.CommandContext(context.Background(), "kubectl", "wait", "--for=condition=Established",
+				"crd/multiwidgets.e2etest.auth-operator.io", "--timeout=30s")
+			_, err := utils.Run(cmd)
+			return err
+		}, complexReconcileTime, complexPollInterval).Should(Succeed())
 	})
 
 	AfterAll(func() {
@@ -574,35 +586,6 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 		}
 
 		It("should not produce duplicate resources when a CRD serves multiple versions", func() {
-			By("Installing multi-version CRD (v1 + v1alpha1)")
-			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", multiversionCRDPath)
-			_, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred())
-
-			By("Waiting for CRD to be established")
-			Eventually(func() error {
-				cmd := exec.CommandContext(context.Background(), "kubectl", "wait", "--for=condition=Established",
-					"crd/multiwidgets.e2etest.auth-operator.io", "--timeout=30s")
-				_, err := utils.Run(cmd)
-				return err
-			}, complexReconcileTime, complexPollInterval).Should(Succeed())
-
-			By("Waiting for CRD resources to be discoverable via the API server")
-			Eventually(func() error {
-				cmd := exec.CommandContext(context.Background(), "kubectl", "api-resources", "--api-group=e2etest.auth-operator.io", "-o", "name")
-				output, err := utils.Run(cmd)
-				if err != nil {
-					return fmt.Errorf("api-resources failed: %w", err)
-				}
-				if !strings.Contains(string(output), "multiwidgets") {
-					return fmt.Errorf("multiwidgets not yet discoverable, got: %s", string(output))
-				}
-				return nil
-			}, complexReconcileTime, complexPollInterval).Should(Succeed())
-
-			By("Waiting for the resource tracker to collect the new API resources")
-			time.Sleep(10 * time.Second)
-
 			By("Creating a RoleDefinition targeting a new ClusterRole")
 			roleDefYAML := fmt.Sprintf(`
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
@@ -621,9 +604,9 @@ spec:
     - deletecollection
 `, dedupRoleDefName, dedupClusterRole)
 
-			cmd = exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(roleDefYAML)
-			_, err = utils.Run(cmd)
+			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for RoleDefinition to be reconciled")
