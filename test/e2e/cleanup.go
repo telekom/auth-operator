@@ -67,7 +67,6 @@ func CleanupTestResources(opts CleanupOptions) {
 		for time.Now().Before(deadline) {
 			allGone := true
 			for _, ns := range opts.Namespaces {
-				//nolint:gosec // G204: controlled test cleanup commands with known namespace names
 				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "ns", ns, "--ignore-not-found", "-o", "name")
 				out, err := utils.Run(cmd)
 				if err != nil {
