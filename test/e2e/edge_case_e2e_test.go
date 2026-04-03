@@ -138,9 +138,18 @@ var _ = Describe("Edge Case - Deletion and Shared Resources", Ordered, Label("co
 			"-l", "app.kubernetes.io/managed-by=auth-operator", "--ignore-not-found=true")
 		_, _ = utils.Run(cmd)
 
-		// Brief pause to let the operator process CRB deletions before Helm uninstall.
-		//nolint:mnd // Cleanup delay — not a test assertion.
-		time.Sleep(5 * time.Second)
+		Eventually(func() error {
+			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrolebinding",
+				"-l", "app.kubernetes.io/managed-by=auth-operator", "-o", "name")
+			out, err := utils.Run(cmd)
+			if err != nil {
+				return nil
+			}
+			if len(out) > 0 {
+				return fmt.Errorf("managed clusterrolebindings still exist: %s", string(out))
+			}
+			return nil
+		}).WithTimeout(30 * time.Second).WithPolling(2 * time.Second).Should(Succeed())
 
 		By("Uninstalling edge-case Helm release")
 		cmd = exec.CommandContext(context.Background(), "helm", "uninstall", edgeCaseRelease, "-n", edgeCaseOperatorNS, "--wait", "--timeout", "2m")

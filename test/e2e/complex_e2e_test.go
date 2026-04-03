@@ -141,7 +141,15 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 		}
 		CleanupForComplexTests(complexNamespace, clusterRoles, clusterRoleBindings)
 
-		time.Sleep(5 * time.Second)
+		Eventually(func() error {
+			for _, cr := range clusterRoles {
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrole", cr)
+				if _, err := utils.Run(cmd); err == nil {
+					return fmt.Errorf("clusterrole %s still exists", cr)
+				}
+			}
+			return nil
+		}).WithTimeout(30 * time.Second).WithPolling(2 * time.Second).Should(Succeed())
 
 		By("Uninstalling Helm release")
 		cmd := exec.CommandContext(context.Background(), "helm", "uninstall", complexRelease, "-n", complexNamespace, "--wait", "--timeout", "2m")

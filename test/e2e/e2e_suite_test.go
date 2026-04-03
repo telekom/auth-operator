@@ -345,8 +345,15 @@ func cleanupPreExistingInstallations() {
 		_, _ = cmd.CombinedOutput()
 	}
 
-	// Wait a moment for deletions to propagate
-	time.Sleep(2 * time.Second)
+	Eventually(func() error {
+		for _, ns := range testNamespaces {
+			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "ns", ns)
+			if out, err := cmd.CombinedOutput(); err == nil {
+				return fmt.Errorf("namespace %s still exists: %s", ns, string(out))
+			}
+		}
+		return nil
+	}).WithTimeout(30 * time.Second).WithPolling(2 * time.Second).Should(Succeed())
 	_, _ = fmt.Fprintf(GinkgoWriter, "Pre-existing installations cleanup complete\n")
 	_, _ = fmt.Fprintf(GinkgoWriter, "=============================================\n\n")
 }

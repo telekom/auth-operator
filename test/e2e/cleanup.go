@@ -60,7 +60,21 @@ func CleanupTestResources(opts CleanupOptions) {
 
 	// Step 6: Wait for deletion to complete
 	if opts.WaitForDeletion {
-		time.Sleep(5 * time.Second)
+		deadline := time.Now().Add(30 * time.Second)
+		for time.Now().Before(deadline) {
+			allGone := true
+			for _, ns := range opts.Namespaces {
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "ns", ns)
+				if _, err := utils.Run(cmd); err == nil {
+					allGone = false
+					break
+				}
+			}
+			if allGone {
+				break
+			}
+			time.Sleep(2 * time.Second)
+		}
 	}
 }
 
