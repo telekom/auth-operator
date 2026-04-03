@@ -102,7 +102,20 @@ var _ = Describe("Dev Flavor E2E - Kustomize Deploy", Ordered, Label("dev"), fun
 		CleanupForDevTests(devNamespace, clusterRoles)
 
 		if utils.ShouldTeardown() {
-			time.Sleep(5 * time.Second)
+			Eventually(func() error {
+				attemptCtx, attemptCancel := context.WithTimeout(context.Background(), 10*time.Second)
+				cmd := exec.CommandContext(attemptCtx, "kubectl", "get", "clusterrole",
+					"-l", "app.kubernetes.io/managed-by=auth-operator", "--ignore-not-found=true", "-o", "name")
+				out, err := utils.Run(cmd)
+				attemptCancel()
+				if err != nil {
+					return fmt.Errorf("failed to get managed clusterroles: %w", err)
+				}
+				if strings.TrimSpace(string(out)) != "" {
+					return fmt.Errorf("managed clusterroles still exist: %s", string(out))
+				}
+				return nil
+			}).WithTimeout(30 * time.Second).WithPolling(2 * time.Second).Should(Succeed())
 
 			By("Cleaning up webhooks")
 			utils.CleanupWebhooks("authorization.t-caas.telekom.com/component=webhook")

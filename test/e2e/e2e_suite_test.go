@@ -345,8 +345,21 @@ func cleanupPreExistingInstallations() {
 		_, _ = cmd.CombinedOutput()
 	}
 
-	// Wait a moment for deletions to propagate
-	time.Sleep(2 * time.Second)
+	Eventually(func() error {
+		for _, ns := range testNamespaces {
+			attemptCtx, attemptCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			cmd := exec.CommandContext(attemptCtx, "kubectl", "get", "ns", ns, "--ignore-not-found", "-o", "name")
+			out, err := cmd.Output()
+			attemptCancel()
+			if err != nil {
+				return fmt.Errorf("failed to get namespace %s: %w", ns, err)
+			}
+			if strings.TrimSpace(string(out)) != "" {
+				return fmt.Errorf("namespace %s still exists", ns)
+			}
+		}
+		return nil
+	}).WithTimeout(30 * time.Second).WithPolling(2 * time.Second).Should(Succeed())
 	_, _ = fmt.Fprintf(GinkgoWriter, "Pre-existing installations cleanup complete\n")
 	_, _ = fmt.Fprintf(GinkgoWriter, "=============================================\n\n")
 }
