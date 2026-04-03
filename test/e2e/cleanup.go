@@ -61,12 +61,14 @@ func CleanupTestResources(opts CleanupOptions) {
 		_, _ = utils.Run(cmd)
 	}
 
-	// Step 6: Wait for deletion to complete
+	// Step 6: Wait for deletion to complete (namespaces and cluster-scoped resources)
 	if opts.WaitForDeletion {
 		deadline := time.Now().Add(30 * time.Second)
 		deletionComplete := false
 		for time.Now().Before(deadline) {
 			allGone := true
+
+			// Check namespaces
 			for _, ns := range opts.Namespaces {
 				attemptCtx, attemptCancel := context.WithTimeout(context.Background(), 10*time.Second)
 				cmd := exec.CommandContext(attemptCtx, "kubectl", "get", "ns", ns, "--ignore-not-found", "-o", "name") // #nosec G204 -- ns is a controlled test fixture, not user input
@@ -82,6 +84,45 @@ func CleanupTestResources(opts CleanupOptions) {
 					break
 				}
 			}
+
+			// Check ClusterRoles
+			if allGone {
+				for _, cr := range opts.ClusterRoles {
+					attemptCtx, attemptCancel := context.WithTimeout(context.Background(), 10*time.Second)
+					cmd := exec.CommandContext(attemptCtx, "kubectl", "get", "clusterrole", cr, "--ignore-not-found", "-o", "name") // #nosec G204 -- cr is a controlled test fixture, not user input
+					out, err := utils.Run(cmd)
+					attemptCancel()
+					if err != nil {
+						_, _ = fmt.Fprintf(os.Stderr, "warning: kubectl get clusterrole %s failed: %v\n", cr, err)
+						allGone = false
+						break
+					}
+					if strings.TrimSpace(string(out)) != "" {
+						allGone = false
+						break
+					}
+				}
+			}
+
+			// Check ClusterRoleBindings
+			if allGone {
+				for _, crb := range opts.ClusterRoleBindings {
+					attemptCtx, attemptCancel := context.WithTimeout(context.Background(), 10*time.Second)
+					cmd := exec.CommandContext(attemptCtx, "kubectl", "get", "clusterrolebinding", crb, "--ignore-not-found", "-o", "name") // #nosec G204 -- crb is a controlled test fixture, not user input
+					out, err := utils.Run(cmd)
+					attemptCancel()
+					if err != nil {
+						_, _ = fmt.Fprintf(os.Stderr, "warning: kubectl get clusterrolebinding %s failed: %v\n", crb, err)
+						allGone = false
+						break
+					}
+					if strings.TrimSpace(string(out)) != "" {
+						allGone = false
+						break
+					}
+				}
+			}
+
 			if allGone {
 				deletionComplete = true
 				break
@@ -89,7 +130,7 @@ func CleanupTestResources(opts CleanupOptions) {
 			time.Sleep(2 * time.Second)
 		}
 		if !deletionComplete {
-			_, _ = fmt.Fprintf(os.Stderr, "warning: WaitForDeletion deadline reached; some namespaces may still exist\n")
+			_, _ = fmt.Fprintf(os.Stderr, "warning: WaitForDeletion deadline reached; some resources may still exist\n")
 		}
 	}
 }
