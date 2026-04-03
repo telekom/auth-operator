@@ -179,6 +179,12 @@ var _ = Describe("Leader Election and HA E2E", Ordered, Label("ha", "leader-elec
 
 			By("Waiting for webhook service endpoints")
 			Expect(utils.WaitForServiceEndpoints(fmt.Sprintf("%s-webhook-service", haHelmRelease), haNamespace, deployTimeout)).To(Succeed())
+
+			By("Waiting for webhook CA bundle injection")
+			Expect(utils.WaitForWebhookCABundle("authorization.t-caas.telekom.com/component=webhook", deployTimeout)).To(Succeed())
+
+			By("Waiting for webhook to be fully ready")
+			Expect(utils.WaitForWebhookReady(deployTimeout)).To(Succeed())
 		})
 
 		It("should have PodDisruptionBudgets configured correctly", func() {
@@ -218,12 +224,14 @@ var _ = Describe("Leader Election and HA E2E", Ordered, Label("ha", "leader-elec
 			Eventually(func() string {
 				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "lease",
 					"-n", haNamespace,
-					"-l", "control-plane=controller-manager",
 					"-o", "jsonpath={.items[0].spec.holderIdentity}")
-				output, _ := utils.Run(cmd)
+				output, err := utils.Run(cmd)
+				if err != nil {
+					return ""
+				}
 				originalLeader = strings.TrimSpace(string(output))
 				return originalLeader
-			}, shortTimeout, pollingInterval).ShouldNot(BeEmpty())
+			}, reconcileTimeout, pollingInterval).ShouldNot(BeEmpty())
 			_, _ = fmt.Fprintf(GinkgoWriter, "Current leader: %s\n", originalLeader)
 		})
 
@@ -268,7 +276,6 @@ spec:
 			Eventually(func() bool {
 				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "lease",
 					"-n", haNamespace,
-					"-l", "control-plane=controller-manager",
 					"-o", "jsonpath={.items[0].spec.holderIdentity}")
 				output, err := utils.Run(cmd)
 				if err != nil {
