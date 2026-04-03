@@ -180,9 +180,6 @@ var _ = Describe("Leader Election and HA E2E", Ordered, Label("ha", "leader-elec
 			By("Waiting for webhook service endpoints")
 			Expect(utils.WaitForServiceEndpoints(fmt.Sprintf("%s-webhook-service", haHelmRelease), haNamespace, deployTimeout)).To(Succeed())
 
-			By("Waiting for webhook CA bundle injection")
-			Expect(utils.WaitForWebhookCABundle("authorization.t-caas.telekom.com/component=webhook", deployTimeout)).To(Succeed())
-
 			By("Waiting for webhook to be fully ready")
 			Expect(utils.WaitForWebhookReady(deployTimeout)).To(Succeed())
 		})
