@@ -347,9 +347,13 @@ func cleanupPreExistingInstallations() {
 
 	Eventually(func() error {
 		for _, ns := range testNamespaces {
-			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "ns", ns)
-			if out, err := cmd.CombinedOutput(); err == nil {
-				return fmt.Errorf("namespace %s still exists: %s", ns, string(out))
+			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "ns", ns, "--ignore-not-found", "-o", "name")
+			out, err := cmd.Output()
+			if err != nil {
+				return fmt.Errorf("failed to get namespace %s: %w", ns, err)
+			}
+			if strings.TrimSpace(string(out)) != "" {
+				return fmt.Errorf("namespace %s still exists", ns)
 			}
 		}
 		return nil

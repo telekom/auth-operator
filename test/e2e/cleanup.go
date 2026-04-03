@@ -2,7 +2,10 @@ package e2e
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/telekom/auth-operator/test/utils"
@@ -64,8 +67,15 @@ func CleanupTestResources(opts CleanupOptions) {
 		for time.Now().Before(deadline) {
 			allGone := true
 			for _, ns := range opts.Namespaces {
-				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "ns", ns)
-				if _, err := utils.Run(cmd); err == nil {
+				//nolint:gosec // G204: controlled test cleanup commands with known namespace names
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "ns", ns, "--ignore-not-found", "-o", "name")
+				out, err := utils.Run(cmd)
+				if err != nil {
+					_, _ = fmt.Fprintf(os.Stderr, "warning: kubectl get ns %s failed: %v\n", ns, err)
+					allGone = false
+					break
+				}
+				if strings.TrimSpace(string(out)) != "" {
 					allGone = false
 					break
 				}

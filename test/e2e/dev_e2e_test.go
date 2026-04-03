@@ -104,12 +104,12 @@ var _ = Describe("Dev Flavor E2E - Kustomize Deploy", Ordered, Label("dev"), fun
 		if utils.ShouldTeardown() {
 			Eventually(func() error {
 				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrole",
-					"-l", "app.kubernetes.io/managed-by=auth-operator", "-o", "name")
+					"-l", "app.kubernetes.io/managed-by=auth-operator", "--ignore-not-found=true", "-o", "name")
 				out, err := utils.Run(cmd)
 				if err != nil {
-					return nil
+					return fmt.Errorf("failed to get managed clusterroles: %w", err)
 				}
-				if len(out) > 0 {
+				if strings.TrimSpace(string(out)) != "" {
 					return fmt.Errorf("managed clusterroles still exist: %s", string(out))
 				}
 				return nil

@@ -140,12 +140,12 @@ var _ = Describe("Edge Case - Deletion and Shared Resources", Ordered, Label("co
 
 		Eventually(func() error {
 			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrolebinding",
-				"-l", "app.kubernetes.io/managed-by=auth-operator", "-o", "name")
+				"-l", "app.kubernetes.io/managed-by=auth-operator", "--ignore-not-found=true", "-o", "name")
 			out, err := utils.Run(cmd)
 			if err != nil {
-				return nil
+				return fmt.Errorf("unable to get managed clusterrolebindings: %w", err)
 			}
-			if len(out) > 0 {
+			if len(strings.TrimSpace(string(out))) > 0 {
 				return fmt.Errorf("managed clusterrolebindings still exist: %s", string(out))
 			}
 			return nil
