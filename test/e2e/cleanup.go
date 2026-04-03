@@ -69,7 +69,7 @@ func CleanupTestResources(opts CleanupOptions) {
 			allGone := true
 			for _, ns := range opts.Namespaces {
 				attemptCtx, attemptCancel := context.WithTimeout(context.Background(), 10*time.Second)
-				cmd := exec.CommandContext(attemptCtx, "kubectl", "get", "ns", ns, "--ignore-not-found", "-o", "name")
+				cmd := exec.CommandContext(attemptCtx, "kubectl", "get", "ns", ns, "--ignore-not-found", "-o", "name") // #nosec G204 -- ns is a controlled test fixture, not user input
 				out, err := utils.Run(cmd)
 				attemptCancel()
 				if err != nil {
