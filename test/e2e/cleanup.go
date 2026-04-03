@@ -69,7 +69,28 @@ func waitForResourceDeletion(opts CleanupOptions) {
 		}
 		time.Sleep(2 * time.Second)
 	}
-	_, _ = fmt.Fprintf(os.Stderr, "warning: WaitForDeletion deadline reached; some resources may still exist\n")
+	remaining := remainingResources(opts)
+	_, _ = fmt.Fprintf(os.Stderr, "ERROR: WaitForDeletion deadline reached; remaining resources: %s\n", strings.Join(remaining, ", "))
+}
+
+func remainingResources(opts CleanupOptions) []string {
+	var remaining []string
+	for _, ns := range opts.Namespaces {
+		if resourceExists("ns", ns) {
+			remaining = append(remaining, "ns/"+ns)
+		}
+	}
+	for _, cr := range opts.ClusterRoles {
+		if resourceExists("clusterrole", cr) {
+			remaining = append(remaining, "clusterrole/"+cr)
+		}
+	}
+	for _, crb := range opts.ClusterRoleBindings {
+		if resourceExists("clusterrolebinding", crb) {
+			remaining = append(remaining, "clusterrolebinding/"+crb)
+		}
+	}
+	return remaining
 }
 
 func resourcesGone(opts CleanupOptions) bool {

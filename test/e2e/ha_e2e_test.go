@@ -220,8 +220,9 @@ var _ = Describe("Leader Election and HA E2E", Ordered, Label("ha", "leader-elec
 			By("Getting the current leader identity")
 			Eventually(func() string {
 				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "lease",
+					"auth.t-caas.telekom.com",
 					"-n", haNamespace,
-					"-o", "jsonpath={.items[0].spec.holderIdentity}")
+					"-o", "jsonpath={.spec.holderIdentity}")
 				output, err := utils.Run(cmd)
 				if err != nil {
 					return ""
@@ -272,8 +273,9 @@ spec:
 			By("Waiting for a new leader to be elected")
 			Eventually(func() bool {
 				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "lease",
+					"auth.t-caas.telekom.com",
 					"-n", haNamespace,
-					"-o", "jsonpath={.items[0].spec.holderIdentity}")
+					"-o", "jsonpath={.spec.holderIdentity}")
 				output, err := utils.Run(cmd)
 				if err != nil {
 					return false
