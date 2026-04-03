@@ -23,11 +23,12 @@ const (
 	webhookService    = "auth-operator-webhook-service"
 
 	// Timeouts for various operations
-	deployTimeout     = 5 * time.Minute
-	reconcileTimeout  = 2 * time.Minute
-	shortTimeout      = 30 * time.Second
-	pollingInterval   = 2 * time.Second
-	shortPollInterval = 1 * time.Second
+	deployTimeout         = 5 * time.Minute
+	reconcileTimeout      = 2 * time.Minute
+	crdPropagationTimeout = 5 * time.Minute
+	shortTimeout          = 30 * time.Second
+	pollingInterval       = 2 * time.Second
+	shortPollInterval     = 1 * time.Second
 
 	// Common status strings
 	crdStatusRunning = "Running"
@@ -412,7 +413,7 @@ var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 					return nil // Resource not found means it was deleted
 				}
 				return fmt.Errorf("ClusterRole still exists")
-			}, reconcileTimeout, pollingInterval).Should(Succeed())
+			}, crdPropagationTimeout, pollingInterval).Should(Succeed())
 		})
 
 		It("should clean up child resources when BindDefinition is deleted", func() {
@@ -438,7 +439,7 @@ var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 					return nil // Resource not found means it was deleted
 				}
 				return fmt.Errorf("ClusterRoleBinding still exists")
-			}, reconcileTimeout, pollingInterval).Should(Succeed())
+			}, crdPropagationTimeout, pollingInterval).Should(Succeed())
 		})
 	})
 
