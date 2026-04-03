@@ -143,8 +143,10 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 
 		Eventually(func() error {
 			for _, cr := range clusterRoles {
-				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrole", cr, "--ignore-not-found", "-o", "name")
+				attemptCtx, attemptCancel := context.WithTimeout(context.Background(), 10*time.Second)
+				cmd := exec.CommandContext(attemptCtx, "kubectl", "get", "clusterrole", cr, "--ignore-not-found", "-o", "name")
 				out, err := utils.Run(cmd)
+				attemptCancel()
 				if err != nil {
 					return fmt.Errorf("failed to get clusterrole %s: %w", cr, err)
 				}

@@ -64,11 +64,14 @@ func CleanupTestResources(opts CleanupOptions) {
 	// Step 6: Wait for deletion to complete
 	if opts.WaitForDeletion {
 		deadline := time.Now().Add(30 * time.Second)
+		deletionComplete := false
 		for time.Now().Before(deadline) {
 			allGone := true
 			for _, ns := range opts.Namespaces {
-				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "ns", ns, "--ignore-not-found", "-o", "name")
+				attemptCtx, attemptCancel := context.WithTimeout(context.Background(), 10*time.Second)
+				cmd := exec.CommandContext(attemptCtx, "kubectl", "get", "ns", ns, "--ignore-not-found", "-o", "name")
 				out, err := utils.Run(cmd)
+				attemptCancel()
 				if err != nil {
 					_, _ = fmt.Fprintf(os.Stderr, "warning: kubectl get ns %s failed: %v\n", ns, err)
 					allGone = false
@@ -80,9 +83,13 @@ func CleanupTestResources(opts CleanupOptions) {
 				}
 			}
 			if allGone {
+				deletionComplete = true
 				break
 			}
 			time.Sleep(2 * time.Second)
+		}
+		if !deletionComplete {
+			_, _ = fmt.Fprintf(os.Stderr, "warning: WaitForDeletion deadline reached; some namespaces may still exist\n")
 		}
 	}
 }
