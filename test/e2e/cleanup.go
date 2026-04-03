@@ -22,117 +22,86 @@ type CleanupOptions struct {
 	WebhookSelector     string   // Cleanup webhooks matching label selector
 }
 
-// CleanupTestResources performs comprehensive cleanup of test resources
+// CleanupTestResources performs comprehensive cleanup of test resources.
 // This function centralizes cleanup logic to avoid duplication across test files.
 func CleanupTestResources(opts CleanupOptions) {
-	// Step 1: Remove finalizers if requested (prevents stuck deletions)
 	if opts.RemoveFinalizers {
 		utils.RemoveFinalizersForAll("roledefinition")
 		utils.RemoveFinalizersForAll("binddefinition")
 		utils.RemoveFinalizersForAll("webhookauthorizer")
 	}
 
-	// Step 2: Delete CRs first (before operator teardown)
 	if opts.RemoveCRDs {
 		cleanupAllCRDs()
 	}
 
-	// Step 3: Cleanup webhooks BEFORE deleting namespaces
-	// This is critical - if webhooks are deleted after the operator namespace,
-	// the webhook service won't exist and namespace deletion will fail
+	// Cleanup webhooks BEFORE deleting namespaces — if webhooks are deleted
+	// after the operator namespace, the webhook service won't exist and
+	// namespace deletion will fail.
 	if opts.WebhookSelector != "" {
 		utils.CleanupWebhooks(opts.WebhookSelector)
 	}
 	utils.CleanupAllAuthOperatorWebhooks()
 
-	// Step 4: Delete namespaces (now safe since webhooks are gone)
 	for _, ns := range opts.Namespaces {
 		utils.CleanupNamespace(ns)
 	}
 
-	// Step 5: Delete cluster-scoped resources
 	for _, cr := range opts.ClusterRoles {
 		cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "clusterrole", cr, "--ignore-not-found=true")
 		_, _ = utils.Run(cmd)
 	}
-
 	for _, crb := range opts.ClusterRoleBindings {
 		cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "clusterrolebinding", crb, "--ignore-not-found=true")
 		_, _ = utils.Run(cmd)
 	}
 
-	// Step 6: Wait for deletion to complete (namespaces and cluster-scoped resources)
 	if opts.WaitForDeletion {
-		deadline := time.Now().Add(30 * time.Second)
-		deletionComplete := false
-		for time.Now().Before(deadline) {
-			allGone := true
+		waitForResourceDeletion(opts)
+	}
+}
 
-			// Check namespaces
-			for _, ns := range opts.Namespaces {
-				attemptCtx, attemptCancel := context.WithTimeout(context.Background(), 10*time.Second)
-				cmd := exec.CommandContext(attemptCtx, "kubectl", "get", "ns", ns, "--ignore-not-found", "-o", "name") // #nosec G204 -- ns is a controlled test fixture, not user input
-				out, err := utils.Run(cmd)
-				attemptCancel()
-				if err != nil {
-					_, _ = fmt.Fprintf(os.Stderr, "warning: kubectl get ns %s failed: %v\n", ns, err)
-					allGone = false
-					break
-				}
-				if strings.TrimSpace(string(out)) != "" {
-					allGone = false
-					break
-				}
-			}
-
-			// Check ClusterRoles
-			if allGone {
-				for _, cr := range opts.ClusterRoles {
-					attemptCtx, attemptCancel := context.WithTimeout(context.Background(), 10*time.Second)
-					cmd := exec.CommandContext(attemptCtx, "kubectl", "get", "clusterrole", cr, "--ignore-not-found", "-o", "name") // #nosec G204 -- cr is a controlled test fixture, not user input
-					out, err := utils.Run(cmd)
-					attemptCancel()
-					if err != nil {
-						_, _ = fmt.Fprintf(os.Stderr, "warning: kubectl get clusterrole %s failed: %v\n", cr, err)
-						allGone = false
-						break
-					}
-					if strings.TrimSpace(string(out)) != "" {
-						allGone = false
-						break
-					}
-				}
-			}
-
-			// Check ClusterRoleBindings
-			if allGone {
-				for _, crb := range opts.ClusterRoleBindings {
-					attemptCtx, attemptCancel := context.WithTimeout(context.Background(), 10*time.Second)
-					cmd := exec.CommandContext(attemptCtx, "kubectl", "get", "clusterrolebinding", crb, "--ignore-not-found", "-o", "name") // #nosec G204 -- crb is a controlled test fixture, not user input
-					out, err := utils.Run(cmd)
-					attemptCancel()
-					if err != nil {
-						_, _ = fmt.Fprintf(os.Stderr, "warning: kubectl get clusterrolebinding %s failed: %v\n", crb, err)
-						allGone = false
-						break
-					}
-					if strings.TrimSpace(string(out)) != "" {
-						allGone = false
-						break
-					}
-				}
-			}
-
-			if allGone {
-				deletionComplete = true
-				break
-			}
-			time.Sleep(2 * time.Second)
+func waitForResourceDeletion(opts CleanupOptions) {
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if resourcesGone(opts) {
+			return
 		}
-		if !deletionComplete {
-			_, _ = fmt.Fprintf(os.Stderr, "warning: WaitForDeletion deadline reached; some resources may still exist\n")
+		time.Sleep(2 * time.Second)
+	}
+	_, _ = fmt.Fprintf(os.Stderr, "warning: WaitForDeletion deadline reached; some resources may still exist\n")
+}
+
+func resourcesGone(opts CleanupOptions) bool {
+	for _, ns := range opts.Namespaces {
+		if resourceExists("ns", ns) {
+			return false
 		}
 	}
+	for _, cr := range opts.ClusterRoles {
+		if resourceExists("clusterrole", cr) {
+			return false
+		}
+	}
+	for _, crb := range opts.ClusterRoleBindings {
+		if resourceExists("clusterrolebinding", crb) {
+			return false
+		}
+	}
+	return true
+}
+
+// #nosec G204 -- resource kind and name are controlled test fixtures, not user input.
+func resourceExists(kind, name string) bool {
+	attemptCtx, attemptCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer attemptCancel()
+	cmd := exec.CommandContext(attemptCtx, "kubectl", "get", kind, name, "--ignore-not-found", "-o", "name")
+	out, err := utils.Run(cmd)
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "warning: kubectl get %s %s failed: %v\n", kind, name, err)
+		return true
+	}
+	return strings.TrimSpace(string(out)) != ""
 }
 
 // cleanupAllCRDs deletes all auth-operator custom resources.
