@@ -52,22 +52,18 @@ var _ = Describe("Resilience - Webhook Failure Injection", Ordered, Label("compl
 		Expect(err).NotTo(HaveOccurred(), "Failed to load image into kind cluster")
 
 		By("Installing auth-operator via Helm for webhook failure tests")
-		imageRepo := strings.Split(projectImage, ":")[0]
-		imageTag := strings.Split(projectImage, ":")[1]
-		if imageTag == "" {
-			imageTag = defaultImageTag
-		}
-
-		cmd := exec.CommandContext(context.Background(), "helm", "upgrade", "--install", whResilienceRelease, whHelmChartPath,
+		helmArgs := []string{"upgrade", "--install", whResilienceRelease, whHelmChartPath,
 			"-n", whResilienceNS,
 			"--create-namespace",
-			"--set", fmt.Sprintf("image.repository=%s", imageRepo),
-			"--set", fmt.Sprintf("image.tag=%s", imageTag),
+		}
+		helmArgs = append(helmArgs, imageSetArgs()...)
+		helmArgs = append(helmArgs,
 			"--set", "controller.replicas=1",
 			"--set", "webhookServer.replicas=1",
 			"--wait",
 			"--timeout", "5m",
 		)
+		cmd := exec.CommandContext(context.Background(), "helm", helmArgs...)
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to install Helm chart for webhook-failure tests")
 
@@ -120,18 +116,11 @@ var _ = Describe("Resilience - Webhook Failure Injection", Ordered, Label("compl
 			By("Identifying the webhook TLS secret")
 			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "secrets",
 				"-n", whResilienceNS,
-				"-o", "jsonpath={.items[*].metadata.name}")
+				"-l", "authorization.t-caas.telekom.com/component=webhook",
+				"-o", "jsonpath={.items[0].metadata.name}")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
-			secretNames := strings.Fields(string(output))
-
-			var tlsSecretName string
-			for _, name := range secretNames {
-				if strings.Contains(name, "tls") || strings.Contains(name, "webhook") || strings.Contains(name, "cert") {
-					tlsSecretName = name
-					break
-				}
-			}
+			tlsSecretName := strings.TrimSpace(string(output))
 
 			if tlsSecretName == "" {
 				Skip("No TLS secret found — skipping TLS rotation test")
@@ -153,7 +142,7 @@ var _ = Describe("Resilience - Webhook Failure Injection", Ordered, Label("compl
 			Expect(utils.WaitForWebhookReady(whDeployTimeout)).To(Succeed())
 
 			By("Verifying webhook CA bundle is updated")
-			Expect(utils.WaitForWebhookCABundle(whDeployTimeout)).To(Succeed())
+			Expect(utils.WaitForWebhookCABundle("authorization.t-caas.telekom.com/component=webhook", whDeployTimeout)).To(Succeed())
 		})
 
 		It("should reconcile successfully after TLS recovery", func() {
@@ -193,7 +182,7 @@ spec:
 	Context("Webhook Endpoint Unreachable During Reconciliation", func() {
 		const scaledDownTestRDName = "resilience-wh-scaled-rd"
 
-		It("should reject admission requests while webhook is scaled to zero", func() {
+		It("should handle admission requests while webhook is scaled to zero", func() {
 			By("Scaling the webhook server deployment to zero replicas")
 			cmd := exec.CommandContext(context.Background(), "kubectl", "scale", "deployment",
 				"-l", "control-plane=webhook-server",
@@ -287,7 +276,7 @@ spec:
 		// Verify that the overall webhook endpoint health is clean after restore
 		It("should have all webhook configurations healthy after restore", func() {
 			By("Waiting for webhook configurations to stabilize")
-			Expect(utils.WaitForWebhookConfigurations(whShortTimeout)).To(Succeed())
+			Expect(utils.WaitForWebhookConfigurations("authorization.t-caas.telekom.com/component=webhook", whShortTimeout)).To(Succeed())
 		})
 	})
 })
@@ -319,22 +308,18 @@ var _ = Describe("Resilience - SSA Ownership Conflicts", Ordered, Label("complex
 		Expect(err).NotTo(HaveOccurred(), "Failed to load image into kind cluster")
 
 		By("Installing auth-operator via Helm for SSA conflict tests")
-		imageRepo := strings.Split(projectImage, ":")[0]
-		imageTag := strings.Split(projectImage, ":")[1]
-		if imageTag == "" {
-			imageTag = defaultImageTag
-		}
-
-		cmd := exec.CommandContext(context.Background(), "helm", "upgrade", "--install", ssaResilienceRelease, ssaHelmChartPath,
+		helmArgs := []string{"upgrade", "--install", ssaResilienceRelease, ssaHelmChartPath,
 			"-n", ssaResilienceNS,
 			"--create-namespace",
-			"--set", fmt.Sprintf("image.repository=%s", imageRepo),
-			"--set", fmt.Sprintf("image.tag=%s", imageTag),
+		}
+		helmArgs = append(helmArgs, imageSetArgs()...)
+		helmArgs = append(helmArgs,
 			"--set", "controller.replicas=1",
 			"--set", "webhookServer.replicas=1",
 			"--wait",
 			"--timeout", "5m",
 		)
+		cmd := exec.CommandContext(context.Background(), "helm", helmArgs...)
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to install Helm chart for SSA conflict tests")
 
@@ -419,12 +404,17 @@ spec:
 			Expect(err).NotTo(HaveOccurred(), "Should be able to patch the ClusterRole externally")
 
 			By("Verifying the operator re-applies the correct rules via SSA reconciliation")
-			Eventually(func() (string, error) {
+			Eventually(func() (bool, error) {
 				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrole", ssaExternalCRName,
 					"-o", "jsonpath={.rules}")
 				output, err := utils.Run(cmd)
-				return string(output), err
-			}, ssaReconcileTimeout, ssaPollInterval).ShouldNot(BeEmpty(),
+				if err != nil {
+					return false, err
+				}
+				rulesStr := strings.TrimSpace(string(output))
+				// Empty rules: "", "[]", or "null"
+				return rulesStr != "" && rulesStr != "[]" && rulesStr != "null", nil
+			}, ssaReconcileTimeout, ssaPollInterval).Should(BeTrue(),
 				"Operator should re-populate ClusterRole rules after external modification")
 		})
 
@@ -506,12 +496,17 @@ rules:
 				"ClusterRole must still exist after conflicting SSA patch")
 
 			By("Verifying the ClusterRole rules are non-empty after operator reconciliation")
-			Eventually(func() (string, error) {
+			Eventually(func() (bool, error) {
 				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrole", ssaConflictCRName,
 					"-o", "jsonpath={.rules}")
 				output, err := utils.Run(cmd)
-				return string(output), err
-			}, ssaReconcileTimeout, ssaPollInterval).ShouldNot(BeEmpty(),
+				if err != nil {
+					return false, err
+				}
+				rulesStr := strings.TrimSpace(string(output))
+				// Empty rules: "", "[]", or "null"
+				return rulesStr != "" && rulesStr != "[]" && rulesStr != "null", nil
+			}, ssaReconcileTimeout, ssaPollInterval).Should(BeTrue(),
 				"Operator should maintain valid rules after conflicting field-manager patch")
 		})
 
@@ -526,10 +521,10 @@ rules:
 				}
 				managers := string(output)
 				_, _ = fmt.Fprintf(GinkgoWriter, "Field managers: %s\n", managers)
-				// The auth-operator uses its own manager name; accept any manager that is not only kubectl/apply
-				return len(strings.TrimSpace(managers)) > 0
+				// The auth-operator's SSA field owner is "auth-operator" (see pkg/ssa/ssa.go)
+				return strings.Contains(managers, "auth-operator")
 			}, ssaReconcileTimeout, ssaPollInterval).Should(BeTrue(),
-				"ClusterRole should have at least one field manager entry")
+				"ClusterRole should have auth-operator as a field manager")
 		})
 
 		It("should clean up after SSA conflict test", func() {
@@ -584,17 +579,12 @@ var _ = Describe("Resilience - HA Failover", Ordered, Label("ha", "resilience"),
 		Expect(err).NotTo(HaveOccurred(), "Failed to load image into kind cluster")
 
 		By("Installing auth-operator via Helm with 3 controller replicas")
-		imageRepo := strings.Split(projectImage, ":")[0]
-		imageTag := strings.Split(projectImage, ":")[1]
-		if imageTag == "" {
-			imageTag = defaultImageTag
-		}
-
-		cmd := exec.CommandContext(context.Background(), "helm", "upgrade", "--install", haResilienceRelease, haResilienceChart,
+		helmArgs := []string{"upgrade", "--install", haResilienceRelease, haResilienceChart,
 			"-n", haResilienceNS,
 			"--create-namespace",
-			"--set", fmt.Sprintf("image.repository=%s", imageRepo),
-			"--set", fmt.Sprintf("image.tag=%s", imageTag),
+		}
+		helmArgs = append(helmArgs, imageSetArgs()...)
+		helmArgs = append(helmArgs,
 			"--set", "controller.replicas=3",
 			"--set", "controller.podDisruptionBudget.enabled=true",
 			"--set", "controller.podDisruptionBudget.minAvailable=2",
@@ -604,6 +594,7 @@ var _ = Describe("Resilience - HA Failover", Ordered, Label("ha", "resilience"),
 			"--wait",
 			"--timeout", "8m",
 		)
+		cmd := exec.CommandContext(context.Background(), "helm", helmArgs...)
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to install Helm chart for HA resilience tests")
 
@@ -727,7 +718,7 @@ var _ = Describe("Resilience - HA Failover", Ordered, Label("ha", "resilience"),
 				"All 3 controller pods should be running again after failover")
 		})
 
-		It("should continue reconciling CRDs after failover", func() {
+		It("should continue reconciling CRDs after HA deployment", func() {
 			By("Creating a RoleDefinition to verify reconciler is still healthy after (potential) failover")
 			const failoverRDName = "resilience-ha-failover-rd"
 			roleDefYAML := fmt.Sprintf(`
