@@ -600,7 +600,7 @@ var _ = Describe("Resilience - HA Failover", Ordered, Label("ha", "resilience"),
 			"--wait",
 			"--timeout", "8m",
 		)
-		cmd := exec.CommandContext(context.Background(), "helm", helmArgs...)
+		cmd = exec.CommandContext(context.Background(), "helm", helmArgs...)
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to install Helm chart for HA resilience tests")
 
