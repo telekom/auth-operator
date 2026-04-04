@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -17,9 +17,9 @@ import (
 // trackedOwnershipKeys defines the ownership label keys used for SA namespace
 // label inheritance, label extraction, and extra-key detection.
 var trackedOwnershipKeys = []string{
-	authzv1alpha1.LabelKeyOwner,
-	authzv1alpha1.LabelKeyTenant,
-	authzv1alpha1.LabelKeyThirdParty,
+	authorizationv1alpha1.LabelKeyOwner,
+	authorizationv1alpha1.LabelKeyTenant,
+	authorizationv1alpha1.LabelKeyThirdParty,
 }
 
 /*
@@ -231,7 +231,7 @@ func GetSANamespaceTrackedLabels(ctx context.Context, c client.Client, saInfo Se
 	}
 
 	// Require at minimum the owner label with a non-empty value.
-	ownerVal, hasOwner := result[authzv1alpha1.LabelKeyOwner]
+	ownerVal, hasOwner := result[authorizationv1alpha1.LabelKeyOwner]
 	if !hasOwner || ownerVal == "" {
 		return map[string]string{}, nil
 	}
@@ -242,27 +242,27 @@ func GetSANamespaceTrackedLabels(ctx context.Context, c client.Client, saInfo Se
 	//   - owner=thirdparty  => owner + thirdparty; no tenant label
 	// Any other combination is treated as invalid and results in no tracked labels.
 	switch ownerVal {
-	case authzv1alpha1.OwnerPlatform:
-		if _, ok := result[authzv1alpha1.LabelKeyTenant]; ok {
+	case authorizationv1alpha1.OwnerPlatform:
+		if _, ok := result[authorizationv1alpha1.LabelKeyTenant]; ok {
 			return map[string]string{}, nil
 		}
-		if _, ok := result[authzv1alpha1.LabelKeyThirdParty]; ok {
+		if _, ok := result[authorizationv1alpha1.LabelKeyThirdParty]; ok {
 			return map[string]string{}, nil
 		}
-	case authzv1alpha1.OwnerTenant:
-		tenantVal, hasTenant := result[authzv1alpha1.LabelKeyTenant]
+	case authorizationv1alpha1.OwnerTenant:
+		tenantVal, hasTenant := result[authorizationv1alpha1.LabelKeyTenant]
 		if !hasTenant || tenantVal == "" {
 			return map[string]string{}, nil
 		}
-		if _, ok := result[authzv1alpha1.LabelKeyThirdParty]; ok {
+		if _, ok := result[authorizationv1alpha1.LabelKeyThirdParty]; ok {
 			return map[string]string{}, nil
 		}
-	case authzv1alpha1.OwnerThirdParty:
-		tpVal, hasTP := result[authzv1alpha1.LabelKeyThirdParty]
+	case authorizationv1alpha1.OwnerThirdParty:
+		tpVal, hasTP := result[authorizationv1alpha1.LabelKeyThirdParty]
 		if !hasTP || tpVal == "" {
 			return map[string]string{}, nil
 		}
-		if _, ok := result[authzv1alpha1.LabelKeyTenant]; ok {
+		if _, ok := result[authorizationv1alpha1.LabelKeyTenant]; ok {
 			return map[string]string{}, nil
 		}
 	default:

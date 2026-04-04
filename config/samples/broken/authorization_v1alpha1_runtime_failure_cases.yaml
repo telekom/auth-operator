@@ -1,0 +1,99 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# =============================================================================
+# Runtime Failure Samples (INTENTIONALLY STALL/ERROR DURING RECONCILIATION)
+# =============================================================================
+# IMPORTANT:
+# - These objects are valid and should pass schema/webhook validation.
+# - They are expected to fail during reconciliation due to runtime authz limits.
+# - This file is intentionally NOT referenced by config/samples/kustomization.yaml.
+# - It is included via config/samples/broken/kustomization.yaml and must apply
+#   successfully in CI before surfacing stalled/partial reconciliation behavior.
+# =============================================================================
+
+---
+# CASE: Impersonation enabled but expected authz failure.
+# The impersonated ServiceAccount has no RBAC grants for target operations.
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RBACPolicy
+metadata:
+  name: sample-policy-impersonation-authz-failure
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/policy-tier: samples
+    t-caas.telekom.com/sample-case: impersonation-failure
+spec:
+  appliesTo:
+    namespaces:
+      - sample-tenant-a
+  defaultAssignment:
+    serviceAccounts:
+      - name: sample-impersonation-denied
+        namespace: sample-authz
+  impersonation:
+    enabled: true
+    serviceAccountRef:
+      name: sample-impersonation-denied
+      namespace: sample-authz
+  bindingLimits:
+    allowClusterRoleBindings: true
+    clusterRoleBindingLimits:
+      allowedRoleRefs:
+        - "sample-*"
+  roleLimits:
+    allowClusterRoles: true
+  subjectLimits:
+    allowedKinds:
+      - ServiceAccount
+
+---
+# CASE: RestrictedBindDefinition expected to stall with forbidden errors.
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedBindDefinition
+metadata:
+  name: rbd-case-impersonated-authz-failure
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/sample-case: impersonated-failed
+spec:
+  policyRef:
+    name: sample-policy-impersonation-authz-failure
+  targetName: sample-impersonated-fail
+  subjects:
+    - kind: ServiceAccount
+      name: sample-workload-impersonated-fail
+      namespace: sample-tenant-a
+      apiGroup: ""
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - sample-existing-cluster-role
+  roleBindings:
+    - namespace: sample-tenant-a
+      roleRefs:
+        - sample-existing-role
+
+---
+# CASE: RestrictedRoleDefinition expected to stall with forbidden errors.
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedRoleDefinition
+metadata:
+  name: rrd-case-impersonated-authz-failure
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/sample-case: impersonated-failed
+spec:
+  policyRef:
+    name: sample-policy-impersonation-authz-failure
+  targetRole: Role
+  targetName: sample-impersonated-fail-role
+  targetNamespace: sample-tenant-a
+  scopeNamespaced: true
+  restrictedVerbs:
+    - delete
+
+---

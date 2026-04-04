@@ -19,7 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/pkg/indexer"
 	pkgmetrics "github.com/telekom/auth-operator/pkg/metrics"
 )
@@ -37,8 +37,8 @@ func capturingLogger(buf *strings.Builder, verbosity int) logr.Logger {
 func newScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
 	s := runtime.NewScheme()
-	if err := authzv1alpha1.AddToScheme(s); err != nil {
-		t.Fatalf("failed to add authzv1alpha1 to scheme: %v", err)
+	if err := authorizationv1alpha1.AddToScheme(s); err != nil {
+		t.Fatalf("failed to add authorizationv1alpha1 to scheme: %v", err)
 	}
 	return s
 }
@@ -49,7 +49,7 @@ func newIndexedClient(scheme *runtime.Scheme, objs ...client.Object) client.Clie
 	builder := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithIndex(
-			&authzv1alpha1.WebhookAuthorizer{},
+			&authorizationv1alpha1.WebhookAuthorizer{},
 			indexer.WebhookAuthorizerHasNamespaceSelectorField,
 			indexer.WebhookAuthorizerHasNamespaceSelectorFunc,
 		)
@@ -73,10 +73,10 @@ func TestAuditLog_DenyDecisionAtV0(t *testing.T) {
 	logger := capturingLogger(&buf, 0)
 	scheme := newScheme(t)
 
-	wa := authzv1alpha1.WebhookAuthorizer{
+	wa := authorizationv1alpha1.WebhookAuthorizer{
 		ObjectMeta: metav1.ObjectMeta{Name: "deny-wa"},
-		Spec: authzv1alpha1.WebhookAuthorizerSpec{
-			DeniedPrincipals: []authzv1alpha1.Principal{{User: "baduser"}},
+		Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+			DeniedPrincipals: []authorizationv1alpha1.Principal{{User: "baduser"}},
 		},
 	}
 	cl := newIndexedClient(scheme, &wa)
@@ -126,10 +126,10 @@ func TestAuditLog_AllowDecisionAtV1(t *testing.T) {
 	logger0 := capturingLogger(&buf0, 0)
 	scheme := newScheme(t)
 
-	wa := authzv1alpha1.WebhookAuthorizer{
+	wa := authorizationv1alpha1.WebhookAuthorizer{
 		ObjectMeta: metav1.ObjectMeta{Name: "allow-wa"},
-		Spec: authzv1alpha1.WebhookAuthorizerSpec{
-			AllowedPrincipals: []authzv1alpha1.Principal{{User: "admin"}},
+		Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+			AllowedPrincipals: []authorizationv1alpha1.Principal{{User: "admin"}},
 			ResourceRules:     []authzv1.ResourceRule{{Verbs: []string{"*"}, APIGroups: []string{"*"}, Resources: []string{"*"}}},
 		},
 	}
@@ -240,10 +240,10 @@ func TestAuditLog_V2TraceLogs(t *testing.T) {
 	logger := capturingLogger(&buf, 2)
 	scheme := newScheme(t)
 
-	wa := authzv1alpha1.WebhookAuthorizer{
+	wa := authorizationv1alpha1.WebhookAuthorizer{
 		ObjectMeta: metav1.ObjectMeta{Name: "trace-wa"},
-		Spec: authzv1alpha1.WebhookAuthorizerSpec{
-			AllowedPrincipals: []authzv1alpha1.Principal{{User: "tracer"}},
+		Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+			AllowedPrincipals: []authorizationv1alpha1.Principal{{User: "tracer"}},
 			ResourceRules:     []authzv1.ResourceRule{{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods"}}},
 		},
 	}
@@ -304,10 +304,10 @@ func TestAuditLog_NonResourceAttributes(t *testing.T) {
 	logger := capturingLogger(&buf, 1)
 	scheme := newScheme(t)
 
-	wa := authzv1alpha1.WebhookAuthorizer{
+	wa := authorizationv1alpha1.WebhookAuthorizer{
 		ObjectMeta: metav1.ObjectMeta{Name: "nonres-wa"},
-		Spec: authzv1alpha1.WebhookAuthorizerSpec{
-			AllowedPrincipals: []authzv1alpha1.Principal{{User: "admin"}},
+		Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+			AllowedPrincipals: []authorizationv1alpha1.Principal{{User: "admin"}},
 			NonResourceRules:  []authzv1.NonResourceRule{{Verbs: []string{"get"}, NonResourceURLs: []string{"/healthz"}}},
 		},
 	}
@@ -346,18 +346,18 @@ func TestEvaluateSAR_ResultFields(t *testing.T) {
 	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
 	handler := &Authorizer{Client: cl, Log: logr.Discard()}
 
-	wa := authzv1alpha1.WebhookAuthorizer{
+	wa := authorizationv1alpha1.WebhookAuthorizer{
 		ObjectMeta: metav1.ObjectMeta{Name: "eval-wa"},
-		Spec: authzv1alpha1.WebhookAuthorizerSpec{
-			AllowedPrincipals: []authzv1alpha1.Principal{{User: "alice"}},
-			DeniedPrincipals:  []authzv1alpha1.Principal{{User: "bob"}},
+		Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+			AllowedPrincipals: []authorizationv1alpha1.Principal{{User: "alice"}},
+			DeniedPrincipals:  []authorizationv1alpha1.Principal{{User: "bob"}},
 			ResourceRules: []authzv1.ResourceRule{
 				{Verbs: []string{"list"}, APIGroups: []string{""}, Resources: []string{"secrets"}},
 				{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods"}},
 			},
 		},
 	}
-	waList := &authzv1alpha1.WebhookAuthorizerList{Items: []authzv1alpha1.WebhookAuthorizer{wa}}
+	waList := &authorizationv1alpha1.WebhookAuthorizerList{Items: []authorizationv1alpha1.WebhookAuthorizer{wa}}
 
 	t.Run("allowed returns correct rule index", func(t *testing.T) {
 		sar := &authzv1.SubjectAccessReview{
@@ -485,10 +485,10 @@ func TestAuditLog_StructuredFieldsComprehensive(t *testing.T) {
 	scheme := newScheme(t)
 
 	// Set up a deny authorizer so we get a deny decision at V(0).
-	deny := authzv1alpha1.WebhookAuthorizer{
+	deny := authorizationv1alpha1.WebhookAuthorizer{
 		ObjectMeta: metav1.ObjectMeta{Name: "audit-format-wa"},
-		Spec: authzv1alpha1.WebhookAuthorizerSpec{
-			DeniedPrincipals: []authzv1alpha1.Principal{{User: "audit-user"}},
+		Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+			DeniedPrincipals: []authorizationv1alpha1.Principal{{User: "audit-user"}},
 		},
 	}
 	cl := newIndexedClient(scheme, &deny)
@@ -575,11 +575,11 @@ func TestAuditLog_StructuredFieldsComprehensive(t *testing.T) {
 // guards against regressions where refactoring might break metric recording.
 func TestMetrics_RecordedAfterServeHTTP(t *testing.T) {
 	scheme := newScheme(t)
-	wa := authzv1alpha1.WebhookAuthorizer{
+	wa := authorizationv1alpha1.WebhookAuthorizer{
 		ObjectMeta: metav1.ObjectMeta{Name: "metrics-wa"},
-		Spec: authzv1alpha1.WebhookAuthorizerSpec{
-			DeniedPrincipals:  []authzv1alpha1.Principal{{User: "blocked"}},
-			AllowedPrincipals: []authzv1alpha1.Principal{{User: "admin"}},
+		Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+			DeniedPrincipals:  []authorizationv1alpha1.Principal{{User: "blocked"}},
+			AllowedPrincipals: []authorizationv1alpha1.Principal{{User: "admin"}},
 			ResourceRules: []authzv1.ResourceRule{
 				{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods"}},
 				{Verbs: []string{"list"}, APIGroups: []string{""}, Resources: []string{"pods"}},
@@ -725,22 +725,22 @@ func TestCappedGroups(t *testing.T) {
 func TestCountTotalRules(t *testing.T) {
 	tests := []struct {
 		name        string
-		authorizers []authzv1alpha1.WebhookAuthorizer
+		authorizers []authorizationv1alpha1.WebhookAuthorizer
 		want        int
 	}{
 		{"nil", nil, 0},
-		{"empty", []authzv1alpha1.WebhookAuthorizer{}, 0},
-		{"single with rules", []authzv1alpha1.WebhookAuthorizer{
-			{Spec: authzv1alpha1.WebhookAuthorizerSpec{
+		{"empty", []authorizationv1alpha1.WebhookAuthorizer{}, 0},
+		{"single with rules", []authorizationv1alpha1.WebhookAuthorizer{
+			{Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
 				ResourceRules:    []authzv1.ResourceRule{{Verbs: []string{"get"}}},
 				NonResourceRules: []authzv1.NonResourceRule{{Verbs: []string{"get"}, NonResourceURLs: []string{"/healthz"}}},
 			}},
 		}, 2},
-		{"multiple", []authzv1alpha1.WebhookAuthorizer{
-			{Spec: authzv1alpha1.WebhookAuthorizerSpec{
+		{"multiple", []authorizationv1alpha1.WebhookAuthorizer{
+			{Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
 				ResourceRules: []authzv1.ResourceRule{{Verbs: []string{"get"}}, {Verbs: []string{"list"}}},
 			}},
-			{Spec: authzv1alpha1.WebhookAuthorizerSpec{
+			{Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
 				NonResourceRules: []authzv1.NonResourceRule{{Verbs: []string{"get"}, NonResourceURLs: []string{"/healthz"}}},
 			}},
 		}, 3},

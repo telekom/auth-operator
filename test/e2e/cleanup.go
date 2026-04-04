@@ -29,6 +29,9 @@ func CleanupTestResources(opts CleanupOptions) {
 		utils.RemoveFinalizersForAll("roledefinition")
 		utils.RemoveFinalizersForAll("binddefinition")
 		utils.RemoveFinalizersForAll("webhookauthorizer")
+		utils.RemoveFinalizersForAll("restrictedbinddefinition")
+		utils.RemoveFinalizersForAll("restrictedroledefinition")
+		utils.RemoveFinalizersForAll("rbacpolicy")
 	}
 
 	if opts.RemoveCRDs {
@@ -48,11 +51,11 @@ func CleanupTestResources(opts CleanupOptions) {
 	}
 
 	for _, cr := range opts.ClusterRoles {
-		cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "clusterrole", cr, "--ignore-not-found=true")
+		cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "clusterrole", cr, "--ignore-not-found=true") // #nosec G204
 		_, _ = utils.Run(cmd)
 	}
 	for _, crb := range opts.ClusterRoleBindings {
-		cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "clusterrolebinding", crb, "--ignore-not-found=true")
+		cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "clusterrolebinding", crb, "--ignore-not-found=true") // #nosec G204
 		_, _ = utils.Run(cmd)
 	}
 
@@ -127,15 +130,15 @@ func resourceExists(kind, name string) bool {
 
 // cleanupAllCRDs deletes all auth-operator custom resources.
 func cleanupAllCRDs() {
-	resources := []string{"roledefinition", "binddefinition", "webhookauthorizer"}
+	resources := []string{"restrictedbinddefinition", "restrictedroledefinition", "roledefinition", "binddefinition", "webhookauthorizer", "rbacpolicy"}
 	for _, resource := range resources {
-		cmd := exec.CommandContext(context.Background(), "kubectl", "delete", resource, "-A", "--all", "--ignore-not-found=true")
+		cmd := exec.CommandContext(context.Background(), "kubectl", "delete", resource, "-A", "--all", "--ignore-not-found=true") // #nosec G204
 		_, _ = utils.Run(cmd)
 	}
 }
 
-// CleanupForHelmTests provides convenient cleanup for Helm-based tests
-// Usage: CleanupForHelmTests(helmNamespace, helmReleaseName, additionalNamespaces...)
+// CleanupForHelmTests provides convenient cleanup for Helm-based tests.
+// Usage: CleanupForHelmTests(helmNamespace, helmReleaseName, additionalNamespaces...).
 func CleanupForHelmTests(namespace, release string, additionalNamespaces ...string) {
 	namespaces := make([]string, 0, 1+len(additionalNamespaces))
 	namespaces = append(namespaces, namespace)
@@ -213,15 +216,15 @@ func CleanupComplete(namespaces, clusterRoles, clusterRoleBindings []string, web
 // Use within tests for cleanup between test cases.
 func CleanupCRDsByName(roledefs, binddefs, webhookauthorizers []string) {
 	for _, name := range binddefs {
-		cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "binddefinition", name, "--ignore-not-found=true")
+		cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "binddefinition", name, "--ignore-not-found=true") // #nosec G204
 		_, _ = utils.Run(cmd)
 	}
 	for _, name := range roledefs {
-		cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "roledefinition", name, "--ignore-not-found=true")
+		cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "roledefinition", name, "--ignore-not-found=true") // #nosec G204
 		_, _ = utils.Run(cmd)
 	}
 	for _, name := range webhookauthorizers {
-		cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "webhookauthorizer", name, "--ignore-not-found=true")
+		cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "webhookauthorizer", name, "--ignore-not-found=true") // #nosec G204
 		_, _ = utils.Run(cmd)
 	}
 }
@@ -232,10 +235,10 @@ func CleanupAllCRDsInNamespace(namespace string) {
 	resources := []string{"binddefinition", "roledefinition", "webhookauthorizer"}
 	for _, resource := range resources {
 		if namespace != "" {
-			cmd := exec.CommandContext(context.Background(), "kubectl", "delete", resource, "--all", "-n", namespace, "--ignore-not-found=true")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "delete", resource, "--all", "-n", namespace, "--ignore-not-found=true") // #nosec G204
 			_, _ = utils.Run(cmd)
 		} else {
-			cmd := exec.CommandContext(context.Background(), "kubectl", "delete", resource, "--all", "--ignore-not-found=true")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "delete", resource, "--all", "--ignore-not-found=true") // #nosec G204
 			_, _ = utils.Run(cmd)
 		}
 	}
@@ -243,6 +246,6 @@ func CleanupAllCRDsInNamespace(namespace string) {
 
 // CleanupAllWebhookAuthorizersClusterWide deletes all WebhookAuthorizers (cluster-scoped).
 func CleanupAllWebhookAuthorizersClusterWide() {
-	cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "webhookauthorizer", "--all", "--ignore-not-found=true")
+	cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "webhookauthorizer", "--all", "--ignore-not-found=true") // #nosec G204
 	_, _ = utils.Run(cmd)
 }

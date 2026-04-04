@@ -10,6 +10,9 @@ Package v1alpha1 contains API Schema definitions for the authorization v1alpha1 
 
 ### Resource Types
 - [BindDefinition](#binddefinition)
+- [RBACPolicy](#rbacpolicy)
+- [RestrictedBindDefinition](#restrictedbinddefinition)
+- [RestrictedRoleDefinition](#restrictedroledefinition)
 - [RoleDefinition](#roledefinition)
 - [WebhookAuthorizer](#webhookauthorizer)
 
@@ -83,6 +86,25 @@ _Appears in:_
 
 
 
+#### BindingLimits
+
+
+
+BindingLimits defines constraints on role bindings created by restricted definitions.
+
+
+
+_Appears in:_
+- [RBACPolicySpec](#rbacpolicyspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `allowClusterRoleBindings` _boolean_ | AllowClusterRoleBindings controls whether ClusterRoleBindings may be created.<br />Default is false (deny by default). | false | Optional: \{\} <br /> |
+| `clusterRoleBindingLimits` _[RoleRefLimits](#rolereflimits)_ | ClusterRoleBindingLimits constrains which ClusterRoles may be referenced in CRBs. |  | Optional: \{\} <br /> |
+| `roleBindingLimits` _[RoleRefLimits](#rolereflimits)_ | RoleBindingLimits constrains which ClusterRoles/Roles may be referenced in RBs. |  | Optional: \{\} <br /> |
+| `targetNamespaceLimits` _[NamespaceLimits](#namespacelimits)_ | TargetNamespaceLimits constrains which namespaces may be targeted. |  | Optional: \{\} <br /> |
+
+
 #### ClusterBinding
 
 
@@ -93,12 +115,70 @@ ClusterBinding defines cluster-scoped role bindings.
 
 _Appears in:_
 - [BindDefinitionSpec](#binddefinitionspec)
+- [RestrictedBindDefinitionSpec](#restrictedbinddefinitionspec)
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `clusterRoleRefs` _string array_ | ClusterRoleRefs references an existing ClusterRole |  | MaxItems: 64 <br />Optional: \{\} <br /> |
 
 
+#### DefaultPolicyAssignment
+
+
+
+DefaultPolicyAssignment defines identities that must use this policy by default
+when creating RestrictedBindDefinition/RestrictedRoleDefinition resources.
+
+
+
+_Appears in:_
+- [RBACPolicySpec](#rbacpolicyspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `groups` _string array_ | Groups lists requester group names for which this policy is the default. |  | MaxItems: 128 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
+| `serviceAccounts` _[SARef](#saref) array_ | ServiceAccounts lists requester ServiceAccounts for which this policy is the default. |  | MaxItems: 128 <br />Optional: \{\} <br /> |
+
+
+#### ImpersonationConfig
+
+
+
+ImpersonationConfig controls apply-time ServiceAccount impersonation for
+RestrictedBindDefinition and RestrictedRoleDefinition reconciliation.
+
+
+
+_Appears in:_
+- [RBACPolicySpec](#rbacpolicyspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `enabled` _boolean_ | Enabled enables ServiceAccount impersonation during restricted resource apply operations. | false | Optional: \{\} <br /> |
+| `serviceAccountRef` _[SARef](#saref)_ | ServiceAccountRef is the ServiceAccount identity used for impersonated apply operations.<br />Required when enabled is true. |  | Optional: \{\} <br /> |
+
+
+
+
+#### NameMatchLimits
+
+
+
+NameMatchLimits defines name-based allow/deny patterns for subjects.
+
+
+
+_Appears in:_
+- [SubjectLimits](#subjectlimits)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `allowedNames` _string array_ | AllowedNames is a list of allowed subject names. |  | MaxItems: 128 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
+| `forbiddenNames` _string array_ | ForbiddenNames is a list of forbidden subject names. |  | MaxItems: 128 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
+| `allowedPrefixes` _string array_ | AllowedPrefixes is a list of allowed name prefixes. |  | MaxItems: 64 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
+| `forbiddenPrefixes` _string array_ | ForbiddenPrefixes is a list of forbidden name prefixes. |  | MaxItems: 64 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
+| `allowedSuffixes` _string array_ | AllowedSuffixes is a list of allowed name suffixes. |  | MaxItems: 64 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
+| `forbiddenSuffixes` _string array_ | ForbiddenSuffixes is a list of forbidden name suffixes. |  | MaxItems: 64 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
 
 
 #### NamespaceBinding
@@ -111,6 +191,7 @@ NamespaceBinding defines namespace-scoped role bindings.
 
 _Appears in:_
 - [BindDefinitionSpec](#binddefinitionspec)
+- [RestrictedBindDefinitionSpec](#restrictedbinddefinitionspec)
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
@@ -118,6 +199,42 @@ _Appears in:_
 | `roleRefs` _string array_ | RoleRefs references a specific Role that has to exist in the target namespaces |  | MaxItems: 64 <br />Optional: \{\} <br /> |
 | `namespace` _string_ | Namespace of the Role that should be bound to the subjects. |  | Optional: \{\} <br /> |
 | `namespaceSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#labelselector-v1-meta) array_ | NamespaceSelector is a label selector which will match namespaces that should have the RoleBinding/s. |  | MaxItems: 16 <br />Optional: \{\} <br /> |
+
+
+#### NamespaceLimits
+
+
+
+NamespaceLimits controls which namespaces can be targeted by bindings.
+
+
+
+_Appears in:_
+- [BindingLimits](#bindinglimits)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `allowedNamespaceSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#labelselector-v1-meta)_ | AllowedNamespaceSelector selects allowed namespaces by label. |  | Optional: \{\} <br /> |
+| `forbiddenNamespaces` _string array_ | ForbiddenNamespaces is a list of namespace names that may not be targeted. |  | MaxItems: 128 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
+| `forbiddenNamespacePrefixes` _string array_ | ForbiddenNamespacePrefixes is a list of namespace name prefixes that may not be targeted. |  | MaxItems: 64 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
+| `maxTargetNamespaces` _integer_ | MaxTargetNamespaces limits the number of target namespaces per binding. |  | Minimum: 0 <br />Optional: \{\} <br /> |
+
+
+#### PolicyScope
+
+
+
+PolicyScope defines which namespaces this policy governs.
+
+
+
+_Appears in:_
+- [RBACPolicySpec](#rbacpolicyspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `namespaceSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#labelselector-v1-meta)_ | NamespaceSelector selects namespaces by label selector. |  | Optional: \{\} <br /> |
+| `namespaces` _string array_ | Namespaces is an explicit list of namespace names. |  | MaxItems: 256 <br />Optional: \{\} <br />items:MaxLength: 63 <br />items:MinLength: 1 <br /> |
 
 
 #### Principal
@@ -138,6 +255,103 @@ _Appears in:_
 | `namespace` _string_ | Namespace is the requesting user namespace in case the requesting user is a ServiceAccount. |  | MaxLength: 253 <br />Optional: \{\} <br /> |
 
 
+#### RBACPolicy
+
+
+
+RBACPolicy is the Schema for the rbacpolicies API.
+It defines RBAC guardrails that RestrictedBindDefinitions and
+RestrictedRoleDefinitions must comply with.
+
+
+
+
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `apiVersion` _string_ | `authorization.t-caas.telekom.com/v1alpha1` | | |
+| `kind` _string_ | `RBACPolicy` | | |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `spec` _[RBACPolicySpec](#rbacpolicyspec)_ |  |  |  |
+| `status` _[RBACPolicyStatus](#rbacpolicystatus)_ |  |  |  |
+
+
+#### RBACPolicyReference
+
+
+
+RBACPolicyReference is a reference to an RBACPolicy that governs a restricted resource.
+
+
+
+_Appears in:_
+- [RestrictedBindDefinitionSpec](#restrictedbinddefinitionspec)
+- [RestrictedRoleDefinitionSpec](#restrictedroledefinitionspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `name` _string_ | Name of the RBACPolicy. |  | MaxLength: 253 <br />MinLength: 1 <br />Required: \{\} <br /> |
+
+
+#### RBACPolicySpec
+
+
+
+RBACPolicySpec defines the desired state of RBACPolicy.
+
+
+
+_Appears in:_
+- [RBACPolicy](#rbacpolicy)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `appliesTo` _[PolicyScope](#policyscope)_ | AppliesTo defines the namespace scope this policy governs. |  | Required: \{\} <br /> |
+| `bindingLimits` _[BindingLimits](#bindinglimits)_ | BindingLimits constrains role bindings that may be created. |  | Optional: \{\} <br /> |
+| `roleLimits` _[RoleLimits](#rolelimits)_ | RoleLimits constrains roles that may be generated. |  | Optional: \{\} <br /> |
+| `subjectLimits` _[SubjectLimits](#subjectlimits)_ | SubjectLimits constrains the subjects a tenant may use. |  | Optional: \{\} <br /> |
+| `defaultAssignment` _[DefaultPolicyAssignment](#defaultpolicyassignment)_ | DefaultAssignment defines requester identities that must use this policy by default<br />when creating restricted resources. |  | Optional: \{\} <br /> |
+| `impersonation` _[ImpersonationConfig](#impersonationconfig)_ | Impersonation configures ServiceAccount impersonation for restricted resource<br />apply operations governed by this policy. |  | Optional: \{\} <br /> |
+
+
+#### RBACPolicyStatus
+
+
+
+RBACPolicyStatus defines the observed state of RBACPolicy.
+
+
+
+_Appears in:_
+- [RBACPolicy](#rbacpolicy)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `observedGeneration` _integer_ | ObservedGeneration is the last observed generation of the resource. |  | Optional: \{\} <br /> |
+| `boundResourceCount` _integer_ | BoundResourceCount is the number of RestrictedBindDefinitions and<br />RestrictedRoleDefinitions currently referencing this policy. |  | Optional: \{\} <br /> |
+| `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#condition-v1-meta) array_ | Conditions defines current service state of the RBACPolicy. |  | Optional: \{\} <br /> |
+
+
+
+
+#### ResourceVerbRule
+
+
+
+ResourceVerbRule specifies a forbidden combination of resource, API group, and verbs.
+
+
+
+_Appears in:_
+- [RoleLimits](#rolelimits)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `resource` _string_ | Resource is the resource name (e.g., "pods", "secrets"). |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `apiGroup` _string_ | APIGroup is the API group of the resource. Empty string means core group. |  | Optional: \{\} <br /> |
+| `verbs` _string array_ | Verbs are the verbs forbidden on this resource. |  | MinItems: 1 <br />Required: \{\} <br /> |
+
+
 #### RestrictedAPIGroup
 
 
@@ -150,6 +364,7 @@ and the remaining verbs are still allowed.
 
 
 _Appears in:_
+- [RestrictedRoleDefinitionSpec](#restrictedroledefinitionspec)
 - [RoleDefinitionSpec](#roledefinitionspec)
 
 | Field | Description | Default | Validation |
@@ -157,6 +372,137 @@ _Appears in:_
 | `name` _string_ | Name is the name of the API group (e.g., "storage.k8s.io", "velero.io"). |  | Required: \{\} <br /> |
 | `versions` _[GroupVersionForDiscovery](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#groupversionfordiscovery-v1-meta) array_ | Versions restricts only the specified API versions within this group.<br />When empty, all versions of the group are affected. |  | Optional: \{\} <br /> |
 | `verbs` _string array_ | Verbs restricts only the specified verbs across all resources in this API group.<br />When empty, the entire API group is fully blocked (existing behavior).<br />When specified, only the listed verbs are removed from the generated role for resources<br />in this group — remaining verbs are still allowed.<br />This enables per-API-group read-only restrictions without enumerating every resource.<br />Note: "*" matches only the literal wildcard verb, not all verbs. |  | MaxItems: 16 <br />Optional: \{\} <br />items:MaxLength: 63 <br />items:MinLength: 1 <br />items:Pattern: ^([a-z]+\|\*)$ <br /> |
+
+
+#### RestrictedBindDefinition
+
+
+
+RestrictedBindDefinition is the Schema for the restrictedbinddefinitions API.
+It is similar to BindDefinition but requires a policy reference and enforces
+RBAC guardrails defined by the referenced RBACPolicy.
+
+
+
+
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `apiVersion` _string_ | `authorization.t-caas.telekom.com/v1alpha1` | | |
+| `kind` _string_ | `RestrictedBindDefinition` | | |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `spec` _[RestrictedBindDefinitionSpec](#restrictedbinddefinitionspec)_ |  |  |  |
+| `status` _[RestrictedBindDefinitionStatus](#restrictedbinddefinitionstatus)_ |  |  |  |
+
+
+#### RestrictedBindDefinitionSpec
+
+
+
+RestrictedBindDefinitionSpec defines the desired state of RestrictedBindDefinition.
+
+
+
+_Appears in:_
+- [RestrictedBindDefinition](#restrictedbinddefinition)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `policyRef` _[RBACPolicyReference](#rbacpolicyreference)_ | PolicyRef references the RBACPolicy that governs this binding.<br />This field is immutable after creation. |  | Required: \{\} <br /> |
+| `targetName` _string_ | TargetName is the name prefix for generated bindings. Follows format<br />"targetName-clusterrole/role-binding".<br />This field is immutable after creation. |  | MaxLength: 253 <br />MinLength: 1 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` <br />Required: \{\} <br /> |
+| `subjects` _[Subject](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#subject-v1-rbac) array_ | Subjects lists the subjects that will be bound to the target ClusterRole/Role.<br />Can be "User", "Group" or "ServiceAccount". |  | MaxItems: 256 <br />Required: \{\} <br /> |
+| `clusterRoleBindings` _[ClusterBinding](#clusterbinding)_ | ClusterRoleBindings defines cluster-scoped role bindings. |  | Optional: \{\} <br /> |
+| `roleBindings` _[NamespaceBinding](#namespacebinding) array_ | RoleBindings defines namespace-scoped role bindings. |  | MaxItems: 64 <br />Optional: \{\} <br /> |
+| `automountServiceAccountToken` _boolean_ | AutomountServiceAccountToken controls whether to automount API credentials<br />for ServiceAccounts created by this RestrictedBindDefinition. | true | Optional: \{\} <br /> |
+
+
+#### RestrictedBindDefinitionStatus
+
+
+
+RestrictedBindDefinitionStatus defines the observed state of RestrictedBindDefinition.
+
+
+
+_Appears in:_
+- [RestrictedBindDefinition](#restrictedbinddefinition)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `observedGeneration` _integer_ | ObservedGeneration is the last observed generation of the resource. |  | Optional: \{\} <br /> |
+| `bindReconciled` _boolean_ | BindReconciled indicates whether bindings have been successfully reconciled. |  | Optional: \{\} <br /> |
+| `generatedServiceAccounts` _[Subject](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#subject-v1-rbac) array_ | GeneratedServiceAccounts lists ServiceAccounts that were auto-created. |  | Optional: \{\} <br /> |
+| `missingRoleRefs` _string array_ | MissingRoleRefs lists role references that could not be resolved.<br />Format: "ClusterRole/<name>" or "Role/<namespace>/<name>". |  | Optional: \{\} <br /> |
+| `externalServiceAccounts` _string array_ | ExternalServiceAccounts lists ServiceAccounts referenced by this RestrictedBindDefinition<br />that were not created by the controller.<br />Format: "<namespace>/<name>". |  | Optional: \{\} <br /> |
+| `policyViolations` _string array_ | PolicyViolations lists policy violations detected during the last reconciliation.<br />Format: "<fieldPath>: <message>" when a field path is available.<br />Empty when all checks pass. |  | Optional: \{\} <br /> |
+| `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#condition-v1-meta) array_ | Conditions defines current service state. |  | Optional: \{\} <br /> |
+
+
+
+
+#### RestrictedRoleDefinition
+
+
+
+RestrictedRoleDefinition is the Schema for the restrictedroledefinitions API.
+It is similar to RoleDefinition but requires a policy reference and enforces
+RBAC guardrails defined by the referenced RBACPolicy.
+
+
+
+
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `apiVersion` _string_ | `authorization.t-caas.telekom.com/v1alpha1` | | |
+| `kind` _string_ | `RestrictedRoleDefinition` | | |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `spec` _[RestrictedRoleDefinitionSpec](#restrictedroledefinitionspec)_ |  |  |  |
+| `status` _[RestrictedRoleDefinitionStatus](#restrictedroledefinitionstatus)_ |  |  |  |
+
+
+#### RestrictedRoleDefinitionSpec
+
+
+
+RestrictedRoleDefinitionSpec defines the desired state of RestrictedRoleDefinition.
+
+
+
+_Appears in:_
+- [RestrictedRoleDefinition](#restrictedroledefinition)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `policyRef` _[RBACPolicyReference](#rbacpolicyreference)_ | PolicyRef references the RBACPolicy that governs this role definition.<br />This field is immutable after creation. |  | Required: \{\} <br /> |
+| `targetRole` _string_ | TargetRole is the role type that will be reconciled: ClusterRole or Role.<br />This field is immutable after creation. |  | Enum: [ClusterRole Role] <br />Required: \{\} <br /> |
+| `targetName` _string_ | TargetName is the name of the target role.<br />This field is immutable after creation. |  | MaxLength: 63 <br />MinLength: 5 <br />Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` <br />Required: \{\} <br /> |
+| `targetNamespace` _string_ | TargetNamespace is the target namespace for the Role.<br />Required when "TargetRole" is "Role". |  | Optional: \{\} <br /> |
+| `scopeNamespaced` _boolean_ | ScopeNamespaced controls whether the API resource filter includes<br />namespaced or cluster-scoped resources. |  | Required: \{\} <br /> |
+| `restrictedApis` _[RestrictedAPIGroup](#restrictedapigroup) array_ | RestrictedAPIs defines API group-level restrictions for the generated role.<br />Each entry can either fully block an API group or restrict only certain verbs:<br />  - When Verbs is empty or omitted, the entire API group is fully blocked<br />    (no resources from that group appear in the generated role).<br />  - When Verbs is specified, only those verbs are removed for resources in<br />    the group — the remaining verbs are still allowed (partial restriction).<br />Version filtering narrows which API versions are affected:<br />  - When Versions is empty, all versions of the group are affected.<br />  - When Versions is specified, only those API versions are restricted.<br />Note: Kubernetes RBAC PolicyRules are version-agnostic. If the same resource<br />exists in a non-restricted version of the same group, it will still appear<br />in the generated role. |  | MaxItems: 64 <br />Optional: \{\} <br /> |
+| `restrictedResources` _[APIResource](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#apiresource-v1-meta) array_ | RestrictedResources holds resources which will NOT be included in the generated role. |  | MaxItems: 128 <br />Optional: \{\} <br /> |
+| `restrictedVerbs` _string array_ | RestrictedVerbs holds verbs which will NOT be included in the generated role. |  | MaxItems: 16 <br />Optional: \{\} <br />items:MaxLength: 63 <br />items:MinLength: 1 <br />items:Pattern: ^([a-z]+\|\*)$ <br /> |
+
+
+#### RestrictedRoleDefinitionStatus
+
+
+
+RestrictedRoleDefinitionStatus defines the observed state of RestrictedRoleDefinition.
+
+
+
+_Appears in:_
+- [RestrictedRoleDefinition](#restrictedroledefinition)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `observedGeneration` _integer_ | ObservedGeneration is the last observed generation of the resource. |  | Optional: \{\} <br /> |
+| `roleReconciled` _boolean_ | RoleReconciled indicates whether the target role has been successfully reconciled. |  | Optional: \{\} <br /> |
+| `policyViolations` _string array_ | PolicyViolations lists policy violations detected during the last reconciliation. |  | Optional: \{\} <br /> |
+| `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#condition-v1-meta) array_ | Conditions defines current service state. |  | Optional: \{\} <br /> |
+
+
 
 
 #### RoleDefinition
@@ -219,6 +565,125 @@ _Appears in:_
 | `observedGeneration` _integer_ | ObservedGeneration is the last observed generation of the resource.<br />This is used by kstatus to determine if the resource is current. |  | Optional: \{\} <br /> |
 | `roleReconciled` _boolean_ | RoleReconciled indicates whether the target role has been successfully reconciled. |  | Optional: \{\} <br /> |
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#condition-v1-meta) array_ | Conditions defines current service state of the Role definition. All conditions should evaluate to true to signify successful reconciliation. |  | Optional: \{\} <br /> |
+
+
+
+
+#### RoleLimits
+
+
+
+RoleLimits defines constraints on roles created by RestrictedRoleDefinitions.
+
+
+
+_Appears in:_
+- [RBACPolicySpec](#rbacpolicyspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `allowClusterRoles` _boolean_ | AllowClusterRoles controls whether ClusterRoles may be generated.<br />Default is false (deny by default). | false | Optional: \{\} <br /> |
+| `forbiddenVerbs` _string array_ | ForbiddenVerbs is a list of verbs that must not appear in generated roles. |  | MaxItems: 16 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
+| `forbiddenResources` _string array_ | ForbiddenResources is a list of resources that must not appear in generated roles. |  | MaxItems: 128 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
+| `forbiddenAPIGroups` _string array_ | ForbiddenAPIGroups is a list of API groups that must not appear in generated roles. |  | MaxItems: 64 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
+| `forbiddenResourceVerbs` _[ResourceVerbRule](#resourceverbrule) array_ | ForbiddenResourceVerbs is a list of specific resource+verb combinations that are forbidden. |  | MaxItems: 64 <br />Optional: \{\} <br /> |
+| `maxRulesPerRole` _integer_ | MaxRulesPerRole limits the number of rules in a single generated role. |  | Minimum: 1 <br />Optional: \{\} <br /> |
+
+
+#### RoleRefLimits
+
+
+
+RoleRefLimits controls which role references are allowed or forbidden.
+
+
+
+_Appears in:_
+- [BindingLimits](#bindinglimits)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `allowedRoleRefs` _string array_ | AllowedRoleRefs is a list of allowed role names. Supports simple wildcards:<br />"prefix*" and "*suffix". An empty list means no role refs are allowed (default-deny). |  | MaxItems: 128 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
+| `allowedRoleRefSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#labelselector-v1-meta)_ | AllowedRoleRefSelector selects allowed roles by label. |  | Optional: \{\} <br /> |
+| `forbiddenRoleRefs` _string array_ | ForbiddenRoleRefs is a list of explicitly forbidden role names.<br />Takes precedence over AllowedRoleRefs. |  | MaxItems: 128 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
+| `forbiddenRoleRefSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#labelselector-v1-meta)_ | ForbiddenRoleRefSelector selects forbidden roles by label. |  | Optional: \{\} <br /> |
+
+
+#### SACreationConfig
+
+
+
+SACreationConfig controls ServiceAccount auto-creation behaviour.
+
+
+
+_Appears in:_
+- [ServiceAccountLimits](#serviceaccountlimits)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `allowAutoCreate` _boolean_ | AllowAutoCreate controls whether ServiceAccounts may be auto-created. | false | Optional: \{\} <br /> |
+| `allowedCreationNamespaceSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#labelselector-v1-meta)_ | AllowedCreationNamespaceSelector selects namespaces where SA creation is allowed. |  | Optional: \{\} <br /> |
+| `allowedCreationNamespaces` _string array_ | AllowedCreationNamespaces is an explicit list of namespaces where SA creation is allowed. |  | MaxItems: 128 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
+| `automountServiceAccountToken` _boolean_ | AutomountServiceAccountToken controls automount for auto-created SAs. |  | Optional: \{\} <br /> |
+| `disableAdoption` _boolean_ | DisableAdoption prevents adoption of pre-existing ServiceAccounts. | false | Optional: \{\} <br /> |
+
+
+#### SARef
+
+
+
+SARef is a reference to a specific ServiceAccount.
+
+
+
+_Appears in:_
+- [DefaultPolicyAssignment](#defaultpolicyassignment)
+- [ImpersonationConfig](#impersonationconfig)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `name` _string_ | Name of the ServiceAccount. |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `namespace` _string_ | Namespace of the ServiceAccount. |  | Optional: \{\} <br /> |
+
+
+#### ServiceAccountLimits
+
+
+
+ServiceAccountLimits defines constraints on ServiceAccount subjects.
+
+
+
+_Appears in:_
+- [SubjectLimits](#subjectlimits)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `allowedNamespaceSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#labelselector-v1-meta)_ | AllowedNamespaceSelector selects namespaces whose SAs may be referenced. |  | Optional: \{\} <br /> |
+| `forbiddenNamespaces` _string array_ | ForbiddenNamespaces is a list of namespaces whose SAs may not be referenced. |  | MaxItems: 128 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
+| `forbiddenNamespacePrefixes` _string array_ | ForbiddenNamespacePrefixes is a list of namespace prefixes to deny. |  | MaxItems: 64 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
+| `creation` _[SACreationConfig](#sacreationconfig)_ | Creation constrains ServiceAccount auto-creation behaviour. |  | Optional: \{\} <br /> |
+
+
+#### SubjectLimits
+
+
+
+SubjectLimits defines constraints on the subjects a tenant may use.
+
+
+
+_Appears in:_
+- [RBACPolicySpec](#rbacpolicyspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `allowedKinds` _string array_ | AllowedKinds controls which subject kinds are allowed.<br />Valid values: "User", "Group", "ServiceAccount".<br />An empty list means no subject kinds are allowed (default-deny). |  | MaxItems: 3 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
+| `forbiddenKinds` _string array_ | ForbiddenKinds lists subject kinds that are explicitly forbidden.<br />Takes precedence over AllowedKinds. |  | MaxItems: 3 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
+| `userLimits` _[NameMatchLimits](#namematchlimits)_ | UserLimits constrains User subject names. |  | Optional: \{\} <br /> |
+| `groupLimits` _[NameMatchLimits](#namematchlimits)_ | GroupLimits constrains Group subject names. |  | Optional: \{\} <br /> |
+| `serviceAccountLimits` _[ServiceAccountLimits](#serviceaccountlimits)_ | ServiceAccountLimits constrains ServiceAccount subjects. |  | Optional: \{\} <br /> |
 
 
 

@@ -50,6 +50,10 @@ import (
 // +kubebuilder:rbac:groups="coordination.k8s.io",resources=leases,verbs=get;list;update;create;delete
 // +kubebuilder:rbac:groups="events.k8s.io",resources=events,verbs=create;patch;update
 
+// queueAllTimeout is the maximum time spent listing all resources when
+// re-queuing reconciliations after a tracker event (e.g. CRD discovery change).
+const queueAllTimeout = 10 * time.Second
+
 // RoleDefinitionReconciler reconciles a RoleDefinition object.
 type RoleDefinitionReconciler struct {
 	client          client.Client
@@ -117,7 +121,9 @@ func (r *RoleDefinitionReconciler) queueAll() handler.MapFunc {
 
 		// List all RoleDefinition resources
 		roleDefList := &authorizationv1alpha1.RoleDefinitionList{}
-		err := r.client.List(ctx, roleDefList)
+		listCtx, cancel := context.WithTimeout(ctx, queueAllTimeout)
+		defer cancel()
+		err := r.client.List(listCtx, roleDefList)
 		if err != nil {
 			logger.Error(err, "failed to list RoleDefinition resources")
 			return nil

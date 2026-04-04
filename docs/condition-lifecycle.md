@@ -53,7 +53,6 @@ encountered a persistent error; **absent** when healthy.
 | Status | Reason | Meaning |
 |--------|--------|---------|
 | `True` | `Error` | A reconciliation error occurred |
-| `True` | `MissingDependency` | A required dependency is missing |
 | *(deleted)* | — | Reconciliation succeeded or progressing |
 
 **Lifecycle**: Set via `MarkStalled()` on unrecoverable errors. Deleted when
@@ -283,6 +282,82 @@ NamespaceSelectorValid → RulesValid → PrincipalConfigured → Ready
 
 ---
 
+## RBACPolicy Conditions
+
+RBACPolicy uses the standard kstatus conditions (`Ready`, `Stalled`).
+
+### Ready
+
+| Status | Reason | Message |
+|--------|--------|---------|
+| `True` | `Reconciled` | Reconciled successfully |
+| `False` | — | Set implicitly when Stalled is True |
+
+### Stalled
+
+| Status | Reason | Message |
+|--------|--------|---------|
+| `True` | `Error` | An error occurred; check operator logs for details |
+
+**Lifecycle**: Set when the controller fails to list or evaluate restricted
+resources during reconciliation. Cleared on the next successful reconciliation.
+
+---
+
+## Restricted CRD Conditions
+
+RestrictedRoleDefinition and RestrictedBindDefinition use the standard kstatus
+conditions (`Ready`, `Reconciling`, `Stalled`) plus these domain-specific
+conditions.
+
+### PolicyCompliant
+
+Reports whether the resource complies with its referenced RBACPolicy.
+
+| Status | Reason | Message |
+|--------|--------|---------|
+| `True` | `AllChecksPass` | All policy checks pass |
+| `False` | `ViolationsDetected` | Policy violations detected: *\<details\>* |
+| `False` | `PolicyNotFound` | Referenced RBACPolicy %q not found |
+| `False` | `PolicyScopeNotMatched` | Target namespaces are outside policy scope |
+
+**Lifecycle**: Evaluated on every reconciliation after fetching the referenced
+RBACPolicy. When violations are detected, the controller triggers
+deprovisioning of managed RBAC resources.
+
+### Deprovisioned (Policy Violation)
+
+When policy violations are detected, the controller deprovisions all managed
+RBAC resources and marks the resource as non-ready:
+
+| Condition | Status | Reason | Message |
+|-----------|--------|--------|---------|
+| `PolicyCompliant` | `False` | `ViolationsDetected` | violation details (up to 10) |
+| `Ready` | `False` | `Deprovisioned` | deprovisioned due to policy violations |
+
+If deprovision itself fails, the controller additionally sets `Stalled=True`
+to signal an operational error requiring investigation.
+
+### Reconciliation Sequence (RestrictedRoleDefinition)
+
+```
+PolicyCompliant → Discover APIs → Filter APIs → EnsureRole → Ready
+    │
+    └─ (violations) → Deprovision → Ready=False (Deprovisioned)
+```
+
+### Reconciliation Sequence (RestrictedBindDefinition)
+
+```
+Reconciling → Finalizer → FetchPolicy → PolicyCompliant
+  │
+  └─ (compliant) → EnsureServiceAccounts → EnsureBindings → ValidateRoles → Ready
+    │
+    └─ (violations) → Deprovision → Ready=False (Deprovisioned)
+```
+
+---
+
 ## Condition Utilities
 
 The `pkg/conditions` package provides helpers for managing conditions:
@@ -332,6 +407,7 @@ kubectl get roledefinitions -o json | \
 | Condition | When False | Recommended Action |
 |-----------|-----------|-------------------|
 | `Ready` | Resource not fully reconciled | Check `Stalled` and `Reconciling` conditions for details |
+| `PolicyCompliant` | Policy violations detected | Fix the spec to comply with the referenced RBACPolicy, or update the policy |
 | `RoleRefsValid` | Referenced roles missing | Create the missing ClusterRole/Role, or remove the reference from the BindDefinition |
 | `RulesValid` | Invalid resource/non-resource rules | Fix the rule syntax in the WebhookAuthorizer spec |
 | `NamespaceSelectorValid` | Unparseable label selector | Fix the label selector expression in the spec |

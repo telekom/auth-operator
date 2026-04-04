@@ -37,32 +37,32 @@ var _ = Describe("Helm Chart E2E", Ordered, Label("helm"), func() {
 		By("Setting up Helm test environment")
 
 		// Create output directory
-		err := os.MkdirAll(utils.GetE2EOutputDir(), 0o755)
+		err := os.MkdirAll(utils.GetE2EOutputDir(), 0o750)
 		Expect(err).NotTo(HaveOccurred())
 
 		// cert-manager is installed in BeforeSuite, no need to install here
 
 		By("Creating Helm test namespace")
-		cmd := exec.CommandContext(context.Background(), "kubectl", "create", "ns", helmNamespace, "--dry-run=client", "-o", "yaml")
+		cmd := exec.CommandContext(context.Background(), "kubectl", "create", "ns", helmNamespace, "--dry-run=client", "-o", "yaml") // #nosec G204
 		output, _ := utils.Run(cmd)
-		cmd = exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
+		cmd = exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-") // #nosec G204
 		cmd.Stdin = strings.NewReader(string(output))
 		_, _ = utils.Run(cmd)
 
 		By("Creating test namespace for CRD testing")
-		cmd = exec.CommandContext(context.Background(), "kubectl", "create", "ns", helmTestNamespace, "--dry-run=client", "-o", "yaml")
+		cmd = exec.CommandContext(context.Background(), "kubectl", "create", "ns", helmTestNamespace, "--dry-run=client", "-o", "yaml") // #nosec G204
 		output, _ = utils.Run(cmd)
-		cmd = exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
+		cmd = exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-") // #nosec G204
 		cmd.Stdin = strings.NewReader(string(output))
 		_, _ = utils.Run(cmd)
 
 		// Label the test namespace
-		cmd = exec.CommandContext(context.Background(), "kubectl", "label", "ns", helmTestNamespace,
+		cmd = exec.CommandContext(context.Background(), "kubectl", "label", "ns", helmTestNamespace, // #nosec G204
 			"e2e-helm-test=true", "--overwrite")
 		_, _ = utils.Run(cmd)
 
 		By("Building the operator image")
-		cmd = exec.CommandContext(context.Background(), "make", "docker-build", fmt.Sprintf("IMG=%s", projectImage))
+		cmd = exec.CommandContext(context.Background(), "make", "docker-build", fmt.Sprintf("IMG=%s", projectImage)) // #nosec G204
 		_, err = utils.Run(cmd)
 		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build operator image")
 
@@ -83,7 +83,7 @@ var _ = Describe("Helm Chart E2E", Ordered, Label("helm"), func() {
 		}
 
 		By("Cleaning up Helm release")
-		cmd := exec.CommandContext(context.Background(), "helm", "uninstall", helmReleaseName, "-n", helmNamespace, "--wait", "--timeout", "2m")
+		cmd := exec.CommandContext(context.Background(), "helm", "uninstall", helmReleaseName, "-n", helmNamespace, "--wait", "--timeout", "2m") // #nosec G204
 		_, _ = utils.Run(cmd)
 
 		// Use centralized cleanup utility (includes namespace deletion)
@@ -96,7 +96,7 @@ var _ = Describe("Helm Chart E2E", Ordered, Label("helm"), func() {
 	Context("Helm Chart Validation", func() {
 		It("should lint the Helm chart successfully", func() {
 			By("Running helm lint")
-			cmd := exec.CommandContext(context.Background(), "helm", "lint", helmChartPath, "--strict")
+			cmd := exec.CommandContext(context.Background(), "helm", "lint", helmChartPath, "--strict") // #nosec G204
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Helm lint failed: %s", string(output))
 		})
@@ -107,7 +107,7 @@ var _ = Describe("Helm Chart E2E", Ordered, Label("helm"), func() {
 				"-n", helmNamespace},
 				imageSetArgs()...,
 			)
-			cmd := exec.CommandContext(context.Background(), "helm", templateArgs...)
+			cmd := exec.CommandContext(context.Background(), "helm", templateArgs...) // #nosec G204
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Helm template failed")
 			Expect(string(output)).To(ContainSubstring("Deployment"))
@@ -131,7 +131,7 @@ var _ = Describe("Helm Chart E2E", Ordered, Label("helm"), func() {
 				"--set", "webhookServer.podDisruptionBudget.enabled=true",
 				"--set", "metrics.serviceMonitor.enabled=true",
 			)
-			cmd := exec.CommandContext(context.Background(), "helm", templateArgs...)
+			cmd := exec.CommandContext(context.Background(), "helm", templateArgs...) // #nosec G204
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Helm template with all features failed: %s", string(output))
 			Expect(string(output)).To(ContainSubstring("PodDisruptionBudget"))
@@ -161,7 +161,7 @@ var _ = Describe("Helm Chart E2E", Ordered, Label("helm"), func() {
 				"--set-string", "podAnnotations.prometheus\\.io/scrape=true",
 				"--set-string", "podLabels.environment=test",
 			)
-			cmd := exec.CommandContext(context.Background(), "helm", templateArgs...)
+			cmd := exec.CommandContext(context.Background(), "helm", templateArgs...) // #nosec G204
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Helm template with scheduling constraints failed: %s", string(output))
 
@@ -212,7 +212,7 @@ var _ = Describe("Helm Chart E2E", Ordered, Label("helm"), func() {
 				"--wait",
 				"--timeout", "5m",
 			)
-			cmd := exec.CommandContext(context.Background(), "helm", installArgs...)
+			cmd := exec.CommandContext(context.Background(), "helm", installArgs...) // #nosec G204
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Helm install failed: %s", string(output))
 		})
@@ -234,38 +234,38 @@ var _ = Describe("Helm Chart E2E", Ordered, Label("helm"), func() {
 
 		It("should have CRDs installed", func() {
 			By("Checking RoleDefinition CRD exists")
-			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "crd", "roledefinitions.authorization.t-caas.telekom.com")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "crd", "roledefinitions.authorization.t-caas.telekom.com") // #nosec G204
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Checking BindDefinition CRD exists")
-			cmd = exec.CommandContext(context.Background(), "kubectl", "get", "crd", "binddefinitions.authorization.t-caas.telekom.com")
+			cmd = exec.CommandContext(context.Background(), "kubectl", "get", "crd", "binddefinitions.authorization.t-caas.telekom.com") // #nosec G204
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Checking WebhookAuthorizer CRD exists")
-			cmd = exec.CommandContext(context.Background(), "kubectl", "get", "crd", "webhookauthorizers.authorization.t-caas.telekom.com")
+			cmd = exec.CommandContext(context.Background(), "kubectl", "get", "crd", "webhookauthorizers.authorization.t-caas.telekom.com") // #nosec G204
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
 		It("should have RBAC resources created", func() {
 			By("Checking ClusterRole exists")
-			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrole",
+			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrole", // #nosec G204
 				"-l", fmt.Sprintf("app.kubernetes.io/instance=%s", helmReleaseName))
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(string(output)).To(ContainSubstring(helmReleaseName))
 
 			By("Checking ClusterRoleBinding exists")
-			cmd = exec.CommandContext(context.Background(), "kubectl", "get", "clusterrolebinding",
+			cmd = exec.CommandContext(context.Background(), "kubectl", "get", "clusterrolebinding", // #nosec G204
 				"-l", fmt.Sprintf("app.kubernetes.io/instance=%s", helmReleaseName))
 			output, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(string(output)).To(ContainSubstring(helmReleaseName))
 
 			By("Checking ServiceAccount exists")
-			cmd = exec.CommandContext(context.Background(), "kubectl", "get", "serviceaccount", "-n", helmNamespace,
+			cmd = exec.CommandContext(context.Background(), "kubectl", "get", "serviceaccount", "-n", helmNamespace, // #nosec G204
 				"-l", fmt.Sprintf("app.kubernetes.io/instance=%s", helmReleaseName))
 			output, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -291,7 +291,7 @@ spec:
     - delete
     - patch
 `
-			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-") // #nosec G204
 			cmd.Stdin = strings.NewReader(roleDefYAML)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -323,7 +323,7 @@ spec:
     - create
     - delete
 `, helmTestNamespace)
-			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-") // #nosec G204
 			cmd.Stdin = strings.NewReader(roleDefYAML)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -354,7 +354,7 @@ spec:
     clusterRoleRefs:
       - helm-e2e-generated-clusterrole
 `
-			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-") // #nosec G204
 			cmd.Stdin = strings.NewReader(bindDefYAML)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -363,7 +363,7 @@ spec:
 			// ClusterRoleBinding name format: {targetName}-{clusterRoleRef}-binding
 			expectedCRBName := "helm-e2e-binding-helm-e2e-generated-clusterrole-binding"
 			Eventually(func() error {
-				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrolebinding", expectedCRBName)
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrolebinding", expectedCRBName) // #nosec G204
 				_, err := utils.Run(cmd)
 				return err
 			}, reconcileTimeout, pollingInterval).Should(Succeed())
@@ -394,7 +394,7 @@ spec:
         - matchLabels:
             e2e-helm-test: "true"
 `
-			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-") // #nosec G204
 			cmd.Stdin = strings.NewReader(bindDefYAML)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -403,7 +403,7 @@ spec:
 			// RoleBinding name format: {targetName}-{clusterRoleRef}-binding
 			expectedRBName := "helm-e2e-ns-binding-helm-e2e-generated-clusterrole-binding"
 			Eventually(func() error {
-				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "rolebinding", expectedRBName,
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "rolebinding", expectedRBName, // #nosec G204
 					"-n", helmTestNamespace)
 				_, err := utils.Run(cmd)
 				return err
@@ -427,7 +427,7 @@ spec:
     clusterRoleRefs:
       - helm-e2e-generated-clusterrole
 `, helmTestNamespace)
-			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-") // #nosec G204
 			cmd.Stdin = strings.NewReader(bindDefYAML)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -439,7 +439,7 @@ spec:
 
 			By("Verifying BindDefinition status includes generated ServiceAccount")
 			Eventually(func() bool {
-				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "binddefinition", "helm-e2e-sa-binding",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "binddefinition", "helm-e2e-sa-binding", // #nosec G204
 					"-o", "jsonpath={.status.generatedServiceAccounts}")
 				output, err := utils.Run(cmd)
 				if err != nil {
@@ -474,7 +474,7 @@ spec:
     matchLabels:
       e2e-helm-test: "true"
 `
-			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-") // #nosec G204
 			cmd.Stdin = strings.NewReader(authorizerYAML)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -506,7 +506,7 @@ spec:
     - groups:
         - helm-denied-group
 `
-			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-") // #nosec G204
 			cmd.Stdin = strings.NewReader(authorizerYAML)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -537,7 +537,7 @@ spec:
   allowedPrincipals:
     - user: helm-health-user
 `
-			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
+			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-") // #nosec G204
 			cmd.Stdin = strings.NewReader(authorizerYAML)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -568,7 +568,7 @@ spec:
 				"--wait",
 				"--timeout", "7m",
 			)
-			cmd := exec.CommandContext(context.Background(), "helm", upgradeArgs...)
+			cmd := exec.CommandContext(context.Background(), "helm", upgradeArgs...) // #nosec G204
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Helm upgrade failed: %s", string(output))
 		})
@@ -576,7 +576,7 @@ spec:
 		It("should have PodDisruptionBudget created", func() {
 			By("Checking PodDisruptionBudget exists")
 			Eventually(func() error {
-				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pdb", "-n", helmNamespace)
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pdb", "-n", helmNamespace) // #nosec G204
 				output, err := utils.Run(cmd)
 				if err != nil {
 					return err
@@ -591,7 +591,7 @@ spec:
 		It("should have scaled replicas", func() {
 			By("Checking controller has 2 replicas")
 			Eventually(func() int {
-				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "deployment",
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "deployment", // #nosec G204
 					"-l", "control-plane=controller-manager",
 					"-n", helmNamespace,
 					"-o", "jsonpath={.items[0].spec.replicas}")
@@ -674,7 +674,7 @@ func helmFullName() string {
 }
 
 func verifyHelmPodRunning(labelSelector, namespace string) error {
-	cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pods",
+	cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pods", // #nosec G204
 		"-l", labelSelector,
 		"-n", namespace,
 		"-o", "jsonpath={.items[0].status.phase}")
@@ -690,7 +690,7 @@ func verifyHelmPodRunning(labelSelector, namespace string) error {
 
 func saveOutput(filename string, content []byte) {
 	fp := filepath.Join(utils.GetE2EOutputDir(), filename)
-	err := os.WriteFile(fp, content, 0o644)
+	err := os.WriteFile(fp, content, 0o600)
 	if err != nil {
 		_, _ = fmt.Fprintf(GinkgoWriter, "Failed to save output to %s: %v\n", fp, err)
 	} else {
@@ -748,7 +748,7 @@ func dumpResource(resourceType, namespace, filename string) {
 		args = append(args, "-A")
 	}
 
-	cmd := exec.CommandContext(context.Background(), "kubectl", args...)
+	cmd := exec.CommandContext(context.Background(), "kubectl", args...) // #nosec G204
 	output, err := utils.Run(cmd)
 	if err != nil {
 		_, _ = fmt.Fprintf(GinkgoWriter, "Failed to dump %s: %v\n", resourceType, err)
@@ -765,7 +765,7 @@ func dumpResourceWithLabel(resourceType, namespace, labelSelector, filename stri
 		args = append(args, "-A")
 	}
 
-	cmd := exec.CommandContext(context.Background(), "kubectl", args...)
+	cmd := exec.CommandContext(context.Background(), "kubectl", args...) // #nosec G204
 	output, err := utils.Run(cmd)
 	if err != nil {
 		_, _ = fmt.Fprintf(GinkgoWriter, "Failed to dump %s with label %s: %v\n", resourceType, labelSelector, err)
@@ -780,7 +780,7 @@ func dumpLogs(labelSelector, namespace, filename string) {
 		args = append(args, "-n", namespace)
 	}
 
-	cmd := exec.CommandContext(context.Background(), "kubectl", args...)
+	cmd := exec.CommandContext(context.Background(), "kubectl", args...) // #nosec G204
 	output, _ := utils.Run(cmd)
 	saveOutput(filename, output)
 }
@@ -806,7 +806,7 @@ func createResourceSummary(timestamp string) {
 	// Operator status
 	summary.WriteString("\n## Operator Status\n\n")
 	if helmNamespace != "" {
-		cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pods", "-n", helmNamespace, "-o", "wide")
+		cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pods", "-n", helmNamespace, "-o", "wide") // #nosec G204
 		output, _ := utils.Run(cmd)
 		summary.WriteString("```\n")
 		summary.WriteString(string(output))
@@ -818,14 +818,14 @@ func createResourceSummary(timestamp string) {
 }
 
 func countResource(summary *strings.Builder, name, resourceType string) {
-	cmd := exec.CommandContext(context.Background(), "kubectl", "get", resourceType, "-o", "name")
+	cmd := exec.CommandContext(context.Background(), "kubectl", "get", resourceType, "-o", "name") // #nosec G204
 	output, _ := utils.Run(cmd)
 	count := len(utils.GetNonEmptyLines(string(output)))
 	fmt.Fprintf(summary, "- %s: %d\n", name, count)
 }
 
 func countResourceWithLabel(summary *strings.Builder, name, resourceType string) {
-	cmd := exec.CommandContext(context.Background(), "kubectl", "get", resourceType, "-l", authOperatorLabel, "-A", "-o", "name")
+	cmd := exec.CommandContext(context.Background(), "kubectl", "get", resourceType, "-l", authOperatorLabel, "-A", "-o", "name") // #nosec G204
 	output, _ := utils.Run(cmd)
 	count := len(utils.GetNonEmptyLines(string(output)))
 	fmt.Fprintf(summary, "- %s: %d\n", name, count)

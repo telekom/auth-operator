@@ -71,6 +71,9 @@ rules:
   - authorization.t-caas.telekom.com
   resources:
   - binddefinitions
+  - rbacpolicies
+  - restrictedbinddefinitions
+  - restrictedroledefinitions
   - roledefinitions
   verbs:
   - get
@@ -82,6 +85,9 @@ rules:
   - authorization.t-caas.telekom.com
   resources:
   - binddefinitions/finalizers
+  - rbacpolicies/finalizers
+  - restrictedbinddefinitions/finalizers
+  - restrictedroledefinitions/finalizers
   - roledefinitions/finalizers
   verbs:
   - update
@@ -89,6 +95,9 @@ rules:
   - authorization.t-caas.telekom.com
   resources:
   - binddefinitions/status
+  - rbacpolicies/status
+  - restrictedbinddefinitions/status
+  - restrictedroledefinitions/status
   - roledefinitions/status
   - webhookauthorizers/status
   verbs:
@@ -182,6 +191,9 @@ rules:
   - authorization.t-caas.telekom.com
   resources:
   - binddefinitions
+  - rbacpolicies
+  - restrictedbinddefinitions
+  - restrictedroledefinitions
   - roledefinitions
   verbs:
   - get
@@ -191,6 +203,9 @@ rules:
   - authorization.t-caas.telekom.com
   resources:
   - binddefinitions/status
+  - rbacpolicies/status
+  - restrictedbinddefinitions/status
+  - restrictedroledefinitions/status
   - webhookauthorizers/status
   verbs:
   - get

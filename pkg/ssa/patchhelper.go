@@ -151,6 +151,7 @@ func PatchApplyClusterRoleBinding(
 	ctx context.Context,
 	c client.Client,
 	ac *rbacv1ac.ClusterRoleBindingApplyConfiguration,
+	fieldOwnerOverride ...string,
 ) (PatchApplyResult, error) {
 	if ac == nil || ac.Name == nil {
 		return 0, fmt.Errorf("clusterRoleBinding ApplyConfiguration must have a name")
@@ -159,13 +160,18 @@ func PatchApplyClusterRoleBinding(
 		return 0, fmt.Errorf("clusterRoleBinding ApplyConfiguration name must not be empty")
 	}
 
+	fieldOwner, err := normalizeFieldOwner(fieldOwnerOverride...)
+	if err != nil {
+		return 0, err
+	}
+
 	logger := log.FromContext(ctx)
 
 	existing := &rbacv1.ClusterRoleBinding{}
-	err := c.Get(ctx, types.NamespacedName{Name: *ac.Name}, existing)
+	err = c.Get(ctx, types.NamespacedName{Name: *ac.Name}, existing)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership); applyErr != nil {
+			if applyErr := c.Apply(ctx, ac, client.FieldOwner(fieldOwner), client.ForceOwnership); applyErr != nil {
 				return 0, fmt.Errorf("create ClusterRoleBinding %s: %w", *ac.Name, applyErr)
 			}
 			return PatchApplyResultCreated, nil
@@ -179,7 +185,7 @@ func PatchApplyClusterRoleBinding(
 		return PatchApplyResultSkipped, nil
 	}
 
-	if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership); applyErr != nil {
+	if applyErr := c.Apply(ctx, ac, client.FieldOwner(fieldOwner), client.ForceOwnership); applyErr != nil {
 		return 0, fmt.Errorf("patch ClusterRoleBinding %s: %w", *ac.Name, applyErr)
 	}
 	return PatchApplyResultPatched, nil
@@ -191,6 +197,7 @@ func PatchApplyRoleBinding(
 	ctx context.Context,
 	c client.Client,
 	ac *rbacv1ac.RoleBindingApplyConfiguration,
+	fieldOwnerOverride ...string,
 ) (PatchApplyResult, error) {
 	if ac == nil || ac.Name == nil {
 		return 0, fmt.Errorf("roleBinding ApplyConfiguration must have a name")
@@ -202,13 +209,18 @@ func PatchApplyRoleBinding(
 		return 0, fmt.Errorf("roleBinding ApplyConfiguration must have a namespace")
 	}
 
+	fieldOwner, err := normalizeFieldOwner(fieldOwnerOverride...)
+	if err != nil {
+		return 0, err
+	}
+
 	logger := log.FromContext(ctx)
 
 	existing := &rbacv1.RoleBinding{}
-	err := c.Get(ctx, types.NamespacedName{Name: *ac.Name, Namespace: *ac.Namespace}, existing)
+	err = c.Get(ctx, types.NamespacedName{Name: *ac.Name, Namespace: *ac.Namespace}, existing)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership); applyErr != nil {
+			if applyErr := c.Apply(ctx, ac, client.FieldOwner(fieldOwner), client.ForceOwnership); applyErr != nil {
 				return 0, fmt.Errorf("create RoleBinding %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 			}
 			return PatchApplyResultCreated, nil
@@ -222,7 +234,7 @@ func PatchApplyRoleBinding(
 		return PatchApplyResultSkipped, nil
 	}
 
-	if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership); applyErr != nil {
+	if applyErr := c.Apply(ctx, ac, client.FieldOwner(fieldOwner), client.ForceOwnership); applyErr != nil {
 		return 0, fmt.Errorf("patch RoleBinding %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 	}
 	return PatchApplyResultPatched, nil
@@ -273,6 +285,20 @@ func PatchApplyServiceAccount(
 		return 0, fmt.Errorf("patch ServiceAccount %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 	}
 	return PatchApplyResultPatched, nil
+}
+
+func normalizeFieldOwner(fieldOwnerOverride ...string) (string, error) {
+	if len(fieldOwnerOverride) == 0 {
+		return FieldOwner, nil
+	}
+	if len(fieldOwnerOverride) > 1 {
+		return "", fmt.Errorf("at most one fieldOwner override is supported")
+	}
+	fieldOwner := strings.TrimSpace(fieldOwnerOverride[0])
+	if fieldOwner == "" {
+		return "", fmt.Errorf("fieldOwner must not be empty")
+	}
+	return fieldOwner, nil
 }
 
 // Comparison helpers — these compare only the fields we own via SSA and ignore

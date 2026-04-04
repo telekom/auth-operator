@@ -1,0 +1,38 @@
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RBACPolicy
+metadata:
+  name: e2e-test-restrictive-policy
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/component: e2e-test
+    app.kubernetes.io/created-by: auth-operator
+spec:
+  appliesTo:
+    namespaceSelector:
+      matchLabels:
+        e2e-test: "true"
+  bindingLimits:
+    allowClusterRoleBindings: false
+    roleBindingLimits:
+      allowedRoleRefs:
+        - "e2e-allowed-*"
+      forbiddenRoleRefs:
+        - "e2e-forbidden-*"
+    targetNamespaceLimits:
+      forbiddenNamespacePrefixes:
+        - "kube-"
+      maxTargetNamespaces: 2
+  roleLimits:
+    allowClusterRoles: false
+    forbiddenVerbs:
+      - "delete"
+      - "escalate"
+    forbiddenResources:
+      - "secrets"
+    maxRulesPerRole: 10
+  subjectLimits:
+    allowedKinds:
+      - "ServiceAccount"
+    serviceAccountLimits:
+      creation:
+        allowAutoCreate: false
