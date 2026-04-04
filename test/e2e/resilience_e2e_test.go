@@ -129,26 +129,34 @@ var _ = Describe("Resilience - Webhook Failure Injection", Ordered, Label("compl
 			}
 			_, _ = fmt.Fprintf(GinkgoWriter, "Found TLS secret: %s\n", tlsSecretName)
 
-			By("Deleting the TLS secret to trigger rotation")
-			cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "secret", tlsSecretName,
-				"-n", whResilienceNS, "--ignore-not-found=true")
-			_, _ = utils.Run(cmd)
-
-			By("Restarting webhook-server pods so the cert-rotator reinitializes and recreates the secret")
-			cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "pods",
+			By("Clearing TLS data from the secret to invalidate certs and trigger rotation")
+			cmd = exec.CommandContext(context.Background(), "kubectl", "patch", "secret", tlsSecretName,
 				"-n", whResilienceNS,
-				"-l", "control-plane=webhook-server",
-				"--grace-period=0", "--force")
+				"--type=merge", "-p", `{"data":{"tls.crt":"","tls.key":"","ca.crt":""}}`)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Restarting webhook-server pods to trigger cert-rotator re-initialization")
+			cmd = exec.CommandContext(context.Background(), "kubectl", "rollout", "restart",
+				"deployment/"+whResilienceRelease+"-webhook-server",
+				"-n", whResilienceNS)
 			_, _ = utils.Run(cmd)
 
-			By("Waiting for webhook-server pods to become ready again")
+			By("Waiting for webhook-server pods to become ready after restart")
 			Expect(utils.WaitForPodsReady("control-plane=webhook-server", whResilienceNS, whDeployTimeout)).To(Succeed())
 
-			By("Waiting for the cert-controller to regenerate the TLS secret")
-			Eventually(func() error {
-				return checkResourceExists("secret", tlsSecretName, whResilienceNS)
-			}, whReconcileTimeout, whPollInterval).Should(Succeed(),
-				"TLS secret should be regenerated after deletion")
+			By("Waiting for the cert-controller to regenerate valid TLS data in the secret")
+			Eventually(func() bool {
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "secret", tlsSecretName,
+					"-n", whResilienceNS,
+					"-o", "jsonpath={.data.ca\\.crt}")
+				newCA, err := utils.Run(cmd)
+				if err != nil {
+					return false
+				}
+				return len(newCA) > 0
+			}, whReconcileTimeout, whPollInterval).Should(BeTrue(),
+				"TLS secret should contain regenerated CA data after rotation")
 
 			By("Waiting for webhook to recover after certificate rotation")
 			Expect(utils.WaitForWebhookReady(whDeployTimeout)).To(Succeed())
