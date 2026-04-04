@@ -52,11 +52,13 @@ var _ = Describe("Resilience - Webhook Failure Injection", Ordered, Label("compl
 		Expect(err).NotTo(HaveOccurred(), "Failed to load image into kind cluster")
 
 		By("Installing auth-operator via Helm for webhook failure tests")
-		helmArgs := []string{"upgrade", "--install", whResilienceRelease, whHelmChartPath,
+		imageArgs := imageSetArgs()
+		helmArgs := make([]string, 0, 7+len(imageArgs)+6)
+		helmArgs = append(helmArgs, "upgrade", "--install", whResilienceRelease, whHelmChartPath,
 			"-n", whResilienceNS,
 			"--create-namespace",
-		}
-		helmArgs = append(helmArgs, imageSetArgs()...)
+		)
+		helmArgs = append(helmArgs, imageArgs...)
 		helmArgs = append(helmArgs,
 			"--set", "controller.replicas=1",
 			"--set", "webhookServer.replicas=1",
@@ -308,11 +310,13 @@ var _ = Describe("Resilience - SSA Ownership Conflicts", Ordered, Label("complex
 		Expect(err).NotTo(HaveOccurred(), "Failed to load image into kind cluster")
 
 		By("Installing auth-operator via Helm for SSA conflict tests")
-		helmArgs := []string{"upgrade", "--install", ssaResilienceRelease, ssaHelmChartPath,
+		imageArgs := imageSetArgs()
+		helmArgs := make([]string, 0, 7+len(imageArgs)+6)
+		helmArgs = append(helmArgs, "upgrade", "--install", ssaResilienceRelease, ssaHelmChartPath,
 			"-n", ssaResilienceNS,
 			"--create-namespace",
-		}
-		helmArgs = append(helmArgs, imageSetArgs()...)
+		)
+		helmArgs = append(helmArgs, imageArgs...)
 		helmArgs = append(helmArgs,
 			"--set", "controller.replicas=1",
 			"--set", "webhookServer.replicas=1",
@@ -579,11 +583,13 @@ var _ = Describe("Resilience - HA Failover", Ordered, Label("ha", "resilience"),
 		Expect(err).NotTo(HaveOccurred(), "Failed to load image into kind cluster")
 
 		By("Installing auth-operator via Helm with 3 controller replicas")
-		helmArgs := []string{"upgrade", "--install", haResilienceRelease, haResilienceChart,
+		imageArgs := imageSetArgs()
+		helmArgs := make([]string, 0, 7+len(imageArgs)+14)
+		helmArgs = append(helmArgs, "upgrade", "--install", haResilienceRelease, haResilienceChart,
 			"-n", haResilienceNS,
 			"--create-namespace",
-		}
-		helmArgs = append(helmArgs, imageSetArgs()...)
+		)
+		helmArgs = append(helmArgs, imageArgs...)
 		helmArgs = append(helmArgs,
 			"--set", "controller.replicas=3",
 			"--set", "controller.podDisruptionBudget.enabled=true",
