@@ -32,7 +32,6 @@ var _ = Describe("Resilience - Webhook Failure Injection", Ordered, Label("compl
 	const (
 		whResilienceRelease = "auth-operator-resilience-wh"
 		whResilienceNS      = "auth-operator-resilience-wh"
-		whTestNS            = "e2e-resilience-wh-test"
 		whHelmChartPath     = "chart/auth-operator"
 		whReconcileTimeout  = 2 * time.Minute
 		whDeployTimeout     = 5 * time.Minute
@@ -43,9 +42,6 @@ var _ = Describe("Resilience - Webhook Failure Injection", Ordered, Label("compl
 	BeforeAll(func() {
 		setSuiteOutputDir("resilience")
 		By("Setting up webhook-failure-injection test environment")
-
-		By("Creating test namespaces")
-		createNamespaceIfNotExists(whTestNS, nil)
 
 		By("Loading the operator image into kind cluster")
 		err := utils.LoadImageToKindClusterWithName(projectImage)
@@ -86,24 +82,6 @@ var _ = Describe("Resilience - Webhook Failure Injection", Ordered, Label("compl
 
 		By("Cleaning up webhook failure test resources")
 		CleanupForHelmTests(whResilienceNS, whResilienceRelease)
-
-		By("Uninstalling Helm release")
-		cmd := exec.CommandContext(context.Background(), "helm", "uninstall", whResilienceRelease,
-			"-n", whResilienceNS, "--wait", "--timeout", "2m")
-		_, _ = utils.Run(cmd)
-
-		By("Cleaning up operator namespace")
-		cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "ns", whResilienceNS,
-			"--ignore-not-found=true")
-		_, _ = utils.Run(cmd)
-
-		By("Cleaning up test namespace")
-		cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "ns", whTestNS,
-			"--ignore-not-found=true")
-		_, _ = utils.Run(cmd)
-
-		By("Cleaning up webhooks")
-		utils.CleanupAllAuthOperatorWebhooks()
 	})
 
 	Context("TLS Certificate Rotation Recovery", func() {
@@ -114,7 +92,7 @@ var _ = Describe("Resilience - Webhook Failure Injection", Ordered, Label("compl
 			Expect(utils.WaitForWebhookReady(whDeployTimeout)).To(Succeed())
 		})
 
-		It("should recover after TLS secret deletion triggers rotation", func() {
+		It("should recover after TLS cert invalidation triggers rotation", func() {
 			whDeployName := whResilienceRelease + "-webhook-server"
 
 			By("Identifying the webhook TLS secret")
@@ -123,12 +101,10 @@ var _ = Describe("Resilience - Webhook Failure Injection", Ordered, Label("compl
 				"-l", "authorization.t-caas.telekom.com/component=webhook",
 				"-o", "jsonpath={.items[0].metadata.name}")
 			output, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred())
-			tlsSecretName := strings.TrimSpace(string(output))
-
-			if tlsSecretName == "" {
+			if err != nil || strings.TrimSpace(string(output)) == "" {
 				Skip("No TLS secret found — skipping TLS rotation test")
 			}
+			tlsSecretName := strings.TrimSpace(string(output))
 			_, _ = fmt.Fprintf(GinkgoWriter, "Found TLS secret: %s\n", tlsSecretName)
 
 			By("Scaling webhook deployment to zero to avoid dual-pod conflicts during cert reset")
@@ -274,9 +250,8 @@ spec:
 			cmd = exec.CommandContext(context.Background(), "kubectl", "apply", "--dry-run=server", "-f", "-")
 			cmd.Stdin = strings.NewReader(roleDefYAML)
 			_, err = utils.Run(cmd)
-			// Either rejected (webhook enforcing) or accepted (failOpen policy) — both are valid
-			// What matters is the operator comes back after scaling up
-			_, _ = fmt.Fprintf(GinkgoWriter, "Dry-run result while webhook down (err=%v)\n", err)
+			// With failurePolicy: Fail, admission must be rejected when the webhook endpoint is unreachable.
+			Expect(err).To(HaveOccurred(), "Admission should be rejected when webhook endpoint is unreachable")
 		})
 
 		It("should recover reconciliation once webhook is restored", func() {
@@ -341,7 +316,6 @@ var _ = Describe("Resilience - SSA Ownership Conflicts", Ordered, Label("complex
 	const (
 		ssaResilienceRelease = "auth-operator-resilience-ssa"
 		ssaResilienceNS      = "auth-operator-resilience-ssa"
-		ssaTestNS            = "e2e-resilience-ssa-test"
 		ssaHelmChartPath     = "chart/auth-operator"
 		ssaReconcileTimeout  = 2 * time.Minute
 		ssaDeployTimeout     = 5 * time.Minute
@@ -351,9 +325,6 @@ var _ = Describe("Resilience - SSA Ownership Conflicts", Ordered, Label("complex
 	BeforeAll(func() {
 		setSuiteOutputDir("resilience")
 		By("Setting up SSA-ownership-conflict test environment")
-
-		By("Creating SSA test namespace")
-		createNamespaceIfNotExists(ssaTestNS, nil)
 
 		By("Loading the operator image into kind cluster")
 		err := utils.LoadImageToKindClusterWithName(projectImage)
@@ -394,24 +365,6 @@ var _ = Describe("Resilience - SSA Ownership Conflicts", Ordered, Label("complex
 
 		By("Cleaning up SSA conflict test resources")
 		CleanupForHelmTests(ssaResilienceNS, ssaResilienceRelease)
-
-		By("Uninstalling Helm release")
-		cmd := exec.CommandContext(context.Background(), "helm", "uninstall", ssaResilienceRelease,
-			"-n", ssaResilienceNS, "--wait", "--timeout", "2m")
-		_, _ = utils.Run(cmd)
-
-		By("Cleaning up operator namespace")
-		cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "ns", ssaResilienceNS,
-			"--ignore-not-found=true")
-		_, _ = utils.Run(cmd)
-
-		By("Cleaning up test namespace")
-		cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "ns", ssaTestNS,
-			"--ignore-not-found=true")
-		_, _ = utils.Run(cmd)
-
-		By("Cleaning up webhooks")
-		utils.CleanupAllAuthOperatorWebhooks()
 	})
 
 	Context("External Modification of SSA-Managed ClusterRole", func() {
@@ -448,7 +401,7 @@ spec:
 
 		It("should self-heal when an external actor modifies the SSA-managed ClusterRole", func() {
 			By("Externally patching the ClusterRole to remove an SSA-owned rule")
-			// Overwrite rules to an empty list using a strategic merge patch.
+			// Overwrite rules to an empty list using a JSON merge patch (--type=merge).
 			// The operator should detect the drift and re-apply the correct rules via SSA.
 			patchJSON := `{"rules": []}`
 			cmd := exec.CommandContext(context.Background(), "kubectl", "patch", "clusterrole", ssaExternalCRName,
@@ -603,7 +556,6 @@ var _ = Describe("Resilience - HA Failover", Ordered, Label("ha", "resilience"),
 	const (
 		haResilienceRelease = "auth-operator-resilience-ha"
 		haResilienceNS      = "auth-operator-resilience-ha"
-		haResilienceTestNS  = "e2e-resilience-ha-test"
 		haResilienceChart   = "chart/auth-operator"
 		haReconcileTimeout  = 3 * time.Minute
 		haDeployTimeout     = 8 * time.Minute
@@ -618,15 +570,13 @@ var _ = Describe("Resilience - HA Failover", Ordered, Label("ha", "resilience"),
 		setSuiteOutputDir("resilience")
 		By("Setting up HA failover resilience test environment")
 
-		By("Creating HA test namespaces")
-		for _, ns := range []string{haResilienceNS, haResilienceTestNS} {
-			cmd := exec.CommandContext(context.Background(), "kubectl", "create", "ns", ns,
-				"--dry-run=client", "-o", "yaml")
-			yamlOutput, _ := utils.Run(cmd)
-			cmd = exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
-			cmd.Stdin = strings.NewReader(string(yamlOutput))
-			_, _ = utils.Run(cmd)
-		}
+		By("Creating HA operator namespace")
+		cmd := exec.CommandContext(context.Background(), "kubectl", "create", "ns", haResilienceNS,
+			"--dry-run=client", "-o", "yaml")
+		yamlOutput, _ := utils.Run(cmd)
+		cmd = exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
+		cmd.Stdin = strings.NewReader(string(yamlOutput))
+		_, _ = utils.Run(cmd)
 
 		By("Loading the operator image into kind cluster")
 		err := utils.LoadImageToKindClusterWithName(projectImage)
@@ -671,21 +621,6 @@ var _ = Describe("Resilience - HA Failover", Ordered, Label("ha", "resilience"),
 
 		By("Cleaning up HA resilience test resources")
 		CleanupForHelmTests(haResilienceNS, haResilienceRelease)
-
-		By("Uninstalling Helm release")
-		cmd := exec.CommandContext(context.Background(), "helm", "uninstall", haResilienceRelease,
-			"-n", haResilienceNS, "--wait", "--timeout", "2m")
-		_, _ = utils.Run(cmd)
-
-		By("Cleaning up namespaces")
-		for _, ns := range []string{haResilienceNS, haResilienceTestNS} {
-			cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "ns", ns,
-				"--ignore-not-found=true")
-			_, _ = utils.Run(cmd)
-		}
-
-		By("Cleaning up webhooks")
-		utils.CleanupAllAuthOperatorWebhooks()
 	})
 
 	Context("Controller Failover", func() {
@@ -774,8 +709,8 @@ var _ = Describe("Resilience - HA Failover", Ordered, Label("ha", "resilience"),
 				"All 3 controller pods should be running again after failover")
 		})
 
-		It("should continue reconciling CRDs after HA deployment", func() {
-			By("Creating a RoleDefinition to verify reconciler is still healthy after (potential) failover")
+		It("should reconcile successfully in HA mode", func() {
+			By("Creating a RoleDefinition to verify reconciler is still healthy in the HA deployment")
 			const failoverRDName = "resilience-ha-failover-rd"
 			roleDefYAML := fmt.Sprintf(`
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
@@ -794,11 +729,11 @@ spec:
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "RoleDefinition should be admitted after failover")
 
-			By("Waiting for the ClusterRole to be generated by the new leader")
+			By("Waiting for the ClusterRole to be generated by the active leader")
 			Eventually(func() error {
 				return checkResourceExists("clusterrole", "resilience-ha-failover-generated-role", "")
 			}, haReconcileTimeout, haPollInterval).Should(Succeed(),
-				"Reconciler should generate the ClusterRole after leader failover")
+				"Reconciler should generate the ClusterRole in HA mode")
 
 			By("Cleaning up failover test resources")
 			cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "roledefinition", failoverRDName,
