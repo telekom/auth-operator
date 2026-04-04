@@ -115,6 +115,8 @@ var _ = Describe("Resilience - Webhook Failure Injection", Ordered, Label("compl
 		})
 
 		It("should recover after TLS secret deletion triggers rotation", func() {
+			whDeployName := whResilienceRelease + "-webhook-server"
+
 			By("Identifying the webhook TLS secret")
 			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "secrets",
 				"-n", whResilienceNS,
@@ -129,6 +131,30 @@ var _ = Describe("Resilience - Webhook Failure Injection", Ordered, Label("compl
 			}
 			_, _ = fmt.Fprintf(GinkgoWriter, "Found TLS secret: %s\n", tlsSecretName)
 
+			By("Scaling webhook deployment to zero to avoid dual-pod conflicts during cert reset")
+			cmd = exec.CommandContext(context.Background(), "kubectl", "scale", "deployment",
+				whDeployName, "-n", whResilienceNS, "--replicas=0")
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Waiting for all webhook pods to terminate")
+			Eventually(func() int {
+				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pods",
+					"-l", "control-plane=webhook-server",
+					"-n", whResilienceNS,
+					"-o", "name")
+				out, err := utils.Run(cmd)
+				if err != nil {
+					return -1
+				}
+				trimmed := strings.TrimSpace(string(out))
+				if trimmed == "" {
+					return 0
+				}
+				return len(strings.Split(trimmed, "\n"))
+			}, whDeployTimeout, whPollInterval).Should(Equal(0),
+				"All webhook pods should be terminated before cert invalidation")
+
 			By("Clearing TLS data from the secret to invalidate certs and trigger rotation")
 			cmd = exec.CommandContext(context.Background(), "kubectl", "patch", "secret", tlsSecretName,
 				"-n", whResilienceNS,
@@ -136,16 +162,15 @@ var _ = Describe("Resilience - Webhook Failure Injection", Ordered, Label("compl
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Restarting webhook-server pods to trigger cert-rotator re-initialization")
-			cmd = exec.CommandContext(context.Background(), "kubectl", "rollout", "restart",
-				"deployment/"+whResilienceRelease+"-webhook-server",
-				"-n", whResilienceNS)
-			_, _ = utils.Run(cmd)
-
-			By("Waiting for webhook-server pods to become ready after restart")
-			Expect(utils.WaitForPodsReady("control-plane=webhook-server", whResilienceNS, whDeployTimeout)).To(Succeed())
+			By("Scaling webhook deployment back to one replica to trigger cert-rotator re-initialization")
+			cmd = exec.CommandContext(context.Background(), "kubectl", "scale", "deployment",
+				whDeployName, "-n", whResilienceNS, "--replicas=1")
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for the cert-controller to regenerate valid TLS data in the secret")
+			// The cert-rotator detects empty certs, regenerates them, then os.Exit(0)
+			// (RestartOnSecretRefresh: true). The pod restarts and becomes ready on the second start.
 			Eventually(func() bool {
 				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "secret", tlsSecretName,
 					"-n", whResilienceNS,
@@ -154,15 +179,22 @@ var _ = Describe("Resilience - Webhook Failure Injection", Ordered, Label("compl
 				if err != nil {
 					return false
 				}
-				return len(newCA) > 0
-			}, whReconcileTimeout, whPollInterval).Should(BeTrue(),
+				return len(strings.TrimSpace(string(newCA))) > 0
+			}, whDeployTimeout, whPollInterval).Should(BeTrue(),
 				"TLS secret should contain regenerated CA data after rotation")
+
+			By("Waiting for webhook deployment to become available after cert regeneration")
+			Expect(utils.WaitForDeploymentAvailable(
+				"control-plane=webhook-server", whResilienceNS, whDeployTimeout,
+			)).To(Succeed())
 
 			By("Waiting for webhook to recover after certificate rotation")
 			Expect(utils.WaitForWebhookReady(whDeployTimeout)).To(Succeed())
 
 			By("Verifying webhook CA bundle is updated")
-			Expect(utils.WaitForWebhookCABundle("authorization.t-caas.telekom.com/component=webhook", whDeployTimeout)).To(Succeed())
+			Expect(utils.WaitForWebhookCABundle(
+				"authorization.t-caas.telekom.com/component=webhook", whDeployTimeout,
+			)).To(Succeed())
 		})
 
 		It("should reconcile successfully after TLS recovery", func() {
