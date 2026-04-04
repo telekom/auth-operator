@@ -134,6 +134,16 @@ var _ = Describe("Resilience - Webhook Failure Injection", Ordered, Label("compl
 				"-n", whResilienceNS, "--ignore-not-found=true")
 			_, _ = utils.Run(cmd)
 
+			By("Restarting webhook-server pods so the cert-rotator reinitializes and recreates the secret")
+			cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "pods",
+				"-n", whResilienceNS,
+				"-l", "control-plane=webhook-server",
+				"--grace-period=0", "--force")
+			_, _ = utils.Run(cmd)
+
+			By("Waiting for webhook-server pods to become ready again")
+			Expect(utils.WaitForPodsReady("control-plane=webhook-server", whResilienceNS, whDeployTimeout)).To(Succeed())
+
 			By("Waiting for the cert-controller to regenerate the TLS secret")
 			Eventually(func() error {
 				return checkResourceExists("secret", tlsSecretName, whResilienceNS)
