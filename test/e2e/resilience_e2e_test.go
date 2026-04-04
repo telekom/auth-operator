@@ -37,7 +37,6 @@ var _ = Describe("Resilience - Webhook Failure Injection", Ordered, Label("compl
 		whReconcileTimeout  = 2 * time.Minute
 		whDeployTimeout     = 5 * time.Minute
 		whPollInterval      = 5 * time.Second
-		whShortTimeout      = 30 * time.Second
 	)
 
 	BeforeAll(func() {
