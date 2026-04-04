@@ -309,7 +309,7 @@ spec:
 		// Verify that the overall webhook endpoint health is clean after restore
 		It("should have all webhook configurations healthy after restore", func() {
 			By("Waiting for webhook configurations to stabilize")
-			Expect(utils.WaitForWebhookConfigurations("authorization.t-caas.telekom.com/component=webhook", whShortTimeout)).To(Succeed())
+			Expect(utils.WaitForWebhookConfigurations("app.kubernetes.io/instance="+whResilienceRelease, whReconcileTimeout)).To(Succeed())
 		})
 	})
 })
@@ -620,6 +620,10 @@ var _ = Describe("Resilience - HA Failover", Ordered, Label("ha", "resilience"),
 		Expect(utils.WaitForDeploymentAvailable("control-plane=webhook-server", haResilienceNS, haDeployTimeout)).To(Succeed())
 		Expect(utils.WaitForPodsReady("control-plane=controller-manager", haResilienceNS, haDeployTimeout)).To(Succeed())
 		Expect(utils.WaitForPodsReady("control-plane=webhook-server", haResilienceNS, haDeployTimeout)).To(Succeed())
+
+		By("Waiting for webhook CA bundle injection and readiness")
+		Expect(utils.WaitForWebhookCABundle("app.kubernetes.io/instance="+haResilienceRelease, haDeployTimeout)).To(Succeed())
+		Expect(utils.WaitForWebhookReady(haDeployTimeout)).To(Succeed())
 	})
 
 	AfterAll(func() {
