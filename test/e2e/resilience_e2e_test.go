@@ -169,7 +169,7 @@ var _ = Describe("Resilience - Webhook Failure Injection", Ordered, Label("compl
 
 			By("Verifying webhook CA bundle is updated")
 			Expect(utils.WaitForWebhookCABundle(
-				"authorization.t-caas.telekom.com/component=webhook", whDeployTimeout,
+				"app.kubernetes.io/instance="+whResilienceRelease, whDeployTimeout,
 			)).To(Succeed())
 		})
 
