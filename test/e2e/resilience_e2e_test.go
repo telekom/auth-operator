@@ -18,6 +18,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/telekom/auth-operator/pkg/ssa"
 	"github.com/telekom/auth-operator/test/utils"
 )
 
@@ -81,6 +82,11 @@ var _ = Describe("Resilience - Webhook Failure Injection", Ordered, Label("compl
 		}
 
 		By("Cleaning up webhook failure test resources")
+		By("Uninstalling webhook failure Helm release")
+		cmd := exec.CommandContext(context.Background(), "helm", "uninstall", whResilienceRelease,
+			"-n", whResilienceNS, "--wait", "--timeout", "2m")
+		_, _ = utils.Run(cmd)
+
 		CleanupForHelmTests(whResilienceNS, whResilienceRelease)
 	})
 
@@ -364,6 +370,11 @@ var _ = Describe("Resilience - SSA Ownership Conflicts", Ordered, Label("complex
 		}
 
 		By("Cleaning up SSA conflict test resources")
+		By("Uninstalling SSA conflict Helm release")
+		cmd := exec.CommandContext(context.Background(), "helm", "uninstall", ssaResilienceRelease,
+			"-n", ssaResilienceNS, "--wait", "--timeout", "2m")
+		_, _ = utils.Run(cmd)
+
 		CleanupForHelmTests(ssaResilienceNS, ssaResilienceRelease)
 	})
 
@@ -528,8 +539,8 @@ rules:
 				}
 				managers := string(output)
 				_, _ = fmt.Fprintf(GinkgoWriter, "Field managers: %s\n", managers)
-				// The auth-operator's SSA field owner is "auth-operator" (see pkg/ssa/ssa.go)
-				return strings.Contains(managers, "auth-operator")
+				// The auth-operator's SSA field owner is defined in pkg/ssa.FieldOwner.
+				return strings.Contains(managers, ssa.FieldOwner)
 			}, ssaReconcileTimeout, ssaPollInterval).Should(BeTrue(),
 				"ClusterRole should have auth-operator as a field manager")
 		})
@@ -620,6 +631,11 @@ var _ = Describe("Resilience - HA Failover", Ordered, Label("ha", "resilience"),
 		}
 
 		By("Cleaning up HA resilience test resources")
+		By("Uninstalling HA resilience Helm release")
+		cmd := exec.CommandContext(context.Background(), "helm", "uninstall", haResilienceRelease,
+			"-n", haResilienceNS, "--wait", "--timeout", "2m")
+		_, _ = utils.Run(cmd)
+
 		CleanupForHelmTests(haResilienceNS, haResilienceRelease)
 	})
 
