@@ -421,6 +421,11 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 	metrics.RoleRefsMissing.WithLabelValues(rbd.Name).Set(float64(len(missingRoles)))
 
 	// Step 8: Mark Ready.
+	// Ready=true is intentional even when missingRoleRefs is non-empty: bindings are
+	// created immediately and become effective once referenced roles appear (best-effort,
+	// eventually-consistent behaviour). Missing refs are observable via
+	// status.missingRoleRefs and the RoleRefsMissing metric. Unlike BindDefinition, no
+	// RoleRefsValid condition is emitted here; add one if stricter signalling is needed.
 	rbd.Status.BindReconciled = true
 	conditions.MarkReady(rbd, rbd.Generation,
 		authorizationv1alpha1.ReadyReasonReconciled, authorizationv1alpha1.ReadyMessageReconciled)
