@@ -63,7 +63,12 @@ spec:
             description: RBACPolicySpec defines the desired state of RBACPolicy.
             properties:
               appliesTo:
-                description: AppliesTo defines the namespace scope this policy governs.
+                description: |-
+                  AppliesTo defines the namespace scope this policy governs.
+                  This field is stored and validated but runtime enforcement (scoping evaluators
+                  and admission checks to the declared namespaces) is not yet implemented.
+                  RestrictedBindDefinitions/RestrictedRoleDefinitions referencing this policy
+                  may target. Tracked in the PR #224 review findings (SEC-01).
                 properties:
                   namespaceSelector:
                     description: NamespaceSelector selects namespaces by label selector.
