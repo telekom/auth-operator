@@ -124,7 +124,7 @@ func (v *RestrictedRoleDefinitionValidator) validateRestrictedRoleDefinitionSpec
 		TargetNameField: obj.Spec.TargetName,
 	}, client.Limit(2)); err != nil {
 		logger.Error(err, "failed to list RestrictedRoleDefinitions", "targetName", obj.Spec.TargetName)
-		return apierrors.NewInternalError(errors.New("unable to list RestrictedRoleDefinitions"))
+		return listErrorToAdmission("RestrictedRoleDefinitions", err)
 	}
 
 	for _, existing := range rrdList.Items {
@@ -147,7 +147,7 @@ func (v *RestrictedRoleDefinitionValidator) validateRestrictedRoleDefinitionSpec
 		TargetNameField: obj.Spec.TargetName,
 	}, client.Limit(1)); err != nil {
 		logger.Error(err, "failed to list RoleDefinitions", "targetName", obj.Spec.TargetName)
-		return apierrors.NewInternalError(errors.New("unable to list RoleDefinitions"))
+		return listErrorToAdmission("RoleDefinitions", err)
 	}
 	for _, existing := range rdList.Items {
 		if roleTargetCollision(obj.Spec.TargetRole, obj.Spec.TargetNamespace, existing.Spec.TargetRole, existing.Spec.TargetNamespace) {
