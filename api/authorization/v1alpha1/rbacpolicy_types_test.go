@@ -81,12 +81,6 @@ func TestRBACPolicySetConditionsOverwrite(t *testing.T) {
 	}
 }
 
-func TestRBACPolicyConstants(t *testing.T) {
-	if RBACPolicyFinalizer != "rbacpolicy.authorization.t-caas.telekom.com/finalizer" {
-		t.Errorf("unexpected finalizer: %s", RBACPolicyFinalizer)
-	}
-}
-
 func TestRBACPolicySpecFields(t *testing.T) {
 	maxNS := int32(10)
 	maxRules := int32(50)

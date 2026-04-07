@@ -23,6 +23,11 @@ package v1alpha1
 // RBACPolicySpec defines the desired state of RBACPolicy.
 type RBACPolicySpecApplyConfiguration struct {
 	// AppliesTo defines the namespace scope this policy governs.
+	// This field is stored and validated but runtime enforcement (scoping evaluators
+	// and admission checks to the declared namespaces) is not yet implemented.
+	// TODO: enforce appliesTo at evaluation time — restrict which namespaces
+	// RestrictedBindDefinitions/RestrictedRoleDefinitions referencing this policy
+	// may target. Tracked in the PR #224 review findings (SEC-01).
 	AppliesTo *PolicyScopeApplyConfiguration `json:"appliesTo,omitempty"`
 	// BindingLimits constrains role bindings that may be created.
 	BindingLimits *BindingLimitsApplyConfiguration `json:"bindingLimits,omitempty"`
