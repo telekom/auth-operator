@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+//
+// SPDX-License-Identifier: Apache-2.0
+
 package v1alpha1
 
 import (
@@ -14,10 +18,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
-
-// TargetNameField is the field index for efficient lookups by Spec.TargetName.
-// This index must be registered with the manager before use.
-const TargetNameField = ".spec.targetName"
 
 // RoleDefinitionValidator implements admission.Validator for RoleDefinition.
 // It holds a client reference for listing existing resources during validation.
@@ -38,17 +38,28 @@ func (r *RoleDefinition) SetupWebhookWithManager(mgr ctrl.Manager) error {
 // +kubebuilder:webhook:path=/validate-authorization-t-caas-telekom-com-v1alpha1-roledefinition,mutating=false,failurePolicy=fail,sideEffects=None,groups=authorization.t-caas.telekom.com,resources=roledefinitions,verbs=create;update,versions=v1alpha1,name=roledefinition.validating.webhook.auth.t-caas.telekom.de,admissionReviewVersions=v1
 
 // validateRestrictedAPIsVersions ensures every version entry starts with 'v'
-// and is at most 20 characters. This was previously a CEL XValidation rule but
+// and is at most maxVersionLength characters. This was previously a CEL XValidation rule but
 // the nested iteration over the RestrictedAPIGroup type exceeded the CEL cost budget.
 func validateRestrictedAPIsVersions(obj *RoleDefinition) error {
 	for i, group := range obj.Spec.RestrictedAPIs {
 		for j, gv := range group.Versions {
-			if !strings.HasPrefix(gv.Version, "v") || len(gv.Version) > 20 {
-				return fmt.Errorf("restrictedApis[%d].versions[%d].version %q: must start with 'v' and be at most 20 characters", i, j, gv.Version)
+			if !strings.HasPrefix(gv.Version, "v") || len(gv.Version) > maxVersionLength {
+				return fmt.Errorf("restrictedApis[%d].versions[%d].version %q: must start with 'v' and be at most %d characters", i, j, gv.Version, maxVersionLength)
 			}
 		}
 	}
 	return nil
+}
+
+// listErrorToAdmission converts a List API error to an appropriate admission error.
+// Transient errors (timeout, server timeout, service unavailable) are wrapped
+// with a message that signals the caller should retry; all other errors return
+// a generic internal error suitable for a permanent admission denial.
+func listErrorToAdmission(resource string, err error) error {
+	if apierrors.IsTimeout(err) || apierrors.IsServerTimeout(err) || apierrors.IsServiceUnavailable(err) {
+		return apierrors.NewInternalError(fmt.Errorf("transient error listing %s; please retry", resource))
+	}
+	return apierrors.NewInternalError(fmt.Errorf("unable to list %s", resource))
 }
 
 // validateNoDuplicateRestrictedAPIs rejects duplicate API group names in RestrictedAPIs.
@@ -69,6 +80,9 @@ func validateNoDuplicateRestrictedAPIs(obj *RoleDefinition) error {
 
 // ValidateCreate implements admission.Validator for RoleDefinition.
 func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleDefinition) (admission.Warnings, error) {
+	ctx, cancel := context.WithTimeout(ctx, WebhookCacheTimeout)
+	defer cancel()
+
 	logger := log.FromContext(ctx).WithName("roledefinition-webhook")
 	logger.V(1).Info("validating create", "name", obj.Name)
 
@@ -76,20 +90,39 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 		return nil, err
 	}
 
-	// Use field index for efficient lookup by TargetName
+	// Use field index for efficient lookup by TargetName. The field index constrains
+	// results to the small set matching this targetName; the context timeout provides
+	// the hard latency bound.
 	roleDefinitionList := &RoleDefinitionList{}
 	if err := v.Client.List(ctx, roleDefinitionList, client.MatchingFields{
 		TargetNameField: obj.Spec.TargetName,
 	}); err != nil {
 		logger.Error(err, "failed to list RoleDefinitions", "targetName", obj.Spec.TargetName)
-		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RoleDefinitions: %w", err))
+		return nil, listErrorToAdmission("RoleDefinitions", err)
 	}
 
 	for _, roleDefinition := range roleDefinitionList.Items {
-		if roleDefinition.Spec.TargetRole == obj.Spec.TargetRole && roleDefinition.Name != obj.Name {
+		if roleDefinition.Name != obj.Name &&
+			roleTargetCollision(obj.Spec.TargetRole, obj.Spec.TargetNamespace, roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetNamespace) {
 			logger.Info("validation failed: duplicate targetName",
 				"name", obj.Name, "targetName", obj.Spec.TargetName, "conflictsWith", roleDefinition.Name)
-			return nil, apierrors.NewBadRequest(fmt.Sprintf("targetName %s already exists in RoleDefinition %s", obj.Spec.TargetName, roleDefinition.Name))
+			return nil, apierrors.NewBadRequest(
+				fmt.Sprintf("targetName %s is already in use by RoleDefinition %s", obj.Spec.TargetName, roleDefinition.Name))
+		}
+	}
+
+	// Check for cross-type targetName collision with RestrictedRoleDefinitions (only need first match).
+	rrdList := &RestrictedRoleDefinitionList{}
+	if err := v.Client.List(ctx, rrdList, client.MatchingFields{
+		TargetNameField: obj.Spec.TargetName,
+	}, client.Limit(1)); err != nil {
+		logger.Error(err, "failed to list RestrictedRoleDefinitions", "targetName", obj.Spec.TargetName)
+		return nil, listErrorToAdmission("RestrictedRoleDefinitions", err)
+	}
+	for _, existing := range rrdList.Items {
+		if roleTargetCollision(obj.Spec.TargetRole, obj.Spec.TargetNamespace, existing.Spec.TargetRole, existing.Spec.TargetNamespace) {
+			return nil, apierrors.NewBadRequest(
+				fmt.Sprintf("targetName %s is already in use by RestrictedRoleDefinition %q", obj.Spec.TargetName, existing.Name))
 		}
 	}
 
@@ -98,17 +131,24 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 
 // ValidateUpdate implements admission.Validator for RoleDefinition.
 func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *RoleDefinition) (admission.Warnings, error) {
+	ctx, cancel := context.WithTimeout(ctx, WebhookCacheTimeout)
+	defer cancel()
+
 	logger := log.FromContext(ctx).WithName("roledefinition-webhook")
 	logger.V(1).Info("validating update", "name", newObj.Name)
 
-	// Immutability: targetRole and targetName cannot be changed after creation.
-	// Changing them would orphan the generated ClusterRole/Role and its bindings.
+	// Immutability: targetRole, targetName, and targetNamespace cannot be changed
+	// after creation. Changing these would orphan the generated
+	// ClusterRole/Role and its bindings.
 	var allErrs field.ErrorList
 	if oldObj.Spec.TargetRole != newObj.Spec.TargetRole {
 		allErrs = append(allErrs, field.Forbidden(field.NewPath("spec", "targetRole"), "field is immutable after creation"))
 	}
 	if oldObj.Spec.TargetName != newObj.Spec.TargetName {
 		allErrs = append(allErrs, field.Forbidden(field.NewPath("spec", "targetName"), "field is immutable after creation"))
+	}
+	if oldObj.Spec.TargetNamespace != newObj.Spec.TargetNamespace {
+		allErrs = append(allErrs, field.Forbidden(field.NewPath("spec", "targetNamespace"), "field is immutable after creation"))
 	}
 	if len(allErrs) > 0 {
 		return nil, apierrors.NewInvalid(
@@ -132,20 +172,39 @@ func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 		return nil, err
 	}
 
-	// Use field index for efficient lookup by TargetName
+	// Use field index for efficient lookup by TargetName. The field index constrains
+	// results to the small set matching this targetName; the context timeout provides
+	// the hard latency bound.
 	roleDefinitionList := &RoleDefinitionList{}
 	if err := v.Client.List(ctx, roleDefinitionList, client.MatchingFields{
 		TargetNameField: newObj.Spec.TargetName,
 	}); err != nil {
 		logger.Error(err, "failed to list RoleDefinitions", "targetName", newObj.Spec.TargetName)
-		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RoleDefinitions: %w", err))
+		return nil, listErrorToAdmission("RoleDefinitions", err)
 	}
 
 	for _, roleDefinition := range roleDefinitionList.Items {
-		if roleDefinition.Spec.TargetRole == newObj.Spec.TargetRole && roleDefinition.Name != newObj.Name {
+		if roleDefinition.Name != newObj.Name &&
+			roleTargetCollision(newObj.Spec.TargetRole, newObj.Spec.TargetNamespace, roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetNamespace) {
 			logger.Info("validation failed: duplicate targetName",
 				"name", newObj.Name, "targetName", newObj.Spec.TargetName, "conflictsWith", roleDefinition.Name)
-			return nil, apierrors.NewBadRequest(fmt.Sprintf("targetName %s already exists in RoleDefinition %s", newObj.Spec.TargetName, roleDefinition.Name))
+			return nil, apierrors.NewBadRequest(
+				fmt.Sprintf("targetName %s is already in use by RoleDefinition %s", newObj.Spec.TargetName, roleDefinition.Name))
+		}
+	}
+
+	// Keep cross-type targetName collision checks aligned with ValidateCreate.
+	rrdList := &RestrictedRoleDefinitionList{}
+	if err := v.Client.List(ctx, rrdList, client.MatchingFields{
+		TargetNameField: newObj.Spec.TargetName,
+	}, client.Limit(1)); err != nil {
+		logger.Error(err, "failed to list RestrictedRoleDefinitions", "targetName", newObj.Spec.TargetName)
+		return nil, listErrorToAdmission("RestrictedRoleDefinitions", err)
+	}
+	for _, existing := range rrdList.Items {
+		if roleTargetCollision(newObj.Spec.TargetRole, newObj.Spec.TargetNamespace, existing.Spec.TargetRole, existing.Spec.TargetNamespace) {
+			return nil, apierrors.NewBadRequest(
+				fmt.Sprintf("targetName %s is already in use by RestrictedRoleDefinition %q", newObj.Spec.TargetName, existing.Name))
 		}
 	}
 

@@ -161,7 +161,7 @@ func DebugTable(headers []string, rows [][]string) {
 // InstallPrometheusOperator installs the prometheus Operator to be used to export the enabled metrics.
 func InstallPrometheusOperator() error {
 	url := fmt.Sprintf(prometheusOperatorURL, prometheusOperatorVersion)
-	cmd := exec.CommandContext(context.Background(), "kubectl", "create", "-f", url)
+	cmd := exec.CommandContext(context.Background(), "kubectl", "create", "-f", url) // #nosec G204 -- test helper with hardcoded binary and controlled args
 	_, err := Run(cmd)
 	return err
 }
@@ -191,7 +191,7 @@ func Run(cmd *exec.Cmd) ([]byte, error) {
 }
 
 // RunWithTimeout executes a command with a timeout.
-// It rebuilds the command using exec.CommandContext so the OS process is killed
+// It rebuilds the command using exec.CommandContext so the OS process is killed // #nosec G204
 // automatically when the timeout expires, avoiding goroutine leaks.
 func RunWithTimeout(cmd *exec.Cmd, timeout time.Duration) ([]byte, error) {
 	dir, _ := GetProjectDir()
@@ -210,7 +210,7 @@ func RunWithTimeout(cmd *exec.Cmd, timeout time.Duration) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	ctxCmd := exec.CommandContext(ctx, cmd.Args[0], cmd.Args[1:]...) // args come from test code
+	ctxCmd := exec.CommandContext(ctx, cmd.Args[0], cmd.Args[1:]...) // #nosec G204 -- args come from test code, not user input
 	ctxCmd.Dir = cmd.Dir
 	ctxCmd.Env = cmd.Env
 
@@ -228,7 +228,7 @@ func RunWithTimeout(cmd *exec.Cmd, timeout time.Duration) ([]byte, error) {
 // UninstallPrometheusOperator uninstalls the prometheus.
 func UninstallPrometheusOperator() {
 	url := fmt.Sprintf(prometheusOperatorURL, prometheusOperatorVersion)
-	cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "-f", url)
+	cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "-f", url) // #nosec G204 -- test helper with hardcoded binary and controlled args
 	if _, err := Run(cmd); err != nil {
 		warnError(err)
 	}
@@ -237,7 +237,7 @@ func UninstallPrometheusOperator() {
 // UninstallCertManager uninstalls the cert manager.
 func UninstallCertManager() {
 	url := fmt.Sprintf(certmanagerURLTmpl, certmanagerVersion)
-	cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "-f", url)
+	cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "-f", url) // #nosec G204
 	if _, err := Run(cmd); err != nil {
 		warnError(err)
 	}
@@ -245,7 +245,7 @@ func UninstallCertManager() {
 
 // IsCertManagerInstalled checks if cert-manager is already installed.
 func IsCertManagerInstalled() bool {
-	cmd := exec.CommandContext(context.Background(), "kubectl", "get", "deployment", "cert-manager-webhook",
+	cmd := exec.CommandContext(context.Background(), "kubectl", "get", "deployment", "cert-manager-webhook", // #nosec G204
 		"-n", "cert-manager", "-o", "name")
 	_, err := Run(cmd)
 	return err == nil
@@ -257,7 +257,7 @@ func InstallCertManager() error {
 	if IsCertManagerInstalled() {
 		_, _ = fmt.Fprintf(GinkgoWriter, "cert-manager already installed, skipping installation\n")
 		// Still wait for it to be ready
-		cmd := exec.CommandContext(context.Background(), "kubectl", "wait", "deployment.apps/cert-manager-webhook",
+		cmd := exec.CommandContext(context.Background(), "kubectl", "wait", "deployment.apps/cert-manager-webhook", // #nosec G204
 			"--for", "condition=Available",
 			"--namespace", "cert-manager",
 			"--timeout", "5m",
@@ -272,7 +272,7 @@ func InstallCertManager() error {
 	var lastErr error
 	for attempt := 1; attempt <= 3; attempt++ {
 		_, _ = fmt.Fprintf(GinkgoWriter, "Installing cert-manager (attempt %d/3)\n", attempt)
-		cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", url, "--server-side", "--force-conflicts")
+		cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", url, "--server-side", "--force-conflicts") // #nosec G204
 		if _, err := Run(cmd); err != nil {
 			lastErr = err
 			if attempt < 3 {
@@ -292,7 +292,7 @@ func InstallCertManager() error {
 
 	// Wait for cert-manager-webhook to be ready, which can take time if cert-manager
 	// was re-installed after uninstalling on a cluster.
-	cmd := exec.CommandContext(context.Background(), "kubectl", "wait", "deployment.apps/cert-manager-webhook",
+	cmd := exec.CommandContext(context.Background(), "kubectl", "wait", "deployment.apps/cert-manager-webhook", // #nosec G204
 		"--for", "condition=Available",
 		"--namespace", "cert-manager",
 		"--timeout", "5m",
@@ -309,7 +309,7 @@ func LoadImageToKindClusterWithName(name string) error {
 		cluster = v
 	}
 	kindOptions := []string{"load", "docker-image", name, "--name", cluster}
-	cmd := exec.CommandContext(context.Background(), "kind", kindOptions...)
+	cmd := exec.CommandContext(context.Background(), "kind", kindOptions...) // #nosec G204
 	_, err := Run(cmd)
 	return err
 }
@@ -340,7 +340,7 @@ func GetProjectDir() (string, error) {
 
 // DeploymentExists checks if a deployment exists for a label selector in a namespace.
 func DeploymentExists(labelSelector, namespace string) bool {
-	cmd := exec.CommandContext(context.Background(), "kubectl", "get", "deployment",
+	cmd := exec.CommandContext(context.Background(), "kubectl", "get", "deployment", // #nosec G204
 		"-l", labelSelector,
 		"-n", namespace,
 		"-o", "name")
@@ -365,7 +365,7 @@ func WaitForResource(resourceType, name, namespace string, timeout time.Duration
 
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		cmd := exec.CommandContext(context.Background(), "kubectl", args...)
+		cmd := exec.CommandContext(context.Background(), "kubectl", args...) // #nosec G204
 		if _, err := Run(cmd); err == nil {
 			return nil
 		}
@@ -378,7 +378,7 @@ func WaitForResource(resourceType, name, namespace string, timeout time.Duration
 func WaitForPodRunning(labelSelector, namespace string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pods",
+		cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pods", // #nosec G204
 			"-l", labelSelector,
 			"-n", namespace,
 			"-o", "jsonpath={.items[0].status.phase}")
@@ -393,7 +393,7 @@ func WaitForPodRunning(labelSelector, namespace string, timeout time.Duration) e
 
 // WaitForPodsReady waits for all pods matching the label selector to be Ready.
 func WaitForPodsReady(labelSelector, namespace string, timeout time.Duration) error {
-	cmd := exec.CommandContext(context.Background(), "kubectl", "wait", "pod",
+	cmd := exec.CommandContext(context.Background(), "kubectl", "wait", "pod", // #nosec G204
 		"-l", labelSelector,
 		"-n", namespace,
 		"--for=condition=Ready",
@@ -404,7 +404,7 @@ func WaitForPodsReady(labelSelector, namespace string, timeout time.Duration) er
 
 // WaitForDeploymentAvailable waits for deployments matching label selector to be Available.
 func WaitForDeploymentAvailable(labelSelector, namespace string, timeout time.Duration) error {
-	cmd := exec.CommandContext(context.Background(), "kubectl", "wait", "deployment",
+	cmd := exec.CommandContext(context.Background(), "kubectl", "wait", "deployment", // #nosec G204
 		"-l", labelSelector,
 		"-n", namespace,
 		"--for=condition=Available",
@@ -417,7 +417,7 @@ func WaitForDeploymentAvailable(labelSelector, namespace string, timeout time.Du
 func WaitForServiceEndpoints(serviceName, namespace string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		cmd := exec.CommandContext(context.Background(), "kubectl", "get", "endpoints", serviceName,
+		cmd := exec.CommandContext(context.Background(), "kubectl", "get", "endpoints", serviceName, // #nosec G204
 			"-n", namespace,
 			"-o", "jsonpath={.subsets}")
 		output, err := Run(cmd)
@@ -433,9 +433,9 @@ func WaitForServiceEndpoints(serviceName, namespace string, timeout time.Duratio
 func WaitForWebhookConfigurations(labelSelector string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		validating := exec.CommandContext(context.Background(), "kubectl", "get", "validatingwebhookconfiguration",
+		validating := exec.CommandContext(context.Background(), "kubectl", "get", "validatingwebhookconfiguration", // #nosec G204
 			"-l", labelSelector, "-o", "name")
-		mutating := exec.CommandContext(context.Background(), "kubectl", "get", "mutatingwebhookconfiguration",
+		mutating := exec.CommandContext(context.Background(), "kubectl", "get", "mutatingwebhookconfiguration", // #nosec G204
 			"-l", labelSelector, "-o", "name")
 		vOut, vErr := Run(validating)
 		mOut, mErr := Run(mutating)
@@ -453,13 +453,13 @@ func WaitForWebhookCABundle(labelSelector string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		// Check if mutating webhook has caBundle populated
-		mutatingCmd := exec.CommandContext(context.Background(), "kubectl", "get", "mutatingwebhookconfiguration",
+		mutatingCmd := exec.CommandContext(context.Background(), "kubectl", "get", "mutatingwebhookconfiguration", // #nosec G204
 			"-l", labelSelector,
 			"-o", "jsonpath={.items[*].webhooks[*].clientConfig.caBundle}")
 		mutatingOut, mutatingErr := Run(mutatingCmd)
 
 		// Check if validating webhook has caBundle populated
-		validatingCmd := exec.CommandContext(context.Background(), "kubectl", "get", "validatingwebhookconfiguration",
+		validatingCmd := exec.CommandContext(context.Background(), "kubectl", "get", "validatingwebhookconfiguration", // #nosec G204
 			"-l", labelSelector,
 			"-o", "jsonpath={.items[*].webhooks[*].clientConfig.caBundle}")
 		validatingOut, validatingErr := Run(validatingCmd)
@@ -499,7 +499,7 @@ func WaitForWebhookReady(timeout time.Duration) error {
 	for time.Now().Before(deadline) {
 		// Perform a dry-run namespace create which will trigger the mutating webhook
 		// If the webhook is ready with valid TLS, this will succeed
-		cmd := exec.CommandContext(context.Background(), "kubectl", "create", "namespace", testNS,
+		cmd := exec.CommandContext(context.Background(), "kubectl", "create", "namespace", testNS, // #nosec G204
 			"--dry-run=server", "-o", "yaml")
 		_, err := Run(cmd)
 		if err == nil {
@@ -536,7 +536,7 @@ func WaitForWebhookReady(timeout time.Duration) error {
 
 // ApplyManifest applies a YAML manifest from a string using server-side apply.
 func ApplyManifest(manifest string) error {
-	cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "--server-side", "--force-conflicts", "-f", "-")
+	cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "--server-side", "--force-conflicts", "-f", "-") // #nosec G204
 	cmd.Stdin = strings.NewReader(manifest)
 	_, err := Run(cmd)
 	return err
@@ -544,7 +544,7 @@ func ApplyManifest(manifest string) error {
 
 // DeleteManifest deletes resources defined in a YAML manifest.
 func DeleteManifest(manifest string) error {
-	cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "-f", "-", "--ignore-not-found=true")
+	cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "-f", "-", "--ignore-not-found=true") // #nosec G204
 	cmd.Stdin = strings.NewReader(manifest)
 	_, err := Run(cmd)
 	return err
@@ -556,7 +556,7 @@ func GetResourceField(resourceType, name, namespace, jsonpath string) (string, e
 	if namespace != "" {
 		args = append(args, "-n", namespace)
 	}
-	cmd := exec.CommandContext(context.Background(), "kubectl", args...)
+	cmd := exec.CommandContext(context.Background(), "kubectl", args...) // #nosec G204
 	output, err := Run(cmd)
 	if err != nil {
 		return "", err
@@ -566,7 +566,7 @@ func GetResourceField(resourceType, name, namespace, jsonpath string) (string, e
 
 // KindClusterExists checks if a kind cluster with the given name exists.
 func KindClusterExists(name string) bool {
-	cmd := exec.CommandContext(context.Background(), "kind", "get", "clusters")
+	cmd := exec.CommandContext(context.Background(), "kind", "get", "clusters") // #nosec G204
 	output, err := Run(cmd)
 	if err != nil {
 		return false
@@ -588,7 +588,7 @@ func CreateKindCluster(name, k8sVersion string) error {
 	}
 
 	image := fmt.Sprintf("kindest/node:%s", k8sVersion)
-	cmd := exec.CommandContext(context.Background(), "kind", "create", "cluster",
+	cmd := exec.CommandContext(context.Background(), "kind", "create", "cluster", // #nosec G204
 		"--name", name,
 		"--image", image,
 		"--wait", "5m")
@@ -598,7 +598,7 @@ func CreateKindCluster(name, k8sVersion string) error {
 
 // DeleteKindCluster deletes a kind cluster.
 func DeleteKindCluster(name string) error {
-	cmd := exec.CommandContext(context.Background(), "kind", "delete", "cluster", "--name", name)
+	cmd := exec.CommandContext(context.Background(), "kind", "delete", "cluster", "--name", name) // #nosec G204
 	_, err := Run(cmd)
 	return err
 }
@@ -609,14 +609,14 @@ func CleanupWebhooks(labelSelector string) {
 	_, _ = fmt.Fprintf(GinkgoWriter, "Cleaning up webhooks with label: %s\n", labelSelector)
 
 	// Clean up ValidatingWebhookConfigurations
-	cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "validatingwebhookconfiguration",
+	cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "validatingwebhookconfiguration", // #nosec G204
 		"-l", labelSelector, "--ignore-not-found=true")
 	if _, err := Run(cmd); err != nil {
 		warnError(err)
 	}
 
 	// Clean up MutatingWebhookConfigurations
-	cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "mutatingwebhookconfiguration",
+	cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "mutatingwebhookconfiguration", // #nosec G204
 		"-l", labelSelector, "--ignore-not-found=true")
 	if _, err := Run(cmd); err != nil {
 		warnError(err)
@@ -636,22 +636,22 @@ func CleanupAllAuthOperatorWebhooks() {
 	}
 
 	for _, pattern := range webhookPatterns {
-		cmd := exec.CommandContext(context.Background(), "kubectl", "get", "validatingwebhookconfiguration", "-o", "name")
+		cmd := exec.CommandContext(context.Background(), "kubectl", "get", "validatingwebhookconfiguration", "-o", "name") // #nosec G204
 		output, _ := Run(cmd)
 		for _, line := range GetNonEmptyLines(string(output)) {
 			if strings.Contains(line, pattern) {
 				name := strings.TrimPrefix(line, "validatingwebhookconfiguration.admissionregistration.k8s.io/")
-				cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "validatingwebhookconfiguration", name, "--ignore-not-found=true")
+				cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "validatingwebhookconfiguration", name, "--ignore-not-found=true") // #nosec G204
 				_, _ = Run(cmd)
 			}
 		}
 
-		cmd = exec.CommandContext(context.Background(), "kubectl", "get", "mutatingwebhookconfiguration", "-o", "name")
+		cmd = exec.CommandContext(context.Background(), "kubectl", "get", "mutatingwebhookconfiguration", "-o", "name") // #nosec G204
 		output, _ = Run(cmd)
 		for _, line := range GetNonEmptyLines(string(output)) {
 			if strings.Contains(line, pattern) {
 				name := strings.TrimPrefix(line, "mutatingwebhookconfiguration.admissionregistration.k8s.io/")
-				cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "mutatingwebhookconfiguration", name, "--ignore-not-found=true")
+				cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "mutatingwebhookconfiguration", name, "--ignore-not-found=true") // #nosec G204
 				_, _ = Run(cmd)
 			}
 		}
@@ -660,7 +660,7 @@ func CleanupAllAuthOperatorWebhooks() {
 
 // RemoveFinalizersForAll removes finalizers from all resources of a given type.
 func RemoveFinalizersForAll(resourceType string) {
-	cmd := exec.CommandContext(context.Background(), "kubectl", "get", resourceType, "-A",
+	cmd := exec.CommandContext(context.Background(), "kubectl", "get", resourceType, "-A", // #nosec G204
 		"-o", `jsonpath={range .items[*]}{.metadata.namespace}{"/"}{.metadata.name}{"\n"}{end}`)
 	output, err := Run(cmd)
 	if err != nil {
@@ -674,7 +674,7 @@ func RemoveFinalizersForAll(resourceType string) {
 		if ns != "" {
 			args = append(args, "-n", ns)
 		}
-		patch := exec.CommandContext(context.Background(), "kubectl", args...)
+		patch := exec.CommandContext(context.Background(), "kubectl", args...) // #nosec G204
 		if _, err := Run(patch); err != nil {
 			warnError(err)
 		}
@@ -702,7 +702,7 @@ func CleanupResourcesByLabel(resourceType, labelSelector, namespace string) {
 	if namespace != "" {
 		args = append(args, "-n", namespace)
 	}
-	cmd := exec.CommandContext(context.Background(), "kubectl", args...)
+	cmd := exec.CommandContext(context.Background(), "kubectl", args...) // #nosec G204
 	if _, err := Run(cmd); err != nil {
 		warnError(err)
 	}
@@ -710,13 +710,13 @@ func CleanupResourcesByLabel(resourceType, labelSelector, namespace string) {
 
 // CleanupNamespace deletes a namespace and waits for it to be fully removed.
 func CleanupNamespace(namespace string) {
-	cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "ns", namespace, "--ignore-not-found=true", "--wait=false")
+	cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "ns", namespace, "--ignore-not-found=true", "--wait=false") // #nosec G204
 	_, _ = Run(cmd)
 
 	// Wait for namespace to be deleted (with timeout)
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
-		cmd := exec.CommandContext(context.Background(), "kubectl", "get", "ns", namespace)
+		cmd := exec.CommandContext(context.Background(), "kubectl", "get", "ns", namespace) // #nosec G204
 		if _, err := Run(cmd); err != nil {
 			// Namespace is gone
 			return
@@ -735,7 +735,7 @@ func CleanupClusterResources(labelSelector string) {
 			"delete", resource, "-l", labelSelector,
 			"--ignore-not-found=true", "--wait=false", "--timeout=30s",
 		}
-		cmd := exec.CommandContext(context.Background(), "kubectl", args...)
+		cmd := exec.CommandContext(context.Background(), "kubectl", args...) // #nosec G204
 		if _, err := Run(cmd); err != nil {
 			warnError(err)
 		}
@@ -1007,7 +1007,7 @@ func SaveTestSummaryJSON(
 	}
 
 	outputDir := GetE2EOutputDirForContext(suite)
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+	if err := os.MkdirAll(outputDir, 0o750); err != nil {
 		return err
 	}
 
@@ -1024,13 +1024,13 @@ func getClusterInfo() map[string]string {
 	info := make(map[string]string)
 
 	// Kubernetes version
-	cmd := exec.CommandContext(context.Background(), "kubectl", "version", "--client", "--short")
+	cmd := exec.CommandContext(context.Background(), "kubectl", "version", "--client", "--short") // #nosec G204
 	if output, err := Run(cmd); err == nil {
 		info["kubectl_version"] = strings.TrimSpace(string(output))
 	}
 
 	// Server version
-	cmd = exec.CommandContext(context.Background(), "kubectl", "version", "-o", "json")
+	cmd = exec.CommandContext(context.Background(), "kubectl", "version", "-o", "json") // #nosec G204
 	if output, err := Run(cmd); err == nil {
 		// Extract server version from JSON (simplified)
 		if strings.Contains(string(output), "serverVersion") {
@@ -1039,7 +1039,7 @@ func getClusterInfo() map[string]string {
 	}
 
 	// Current context
-	cmd = exec.CommandContext(context.Background(), "kubectl", "config", "current-context")
+	cmd = exec.CommandContext(context.Background(), "kubectl", "config", "current-context") // #nosec G204
 	if output, err := Run(cmd); err == nil {
 		info["context"] = strings.TrimSpace(string(output))
 	}
@@ -1079,36 +1079,34 @@ func jsonMarshalIndent(v interface{}, indent string) ([]byte, error) {
 
 	var sb strings.Builder
 	sb.WriteString("{\n")
-	sb.WriteString(fmt.Sprintf("%s\"timestamp\": %q,\n", indent, summary.Timestamp))
-	sb.WriteString(fmt.Sprintf("%s\"run_id\": %q,\n", indent, summary.RunID))
-	sb.WriteString(fmt.Sprintf("%s\"suite\": %q,\n", indent, summary.Suite))
-	sb.WriteString(fmt.Sprintf("%s\"total_tests\": %d,\n", indent, summary.TotalTests))
-	sb.WriteString(fmt.Sprintf("%s\"passed\": %d,\n", indent, summary.Passed))
-	sb.WriteString(fmt.Sprintf("%s\"failed\": %d,\n", indent, summary.Failed))
-	sb.WriteString(fmt.Sprintf("%s\"skipped\": %d,\n", indent, summary.Skipped))
-	sb.WriteString(fmt.Sprintf("%s\"duration\": %q,\n", indent, summary.Duration))
-	sb.WriteString(fmt.Sprintf("%s\"debug_level\": %d,\n", indent, summary.DebugLevel))
-	sb.WriteString(fmt.Sprintf("%s\"output_dir\": %q,\n", indent, summary.OutputDir))
+	fmt.Fprintf(&sb, "%s\"timestamp\": %q,\n", indent, summary.Timestamp)
+	fmt.Fprintf(&sb, "%s\"run_id\": %q,\n", indent, summary.RunID)
+	fmt.Fprintf(&sb, "%s\"suite\": %q,\n", indent, summary.Suite)
+	fmt.Fprintf(&sb, "%s\"total_tests\": %d,\n", indent, summary.TotalTests)
+	fmt.Fprintf(&sb, "%s\"passed\": %d,\n", indent, summary.Passed)
+	fmt.Fprintf(&sb, "%s\"failed\": %d,\n", indent, summary.Failed)
+	fmt.Fprintf(&sb, "%s\"skipped\": %d,\n", indent, summary.Skipped)
+	fmt.Fprintf(&sb, "%s\"duration\": %q,\n", indent, summary.Duration)
+	fmt.Fprintf(&sb, "%s\"debug_level\": %d,\n", indent, summary.DebugLevel)
+	fmt.Fprintf(&sb, "%s\"output_dir\": %q,\n", indent, summary.OutputDir)
 
-	// Cluster info
-	sb.WriteString(fmt.Sprintf("%s\"cluster_info\": {\n", indent))
+	fmt.Fprintf(&sb, "%s\"cluster_info\": {\n", indent)
 	i := 0
 	for k, v := range summary.ClusterInfo {
 		if i > 0 {
 			sb.WriteString(",\n")
 		}
-		sb.WriteString(fmt.Sprintf("%s%s%q: %q", indent, indent, k, v))
+		fmt.Fprintf(&sb, "%s%s%q: %q", indent, indent, k, v)
 		i++
 	}
-	sb.WriteString(fmt.Sprintf("\n%s},\n", indent))
+	fmt.Fprintf(&sb, "\n%s},\n", indent)
 
-	// Failed tests
-	sb.WriteString(fmt.Sprintf("%s\"failed_tests\": [", indent))
+	fmt.Fprintf(&sb, "%s\"failed_tests\": [", indent)
 	for j, t := range summary.FailedTests {
 		if j > 0 {
 			sb.WriteString(", ")
 		}
-		sb.WriteString(fmt.Sprintf("%q", t))
+		fmt.Fprintf(&sb, "%q", t)
 	}
 	sb.WriteString("]\n")
 
@@ -1118,12 +1116,12 @@ func jsonMarshalIndent(v interface{}, indent string) ([]byte, error) {
 
 // SaveDebugInfoToFile saves debug info to a file in the output directory.
 func SaveDebugInfoToFile(outputDir, filename, content string) error {
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+	if err := os.MkdirAll(outputDir, 0o750); err != nil {
 		return err
 	}
 
 	filePath := filepath.Join(outputDir, filename)
-	return os.WriteFile(filePath, []byte(content), 0o644)
+	return os.WriteFile(filePath, []byte(content), 0o600)
 }
 
 // CollectAndSaveAllDebugInfo collects all debug info and saves to files
@@ -1139,33 +1137,33 @@ func CollectAndSaveAllDebugInfo(testContext string) {
 
 	// Save to files for CI artifacts
 	outputDir := GetE2EOutputDirForContext(testContext)
-	_ = os.MkdirAll(outputDir, 0o755)
+	_ = os.MkdirAll(outputDir, 0o750)
 
 	// Cluster dump
-	cmd := exec.CommandContext(context.Background(), "kubectl", "cluster-info", "dump", "--output-directory", filepath.Join(outputDir, "cluster-dump"))
+	cmd := exec.CommandContext(context.Background(), "kubectl", "cluster-info", "dump", "--output-directory", filepath.Join(outputDir, "cluster-dump")) // #nosec G204
 	_, _ = Run(cmd)
 
 	// All resources
-	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "all", "-A", "-o", "wide")
+	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "all", "-A", "-o", "wide") // #nosec G204
 	if output, err := Run(cmd); err == nil {
 		_ = SaveDebugInfoToFile(outputDir, "all-resources.txt", string(output))
 	}
 
 	// Events
-	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "events", "-A", "--sort-by=.lastTimestamp")
+	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "events", "-A", "--sort-by=.lastTimestamp") // #nosec G204
 	if output, err := Run(cmd); err == nil {
 		_ = SaveDebugInfoToFile(outputDir, "events.txt", string(output))
 	}
 
 	// Pods
-	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "pods", "-A", "-o", "wide")
+	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "pods", "-A", "-o", "wide") // #nosec G204
 	if output, err := Run(cmd); err == nil {
 		_ = SaveDebugInfoToFile(outputDir, "pods.txt", string(output))
 	}
 
 	// CRD instances
 	for _, crd := range []string{"roledefinitions", "binddefinitions", "webhookauthorizers"} {
-		cmd = exec.CommandContext(context.Background(), "kubectl", "get", crd, "-A", "-o", "yaml")
+		cmd = exec.CommandContext(context.Background(), "kubectl", "get", crd, "-A", "-o", "yaml") // #nosec G204
 		if output, err := Run(cmd); err == nil {
 			_ = SaveDebugInfoToFile(outputDir, crd+".yaml", string(output))
 		}
@@ -1179,15 +1177,15 @@ func CollectAndSaveAllDebugInfo(testContext string) {
 		"auth-operator-integration-test",
 	}
 	for _, ns := range operatorNamespaces {
-		cmd = exec.CommandContext(context.Background(), "kubectl", "get", "ns", ns, "-o", "name")
+		cmd = exec.CommandContext(context.Background(), "kubectl", "get", "ns", ns, "-o", "name") // #nosec G204
 		if _, err := Run(cmd); err != nil {
 			continue
 		}
-		cmd = exec.CommandContext(context.Background(), "kubectl", "logs", "-n", ns, "-l", "control-plane=controller-manager", "--tail=1000")
+		cmd = exec.CommandContext(context.Background(), "kubectl", "logs", "-n", ns, "-l", "control-plane=controller-manager", "--tail=1000") // #nosec G204
 		if output, err := Run(cmd); err == nil {
 			_ = SaveDebugInfoToFile(outputDir, fmt.Sprintf("%s-controller-logs.txt", ns), string(output))
 		}
-		cmd = exec.CommandContext(context.Background(), "kubectl", "logs", "-n", ns, "-l", "app.kubernetes.io/component=webhook", "--tail=1000")
+		cmd = exec.CommandContext(context.Background(), "kubectl", "logs", "-n", ns, "-l", "app.kubernetes.io/component=webhook", "--tail=1000") // #nosec G204
 		if output, err := Run(cmd); err == nil {
 			_ = SaveDebugInfoToFile(outputDir, fmt.Sprintf("%s-webhook-logs.txt", ns), string(output))
 		}
@@ -1217,7 +1215,7 @@ func collectSection(title string, fn func()) {
 
 // runDebugCommand runs a command and prints output to GinkgoWriter (ignores errors).
 func runDebugCommand(name string, args ...string) {
-	cmd := exec.CommandContext(context.Background(), name, args...)
+	cmd := exec.CommandContext(context.Background(), name, args...) // #nosec G204
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		_, _ = fmt.Fprintf(GinkgoWriter, "$ %s %s\n[error: %v]\n", name, strings.Join(args, " "), err)

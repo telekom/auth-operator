@@ -1034,3 +1034,203 @@ func TestServeHTTP_AcceptsNonResourceAttributes(t *testing.T) {
 		t.Errorf("non-resource SAR should not be rejected by validation, but got reason: %s", resp.Status.Reason)
 	}
 }
+
+func TestServeHTTP_DeniedResponseSetsDeniedTrue(t *testing.T) {
+	scheme := newScheme(t)
+
+	wa := authorizationv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{Name: "deny-uid-wa"},
+		Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+			DeniedPrincipals: []authorizationv1alpha1.Principal{{User: "blocked-user"}},
+		},
+	}
+	cl := newIndexedClient(scheme, &wa)
+	handler := &Authorizer{Client: cl, Log: logr.Discard()}
+
+	sar := authzv1.SubjectAccessReview{
+		Spec: authzv1.SubjectAccessReviewSpec{
+			User:               "blocked-user",
+			ResourceAttributes: &authzv1.ResourceAttributes{Verb: "get", Resource: "pods"},
+		},
+	}
+	body := marshalSAR(t, sar)
+	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var resp authzv1.SubjectAccessReview
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Status.Allowed {
+		t.Error("expected Allowed=false for denied request")
+	}
+	// Per K8s SAR semantics: Allowed=false without Denied=true means
+	// "no opinion" — subsequent authorizers could still allow the request.
+	// A genuine deny MUST set Denied=true.
+	if !resp.Status.Denied {
+		t.Error("expected Denied=true for explicit deny decision; without it, subsequent authorizers can override the denial")
+	}
+}
+
+func TestServeHTTP_NoOpinionResponseDoesNotSetDeniedTrue(t *testing.T) {
+	// No-opinion (no authorizer matched) must NOT set Denied=true, otherwise
+	// Kubernetes would treat it as a hard deny instead of passing through to
+	// the next authorizer.
+	scheme := newScheme(t)
+	cl := newIndexedClient(scheme) // no authorizers
+	handler := &Authorizer{Client: cl, Log: logr.Discard()}
+
+	sar := authzv1.SubjectAccessReview{
+		Spec: authzv1.SubjectAccessReviewSpec{
+			User:               "unknown-user",
+			ResourceAttributes: &authzv1.ResourceAttributes{Verb: "get", Resource: "pods"},
+		},
+	}
+	body := marshalSAR(t, sar)
+	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var resp authzv1.SubjectAccessReview
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Status.Allowed {
+		t.Error("expected Allowed=false for no-opinion")
+	}
+	if resp.Status.Denied {
+		t.Error("expected Denied=false for no-opinion; Denied=true would prevent fallthrough to next authorizer")
+	}
+}
+
+func TestServeHTTP_RateLimitResponseSetsDeniedTrue(t *testing.T) {
+	scheme := newScheme(t)
+	cl := newIndexedClient(scheme)
+
+	// Limiter with burst=0: every request is rate-limited.
+	handler := &Authorizer{
+		Client:  cl,
+		Log:     logr.Discard(),
+		Limiter: rate.NewLimiter(rate.Limit(0), 0),
+	}
+
+	sar := authzv1.SubjectAccessReview{
+		Spec: authzv1.SubjectAccessReviewSpec{
+			User:               "rate-limited-user",
+			ResourceAttributes: &authzv1.ResourceAttributes{Verb: "get", Resource: "pods"},
+		},
+	}
+	body := marshalSAR(t, sar)
+	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var resp authzv1.SubjectAccessReview
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode rate-limit response: %v", err)
+	}
+	if resp.Status.Allowed {
+		t.Error("expected Allowed=false for rate-limited request")
+	}
+	if !resp.Status.Denied {
+		t.Error("expected Denied=true for rate-limited request; without it, subsequent authorizers could allow the request")
+	}
+}
+
+func TestResourceRuleIndex_SubresourceMatching(t *testing.T) {
+	scheme := newScheme(t)
+	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+	handler := &Authorizer{Client: cl, Log: logr.Discard()}
+
+	rules := []authzv1.ResourceRule{
+		// Rule 0: allows "pods" but NOT "pods/log"
+		{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods"}},
+		// Rule 1: explicitly allows "pods/log"
+		{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods/log"}},
+	}
+
+	t.Run("pods request matches pods rule", func(t *testing.T) {
+		attr := &authzv1.ResourceAttributes{Verb: "get", Group: "", Resource: "pods"}
+		idx := handler.resourceRuleIndex(rules, attr)
+		if idx != 0 {
+			t.Errorf("expected rule index 0 for pods, got %d", idx)
+		}
+	})
+
+	t.Run("pods/log subresource matches pods/log rule not pods rule", func(t *testing.T) {
+		attr := &authzv1.ResourceAttributes{Verb: "get", Group: "", Resource: "pods", Subresource: "log"}
+		idx := handler.resourceRuleIndex(rules, attr)
+		if idx != 1 {
+			t.Errorf("expected rule index 1 for pods/log subresource, got %d (a pods-only rule must NOT match pods/log)", idx)
+		}
+	})
+
+	t.Run("pods/exec subresource not matched by any rule", func(t *testing.T) {
+		attr := &authzv1.ResourceAttributes{Verb: "get", Group: "", Resource: "pods", Subresource: "exec"}
+		idx := handler.resourceRuleIndex(rules, attr)
+		if idx >= 0 {
+			t.Errorf("expected no match for pods/exec subresource, got rule index %d", idx)
+		}
+	})
+}
+
+func TestResourceRuleIndex_ResourceNamesMatching(t *testing.T) {
+	scheme := newScheme(t)
+	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+	handler := &Authorizer{Client: cl, Log: logr.Discard()}
+
+	rules := []authzv1.ResourceRule{
+		// Rule 0: allows only specific-pod by name
+		{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods"}, ResourceNames: []string{"specific-pod"}},
+		// Rule 1: allows all pods (no ResourceNames restriction)
+		{Verbs: []string{"list"}, APIGroups: []string{""}, Resources: []string{"pods"}},
+	}
+
+	t.Run("named pod matches rule with matching ResourceName", func(t *testing.T) {
+		attr := &authzv1.ResourceAttributes{Verb: "get", Group: "", Resource: "pods", Name: "specific-pod"}
+		idx := handler.resourceRuleIndex(rules, attr)
+		if idx != 0 {
+			t.Errorf("expected rule index 0 for specific-pod, got %d", idx)
+		}
+	})
+
+	t.Run("different pod name does not match ResourceNames-restricted rule", func(t *testing.T) {
+		attr := &authzv1.ResourceAttributes{Verb: "get", Group: "", Resource: "pods", Name: "other-pod"}
+		idx := handler.resourceRuleIndex(rules, attr)
+		if idx >= 0 {
+			t.Errorf("expected no match for other-pod when rule restricts ResourceNames, got rule index %d", idx)
+		}
+	})
+
+	t.Run("list with no name restriction matches rule without ResourceNames", func(t *testing.T) {
+		attr := &authzv1.ResourceAttributes{Verb: "list", Group: "", Resource: "pods"}
+		idx := handler.resourceRuleIndex(rules, attr)
+		if idx != 1 {
+			t.Errorf("expected rule index 1 for list pods, got %d", idx)
+		}
+	})
+
+	t.Run("wildcard ResourceName matches any request name", func(t *testing.T) {
+		wildcardRules := []authzv1.ResourceRule{
+			{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods"}, ResourceNames: []string{"*"}},
+		}
+		attr := &authzv1.ResourceAttributes{Verb: "get", Group: "", Resource: "pods", Name: "any-pod"}
+		idx := handler.resourceRuleIndex(wildcardRules, attr)
+		if idx != 0 {
+			t.Errorf("expected rule index 0 for wildcard ResourceNames, got %d", idx)
+		}
+	})
+}

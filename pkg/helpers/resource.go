@@ -137,3 +137,23 @@ func RemoveSourceName(existing, nameToRemove string) string {
 func IsLabelSelectorEmpty(selector *metav1.LabelSelector) bool {
 	return selector == nil || (len(selector.MatchLabels) == 0 && len(selector.MatchExpressions) == 0)
 }
+
+// IsMissingFieldIndexError reports whether err is a controller-runtime error
+// indicating that a required field index has not been registered.
+// Callers should treat this as transient and retry rather than failing hard.
+func IsMissingFieldIndexError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "no index with name") {
+		return true
+	}
+	if strings.Contains(msg, "index with name") && strings.Contains(msg, "does not exist") {
+		return true
+	}
+	if strings.Contains(msg, "index with name") && strings.Contains(msg, "has been registered") {
+		return true
+	}
+	return false
+}

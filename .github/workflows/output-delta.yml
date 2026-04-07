@@ -111,12 +111,12 @@ jobs:
           # Deploy the operator
           make deploy IMG=auth-operator:main
           echo "Waiting for operator to be ready..."
-          kubectl wait --for=condition=available --timeout=180s deployment -l control-plane=controller-manager -A 2>/dev/null || \
+          kubectl rollout status deployment/auth-operator-controller-manager -n auth-operator-system --timeout=180s 2>/dev/null || \
             echo "::warning::Could not verify controller-manager readiness, continuing anyway"
 
           # Wait for webhook server if deployed (required for BindDefinition validation)
           echo "Waiting for webhook server to be ready..."
-          kubectl wait --for=condition=available --timeout=180s deployment -l control-plane=webhook-server -A 2>/dev/null || \
+          kubectl rollout status deployment/auth-operator-webhook-server -n auth-operator-system --timeout=180s 2>/dev/null || \
             echo "::notice::Webhook server not found or not ready, continuing anyway"
           sleep 5
 
@@ -135,10 +135,33 @@ jobs:
             echo "::warning::Main branch samples failed to apply, will use PR branch samples as baseline"
           fi
 
+          # Apply intentionally broken (runtime-failure) samples when available.
+          # These must stay structurally valid and apply successfully.
+          if [ -f config/samples/broken/kustomization.yaml ]; then
+            broken_samples_applied=false
+            for i in 1 2 3 4 5; do
+              if kubectl apply --server-side --force-conflicts -k config/samples/broken/ 2>&1; then
+                broken_samples_applied=true
+                break
+              fi
+              echo "Broken sample apply attempt $i failed, waiting before retry..."
+              sleep 10
+            done
+            if [ "$broken_samples_applied" = "false" ]; then
+              echo "::error::Broken runtime-failure samples must apply successfully"
+              exit 1
+            fi
+          else
+            echo "::notice::No config/samples/broken set in this branch, skipping broken-sample apply"
+          fi
+
           # Wait for all CRs to be fully reconciled (Ready condition)
           echo "Waiting for resources to be reconciled..."
           kubectl wait --for=condition=Ready roledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RoleDefinitions not fully reconciled"
           kubectl wait --for=condition=Ready binddefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some BindDefinitions not fully reconciled"
+          kubectl wait --for=condition=Ready rbacpolicy --all --timeout=180s 2>/dev/null || echo "::notice::Some RBACPolicies not fully reconciled"
+          kubectl wait --for=condition=Ready restrictedbinddefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RestrictedBindDefinitions not fully reconciled"
+          kubectl wait --for=condition=Ready restrictedroledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RestrictedRoleDefinitions not fully reconciled"
 
           # Allow extra settle time for cross-resource dependencies (e.g. BDs
           # re-reconcile after RD-generated ClusterRoles appear).
@@ -156,24 +179,32 @@ jobs:
             # Try multiple methods to capture logs (NO --tail limit = capture ALL)
             kubectl logs -n $ns -l control-plane=controller-manager >> /tmp/controller-logs/main-${ns}-controller.log 2>&1 || true
             kubectl logs -n $ns -l app.kubernetes.io/name=auth-operator >> /tmp/controller-logs/main-${ns}-controller.log 2>&1 || true
-            
+
             # Also try getting logs by pod directly
             PODS=$(kubectl get pods -n $ns -l control-plane=controller-manager --no-headers -o custom-columns=":metadata.name" 2>/dev/null || true)
             for pod in $PODS; do
               echo "=== Pod: $pod in $ns (main) ===" >> /tmp/controller-logs/main-${ns}-controller.log
               kubectl logs -n $ns "$pod" >> /tmp/controller-logs/main-${ns}-controller.log 2>&1 || true
             done
-            
+
             kubectl logs -n $ns -l control-plane=webhook-server > /tmp/controller-logs/main-${ns}-webhook.log 2>/dev/null || true
           done
 
           # Cleanup samples -- delete CRs and wait for finalizers to be processed before undeploying
+          kubectl delete -k config/samples/broken/ --ignore-not-found --timeout=60s 2>/dev/null || true
           kubectl delete -k config/samples/ --ignore-not-found --timeout=60s 2>/dev/null || true
           echo "Waiting for CRs to be fully deleted..."
           kubectl wait --for=delete roledefinition --all --timeout=60s 2>/dev/null || true
           kubectl wait --for=delete binddefinition --all --timeout=60s 2>/dev/null || true
           kubectl wait --for=delete webhookauthorizer --all --timeout=60s 2>/dev/null || true
+          kubectl wait --for=delete rbacpolicy --all --timeout=60s 2>/dev/null || true
+          kubectl wait --for=delete restrictedbinddefinition --all --timeout=60s 2>/dev/null || true
+          kubectl wait --for=delete restrictedroledefinition --all --timeout=60s 2>/dev/null || true
           make undeploy 2>/dev/null || true
+          kubectl wait --for=delete deployment/auth-operator-controller-manager -n auth-operator-system --timeout=180s 2>/dev/null || true
+          kubectl wait --for=delete deployment/auth-operator-webhook-server -n auth-operator-system --timeout=180s 2>/dev/null || true
+          kubectl wait --for=delete pod -l control-plane=controller-manager -n auth-operator-system --timeout=180s 2>/dev/null || true
+          kubectl wait --for=delete pod -l control-plane=webhook-server -n auth-operator-system --timeout=180s 2>/dev/null || true
 
           echo "Main branch outputs captured"
 
@@ -190,11 +221,11 @@ jobs:
           kind load docker-image auth-operator:pr --name output-delta
 
           make deploy IMG=auth-operator:pr
-          kubectl wait --for=condition=available --timeout=180s deployment -l control-plane=controller-manager -A 2>/dev/null || \
+          kubectl rollout status deployment/auth-operator-controller-manager -n auth-operator-system --timeout=180s 2>/dev/null || \
             echo "::warning::Controller-manager deployment not Available in time (fallback baseline will continue anyway)"
 
           echo "Waiting for webhook server to be ready..."
-          kubectl wait --for=condition=available --timeout=180s deployment -l control-plane=webhook-server -A 2>/dev/null || \
+          kubectl rollout status deployment/auth-operator-webhook-server -n auth-operator-system --timeout=180s 2>/dev/null || \
             echo "::warning::Webhook server not ready in time, continuing anyway"
           sleep 5
 
@@ -208,9 +239,32 @@ jobs:
             sleep 10
           done
 
+          # Apply intentionally broken (runtime-failure) samples when available.
+          # These must stay structurally valid and apply successfully.
+          if [ -f config/samples/broken/kustomization.yaml ]; then
+            broken_samples_applied=false
+            for i in 1 2 3 4 5; do
+              if kubectl apply --server-side --force-conflicts -k config/samples/broken/ 2>&1; then
+                broken_samples_applied=true
+                break
+              fi
+              echo "Broken sample apply attempt $i failed, waiting before retry..."
+              sleep 10
+            done
+            if [ "$broken_samples_applied" = "false" ]; then
+              echo "::error::Broken runtime-failure samples must apply successfully"
+              exit 1
+            fi
+          else
+            echo "::notice::No config/samples/broken set in this branch, skipping broken-sample apply"
+          fi
+
           # Wait for reconciliation
           kubectl wait --for=condition=Ready roledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RoleDefinitions not fully reconciled"
           kubectl wait --for=condition=Ready binddefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some BindDefinitions not fully reconciled"
+          kubectl wait --for=condition=Ready rbacpolicy --all --timeout=180s 2>/dev/null || echo "::notice::Some RBACPolicies not fully reconciled"
+          kubectl wait --for=condition=Ready restrictedbinddefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RestrictedBindDefinitions not fully reconciled"
+          kubectl wait --for=condition=Ready restrictedroledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RestrictedRoleDefinitions not fully reconciled"
 
           echo "Waiting 15s for reconciliation to fully settle..."
           sleep 15
@@ -218,11 +272,19 @@ jobs:
 
           bash hack/ci/capture-operator-output.sh /tmp/main-output
 
+          kubectl delete -k config/samples/broken/ --ignore-not-found --timeout=60s 2>/dev/null || true
           kubectl delete -k config/samples/ --ignore-not-found --timeout=60s 2>/dev/null || true
           kubectl wait --for=delete roledefinition --all --timeout=60s 2>/dev/null || true
           kubectl wait --for=delete binddefinition --all --timeout=60s 2>/dev/null || true
           kubectl wait --for=delete webhookauthorizer --all --timeout=60s 2>/dev/null || true
+          kubectl wait --for=delete rbacpolicy --all --timeout=60s 2>/dev/null || true
+          kubectl wait --for=delete restrictedbinddefinition --all --timeout=60s 2>/dev/null || true
+          kubectl wait --for=delete restrictedroledefinition --all --timeout=60s 2>/dev/null || true
           make undeploy 2>/dev/null || true
+          kubectl wait --for=delete deployment/auth-operator-controller-manager -n auth-operator-system --timeout=180s 2>/dev/null || true
+          kubectl wait --for=delete deployment/auth-operator-webhook-server -n auth-operator-system --timeout=180s 2>/dev/null || true
+          kubectl wait --for=delete pod -l control-plane=controller-manager -n auth-operator-system --timeout=180s 2>/dev/null || true
+          kubectl wait --for=delete pod -l control-plane=webhook-server -n auth-operator-system --timeout=180s 2>/dev/null || true
 
           echo "Fallback baseline captured using PR branch samples"
           echo "MAIN_FALLBACK=true" >> $GITHUB_ENV
@@ -258,10 +320,10 @@ jobs:
             exit 0
           }
           echo "Waiting for operator to be ready..."
-          kubectl wait --for=condition=available --timeout=180s deployment -l control-plane=controller-manager -A 2>/dev/null || true
+          kubectl rollout status deployment/auth-operator-controller-manager -n auth-operator-system --timeout=180s 2>/dev/null || true
 
           echo "Waiting for webhook server to be ready..."
-          kubectl wait --for=condition=available --timeout=180s deployment -l control-plane=webhook-server -A 2>/dev/null || \
+          kubectl rollout status deployment/auth-operator-webhook-server -n auth-operator-system --timeout=180s 2>/dev/null || \
             echo "::notice::Webhook server not found or not ready, continuing anyway"
           sleep 5
 
@@ -281,8 +343,27 @@ jobs:
             exit 0
           fi
 
+          # Apply intentionally broken (runtime-failure) samples.
+          # These must stay structurally valid and apply successfully.
+          broken_samples_applied=false
+          for i in 1 2 3 4 5; do
+            if kubectl apply --server-side --force-conflicts -k config/samples/broken/ 2>&1; then
+              broken_samples_applied=true
+              break
+            fi
+            echo "Broken sample apply attempt $i failed, waiting before retry..."
+            sleep 10
+          done
+          if [ "$broken_samples_applied" = "false" ]; then
+            echo "::error::Broken runtime-failure samples must apply successfully"
+            exit 1
+          fi
+
           kubectl wait --for=condition=Ready roledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RoleDefinitions not fully reconciled"
           kubectl wait --for=condition=Ready binddefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some BindDefinitions not fully reconciled"
+          kubectl wait --for=condition=Ready rbacpolicy --all --timeout=180s 2>/dev/null || echo "::notice::Some RBACPolicies not fully reconciled"
+          kubectl wait --for=condition=Ready restrictedbinddefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RestrictedBindDefinitions not fully reconciled"
+          kubectl wait --for=condition=Ready restrictedroledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RestrictedRoleDefinitions not fully reconciled"
 
           echo "Waiting 15s for reconciliation to fully settle..."
           sleep 15
@@ -295,22 +376,30 @@ jobs:
           for ns in auth-operator-system kube-system default; do
             kubectl logs -n $ns -l control-plane=controller-manager >> /tmp/controller-logs/tag-${ns}-controller.log 2>&1 || true
             kubectl logs -n $ns -l app.kubernetes.io/name=auth-operator >> /tmp/controller-logs/tag-${ns}-controller.log 2>&1 || true
-            
+
             PODS=$(kubectl get pods -n $ns -l control-plane=controller-manager --no-headers -o custom-columns=":metadata.name" 2>/dev/null || true)
             for pod in $PODS; do
               echo "=== Pod: $pod in $ns (tag) ===" >> /tmp/controller-logs/tag-${ns}-controller.log
               kubectl logs -n $ns "$pod" >> /tmp/controller-logs/tag-${ns}-controller.log 2>&1 || true
             done
-            
+
             kubectl logs -n $ns -l control-plane=webhook-server > /tmp/controller-logs/tag-${ns}-webhook.log 2>/dev/null || true
           done
 
+          kubectl delete -k config/samples/broken/ --ignore-not-found --timeout=60s 2>/dev/null || true
           kubectl delete -k config/samples/ --ignore-not-found --timeout=60s 2>/dev/null || true
           echo "Waiting for CRs to be fully deleted..."
           kubectl wait --for=delete roledefinition --all --timeout=60s 2>/dev/null || true
           kubectl wait --for=delete binddefinition --all --timeout=60s 2>/dev/null || true
           kubectl wait --for=delete webhookauthorizer --all --timeout=60s 2>/dev/null || true
+          kubectl wait --for=delete rbacpolicy --all --timeout=60s 2>/dev/null || true
+          kubectl wait --for=delete restrictedbinddefinition --all --timeout=60s 2>/dev/null || true
+          kubectl wait --for=delete restrictedroledefinition --all --timeout=60s 2>/dev/null || true
           make undeploy 2>/dev/null || true
+          kubectl wait --for=delete deployment/auth-operator-controller-manager -n auth-operator-system --timeout=180s 2>/dev/null || true
+          kubectl wait --for=delete deployment/auth-operator-webhook-server -n auth-operator-system --timeout=180s 2>/dev/null || true
+          kubectl wait --for=delete pod -l control-plane=controller-manager -n auth-operator-system --timeout=180s 2>/dev/null || true
+          kubectl wait --for=delete pod -l control-plane=webhook-server -n auth-operator-system --timeout=180s 2>/dev/null || true
 
           echo "Tag branch (${{ steps.latest-tag.outputs.tag }}) outputs captured"
 
@@ -329,26 +418,51 @@ jobs:
 
           make deploy IMG=auth-operator:pr
           echo "Waiting for operator to be ready..."
-          kubectl wait --for=condition=available --timeout=180s deployment -l control-plane=controller-manager -A 2>/dev/null || \
+          kubectl rollout status deployment/auth-operator-controller-manager -n auth-operator-system --timeout=180s 2>/dev/null || \
             echo "::warning::Could not verify controller-manager readiness, continuing anyway"
 
           echo "Waiting for webhook server to be ready..."
-          kubectl wait --for=condition=available --timeout=180s deployment -l control-plane=webhook-server -A 2>/dev/null || \
+          kubectl rollout status deployment/auth-operator-webhook-server -n auth-operator-system --timeout=180s 2>/dev/null || \
             echo "::warning::Could not verify webhook-server readiness, continuing anyway"
           sleep 5
 
           # Apply sample configs with retry (webhook may need additional time to be fully ready)
+          pr_samples_applied=false
           for i in 1 2 3 4 5; do
             if kubectl apply --server-side --force-conflicts -k config/samples/ 2>&1; then
+              pr_samples_applied=true
               echo "Samples applied successfully"
               break
             fi
             echo "Attempt $i failed, waiting before retry..."
             sleep 10
           done
+          if [ "$pr_samples_applied" = "false" ]; then
+            echo "::error::PR branch samples failed to apply after 5 attempts"
+            exit 1
+          fi
+
+          # Apply intentionally broken (runtime-failure) samples.
+          # These must stay structurally valid and apply successfully.
+          broken_samples_applied=false
+          for i in 1 2 3 4 5; do
+            if kubectl apply --server-side --force-conflicts -k config/samples/broken/ 2>&1; then
+              broken_samples_applied=true
+              break
+            fi
+            echo "Broken sample apply attempt $i failed, waiting before retry..."
+            sleep 10
+          done
+          if [ "$broken_samples_applied" = "false" ]; then
+            echo "::error::Broken runtime-failure samples must apply successfully"
+            exit 1
+          fi
 
           kubectl wait --for=condition=Ready roledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RoleDefinitions not fully reconciled"
           kubectl wait --for=condition=Ready binddefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some BindDefinitions not fully reconciled"
+          kubectl wait --for=condition=Ready rbacpolicy --all --timeout=180s 2>/dev/null || echo "::notice::Some RBACPolicies not fully reconciled"
+          kubectl wait --for=condition=Ready restrictedbinddefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RestrictedBindDefinitions not fully reconciled"
+          kubectl wait --for=condition=Ready restrictedroledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RestrictedRoleDefinitions not fully reconciled"
 
           echo "Waiting 15s for reconciliation to fully settle..."
           sleep 15
@@ -367,21 +481,21 @@ jobs:
           mkdir -p /tmp/controller-logs
 
           echo "Collecting controller logs (PR branch — FULL capture, no truncation)..."
-          
+
           # Debug: Show what pods exist
           echo "=== All pods ===" > /tmp/controller-logs/debug-pods.txt
           kubectl get pods -A -o wide >> /tmp/controller-logs/debug-pods.txt 2>&1 || true
-          
+
           # Try multiple label selectors to find controller pods (NO --tail limit = capture ALL)
           for ns in auth-operator-system kube-system default; do
             echo "Checking namespace: $ns"
-            
+
             # Method 1: By control-plane label
             kubectl logs -n $ns -l control-plane=controller-manager >> /tmp/controller-logs/pr-${ns}-controller.log 2>&1 || true
-            
-            # Method 2: By app.kubernetes.io/name label  
+
+            # Method 2: By app.kubernetes.io/name label
             kubectl logs -n $ns -l app.kubernetes.io/name=auth-operator >> /tmp/controller-logs/pr-${ns}-controller.log 2>&1 || true
-            
+
             # Method 3: By deployment name directly (use -l selector on deployment, then get pods)
             PODS=$(kubectl get pods -n $ns -l control-plane=controller-manager --no-headers -o custom-columns=":metadata.name" 2>/dev/null || true)
             for pod in $PODS; do
@@ -408,6 +522,9 @@ jobs:
           # Get CRD statuses (raw, for debugging)
           kubectl get roledefinitions -A -o yaml > /tmp/controller-logs/roledefinitions.yaml 2>/dev/null || true
           kubectl get binddefinitions -A -o yaml > /tmp/controller-logs/binddefinitions.yaml 2>/dev/null || true
+          kubectl get rbacpolicies -A -o yaml > /tmp/controller-logs/rbacpolicies.yaml 2>/dev/null || true
+          kubectl get restrictedbinddefinitions -A -o yaml > /tmp/controller-logs/restrictedbinddefinitions.yaml 2>/dev/null || true
+          kubectl get restrictedroledefinitions -A -o yaml > /tmp/controller-logs/restrictedroledefinitions.yaml 2>/dev/null || true
 
           echo "Controller logs collected"
 
@@ -443,7 +560,7 @@ jobs:
 
           echo "## CRD Conditions (non-Ready)" >> "$ERROR_LOG"
           echo '```yaml' >> "$ERROR_LOG"
-          for crd in roledefinitions binddefinitions; do
+          for crd in roledefinitions binddefinitions rbacpolicies restrictedbinddefinitions restrictedroledefinitions; do
             if [ -f "/tmp/controller-logs/${crd}.yaml" ]; then
               yq '.items[] | select(.status.conditions != null) | select(.status.conditions[] | select(.status != "True")) | {"name": .metadata.name, "conditions": .status.conditions}' "/tmp/controller-logs/${crd}.yaml" 2>/dev/null >> "$ERROR_LOG" || true
             fi
@@ -504,9 +621,13 @@ jobs:
           done
 
           # CRD status diffs (main vs PR)
-          for resource in roledefinitions-status binddefinitions-status; do
+          for resource in roledefinitions-status binddefinitions-status rbacpolicies-status restrictedbinddefinitions-status restrictedroledefinitions-status; do
             if [ -f "/tmp/main-output/$resource.yaml" ] && [ -f "/tmp/pr-output/$resource.yaml" ]; then
               diff -u /tmp/main-output/$resource.yaml /tmp/pr-output/$resource.yaml > /tmp/diff-output/main/$resource.diff 2>&1 || true
+            elif [ -f "/tmp/pr-output/$resource.yaml" ]; then
+              diff -u /dev/null /tmp/pr-output/$resource.yaml > /tmp/diff-output/main/$resource.diff 2>&1 || true
+            elif [ -f "/tmp/main-output/$resource.yaml" ]; then
+              diff -u /tmp/main-output/$resource.yaml /dev/null > /tmp/diff-output/main/$resource.diff 2>&1 || true
             fi
           done
 
@@ -516,9 +637,13 @@ jobs:
               diff -u /tmp/tag-output/$resource.yaml /tmp/pr-output/$resource.yaml > /tmp/diff-output/tag/$resource.diff 2>&1 || true
             done
 
-            for resource in roledefinitions-status binddefinitions-status; do
+            for resource in roledefinitions-status binddefinitions-status rbacpolicies-status restrictedbinddefinitions-status restrictedroledefinitions-status; do
               if [ -f "/tmp/tag-output/$resource.yaml" ] && [ -f "/tmp/pr-output/$resource.yaml" ]; then
                 diff -u /tmp/tag-output/$resource.yaml /tmp/pr-output/$resource.yaml > /tmp/diff-output/tag/$resource.diff 2>&1 || true
+              elif [ -f "/tmp/pr-output/$resource.yaml" ]; then
+                diff -u /dev/null /tmp/pr-output/$resource.yaml > /tmp/diff-output/tag/$resource.diff 2>&1 || true
+              elif [ -f "/tmp/tag-output/$resource.yaml" ]; then
+                diff -u /tmp/tag-output/$resource.yaml /dev/null > /tmp/diff-output/tag/$resource.diff 2>&1 || true
               fi
             done
 
@@ -588,7 +713,10 @@ jobs:
               ['RoleBindings', 'rolebindings.diff'],
               ['ServiceAccounts', 'serviceaccounts.diff'],
               ['RoleDefinitions Status', 'roledefinitions-status.diff'],
-              ['BindDefinitions Status', 'binddefinitions-status.diff']
+              ['BindDefinitions Status', 'binddefinitions-status.diff'],
+              ['RBACPolicies Status', 'rbacpolicies-status.diff'],
+              ['RestrictedBindDefinitions Status', 'restrictedbinddefinitions-status.diff'],
+              ['RestrictedRoleDefinitions Status', 'restrictedroledefinitions-status.diff']
             ];
 
             const mainFallback = '${{ steps.diff.outputs.main_fallback }}' === 'true';

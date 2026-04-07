@@ -34,6 +34,9 @@ spec:
         - --binddefinition-concurrency={{ .Values.controller.bindDefinitionConcurrency }}
         - --roledefinition-concurrency={{ .Values.controller.roleDefinitionConcurrency }}
         - --webhookauthorizer-concurrency={{ .Values.controller.webhookAuthorizerConcurrency }}
+        - --rbacpolicy-concurrency={{ .Values.controller.rbacPolicyConcurrency }}
+        - --restrictedbinddefinition-concurrency={{ .Values.controller.restrictedBindDefinitionConcurrency }}
+        - --restrictedroledefinition-concurrency={{ .Values.controller.restrictedRoleDefinitionConcurrency }}
         - --verbosity={{ .Values.global.logLevel }}
         {{- if .Values.metrics.auth.enabled }}
         - --metrics-secure

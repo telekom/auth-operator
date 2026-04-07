@@ -1,0 +1,372 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# =============================================================================
+# RBACPolicy Samples - Comprehensive Feature Coverage
+# =============================================================================
+# These samples demonstrate all features of the RBACPolicy CRD:
+# - Namespace scoping (label selector, explicit list)
+# - Binding limits (CRB/RB allow/deny, role ref wildcards, namespace targets)
+# - Role limits (forbidden verbs, resources, API groups, resource-verb combos)
+# - Subject limits (allowed/forbidden kinds, name patterns, SA constraints)
+# - ServiceAccount creation config (auto-create, namespace restrictions)
+# =============================================================================
+
+---
+# -----------------------------------------------------------------------------
+# RBACPolicy: Team Workload Policy
+# A typical policy for application teams that restricts SA-only access
+# in labeled team namespaces with read-only ClusterRole bindings.
+# Use case: ServiceAccount-only tenants
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RBACPolicy
+metadata:
+  name: team-workload-policy
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/policy-tier: workload
+spec:
+  appliesTo:
+    namespaceSelector:
+      matchLabels:
+        t-caas.telekom.com/tenant: "true"
+  # Default policy assignment for identities that submit restricted resources.
+  # This is useful when restricted resources are applied via impersonated SAs.
+  defaultAssignment:
+    groups:
+      - "oidc:team-alpha-rbac-admins"
+    serviceAccounts:
+      - name: team-alpha-rbac-applier
+        namespace: team-alpha
+  impersonation:
+    enabled: true
+    serviceAccountRef:
+      name: team-alpha-rbac-applier
+      namespace: team-alpha
+  bindingLimits:
+    allowClusterRoleBindings: false
+    roleBindingLimits:
+      allowedRoleRefs:
+        - "t-caas-team-*"
+      forbiddenRoleRefs:
+        - "cluster-admin"
+        - "admin"
+    targetNamespaceLimits:
+      forbiddenNamespacePrefixes:
+        - "kube-"
+        - "auth-operator-"
+      maxTargetNamespaces: 5
+  roleLimits:
+    allowClusterRoles: false
+    forbiddenVerbs:
+      - "escalate"
+      - "impersonate"
+      - "bind"
+    forbiddenResources:
+      - "secrets"
+      - "nodes"
+    forbiddenAPIGroups:
+      - "certificates.k8s.io"
+    maxRulesPerRole: 20
+  subjectLimits:
+    allowedKinds:
+      - "ServiceAccount"
+    serviceAccountLimits:
+      forbiddenNamespacePrefixes:
+        - "kube-"
+      creation:
+        allowAutoCreate: true
+        allowedCreationNamespaceSelector:
+          matchLabels:
+            t-caas.telekom.com/tenant: "true"
+
+---
+# -----------------------------------------------------------------------------
+# RBACPolicy: Cross-Namespace Operator Policy
+# Allows operators to bind across multiple tenant namespaces.
+# Use case: Cross-namespace operator access
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RBACPolicy
+metadata:
+  name: operator-cross-namespace-policy
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/policy-tier: operator
+spec:
+  appliesTo:
+    namespaceSelector:
+      matchExpressions:
+        - key: t-caas.telekom.com/managed-by
+          operator: In
+          values:
+            - platform-team
+            - infra-team
+  defaultAssignment:
+    groups:
+      - "oidc:platform-operators"
+      - "oidc:infra-operators"
+  bindingLimits:
+    allowClusterRoleBindings: true
+    clusterRoleBindingLimits:
+      allowedRoleRefs:
+        - "t-caas-operator-*"
+        - "t-caas-monitoring-*"
+      forbiddenRoleRefs:
+        - "cluster-admin"
+    roleBindingLimits:
+      allowedRoleRefs:
+        - "t-caas-*"
+    targetNamespaceLimits:
+      forbiddenNamespaces:
+        - "kube-system"
+        - "kube-public"
+      maxTargetNamespaces: 20
+  subjectLimits:
+    allowedKinds:
+      - "ServiceAccount"
+      - "Group"
+    groupLimits:
+      allowedPrefixes:
+        - "platform-"
+        - "infra-"
+
+---
+# -----------------------------------------------------------------------------
+# RBACPolicy: CI/CD Pipeline Policy
+# Restricts CI service accounts to CI namespaces with specific roles.
+# Use case: CI/CD pipelines
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RBACPolicy
+metadata:
+  name: cicd-pipeline-policy
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/policy-tier: cicd
+spec:
+  appliesTo:
+    namespaces:
+      - ci-runners
+      - cd-deploy
+  defaultAssignment:
+    serviceAccounts:
+      - name: ci-rbac-applier
+        namespace: ci-runners
+  impersonation:
+    enabled: true
+    serviceAccountRef:
+      name: ci-rbac-applier
+      namespace: ci-runners
+  bindingLimits:
+    allowClusterRoleBindings: false
+    roleBindingLimits:
+      allowedRoleRefs:
+        - "t-caas-ci-*"
+        - "t-caas-deploy-*"
+    targetNamespaceLimits:
+      forbiddenNamespacePrefixes:
+        - "kube-"
+        - "auth-operator-"
+  roleLimits:
+    allowClusterRoles: false
+    forbiddenVerbs:
+      - "escalate"
+      - "impersonate"
+      - "bind"
+      - "delete"
+    forbiddenResources:
+      - "secrets"
+      - "persistentvolumes"
+    forbiddenResourceVerbs:
+      - resource: "deployments"
+        apiGroup: "apps"
+        verbs:
+          - "delete"
+    maxRulesPerRole: 10
+  subjectLimits:
+    allowedKinds:
+      - "ServiceAccount"
+    serviceAccountLimits:
+      forbiddenNamespacePrefixes:
+        - "kube-"
+      creation:
+        allowAutoCreate: true
+        allowedCreationNamespaces:
+          - ci-runners
+          - cd-deploy
+        automountServiceAccountToken: false
+
+---
+# -----------------------------------------------------------------------------
+# RBACPolicy: Compliance-Strict Policy
+# Enforces strict compliance requirements with audit annotations.
+# Use case: Compliance requirements
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RBACPolicy
+metadata:
+  name: compliance-strict-policy
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/policy-tier: compliance
+spec:
+  appliesTo:
+    namespaceSelector:
+      matchLabels:
+        t-caas.telekom.com/compliance: "strict"
+  bindingLimits:
+    allowClusterRoleBindings: false
+    roleBindingLimits:
+      allowedRoleRefs:
+        - "t-caas-readonly-*"
+      forbiddenRoleRefSelector:
+        matchLabels:
+          t-caas.telekom.com/privilege-level: admin
+    targetNamespaceLimits:
+      forbiddenNamespacePrefixes:
+        - "kube-"
+      maxTargetNamespaces: 3
+  roleLimits:
+    allowClusterRoles: false
+    forbiddenVerbs:
+      - "create"
+      - "update"
+      - "delete"
+      - "patch"
+      - "escalate"
+      - "impersonate"
+      - "bind"
+    forbiddenResources:
+      - "secrets"
+      - "configmaps"
+    forbiddenAPIGroups:
+      - "certificates.k8s.io"
+      - "admissionregistration.k8s.io"
+    maxRulesPerRole: 5
+  subjectLimits:
+    allowedKinds:
+      - "Group"
+    forbiddenKinds:
+      - "User"
+    groupLimits:
+      forbiddenPrefixes:
+        - "system:"
+      forbiddenNames:
+        - "cluster-admins"
+
+---
+# -----------------------------------------------------------------------------
+# CASE: Allowed (broad sample policy)
+# Purpose: allows core restricted reconciliation paths and uses impersonation.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RBACPolicy
+metadata:
+  name: sample-policy-allow-all-paths
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/policy-tier: samples
+    t-caas.telekom.com/sample-case: allowed
+spec:
+  appliesTo:
+    namespaces:
+      - sample-tenant-a
+      - sample-tenant-b
+  defaultAssignment:
+    groups:
+      - "oidc:sample-rbac-admins"
+    serviceAccounts:
+      - name: sample-impersonation-admin
+        namespace: sample-authz
+  impersonation:
+    enabled: true
+    serviceAccountRef:
+      name: sample-impersonation-admin
+      namespace: sample-authz
+  bindingLimits:
+    allowClusterRoleBindings: true
+    clusterRoleBindingLimits:
+      allowedRoleRefs:
+        - "sample-*"
+    roleBindingLimits:
+      allowedRoleRefs:
+        - "sample-*"
+  roleLimits:
+    allowClusterRoles: true
+    forbiddenVerbs:
+      - escalate
+  subjectLimits:
+    allowedKinds:
+      - ServiceAccount
+      - Group
+
+---
+# -----------------------------------------------------------------------------
+# CASE: Blocked by policy (ClusterRoleBindings forbidden)
+# Purpose: RestrictedBindDefinition using clusterRoleBindings should be blocked.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RBACPolicy
+metadata:
+  name: sample-policy-block-clusterrolebindings
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/policy-tier: samples
+    t-caas.telekom.com/sample-case: blocked
+spec:
+  appliesTo:
+    namespaces:
+      - sample-tenant-a
+  bindingLimits:
+    allowClusterRoleBindings: false
+    roleBindingLimits:
+      allowedRoleRefs:
+        - "sample-*"
+  roleLimits:
+    allowClusterRoles: false
+  subjectLimits:
+    allowedKinds:
+      - ServiceAccount
+
+---
+# -----------------------------------------------------------------------------
+# CASE: Partially allowed
+# Purpose: permits object creation but allows missing roleRef reporting paths.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RBACPolicy
+metadata:
+  name: sample-policy-partially-allowed-bindings
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/policy-tier: samples
+    t-caas.telekom.com/sample-case: partial
+spec:
+  appliesTo:
+    namespaces:
+      - sample-tenant-a
+      - sample-tenant-b
+  bindingLimits:
+    allowClusterRoleBindings: false
+    roleBindingLimits:
+      allowedRoleRefs:
+        - "sample-*"
+    targetNamespaceLimits:
+      maxTargetNamespaces: 3
+  roleLimits:
+    allowClusterRoles: true
+    forbiddenResources:
+      - secrets
+  subjectLimits:
+    allowedKinds:
+      - ServiceAccount

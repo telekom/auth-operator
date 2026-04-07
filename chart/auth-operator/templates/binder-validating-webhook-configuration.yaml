@@ -31,6 +31,67 @@ webhooks:
     service:
       name: '{{ include "auth-operator.fullname" . }}-webhook-service'
       namespace: '{{ .Release.Namespace }}'
+      path: /validate-authorization-t-caas-telekom-com-v1alpha1-rbacpolicy
+  failurePolicy: Fail
+  name: rbacpolicy.validating.webhook.auth.t-caas.telekom.de
+  rules:
+  - apiGroups:
+    - authorization.t-caas.telekom.com
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    - DELETE
+    resources:
+    - rbacpolicies
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: '{{ include "auth-operator.fullname" . }}-webhook-service'
+      namespace: '{{ .Release.Namespace }}'
+      path: /validate-authorization-t-caas-telekom-com-v1alpha1-restrictedbinddefinition
+  failurePolicy: Fail
+  name: restrictedbinddefinition.validating.webhook.auth.t-caas.telekom.de
+  rules:
+  - apiGroups:
+    - authorization.t-caas.telekom.com
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - restrictedbinddefinitions
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: '{{ include "auth-operator.fullname" . }}-webhook-service'
+      namespace: '{{ .Release.Namespace }}'
+      path: /validate-authorization-t-caas-telekom-com-v1alpha1-restrictedroledefinition
+  failurePolicy: Fail
+  name: restrictedroledefinition.validating.webhook.auth.t-caas.telekom.de
+  rules:
+  - apiGroups:
+    - authorization.t-caas.telekom.com
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - restrictedroledefinitions
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: '{{ include "auth-operator.fullname" . }}-webhook-service'
+      namespace: '{{ .Release.Namespace }}'
       path: /validate-authorization-t-caas-telekom-com-v1alpha1-roledefinition
   failurePolicy: Fail
   name: roledefinition.validating.webhook.auth.t-caas.telekom.de

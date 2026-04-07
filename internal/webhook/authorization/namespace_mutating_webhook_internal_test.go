@@ -7,7 +7,7 @@ package webhooks
 import (
 	"testing"
 
-	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -26,61 +26,61 @@ func TestGetLabelsFromNamespaceSelector(t *testing.T) {
 			name: "matchLabels with owner key",
 			selector: metav1.LabelSelector{
 				MatchLabels: map[string]string{
-					authzv1alpha1.LabelKeyOwner: "platform",
+					authorizationv1alpha1.LabelKeyOwner: "platform",
 				},
 			},
 			want: map[string]string{
-				authzv1alpha1.LabelKeyOwner: "platform",
+				authorizationv1alpha1.LabelKeyOwner: "platform",
 			},
 		},
 		{
 			name: "matchLabels with tenant key",
 			selector: metav1.LabelSelector{
 				MatchLabels: map[string]string{
-					authzv1alpha1.LabelKeyTenant: "team-alpha",
+					authorizationv1alpha1.LabelKeyTenant: "team-alpha",
 				},
 			},
 			want: map[string]string{
-				authzv1alpha1.LabelKeyTenant: "team-alpha",
+				authorizationv1alpha1.LabelKeyTenant: "team-alpha",
 			},
 		},
 		{
 			name: "matchLabels with thirdparty key",
 			selector: metav1.LabelSelector{
 				MatchLabels: map[string]string{
-					authzv1alpha1.LabelKeyThirdParty: "vendor-x",
+					authorizationv1alpha1.LabelKeyThirdParty: "vendor-x",
 				},
 			},
 			want: map[string]string{
-				authzv1alpha1.LabelKeyThirdParty: "vendor-x",
+				authorizationv1alpha1.LabelKeyThirdParty: "vendor-x",
 			},
 		},
 		{
 			name: "matchLabels with all tracked keys",
 			selector: metav1.LabelSelector{
 				MatchLabels: map[string]string{
-					authzv1alpha1.LabelKeyOwner:      "tenant",
-					authzv1alpha1.LabelKeyTenant:     "team-beta",
-					authzv1alpha1.LabelKeyThirdParty: "vendor-y",
+					authorizationv1alpha1.LabelKeyOwner:      "tenant",
+					authorizationv1alpha1.LabelKeyTenant:     "team-beta",
+					authorizationv1alpha1.LabelKeyThirdParty: "vendor-y",
 				},
 			},
 			want: map[string]string{
-				authzv1alpha1.LabelKeyOwner:      "tenant",
-				authzv1alpha1.LabelKeyTenant:     "team-beta",
-				authzv1alpha1.LabelKeyThirdParty: "vendor-y",
+				authorizationv1alpha1.LabelKeyOwner:      "tenant",
+				authorizationv1alpha1.LabelKeyTenant:     "team-beta",
+				authorizationv1alpha1.LabelKeyThirdParty: "vendor-y",
 			},
 		},
 		{
 			name: "matchLabels ignores non-tracked keys",
 			selector: metav1.LabelSelector{
 				MatchLabels: map[string]string{
-					"kubernetes.io/metadata.name": "kube-system",
-					authzv1alpha1.LabelKeyOwner:   "platform",
-					"some-other-label":            "value",
+					"kubernetes.io/metadata.name":       "kube-system",
+					authorizationv1alpha1.LabelKeyOwner: "platform",
+					"some-other-label":                  "value",
 				},
 			},
 			want: map[string]string{
-				authzv1alpha1.LabelKeyOwner: "platform",
+				authorizationv1alpha1.LabelKeyOwner: "platform",
 			},
 		},
 		{
@@ -88,14 +88,14 @@ func TestGetLabelsFromNamespaceSelector(t *testing.T) {
 			selector: metav1.LabelSelector{
 				MatchExpressions: []metav1.LabelSelectorRequirement{
 					{
-						Key:      authzv1alpha1.LabelKeyOwner,
+						Key:      authorizationv1alpha1.LabelKeyOwner,
 						Operator: metav1.LabelSelectorOpIn,
 						Values:   []string{"platform"},
 					},
 				},
 			},
 			want: map[string]string{
-				authzv1alpha1.LabelKeyOwner: "platform",
+				authorizationv1alpha1.LabelKeyOwner: "platform",
 			},
 		},
 		{
@@ -103,14 +103,14 @@ func TestGetLabelsFromNamespaceSelector(t *testing.T) {
 			selector: metav1.LabelSelector{
 				MatchExpressions: []metav1.LabelSelectorRequirement{
 					{
-						Key:      authzv1alpha1.LabelKeyTenant,
+						Key:      authorizationv1alpha1.LabelKeyTenant,
 						Operator: metav1.LabelSelectorOpIn,
 						Values:   []string{"team-gamma"},
 					},
 				},
 			},
 			want: map[string]string{
-				authzv1alpha1.LabelKeyTenant: "team-gamma",
+				authorizationv1alpha1.LabelKeyTenant: "team-gamma",
 			},
 		},
 		{
@@ -118,14 +118,14 @@ func TestGetLabelsFromNamespaceSelector(t *testing.T) {
 			selector: metav1.LabelSelector{
 				MatchExpressions: []metav1.LabelSelectorRequirement{
 					{
-						Key:      authzv1alpha1.LabelKeyThirdParty,
+						Key:      authorizationv1alpha1.LabelKeyThirdParty,
 						Operator: metav1.LabelSelectorOpIn,
 						Values:   []string{"vendor-z"},
 					},
 				},
 			},
 			want: map[string]string{
-				authzv1alpha1.LabelKeyThirdParty: "vendor-z",
+				authorizationv1alpha1.LabelKeyThirdParty: "vendor-z",
 			},
 		},
 		{
@@ -133,7 +133,7 @@ func TestGetLabelsFromNamespaceSelector(t *testing.T) {
 			selector: metav1.LabelSelector{
 				MatchExpressions: []metav1.LabelSelectorRequirement{
 					{
-						Key:      authzv1alpha1.LabelKeyOwner,
+						Key:      authorizationv1alpha1.LabelKeyOwner,
 						Operator: metav1.LabelSelectorOpNotIn,
 						Values:   []string{"platform"},
 					},
@@ -146,7 +146,7 @@ func TestGetLabelsFromNamespaceSelector(t *testing.T) {
 			selector: metav1.LabelSelector{
 				MatchExpressions: []metav1.LabelSelectorRequirement{
 					{
-						Key:      authzv1alpha1.LabelKeyOwner,
+						Key:      authorizationv1alpha1.LabelKeyOwner,
 						Operator: metav1.LabelSelectorOpIn,
 						Values:   []string{"platform", "tenant"},
 					},
@@ -171,19 +171,19 @@ func TestGetLabelsFromNamespaceSelector(t *testing.T) {
 			name: "combined matchLabels and matchExpressions",
 			selector: metav1.LabelSelector{
 				MatchLabels: map[string]string{
-					authzv1alpha1.LabelKeyOwner: "tenant",
+					authorizationv1alpha1.LabelKeyOwner: "tenant",
 				},
 				MatchExpressions: []metav1.LabelSelectorRequirement{
 					{
-						Key:      authzv1alpha1.LabelKeyTenant,
+						Key:      authorizationv1alpha1.LabelKeyTenant,
 						Operator: metav1.LabelSelectorOpIn,
 						Values:   []string{"team-delta"},
 					},
 				},
 			},
 			want: map[string]string{
-				authzv1alpha1.LabelKeyOwner:  "tenant",
-				authzv1alpha1.LabelKeyTenant: "team-delta",
+				authorizationv1alpha1.LabelKeyOwner:  "tenant",
+				authorizationv1alpha1.LabelKeyTenant: "team-delta",
 			},
 		},
 	}
