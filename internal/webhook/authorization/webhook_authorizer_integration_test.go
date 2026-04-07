@@ -21,7 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	webhooks "github.com/telekom/auth-operator/internal/webhook/authorization"
 )
 
@@ -46,12 +46,12 @@ func sendSAR(authorizer *webhooks.Authorizer, sar authzv1.SubjectAccessReview) a
 
 // createWAAndSync creates a WebhookAuthorizer and waits for the informer cache
 // to reflect it, preventing race conditions between writes and cached reads.
-func createWAAndSync(ctx context.Context, wa *authzv1alpha1.WebhookAuthorizer) {
+func createWAAndSync(ctx context.Context, wa *authorizationv1alpha1.WebhookAuthorizer) {
 	GinkgoHelper()
 	Expect(envClient.Create(ctx, wa)).To(Succeed())
 	key := client.ObjectKeyFromObject(wa)
 	Eventually(func() error {
-		return envClient.Get(ctx, key, &authzv1alpha1.WebhookAuthorizer{})
+		return envClient.Get(ctx, key, &authorizationv1alpha1.WebhookAuthorizer{})
 	}).WithTimeout(10 * time.Second).WithPolling(250 * time.Millisecond).Should(Succeed())
 }
 
@@ -71,10 +71,10 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 
 	Describe("Basic Allow/Deny Flow", func() {
 		BeforeEach(func() {
-			wa := &authzv1alpha1.WebhookAuthorizer{
+			wa := &authorizationv1alpha1.WebhookAuthorizer{
 				ObjectMeta: metav1.ObjectMeta{GenerateName: "wa-basic-"},
-				Spec: authzv1alpha1.WebhookAuthorizerSpec{
-					AllowedPrincipals: []authzv1alpha1.Principal{
+				Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+					AllowedPrincipals: []authorizationv1alpha1.Principal{
 						{User: "allowed-user"},
 					},
 					ResourceRules: []authzv1.ResourceRule{
@@ -128,13 +128,13 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 
 	Describe("DeniedPrincipals Override", func() {
 		BeforeEach(func() {
-			wa := &authzv1alpha1.WebhookAuthorizer{
+			wa := &authorizationv1alpha1.WebhookAuthorizer{
 				ObjectMeta: metav1.ObjectMeta{Name: "wa-deny-override"},
-				Spec: authzv1alpha1.WebhookAuthorizerSpec{
-					AllowedPrincipals: []authzv1alpha1.Principal{
+				Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+					AllowedPrincipals: []authorizationv1alpha1.Principal{
 						{User: "dual-user"},
 					},
-					DeniedPrincipals: []authzv1alpha1.Principal{
+					DeniedPrincipals: []authorizationv1alpha1.Principal{
 						{User: "dual-user"},
 					},
 					ResourceRules: []authzv1.ResourceRule{
@@ -189,10 +189,10 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 				_ = envClient.Delete(setupCtx, nsDev)
 			})
 
-			wa := &authzv1alpha1.WebhookAuthorizer{
+			wa := &authorizationv1alpha1.WebhookAuthorizer{
 				ObjectMeta: metav1.ObjectMeta{Name: "wa-ns-selector"},
-				Spec: authzv1alpha1.WebhookAuthorizerSpec{
-					AllowedPrincipals: []authzv1alpha1.Principal{
+				Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+					AllowedPrincipals: []authorizationv1alpha1.Principal{
 						{User: "ns-user"},
 					},
 					ResourceRules: []authzv1.ResourceRule{
@@ -250,10 +250,10 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 		BeforeEach(func() {
 			// Name the deny authorizer so it sorts before the allow one alphabetically,
 			// since evaluateSAR iterates in API server list order (alphabetical).
-			wa1 := &authzv1alpha1.WebhookAuthorizer{
+			wa1 := &authorizationv1alpha1.WebhookAuthorizer{
 				ObjectMeta: metav1.ObjectMeta{Name: "wa-aaa-deny"},
-				Spec: authzv1alpha1.WebhookAuthorizerSpec{
-					DeniedPrincipals: []authzv1alpha1.Principal{
+				Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+					DeniedPrincipals: []authorizationv1alpha1.Principal{
 						{User: "blocked-user"},
 					},
 					ResourceRules: []authzv1.ResourceRule{
@@ -261,10 +261,10 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 					},
 				},
 			}
-			wa2 := &authzv1alpha1.WebhookAuthorizer{
+			wa2 := &authorizationv1alpha1.WebhookAuthorizer{
 				ObjectMeta: metav1.ObjectMeta{Name: "wa-bbb-allow"},
-				Spec: authzv1alpha1.WebhookAuthorizerSpec{
-					AllowedPrincipals: []authzv1alpha1.Principal{
+				Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+					AllowedPrincipals: []authorizationv1alpha1.Principal{
 						{User: "blocked-user"},
 						{User: "normal-user"},
 					},
@@ -309,10 +309,10 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 
 	Describe("NonResourceRules", func() {
 		BeforeEach(func() {
-			wa := &authzv1alpha1.WebhookAuthorizer{
+			wa := &authorizationv1alpha1.WebhookAuthorizer{
 				ObjectMeta: metav1.ObjectMeta{Name: "wa-nonresource"},
-				Spec: authzv1alpha1.WebhookAuthorizerSpec{
-					AllowedPrincipals: []authzv1alpha1.Principal{
+				Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+					AllowedPrincipals: []authorizationv1alpha1.Principal{
 						{User: "health-checker"},
 					},
 					NonResourceRules: []authzv1.NonResourceRule{
@@ -353,13 +353,13 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 
 	Describe("Group-Based Principal Matching", func() {
 		BeforeEach(func() {
-			wa := &authzv1alpha1.WebhookAuthorizer{
+			wa := &authorizationv1alpha1.WebhookAuthorizer{
 				ObjectMeta: metav1.ObjectMeta{Name: "wa-groups"},
-				Spec: authzv1alpha1.WebhookAuthorizerSpec{
-					AllowedPrincipals: []authzv1alpha1.Principal{
+				Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+					AllowedPrincipals: []authorizationv1alpha1.Principal{
 						{Groups: []string{"platform-admins"}},
 					},
-					DeniedPrincipals: []authzv1alpha1.Principal{
+					DeniedPrincipals: []authorizationv1alpha1.Principal{
 						{Groups: []string{"suspended-group"}},
 					},
 					ResourceRules: []authzv1.ResourceRule{
@@ -415,10 +415,10 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 
 	Describe("ServiceAccount Principal Matching", func() {
 		BeforeEach(func() {
-			wa := &authzv1alpha1.WebhookAuthorizer{
+			wa := &authorizationv1alpha1.WebhookAuthorizer{
 				ObjectMeta: metav1.ObjectMeta{Name: "wa-serviceaccount"},
-				Spec: authzv1alpha1.WebhookAuthorizerSpec{
-					AllowedPrincipals: []authzv1alpha1.Principal{
+				Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+					AllowedPrincipals: []authorizationv1alpha1.Principal{
 						{User: "my-sa", Namespace: "kube-system"},
 					},
 					ResourceRules: []authzv1.ResourceRule{
@@ -459,10 +459,10 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 
 	Describe("Live Update", func() {
 		It("reflects changes after updating the WebhookAuthorizer", func() {
-			wa := &authzv1alpha1.WebhookAuthorizer{
+			wa := &authorizationv1alpha1.WebhookAuthorizer{
 				ObjectMeta: metav1.ObjectMeta{Name: "wa-live-update"},
-				Spec: authzv1alpha1.WebhookAuthorizerSpec{
-					AllowedPrincipals: []authzv1alpha1.Principal{
+				Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+					AllowedPrincipals: []authorizationv1alpha1.Principal{
 						{User: "live-user"},
 					},
 					ResourceRules: []authzv1.ResourceRule{
@@ -488,7 +488,7 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 
 			// Update to remove the user from allowed principals.
 			Expect(envClient.Get(ctx, client.ObjectKeyFromObject(wa), wa)).To(Succeed())
-			wa.Spec.AllowedPrincipals = []authzv1alpha1.Principal{
+			wa.Spec.AllowedPrincipals = []authorizationv1alpha1.Principal{
 				{User: "someone-else"},
 			}
 			Expect(envClient.Update(ctx, wa)).To(Succeed())
@@ -510,10 +510,10 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 
 	Describe("Wildcard Matching", func() {
 		BeforeEach(func() {
-			wa := &authzv1alpha1.WebhookAuthorizer{
+			wa := &authorizationv1alpha1.WebhookAuthorizer{
 				ObjectMeta: metav1.ObjectMeta{Name: "wa-wildcard"},
-				Spec: authzv1alpha1.WebhookAuthorizerSpec{
-					AllowedPrincipals: []authzv1alpha1.Principal{
+				Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+					AllowedPrincipals: []authorizationv1alpha1.Principal{
 						{User: "admin"},
 					},
 					ResourceRules: []authzv1.ResourceRule{

@@ -39,6 +39,12 @@ test/e2e/                      Ginkgo E2E tests
 8. **Test patterns**: Use Ginkgo/Gomega for controller tests, standard `testing` for unit tests. Target >70% coverage.
 9. **Condition management**: Use `pkg/conditions.SetCondition()` — never set conditions manually on status.
 10. **Server-Side Apply**: Use `pkg/ssa` helpers for RBAC resources — never use `Update()` for managed objects.
+11. **Context-aware logging only**: In production controller/webhook code, derive loggers from context via `log.FromContext(ctx)` (or pass `ctx` and derive inside helpers). Do not pass raw logger instances across helper boundaries.
+12. **Tracing attributes**: For reconciler spans, include controller/resource/namespace attributes. For impersonated apply flows, add user attribute to the active span.
+13. **Sample set semantics**:
+   - `config/samples/`: structurally valid baseline samples for normal reconciliation paths.
+   - `config/samples/broken/`: structurally valid runtime-failure samples that MUST apply and then stall/partially reconcile.
+   - Webhook/schema-invalid examples stay outside the broken kustomization apply set.
 
 ## Testing
 
@@ -96,19 +102,19 @@ above groups by domain):
 **Code quality** (4 personas):
 - **Go style** catches import alias violations (`authorizationv1alpha1` enforcement), `%v` error wrapping, `godot` comment periods, `revive` naming
 - **Concurrency** catches SSA ownership conflicts, condition management bypasses, stale cache reads
-- **K8s patterns** catches missing context timeouts, non-idempotent reconcilers, condition mis-management
+- **K8s patterns** catches missing context timeouts, non-idempotent reconcilers, condition mis-management, and non-context-aware logging (raw logger usage)
 - **Performance** catches unbounded namespace enumeration, SSA no-op waste, high-cardinality metrics
 
 **Correctness** (4 personas):
-- **Integration wiring** catches new code that is defined but never called, SSA apply gaps, RBAC drift, **PR description ↔ implementation alignment**
+- **Integration wiring** catches new code that is defined but never called, SSA apply gaps, RBAC drift, cross-branch CI path assumptions, **PR description ↔ implementation alignment**
 - **API & CRD** catches missing validation markers, backwards-compatibility breaks (incl. **validation tightening** as breaking), SSA completeness
-- **Edge cases** catches namespace lifecycle races, SSA conflicts, zero-value bugs, webhook timing, **SSA field ownership edge cases** (ForceOwnership wars, GC interactions)
+- **Edge cases** catches namespace lifecycle races, SSA conflicts, zero-value bugs, webhook timing, runtime-failure sample behavior, **SSA field ownership edge cases** (ForceOwnership wars, GC interactions)
 - **QA regression** catches RBAC generation regressions, condition reason changes, rollback hazards, **verification discipline** (search codebase before flagging)
 
 **Security & documentation** (3 personas):
 - **Security** catches privilege escalation via RBAC generation, webhook bypass, DoS vectors, **error response sanitization** (no internal details in admission responses)
 - **Docs consistency** catches field name mismatches, stale condition references, Helm doc drift
-- **CI & testing** catches coverage gaps, Ginkgo/testify mixing, missing enum cases, golden staleness, **verification discipline** (search tests before flagging)
+- **CI & testing** catches coverage gaps, Ginkgo/testify mixing, missing enum cases, golden staleness, broken-sample apply semantics, **verification discipline** (search tests before flagging)
 
 **User-facing** (1 persona):
 - **End-user** catches platform engineer confusion, admin upgrade friction, auditor visibility gaps

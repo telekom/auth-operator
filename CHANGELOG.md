@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- RestrictedRoleDefinition enforces immutable `spec.policyRef`, `spec.targetRole`, `spec.targetName`, and `spec.targetNamespace` after creation. RestrictedBindDefinition enforces immutable `spec.policyRef` and `spec.targetName` after creation. RoleDefinition now also enforces immutable `spec.targetNamespace`. To change these fields, recreate the resource with the desired values.
+
 ## [0.4.0-rc.13] — Pre-release
 
 ### Added

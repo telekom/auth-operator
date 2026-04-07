@@ -83,7 +83,7 @@ capture_rbac serviceaccounts     "-A" serviceaccounts.yaml
 
 # --- CRD status (for debugging) ---
 echo "Capturing CRD statuses ..."
-for crd in roledefinitions binddefinitions; do
+for crd in roledefinitions binddefinitions rbacpolicies restrictedbinddefinitions restrictedroledefinitions; do
   if kubectl get "$crd" -o yaml 2>/dev/null | yq "$YQ_STRIP_CRD" > "$OUTPUT_DIR/${crd}-status.yaml"; then
     echo "  Captured ${crd}-status.yaml"
   else

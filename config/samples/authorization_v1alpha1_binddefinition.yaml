@@ -956,3 +956,85 @@ spec:
         # MISSING — no such Role in tenant-alpha
         - phantom-namespace-role
       namespace: tenant-alpha
+
+---
+# -----------------------------------------------------------------------------
+# Edge Case 9: missing-role-policy=warn (explicit)
+# Explicitly sets warn behavior with missing refs. Should apply and reconcile
+# while surfacing missing refs in status/conditions/events.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: bd-edge-missing-role-policy-warn
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/purpose: edge-case
+  annotations:
+    authorization.t-caas.telekom.com/missing-role-policy: warn
+spec:
+  targetName: edge-missing-policy-warn
+  subjects:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group
+      name: missing-policy-warn@example.com
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - phantom-policy-warn-cluster-role
+
+---
+# -----------------------------------------------------------------------------
+# Edge Case 10: missing-role-policy=ignore
+# Validation of role refs is skipped by policy; object should reconcile without
+# missing-role blocking despite nonexistent role references.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: bd-edge-missing-role-policy-ignore
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/purpose: edge-case
+  annotations:
+    authorization.t-caas.telekom.com/missing-role-policy: ignore
+spec:
+  targetName: edge-missing-policy-ignore
+  subjects:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group
+      name: missing-policy-ignore@example.com
+  roleBindings:
+    - roleRefs:
+        - phantom-policy-ignore-role
+      namespace: tenant-alpha
+
+---
+# -----------------------------------------------------------------------------
+# Edge Case 11: missing-role-policy=error with valid refs
+# Explicit error mode should still reconcile when all refs exist.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: bd-edge-missing-role-policy-error-valid
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/purpose: edge-case
+  annotations:
+    authorization.t-caas.telekom.com/missing-role-policy: error
+spec:
+  targetName: edge-missing-policy-error-valid
+  subjects:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group
+      name: missing-policy-error-valid@example.com
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - view
+  roleBindings:
+    - roleRefs:
+        - t-caas-namespace-viewer
+      namespace: tenant-beta

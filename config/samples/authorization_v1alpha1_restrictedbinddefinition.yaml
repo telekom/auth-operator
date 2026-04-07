@@ -1,0 +1,272 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# =============================================================================
+# RestrictedBindDefinition Samples - Comprehensive Feature Coverage
+# =============================================================================
+# Prerequisite: Apply authorization_v1alpha1_rbacpolicy.yaml first.
+#
+# These samples demonstrate all features of the RestrictedBindDefinition CRD:
+# - Policy reference (policyRef)
+# - ServiceAccount-only subjects
+# - ClusterRoleBindings within policy limits
+# - RoleBindings with namespace selectors
+# - Auto-created ServiceAccounts
+# - Mixed subject types (Group + SA)
+# =============================================================================
+
+---
+# -----------------------------------------------------------------------------
+# RestrictedBindDefinition: Team SA Binding
+# Binds a team ServiceAccount to allowed roles within the team-workload-policy.
+# Use case: ServiceAccount-only tenant access
+# Requires: team-workload-policy RBACPolicy
+# Requester default-policy example: can be submitted by
+# system:serviceaccount:team-alpha:team-alpha-rbac-applier.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedBindDefinition
+metadata:
+  name: rbd-team-alpha-sa
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/tenant: team-alpha
+spec:
+  policyRef:
+    name: team-workload-policy
+  targetName: team-alpha-sa-binding
+  subjects:
+    - kind: ServiceAccount
+      name: team-alpha-workload
+      namespace: team-alpha
+      apiGroup: ""
+  roleBindings:
+    - namespace: team-alpha
+      clusterRoleRefs:
+        - t-caas-team-reader
+      roleRefs:
+        - t-caas-team-alpha-editor
+
+---
+# -----------------------------------------------------------------------------
+# RestrictedBindDefinition: Operator Cross-Namespace Binding
+# Binds an operator SA and group across multiple namespaces.
+# Use case: Cross-namespace operator access
+# Requires: operator-cross-namespace-policy RBACPolicy
+# Requester default-policy example: users in groups
+# oidc:platform-operators or oidc:infra-operators.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedBindDefinition
+metadata:
+  name: rbd-platform-operator
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/tenant: platform-team
+spec:
+  policyRef:
+    name: operator-cross-namespace-policy
+  targetName: platform-operator-binding
+  subjects:
+    - kind: ServiceAccount
+      name: platform-controller
+      namespace: platform-system
+      apiGroup: ""
+    - kind: Group
+      name: platform-operators
+      apiGroup: rbac.authorization.k8s.io
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - t-caas-operator-reader
+  roleBindings:
+    - namespace: team-alpha
+      clusterRoleRefs:
+        - t-caas-operator-manager
+    - namespace: team-beta
+      clusterRoleRefs:
+        - t-caas-operator-manager
+
+---
+# -----------------------------------------------------------------------------
+# RestrictedBindDefinition: CI Pipeline Binding
+# Binds CI service accounts to deploy roles in CI namespaces.
+# Use case: CI/CD pipelines
+# Requires: cicd-pipeline-policy RBACPolicy
+# Requester default-policy example: submitted by
+# system:serviceaccount:ci-runners:ci-rbac-applier.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedBindDefinition
+metadata:
+  name: rbd-ci-deploy
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/tenant: cicd
+spec:
+  policyRef:
+    name: cicd-pipeline-policy
+  targetName: ci-deploy-binding
+  automountServiceAccountToken: false
+  subjects:
+    - kind: ServiceAccount
+      name: ci-deployer
+      namespace: ci-runners
+      apiGroup: ""
+  roleBindings:
+    - namespace: cd-deploy
+      clusterRoleRefs:
+        - t-caas-deploy-writer
+
+---
+# -----------------------------------------------------------------------------
+# CASE: Allowed
+# Uses a permissive sample policy and should reconcile cleanly.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedBindDefinition
+metadata:
+  name: rbd-case-allowed-all-paths
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/sample-case: allowed
+spec:
+  policyRef:
+    name: sample-policy-allow-all-paths
+  targetName: sample-allowed-binding
+  subjects:
+    - kind: ServiceAccount
+      name: sample-workload-a
+      namespace: sample-tenant-a
+      apiGroup: ""
+    - kind: Group
+      name: sample-app-operators
+      apiGroup: rbac.authorization.k8s.io
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - sample-existing-cluster-role
+  roleBindings:
+    - namespace: sample-tenant-a
+      clusterRoleRefs:
+        - sample-existing-cluster-role
+      roleRefs:
+        - sample-existing-role
+
+---
+# -----------------------------------------------------------------------------
+# CASE: Blocked by policy
+# This object is valid CRD input but should be deprovisioned/stalled because the
+# selected policy forbids clusterRoleBindings.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedBindDefinition
+metadata:
+  name: rbd-case-blocked-crb-by-policy
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/sample-case: blocked
+spec:
+  policyRef:
+    name: sample-policy-block-clusterrolebindings
+  targetName: sample-blocked-crb
+  subjects:
+    - kind: ServiceAccount
+      name: sample-workload-blocked
+      namespace: sample-tenant-a
+      apiGroup: ""
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - sample-existing-cluster-role
+
+---
+# -----------------------------------------------------------------------------
+# CASE: Partially allowed
+# Existing role refs are applied; missing refs are reflected in status.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedBindDefinition
+metadata:
+  name: rbd-case-partial-missing-role-refs
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/sample-case: partial
+spec:
+  policyRef:
+    name: sample-policy-partially-allowed-bindings
+  targetName: sample-partial-refs
+  subjects:
+    - kind: ServiceAccount
+      name: sample-workload-partial
+      namespace: sample-tenant-a
+      apiGroup: ""
+  roleBindings:
+    - namespace: sample-tenant-a
+      clusterRoleRefs:
+        - sample-existing-cluster-role
+        - sample-missing-cluster-role
+      roleRefs:
+        - sample-existing-role
+        - sample-missing-role
+
+---
+# -----------------------------------------------------------------------------
+# CASE: Impersonated apply success
+# Policy selects an impersonated SA with RBAC grants (see prerequisites).
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedBindDefinition
+metadata:
+  name: rbd-case-impersonated-allowed
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/sample-case: impersonated-allowed
+spec:
+  policyRef:
+    name: sample-policy-allow-all-paths
+  targetName: sample-impersonated-ok
+  subjects:
+    - kind: ServiceAccount
+      name: sample-workload-impersonated-ok
+      namespace: sample-tenant-b
+      apiGroup: ""
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - sample-existing-cluster-role
+  roleBindings:
+    - namespace: sample-tenant-b
+      clusterRoleRefs:
+        - sample-existing-cluster-role
+
+---
+# -----------------------------------------------------------------------------
+# CASE: Blocked by policy (forbidden subject kind)
+# Uses a ServiceAccount-only policy but provides a User subject.
+# Expected: policy violation, deprovision/degraded status.
+# -----------------------------------------------------------------------------
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedBindDefinition
+metadata:
+  name: rbd-case-blocked-subject-kind
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    t-caas.telekom.com/sample-case: blocked-subject
+spec:
+  policyRef:
+    name: sample-policy-block-clusterrolebindings
+  targetName: sample-blocked-subject-kind
+  subjects:
+    - kind: User
+      name: sample-user-blocked
+      apiGroup: rbac.authorization.k8s.io
+  roleBindings:
+    - namespace: sample-tenant-a
+      roleRefs:
+        - sample-existing-role

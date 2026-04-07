@@ -10,7 +10,7 @@ import (
 
 	jsonpatch "github.com/evanphx/json-patch"
 
-	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	webhooks "github.com/telekom/auth-operator/internal/webhook/authorization"
 
 	admissionv1 "k8s.io/api/admission/v1"
@@ -43,17 +43,17 @@ func TestNamespaceMutatorHandle(t *testing.T) {
 	// 1. Setup the scheme for our fake client
 	// ----------------------------------------------------------------------
 	scheme := runtime.NewScheme()
-	utilruntime.Must(clientgoscheme.AddToScheme(scheme)) // For corev1, admissionv1, etc.
-	utilruntime.Must(authzv1alpha1.AddToScheme(scheme))  // Register your CRD types
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))        // For corev1, admissionv1, etc.
+	utilruntime.Must(authorizationv1alpha1.AddToScheme(scheme)) // Register your CRD types
 
 	// ----------------------------------------------------------------------
 	// 2. Create some sample BindDefinitions that might match certain groups
 	// ----------------------------------------------------------------------
-	bindDefPlatform := authzv1alpha1.BindDefinition{
+	bindDefPlatform := authorizationv1alpha1.BindDefinition{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "platform-namespaced-poweruser",
 		},
-		Spec: authzv1alpha1.BindDefinitionSpec{
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
 			TargetName: "bd-platform-ns-poweruser",
 			Subjects: []rbacv1.Subject{
 				{
@@ -77,7 +77,7 @@ func TestNamespaceMutatorHandle(t *testing.T) {
 					Namespace: "kube-system",
 				},
 			},
-			RoleBindings: []authzv1alpha1.NamespaceBinding{{
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{{
 				ClusterRoleRefs: []string{"t-caas-platform-namespaced-poweruser"},
 				NamespaceSelector: []metav1.LabelSelector{
 					{
@@ -444,7 +444,7 @@ func TestNamespaceMutatorHandle(t *testing.T) {
 func TestNamespaceMutatorSANamespaceInheritance(t *testing.T) {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(authzv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(authorizationv1alpha1.AddToScheme(scheme))
 
 	buildRequest := func(
 		t *testing.T,
@@ -781,17 +781,17 @@ func TestNamespaceMutatorPerformance(t *testing.T) {
 	// 1. Setup the scheme for our fake client
 	// ----------------------------------------------------------------------
 	scheme := runtime.NewScheme()
-	utilruntime.Must(clientgoscheme.AddToScheme(scheme)) // For corev1, admissionv1, etc.
-	utilruntime.Must(authzv1alpha1.AddToScheme(scheme))  // Register your CRD types
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))        // For corev1, admissionv1, etc.
+	utilruntime.Must(authorizationv1alpha1.AddToScheme(scheme)) // Register your CRD types
 
 	// ----------------------------------------------------------------------
 	// 2. Create some sample BindDefinitions that might match certain groups
 	// ----------------------------------------------------------------------
-	bindDefPlatform := authzv1alpha1.BindDefinition{
+	bindDefPlatform := authorizationv1alpha1.BindDefinition{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "platform-namespaced-poweruser",
 		},
-		Spec: authzv1alpha1.BindDefinitionSpec{
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
 			TargetName: "bd-platform-ns-poweruser",
 			Subjects: []rbacv1.Subject{
 				{
@@ -815,7 +815,7 @@ func TestNamespaceMutatorPerformance(t *testing.T) {
 					Namespace: "kube-system",
 				},
 			},
-			RoleBindings: []authzv1alpha1.NamespaceBinding{{
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{{
 				ClusterRoleRefs: []string{"t-caas-platform-namespaced-poweruser"},
 				NamespaceSelector: []metav1.LabelSelector{
 					{

@@ -1,0 +1,21 @@
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedBindDefinition
+metadata:
+  name: e2e-test-restricted-binding
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/component: e2e-test
+    app.kubernetes.io/created-by: auth-operator
+spec:
+  policyRef:
+    name: e2e-test-policy
+  targetName: e2e-restricted-binding
+  subjects:
+    - kind: ServiceAccount
+      name: e2e-restricted-sa
+      namespace: e2e-test-ns
+      apiGroup: ""
+  roleBindings:
+    - namespace: e2e-test-ns
+      clusterRoleRefs:
+        - e2e-cluster-reader

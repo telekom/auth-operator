@@ -160,11 +160,12 @@ func (r *BindDefinitionReconciler) deleteServiceAccount(
 			oldSourceNames := sa.Annotations[helpers.SourceNamesAnnotation]
 			newSourceNames := helpers.RemoveSourceName(oldSourceNames, bindDef.Name)
 			if newSourceNames != oldSourceNames {
+				old := sa.DeepCopy()
 				if sa.Annotations == nil {
 					sa.Annotations = make(map[string]string)
 				}
 				sa.Annotations[helpers.SourceNamesAnnotation] = newSourceNames
-				if err := r.client.Update(ctx, sa); err != nil {
+				if err := r.client.Patch(ctx, sa, sigs_client.MergeFromWithOptions(old, sigs_client.MergeFromWithOptimisticLock{})); err != nil {
 					logger.Error(err, "Failed to update source-names annotation on retained ServiceAccount",
 						"bindDefinitionName", bindDef.Name, "serviceAccount", sa.Name, "namespace", sa.Namespace)
 					// Non-fatal - continue with deletion cleanup

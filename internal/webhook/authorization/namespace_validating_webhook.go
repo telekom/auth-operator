@@ -6,7 +6,7 @@ import (
 	"net/http"
 
 	"github.com/go-logr/logr"
-	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/pkg/indexer"
 	"github.com/telekom/auth-operator/pkg/metrics"
 	admissionv1 "k8s.io/api/admission/v1"
@@ -159,9 +159,9 @@ func (v *NamespaceValidator) validateLabelImmutability(logger logr.Logger, req a
 
 	// Define the label keys of interest
 	labelKeys := []string{
-		authzv1alpha1.LabelKeyOwner,
-		authzv1alpha1.LabelKeyTenant,
-		authzv1alpha1.LabelKeyThirdParty,
+		authorizationv1alpha1.LabelKeyOwner,
+		authorizationv1alpha1.LabelKeyTenant,
+		authorizationv1alpha1.LabelKeyThirdParty,
 	}
 	if v.TDGMigration {
 		labelKeys = append(labelKeys, legacyOwnerLabel)
@@ -183,9 +183,9 @@ func (v *NamespaceValidator) validateLabelImmutability(logger logr.Logger, req a
 		}
 
 		// During tenant↔thirdparty reclassification, allow changes to owner/tenant/thirdparty labels.
-		if ownerReclassification && (key == authzv1alpha1.LabelKeyOwner ||
-			key == authzv1alpha1.LabelKeyTenant ||
-			key == authzv1alpha1.LabelKeyThirdParty) {
+		if ownerReclassification && (key == authorizationv1alpha1.LabelKeyOwner ||
+			key == authorizationv1alpha1.LabelKeyTenant ||
+			key == authorizationv1alpha1.LabelKeyThirdParty) {
 			logger.V(2).Info("label change allowed during reclassification",
 				"namespace", req.Name, "label", key, "oldValue", oldValue, "newValue", newValue)
 			continue
@@ -195,7 +195,7 @@ func (v *NamespaceValidator) validateLabelImmutability(logger logr.Logger, req a
 		// once the new t-caas.telekom.com/owner label is established.
 		if bypassResult.ShouldBypass &&
 			key == legacyOwnerLabel && oldExists && !newExists {
-			_, newOwnerExists := ns.Labels[authzv1alpha1.LabelKeyOwner]
+			_, newOwnerExists := ns.Labels[authorizationv1alpha1.LabelKeyOwner]
 			if newOwnerExists {
 				logger.V(1).Info("AUDIT: legacy label removal allowed (new owner label exists)",
 					"namespace", req.Name, "removedLabel", key, "removedValue", oldValue)
@@ -222,14 +222,14 @@ func (v *NamespaceValidator) detectOwnerReclassification(logger logr.Logger, req
 	if !v.TDGMigration || !bypassResult.ShouldBypass {
 		return false
 	}
-	oldOwner := oldNs.Labels[authzv1alpha1.LabelKeyOwner]
-	newOwner := ns.Labels[authzv1alpha1.LabelKeyOwner]
+	oldOwner := oldNs.Labels[authorizationv1alpha1.LabelKeyOwner]
+	newOwner := ns.Labels[authorizationv1alpha1.LabelKeyOwner]
 	if oldOwner == newOwner {
 		return false
 	}
 	// Only tenant↔thirdparty is allowed; platform is always immutable.
 	// Both old and new must be non-empty to prevent label removal from being treated as reclassification.
-	if oldOwner == authzv1alpha1.OwnerPlatform || newOwner == authzv1alpha1.OwnerPlatform ||
+	if oldOwner == authorizationv1alpha1.OwnerPlatform || newOwner == authorizationv1alpha1.OwnerPlatform ||
 		oldOwner == "" || newOwner == "" {
 		return false
 	}
@@ -247,8 +247,8 @@ func (v *NamespaceValidator) crossValidateLegacyLabels(logger logr.Logger, req a
 	}
 
 	legacyOwner := oldNs.Labels[legacyOwnerLabel]
-	newOwner, newOwnerExists := ns.Labels[authzv1alpha1.LabelKeyOwner]
-	_, oldOwnerExists := oldNs.Labels[authzv1alpha1.LabelKeyOwner]
+	newOwner, newOwnerExists := ns.Labels[authorizationv1alpha1.LabelKeyOwner]
+	_, oldOwnerExists := oldNs.Labels[authorizationv1alpha1.LabelKeyOwner]
 
 	// Only validate during initial adoption of the new owner label
 	if legacyOwner == "" || !newOwnerExists || oldOwnerExists {
@@ -256,7 +256,7 @@ func (v *NamespaceValidator) crossValidateLegacyLabels(logger logr.Logger, req a
 	}
 
 	isLegacyPlatform := legacyOwner == "platform" || legacyOwner == "schiff"
-	isNewPlatform := newOwner == authzv1alpha1.OwnerPlatform
+	isNewPlatform := newOwner == authorizationv1alpha1.OwnerPlatform
 
 	if isLegacyPlatform && !isNewPlatform {
 		logger.V(2).Info("adoption denied: legacy platform namespace cannot become non-platform",
@@ -285,8 +285,10 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 		"username", req.UserInfo.Username, "isServiceAccount", saInfo.IsServiceAccount,
 		"groupCount", len(userGroups))
 
-	bindDefinitions := &authzv1alpha1.BindDefinitionList{}
-	if err := v.Client.List(ctx, bindDefinitions,
+	bindDefinitions := &authorizationv1alpha1.BindDefinitionList{}
+	listCtx, cancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
+	defer cancel()
+	if err := v.Client.List(listCtx, bindDefinitions,
 		client.MatchingFields{indexer.BindDefinitionHasRoleBindingsField: indexer.BindDefinitionHasRoleBindingsTrue},
 	); err != nil {
 		if !isFieldIndexError(err) {
@@ -297,13 +299,15 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 
 		logger.V(1).Info("field index unavailable for BindDefinitions, falling back to unindexed list",
 			"field", indexer.BindDefinitionHasRoleBindingsField, "error", err)
-		allBindDefinitions := &authzv1alpha1.BindDefinitionList{}
-		if err := v.Client.List(ctx, allBindDefinitions); err != nil {
+		allBindDefinitions := &authorizationv1alpha1.BindDefinitionList{}
+		fallbackCtx, fallbackCancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
+		defer fallbackCancel()
+		if err := v.Client.List(fallbackCtx, allBindDefinitions); err != nil {
 			logger.Error(err, "failed to list BindDefinitions", "namespace", req.Name)
 			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
-		bindDefinitions.Items = make([]authzv1alpha1.BindDefinition, 0, len(allBindDefinitions.Items))
+		bindDefinitions.Items = make([]authorizationv1alpha1.BindDefinition, 0, len(allBindDefinitions.Items))
 		for _, bindDefinition := range allBindDefinitions.Items {
 			if len(bindDefinition.Spec.RoleBindings) > 0 {
 				bindDefinitions.Items = append(bindDefinitions.Items, bindDefinition)
@@ -371,7 +375,7 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 	// and does not match any BindDefinition selector. This keeps delete
 	// authorization conservative for namespaces that are still targeted.
 	if req.Operation == admissionv1.Delete {
-		ownerValue, hasOwner := ns.Labels[authzv1alpha1.LabelKeyOwner]
+		ownerValue, hasOwner := ns.Labels[authorizationv1alpha1.LabelKeyOwner]
 		if hasOwner && ownerValue != "" && !namespaceMatchedByAnyBindDefinition(logger, ns, bindDefinitions.Items) {
 			logger.V(1).Info("namespace delete allowed - owner label is unclaimed by any BindDefinition",
 				"namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username)
@@ -385,7 +389,9 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 	// This is restricted to CREATE/UPDATE — DELETE is intentionally excluded.
 	if saInfo.IsServiceAccount &&
 		(req.Operation == admissionv1.Create || req.Operation == admissionv1.Update) {
-		inheritedLabels, saErr := GetSANamespaceTrackedLabels(ctx, v.Client, saInfo)
+		saCtx, saCancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
+		defer saCancel()
+		inheritedLabels, saErr := GetSANamespaceTrackedLabels(saCtx, v.Client, saInfo)
 		if saErr != nil {
 			logger.Error(saErr, "failed to lookup SA namespace labels", "saNamespace", saInfo.Namespace, "targetNamespace", req.Name)
 			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()
@@ -435,7 +441,7 @@ func namespaceMatchesSelector(ns *corev1.Namespace, selector *metav1.LabelSelect
 	return labelSelector.Matches(labels.Set(ns.Labels)), nil
 }
 
-func namespaceMatchedByAnyBindDefinition(logger logr.Logger, ns *corev1.Namespace, bindDefs []authzv1alpha1.BindDefinition) bool {
+func namespaceMatchedByAnyBindDefinition(logger logr.Logger, ns *corev1.Namespace, bindDefs []authorizationv1alpha1.BindDefinition) bool {
 	for _, bindDef := range bindDefs {
 		if IsRestrictedBindDefinition(bindDef.Name) {
 			continue

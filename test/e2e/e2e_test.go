@@ -19,27 +19,27 @@ var _ = Describe("Operator Setup", Ordered, Label("setup"), func() {
 
 	Context("Prerequisites", func() {
 		It("should have kubectl available", func() {
-			cmd := utils.CommandContext(context.Background(), "kubectl", "version", "--client")
+			cmd := utils.CommandContext(context.Background(), "kubectl", "version", "--client") // #nosec G204
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(string(output)).To(ContainSubstring("Client Version"))
 		})
 
 		It("should have kind available", func() {
-			cmd := utils.CommandContext(context.Background(), "kind", "version")
+			cmd := utils.CommandContext(context.Background(), "kind", "version") // #nosec G204
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(string(output)).To(ContainSubstring("kind"))
 		})
 
 		It("should have docker available", func() {
-			cmd := utils.CommandContext(context.Background(), "docker", "version", "--format", "{{.Server.Version}}")
+			cmd := utils.CommandContext(context.Background(), "docker", "version", "--format", "{{.Server.Version}}") // #nosec G204
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
 		It("should have a running kind cluster", func() {
-			cmd := utils.CommandContext(context.Background(), "kubectl", "cluster-info")
+			cmd := utils.CommandContext(context.Background(), "kubectl", "cluster-info") // #nosec G204
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "No Kubernetes cluster available. Run 'make kind-create' first.")
 			Expect(string(output)).To(ContainSubstring("Kubernetes"))
@@ -48,7 +48,7 @@ var _ = Describe("Operator Setup", Ordered, Label("setup"), func() {
 
 	Context("CRDs", func() {
 		It("should have RoleDefinition CRD installed", func() {
-			cmd := utils.CommandContext(context.Background(), "kubectl", "get", "crd", "roledefinitions.authorization.t-caas.telekom.com")
+			cmd := utils.CommandContext(context.Background(), "kubectl", "get", "crd", "roledefinitions.authorization.t-caas.telekom.com") // #nosec G204
 			_, err := utils.Run(cmd)
 			if err != nil {
 				Skip("CRDs not installed yet - run 'make install' first")
@@ -56,7 +56,7 @@ var _ = Describe("Operator Setup", Ordered, Label("setup"), func() {
 		})
 
 		It("should have BindDefinition CRD installed", func() {
-			cmd := utils.CommandContext(context.Background(), "kubectl", "get", "crd", "binddefinitions.authorization.t-caas.telekom.com")
+			cmd := utils.CommandContext(context.Background(), "kubectl", "get", "crd", "binddefinitions.authorization.t-caas.telekom.com") // #nosec G204
 			_, err := utils.Run(cmd)
 			if err != nil {
 				Skip("CRDs not installed yet - run 'make install' first")
@@ -64,7 +64,7 @@ var _ = Describe("Operator Setup", Ordered, Label("setup"), func() {
 		})
 
 		It("should have WebhookAuthorizer CRD installed", func() {
-			cmd := utils.CommandContext(context.Background(), "kubectl", "get", "crd", "webhookauthorizers.authorization.t-caas.telekom.com")
+			cmd := utils.CommandContext(context.Background(), "kubectl", "get", "crd", "webhookauthorizers.authorization.t-caas.telekom.com") // #nosec G204
 			_, err := utils.Run(cmd)
 			if err != nil {
 				Skip("CRDs not installed yet - run 'make install' first")
@@ -74,7 +74,7 @@ var _ = Describe("Operator Setup", Ordered, Label("setup"), func() {
 
 	Context("Operator Deployment", func() {
 		It("should have the controller-manager deployment", func() {
-			cmd := utils.CommandContext(context.Background(), "kubectl", "get", "deployment",
+			cmd := utils.CommandContext(context.Background(), "kubectl", "get", "deployment", // #nosec G204
 				"-l", "control-plane=controller-manager",
 				"-n", "auth-operator-system",
 				"-o", "name")
@@ -86,7 +86,7 @@ var _ = Describe("Operator Setup", Ordered, Label("setup"), func() {
 		})
 
 		It("should have controller-manager pod running", func() {
-			cmd := utils.CommandContext(context.Background(), "kubectl", "get", "pods",
+			cmd := utils.CommandContext(context.Background(), "kubectl", "get", "pods", // #nosec G204
 				"-l", "control-plane=controller-manager",
 				"-n", "auth-operator-system",
 				"-o", "jsonpath={.items[0].status.phase}")
@@ -101,7 +101,7 @@ var _ = Describe("Operator Setup", Ordered, Label("setup"), func() {
 
 var _ = Describe("API Versions", Label("api"), func() {
 	It("should support authorization.t-caas.telekom.com/v1alpha1", func() {
-		cmd := utils.CommandContext(context.Background(), "kubectl", "api-resources",
+		cmd := utils.CommandContext(context.Background(), "kubectl", "api-resources", // #nosec G204
 			"--api-group=authorization.t-caas.telekom.com",
 			"-o", "name")
 		output, err := utils.Run(cmd)
@@ -115,7 +115,7 @@ var _ = Describe("API Versions", Label("api"), func() {
 	})
 
 	It("should have correct short names", func() {
-		cmd := utils.CommandContext(context.Background(), "kubectl", "api-resources",
+		cmd := utils.CommandContext(context.Background(), "kubectl", "api-resources", // #nosec G204
 			"--api-group=authorization.t-caas.telekom.com",
 			"-o", "wide")
 		output, err := utils.Run(cmd)
@@ -155,18 +155,18 @@ var _ = Describe("Debug Info", Label("debug"), func() {
 		By("Getting all auth-operator resources")
 		resources := []string{"roledefinitions", "binddefinitions", "webhookauthorizers"}
 		for _, r := range resources {
-			cmd := utils.CommandContext(context.Background(), "kubectl", "get", r, "-A", "-o", "wide")
+			cmd := utils.CommandContext(context.Background(), "kubectl", "get", r, "-A", "-o", "wide") // #nosec G204
 			output, _ := utils.Run(cmd)
 			_, _ = fmt.Fprintf(GinkgoWriter, "\n=== %s ===\n%s\n", r, string(output))
 		}
 
 		By("Getting operator pods in all namespaces")
-		cmd := utils.CommandContext(context.Background(), "kubectl", "get", "pods", "-A", "-l", "control-plane", "-o", "wide")
+		cmd := utils.CommandContext(context.Background(), "kubectl", "get", "pods", "-A", "-l", "control-plane", "-o", "wide") // #nosec G204
 		output, _ := utils.Run(cmd)
 		_, _ = fmt.Fprintf(GinkgoWriter, "\n=== Operator Pods ===\n%s\n", string(output))
 
 		By("Getting recent events")
-		cmd = utils.CommandContext(context.Background(), "kubectl", "get", "events", "-A", "--sort-by=.lastTimestamp", "--field-selector=type!=Normal")
+		cmd = utils.CommandContext(context.Background(), "kubectl", "get", "events", "-A", "--sort-by=.lastTimestamp", "--field-selector=type!=Normal") // #nosec G204
 		output, _ = utils.Run(cmd)
 		_, _ = fmt.Fprintf(GinkgoWriter, "\n=== Recent Warning/Error Events ===\n%s\n", string(output))
 	})

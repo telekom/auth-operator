@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -565,7 +565,7 @@ func TestIsFieldIndexError(t *testing.T) {
 func TestGetSANamespaceTrackedLabels(t *testing.T) {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(authzv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(authorizationv1alpha1.AddToScheme(scheme))
 
 	tests := []struct {
 		name       string
@@ -597,13 +597,13 @@ func TestGetSANamespaceTrackedLabels(t *testing.T) {
 			saInfo: ServiceAccountInfo{Namespace: "tenant-ns", Name: "operator-sa", IsServiceAccount: true},
 			namespaces: []corev1.Namespace{
 				{ObjectMeta: metav1.ObjectMeta{Name: "tenant-ns", Labels: map[string]string{
-					authzv1alpha1.LabelKeyOwner:  "tenant",
-					authzv1alpha1.LabelKeyTenant: "team-alpha",
+					authorizationv1alpha1.LabelKeyOwner:  "tenant",
+					authorizationv1alpha1.LabelKeyTenant: "team-alpha",
 				}}},
 			},
 			wantLabels: map[string]string{
-				authzv1alpha1.LabelKeyOwner:  "tenant",
-				authzv1alpha1.LabelKeyTenant: "team-alpha",
+				authorizationv1alpha1.LabelKeyOwner:  "tenant",
+				authorizationv1alpha1.LabelKeyTenant: "team-alpha",
 			},
 		},
 		{
@@ -611,13 +611,13 @@ func TestGetSANamespaceTrackedLabels(t *testing.T) {
 			saInfo: ServiceAccountInfo{Namespace: "3p-ns", Name: "sa", IsServiceAccount: true},
 			namespaces: []corev1.Namespace{
 				{ObjectMeta: metav1.ObjectMeta{Name: "3p-ns", Labels: map[string]string{
-					authzv1alpha1.LabelKeyOwner:      "thirdparty",
-					authzv1alpha1.LabelKeyThirdParty: "vendor-x",
+					authorizationv1alpha1.LabelKeyOwner:      "thirdparty",
+					authorizationv1alpha1.LabelKeyThirdParty: "vendor-x",
 				}}},
 			},
 			wantLabels: map[string]string{
-				authzv1alpha1.LabelKeyOwner:      "thirdparty",
-				authzv1alpha1.LabelKeyThirdParty: "vendor-x",
+				authorizationv1alpha1.LabelKeyOwner:      "thirdparty",
+				authorizationv1alpha1.LabelKeyThirdParty: "vendor-x",
 			},
 		},
 		{
@@ -625,11 +625,11 @@ func TestGetSANamespaceTrackedLabels(t *testing.T) {
 			saInfo: ServiceAccountInfo{Namespace: "platform-ns", Name: "sa", IsServiceAccount: true},
 			namespaces: []corev1.Namespace{
 				{ObjectMeta: metav1.ObjectMeta{Name: "platform-ns", Labels: map[string]string{
-					authzv1alpha1.LabelKeyOwner: "platform",
+					authorizationv1alpha1.LabelKeyOwner: "platform",
 				}}},
 			},
 			wantLabels: map[string]string{
-				authzv1alpha1.LabelKeyOwner: "platform",
+				authorizationv1alpha1.LabelKeyOwner: "platform",
 			},
 		},
 		{
@@ -645,7 +645,7 @@ func TestGetSANamespaceTrackedLabels(t *testing.T) {
 			saInfo: ServiceAccountInfo{Namespace: "bad-ns", Name: "sa", IsServiceAccount: true},
 			namespaces: []corev1.Namespace{
 				{ObjectMeta: metav1.ObjectMeta{Name: "bad-ns", Labels: map[string]string{
-					authzv1alpha1.LabelKeyOwner: "tenant",
+					authorizationv1alpha1.LabelKeyOwner: "tenant",
 				}}},
 			},
 			wantLabels: nil,
@@ -655,7 +655,7 @@ func TestGetSANamespaceTrackedLabels(t *testing.T) {
 			saInfo: ServiceAccountInfo{Namespace: "bad-3p", Name: "sa", IsServiceAccount: true},
 			namespaces: []corev1.Namespace{
 				{ObjectMeta: metav1.ObjectMeta{Name: "bad-3p", Labels: map[string]string{
-					authzv1alpha1.LabelKeyOwner: "thirdparty",
+					authorizationv1alpha1.LabelKeyOwner: "thirdparty",
 				}}},
 			},
 			wantLabels: nil,
@@ -665,7 +665,7 @@ func TestGetSANamespaceTrackedLabels(t *testing.T) {
 			saInfo: ServiceAccountInfo{Namespace: "no-owner", Name: "sa", IsServiceAccount: true},
 			namespaces: []corev1.Namespace{
 				{ObjectMeta: metav1.ObjectMeta{Name: "no-owner", Labels: map[string]string{
-					authzv1alpha1.LabelKeyTenant: "team-x",
+					authorizationv1alpha1.LabelKeyTenant: "team-x",
 				}}},
 			},
 			wantLabels: nil,
@@ -675,8 +675,8 @@ func TestGetSANamespaceTrackedLabels(t *testing.T) {
 			saInfo: ServiceAccountInfo{Namespace: "ambig-1", Name: "sa", IsServiceAccount: true},
 			namespaces: []corev1.Namespace{
 				{ObjectMeta: metav1.ObjectMeta{Name: "ambig-1", Labels: map[string]string{
-					authzv1alpha1.LabelKeyOwner:  "platform",
-					authzv1alpha1.LabelKeyTenant: "team-x",
+					authorizationv1alpha1.LabelKeyOwner:  "platform",
+					authorizationv1alpha1.LabelKeyTenant: "team-x",
 				}}},
 			},
 			wantLabels: nil,
@@ -686,8 +686,8 @@ func TestGetSANamespaceTrackedLabels(t *testing.T) {
 			saInfo: ServiceAccountInfo{Namespace: "ambig-2", Name: "sa", IsServiceAccount: true},
 			namespaces: []corev1.Namespace{
 				{ObjectMeta: metav1.ObjectMeta{Name: "ambig-2", Labels: map[string]string{
-					authzv1alpha1.LabelKeyOwner:      "platform",
-					authzv1alpha1.LabelKeyThirdParty: "vendor-x",
+					authorizationv1alpha1.LabelKeyOwner:      "platform",
+					authorizationv1alpha1.LabelKeyThirdParty: "vendor-x",
 				}}},
 			},
 			wantLabels: nil,
@@ -697,9 +697,9 @@ func TestGetSANamespaceTrackedLabels(t *testing.T) {
 			saInfo: ServiceAccountInfo{Namespace: "ambig-3", Name: "sa", IsServiceAccount: true},
 			namespaces: []corev1.Namespace{
 				{ObjectMeta: metav1.ObjectMeta{Name: "ambig-3", Labels: map[string]string{
-					authzv1alpha1.LabelKeyOwner:      "tenant",
-					authzv1alpha1.LabelKeyTenant:     "team-x",
-					authzv1alpha1.LabelKeyThirdParty: "vendor-x",
+					authorizationv1alpha1.LabelKeyOwner:      "tenant",
+					authorizationv1alpha1.LabelKeyTenant:     "team-x",
+					authorizationv1alpha1.LabelKeyThirdParty: "vendor-x",
 				}}},
 			},
 			wantLabels: nil,
@@ -709,9 +709,9 @@ func TestGetSANamespaceTrackedLabels(t *testing.T) {
 			saInfo: ServiceAccountInfo{Namespace: "ambig-4", Name: "sa", IsServiceAccount: true},
 			namespaces: []corev1.Namespace{
 				{ObjectMeta: metav1.ObjectMeta{Name: "ambig-4", Labels: map[string]string{
-					authzv1alpha1.LabelKeyOwner:      "thirdparty",
-					authzv1alpha1.LabelKeyThirdParty: "vendor-x",
-					authzv1alpha1.LabelKeyTenant:     "team-x",
+					authorizationv1alpha1.LabelKeyOwner:      "thirdparty",
+					authorizationv1alpha1.LabelKeyThirdParty: "vendor-x",
+					authorizationv1alpha1.LabelKeyTenant:     "team-x",
 				}}},
 			},
 			wantLabels: nil,
@@ -721,7 +721,7 @@ func TestGetSANamespaceTrackedLabels(t *testing.T) {
 			saInfo: ServiceAccountInfo{Namespace: "unknown-owner", Name: "sa", IsServiceAccount: true},
 			namespaces: []corev1.Namespace{
 				{ObjectMeta: metav1.ObjectMeta{Name: "unknown-owner", Labels: map[string]string{
-					authzv1alpha1.LabelKeyOwner: "custom-value",
+					authorizationv1alpha1.LabelKeyOwner: "custom-value",
 				}}},
 			},
 			wantLabels: nil,
@@ -731,7 +731,7 @@ func TestGetSANamespaceTrackedLabels(t *testing.T) {
 			saInfo: ServiceAccountInfo{Namespace: "empty-owner", Name: "sa", IsServiceAccount: true},
 			namespaces: []corev1.Namespace{
 				{ObjectMeta: metav1.ObjectMeta{Name: "empty-owner", Labels: map[string]string{
-					authzv1alpha1.LabelKeyOwner: "",
+					authorizationv1alpha1.LabelKeyOwner: "",
 				}}},
 			},
 			wantLabels: nil,
@@ -741,8 +741,8 @@ func TestGetSANamespaceTrackedLabels(t *testing.T) {
 			saInfo: ServiceAccountInfo{Namespace: "empty-tenant", Name: "sa", IsServiceAccount: true},
 			namespaces: []corev1.Namespace{
 				{ObjectMeta: metav1.ObjectMeta{Name: "empty-tenant", Labels: map[string]string{
-					authzv1alpha1.LabelKeyOwner:  "tenant",
-					authzv1alpha1.LabelKeyTenant: "",
+					authorizationv1alpha1.LabelKeyOwner:  "tenant",
+					authorizationv1alpha1.LabelKeyTenant: "",
 				}}},
 			},
 			wantLabels: nil,
@@ -752,8 +752,8 @@ func TestGetSANamespaceTrackedLabels(t *testing.T) {
 			saInfo: ServiceAccountInfo{Namespace: "empty-tp", Name: "sa", IsServiceAccount: true},
 			namespaces: []corev1.Namespace{
 				{ObjectMeta: metav1.ObjectMeta{Name: "empty-tp", Labels: map[string]string{
-					authzv1alpha1.LabelKeyOwner:      "thirdparty",
-					authzv1alpha1.LabelKeyThirdParty: "",
+					authorizationv1alpha1.LabelKeyOwner:      "thirdparty",
+					authorizationv1alpha1.LabelKeyThirdParty: "",
 				}}},
 			},
 			wantLabels: nil,
@@ -803,7 +803,7 @@ func TestGetSANamespaceTrackedLabels(t *testing.T) {
 func TestGetSANamespaceTrackedLabels_ClientGetError(t *testing.T) {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(authzv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(authorizationv1alpha1.AddToScheme(scheme))
 
 	injectedErr := fmt.Errorf("transient API failure")
 	c := fake.NewClientBuilder().WithScheme(scheme).
@@ -833,33 +833,33 @@ func TestFindExtraTrackedKey(t *testing.T) {
 	}{
 		{
 			name:         "no extra keys",
-			targetLabels: map[string]string{authzv1alpha1.LabelKeyOwner: "platform"},
-			inherited:    map[string]string{authzv1alpha1.LabelKeyOwner: "platform"},
+			targetLabels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "platform"},
+			inherited:    map[string]string{authorizationv1alpha1.LabelKeyOwner: "platform"},
 			want:         "",
 		},
 		{
 			name:         "target has no tracked keys",
 			targetLabels: map[string]string{"unrelated": "val"},
-			inherited:    map[string]string{authzv1alpha1.LabelKeyOwner: "platform"},
+			inherited:    map[string]string{authorizationv1alpha1.LabelKeyOwner: "platform"},
 			want:         "",
 		},
 		{
 			name:         "target has extra tenant key",
-			targetLabels: map[string]string{authzv1alpha1.LabelKeyOwner: "platform", authzv1alpha1.LabelKeyTenant: "team-x"},
-			inherited:    map[string]string{authzv1alpha1.LabelKeyOwner: "platform"},
-			want:         authzv1alpha1.LabelKeyTenant,
+			targetLabels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "platform", authorizationv1alpha1.LabelKeyTenant: "team-x"},
+			inherited:    map[string]string{authorizationv1alpha1.LabelKeyOwner: "platform"},
+			want:         authorizationv1alpha1.LabelKeyTenant,
 		},
 		{
 			name:         "target has extra thirdparty key",
-			targetLabels: map[string]string{authzv1alpha1.LabelKeyOwner: "platform", authzv1alpha1.LabelKeyThirdParty: "vendor-x"},
-			inherited:    map[string]string{authzv1alpha1.LabelKeyOwner: "platform"},
-			want:         authzv1alpha1.LabelKeyThirdParty,
+			targetLabels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "platform", authorizationv1alpha1.LabelKeyThirdParty: "vendor-x"},
+			inherited:    map[string]string{authorizationv1alpha1.LabelKeyOwner: "platform"},
+			want:         authorizationv1alpha1.LabelKeyThirdParty,
 		},
 		{
 			name:         "target has extra owner key",
-			targetLabels: map[string]string{authzv1alpha1.LabelKeyOwner: "platform"},
-			inherited:    map[string]string{authzv1alpha1.LabelKeyTenant: "team-x"},
-			want:         authzv1alpha1.LabelKeyOwner,
+			targetLabels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "platform"},
+			inherited:    map[string]string{authorizationv1alpha1.LabelKeyTenant: "team-x"},
+			want:         authorizationv1alpha1.LabelKeyOwner,
 		},
 		{
 			name:         "both empty",
