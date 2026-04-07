@@ -87,7 +87,11 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 
 	// Ensure request body is closed to prevent resource leaks.
-	defer func() { _ = r.Body.Close() }()
+	defer func() {
+		if err := r.Body.Close(); err != nil {
+			wa.Log.Error(err, "failed to close request body")
+		}
+	}()
 
 	// Rate-limit incoming requests to prevent overloading the authorizer.
 	// When the limiter is configured and the token bucket is exhausted,

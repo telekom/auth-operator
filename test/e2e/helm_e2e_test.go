@@ -787,7 +787,7 @@ func dumpLogs(labelSelector, namespace, filename string) {
 
 func createResourceSummary(timestamp string) {
 	var summary strings.Builder
-	summary.WriteString(fmt.Sprintf("# E2E Test Resource Summary - %s\n\n", timestamp))
+	fmt.Fprintf(&summary, "# E2E Test Resource Summary - %s\n\n", timestamp)
 
 	// Count CRDs
 	summary.WriteString("## Custom Resources\n\n")

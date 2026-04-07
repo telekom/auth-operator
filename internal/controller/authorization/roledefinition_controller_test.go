@@ -867,7 +867,7 @@ func TestFilterAPIResourcesAdditionalCases(t *testing.T) {
 			"apps/v1": []metav1.APIResource{
 				{Name: "deployments", Verbs: metav1.Verbs{"get"}},
 			},
-			"apps/v1beta1": []metav1.APIResource{
+			"apps/v1alpha1": []metav1.APIResource{
 				{Name: "deployments", Verbs: metav1.Verbs{"get"}},
 			},
 		}
@@ -887,7 +887,7 @@ func TestFilterAPIResourcesAdditionalCases(t *testing.T) {
 					{
 						Name: "apps",
 						Versions: []metav1.GroupVersionForDiscovery{
-							{GroupVersion: "apps/v1beta1", Version: "v1beta1"},
+							{GroupVersion: "apps/v1alpha1", Version: "v1alpha1"},
 						},
 					},
 				},
@@ -898,7 +898,7 @@ func TestFilterAPIResourcesAdditionalCases(t *testing.T) {
 			"apps/v1": []metav1.APIResource{
 				{Name: "deployments", Verbs: metav1.Verbs{"get"}},
 			},
-			"apps/v1beta1": []metav1.APIResource{
+			"apps/v1alpha1": []metav1.APIResource{
 				{Name: "deployments", Verbs: metav1.Verbs{"get"}},
 			},
 		}
@@ -906,7 +906,7 @@ func TestFilterAPIResourcesAdditionalCases(t *testing.T) {
 		r := &RoleDefinitionReconciler{}
 		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
 		g.Expect(err).NotTo(HaveOccurred())
-		// apps/v1beta1 should be restricted, apps/v1 should remain
+		// apps/v1alpha1 should be restricted, apps/v1 should remain
 		g.Expect(rules).To(HaveLen(1))
 		for _, rule := range rules {
 			g.Expect(rule.APIGroups).To(ContainElement("apps"))
@@ -923,7 +923,7 @@ func TestFilterAPIResourcesAdditionalCases(t *testing.T) {
 					{
 						Name: "batch",
 						Versions: []metav1.GroupVersionForDiscovery{
-							{GroupVersion: "batch/v1beta1", Version: "v1beta1"},
+							{GroupVersion: "batch/v1alpha1", Version: "v1alpha1"},
 						},
 					},
 				},
@@ -934,7 +934,7 @@ func TestFilterAPIResourcesAdditionalCases(t *testing.T) {
 			"batch/v1": []metav1.APIResource{
 				{Name: "jobs", Verbs: metav1.Verbs{"get", "list"}},
 			},
-			"batch/v1beta1": []metav1.APIResource{
+			"batch/v1alpha1": []metav1.APIResource{
 				{Name: "cronjobs", Verbs: metav1.Verbs{"get"}},
 			},
 		}
@@ -942,7 +942,7 @@ func TestFilterAPIResourcesAdditionalCases(t *testing.T) {
 		r := &RoleDefinitionReconciler{}
 		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
 		g.Expect(err).NotTo(HaveOccurred())
-		// batch/v1 should remain, batch/v1beta1 should be restricted
+		// batch/v1 should remain, batch/v1alpha1 should be restricted
 		hasJobs := false
 		hasCronjobs := false
 		for _, rule := range rules {
@@ -956,7 +956,7 @@ func TestFilterAPIResourcesAdditionalCases(t *testing.T) {
 			}
 		}
 		g.Expect(hasJobs).To(BeTrue(), "batch/v1 jobs should not be restricted")
-		g.Expect(hasCronjobs).To(BeFalse(), "batch/v1beta1 cronjobs should be restricted")
+		g.Expect(hasCronjobs).To(BeFalse(), "batch/v1alpha1 cronjobs should be restricted")
 	})
 
 	t.Run("restricts multiple specified versions", func(t *testing.T) {
@@ -968,8 +968,8 @@ func TestFilterAPIResourcesAdditionalCases(t *testing.T) {
 					{
 						Name: "apps",
 						Versions: []metav1.GroupVersionForDiscovery{
-							{GroupVersion: "apps/v1beta1", Version: "v1beta1"},
-							{GroupVersion: "apps/v1beta2", Version: "v1beta2"},
+							{GroupVersion: "apps/v1alpha1", Version: "v1alpha1"},
+							{GroupVersion: "apps/v1alpha2", Version: "v1alpha2"},
 						},
 					},
 				},
@@ -980,10 +980,10 @@ func TestFilterAPIResourcesAdditionalCases(t *testing.T) {
 			"apps/v1": []metav1.APIResource{
 				{Name: "deployments", Verbs: metav1.Verbs{"get"}},
 			},
-			"apps/v1beta1": []metav1.APIResource{
+			"apps/v1alpha1": []metav1.APIResource{
 				{Name: "deployments", Verbs: metav1.Verbs{"get"}},
 			},
-			"apps/v1beta2": []metav1.APIResource{
+			"apps/v1alpha2": []metav1.APIResource{
 				{Name: "deployments", Verbs: metav1.Verbs{"get"}},
 			},
 		}
@@ -1149,14 +1149,14 @@ func TestFilterAPIResourcesDeduplication(t *testing.T) {
 			Spec: authorizationv1alpha1.RoleDefinitionSpec{},
 		}
 
-		// v1 has "deployments", v1beta1 has "deployments" too (same),
-		// plus v1 has "statefulsets" that v1beta1 does not.
+		// v1 has "deployments", v1alpha1 has "deployments" too (same),
+		// plus v1 has "statefulsets" that v1alpha1 does not.
 		apiResources := discovery.APIResourcesByGroupVersion{
 			"apps/v1": []metav1.APIResource{
 				{Name: "deployments", Verbs: metav1.Verbs{"get", "list"}},
 				{Name: "statefulsets", Verbs: metav1.Verbs{"get", "list"}},
 			},
-			"apps/v1beta1": []metav1.APIResource{
+			"apps/v1alpha1": []metav1.APIResource{
 				{Name: "deployments", Verbs: metav1.Verbs{"get", "list"}},
 			},
 		}
@@ -1393,7 +1393,7 @@ func TestFilterAPIResourcesVerbRestrictionCombinations(t *testing.T) {
 			"apps/v1": []metav1.APIResource{
 				{Name: "deployments", Verbs: metav1.Verbs{"get", "list", "create", "delete"}},
 			},
-			"apps/v1beta1": []metav1.APIResource{
+			"apps/v1alpha1": []metav1.APIResource{
 				{Name: "deployments", Verbs: metav1.Verbs{"get", "list", "create", "delete"}},
 			},
 		}
@@ -1416,7 +1416,7 @@ func TestFilterAPIResourcesVerbRestrictionCombinations(t *testing.T) {
 					g.Expect(rule.Verbs).NotTo(ContainElement("create"))
 					g.Expect(rule.Verbs).NotTo(ContainElement("delete"))
 				} else {
-					// apps/v1beta1 (unrestricted): all verbs should remain
+					// apps/v1alpha1 (unrestricted): all verbs should remain
 					unrestrictedVersionSeen = true
 					g.Expect(rule.Verbs).To(ContainElement("create"))
 					g.Expect(rule.Verbs).To(ContainElement("delete"))
@@ -1424,7 +1424,7 @@ func TestFilterAPIResourcesVerbRestrictionCombinations(t *testing.T) {
 			}
 		}
 		g.Expect(restrictedVersionSeen).To(BeTrue(), "expected a rule with restricted verbs from apps/v1")
-		g.Expect(unrestrictedVersionSeen).To(BeTrue(), "expected a rule with unrestricted verbs from apps/v1beta1")
+		g.Expect(unrestrictedVersionSeen).To(BeTrue(), "expected a rule with unrestricted verbs from apps/v1alpha1")
 	})
 
 	t.Run("multiple API groups with different verb restrictions", func(t *testing.T) {

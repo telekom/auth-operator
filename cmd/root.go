@@ -88,7 +88,9 @@ updates the generated roles to reflect the current state of available APIs.
 For more information, visit: https://github.com/telekom/auth-operator`,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		// Set the verbosity level for klog
-		_ = flag.Set("v", fmt.Sprintf("%d", verbosity))
+		if err := flag.Set("v", fmt.Sprintf("%d", verbosity)); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "warning: failed to set klog verbosity level: %v\n", err)
+		}
 
 		ctrl.SetLogger(klog.NewKlogr())
 		log := klog.NewKlogr()

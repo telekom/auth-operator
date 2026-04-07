@@ -366,7 +366,7 @@ var _ = Describe("RoleDefinition Webhook", func() {
 							Name: "apps",
 							Versions: []metav1.GroupVersionForDiscovery{
 								{GroupVersion: "apps/v1", Version: "v1"},
-								{GroupVersion: "apps/v1beta1", Version: "v1beta1"},
+								{GroupVersion: "apps/v1alpha1", Version: "v1alpha1"},
 							},
 						},
 					},
