@@ -432,7 +432,7 @@ func dumpAllPodLogs(namespace, filename string) {
 
 	var allLogs strings.Builder
 	for _, podName := range utils.GetNonEmptyLines(string(output)) {
-		allLogs.WriteString(fmt.Sprintf("\n=== Logs for %s ===\n", podName))
+		fmt.Fprintf(&allLogs, "\n=== Logs for %s ===\n", podName)
 		cmd := exec.CommandContext(context.Background(), "kubectl", "logs", podName, "-n", namespace, "--tail=200")
 		logOutput, _ := utils.Run(cmd)
 		allLogs.Write(logOutput)
@@ -443,7 +443,7 @@ func dumpAllPodLogs(namespace, filename string) {
 
 func createHASummary(namespace, timestamp string) {
 	var summary strings.Builder
-	summary.WriteString(fmt.Sprintf("# HA/Leader Election Test Summary - %s\n\n", timestamp))
+	fmt.Fprintf(&summary, "# HA/Leader Election Test Summary - %s\n\n", timestamp)
 
 	summary.WriteString("## Pod Status\n\n")
 	cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pods", "-n", namespace, "-o", "wide")

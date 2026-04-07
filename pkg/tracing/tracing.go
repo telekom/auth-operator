@@ -6,6 +6,7 @@ package tracing
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -132,7 +133,14 @@ func Setup(ctx context.Context, cfg Config, version string) (*Provider, error) {
 		),
 	)
 	if err != nil {
-		_ = exporter.Shutdown(ctx)
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer shutdownCancel()
+		if shutdownErr := exporter.Shutdown(shutdownCtx); shutdownErr != nil {
+			return nil, errors.Join(
+				fmt.Errorf("creating OTEL resource: %w", err),
+				fmt.Errorf("exporter shutdown: %w", shutdownErr),
+			)
+		}
 		return nil, fmt.Errorf("creating OTEL resource: %w", err)
 	}
 
