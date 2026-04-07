@@ -75,6 +75,9 @@ func (c *impersonatedClientCache) getOrCreate(
 		if err != nil {
 			return nil, err
 		}
+		if built == nil {
+			return nil, fmt.Errorf("impersonated client factory returned nil for %q", username)
+		}
 
 		c.mu.Lock()
 		// Store only if still absent (another goroutine may have won the race

@@ -106,8 +106,11 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 			roleTargetCollision(obj.Spec.TargetRole, obj.Spec.TargetNamespace, roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetNamespace) {
 			logger.Info("validation failed: duplicate targetName",
 				"name", obj.Name, "targetName", obj.Spec.TargetName, "conflictsWith", roleDefinition.Name)
-			return nil, apierrors.NewBadRequest(
-				fmt.Sprintf("targetName %s is already in use by RoleDefinition %s", obj.Spec.TargetName, roleDefinition.Name))
+			return nil, apierrors.NewInvalid(
+				schema.GroupKind{Group: GroupVersion.Group, Kind: "RoleDefinition"},
+				obj.Name,
+				field.ErrorList{field.Duplicate(field.NewPath("spec", "targetName"),
+					fmt.Sprintf("%s (already used by RoleDefinition %q)", obj.Spec.TargetName, roleDefinition.Name))})
 		}
 	}
 
@@ -121,8 +124,11 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 	}
 	for _, existing := range rrdList.Items {
 		if roleTargetCollision(obj.Spec.TargetRole, obj.Spec.TargetNamespace, existing.Spec.TargetRole, existing.Spec.TargetNamespace) {
-			return nil, apierrors.NewBadRequest(
-				fmt.Sprintf("targetName %s is already in use by RestrictedRoleDefinition %q", obj.Spec.TargetName, existing.Name))
+			return nil, apierrors.NewInvalid(
+				schema.GroupKind{Group: GroupVersion.Group, Kind: "RoleDefinition"},
+				obj.Name,
+				field.ErrorList{field.Duplicate(field.NewPath("spec", "targetName"),
+					fmt.Sprintf("%s (already used by RestrictedRoleDefinition %q)", obj.Spec.TargetName, existing.Name))})
 		}
 	}
 
@@ -188,8 +194,11 @@ func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 			roleTargetCollision(newObj.Spec.TargetRole, newObj.Spec.TargetNamespace, roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetNamespace) {
 			logger.Info("validation failed: duplicate targetName",
 				"name", newObj.Name, "targetName", newObj.Spec.TargetName, "conflictsWith", roleDefinition.Name)
-			return nil, apierrors.NewBadRequest(
-				fmt.Sprintf("targetName %s is already in use by RoleDefinition %s", newObj.Spec.TargetName, roleDefinition.Name))
+			return nil, apierrors.NewInvalid(
+				schema.GroupKind{Group: GroupVersion.Group, Kind: "RoleDefinition"},
+				newObj.Name,
+				field.ErrorList{field.Duplicate(field.NewPath("spec", "targetName"),
+					fmt.Sprintf("%s (already used by RoleDefinition %q)", newObj.Spec.TargetName, roleDefinition.Name))})
 		}
 	}
 
@@ -203,8 +212,11 @@ func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 	}
 	for _, existing := range rrdList.Items {
 		if roleTargetCollision(newObj.Spec.TargetRole, newObj.Spec.TargetNamespace, existing.Spec.TargetRole, existing.Spec.TargetNamespace) {
-			return nil, apierrors.NewBadRequest(
-				fmt.Sprintf("targetName %s is already in use by RestrictedRoleDefinition %q", newObj.Spec.TargetName, existing.Name))
+			return nil, apierrors.NewInvalid(
+				schema.GroupKind{Group: GroupVersion.Group, Kind: "RoleDefinition"},
+				newObj.Name,
+				field.ErrorList{field.Duplicate(field.NewPath("spec", "targetName"),
+					fmt.Sprintf("%s (already used by RestrictedRoleDefinition %q)", newObj.Spec.TargetName, existing.Name))})
 		}
 	}
 

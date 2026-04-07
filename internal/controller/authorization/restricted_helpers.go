@@ -216,7 +216,7 @@ func checkRestrictedRoleOwnership(
 		if apierrors.IsNotFound(err) {
 			return nil // Target doesn't exist yet — will be created by SSA.
 		}
-		return fmt.Errorf("check existing %s %s: %w", targetRole, key, err)
+		return fmt.Errorf("check existing %s %v: %w", targetRole, key, err)
 	}
 
 	for _, ref := range existing.GetOwnerReferences() {
