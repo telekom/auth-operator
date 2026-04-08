@@ -25,8 +25,9 @@ type RestrictedBindDefinitionSpec struct {
 	// +kubebuilder:validation:Required
 	PolicyRef RBACPolicyReference `json:"policyRef"`
 
-	// TargetName is the name prefix for generated bindings. Follows format
-	// "targetName-clusterrole/role-binding".
+	// TargetName is the name prefix for generated bindings. Generated binding
+	// names are derived from this value and suffixed with the binding kind, for
+	// example "targetName-clusterrolebinding" or "targetName-rolebinding".
 	// This field is immutable after creation.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
