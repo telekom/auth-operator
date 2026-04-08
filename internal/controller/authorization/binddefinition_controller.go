@@ -453,7 +453,7 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// This avoids duplicate API calls to list namespaces.
 	logger.V(2).Info("Collecting namespaces for BindDefinition",
 		"bindDefinition", bindDefinition.Name)
-	namespaceSet, err := r.collectNamespaces(ctx, bindDefinition)
+	namespaceSet, perRoleBindingNamespaces, err := r.collectNamespaces(ctx, bindDefinition)
 	if err != nil {
 		logger.Error(err, "Unable to collect namespaces", "bindDefinitionName", bindDefinition.Name)
 		r.markStalled(ctx, bindDefinition, err)
@@ -478,7 +478,7 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		"subjects", len(bindDefinition.Spec.Subjects),
 		"clusterRoleRefs", len(bindDefinition.Spec.ClusterRoleBindings.ClusterRoleRefs),
 		"roleBindings", len(bindDefinition.Spec.RoleBindings))
-	missingRoleRefCount, err := r.reconcileResources(ctx, bindDefinition, activeNamespaces)
+	missingRoleRefCount, err := r.reconcileResources(ctx, bindDefinition, activeNamespaces, perRoleBindingNamespaces)
 	if err != nil {
 		// When the error policy blocks reconciliation due to missing roles,
 		// apply status (which includes the RoleRefsValid=False condition) and
@@ -590,6 +590,7 @@ func (r *BindDefinitionReconciler) reconcileResources(
 	ctx context.Context,
 	bindDefinition *authorizationv1alpha1.BindDefinition,
 	activeNamespaces []corev1.Namespace,
+	perRoleBindingNamespaces [][]corev1.Namespace,
 ) (int, error) {
 	logger := log.FromContext(ctx)
 
@@ -685,7 +686,7 @@ func (r *BindDefinitionReconciler) reconcileResources(
 	logger.V(2).Info("reconcileResources: Ensuring RoleBindings",
 		"bindDefinition", bindDefinition.Name,
 		"roleBindingSpecCount", len(bindDefinition.Spec.RoleBindings))
-	if err := r.ensureRoleBindings(ctx, bindDefinition); err != nil {
+	if err := r.ensureRoleBindings(ctx, bindDefinition, perRoleBindingNamespaces); err != nil {
 		return 0, fmt.Errorf("ensure RoleBindings: %w", err)
 	}
 	logger.V(2).Info("reconcileResources: RoleBindings ensured",
@@ -767,18 +768,17 @@ func (r *BindDefinitionReconciler) ensureClusterRoleBindings(
 
 // ensureRoleBindings ensures all RoleBindings for the BindDefinition exist and are up-to-date.
 // Uses Server-Side Apply (SSA) to create or update bindings in a single operation.
+// perRoleBindingNamespaces contains pre-resolved namespaces for each roleBinding (by index),
+// avoiding redundant namespace resolution that was already done in collectNamespaces.
 func (r *BindDefinitionReconciler) ensureRoleBindings(
 	ctx context.Context,
 	bindDef *authorizationv1alpha1.BindDefinition,
+	perRoleBindingNamespaces [][]corev1.Namespace,
 ) error {
 	logger := log.FromContext(ctx)
 
-	for _, roleBinding := range bindDef.Spec.RoleBindings {
-		// Resolve namespaces for this specific roleBinding
-		targetNamespaces, err := r.resolveRoleBindingNamespaces(ctx, roleBinding)
-		if err != nil {
-			return fmt.Errorf("resolve namespaces for roleBinding: %w", err)
-		}
+	for i, roleBinding := range bindDef.Spec.RoleBindings {
+		targetNamespaces := perRoleBindingNamespaces[i]
 
 		for _, ns := range targetNamespaces {
 			// Skip terminating namespaces
@@ -1172,7 +1172,7 @@ func (r *BindDefinitionReconciler) deleteAllRoleBindings(
 ) error {
 	logger := log.FromContext(ctx)
 
-	namespaceSet, err := r.collectNamespaces(ctx, bindDef)
+	namespaceSet, _, err := r.collectNamespaces(ctx, bindDef)
 	if err != nil {
 		logger.Error(err, "failed to collect namespaces for RoleBinding cleanup",
 			"bindDefinitionName", bindDef.Name)
@@ -1309,18 +1309,24 @@ func (r *BindDefinitionReconciler) validateRoleReferences(
 	return missingRoles, nil
 }
 
-func (r *BindDefinitionReconciler) collectNamespaces(ctx context.Context, bindDefinition *authorizationv1alpha1.BindDefinition) (map[string]corev1.Namespace, error) {
-	// Aggregate namespaces from all RoleBindings using the shared resolution logic.
+// collectNamespaces resolves namespaces for each roleBinding and returns both an
+// aggregated set (for filtering/metrics) and a per-roleBinding slice (for ensureRoleBindings).
+// This avoids resolving namespaces twice per reconcile — once here and once in ensureRoleBindings.
+func (r *BindDefinitionReconciler) collectNamespaces(ctx context.Context, bindDefinition *authorizationv1alpha1.BindDefinition) (map[string]corev1.Namespace, [][]corev1.Namespace, error) {
+	roleBindings := bindDefinition.Spec.RoleBindings
+	perRoleBinding := make([][]corev1.Namespace, len(roleBindings))
 	namespaceSet := make(map[string]corev1.Namespace)
-	for _, roleBinding := range bindDefinition.Spec.RoleBindings {
+
+	for i, roleBinding := range roleBindings {
 		resolved, err := r.resolveRoleBindingNamespaces(ctx, roleBinding)
 		if err != nil {
-			return nil, fmt.Errorf("collect namespaces for roleBinding: %w", err)
+			return nil, nil, fmt.Errorf("collect namespaces for roleBinding: %w", err)
 		}
+		perRoleBinding[i] = resolved
 		for _, ns := range resolved {
 			namespaceSet[ns.Name] = ns
 		}
 	}
 
-	return namespaceSet, nil
+	return namespaceSet, perRoleBinding, nil
 }
