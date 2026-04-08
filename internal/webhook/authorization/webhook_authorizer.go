@@ -45,6 +45,12 @@ const (
 // This prevents denial-of-service attacks via oversized request bodies.
 const maxRequestBodySize = 1 << 20 // 1MB
 
+// Validation rejection reasons returned by validateSAR.
+const (
+	reasonEmptyIdentity = "empty user identity and no groups"
+	reasonMissingAttrs  = "missing resource and non-resource attributes"
+)
+
 // Decision values used in structured audit log entries are defined in
 // pkg/metrics (AuthorizerDecisionAllowed, AuthorizerDecisionDenied,
 // AuthorizerDecisionNoOpinion) to keep audit logs and Prometheus labels
@@ -125,6 +131,16 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		wa.recordErrorMetrics(start)
 		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if reason := validateSAR(&sar); reason != "" {
+		wa.Log.V(1).Info("rejecting malformed SubjectAccessReview",
+			"reason", reason,
+			"user", sar.Spec.User,
+			"latency", time.Since(start).String())
+		wa.recordErrorMetrics(start)
+		wa.writeNoOpinionResponse(w, reason)
 		return
 	}
 
@@ -670,6 +686,42 @@ func (wa *Authorizer) writeRateLimitResponse(w http.ResponseWriter) {
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		wa.Log.Error(err, "failed to encode rate-limit response")
+	}
+}
+
+// validateSAR checks that the SubjectAccessReview contains the fields a
+// legitimate Kubernetes API server always populates: a non-empty user identity
+// or at least one group, and at least one of ResourceAttributes or
+// NonResourceAttributes. Returns an empty string when valid, or a
+// human-readable reason when invalid.
+func validateSAR(sar *authzv1.SubjectAccessReview) string {
+	if sar.Spec.User == "" && len(sar.Spec.Groups) == 0 {
+		return reasonEmptyIdentity
+	}
+	if sar.Spec.ResourceAttributes == nil && sar.Spec.NonResourceAttributes == nil {
+		return reasonMissingAttrs
+	}
+	return ""
+}
+
+// writeNoOpinionResponse sends a valid SubjectAccessReview with
+// Allowed=false and Denied=false, indicating this webhook has no opinion.
+func (wa *Authorizer) writeNoOpinionResponse(w http.ResponseWriter, reason string) {
+	response := authzv1.SubjectAccessReview{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "authorization.k8s.io/v1",
+			Kind:       "SubjectAccessReview",
+		},
+		Status: authzv1.SubjectAccessReviewStatus{
+			Allowed: false,
+			Denied:  false,
+			Reason:  reason,
+		},
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		wa.Log.Error(err, "failed to encode no-opinion response")
 	}
 }
 
