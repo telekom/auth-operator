@@ -87,7 +87,8 @@ type ResourceTracker struct {
 	rateLimit          rate.Sometimes
 	scheme             *runtime.Scheme
 	config             *rest.Config
-	mutex              sync.RWMutex
+	collectMu          sync.Mutex   // serialises collectAPIResources calls
+	cacheMu            sync.RWMutex // guards cache reads/writes (held briefly)
 	cache              APIResourcesByGroupVersion
 	signalFuncs        []signalFunc
 	crdsMutex          sync.RWMutex
@@ -173,9 +174,6 @@ func NewResourceTracker(scheme *runtime.Scheme, config *rest.Config) *ResourceTr
 
 		// API resources cache
 		cache: make(APIResourcesByGroupVersion),
-
-		// RWMutex to protect access to the cache
-		mutex: sync.RWMutex{},
 	}
 }
 
@@ -287,10 +285,9 @@ func (r *ResourceTracker) GetAPIResources() (APIResourcesByGroupVersion, error) 
 		return nil, ErrResourceTrackerNotStarted
 	}
 
-	r.mutex.RLock()
-	defer r.mutex.RUnlock()
+	r.cacheMu.RLock()
+	defer r.cacheMu.RUnlock()
 
-	// Deep copy the cache to avoid race conditions
 	copiedCache := make(APIResourcesByGroupVersion)
 	for gv, resources := range r.cache {
 		copiedCache[gv] = make([]metav1.APIResource, len(resources))
@@ -308,16 +305,14 @@ func (r *ResourceTracker) GetAPIResources() (APIResourcesByGroupVersion, error) 
 // It collects resources concurrently for each API group version.
 func (r *ResourceTracker) collectAPIResources(ctx context.Context) (bool, error) {
 	startTime := time.Now()
-	if !r.mutex.TryLock() {
-		// another collection is in progress
+	if !r.collectMu.TryLock() {
 		return false, nil
 	}
-	defer r.mutex.Unlock()
+	defer r.collectMu.Unlock()
 
 	logger := log.FromContext(ctx)
-	logger.V(2).Info("collecting API resources - locking mutex")
+	logger.V(2).Info("collecting API resources")
 
-	// Create a Discovery client with higher QPS and Burst to speed up the discovery process
 	discoveryConfig := rest.CopyConfig(r.config)
 	discoveryConfig.QPS = 100
 	discoveryConfig.Burst = 200
@@ -329,7 +324,6 @@ func (r *ResourceTracker) collectAPIResources(ctx context.Context) (bool, error)
 		return false, err
 	}
 
-	// Fetch all existing API Groups and filter them against RestrictedAPIs
 	logger.V(2).Info("starting API discovery")
 
 	discoveredAPIGroups, err := discoveryClient.ServerGroups()
@@ -340,20 +334,16 @@ func (r *ResourceTracker) collectAPIResources(ctx context.Context) (bool, error)
 	}
 	logger.V(2).Info("discovered API groups", "groupCount", len(discoveredAPIGroups.Groups))
 
-	// Record API discovery duration after successful completion
 	defer func() {
 		metrics.APIDiscoveryDuration.Observe(time.Since(startTime).Seconds())
 	}()
 
-	// Fetch all existing API Resources and filter them against RestrictedResources
 	errorGroup, groupCtx := errgroup.WithContext(ctx)
 
-	// Collect results
 	apiResourcesByGroupVersion := make(APIResourcesByGroupVersion)
 	mutex := sync.Mutex{}
 
 	for _, apiGroup := range discoveredAPIGroups.Groups {
-		// Check context cancellation between API group iterations
 		select {
 		case <-ctx.Done():
 			logger.V(1).Info("stopping API resource collection due to context cancellation")
@@ -362,7 +352,6 @@ func (r *ResourceTracker) collectAPIResources(ctx context.Context) (bool, error)
 		}
 
 		for _, apiGroupVersion := range apiGroup.Versions {
-			// Copy loop variables to avoid closure capture bug
 			apiGroupName := apiGroup.Name
 			apiVersionStr := apiGroupVersion.Version
 			gv := metav1.GroupVersion{
@@ -370,7 +359,6 @@ func (r *ResourceTracker) collectAPIResources(ctx context.Context) (bool, error)
 				Version: apiVersionStr,
 			}
 			errorGroup.Go(func() error {
-				// Check context before starting work
 				select {
 				case <-groupCtx.Done():
 					return groupCtx.Err()
@@ -383,7 +371,6 @@ func (r *ResourceTracker) collectAPIResources(ctx context.Context) (bool, error)
 						"group", apiGroupName, "version", apiVersionStr)
 					return err
 				}
-				// Append results into the shared map under mutex to avoid sharing per-goroutine slices
 				mutex.Lock()
 				apiResourcesByGroupVersion[gv.String()] = append(apiResourcesByGroupVersion[gv.String()], resources...)
 				mutex.Unlock()
@@ -392,7 +379,6 @@ func (r *ResourceTracker) collectAPIResources(ctx context.Context) (bool, error)
 		}
 	}
 	if err := errorGroup.Wait(); err != nil {
-		// Don't log context cancellation as an error
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			logger.V(1).Info("API resource collection cancelled", "reason", err.Error())
 			return false, err
@@ -402,6 +388,9 @@ func (r *ResourceTracker) collectAPIResources(ctx context.Context) (bool, error)
 	}
 
 	logger.V(2).Info("discovered API resources", "resourceCount", len(apiResourcesByGroupVersion))
+
+	r.cacheMu.Lock()
+	defer r.cacheMu.Unlock()
 
 	if apiResourcesByGroupVersion.Equals(r.cache) {
 		logger.V(2).Info("API resources cache unchanged")
