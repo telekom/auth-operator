@@ -1844,7 +1844,7 @@ func TestCollectNamespaces(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ns).Build()
 		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
-		nsSet, err := r.collectNamespaces(ctx, bindDef)
+		nsSet, _, err := r.collectNamespaces(ctx, bindDef)
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(nsSet).To(HaveKey("my-ns"))
 	})
@@ -1866,7 +1866,7 @@ func TestCollectNamespaces(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(scheme).Build()
 		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
-		nsSet, err := r.collectNamespaces(ctx, bindDef)
+		nsSet, _, err := r.collectNamespaces(ctx, bindDef)
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(nsSet).To(BeEmpty())
 	})
@@ -1902,7 +1902,7 @@ func TestCollectNamespaces(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ns1, ns2, ns3).Build()
 		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
-		nsSet, err := r.collectNamespaces(ctx, bindDef)
+		nsSet, _, err := r.collectNamespaces(ctx, bindDef)
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(nsSet).To(HaveLen(2))
 		g.Expect(nsSet).To(HaveKey("ns-1"))
@@ -1935,7 +1935,7 @@ func TestCollectNamespaces(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ns).Build()
 		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
-		nsSet, err := r.collectNamespaces(ctx, bindDef)
+		nsSet, _, err := r.collectNamespaces(ctx, bindDef)
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(nsSet).To(HaveLen(1), "same namespace should be deduplicated")
 	})
@@ -1966,7 +1966,7 @@ func TestCollectNamespaces(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ns1, ns2).Build()
 		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
-		nsSet, err := r.collectNamespaces(ctx, bindDef)
+		nsSet, _, err := r.collectNamespaces(ctx, bindDef)
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(nsSet).To(HaveLen(2), "empty LabelSelector should match all namespaces per Kubernetes semantics")
 		g.Expect(nsSet).To(HaveKey("ns-a"))
@@ -2313,7 +2313,10 @@ func TestEnsureRoleBindings(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bindDef, ns).Build()
 		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
-		err := r.ensureRoleBindings(ctx, bindDef)
+		_, perRoleBindingNamespaces, err := r.collectNamespaces(ctx, bindDef)
+		g.Expect(err).NotTo(HaveOccurred())
+
+		err = r.ensureRoleBindings(ctx, bindDef, perRoleBindingNamespaces)
 		g.Expect(err).NotTo(HaveOccurred())
 
 		// Verify ClusterRoleRef-based RoleBinding
@@ -2370,7 +2373,10 @@ func TestEnsureRoleBindings(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bindDef, ns).Build()
 		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
-		err := r.ensureRoleBindings(ctx, bindDef)
+		_, perRoleBindingNamespaces, err := r.collectNamespaces(ctx, bindDef)
+		g.Expect(err).NotTo(HaveOccurred())
+
+		err = r.ensureRoleBindings(ctx, bindDef, perRoleBindingNamespaces)
 		g.Expect(err).NotTo(HaveOccurred())
 
 		// Verify NO RoleBinding was created in the terminating namespace
@@ -2399,7 +2405,7 @@ func TestEnsureRoleBindings(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bindDef).Build()
 		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
-		err := r.ensureRoleBindings(ctx, bindDef)
+		err := r.ensureRoleBindings(ctx, bindDef, nil)
 		g.Expect(err).NotTo(HaveOccurred())
 	})
 }
@@ -3287,7 +3293,7 @@ func TestReconcileResourcesWithSSAError(t *testing.T) {
 	r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
 	activateNamespaces := []corev1.Namespace{*ns}
-	_, err := r.reconcileResources(ctx, bindDef, activateNamespaces)
+	_, err := r.reconcileResources(ctx, bindDef, activateNamespaces, nil)
 	g.Expect(err).To(HaveOccurred())
 	g.Expect(err.Error()).To(ContainSubstring("injected SSA error"))
 }
@@ -4006,7 +4012,8 @@ func TestReconcileResourcesEnsureRBError(t *testing.T) {
 	r := &BindDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
 
 	namespaces := []corev1.Namespace{{ObjectMeta: metav1.ObjectMeta{Name: "ns1"}}}
-	_, err := r.reconcileResources(ctx, bd, namespaces)
+	perRB := [][]corev1.Namespace{namespaces}
+	_, err := r.reconcileResources(ctx, bd, namespaces, perRB)
 	g.Expect(err).To(HaveOccurred())
 	g.Expect(err.Error()).To(ContainSubstring("injected SSA error"))
 }
