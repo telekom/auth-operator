@@ -92,6 +92,25 @@ jobs:
         env:
           CGO_ENABLED: "1"
 
+      - name: Check coverage threshold
+        run: |
+          # Minimum coverage percentage (goal: 70%, see AGENTS.md)
+          THRESHOLD=55
+
+          TOTAL=$(go tool cover -func=coverage.out | grep '^total:' | awk '{print $NF}' | sed 's/%//')
+          if [ -z "${TOTAL}" ]; then
+            echo "FAIL: Could not parse coverage from coverage.out"
+            exit 1
+          fi
+          echo "Total coverage: ${TOTAL}%  (threshold: ${THRESHOLD}%)"
+
+          # Compare as integers (bash doesn't do float comparison)
+          TOTAL_INT=${TOTAL%.*}
+          if [ "${TOTAL_INT}" -lt "${THRESHOLD}" ]; then
+            echo "FAIL: Coverage ${TOTAL}% is below the ${THRESHOLD}% threshold."
+            exit 1
+          fi
+
       - name: Upload coverage
         uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
         with:
