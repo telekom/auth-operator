@@ -777,6 +777,11 @@ func (r *BindDefinitionReconciler) ensureRoleBindings(
 ) error {
 	logger := log.FromContext(ctx)
 
+	if len(perRoleBindingNamespaces) != len(bindDef.Spec.RoleBindings) {
+		return fmt.Errorf("perRoleBindingNamespaces length (%d) does not match RoleBindings length (%d)",
+			len(perRoleBindingNamespaces), len(bindDef.Spec.RoleBindings))
+	}
+
 	for i, roleBinding := range bindDef.Spec.RoleBindings {
 		targetNamespaces := perRoleBindingNamespaces[i]
 
