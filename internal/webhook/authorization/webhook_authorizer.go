@@ -45,6 +45,12 @@ const (
 // This prevents denial-of-service attacks via oversized request bodies.
 const maxRequestBodySize = 1 << 20 // 1MB
 
+// Validation rejection reasons returned by validateSAR.
+const (
+	reasonEmptyIdentity = "empty user identity and no groups"
+	reasonMissingAttrs  = "missing resource and non-resource attributes"
+)
+
 // Decision values used in structured audit log entries are defined in
 // pkg/metrics (AuthorizerDecisionAllowed, AuthorizerDecisionDenied,
 // AuthorizerDecisionNoOpinion) to keep audit logs and Prometheus labels
@@ -124,7 +130,17 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			span.SetStatus(codes.Error, "invalid request body")
 		}
 		wa.recordErrorMetrics(start)
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		wa.writeNoOpinionResponse(w, "invalid request body")
+		return
+	}
+
+	if reason := validateSAR(&sar); reason != "" {
+		wa.Log.V(1).Info("rejecting malformed SubjectAccessReview",
+			"reason", reason,
+			"user", sar.Spec.User,
+			"latency", time.Since(start).String())
+		wa.recordRejectedMetrics(start)
+		wa.writeNoOpinionResponse(w, reason)
 		return
 	}
 
@@ -673,6 +689,42 @@ func (wa *Authorizer) writeRateLimitResponse(w http.ResponseWriter) {
 	}
 }
 
+// validateSAR checks that the SubjectAccessReview contains the fields a
+// legitimate Kubernetes API server always populates: a non-empty user identity
+// or at least one group, and at least one of ResourceAttributes or
+// NonResourceAttributes. Returns an empty string when valid, or a
+// human-readable reason when invalid.
+func validateSAR(sar *authzv1.SubjectAccessReview) string {
+	if sar.Spec.User == "" && len(sar.Spec.Groups) == 0 {
+		return reasonEmptyIdentity
+	}
+	if sar.Spec.ResourceAttributes == nil && sar.Spec.NonResourceAttributes == nil {
+		return reasonMissingAttrs
+	}
+	return ""
+}
+
+// writeNoOpinionResponse sends a valid SubjectAccessReview with
+// Allowed=false and Denied=false, indicating this webhook has no opinion.
+func (wa *Authorizer) writeNoOpinionResponse(w http.ResponseWriter, reason string) {
+	response := authzv1.SubjectAccessReview{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "authorization.k8s.io/v1",
+			Kind:       "SubjectAccessReview",
+		},
+		Status: authzv1.SubjectAccessReviewStatus{
+			Allowed: false,
+			Denied:  false,
+			Reason:  reason,
+		},
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		wa.Log.Error(err, "failed to encode no-opinion response")
+	}
+}
+
 // recordErrorMetrics records Prometheus request counter and duration histogram
 // with decision=error for early-return error paths (decode failures, list
 // failures) so error rates and latency remain visible in dashboards.
@@ -680,6 +732,17 @@ func (wa *Authorizer) recordErrorMetrics(start time.Time) {
 	duration := time.Since(start).Seconds()
 	pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(pkgmetrics.AuthorizerDecisionError, pkgmetrics.AuthorizerNameNone).Inc()
 	pkgmetrics.AuthorizerRequestDuration.WithLabelValues(pkgmetrics.AuthorizerDecisionError).Observe(duration)
+}
+
+// recordRejectedMetrics records Prometheus request counter and duration
+// histogram with decision=no-opinion for malformed-SAR rejection paths. These
+// requests return a valid no-opinion response and are therefore not errors —
+// using the no-opinion label keeps the metrics semantically consistent with the
+// response written to the caller.
+func (wa *Authorizer) recordRejectedMetrics(start time.Time) {
+	duration := time.Since(start).Seconds()
+	pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(pkgmetrics.AuthorizerDecisionNoOpinion, pkgmetrics.AuthorizerNameNone).Inc()
+	pkgmetrics.AuthorizerRequestDuration.WithLabelValues(pkgmetrics.AuthorizerDecisionNoOpinion).Observe(duration)
 }
 
 // matchesRule checks if a value matches any pattern in the list.

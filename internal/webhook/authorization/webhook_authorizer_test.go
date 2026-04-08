@@ -286,8 +286,8 @@ func TestAuditLog_DecodeError(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
 	}
 
 	output := buf.String()
@@ -441,13 +441,22 @@ func TestServeHTTP_OversizedBody(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, rec.Code)
 	}
 
-	body := rec.Body.String()
-	if !strings.Contains(body, "invalid request body") {
-		t.Errorf("expected generic error message, got %q", body)
+	var resp authzv1.SubjectAccessReview
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Status.Allowed {
+		t.Error("expected Allowed=false for oversized body")
+	}
+	if resp.Status.Denied {
+		t.Error("expected Denied=false (no-opinion) for oversized body")
+	}
+	if !strings.Contains(resp.Status.Reason, "invalid request body") {
+		t.Errorf("expected reason to contain 'invalid request body', got %q", resp.Status.Reason)
 	}
 }
 
@@ -463,17 +472,26 @@ func TestServeHTTP_InvalidJSON(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, rec.Code)
 	}
 
-	body := rec.Body.String()
-	// Verify the error message does NOT leak internal details
-	if strings.Contains(body, "json") || strings.Contains(body, "invalid character") {
-		t.Errorf("error response leaks internal details: %q", body)
+	var resp authzv1.SubjectAccessReview
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
 	}
-	if !strings.Contains(body, "invalid request body") {
-		t.Errorf("expected generic error message, got %q", body)
+	if resp.Status.Allowed {
+		t.Error("expected Allowed=false for invalid JSON")
+	}
+	if resp.Status.Denied {
+		t.Error("expected Denied=false (no-opinion) for invalid JSON")
+	}
+	// Verify the reason does NOT leak internal JSON parse details
+	if strings.Contains(resp.Status.Reason, "json") || strings.Contains(resp.Status.Reason, "invalid character") {
+		t.Errorf("response reason leaks internal details: %q", resp.Status.Reason)
+	}
+	if !strings.Contains(resp.Status.Reason, "invalid request body") {
+		t.Errorf("expected reason to contain 'invalid request body', got %q", resp.Status.Reason)
 	}
 }
 
@@ -858,5 +876,161 @@ func TestServeHTTP_NoRateLimiter(t *testing.T) {
 		if rec.Code != http.StatusOK {
 			t.Errorf("request %d: expected status %d, got %d", i, http.StatusOK, rec.Code)
 		}
+	}
+}
+
+func TestServeHTTP_RejectsEmptyIdentity(t *testing.T) {
+	var buf strings.Builder
+	logger := capturingLogger(&buf, 1)
+	scheme := newScheme(t)
+	cl := newIndexedClient(scheme)
+
+	handler := &Authorizer{Client: cl, Log: logger}
+
+	sar := authzv1.SubjectAccessReview{
+		Spec: authzv1.SubjectAccessReviewSpec{
+			User:               "",
+			ResourceAttributes: &authzv1.ResourceAttributes{Verb: "get", Resource: "pods"},
+		},
+	}
+
+	beforeReqs := testutil.ToFloat64(pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(
+		pkgmetrics.AuthorizerDecisionNoOpinion, pkgmetrics.AuthorizerNameNone))
+
+	body := marshalSAR(t, sar)
+	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var resp authzv1.SubjectAccessReview
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Status.Allowed {
+		t.Error("expected Allowed=false for empty identity")
+	}
+	if resp.Status.Denied {
+		t.Error("expected Denied=false (no-opinion) for empty identity")
+	}
+	if resp.Status.Reason != reasonEmptyIdentity {
+		t.Errorf("unexpected reason: %s", resp.Status.Reason)
+	}
+	if !strings.Contains(buf.String(), "rejecting malformed SubjectAccessReview") {
+		t.Errorf("expected rejection log entry, got:\n%s", buf.String())
+	}
+
+	afterReqs := testutil.ToFloat64(pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(
+		pkgmetrics.AuthorizerDecisionNoOpinion, pkgmetrics.AuthorizerNameNone))
+	if afterReqs-beforeReqs < 1 {
+		t.Error("expected no-opinion metrics to be recorded for empty identity rejection")
+	}
+}
+
+func TestServeHTTP_AcceptsEmptyUserWithGroups(t *testing.T) {
+	scheme := newScheme(t)
+	cl := newIndexedClient(scheme)
+
+	handler := &Authorizer{Client: cl, Log: logr.Discard()}
+
+	sar := authzv1.SubjectAccessReview{
+		Spec: authzv1.SubjectAccessReviewSpec{
+			User:               "",
+			Groups:             []string{"system:masters"},
+			ResourceAttributes: &authzv1.ResourceAttributes{Verb: "get", Resource: "pods"},
+		},
+	}
+	body := marshalSAR(t, sar)
+	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var resp authzv1.SubjectAccessReview
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Status.Allowed {
+		t.Error("expected Allowed=false for SAR with empty user but valid groups")
+	}
+	if resp.Status.Denied {
+		t.Error("expected Denied=false (no-opinion) for SAR with empty user but valid groups")
+	}
+}
+
+func TestServeHTTP_RejectsNoAttributes(t *testing.T) {
+	var buf strings.Builder
+	logger := capturingLogger(&buf, 1)
+	scheme := newScheme(t)
+	cl := newIndexedClient(scheme)
+
+	handler := &Authorizer{Client: cl, Log: logger}
+
+	sar := authzv1.SubjectAccessReview{
+		Spec: authzv1.SubjectAccessReviewSpec{
+			User: "some-user",
+		},
+	}
+	body := marshalSAR(t, sar)
+	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var resp authzv1.SubjectAccessReview
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Status.Allowed {
+		t.Error("expected Allowed=false for SAR with no attributes")
+	}
+	if resp.Status.Denied {
+		t.Error("expected Denied=false (no-opinion) for SAR with no attributes")
+	}
+	if !strings.Contains(resp.Status.Reason, reasonMissingAttrs) {
+		t.Errorf("expected reason about missing attributes, got: %s", resp.Status.Reason)
+	}
+	if !strings.Contains(buf.String(), "rejecting malformed SubjectAccessReview") {
+		t.Errorf("expected rejection log entry, got:\n%s", buf.String())
+	}
+}
+
+func TestServeHTTP_AcceptsNonResourceAttributes(t *testing.T) {
+	scheme := newScheme(t)
+	cl := newIndexedClient(scheme)
+
+	handler := &Authorizer{Client: cl, Log: logr.Discard()}
+
+	sar := authzv1.SubjectAccessReview{
+		Spec: authzv1.SubjectAccessReviewSpec{
+			User:                  "some-user",
+			NonResourceAttributes: &authzv1.NonResourceAttributes{Verb: "get", Path: "/healthz"},
+		},
+	}
+	body := marshalSAR(t, sar)
+	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d; body: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+
+	var resp authzv1.SubjectAccessReview
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Status.Reason == reasonMissingAttrs ||
+		resp.Status.Reason == reasonEmptyIdentity {
+		t.Errorf("non-resource SAR should not be rejected by validation, but got reason: %s", resp.Status.Reason)
 	}
 }
