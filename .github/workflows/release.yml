@@ -131,11 +131,55 @@ jobs:
           retention-days: 1
 
   # ---------------------------------------------------------------------------
+  # Test: run unit + integration tests before building release images
+  # ---------------------------------------------------------------------------
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Load versions from versions.env
+        run: grep -v '^#' versions.env | grep -v '^$' >> $GITHUB_ENV
+
+      - name: Setup Go Environment
+        uses: ./.github/actions/setup-go-env
+
+      - name: Install envtest
+        run: |
+          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@${ENVTEST_VERSION}
+          setup-envtest use 1.34.1 --bin-dir ./bin
+          echo "Envtest binaries installed to: $(setup-envtest use 1.34.1 --bin-dir ./bin -p path)"
+
+      - name: Run tests
+        run: |
+          ENVTEST_PATH="$(setup-envtest use 1.34.1 --bin-dir ./bin -p path)"
+          if [[ "${ENVTEST_PATH}" != /* ]]; then
+            ENVTEST_PATH="${GITHUB_WORKSPACE}/${ENVTEST_PATH}"
+          fi
+          export KUBEBUILDER_ASSETS="${ENVTEST_PATH}"
+
+          if [ ! -x "${KUBEBUILDER_ASSETS}/etcd" ]; then
+            echo "ERROR: envtest binaries not found at ${KUBEBUILDER_ASSETS}"
+            ls -la "${KUBEBUILDER_ASSETS}/" 2>/dev/null || echo "Directory does not exist"
+            exit 1
+          fi
+
+          go test -race $(go list ./... | grep -v /e2e) -coverprofile=coverage.out -covermode=atomic
+        env:
+          CGO_ENABLED: "1"
+
+  # ---------------------------------------------------------------------------
   # Build per-arch images on native runners (no QEMU emulation)
   # ---------------------------------------------------------------------------
   build-image:
     name: Build Image (${{ matrix.arch }})
-    needs: [prepare]
+    needs: [prepare, test]
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ${{ matrix.runner }}
     permissions:
