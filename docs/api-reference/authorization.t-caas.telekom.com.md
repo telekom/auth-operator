@@ -306,7 +306,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `appliesTo` _[PolicyScope](#policyscope)_ | AppliesTo defines the namespace scope this policy governs. |  | Required: \{\} <br /> |
+| `appliesTo` _[PolicyScope](#policyscope)_ | AppliesTo defines the namespace scope this policy governs.<br />This field is stored and validated but runtime enforcement (scoping evaluators<br />and admission checks to the declared namespaces) is not yet implemented.<br />RestrictedBindDefinitions/RestrictedRoleDefinitions referencing this policy<br />may target. Tracked in the PR #224 review findings (SEC-01). |  | Required: \{\} <br /> |
 | `bindingLimits` _[BindingLimits](#bindinglimits)_ | BindingLimits constrains role bindings that may be created. |  | Optional: \{\} <br /> |
 | `roleLimits` _[RoleLimits](#rolelimits)_ | RoleLimits constrains roles that may be generated. |  | Optional: \{\} <br /> |
 | `subjectLimits` _[SubjectLimits](#subjectlimits)_ | SubjectLimits constrains the subjects a tenant may use. |  | Optional: \{\} <br /> |
@@ -684,8 +684,6 @@ _Appears in:_
 | `userLimits` _[NameMatchLimits](#namematchlimits)_ | UserLimits constrains User subject names. |  | Optional: \{\} <br /> |
 | `groupLimits` _[NameMatchLimits](#namematchlimits)_ | GroupLimits constrains Group subject names. |  | Optional: \{\} <br /> |
 | `serviceAccountLimits` _[ServiceAccountLimits](#serviceaccountlimits)_ | ServiceAccountLimits constrains ServiceAccount subjects. |  | Optional: \{\} <br /> |
-
-
 
 
 #### WebhookAuthorizer
