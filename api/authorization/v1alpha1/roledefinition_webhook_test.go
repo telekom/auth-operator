@@ -816,7 +816,7 @@ var _ = Describe("RoleDefinition Webhook", func() {
 			}
 			err := k8sClient.Create(ctx, rd)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("duplicate"))
+			Expect(err.Error()).To(ContainSubstring("Duplicate"))
 		})
 
 		It("Should reject RestrictedAPIs verbs with invalid pattern (uppercase)", func() {

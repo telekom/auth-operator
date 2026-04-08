@@ -212,8 +212,9 @@ spec:
                 type: array
               targetName:
                 description: |-
-                  TargetName is the name prefix for generated bindings. Follows format
-                  "targetName-clusterrole/role-binding".
+                  TargetName is the name prefix for generated bindings. Generated binding
+                  names are derived from this value and suffixed with the binding kind, for
+                  example "targetName-clusterrolebinding" or "targetName-rolebinding".
                   This field is immutable after creation.
                 maxLength: 200
                 minLength: 1

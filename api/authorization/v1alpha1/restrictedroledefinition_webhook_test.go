@@ -211,7 +211,7 @@ var _ = Describe("RestrictedRoleDefinition Webhook", func() {
 			}
 			err := k8sClient.Create(ctx, rrd)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("duplicate"))
+			Expect(err.Error()).To(ContainSubstring("Duplicate"))
 		})
 
 		It("Should allow RestrictedAPIs with verb restrictions", func() {
