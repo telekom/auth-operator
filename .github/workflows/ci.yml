@@ -97,7 +97,9 @@ jobs:
           # Minimum coverage percentage (goal: 70%, see AGENTS.md)
           THRESHOLD=55
 
+          set +o pipefail
           TOTAL=$(go tool cover -func=coverage.out | grep '^total:' | awk '{print $NF}' | sed 's/%//')
+          set -o pipefail
           if [ -z "${TOTAL}" ]; then
             echo "FAIL: Could not parse coverage from coverage.out"
             exit 1
