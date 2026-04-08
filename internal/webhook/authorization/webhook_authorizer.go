@@ -130,7 +130,7 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			span.SetStatus(codes.Error, "invalid request body")
 		}
 		wa.recordErrorMetrics(start)
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		wa.writeNoOpinionResponse(w, "invalid request body")
 		return
 	}
 
@@ -139,7 +139,7 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"reason", reason,
 			"user", sar.Spec.User,
 			"latency", time.Since(start).String())
-		wa.recordErrorMetrics(start)
+		wa.recordRejectedMetrics(start)
 		wa.writeNoOpinionResponse(w, reason)
 		return
 	}
@@ -732,6 +732,17 @@ func (wa *Authorizer) recordErrorMetrics(start time.Time) {
 	duration := time.Since(start).Seconds()
 	pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(pkgmetrics.AuthorizerDecisionError, pkgmetrics.AuthorizerNameNone).Inc()
 	pkgmetrics.AuthorizerRequestDuration.WithLabelValues(pkgmetrics.AuthorizerDecisionError).Observe(duration)
+}
+
+// recordRejectedMetrics records Prometheus request counter and duration
+// histogram with decision=no-opinion for malformed-SAR rejection paths. These
+// requests return a valid no-opinion response and are therefore not errors —
+// using the no-opinion label keeps the metrics semantically consistent with the
+// response written to the caller.
+func (wa *Authorizer) recordRejectedMetrics(start time.Time) {
+	duration := time.Since(start).Seconds()
+	pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(pkgmetrics.AuthorizerDecisionNoOpinion, pkgmetrics.AuthorizerNameNone).Inc()
+	pkgmetrics.AuthorizerRequestDuration.WithLabelValues(pkgmetrics.AuthorizerDecisionNoOpinion).Observe(duration)
 }
 
 // matchesRule checks if a value matches any pattern in the list.

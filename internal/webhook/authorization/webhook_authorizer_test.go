@@ -877,7 +877,7 @@ func TestServeHTTP_RejectsEmptyIdentity(t *testing.T) {
 	}
 
 	beforeReqs := testutil.ToFloat64(pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(
-		pkgmetrics.AuthorizerDecisionError, pkgmetrics.AuthorizerNameNone))
+		pkgmetrics.AuthorizerDecisionNoOpinion, pkgmetrics.AuthorizerNameNone))
 
 	body := marshalSAR(t, sar)
 	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
@@ -906,9 +906,9 @@ func TestServeHTTP_RejectsEmptyIdentity(t *testing.T) {
 	}
 
 	afterReqs := testutil.ToFloat64(pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(
-		pkgmetrics.AuthorizerDecisionError, pkgmetrics.AuthorizerNameNone))
+		pkgmetrics.AuthorizerDecisionNoOpinion, pkgmetrics.AuthorizerNameNone))
 	if afterReqs-beforeReqs < 1 {
-		t.Error("expected error metrics to be recorded for empty identity rejection")
+		t.Error("expected no-opinion metrics to be recorded for empty identity rejection")
 	}
 }
 
@@ -938,8 +938,11 @@ func TestServeHTTP_AcceptsEmptyUserWithGroups(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	if strings.Contains(resp.Status.Reason, "empty user") {
-		t.Errorf("SAR with groups should not be rejected, got reason: %s", resp.Status.Reason)
+	if resp.Status.Allowed {
+		t.Error("expected Allowed=false for SAR with empty user but valid groups")
+	}
+	if resp.Status.Denied {
+		t.Error("expected Denied=false (no-opinion) for SAR with empty user but valid groups")
 	}
 }
 
