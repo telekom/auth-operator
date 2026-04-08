@@ -6,6 +6,7 @@ package v1alpha1
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -52,11 +53,12 @@ func validateRestrictedAPIsVersions(obj *RoleDefinition) error {
 }
 
 // listErrorToAdmission converts a List API error to an appropriate admission error.
-// Transient errors (timeout, server timeout, service unavailable) are wrapped
-// with a message that signals the caller should retry; all other errors return
+// Transient errors (timeout, server timeout, service unavailable, context deadline/cancel)
+// are wrapped with a message that signals the caller should retry; all other errors return
 // a generic internal error suitable for a permanent admission denial.
 func listErrorToAdmission(resource string, err error) error {
-	if apierrors.IsTimeout(err) || apierrors.IsServerTimeout(err) || apierrors.IsServiceUnavailable(err) {
+	if apierrors.IsTimeout(err) || apierrors.IsServerTimeout(err) || apierrors.IsServiceUnavailable(err) ||
+		errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return apierrors.NewInternalError(fmt.Errorf("transient error listing %s; please retry", resource))
 	}
 	return apierrors.NewInternalError(fmt.Errorf("unable to list %s", resource))
@@ -69,8 +71,13 @@ func validateNoDuplicateRestrictedAPIs(obj *RoleDefinition) error {
 	seen := make(map[string]int, len(obj.Spec.RestrictedAPIs))
 	for i, group := range obj.Spec.RestrictedAPIs {
 		if prev, ok := seen[group.Name]; ok {
-			return apierrors.NewBadRequest(
-				fmt.Sprintf("restrictedApis[%d].name %q is a duplicate of restrictedApis[%d]", i, group.Name, prev),
+			return apierrors.NewInvalid(
+				schema.GroupKind{Group: GroupVersion.Group, Kind: "RoleDefinition"},
+				obj.Name,
+				field.ErrorList{field.Duplicate(
+					field.NewPath("spec", "restrictedApis").Index(i).Child("name"),
+					fmt.Sprintf("%q is already used at restrictedApis[%d]", group.Name, prev),
+				)},
 			)
 		}
 		seen[group.Name] = i
@@ -90,13 +97,14 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 		return nil, err
 	}
 
-	// Use field index for efficient lookup by TargetName. The field index constrains
-	// results to the small set matching this targetName; the context timeout provides
-	// the hard latency bound.
+	// Use field index for efficient lookup by TargetName. Limit to 2 so we only need
+	// to read until the first collision is found (one result == self on update, two == conflict).
+	// The field index constrains results to the small set matching this targetName;
+	// the context timeout provides the hard latency bound.
 	roleDefinitionList := &RoleDefinitionList{}
 	if err := v.Client.List(ctx, roleDefinitionList, client.MatchingFields{
 		TargetNameField: obj.Spec.TargetName,
-	}); err != nil {
+	}, client.Limit(2)); err != nil {
 		logger.Error(err, "failed to list RoleDefinitions", "targetName", obj.Spec.TargetName)
 		return nil, listErrorToAdmission("RoleDefinitions", err)
 	}
@@ -178,13 +186,14 @@ func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 		return nil, err
 	}
 
-	// Use field index for efficient lookup by TargetName. The field index constrains
-	// results to the small set matching this targetName; the context timeout provides
-	// the hard latency bound.
+	// Use field index for efficient lookup by TargetName. Limit to 2 so we only need
+	// to read until the first collision is found (one result == self on update, two == conflict).
+	// The field index constrains results to the small set matching this targetName;
+	// the context timeout provides the hard latency bound.
 	roleDefinitionList := &RoleDefinitionList{}
 	if err := v.Client.List(ctx, roleDefinitionList, client.MatchingFields{
 		TargetNameField: newObj.Spec.TargetName,
-	}); err != nil {
+	}, client.Limit(2)); err != nil {
 		logger.Error(err, "failed to list RoleDefinitions", "targetName", newObj.Spec.TargetName)
 		return nil, listErrorToAdmission("RoleDefinitions", err)
 	}

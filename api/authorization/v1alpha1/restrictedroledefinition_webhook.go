@@ -176,8 +176,13 @@ func validateNoDuplicateRestrictedRRDAPIs(obj *RestrictedRoleDefinition) error {
 	seen := make(map[string]int, len(obj.Spec.RestrictedAPIs))
 	for i, group := range obj.Spec.RestrictedAPIs {
 		if prev, ok := seen[group.Name]; ok {
-			return apierrors.NewBadRequest(
-				fmt.Sprintf("restrictedApis[%d].name %q is a duplicate of restrictedApis[%d]", i, group.Name, prev),
+			return apierrors.NewInvalid(
+				schema.GroupKind{Group: GroupVersion.Group, Kind: "RestrictedRoleDefinition"},
+				obj.Name,
+				field.ErrorList{field.Duplicate(
+					field.NewPath("spec", "restrictedApis").Index(i).Child("name"),
+					fmt.Sprintf("%q is already used at restrictedApis[%d]", group.Name, prev),
+				)},
 			)
 		}
 		seen[group.Name] = i
@@ -211,8 +216,14 @@ func (v *RestrictedRoleDefinitionValidator) validatePolicyRefExists(ctx context.
 	rbacPolicy := &RBACPolicy{}
 	if err := v.Client.Get(ctx, client.ObjectKey{Name: obj.Spec.PolicyRef.Name}, rbacPolicy); err != nil {
 		if apierrors.IsNotFound(err) {
-			return apierrors.NewBadRequest(
-				fmt.Sprintf("referenced RBACPolicy %q does not exist", obj.Spec.PolicyRef.Name))
+			return apierrors.NewInvalid(
+				schema.GroupKind{Group: GroupVersion.Group, Kind: "RestrictedRoleDefinition"},
+				obj.Name,
+				field.ErrorList{field.NotFound(
+					field.NewPath("spec", "policyRef", "name"),
+					obj.Spec.PolicyRef.Name,
+				)},
+			)
 		}
 		logger.Error(err, "failed to get RBACPolicy", "policyRef", obj.Spec.PolicyRef.Name)
 		return apierrors.NewInternalError(errors.New("unable to validate policy reference"))
