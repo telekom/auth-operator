@@ -40,7 +40,7 @@ type NamespaceSelectorValidationError struct {
 }
 
 func (e *NamespaceSelectorValidationError) Error() string {
-	return fmt.Sprintf("invalid NamespaceSelector: %s", e.Err)
+	return fmt.Sprintf("invalid NamespaceSelector: %v", e.Err)
 }
 
 func (e *NamespaceSelectorValidationError) Unwrap() error {
