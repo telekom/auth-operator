@@ -6,6 +6,7 @@ package authorization
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -347,6 +348,9 @@ func TestValidateNamespaceSelector_InvalidExpression(t *testing.T) {
 	r, _ := newWATestReconciler(wa)
 	err := r.validateNamespaceSelector(ctxWithLogger(), wa)
 	g.Expect(err).To(gomega.HaveOccurred())
+
+	var validationErr *NamespaceSelectorValidationError
+	g.Expect(errors.As(err, &validationErr)).To(gomega.BeTrue(), "expected NamespaceSelectorValidationError")
 	g.Expect(err.Error()).To(gomega.ContainSubstring("invalid NamespaceSelector"))
 }
 
@@ -408,4 +412,28 @@ func TestReconcile_TransientNamespaceListError_ReturnsError(t *testing.T) {
 	// Verify the Reconciling status was persisted (early SSA apply)
 	g.Expect(updated.Status.ObservedGeneration).To(gomega.Equal(int64(1)),
 		"observedGeneration should be set even on transient error")
+}
+
+func TestNamespaceSelectorValidationError(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	inner := fmt.Errorf("bad operator")
+	valErr := &NamespaceSelectorValidationError{Err: inner}
+
+	g.Expect(valErr.Error()).To(gomega.Equal("invalid NamespaceSelector: bad operator"))
+	g.Expect(valErr.Unwrap()).To(gomega.Equal(inner))
+
+	wrapped := fmt.Errorf("outer: %w", valErr)
+	var target *NamespaceSelectorValidationError
+	g.Expect(errors.As(wrapped, &target)).To(gomega.BeTrue())
+	g.Expect(target.Err).To(gomega.Equal(inner))
+
+	doubleWrapped := fmt.Errorf("reconcile: %w", wrapped)
+	var target2 *NamespaceSelectorValidationError
+	g.Expect(errors.As(doubleWrapped, &target2)).To(gomega.BeTrue())
+	g.Expect(target2.Err).To(gomega.Equal(inner))
+
+	transient := fmt.Errorf("list namespaces: connection refused")
+	var noMatch *NamespaceSelectorValidationError
+	g.Expect(errors.As(transient, &noMatch)).To(gomega.BeFalse())
 }

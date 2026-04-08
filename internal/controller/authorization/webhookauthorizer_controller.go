@@ -6,8 +6,8 @@ package authorization
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -29,6 +29,23 @@ import (
 	"github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/metrics"
 )
+
+// NamespaceSelectorValidationError indicates that a WebhookAuthorizer's
+// NamespaceSelector contains a permanent parse error that will not self-heal.
+// Callers use errors.As to distinguish permanent validation failures from
+// transient errors (API failures, network issues).
+type NamespaceSelectorValidationError struct {
+	// Err is the underlying parse error from metav1.LabelSelectorAsSelector.
+	Err error
+}
+
+func (e *NamespaceSelectorValidationError) Error() string {
+	return fmt.Sprintf("invalid NamespaceSelector: %s", e.Err)
+}
+
+func (e *NamespaceSelectorValidationError) Unwrap() error {
+	return e.Err
+}
 
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=webhookauthorizers,verbs=get;list;watch
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=webhookauthorizers/status,verbs=get;update;patch
@@ -126,7 +143,8 @@ func (r *WebhookAuthorizerReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		// Only label selector parse errors are permanent user mistakes —
 		// mark stalled and do not retry. All other errors (API failures,
 		// network issues, context cancellation) are treated as transient.
-		if strings.Contains(err.Error(), "invalid NamespaceSelector:") {
+		var validationErr *NamespaceSelectorValidationError
+		if errors.As(err, &validationErr) {
 			if ssaErr := r.markStalled(ctx, wa, err); ssaErr != nil {
 				return ctrl.Result{}, fmt.Errorf("mark stalled after validation error: %w", ssaErr)
 			}
@@ -191,7 +209,7 @@ func (r *WebhookAuthorizerReconciler) validateNamespaceSelector(
 	// Parse the LabelSelector
 	selector, err := convertLabelSelector(&wa.Spec.NamespaceSelector)
 	if err != nil {
-		return fmt.Errorf("invalid NamespaceSelector: %w", err)
+		return &NamespaceSelectorValidationError{Err: err}
 	}
 
 	// List namespaces matching the selector
