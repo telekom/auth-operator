@@ -159,6 +159,9 @@ func resolvePolicyApplyClient(
 	if err != nil {
 		return nil, "", fmt.Errorf("build impersonated apply client: %w", err)
 	}
+	if impersonatedClient == nil {
+		return nil, "", fmt.Errorf("build impersonated apply client: factory returned nil client")
+	}
 
 	return impersonatedClient, username, nil
 }
