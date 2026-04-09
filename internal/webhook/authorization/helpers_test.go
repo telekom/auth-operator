@@ -412,7 +412,7 @@ func TestMatchesSubjects(t *testing.T) {
 			userGroups: []string{"oidc:developer"},
 			saInfo:     ServiceAccountInfo{IsServiceAccount: false},
 			subjects: []rbacv1.Subject{
-				{Kind: "User", Name: "jane.doe@example.com"},
+				{Kind: rbacv1.UserKind, Name: "jane.doe@example.com"},
 			},
 			want: true,
 		},
@@ -422,7 +422,7 @@ func TestMatchesSubjects(t *testing.T) {
 			userGroups: []string{"oidc:developer"},
 			saInfo:     ServiceAccountInfo{IsServiceAccount: false},
 			subjects: []rbacv1.Subject{
-				{Kind: "User", Name: "jane.doe@example.com"},
+				{Kind: rbacv1.UserKind, Name: "jane.doe@example.com"},
 			},
 			want: false,
 		},
@@ -432,8 +432,8 @@ func TestMatchesSubjects(t *testing.T) {
 			userGroups: []string{},
 			saInfo:     ServiceAccountInfo{IsServiceAccount: false},
 			subjects: []rbacv1.Subject{
-				{Kind: "Group", Name: "oidc:admin"},
-				{Kind: "User", Name: "jane.doe@example.com"},
+				{Kind: rbacv1.GroupKind, Name: "oidc:admin"},
+				{Kind: rbacv1.UserKind, Name: "jane.doe@example.com"},
 			},
 			want: true,
 		},
@@ -443,7 +443,7 @@ func TestMatchesSubjects(t *testing.T) {
 			userGroups: []string{"oidc:admin", "oidc:developer"},
 			saInfo:     ServiceAccountInfo{IsServiceAccount: false},
 			subjects: []rbacv1.Subject{
-				{Kind: "Group", Name: "oidc:admin"},
+				{Kind: rbacv1.GroupKind, Name: "oidc:admin"},
 			},
 			want: true,
 		},
@@ -453,7 +453,7 @@ func TestMatchesSubjects(t *testing.T) {
 			userGroups: []string{"oidc:viewer"},
 			saInfo:     ServiceAccountInfo{IsServiceAccount: false},
 			subjects: []rbacv1.Subject{
-				{Kind: "Group", Name: "oidc:admin"},
+				{Kind: rbacv1.GroupKind, Name: "oidc:admin"},
 			},
 			want: false,
 		},
@@ -463,7 +463,7 @@ func TestMatchesSubjects(t *testing.T) {
 			userGroups: []string{},
 			saInfo:     ServiceAccountInfo{Namespace: "kube-system", Name: "default", IsServiceAccount: true},
 			subjects: []rbacv1.Subject{
-				{Kind: "ServiceAccount", Namespace: "kube-system", Name: "default"},
+				{Kind: rbacv1.ServiceAccountKind, Namespace: "kube-system", Name: "default"},
 			},
 			want: true,
 		},
@@ -473,7 +473,7 @@ func TestMatchesSubjects(t *testing.T) {
 			userGroups: []string{},
 			saInfo:     ServiceAccountInfo{Namespace: "other-ns", Name: "default", IsServiceAccount: true},
 			subjects: []rbacv1.Subject{
-				{Kind: "ServiceAccount", Namespace: "kube-system", Name: "default"},
+				{Kind: rbacv1.ServiceAccountKind, Namespace: "kube-system", Name: "default"},
 			},
 			want: false,
 		},
@@ -483,7 +483,7 @@ func TestMatchesSubjects(t *testing.T) {
 			userGroups: []string{},
 			saInfo:     ServiceAccountInfo{Namespace: "kube-system", Name: "other", IsServiceAccount: true},
 			subjects: []rbacv1.Subject{
-				{Kind: "ServiceAccount", Namespace: "kube-system", Name: "default"},
+				{Kind: rbacv1.ServiceAccountKind, Namespace: "kube-system", Name: "default"},
 			},
 			want: false,
 		},
@@ -501,8 +501,8 @@ func TestMatchesSubjects(t *testing.T) {
 			userGroups: []string{"oidc:developer"},
 			saInfo:     ServiceAccountInfo{IsServiceAccount: false},
 			subjects: []rbacv1.Subject{
-				{Kind: "Group", Name: "oidc:admin"},
-				{Kind: "Group", Name: "oidc:developer"},
+				{Kind: rbacv1.GroupKind, Name: "oidc:admin"},
+				{Kind: rbacv1.GroupKind, Name: "oidc:developer"},
 			},
 			want: true,
 		},

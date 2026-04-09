@@ -182,17 +182,17 @@ func hasGroup(groups []string, expected string) bool {
 func MatchesSubjects(username string, userGroups []string, saInfo ServiceAccountInfo, subjects []rbacv1.Subject) bool {
 	for _, subject := range subjects {
 		switch subject.Kind {
-		case "User":
+		case rbacv1.UserKind:
 			if subject.Name == username {
 				return true
 			}
-		case "Group":
+		case rbacv1.GroupKind:
 			for _, userGroup := range userGroups {
 				if subject.Name == userGroup {
 					return true
 				}
 			}
-		case "ServiceAccount":
+		case rbacv1.ServiceAccountKind:
 			if saInfo.IsServiceAccount && subject.Namespace == saInfo.Namespace && subject.Name == saInfo.Name {
 				return true
 			}
