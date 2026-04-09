@@ -125,7 +125,7 @@ metrics:
   # When enabled, TokenReview and SubjectAccessReview protect the metrics endpoint
   # and auth-delegator ClusterRoleBinding is created.
   auth:
-    enabled: false
+    enabled: true
   service:
     # Enable a dedicated Service for Prometheus scraping
     enabled: true
