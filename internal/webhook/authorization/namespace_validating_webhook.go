@@ -303,7 +303,7 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 		logger.V(3).Info("checking BindDefinition", "namespace", req.Name,
 			"bindDefinitionName", bindDef.Name, "bdIndex", bdIdx, "subjectCount", len(bindDef.Spec.Subjects))
 
-		if !MatchesSubjects(userGroups, saInfo, bindDef.Spec.Subjects) {
+		if !MatchesSubjects(req.UserInfo.Username, userGroups, saInfo, bindDef.Spec.Subjects) {
 			logger.V(4).Info("user not found in BindDefinition subjects",
 				"namespace", req.Name, "bindDefinitionName", bindDef.Name)
 			continue

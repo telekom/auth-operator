@@ -400,13 +400,46 @@ func TestCheckBypassValidatorCases(t *testing.T) {
 func TestMatchesSubjects(t *testing.T) {
 	tests := []struct {
 		name       string
+		username   string
 		userGroups []string
 		saInfo     ServiceAccountInfo
 		subjects   []rbacv1.Subject
 		want       bool
 	}{
 		{
+			name:       "matches user",
+			username:   "jane.doe@example.com",
+			userGroups: []string{"oidc:developer"},
+			saInfo:     ServiceAccountInfo{IsServiceAccount: false},
+			subjects: []rbacv1.Subject{
+				{Kind: "User", Name: "jane.doe@example.com"},
+			},
+			want: true,
+		},
+		{
+			name:       "does not match user",
+			username:   "john.doe@example.com",
+			userGroups: []string{"oidc:developer"},
+			saInfo:     ServiceAccountInfo{IsServiceAccount: false},
+			subjects: []rbacv1.Subject{
+				{Kind: "User", Name: "jane.doe@example.com"},
+			},
+			want: false,
+		},
+		{
+			name:       "matches user among multiple subjects",
+			username:   "jane.doe@example.com",
+			userGroups: []string{},
+			saInfo:     ServiceAccountInfo{IsServiceAccount: false},
+			subjects: []rbacv1.Subject{
+				{Kind: "Group", Name: "oidc:admin"},
+				{Kind: "User", Name: "jane.doe@example.com"},
+			},
+			want: true,
+		},
+		{
 			name:       "matches group",
+			username:   "someone@example.com",
 			userGroups: []string{"oidc:admin", "oidc:developer"},
 			saInfo:     ServiceAccountInfo{IsServiceAccount: false},
 			subjects: []rbacv1.Subject{
@@ -416,6 +449,7 @@ func TestMatchesSubjects(t *testing.T) {
 		},
 		{
 			name:       "does not match group",
+			username:   "someone@example.com",
 			userGroups: []string{"oidc:viewer"},
 			saInfo:     ServiceAccountInfo{IsServiceAccount: false},
 			subjects: []rbacv1.Subject{
@@ -425,6 +459,7 @@ func TestMatchesSubjects(t *testing.T) {
 		},
 		{
 			name:       "matches service account",
+			username:   "system:serviceaccount:kube-system:default",
 			userGroups: []string{},
 			saInfo:     ServiceAccountInfo{Namespace: "kube-system", Name: "default", IsServiceAccount: true},
 			subjects: []rbacv1.Subject{
@@ -434,6 +469,7 @@ func TestMatchesSubjects(t *testing.T) {
 		},
 		{
 			name:       "service account namespace mismatch",
+			username:   "system:serviceaccount:other-ns:default",
 			userGroups: []string{},
 			saInfo:     ServiceAccountInfo{Namespace: "other-ns", Name: "default", IsServiceAccount: true},
 			subjects: []rbacv1.Subject{
@@ -443,6 +479,7 @@ func TestMatchesSubjects(t *testing.T) {
 		},
 		{
 			name:       "service account name mismatch",
+			username:   "system:serviceaccount:kube-system:other",
 			userGroups: []string{},
 			saInfo:     ServiceAccountInfo{Namespace: "kube-system", Name: "other", IsServiceAccount: true},
 			subjects: []rbacv1.Subject{
@@ -452,6 +489,7 @@ func TestMatchesSubjects(t *testing.T) {
 		},
 		{
 			name:       "empty subjects returns false",
+			username:   "someone@example.com",
 			userGroups: []string{"oidc:admin"},
 			saInfo:     ServiceAccountInfo{IsServiceAccount: false},
 			subjects:   []rbacv1.Subject{},
@@ -459,6 +497,7 @@ func TestMatchesSubjects(t *testing.T) {
 		},
 		{
 			name:       "multiple subjects - matches second",
+			username:   "someone@example.com",
 			userGroups: []string{"oidc:developer"},
 			saInfo:     ServiceAccountInfo{IsServiceAccount: false},
 			subjects: []rbacv1.Subject{
@@ -471,7 +510,7 @@ func TestMatchesSubjects(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := MatchesSubjects(tt.userGroups, tt.saInfo, tt.subjects)
+			got := MatchesSubjects(tt.username, tt.userGroups, tt.saInfo, tt.subjects)
 			if got != tt.want {
 				t.Errorf("MatchesSubjects() = %v, want %v", got, tt.want)
 			}
