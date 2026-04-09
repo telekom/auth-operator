@@ -118,7 +118,7 @@ a namespaced Role, not a ClusterRole.
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `metrics.auth.enabled` | Require authentication/authorization for `/metrics` endpoint | `false` |
+| `metrics.auth.enabled` | Require authentication/authorization for `/metrics` endpoint | `true` |
 | `metrics.service.enabled` | Create a dedicated metrics Service | `true` |
 | `metrics.service.port` | Metrics service port | `8080` |
 | `metrics.serviceMonitor.enabled` | Create a Prometheus ServiceMonitor | `false` |

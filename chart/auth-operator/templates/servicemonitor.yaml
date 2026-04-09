@@ -13,6 +13,11 @@ spec:
   endpoints:
     - path: /metrics
       port: metrics
+      {{- /* When metrics.auth.enabled is true, the --metrics-secure flag is passed to the
+           controller, which activates controller-runtime's built-in SecureServing. The
+           metrics listener then uses a self-signed TLS certificate generated at startup;
+           no external cert volume is required. insecureSkipVerify allows Prometheus to
+           scrape that self-signed endpoint. */}}
       scheme: {{ if .Values.metrics.auth.enabled }}https{{ else }}http{{ end }}
       {{- with .Values.metrics.serviceMonitor.interval }}
       interval: {{ . }}

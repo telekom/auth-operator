@@ -399,7 +399,7 @@
             "enabled": {
               "type": "boolean",
               "description": "Require authentication and authorization for the /metrics endpoint.",
-              "default": false
+              "default": true
             }
           }
         },
