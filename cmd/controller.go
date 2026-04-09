@@ -122,6 +122,7 @@ and their status is kept up to date.`,
 
 			Metrics: metricsserver.Options{
 				BindAddress:    metricsAddr,
+				SecureServing:  metricsSecure,
 				FilterProvider: metricsFilterProvider(),
 			},
 			LeaderElection:          enableLeaderElection,

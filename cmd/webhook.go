@@ -109,6 +109,7 @@ ensuring authorization policies are enforced at creation time.`,
 			Scheme: scheme,
 			Metrics: metricsserver.Options{
 				BindAddress:    metricsAddr,
+				SecureServing:  metricsSecure,
 				FilterProvider: metricsFilterProvider(),
 			},
 			WebhookServer:           webhookServer,
