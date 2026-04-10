@@ -281,6 +281,7 @@ func TestFlagDefaults(t *testing.T) {
 		{"controller", "graceful-shutdown-timeout", "30s"},
 		{"controller", "tracker-sync-interval", "5m0s"},
 		{"controller", "tracker-resync-interval", "15m0s"},
+		{"controller", "webhookauthorizer-concurrency", "1"},
 		{"webhook", "port", "9443"},
 		{"webhook", "enable-http2", "false"},
 		{"webhook", "disable-cert-rotation", "false"},

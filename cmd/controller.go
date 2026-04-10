@@ -57,6 +57,9 @@ and their status is kept up to date.`,
 		if err := validateConcurrency(bindDefinitionConcurrency, roleDefinitionConcurrency, webhookAuthorizerConcurrency); err != nil {
 			return err
 		}
+		if err := validateTrackerIntervals(trackerSyncInterval, trackerResyncInterval); err != nil {
+			return err
+		}
 
 		setupLog.Info("starting controller")
 		setupLog.Info("controller configuration",
@@ -241,6 +244,16 @@ func init() {
 	controllerCmd.Flags().DurationVar(&trackerResyncInterval, "tracker-resync-interval", 15*time.Minute,
 		"Interval between full rescans by the ResourceTracker to account for missed events. "+
 			"Refreshes the CRD UUID map and API resources cache. Default is 15 minutes.")
+}
+
+func validateTrackerIntervals(syncInterval, resyncInterval time.Duration) error {
+	if syncInterval < 0 {
+		return fmt.Errorf("tracker-sync-interval must be non-negative, got %s", syncInterval)
+	}
+	if resyncInterval < 0 {
+		return fmt.Errorf("tracker-resync-interval must be non-negative, got %s", resyncInterval)
+	}
+	return nil
 }
 
 // waitForRequiredCRDs waits for all required CRDs to be established before starting controllers.
