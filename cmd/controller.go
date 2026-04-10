@@ -37,6 +37,8 @@ var (
 	cacheSyncTimeout             time.Duration
 	gracefulShutdownTimeout      time.Duration
 	waitForCRDs                  bool
+	trackerSyncInterval          time.Duration
+	trackerResyncInterval        time.Duration
 )
 
 // controllerCmd represents the controller command.
@@ -65,6 +67,8 @@ and their status is kept up to date.`,
 			"cacheSyncTimeout", cacheSyncTimeout,
 			"gracefulShutdownTimeout", gracefulShutdownTimeout,
 			"namespace", namespace,
+			"trackerSyncInterval", trackerSyncInterval,
+			"trackerResyncInterval", trackerResyncInterval,
 		)
 
 		ctx := ctrl.SetupSignalHandler()
@@ -115,6 +119,8 @@ and their status is kept up to date.`,
 		}
 
 		resourceTracker := discovery.NewResourceTracker(scheme, mgr.GetConfig())
+		resourceTracker.CollectionInterval = trackerSyncInterval
+		resourceTracker.FullRescanInterval = trackerResyncInterval
 		if err := mgr.Add(resourceTracker); err != nil {
 			return fmt.Errorf("unable to add resource tracker to manager: %w", err)
 		}
@@ -229,6 +235,12 @@ func init() {
 	controllerCmd.Flags().BoolVar(&waitForCRDs, "wait-for-crds", true,
 		"Wait for required CRDs to be established before starting controllers. "+
 			"This prevents cache sync timeout errors when CRDs are not yet installed. Default is true.")
+	controllerCmd.Flags().DurationVar(&trackerSyncInterval, "tracker-sync-interval", 5*time.Minute,
+		"Interval between periodic API resource collections by the ResourceTracker. "+
+			"Increase to reduce API server load in stable clusters. Default is 5 minutes.")
+	controllerCmd.Flags().DurationVar(&trackerResyncInterval, "tracker-resync-interval", 15*time.Minute,
+		"Interval between full rescans by the ResourceTracker to account for missed events. "+
+			"Refreshes the CRD UUID map and API resources cache. Default is 15 minutes.")
 }
 
 // waitForRequiredCRDs waits for all required CRDs to be established before starting controllers.

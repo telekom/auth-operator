@@ -187,6 +187,8 @@ func TestControllerCmdFlags(t *testing.T) {
 		"cache-sync-timeout",
 		"graceful-shutdown-timeout",
 		"wait-for-crds",
+		"tracker-sync-interval",
+		"tracker-resync-interval",
 	}
 
 	for _, name := range expectedFlags {
@@ -194,6 +196,26 @@ func TestControllerCmdFlags(t *testing.T) {
 		if f == nil {
 			t.Errorf("expected flag %q not found on controller command", name)
 		}
+	}
+}
+
+func TestTrackerIntervalFlagDefaults(t *testing.T) {
+	flags := controllerCmd.Flags()
+
+	syncFlag := flags.Lookup("tracker-sync-interval")
+	if syncFlag == nil {
+		t.Fatal("flag tracker-sync-interval not found on controller command")
+	}
+	if syncFlag.DefValue != "5m0s" {
+		t.Errorf("tracker-sync-interval default = %q, want %q", syncFlag.DefValue, "5m0s")
+	}
+
+	resyncFlag := flags.Lookup("tracker-resync-interval")
+	if resyncFlag == nil {
+		t.Fatal("flag tracker-resync-interval not found on controller command")
+	}
+	if resyncFlag.DefValue != "15m0s" {
+		t.Errorf("tracker-resync-interval default = %q, want %q", resyncFlag.DefValue, "15m0s")
 	}
 }
 
@@ -257,6 +279,8 @@ func TestFlagDefaults(t *testing.T) {
 		{"controller", "wait-for-crds", "true"},
 		{"controller", "cache-sync-timeout", "2m0s"},
 		{"controller", "graceful-shutdown-timeout", "30s"},
+		{"controller", "tracker-sync-interval", "5m0s"},
+		{"controller", "tracker-resync-interval", "15m0s"},
 		{"webhook", "port", "9443"},
 		{"webhook", "enable-http2", "false"},
 		{"webhook", "disable-cert-rotation", "false"},

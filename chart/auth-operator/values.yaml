@@ -45,6 +45,14 @@ controller:
   roleDefinitionConcurrency: 10
   # Number of concurrent reconcilers for WebhookAuthorizer controller (0 to disable)
   webhookAuthorizerConcurrency: 1
+  # ResourceTracker interval configuration
+  tracker:
+    # Interval between periodic API resource collections.
+    # Increase in stable clusters to reduce API server load. (e.g. "5m", "10m")
+    syncInterval: "5m"
+    # Interval between full rescans to account for missed events.
+    # Refreshes the CRD UUID map and API resources cache. (e.g. "15m", "30m")
+    resyncInterval: "15m"
   resources:
     limits:
       cpu: 500m
