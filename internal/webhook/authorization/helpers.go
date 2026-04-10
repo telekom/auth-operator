@@ -178,17 +178,22 @@ func hasGroup(groups []string, expected string) bool {
 	return false
 }
 
-// MatchesSubjects checks if the user (via groups or service account) matches any of the subjects.
-func MatchesSubjects(userGroups []string, saInfo ServiceAccountInfo, subjects []rbacv1.Subject) bool {
+// MatchesSubjects checks if the user (via username, groups, or service account) matches any of the subjects.
+func MatchesSubjects(username string, userGroups []string, saInfo ServiceAccountInfo, subjects []rbacv1.Subject) bool {
 	for _, subject := range subjects {
-		if subject.Kind == "Group" {
+		switch subject.Kind {
+		case rbacv1.UserKind:
+			if subject.Name == username {
+				return true
+			}
+		case rbacv1.GroupKind:
 			for _, userGroup := range userGroups {
 				if subject.Name == userGroup {
 					return true
 				}
 			}
-		} else if subject.Kind == "ServiceAccount" && saInfo.IsServiceAccount {
-			if subject.Namespace == saInfo.Namespace && subject.Name == saInfo.Name {
+		case rbacv1.ServiceAccountKind:
+			if saInfo.IsServiceAccount && subject.Namespace == saInfo.Namespace && subject.Name == saInfo.Name {
 				return true
 			}
 		}

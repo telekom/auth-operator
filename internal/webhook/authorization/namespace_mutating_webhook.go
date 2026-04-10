@@ -72,7 +72,7 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 	}
 
 	// Collect labels from matching BindDefinitions
-	labelsToAdd, listErr := m.collectBindDefinitionLabels(ctx, req.Name, userGroups, saInfo)
+	labelsToAdd, listErr := m.collectBindDefinitionLabels(ctx, req.Name, req.UserInfo.Username, userGroups, saInfo)
 	if listErr != nil {
 		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultErrored).Inc()
 		return admission.Errored(http.StatusInternalServerError, listErr)
@@ -131,7 +131,7 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 
 // collectBindDefinitionLabels iterates over all BindDefinitions and collects labels to add
 // from those whose subjects match the requesting user.
-func (m *NamespaceMutator) collectBindDefinitionLabels(ctx context.Context, nsName string, userGroups []string, saInfo ServiceAccountInfo) (map[string]string, error) {
+func (m *NamespaceMutator) collectBindDefinitionLabels(ctx context.Context, nsName, username string, userGroups []string, saInfo ServiceAccountInfo) (map[string]string, error) {
 	logger := logf.FromContext(ctx).WithName("namespace-mutator")
 
 	// Fetch all BindDefinition CRDs
@@ -155,7 +155,7 @@ func (m *NamespaceMutator) collectBindDefinitionLabels(ctx context.Context, nsNa
 		logger.V(3).Info("checking BindDefinition for user match",
 			"namespace", nsName, "bindDefinitionName", bindDef.Name, "bdIndex", bdIdx)
 
-		if MatchesSubjects(userGroups, saInfo, bindDef.Spec.Subjects) {
+		if MatchesSubjects(username, userGroups, saInfo, bindDef.Spec.Subjects) {
 			logger.V(3).Info("user matched - extracting labels from RoleBindings",
 				"namespace", nsName, "bindDefinition", bindDef.Name)
 
