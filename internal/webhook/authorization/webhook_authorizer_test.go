@@ -1038,10 +1038,10 @@ func TestServeHTTP_AcceptsNonResourceAttributes(t *testing.T) {
 func TestServeHTTP_DeniedResponseSetsDeniedTrue(t *testing.T) {
 	scheme := newScheme(t)
 
-	wa := authorizationv1alpha1.WebhookAuthorizer{
+	wa := authzv1alpha1.WebhookAuthorizer{
 		ObjectMeta: metav1.ObjectMeta{Name: "deny-uid-wa"},
-		Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
-			DeniedPrincipals: []authorizationv1alpha1.Principal{{User: "blocked-user"}},
+		Spec: authzv1alpha1.WebhookAuthorizerSpec{
+			DeniedPrincipals: []authzv1alpha1.Principal{{User: "blocked-user"}},
 		},
 	}
 	cl := newIndexedClient(scheme, &wa)
