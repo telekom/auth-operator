@@ -2,7 +2,6 @@ package v1alpha1
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -102,7 +101,7 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 		TargetNameField: r.Spec.TargetName,
 	}); err != nil {
 		logger.Error(err, "failed to list BindDefinitions", "targetName", r.Spec.TargetName)
-		return nil, apierrors.NewInternalError(errors.New("unable to list BindDefinitions"))
+		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list BindDefinitions: %w", err))
 	}
 
 	for _, bindDefinition := range bindDefinitionList.Items {
@@ -121,7 +120,7 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 		TargetNameField: r.Spec.TargetName,
 	}, client.Limit(1)); err != nil {
 		logger.Error(err, "failed to list RestrictedBindDefinitions", "targetName", r.Spec.TargetName)
-		return nil, apierrors.NewInternalError(errors.New("unable to list RestrictedBindDefinitions"))
+		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RestrictedBindDefinitions: %w", err))
 	}
 	for _, existing := range rbdList.Items {
 		return nil, apierrors.NewBadRequest(
@@ -193,7 +192,7 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 				}
 			} else {
 				logger.Error(err, "failed to fetch clusterrole", "clusterRoleName", clusterRoleRef)
-				return warnings, apierrors.NewInternalError(errors.New("unable to fetch ClusterRole"))
+				return warnings, apierrors.NewInternalError(fmt.Errorf("unable to fetch ClusterRole: %w", err))
 			}
 		} else {
 			clusterRoleExists[clusterRoleRef] = true
@@ -224,7 +223,7 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 					}
 				} else {
 					logger.Error(err, "failed to fetch clusterrole", "clusterRoleName", clusterRoleRef)
-					return warnings, apierrors.NewInternalError(errors.New("unable to fetch ClusterRole"))
+					return warnings, apierrors.NewInternalError(fmt.Errorf("unable to fetch ClusterRole: %w", err))
 				}
 			} else {
 				clusterRoleExists[clusterRoleRef] = true
@@ -250,7 +249,7 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 				}
 				if err := v.Client.List(ctx, namespaceList, listOptions); err != nil {
 					logger.Error(err, "failed to list namespaces", "selector", selector.String())
-					return warnings, apierrors.NewInternalError(errors.New("unable to list namespaces"))
+					return warnings, apierrors.NewInternalError(fmt.Errorf("unable to list namespaces: %w", err))
 				}
 				for _, ns := range namespaceList.Items {
 					namespaceSet[ns.Name] = ns
@@ -274,7 +273,7 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 					if err := v.checkRoleExists(ctx, ns.Name, roleRef, r.Name, policy, roleExists, &missingRoles); err != nil {
 						logger.Error(err, "failed to validate role reference",
 							"name", r.Name, "namespace", ns.Name, "roleName", roleRef)
-						return warnings, apierrors.NewInternalError(errors.New("unable to validate role reference"))
+						return warnings, apierrors.NewInternalError(fmt.Errorf("unable to validate role reference: %w", err))
 					}
 				}
 			}
@@ -290,7 +289,7 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 					continue
 				}
 				logger.Error(err, "failed to get namespace", "namespace", roleBinding.Namespace)
-				return warnings, apierrors.NewInternalError(errors.New("unable to get namespace"))
+				return warnings, apierrors.NewInternalError(fmt.Errorf("unable to get namespace: %w", err))
 			}
 			if ns.Status.Phase == corev1.NamespaceTerminating {
 				continue
@@ -299,7 +298,7 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 				if err := v.checkRoleExists(ctx, roleBinding.Namespace, roleRef, r.Name, policy, roleExists, &missingRoles); err != nil {
 					logger.Error(err, "failed to validate role reference",
 						"name", r.Name, "namespace", roleBinding.Namespace, "roleName", roleRef)
-					return warnings, apierrors.NewInternalError(errors.New("unable to validate role reference"))
+					return warnings, apierrors.NewInternalError(fmt.Errorf("unable to validate role reference: %w", err))
 				}
 			}
 		}

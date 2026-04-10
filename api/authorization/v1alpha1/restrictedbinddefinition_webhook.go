@@ -207,7 +207,7 @@ func (v *RestrictedBindDefinitionValidator) validatePolicyRefExists(ctx context.
 			return nil, apierrors.NewInternalError(errors.New("transient error validating policy reference"))
 		}
 		logger.Error(err, "failed to get RBACPolicy", "policyRef", obj.Spec.PolicyRef.Name)
-		return nil, apierrors.NewInternalError(errors.New("unable to validate policy reference"))
+		return nil, apierrors.NewInternalError(fmt.Errorf("unable to validate policy reference: %w", err))
 	}
 
 	// AllowedNamespaceSelector constraints cannot be evaluated at admission time because
