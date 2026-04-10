@@ -61,7 +61,7 @@ func listErrorToAdmission(resource string, err error) error {
 		errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return apierrors.NewInternalError(fmt.Errorf("transient error listing %s; please retry", resource))
 	}
-	return apierrors.NewInternalError(fmt.Errorf("unable to list %s", resource))
+	return apierrors.NewInternalError(fmt.Errorf("unable to list %s: %w", resource, err))
 }
 
 // validateNoDuplicateRestrictedAPIs rejects duplicate API group names in RestrictedAPIs.

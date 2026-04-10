@@ -6,7 +6,6 @@ package v1alpha1
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -226,7 +225,7 @@ func (v *RestrictedRoleDefinitionValidator) validatePolicyRefExists(ctx context.
 			)
 		}
 		logger.Error(err, "failed to get RBACPolicy", "policyRef", obj.Spec.PolicyRef.Name)
-		return apierrors.NewInternalError(errors.New("unable to validate policy reference"))
+		return apierrors.NewInternalError(fmt.Errorf("unable to validate policy reference: %w", err))
 	}
 
 	return nil
