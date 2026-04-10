@@ -2,7 +2,7 @@ module github.com/telekom/auth-operator
 
 go 1.25.0
 
-toolchain go1.25.8
+toolchain go1.25.9
 
 require (
 	github.com/evanphx/json-patch v5.9.11+incompatible
