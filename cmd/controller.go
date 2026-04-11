@@ -247,11 +247,11 @@ func init() {
 }
 
 func validateTrackerIntervals(syncInterval, resyncInterval time.Duration) error {
-	if syncInterval < 0 {
-		return fmt.Errorf("tracker-sync-interval must be non-negative, got %s", syncInterval)
+	if syncInterval <= 0 {
+		return fmt.Errorf("tracker-sync-interval must be positive, got %s", syncInterval)
 	}
-	if resyncInterval < 0 {
-		return fmt.Errorf("tracker-resync-interval must be non-negative, got %s", resyncInterval)
+	if resyncInterval <= 0 {
+		return fmt.Errorf("tracker-resync-interval must be positive, got %s", resyncInterval)
 	}
 	return nil
 }

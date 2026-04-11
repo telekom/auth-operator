@@ -10,6 +10,7 @@ package cmd
 import (
 	"flag"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -128,6 +129,34 @@ func TestControllerCmdFlagValidation(t *testing.T) {
 			if (err != nil) != tt.expectError {
 				t.Errorf("validateConcurrency(%d, %d, %d): expected error=%v, got %v",
 					tt.bdConc, tt.rdConc, tt.waConc, tt.expectError, err)
+			}
+		})
+	}
+}
+
+func TestValidateTrackerIntervals(t *testing.T) {
+	tests := []struct {
+		name           string
+		syncInterval   time.Duration
+		resyncInterval time.Duration
+		expectError    bool
+	}{
+		{"both positive", 5 * time.Minute, 15 * time.Minute, false},
+		{"sync zero", 0, 15 * time.Minute, true},
+		{"resync zero", 5 * time.Minute, 0, true},
+		{"sync negative", -1 * time.Minute, 15 * time.Minute, true},
+		{"resync negative", 5 * time.Minute, -1 * time.Minute, true},
+		{"both zero", 0, 0, true},
+		{"both negative", -1 * time.Minute, -1 * time.Minute, true},
+		{"small positive valid", time.Second, time.Second, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateTrackerIntervals(tt.syncInterval, tt.resyncInterval)
+			if (err != nil) != tt.expectError {
+				t.Errorf("validateTrackerIntervals(%v, %v): expected error=%v, got %v",
+					tt.syncInterval, tt.resyncInterval, tt.expectError, err)
 			}
 		})
 	}
