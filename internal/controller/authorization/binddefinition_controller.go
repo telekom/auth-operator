@@ -946,8 +946,10 @@ func (r *BindDefinitionReconciler) applyServiceAccount(
 		WithOwnerReferences(saOwnerRefForBindDefinition(bindDef)).
 		WithAnnotations(helpers.BuildManagedSAAnnotations(sourceNames))
 
-	// Use per-BD FieldOwner so each BD's ownerRef is tracked independently.
-	// Without this, SSA would remove BD-A's ownerRef when BD-B applies its ownerRef.
+	// Derive the SSA field manager via the shared FieldOwnerFor helper, scoped
+	// by this BindDefinition's name so separate BindDefinitions do not take
+	// ownership of each other's managed fields when they reconcile the same
+	// ServiceAccount.
 	fieldOwner := pkgssa.FieldOwnerFor(bindDef.Name)
 	result, patchErr := pkgssa.PatchApplyServiceAccount(ctx, r.client, ac, fieldOwner)
 	if patchErr != nil {
