@@ -446,6 +446,26 @@
               "additionalProperties": {
                 "type": "string"
               }
+            },
+            "tlsConfig": {
+              "type": "object",
+              "description": "TLS configuration for Prometheus scraping.",
+              "additionalProperties": false,
+              "properties": {
+                "caFile": {
+                  "type": "string",
+                  "description": "CA file path for Prometheus TLS configuration."
+                },
+                "serverName": {
+                  "type": "string",
+                  "description": "Server name for Prometheus TLS configuration."
+                },
+                "insecureSkipVerify": {
+                  "type": "boolean",
+                  "description": "Skip certificate verification for Prometheus TLS scraping.",
+                  "default": true
+                }
+              }
             }
           }
         }

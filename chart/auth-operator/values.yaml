@@ -139,6 +139,10 @@ metrics:
     scrapeTimeout: ""
     # Additional labels for ServiceMonitor (e.g., for label-based selection)
     additionalLabels: {}
+    tlsConfig:
+      caFile: ""
+      serverName: ""
+      insecureSkipVerify: true
 
 # Pod-level security context (applied to all pods)
 podSecurityContext:

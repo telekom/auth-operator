@@ -13,12 +13,17 @@ spec:
   endpoints:
     - path: /metrics
       port: metrics
-      {{- /* When metrics.auth.enabled is true, the --metrics-secure flag is passed to the
-           controller, which activates controller-runtime's built-in SecureServing. The
-           metrics listener then uses a self-signed TLS certificate generated at startup;
-           no external cert volume is required. insecureSkipVerify allows Prometheus to
-           scrape that self-signed endpoint. */}}
       scheme: {{ if .Values.metrics.auth.enabled }}https{{ else }}http{{ end }}
+      {{- with .Values.metrics.serviceMonitor.tlsConfig }}
+      tlsConfig:
+        {{- with .caFile }}
+        caFile: {{ . | quote }}
+        {{- end }}
+        {{- with .serverName }}
+        serverName: {{ . | quote }}
+        {{- end }}
+        insecureSkipVerify: {{ .insecureSkipVerify }}
+      {{- end }}
       {{- with .Values.metrics.serviceMonitor.interval }}
       interval: {{ . }}
       {{- end }}
@@ -27,8 +32,6 @@ spec:
       {{- end }}
       {{- if .Values.metrics.auth.enabled }}
       bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
-      tlsConfig:
-        insecureSkipVerify: true
       {{- end }}
   selector:
     matchLabels:
