@@ -155,6 +155,9 @@ func (r *RBACPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	policy.Status.ObservedGeneration = policy.Generation
 
 	// Step 3: Count bound RestrictedBindDefinitions.
+	// NOTE: We list full objects rather than PartialObjectMetadataList because
+	// the cache is configured for full object caching. A future optimization
+	// could switch to metadata-only caching for these types to reduce memory.
 	rbdList := &authorizationv1alpha1.RestrictedBindDefinitionList{}
 	rbdListCtx, cancelRBDList := context.WithTimeout(ctx, rbacPolicyListTimeout)
 	defer cancelRBDList()

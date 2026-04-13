@@ -29,6 +29,9 @@ type RestrictedBindDefinitionSpec struct {
 	// names are derived from this value and suffixed with the binding kind, for
 	// example "targetName-clusterrolebinding" or "targetName-rolebinding".
 	// This field is immutable after creation.
+	// MaxLength=200 (not 253) to leave headroom for the longest suffix
+	// ("-clusterrolebinding" = 20 chars), keeping generated names within the
+	// Kubernetes 253-character object name limit.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=200

@@ -33,6 +33,9 @@ type RestrictedBindDefinitionSpecApplyConfiguration struct {
 	// names are derived from this value and suffixed with the binding kind, for
 	// example "targetName-clusterrolebinding" or "targetName-rolebinding".
 	// This field is immutable after creation.
+	// MaxLength=200 (not 253) to leave headroom for the longest suffix
+	// ("-clusterrolebinding" = 20 chars), keeping generated names within the
+	// Kubernetes 253-character object name limit.
 	TargetName *string `json:"targetName,omitempty"`
 	// Subjects lists the subjects that will be bound to the target ClusterRole/Role.
 	// Can be "User", "Group" or "ServiceAccount".
