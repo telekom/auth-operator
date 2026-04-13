@@ -77,6 +77,9 @@ type NamespaceBinding struct {
 type BindDefinitionSpec struct {
 	// Name that will be prefixed to the concatenated string which is the name of the binding. Follows format "targetName-clusterrole-role-binding" where clusterrole/role is the in-cluster existing ClusterRole or Role.
 	// This field is immutable after creation; changing it would orphan existing bindings and service accounts.
+	// MaxLength=253 is the full Kubernetes object name limit. Unlike RestrictedBindDefinition,
+	// BindDefinition uses the referenced role name (not a fixed suffix) when constructing binding names,
+	// so callers are responsible for ensuring the combined name stays within Kubernetes limits.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253

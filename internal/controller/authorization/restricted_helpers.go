@@ -131,6 +131,9 @@ func handlePolicyViolations(
 	}
 
 	cfg.SetReconciled(false)
+	// Policy violations are a user-facing configuration issue, not an operator
+	// malfunction, so we set Ready=False rather than Stalled=True. Stalled is
+	// reserved for transient infrastructure errors (e.g. API server failures).
 	conditions.MarkFalse(obj, conditions.ReadyConditionType, generation,
 		authorizationv1alpha1.DeprovisionedReason, "deprovisioned due to policy violations")
 
