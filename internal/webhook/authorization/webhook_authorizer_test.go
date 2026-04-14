@@ -1109,29 +1109,56 @@ func TestEvaluateSAR_NamespaceLabelCache_SingleGetPerNamespace(t *testing.T) {
 		},
 	}
 
-	base := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(ns, &wa1, &wa2, &wa3).
-		Build()
+	t.Run("single Get per namespace when namespace exists", func(t *testing.T) {
+		base := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(ns, &wa1, &wa2, &wa3).
+			Build()
 
-	counter := &namespaceGetCountingClient{Client: base}
-	handler := &Authorizer{Client: counter, Log: logr.Discard()}
+		counter := &namespaceGetCountingClient{Client: base}
+		handler := &Authorizer{Client: counter, Log: logr.Discard()}
 
-	sar := &authzv1.SubjectAccessReview{
-		Spec: authzv1.SubjectAccessReviewSpec{
-			User: "unknown",
-			ResourceAttributes: &authzv1.ResourceAttributes{
-				Namespace: "target-ns",
-				Verb:      "get",
-				Resource:  "pods",
+		sar := &authzv1.SubjectAccessReview{
+			Spec: authzv1.SubjectAccessReviewSpec{
+				User: "unknown",
+				ResourceAttributes: &authzv1.ResourceAttributes{
+					Namespace: "target-ns",
+					Verb:      "get",
+					Resource:  "pods",
+				},
 			},
-		},
-	}
+		}
 
-	handler.evaluateSAR(context.Background(), sar, []authzv1alpha1.WebhookAuthorizer{wa1, wa2, wa3})
+		handler.evaluateSAR(context.Background(), sar, []authzv1alpha1.WebhookAuthorizer{wa1, wa2, wa3})
 
-	got := counter.getCount.Load()
-	if got != 1 {
-		t.Errorf("expected exactly 1 namespace Get() call for 3 scoped authorizers targeting the same namespace, got %d", got)
-	}
+		if got := counter.getCount.Load(); got != 1 {
+			t.Errorf("expected exactly 1 namespace Get() for 3 authorizers targeting the same namespace, got %d", got)
+		}
+	})
+
+	t.Run("single Get per namespace when namespace is missing", func(t *testing.T) {
+		base := fake.NewClientBuilder().
+			WithScheme(scheme).
+			Build()
+
+		counter := &namespaceGetCountingClient{Client: base}
+		handler := &Authorizer{Client: counter, Log: logr.Discard()}
+
+		sar := &authzv1.SubjectAccessReview{
+			Spec: authzv1.SubjectAccessReviewSpec{
+				User: "unknown",
+				ResourceAttributes: &authzv1.ResourceAttributes{
+					Namespace: "missing-ns",
+					Verb:      "get",
+					Resource:  "pods",
+				},
+			},
+		}
+
+		handler.evaluateSAR(context.Background(), sar, []authzv1alpha1.WebhookAuthorizer{wa1, wa2, wa3})
+
+		if got := counter.getCount.Load(); got != 1 {
+			t.Errorf("expected exactly 1 namespace Get() for missing namespace (negative cache), got %d", got)
+		}
+	})
 }
