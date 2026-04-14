@@ -30,7 +30,9 @@ spec:
         {{- with .serverName }}
         serverName: {{ . | quote }}
         {{- end }}
+        {{- if hasKey . "insecureSkipVerify" }}
         insecureSkipVerify: {{ .insecureSkipVerify }}
+        {{- end }}
       {{- end }}
       {{- end }}
   selector:
