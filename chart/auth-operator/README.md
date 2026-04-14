@@ -118,13 +118,16 @@ a namespaced Role, not a ClusterRole.
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `metrics.auth.enabled` | Require authentication/authorization for `/metrics` endpoint | `false` |
+| `metrics.auth.enabled` | Require authentication/authorization for `/metrics` endpoint | `true` |
 | `metrics.service.enabled` | Create a dedicated metrics Service | `true` |
 | `metrics.service.port` | Metrics service port | `8080` |
 | `metrics.serviceMonitor.enabled` | Create a Prometheus ServiceMonitor | `false` |
 | `metrics.serviceMonitor.interval` | Scrape interval (empty = Prometheus default) | `""` |
 | `metrics.serviceMonitor.scrapeTimeout` | Scrape timeout | `""` |
 | `metrics.serviceMonitor.additionalLabels` | Extra labels on the ServiceMonitor | `{}` |
+| `metrics.serviceMonitor.tlsConfig.caFile` | CA certificate file for TLS verification of the metrics endpoint | `""` |
+| `metrics.serviceMonitor.tlsConfig.serverName` | Server name override for TLS SNI verification | `""` |
+| `metrics.serviceMonitor.tlsConfig.insecureSkipVerify` | Skip TLS verification (default `true` for controller-runtime self-signed certs; set `false` when `caFile`/`serverName` is provided) | `true` |
 
 For the full list of exposed metrics and recommended alert rules, see the
 [Metrics and Alerting documentation](https://github.com/telekom/auth-operator/blob/main/docs/metrics-and-alerting.md).

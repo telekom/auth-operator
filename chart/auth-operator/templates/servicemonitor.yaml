@@ -13,7 +13,7 @@ spec:
   endpoints:
     - path: /metrics
       port: metrics
-      scheme: http
+      scheme: {{ if .Values.metrics.auth.enabled }}https{{ else }}http{{ end }}
       {{- with .Values.metrics.serviceMonitor.interval }}
       interval: {{ . }}
       {{- end }}
@@ -22,6 +22,18 @@ spec:
       {{- end }}
       {{- if .Values.metrics.auth.enabled }}
       bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      {{- with .Values.metrics.serviceMonitor.tlsConfig }}
+      tlsConfig:
+        {{- with .caFile }}
+        caFile: {{ . | quote }}
+        {{- end }}
+        {{- with .serverName }}
+        serverName: {{ . | quote }}
+        {{- end }}
+        {{- if hasKey . "insecureSkipVerify" }}
+        insecureSkipVerify: {{ .insecureSkipVerify }}
+        {{- end }}
+      {{- end }}
       {{- end }}
   selector:
     matchLabels:
