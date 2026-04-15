@@ -480,6 +480,68 @@ func TestEvaluateSAR_NamespaceGetError(t *testing.T) {
 	}
 }
 
+// TestServeHTTP_NamespaceGetError_Returns500 verifies that when evaluateSAR
+// returns an error (e.g. namespace Get fails), ServeHTTP responds with 500.
+func TestServeHTTP_NamespaceGetError_Returns500(t *testing.T) {
+	// Build a scheme that includes corev1 so the fake client recognises
+	// Namespace resources and returns a proper NotFound error.
+	s := runtime.NewScheme()
+	if err := authzv1alpha1.AddToScheme(s); err != nil {
+		t.Fatalf("failed to add authzv1alpha1 to scheme: %v", err)
+	}
+	if err := clientgoscheme.AddToScheme(s); err != nil {
+		t.Fatalf("failed to add clientgoscheme to scheme: %v", err)
+	}
+
+	// WebhookAuthorizer with a NamespaceSelector so it becomes a scoped authorizer.
+	// evaluateSAR will call namespaceMatches, which calls Client.Get for the namespace.
+	wa := &authzv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{Name: "scoped-wa-500"},
+		Spec: authzv1alpha1.WebhookAuthorizerSpec{
+			AllowedPrincipals: []authzv1alpha1.Principal{{User: "alice"}},
+			ResourceRules: []authzv1.ResourceRule{
+				{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods"}},
+			},
+			NamespaceSelector: metav1.LabelSelector{
+				MatchLabels: map[string]string{"env": "prod"},
+			},
+		},
+	}
+
+	// Use an indexed client (matching real manager setup) with the WA but without
+	// the "missing-ns" Namespace object — Get will return NotFound.
+	cl := fake.NewClientBuilder().
+		WithScheme(s).
+		WithIndex(
+			&authzv1alpha1.WebhookAuthorizer{},
+			indexer.WebhookAuthorizerHasNamespaceSelectorField,
+			indexer.WebhookAuthorizerHasNamespaceSelectorFunc,
+		).
+		WithObjects(wa).
+		Build()
+	handler := &Authorizer{Client: cl, Log: logr.Discard()}
+
+	sar := authzv1.SubjectAccessReview{
+		Spec: authzv1.SubjectAccessReviewSpec{
+			User: "alice",
+			ResourceAttributes: &authzv1.ResourceAttributes{
+				Verb:      "get",
+				Resource:  "pods",
+				Namespace: "missing-ns",
+			},
+		},
+	}
+
+	body := marshalSAR(t, sar)
+	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("expected HTTP 500 when namespace Get fails, got %d", rec.Code)
+	}
+}
+
 func TestServeHTTP_OversizedBody(t *testing.T) {
 	var buf strings.Builder
 	logger := capturingLogger(&buf, 0)
