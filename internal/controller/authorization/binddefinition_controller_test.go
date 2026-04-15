@@ -26,6 +26,7 @@ import (
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/helpers"
+	"github.com/telekom/auth-operator/pkg/indexer"
 	"github.com/telekom/auth-operator/pkg/metrics"
 )
 
@@ -2808,7 +2809,9 @@ func TestNamespaceToBindDefinitionRequests(t *testing.T) {
 			},
 		}
 
-		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bd1, bd2).Build()
+		c := fake.NewClientBuilder().WithScheme(scheme).
+			WithIndex(&authorizationv1alpha1.BindDefinition{}, indexer.BindDefinitionHasRoleBindingsField, indexer.BindDefinitionHasRoleBindingsFunc).
+			WithObjects(bd1, bd2).Build()
 		r := &BindDefinitionReconciler{client: c, scheme: scheme}
 
 		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test-ns"}}
@@ -2824,7 +2827,9 @@ func TestNamespaceToBindDefinitionRequests(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "cluster-only-bd"},
 		}
 
-		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bd).Build()
+		c := fake.NewClientBuilder().WithScheme(scheme).
+			WithIndex(&authorizationv1alpha1.BindDefinition{}, indexer.BindDefinitionHasRoleBindingsField, indexer.BindDefinitionHasRoleBindingsFunc).
+			WithObjects(bd).Build()
 		r := &BindDefinitionReconciler{client: c, scheme: scheme}
 
 		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test-ns"}}
@@ -2846,7 +2851,9 @@ func TestNamespaceToBindDefinitionRequests(t *testing.T) {
 			},
 		}
 
-		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bd).Build()
+		c := fake.NewClientBuilder().WithScheme(scheme).
+			WithIndex(&authorizationv1alpha1.BindDefinition{}, indexer.BindDefinitionHasRoleBindingsField, indexer.BindDefinitionHasRoleBindingsFunc).
+			WithObjects(bd).Build()
 		r := &BindDefinitionReconciler{client: c, scheme: scheme}
 
 		// Namespace without the "env=production" label.
@@ -2872,7 +2879,9 @@ func TestNamespaceToBindDefinitionRequests(t *testing.T) {
 			},
 		}
 
-		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bd).Build()
+		c := fake.NewClientBuilder().WithScheme(scheme).
+			WithIndex(&authorizationv1alpha1.BindDefinition{}, indexer.BindDefinitionHasRoleBindingsField, indexer.BindDefinitionHasRoleBindingsFunc).
+			WithObjects(bd).Build()
 		r := &BindDefinitionReconciler{client: c, scheme: scheme}
 
 		// Terminating namespace should match all BDs with roleBindings.
