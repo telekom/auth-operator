@@ -77,7 +77,8 @@ func PatchApplyClusterRole(
 
 	logger := log.FromContext(ctx)
 
-	applyOpts := append([]client.ApplyOption{client.FieldOwner(FieldOwner)}, opts...)
+	applyOptsForCreate := append([]client.ApplyOption{client.FieldOwner(FieldOwner)}, opts...)
+	applyOptsForPatch := append(applyOptsForCreate, client.ForceOwnership)
 
 	// Read via client (cache-backed in controllers).
 	existing := &rbacv1.ClusterRole{}
@@ -85,7 +86,7 @@ func PatchApplyClusterRole(
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			// Resource does not exist — must apply.
-			if applyErr := c.Apply(ctx, ac, applyOpts...); applyErr != nil {
+			if applyErr := c.Apply(ctx, ac, applyOptsForCreate...); applyErr != nil {
 				return 0, fmt.Errorf("create ClusterRole %s: %w", *ac.Name, applyErr)
 			}
 			return PatchApplyResultCreated, nil
@@ -100,7 +101,7 @@ func PatchApplyClusterRole(
 		return PatchApplyResultSkipped, nil
 	}
 
-	if applyErr := c.Apply(ctx, ac, applyOpts...); applyErr != nil {
+	if applyErr := c.Apply(ctx, ac, applyOptsForPatch...); applyErr != nil {
 		return 0, fmt.Errorf("patch ClusterRole %s: %w", *ac.Name, applyErr)
 	}
 	return PatchApplyResultPatched, nil
@@ -127,13 +128,14 @@ func PatchApplyRole(
 
 	logger := log.FromContext(ctx)
 
-	applyOpts := append([]client.ApplyOption{client.FieldOwner(FieldOwner)}, opts...)
+	applyOptsForCreate := append([]client.ApplyOption{client.FieldOwner(FieldOwner)}, opts...)
+	applyOptsForPatch := append(applyOptsForCreate, client.ForceOwnership)
 
 	existing := &rbacv1.Role{}
 	err := c.Get(ctx, types.NamespacedName{Name: *ac.Name, Namespace: *ac.Namespace}, existing)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			if applyErr := c.Apply(ctx, ac, applyOpts...); applyErr != nil {
+			if applyErr := c.Apply(ctx, ac, applyOptsForCreate...); applyErr != nil {
 				return 0, fmt.Errorf("create Role %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 			}
 			return PatchApplyResultCreated, nil
@@ -147,7 +149,7 @@ func PatchApplyRole(
 		return PatchApplyResultSkipped, nil
 	}
 
-	if applyErr := c.Apply(ctx, ac, applyOpts...); applyErr != nil {
+	if applyErr := c.Apply(ctx, ac, applyOptsForPatch...); applyErr != nil {
 		return 0, fmt.Errorf("patch Role %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 	}
 	return PatchApplyResultPatched, nil
@@ -171,13 +173,14 @@ func PatchApplyClusterRoleBinding(
 
 	logger := log.FromContext(ctx)
 
-	applyOpts := append([]client.ApplyOption{client.FieldOwner(FieldOwner)}, opts...)
+	applyOptsForCreate := append([]client.ApplyOption{client.FieldOwner(FieldOwner)}, opts...)
+	applyOptsForPatch := append(applyOptsForCreate, client.ForceOwnership)
 
 	existing := &rbacv1.ClusterRoleBinding{}
 	err := c.Get(ctx, types.NamespacedName{Name: *ac.Name}, existing)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			if applyErr := c.Apply(ctx, ac, applyOpts...); applyErr != nil {
+			if applyErr := c.Apply(ctx, ac, applyOptsForCreate...); applyErr != nil {
 				return 0, fmt.Errorf("create ClusterRoleBinding %s: %w", *ac.Name, applyErr)
 			}
 			return PatchApplyResultCreated, nil
@@ -191,7 +194,7 @@ func PatchApplyClusterRoleBinding(
 		return PatchApplyResultSkipped, nil
 	}
 
-	if applyErr := c.Apply(ctx, ac, applyOpts...); applyErr != nil {
+	if applyErr := c.Apply(ctx, ac, applyOptsForPatch...); applyErr != nil {
 		return 0, fmt.Errorf("patch ClusterRoleBinding %s: %w", *ac.Name, applyErr)
 	}
 	return PatchApplyResultPatched, nil
@@ -218,13 +221,14 @@ func PatchApplyRoleBinding(
 
 	logger := log.FromContext(ctx)
 
-	applyOpts := append([]client.ApplyOption{client.FieldOwner(FieldOwner)}, opts...)
+	applyOptsForCreate := append([]client.ApplyOption{client.FieldOwner(FieldOwner)}, opts...)
+	applyOptsForPatch := append(applyOptsForCreate, client.ForceOwnership)
 
 	existing := &rbacv1.RoleBinding{}
 	err := c.Get(ctx, types.NamespacedName{Name: *ac.Name, Namespace: *ac.Namespace}, existing)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			if applyErr := c.Apply(ctx, ac, applyOpts...); applyErr != nil {
+			if applyErr := c.Apply(ctx, ac, applyOptsForCreate...); applyErr != nil {
 				return 0, fmt.Errorf("create RoleBinding %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 			}
 			return PatchApplyResultCreated, nil
@@ -238,7 +242,7 @@ func PatchApplyRoleBinding(
 		return PatchApplyResultSkipped, nil
 	}
 
-	if applyErr := c.Apply(ctx, ac, applyOpts...); applyErr != nil {
+	if applyErr := c.Apply(ctx, ac, applyOptsForPatch...); applyErr != nil {
 		return 0, fmt.Errorf("patch RoleBinding %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 	}
 	return PatchApplyResultPatched, nil
