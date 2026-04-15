@@ -65,10 +65,10 @@ spec:
               appliesTo:
                 description: |-
                   AppliesTo defines the namespace scope this policy governs.
-                  This field is stored and validated but runtime enforcement (scoping evaluators
-                  and admission checks to the declared namespaces) is not yet implemented.
-                  RestrictedBindDefinitions/RestrictedRoleDefinitions referencing this policy
-                  may target. Tracked in the PR #224 review findings (SEC-01).
+                  Static Namespaces entries are enforced at evaluation time in the policy engine
+                  (EvaluateBindDefinition / EvaluateRoleDefinition). NamespaceSelector-based
+                  scope enforcement requires runtime label resolution and is delegated to the
+                  controller during reconciliation.
                 properties:
                   namespaceSelector:
                     description: NamespaceSelector selects namespaces by label selector.
