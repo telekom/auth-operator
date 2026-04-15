@@ -156,6 +156,7 @@ func (r *BindDefinitionReconciler) deleteServiceAccount(
 		logger.V(2).Info("ServiceAccount is referenced by other BindDefinitions - NOT deleting, updating source-names",
 			"bindDefinitionName", bindDef.Name, "serviceAccount", sa.Name, "namespace", sa.Namespace)
 
+		patched := false
 		if patchErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 			fresh := &corev1.ServiceAccount{}
 			if getErr := r.client.Get(ctx, types.NamespacedName{Name: sa.Name, Namespace: sa.Namespace}, fresh); getErr != nil {
@@ -171,12 +172,16 @@ func (r *BindDefinitionReconciler) deleteServiceAccount(
 			}
 			orig := fresh.DeepCopy()
 			fresh.Annotations[helpers.SourceNamesAnnotation] = newSourceNames
-			return r.client.Patch(ctx, fresh, sigs_client.MergeFrom(orig))
+			if err := r.client.Patch(ctx, fresh, sigs_client.MergeFromWithOptions(orig, sigs_client.MergeFromWithOptimisticLock{})); err != nil {
+				return err
+			}
+			patched = true
+			return nil
 		}); patchErr != nil {
 			logger.Error(patchErr, "Failed to update source-names annotation on retained ServiceAccount",
 				"bindDefinitionName", bindDef.Name, "serviceAccount", sa.Name, "namespace", sa.Namespace)
 			// Non-fatal - continue with deletion cleanup
-		} else {
+		} else if patched {
 			logger.V(2).Info("Updated source-names annotation on retained ServiceAccount",
 				"bindDefinitionName", bindDef.Name, "serviceAccount", sa.Name)
 		}
