@@ -674,7 +674,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdReconcileResources(
 		ac.WithOwnerReferences(ownerRefForRestricted(rbd, authorizationv1alpha1.RestrictedBindDefinitionKind)).
 			WithAnnotations(helpers.BuildResourceAnnotations("RestrictedBindDefinition", rbd.Name))
 
-		if result, err := pkgssa.PatchApplyClusterRoleBinding(ctx, applyClient, ac, pkgssa.FieldOwnerFor(rbd.Name)); err != nil {
+		if result, err := pkgssa.PatchApplyClusterRoleBinding(ctx, applyClient, ac, client.FieldOwner(pkgssa.FieldOwnerFor(rbd.Name))); err != nil {
 			return fmt.Errorf("ensure ClusterRoleBinding %s: %w", crbName, err)
 		} else if result == pkgssa.PatchApplyResultSkipped {
 			metrics.RBACResourcesSkipped.WithLabelValues(metrics.ResourceClusterRoleBinding).Inc()
@@ -1075,7 +1075,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdEnsureRoleBinding(
 	ac.WithOwnerReferences(ownerRefForRestricted(rbd, authorizationv1alpha1.RestrictedBindDefinitionKind)).
 		WithAnnotations(helpers.BuildResourceAnnotations("RestrictedBindDefinition", rbd.Name))
 
-	if result, err := pkgssa.PatchApplyRoleBinding(ctx, applyClient, ac, pkgssa.FieldOwnerFor(rbd.Name)); err != nil {
+	if result, err := pkgssa.PatchApplyRoleBinding(ctx, applyClient, ac, client.FieldOwner(pkgssa.FieldOwnerFor(rbd.Name))); err != nil {
 		return fmt.Errorf("ensure RoleBinding %s/%s: %w", namespace, rbName, err)
 	} else if result == pkgssa.PatchApplyResultSkipped {
 		metrics.RBACResourcesSkipped.WithLabelValues(metrics.ResourceRoleBinding).Inc()

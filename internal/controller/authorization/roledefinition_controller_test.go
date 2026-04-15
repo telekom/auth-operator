@@ -25,6 +25,7 @@ import (
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/pkg/discovery"
+	pkgssa "github.com/telekom/auth-operator/pkg/ssa"
 )
 
 var _ = Describe("RoleDefinition Controller", func() {
@@ -180,14 +181,14 @@ var _ = Describe("RoleDefinition Drift Detection and Rollback", func() {
 			Expect(originalRulesCount).To(BeNumerically(">", 0), "ClusterRole should have rules")
 
 			By("simulating external drift by modifying ClusterRole rules")
-			cr.Rules = []rbacv1.PolicyRule{
+			driftedCRAC := pkgssa.ClusterRoleWithLabelsAndRules("drift-clusterrole", nil, []rbacv1.PolicyRule{
 				{
 					APIGroups: []string{""},
 					Resources: []string{"drifted-resources"},
 					Verbs:     []string{"get", "list"},
 				},
-			}
-			Expect(k8sClient.Update(ctx, cr)).To(Succeed())
+			})
+			Expect(k8sClient.Apply(logCtx, driftedCRAC, client.FieldOwner(pkgssa.FieldOwner))).To(Succeed())
 
 			By("verifying drift occurred")
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "drift-clusterrole"}, cr)).To(Succeed())
@@ -236,11 +237,11 @@ var _ = Describe("RoleDefinition Drift Detection and Rollback", func() {
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "drift-clusterrole"}, cr)).To(Succeed())
 
 			By("simulating label drift")
-			cr.Labels = map[string]string{
+			driftedCRAC := pkgssa.ClusterRoleWithLabelsAndRules("drift-clusterrole", map[string]string{
 				"drifted-label":                "drifted-value",
 				"app.kubernetes.io/managed-by": "someone-else",
-			}
-			Expect(k8sClient.Update(ctx, cr)).To(Succeed())
+			}, cr.Rules)
+			Expect(k8sClient.Apply(logCtx, driftedCRAC, client.FieldOwner(pkgssa.FieldOwner))).To(Succeed())
 
 			By("reconciling to correct drift")
 			_, err = reconciler.Reconcile(logCtx, reconcile.Request{
@@ -330,14 +331,14 @@ var _ = Describe("RoleDefinition Drift Detection and Rollback", func() {
 			Expect(role.Rules).ToNot(BeEmpty())
 
 			By("simulating external drift by replacing rules")
-			role.Rules = []rbacv1.PolicyRule{
+			driftedRoleAC := pkgssa.RoleWithLabelsAndRules("drift-role", testNamespace.Name, nil, []rbacv1.PolicyRule{
 				{
 					APIGroups: []string{""},
 					Resources: []string{"drifted-ns-resource"},
 					Verbs:     []string{"get"},
 				},
-			}
-			Expect(k8sClient.Update(ctx, role)).To(Succeed())
+			})
+			Expect(k8sClient.Apply(logCtx, driftedRoleAC, client.FieldOwner(pkgssa.FieldOwner))).To(Succeed())
 
 			By("verifying drift occurred")
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "drift-role", Namespace: testNamespace.Name}, role)).To(Succeed())
@@ -386,12 +387,13 @@ var _ = Describe("RoleDefinition Drift Detection and Rollback", func() {
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "drift-role", Namespace: testNamespace.Name}, role)).To(Succeed())
 
 			// Add an extra rule that shouldn't be there
-			role.Rules = append(role.Rules, rbacv1.PolicyRule{
+			driftedRules := append(role.Rules, rbacv1.PolicyRule{
 				APIGroups: []string{""},
 				Resources: []string{"secrets"},
 				Verbs:     []string{"*"},
 			})
-			Expect(k8sClient.Update(ctx, role)).To(Succeed())
+			driftedRoleAC := pkgssa.RoleWithLabelsAndRules("drift-role", testNamespace.Name, role.Labels, driftedRules)
+			Expect(k8sClient.Apply(logCtx, driftedRoleAC, client.FieldOwner(pkgssa.FieldOwner))).To(Succeed())
 
 			By("reconciling to remove unauthorized rules")
 			_, err = reconciler.Reconcile(logCtx, reconcile.Request{
