@@ -228,6 +228,28 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			_, err := ssa.PatchApplyClusterRoleBinding(testCtx, k8sClient, nil)
 			Expect(err).To(HaveOccurred())
 		})
+
+		It("should reclaim ownership and patch when a different field manager owns .subjects", func() {
+			subjects := []rbacv1.Subject{{Kind: "User", Name: "dave", APIGroup: rbacv1.GroupName}}
+			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "ph-binding-target"}
+
+			ac := ssa.ClusterRoleBindingWithSubjectsAndRoleRef("ph-conflict-crb", nil, subjects, roleRef)
+			_, err := ssa.PatchApplyClusterRoleBinding(testCtx, k8sClient, ac)
+			Expect(err).NotTo(HaveOccurred())
+
+			externalSubjects := []rbacv1.Subject{{Kind: "Group", Name: "external-group", APIGroup: rbacv1.GroupName}}
+			externalAC := ssa.ClusterRoleBindingWithSubjectsAndRoleRef("ph-conflict-crb", nil, externalSubjects, roleRef)
+			err = k8sClient.Apply(testCtx, externalAC, client.FieldOwner("external-agent"), client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+
+			// ForceOwnership on the patch path allows us to reclaim field ownership
+			// from the external field manager and restore the desired state.
+			desiredSubjects := []rbacv1.Subject{{Kind: "User", Name: "dave", APIGroup: rbacv1.GroupName}}
+			desiredAC := ssa.ClusterRoleBindingWithSubjectsAndRoleRef("ph-conflict-crb", nil, desiredSubjects, roleRef)
+			result, err := ssa.PatchApplyClusterRoleBinding(testCtx, k8sClient, desiredAC)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+		})
 	})
 
 	// -----------------------------------------------------------------------

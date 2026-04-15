@@ -20,6 +20,7 @@ import (
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/pkg/helpers"
+	pkgssa "github.com/telekom/auth-operator/pkg/ssa"
 )
 
 func TestBuildBindingName(t *testing.T) {
@@ -532,17 +533,12 @@ var _ = Describe("BindDefinition Helpers", func() {
 			// Fetch to get UID
 			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(bindDef), bindDef)).To(Succeed())
 
-			// Create ServiceAccount with owner reference and automountServiceAccountToken=false
-			sa := &corev1.ServiceAccount{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-sa-update-automount",
-					Namespace: "default",
-					Labels:    helpers.BuildResourceLabels(bindDef.Labels),
-				},
-				AutomountServiceAccountToken: ptr.To(false),
-			}
-			Expect(controllerutil.SetControllerReference(bindDef, sa, k8sClient.Scheme())).To(Succeed())
-			Expect(k8sClient.Create(ctx, sa)).To(Succeed())
+			saAC := pkgssa.ServiceAccountWith("test-sa-update-automount", "default",
+				helpers.BuildResourceLabels(bindDef.Labels), false).
+				WithOwnerReferences(saOwnerRefForBindDefinition(bindDef)).
+				WithAnnotations(helpers.BuildManagedSAAnnotations(bindDef.Name))
+			_, applyErr := pkgssa.PatchApplyServiceAccount(ctx, k8sClient, saAC, pkgssa.FieldOwnerForBD(bindDef.Name))
+			Expect(applyErr).NotTo(HaveOccurred())
 
 			// Update BindDefinition to set automountServiceAccountToken=true
 			bindDef.Spec.AutomountServiceAccountToken = ptr.To(true)
@@ -595,16 +591,12 @@ var _ = Describe("BindDefinition Helpers", func() {
 			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(bindDef), bindDef)).To(Succeed())
 
 			// Create ServiceAccount with owner reference and automountServiceAccountToken=true
-			sa := &corev1.ServiceAccount{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-sa-update-to-false",
-					Namespace: "default",
-					Labels:    helpers.BuildResourceLabels(bindDef.Labels),
-				},
-				AutomountServiceAccountToken: ptr.To(true),
-			}
-			Expect(controllerutil.SetControllerReference(bindDef, sa, k8sClient.Scheme())).To(Succeed())
-			Expect(k8sClient.Create(ctx, sa)).To(Succeed())
+			saAC2 := pkgssa.ServiceAccountWith("test-sa-update-to-false", "default",
+				helpers.BuildResourceLabels(bindDef.Labels), true).
+				WithOwnerReferences(saOwnerRefForBindDefinition(bindDef)).
+				WithAnnotations(helpers.BuildManagedSAAnnotations(bindDef.Name))
+			_, err2 := pkgssa.PatchApplyServiceAccount(ctx, k8sClient, saAC2, pkgssa.FieldOwnerForBD(bindDef.Name))
+			Expect(err2).NotTo(HaveOccurred())
 
 			// Update BindDefinition to set automountServiceAccountToken=false
 			bindDef.Spec.AutomountServiceAccountToken = ptr.To(false)
