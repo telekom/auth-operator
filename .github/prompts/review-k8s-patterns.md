@@ -70,24 +70,12 @@ reliability, observability, and production behavior.
 - Sensitive data (tokens, credentials) must never be logged.
 - Log the resource name, namespace, and relevant identifiers on every
   operation.
-- Require context-aware logger derivation in production code:
-  - derive logger via `log.FromContext(ctx)` in the function that logs, or
-  - pass `ctx` into helpers and derive logger inside helper.
-  Flag helpers that accept/pass raw logger instances as parameters when
-  context is available.
 - **V-level conventions for authorization decisions**:
   - V(0): deny decisions (security-relevant, always visible)
   - V(1): no-opinion decisions (routine, no authorizer matched)
   - V(2)+: per-authorizer trace logs (debugging)
   Flag code that logs no-opinion at V(0) — it floods operator logs
   in clusters with many non-matching requests.
-
-### 9. Trace Attribute Completeness
-
-- Reconciler spans should include controller/resource/namespace attributes.
-- Impersonated apply flows should attach the effective user to the active span.
-- Flag trace instrumentation that records errors but omits key identity
-  attributes needed for production debugging.
 
 ## Output format
 

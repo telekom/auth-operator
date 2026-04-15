@@ -134,17 +134,7 @@ that would slip past routine test coverage.
 - Webhook validators should detect these patterns at admission time and
   return a warning, not silently accept them.
 
-### 14. Broken Sample Set Validity
-
-- Runtime-failure sample sets used in CI (`config/samples/broken/`) must be
-  structurally valid and apply successfully.
-- Their failure mode should occur during reconciliation (Stalled, partial
-  reconciliation, or policy-degraded states), not at admission/apply time.
-- Flag sample manifests in broken runtime sets that are webhook/schema-invalid;
-  move those into separate negative-validation examples outside the broken
-  apply kustomization.
-
-### 15. Fuzz & Property Testing
+### 10. Fuzz & Property Testing
 
 - Property: for any valid `RoleDefinition` spec, the generated ClusterRole
   must have exactly the same rules (1:1 mapping).
@@ -156,7 +146,7 @@ that would slip past routine test coverage.
   match the final spec (eventual consistency).
 - Fuzz: random bytes in CRD spec fields must not panic the controller.
 
-### 16. SSA Field Ownership Edge Cases
+### 11. SSA Field Ownership Edge Cases
 
 - **User-managed field surviving SSA**: If a user manually edits a label
   or annotation on an operator-managed RBAC resource, and the operator's
