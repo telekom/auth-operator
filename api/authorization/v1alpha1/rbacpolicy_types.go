@@ -310,11 +310,10 @@ type ImpersonationConfig struct {
 // +kubebuilder:validation:XValidation:rule="has(self.appliesTo.namespaceSelector) || (has(self.appliesTo.namespaces) && size(self.appliesTo.namespaces) > 0)",message="appliesTo must specify at least namespaceSelector or namespaces"
 type RBACPolicySpec struct {
 	// AppliesTo defines the namespace scope this policy governs.
-	// This field is stored and validated but runtime enforcement (scoping evaluators
-	// and admission checks to the declared namespaces) is not yet implemented.
-	// TODO: enforce appliesTo at evaluation time — restrict which namespaces
-	// RestrictedBindDefinitions/RestrictedRoleDefinitions referencing this policy
-	// may target. Tracked in the PR #224 review findings (SEC-01).
+	// Static Namespaces entries are enforced at evaluation time in the policy engine
+	// (EvaluateBindDefinition / EvaluateRoleDefinition). NamespaceSelector-based
+	// scope enforcement requires runtime label resolution and is delegated to the
+	// controller during reconciliation.
 	// +kubebuilder:validation:Required
 	AppliesTo PolicyScope `json:"appliesTo"`
 

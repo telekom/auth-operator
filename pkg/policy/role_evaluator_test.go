@@ -571,3 +571,70 @@ func TestForbiddenResourceVerbs_PartialGroupRestriction_DoesNotSkipVerbs(t *test
 		}
 	})
 }
+
+func TestEvaluateRoleDefinition_AppliesToScope(t *testing.T) {
+	t.Run("targetNamespace in static list is allowed", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				AppliesTo: authorizationv1alpha1.PolicyScope{
+					Namespaces: []string{"namespace-a"},
+				},
+			},
+		}
+		rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+			Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+				TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
+				TargetName:      "test-role",
+				TargetNamespace: "namespace-a",
+			},
+		}
+		violations := EvaluateRoleDefinition(policy, rrd)
+		if len(violations) != 0 {
+			t.Errorf("expected no violations for targetNamespace in scope, got %v", violations)
+		}
+	})
+
+	t.Run("targetNamespace outside static list is a violation", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				AppliesTo: authorizationv1alpha1.PolicyScope{
+					Namespaces: []string{"namespace-a"},
+				},
+			},
+		}
+		rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+			Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+				TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
+				TargetName:      "test-role",
+				TargetNamespace: "namespace-b",
+			},
+		}
+		violations := EvaluateRoleDefinition(policy, rrd)
+		if len(violations) != 1 {
+			t.Fatalf("expected 1 violation for targetNamespace outside scope, got %d: %v", len(violations), violations)
+		}
+		if violations[0].Field != "spec.targetNamespace" {
+			t.Errorf("expected field spec.targetNamespace, got %q", violations[0].Field)
+		}
+	})
+
+	t.Run("ClusterRole with no targetNamespace is not scope-checked", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				AppliesTo: authorizationv1alpha1.PolicyScope{
+					Namespaces: []string{"namespace-a"},
+				},
+			},
+		}
+		rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+			Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+				TargetRole: authorizationv1alpha1.DefinitionClusterRole,
+				TargetName: "test-role",
+			},
+		}
+		violations := EvaluateRoleDefinition(policy, rrd)
+		if len(violations) != 0 {
+			t.Errorf("expected no violations for ClusterRole (no targetNamespace), got %v", violations)
+		}
+	})
+}

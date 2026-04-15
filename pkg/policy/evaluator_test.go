@@ -1247,3 +1247,72 @@ func TestEvaluateBindDefinition_SACreationNamespaceORSemantics(t *testing.T) {
 		}
 	})
 }
+
+func TestEvaluateBindDefinition_AppliesToScope(t *testing.T) {
+	t.Run("namespace in static list is allowed", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				AppliesTo: authorizationv1alpha1.PolicyScope{
+					Namespaces: []string{"namespace-a"},
+				},
+			},
+		}
+		rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+			Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+				RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+					{Namespace: "namespace-a"},
+				},
+				Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
+			},
+		}
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, nil)
+		if len(violations) != 0 {
+			t.Errorf("expected no violations for namespace in scope, got %v", violations)
+		}
+	})
+
+	t.Run("namespace outside static list is a violation", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				AppliesTo: authorizationv1alpha1.PolicyScope{
+					Namespaces: []string{"namespace-a"},
+				},
+			},
+		}
+		rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+			Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+				RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+					{Namespace: "namespace-b"},
+				},
+				Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
+			},
+		}
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, nil)
+		if len(violations) != 1 {
+			t.Fatalf("expected 1 violation for namespace outside scope, got %d: %v", len(violations), violations)
+		}
+		if violations[0].Field != "spec.roleBindings[0].namespace" {
+			t.Errorf("expected field spec.roleBindings[0].namespace, got %q", violations[0].Field)
+		}
+	})
+
+	t.Run("empty Namespaces list (global scope) allows any namespace", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				AppliesTo: authorizationv1alpha1.PolicyScope{},
+			},
+		}
+		rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+			Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+				RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+					{Namespace: "any-namespace"},
+				},
+				Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
+			},
+		}
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, nil)
+		if len(violations) != 0 {
+			t.Errorf("expected no violations for global scope, got %v", violations)
+		}
+	})
+}
