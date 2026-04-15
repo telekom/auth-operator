@@ -81,7 +81,7 @@ func PatchApplyClusterRole(
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			// Resource does not exist — must apply.
-			if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership); applyErr != nil {
+			if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner)); applyErr != nil {
 				return 0, fmt.Errorf("create ClusterRole %s: %w", *ac.Name, applyErr)
 			}
 			return PatchApplyResultCreated, nil
@@ -96,7 +96,7 @@ func PatchApplyClusterRole(
 		return PatchApplyResultSkipped, nil
 	}
 
-	if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership); applyErr != nil {
+	if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner)); applyErr != nil {
 		return 0, fmt.Errorf("patch ClusterRole %s: %w", *ac.Name, applyErr)
 	}
 	return PatchApplyResultPatched, nil
@@ -125,7 +125,7 @@ func PatchApplyRole(
 	err := c.Get(ctx, types.NamespacedName{Name: *ac.Name, Namespace: *ac.Namespace}, existing)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership); applyErr != nil {
+			if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner)); applyErr != nil {
 				return 0, fmt.Errorf("create Role %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 			}
 			return PatchApplyResultCreated, nil
@@ -139,7 +139,7 @@ func PatchApplyRole(
 		return PatchApplyResultSkipped, nil
 	}
 
-	if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership); applyErr != nil {
+	if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner)); applyErr != nil {
 		return 0, fmt.Errorf("patch Role %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 	}
 	return PatchApplyResultPatched, nil
@@ -165,7 +165,7 @@ func PatchApplyClusterRoleBinding(
 	err := c.Get(ctx, types.NamespacedName{Name: *ac.Name}, existing)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership); applyErr != nil {
+			if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner)); applyErr != nil {
 				return 0, fmt.Errorf("create ClusterRoleBinding %s: %w", *ac.Name, applyErr)
 			}
 			return PatchApplyResultCreated, nil
@@ -179,7 +179,7 @@ func PatchApplyClusterRoleBinding(
 		return PatchApplyResultSkipped, nil
 	}
 
-	if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership); applyErr != nil {
+	if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner)); applyErr != nil {
 		return 0, fmt.Errorf("patch ClusterRoleBinding %s: %w", *ac.Name, applyErr)
 	}
 	return PatchApplyResultPatched, nil
@@ -208,7 +208,7 @@ func PatchApplyRoleBinding(
 	err := c.Get(ctx, types.NamespacedName{Name: *ac.Name, Namespace: *ac.Namespace}, existing)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership); applyErr != nil {
+			if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner)); applyErr != nil {
 				return 0, fmt.Errorf("create RoleBinding %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 			}
 			return PatchApplyResultCreated, nil
@@ -222,7 +222,7 @@ func PatchApplyRoleBinding(
 		return PatchApplyResultSkipped, nil
 	}
 
-	if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership); applyErr != nil {
+	if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner)); applyErr != nil {
 		return 0, fmt.Errorf("patch RoleBinding %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 	}
 	return PatchApplyResultPatched, nil
@@ -255,7 +255,7 @@ func PatchApplyServiceAccount(
 	err := c.Get(ctx, types.NamespacedName{Name: *ac.Name, Namespace: *ac.Namespace}, existing)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			if applyErr := c.Apply(ctx, ac, client.FieldOwner(fieldOwner), client.ForceOwnership); applyErr != nil {
+			if applyErr := c.Apply(ctx, ac, client.FieldOwner(fieldOwner)); applyErr != nil {
 				return 0, fmt.Errorf("create ServiceAccount %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 			}
 			return PatchApplyResultCreated, nil
@@ -269,7 +269,7 @@ func PatchApplyServiceAccount(
 		return PatchApplyResultSkipped, nil
 	}
 
-	if applyErr := c.Apply(ctx, ac, client.FieldOwner(fieldOwner), client.ForceOwnership); applyErr != nil {
+	if applyErr := c.Apply(ctx, ac, client.FieldOwner(fieldOwner)); applyErr != nil {
 		return 0, fmt.Errorf("patch ServiceAccount %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 	}
 	return PatchApplyResultPatched, nil
