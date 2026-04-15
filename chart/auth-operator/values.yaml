@@ -48,10 +48,14 @@ controller:
   # ResourceTracker interval configuration
   tracker:
     # Interval between periodic API resource collections.
-    # Increase in stable clusters to reduce API server load. (e.g. "5m", "10m")
+    # Increase in stable clusters to reduce API server load. Use a positive duration
+    # string (e.g. "5m", "10m"); 0 does not disable the tracker and is treated by
+    # the controller as "use the internal default" (5 minutes). Negative values are rejected.
     syncInterval: "5m"
     # Interval between full rescans to account for missed events.
-    # Refreshes the CRD UUID map and API resources cache. (e.g. "15m", "30m")
+    # Refreshes the CRD UUID map and API resources cache. Use a positive duration
+    # string (e.g. "15m", "30m"); 0 does not disable the tracker and is treated by
+    # the controller as "use the internal default" (15 minutes). Negative values are rejected.
     resyncInterval: "15m"
   resources:
     limits:
