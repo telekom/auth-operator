@@ -413,3 +413,63 @@ func TestBindDefinitionHasRoleBindingsFunc(t *testing.T) {
 
 	runIndexExtractorTests(t, tests)
 }
+
+func TestBindDefinitionHasRoleBindingsIndexWithFakeClient(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := authorizationv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add scheme: %v", err)
+	}
+
+	subject := rbacv1.Subject{Kind: rbacv1.UserKind, Name: "alice"}
+
+	bdWithRoleBindings := &authorizationv1alpha1.BindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "bd-with-rb"},
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
+			TargetName: "with-rb",
+			Subjects:   []rbacv1.Subject{subject},
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+				{ClusterRoleRefs: []string{"view"}},
+			},
+		},
+	}
+
+	bdWithoutRoleBindings := &authorizationv1alpha1.BindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "bd-without-rb"},
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
+			TargetName: "without-rb",
+			Subjects:   []rbacv1.Subject{subject},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(bdWithRoleBindings, bdWithoutRoleBindings).
+		WithIndex(
+			&authorizationv1alpha1.BindDefinition{},
+			BindDefinitionHasRoleBindingsField,
+			BindDefinitionHasRoleBindingsFunc,
+		).
+		Build()
+
+	ctx := context.Background()
+
+	var withRB authorizationv1alpha1.BindDefinitionList
+	if err := fakeClient.List(ctx, &withRB, client.MatchingFields{BindDefinitionHasRoleBindingsField: "true"}); err != nil {
+		t.Fatalf("failed to list BindDefinitions with role bindings: %v", err)
+	}
+	if len(withRB.Items) != 1 {
+		t.Errorf("expected 1 BindDefinition with role bindings, got %d", len(withRB.Items))
+	} else if withRB.Items[0].Name != "bd-with-rb" {
+		t.Errorf("expected bd-with-rb, got %s", withRB.Items[0].Name)
+	}
+
+	var withoutRB authorizationv1alpha1.BindDefinitionList
+	if err := fakeClient.List(ctx, &withoutRB, client.MatchingFields{BindDefinitionHasRoleBindingsField: "false"}); err != nil {
+		t.Fatalf("failed to list BindDefinitions without role bindings: %v", err)
+	}
+	if len(withoutRB.Items) != 1 {
+		t.Errorf("expected 1 BindDefinition without role bindings, got %d", len(withoutRB.Items))
+	} else if withoutRB.Items[0].Name != "bd-without-rb" {
+		t.Errorf("expected bd-without-rb, got %s", withoutRB.Items[0].Name)
+	}
+}
