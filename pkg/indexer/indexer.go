@@ -36,15 +36,27 @@ const (
 	// need namespace matching versus those that apply globally.
 	WebhookAuthorizerHasNamespaceSelectorField = ".spec.hasNamespaceSelector"
 
-	// BindDefinitionHasRoleBindingsField indexes only BindDefinitions that define
-	// at least one RoleBinding (i.e. namespace-scoped bindings). Used by the
-	// namespace validating webhook to skip cluster-only BindDefinitions and avoid
-	// a full O(N) scan on every namespace admission call.
+	// WebhookAuthorizerHasNamespaceSelectorTrue is the index value for
+	// WebhookAuthorizers that define a non-empty namespace selector.
+	WebhookAuthorizerHasNamespaceSelectorTrue = "true"
+
+	// WebhookAuthorizerHasNamespaceSelectorFalse is the index value for
+	// WebhookAuthorizers that do not define a namespace selector.
+	WebhookAuthorizerHasNamespaceSelectorFalse = "false"
+
+	// BindDefinitionHasRoleBindingsField indexes BindDefinitions by whether they
+	// define at least one RoleBinding (i.e. namespace-scoped bindings). Used to
+	// skip cluster-only BindDefinitions in namespace validating webhook and
+	// namespace event fan-out hot paths.
 	BindDefinitionHasRoleBindingsField = ".spec.hasRoleBindings"
 
 	// BindDefinitionHasRoleBindingsTrue is the index value for BindDefinitions
 	// that have at least one RoleBinding entry.
 	BindDefinitionHasRoleBindingsTrue = "true"
+
+	// BindDefinitionHasRoleBindingsFalse is the index value for BindDefinitions
+	// that do not have RoleBinding entries.
+	BindDefinitionHasRoleBindingsFalse = "false"
 
 	// RestrictedBindDefinitionPolicyRefField indexes RestrictedBindDefinition
 	// by the referenced RBACPolicy name for efficient reverse lookups.
@@ -152,10 +164,9 @@ func SetupBaseIndexes(ctx context.Context, mgr manager.Manager) error {
 		return fmt.Errorf("failed to create index for WebhookAuthorizer.Spec.HasNamespaceSelector: %w", err)
 	}
 
-	// Index BindDefinitions that have at least one RoleBinding.
-	// This allows the namespace validating webhook to skip cluster-only
-	// BindDefinitions and limit the in-memory selector scan to candidates
-	// that can actually produce namespace-scoped bindings.
+	// Index BindDefinition by whether it has at least one RoleBinding.
+	// Allows namespace validating webhook and namespace event fan-out paths to
+	// skip cluster-only BindDefinitions.
 	if err := mgr.GetFieldIndexer().IndexField(
 		ctx,
 		&authorizationv1alpha1.BindDefinition{},
@@ -337,14 +348,13 @@ func WebhookAuthorizerHasNamespaceSelectorFunc(obj client.Object) []string {
 		return nil
 	}
 	if helpers.IsLabelSelectorEmpty(&wa.Spec.NamespaceSelector) {
-		return []string{"false"}
+		return []string{WebhookAuthorizerHasNamespaceSelectorFalse}
 	}
-	return []string{"true"}
+	return []string{WebhookAuthorizerHasNamespaceSelectorTrue}
 }
 
-// BindDefinitionHasRoleBindingsFunc emits the true index value for
-// BindDefinitions that have RoleBindings. BindDefinitions without RoleBindings
-// are intentionally absent from the index.
+// BindDefinitionHasRoleBindingsFunc extracts the index value for the
+// hasRoleBindings field. Exported for testing and fake client setup.
 func BindDefinitionHasRoleBindingsFunc(obj client.Object) []string {
 	bd, ok := obj.(*authorizationv1alpha1.BindDefinition)
 	if !ok {
@@ -353,7 +363,7 @@ func BindDefinitionHasRoleBindingsFunc(obj client.Object) []string {
 	if len(bd.Spec.RoleBindings) > 0 {
 		return []string{BindDefinitionHasRoleBindingsTrue}
 	}
-	return nil
+	return []string{BindDefinitionHasRoleBindingsFalse}
 }
 
 // RoleDefinitionTargetNameFunc extracts the RoleDefinition target name.
