@@ -35,6 +35,18 @@ func EvaluateBindDefinition(
 
 	violations := []Violation{}
 
+	// Enforce appliesTo scope: roleBinding target namespaces must be within the policy's
+	// declared governance scope (static Namespaces list). NamespaceSelector-based scope
+	// enforcement requires runtime resolution and is delegated to the controller.
+	for i, nb := range rbd.Spec.RoleBindings {
+		if nb.Namespace != "" && !namespaceInScope(policy.Spec.AppliesTo, nb.Namespace) {
+			violations = append(violations, Violation{
+				Field:   fmt.Sprintf("spec.roleBindings[%d].namespace", i),
+				Message: fmt.Sprintf("namespace %q is outside the policy's appliesTo scope", nb.Namespace),
+			})
+		}
+	}
+
 	if policy.Spec.BindingLimits != nil {
 		violations = append(violations, evaluateBindingLimits(ctx, policy.Spec.BindingLimits, rbd, labelGetter)...)
 	}

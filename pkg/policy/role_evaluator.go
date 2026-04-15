@@ -15,11 +15,22 @@ import (
 // governing RBACPolicy and returns all violations. An empty slice
 // indicates full compliance.
 func EvaluateRoleDefinition(policy *authorizationv1alpha1.RBACPolicy, rrd *authorizationv1alpha1.RestrictedRoleDefinition) []Violation {
-	if policy.Spec.RoleLimits == nil {
-		return []Violation{}
+	var violations []Violation
+
+	// Enforce appliesTo scope: the Role's target namespace must be within the policy's
+	// declared governance scope (static Namespaces list).
+	if rrd.Spec.TargetNamespace != "" && !namespaceInScope(policy.Spec.AppliesTo, rrd.Spec.TargetNamespace) {
+		violations = append(violations, Violation{
+			Field:   "spec.targetNamespace",
+			Message: fmt.Sprintf("namespace %q is outside the policy's appliesTo scope", rrd.Spec.TargetNamespace),
+		})
 	}
 
-	return evaluateRoleLimits(policy.Spec.RoleLimits, rrd)
+	if policy.Spec.RoleLimits == nil {
+		return violations
+	}
+
+	return append(violations, evaluateRoleLimits(policy.Spec.RoleLimits, rrd)...)
 }
 
 // evaluateRoleLimits checks role-related constraints.
