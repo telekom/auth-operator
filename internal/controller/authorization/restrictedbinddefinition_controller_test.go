@@ -484,7 +484,7 @@ func TestRBD_Reconcile_PolicyCompliant_CreatesRoleBindings(t *testing.T) {
 		},
 		Spec: authorizationv1alpha1.RBACPolicySpec{
 			AppliesTo: authorizationv1alpha1.PolicyScope{
-				Namespaces: []string{"default"},
+				Namespaces: []string{"target-ns"},
 			},
 			BindingLimits: &authorizationv1alpha1.BindingLimits{
 				AllowClusterRoleBindings: false,
