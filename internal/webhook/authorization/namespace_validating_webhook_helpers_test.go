@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	"github.com/telekom/auth-operator/pkg/indexer"
 	admissionv1 "k8s.io/api/admission/v1"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -625,7 +626,11 @@ func TestAuthorizeViaBindDefinitions(t *testing.T) {
 			for i := range tt.bindDefs {
 				objs[i] = &tt.bindDefs[i]
 			}
-			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objs...).Build()
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(objs...).
+				WithIndex(&authzv1alpha1.BindDefinition{}, indexer.BindDefinitionHasRoleBindingsField, indexer.BindDefinitionHasRoleBindingsFunc).
+				Build()
 
 			v := &NamespaceValidator{Client: fakeClient}
 			logger := logf.FromContext(context.Background())
@@ -677,8 +682,11 @@ func TestAuthorizeViaBindDefinitions_SkipsRestricted(t *testing.T) {
 		},
 	}
 
-	fakeClient := fake.NewClientBuilder().WithScheme(scheme).
-		WithRuntimeObjects(&restrictedBD).Build()
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(&restrictedBD).
+		WithIndex(&authzv1alpha1.BindDefinition{}, indexer.BindDefinitionHasRoleBindingsField, indexer.BindDefinitionHasRoleBindingsFunc).
+		Build()
 
 	v := &NamespaceValidator{Client: fakeClient}
 	logger := logf.FromContext(context.Background())
