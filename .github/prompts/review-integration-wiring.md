@@ -108,16 +108,6 @@ fields, unused interfaces, and incomplete plumbing.
   intentionally omits (e.g., internal refactoring, helper extractions).
   Only flag semantic gaps where user-visible behavior doesn't match.
 
-### 13. Cross-Branch CI Path Compatibility
-
-- Workflows like output-delta that checkout main/tag/PR branches must handle
-  file-path drift across branches.
-- Flag hard references to newly introduced paths (for example new sample
-  subfolders) that are executed against older main/tag checkouts without
-  existence guards.
-- Require explicit fallback/notice behavior when path is missing, instead of
-  generic hard-fail.
-
 ## Output format
 
 For each finding:
