@@ -26,6 +26,16 @@ const (
 	// This allows the webhook handler to efficiently filter authorizers that
 	// need namespace matching versus those that apply globally.
 	WebhookAuthorizerHasNamespaceSelectorField = ".spec.hasNamespaceSelector"
+
+	// BindDefinitionHasRoleBindingsField indexes BindDefinitions by whether they
+	// define at least one RoleBinding (i.e. namespace-scoped bindings). Used to
+	// skip cluster-only BindDefinitions in namespace event fan-out and webhook
+	// hot paths.
+	BindDefinitionHasRoleBindingsField = ".spec.hasRoleBindings"
+
+	// BindDefinitionHasRoleBindingsTrue is the index value for BindDefinitions
+	// that have at least one RoleBinding entry.
+	BindDefinitionHasRoleBindingsTrue = "true"
 )
 
 // SetupIndexes registers field indexes on the manager's cache for efficient lookups.
@@ -76,6 +86,17 @@ func SetupIndexes(ctx context.Context, mgr manager.Manager) error {
 		return fmt.Errorf("failed to create index for WebhookAuthorizer.Spec.HasNamespaceSelector: %w", err)
 	}
 
+	// Index BindDefinition by whether it has at least one RoleBinding.
+	// Allows namespace event fan-out to skip cluster-only BindDefinitions.
+	if err := mgr.GetFieldIndexer().IndexField(
+		ctx,
+		&authorizationv1alpha1.BindDefinition{},
+		BindDefinitionHasRoleBindingsField,
+		BindDefinitionHasRoleBindingsFunc,
+	); err != nil {
+		return fmt.Errorf("failed to create index for BindDefinition.Spec.HasRoleBindings: %w", err)
+	}
+
 	return nil
 }
 
@@ -90,4 +111,17 @@ func WebhookAuthorizerHasNamespaceSelectorFunc(obj client.Object) []string {
 		return []string{"false"}
 	}
 	return []string{"true"}
+}
+
+// BindDefinitionHasRoleBindingsFunc extracts the index value for the
+// hasRoleBindings field. Exported for testing and fake client setup.
+func BindDefinitionHasRoleBindingsFunc(obj client.Object) []string {
+	bd, ok := obj.(*authorizationv1alpha1.BindDefinition)
+	if !ok {
+		return nil
+	}
+	if len(bd.Spec.RoleBindings) > 0 {
+		return []string{BindDefinitionHasRoleBindingsTrue}
+	}
+	return []string{"false"}
 }
