@@ -250,6 +250,9 @@ func PatchApplyRoleBinding(
 
 // PatchApplyServiceAccount reads the current SA from cache, compares it to the
 // desired ApplyConfiguration, and only sends an SSA Patch if there is a diff.
+// ForceOwnership is used on the patch path so that a second BindDefinition can
+// claim shared ownership of annotation fields already owned by another BD's
+// field manager, without triggering a conflict error.
 func PatchApplyServiceAccount(
 	ctx context.Context,
 	c client.Client,
@@ -271,11 +274,14 @@ func PatchApplyServiceAccount(
 
 	logger := log.FromContext(ctx)
 
+	applyOptsForCreate := []client.ApplyOption{client.FieldOwner(fieldOwner)}
+	applyOptsForPatch := append(applyOptsForCreate, client.ForceOwnership)
+
 	existing := &corev1.ServiceAccount{}
 	err := c.Get(ctx, types.NamespacedName{Name: *ac.Name, Namespace: *ac.Namespace}, existing)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			if applyErr := c.Apply(ctx, ac, client.FieldOwner(fieldOwner)); applyErr != nil {
+			if applyErr := c.Apply(ctx, ac, applyOptsForCreate...); applyErr != nil {
 				return 0, fmt.Errorf("create ServiceAccount %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 			}
 			return PatchApplyResultCreated, nil
@@ -289,7 +295,7 @@ func PatchApplyServiceAccount(
 		return PatchApplyResultSkipped, nil
 	}
 
-	if applyErr := c.Apply(ctx, ac, client.FieldOwner(fieldOwner)); applyErr != nil {
+	if applyErr := c.Apply(ctx, ac, applyOptsForPatch...); applyErr != nil {
 		return 0, fmt.Errorf("patch ServiceAccount %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 	}
 	return PatchApplyResultPatched, nil
