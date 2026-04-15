@@ -7,6 +7,7 @@ import (
 	"context"
 	"testing"
 
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -369,4 +370,46 @@ func TestWebhookAuthorizerIndexWithFakeClient(t *testing.T) {
 	if len(emptyList.Items) != 0 {
 		t.Errorf("expected 0 authorizers for invalid index value, got %d", len(emptyList.Items))
 	}
+}
+
+func TestBindDefinitionHasRoleBindingsFunc(t *testing.T) {
+	subject := rbacv1.Subject{Kind: rbacv1.UserKind, Name: "alice"}
+
+	tests := []indexExtractorTest{
+		{
+			name: "BD with RoleBindings returns true",
+			object: &authorizationv1alpha1.BindDefinition{
+				ObjectMeta: metav1.ObjectMeta{Name: "bd-with-rb"},
+				Spec: authorizationv1alpha1.BindDefinitionSpec{
+					TargetName: "with-rb",
+					Subjects:   []rbacv1.Subject{subject},
+					RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+						{ClusterRoleRefs: []string{"view"}},
+					},
+				},
+			},
+			indexFunc:  BindDefinitionHasRoleBindingsFunc,
+			wantValues: []string{"true"},
+		},
+		{
+			name: "BD without RoleBindings returns false",
+			object: &authorizationv1alpha1.BindDefinition{
+				ObjectMeta: metav1.ObjectMeta{Name: "bd-without-rb"},
+				Spec: authorizationv1alpha1.BindDefinitionSpec{
+					TargetName: "without-rb",
+					Subjects:   []rbacv1.Subject{subject},
+				},
+			},
+			indexFunc:  BindDefinitionHasRoleBindingsFunc,
+			wantValues: []string{"false"},
+		},
+		{
+			name:       "wrong object type returns nil",
+			object:     &authorizationv1alpha1.RoleDefinition{ObjectMeta: metav1.ObjectMeta{Name: "rd"}},
+			indexFunc:  BindDefinitionHasRoleBindingsFunc,
+			wantValues: nil,
+		},
+	}
+
+	runIndexExtractorTests(t, tests)
 }
