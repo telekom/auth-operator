@@ -346,18 +346,23 @@ jobs:
 
           # Apply intentionally broken (runtime-failure) samples.
           # These must stay structurally valid and apply successfully.
-          broken_samples_applied=false
-          for i in 1 2 3 4 5; do
-            if kubectl apply --server-side --force-conflicts -k config/samples/broken/ 2>&1; then
-              broken_samples_applied=true
-              break
+          # Guard: older tags without the broken/ directory skip this step.
+          if [ -d config/samples/broken/ ]; then
+            broken_samples_applied=false
+            for i in 1 2 3 4 5; do
+              if kubectl apply --server-side --force-conflicts -k config/samples/broken/ 2>&1; then
+                broken_samples_applied=true
+                break
+              fi
+              echo "Broken sample apply attempt $i failed, waiting before retry..."
+              sleep 10
+            done
+            if [ "$broken_samples_applied" = "false" ]; then
+              echo "::error::Broken runtime-failure samples must apply successfully"
+              exit 1
             fi
-            echo "Broken sample apply attempt $i failed, waiting before retry..."
-            sleep 10
-          done
-          if [ "$broken_samples_applied" = "false" ]; then
-            echo "::error::Broken runtime-failure samples must apply successfully"
-            exit 1
+          else
+            echo "::notice::config/samples/broken/ not present in this tag; skipping broken-sample apply"
           fi
 
           kubectl wait --for=condition=Ready roledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RoleDefinitions not fully reconciled"
@@ -445,18 +450,23 @@ jobs:
 
           # Apply intentionally broken (runtime-failure) samples.
           # These must stay structurally valid and apply successfully.
-          broken_samples_applied=false
-          for i in 1 2 3 4 5; do
-            if kubectl apply --server-side --force-conflicts -k config/samples/broken/ 2>&1; then
-              broken_samples_applied=true
-              break
+          # Guard: older tags without the broken/ directory skip this step.
+          if [ -d config/samples/broken/ ]; then
+            broken_samples_applied=false
+            for i in 1 2 3 4 5; do
+              if kubectl apply --server-side --force-conflicts -k config/samples/broken/ 2>&1; then
+                broken_samples_applied=true
+                break
+              fi
+              echo "Broken sample apply attempt $i failed, waiting before retry..."
+              sleep 10
+            done
+            if [ "$broken_samples_applied" = "false" ]; then
+              echo "::error::Broken runtime-failure samples must apply successfully"
+              exit 1
             fi
-            echo "Broken sample apply attempt $i failed, waiting before retry..."
-            sleep 10
-          done
-          if [ "$broken_samples_applied" = "false" ]; then
-            echo "::error::Broken runtime-failure samples must apply successfully"
-            exit 1
+          else
+            echo "::notice::config/samples/broken/ not present in this tag; skipping broken-sample apply"
           fi
 
           kubectl wait --for=condition=Ready roledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RoleDefinitions not fully reconciled"
