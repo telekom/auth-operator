@@ -489,6 +489,14 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 	evaluated := 0
 	skipped := 0
 
+	// nsLabelCache is a per-request cache keyed by namespace name. A nil pointer
+	// value records a failed Get (namespace not found or error); a non-nil pointer
+	// holds the fetched label set, which may itself be an empty map. This
+	// avoids redundant client.Get calls and repeated error logging when multiple
+	// scoped authorizers target the same namespace in one SAR. The map must NOT
+	// be shared across requests to avoid stale label reads.
+	nsLabelCache := make(map[string]*labels.Set)
+
 	for i, webhookAuthorizer := range items {
 		// Skip namespace-scoped authorizers for non-resource or cluster-scoped SARs
 		// that have no namespace target. This is a defensive guard — the list query
@@ -505,7 +513,7 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 				skipped++
 				continue
 			}
-			if !wa.namespaceMatches(ctx, resourceNS, &webhookAuthorizer.Spec.NamespaceSelector) {
+			if !wa.namespaceMatches(ctx, resourceNS, &webhookAuthorizer.Spec.NamespaceSelector, nsLabelCache) {
 				wa.Log.V(2).Info("namespace selector did not match, skipping",
 					"authorizer", webhookAuthorizer.Name,
 					"namespace", resourceNS)
@@ -580,7 +588,11 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 }
 
 // namespaceMatches checks if the namespace matches the selector.
-func (wa *Authorizer) namespaceMatches(ctx context.Context, namespace string, selector *metav1.LabelSelector) bool {
+// nsCache is a per-request map that avoids redundant Get calls when multiple
+// scoped authorizers target the same namespace within one SAR evaluation. A nil
+// pointer value signals a previously failed Get; callers must not share the map
+// across requests.
+func (wa *Authorizer) namespaceMatches(ctx context.Context, namespace string, selector *metav1.LabelSelector, nsCache map[string]*labels.Set) bool {
 	if wa.Tracer != nil {
 		var span trace.Span
 		ctx, span = wa.Tracer.Start(ctx, "webhook.NamespaceMatch",
@@ -591,18 +603,34 @@ func (wa *Authorizer) namespaceMatches(ctx context.Context, namespace string, se
 	if namespace == "" {
 		return false
 	}
+
+	if cached, ok := nsCache[namespace]; ok {
+		if cached == nil {
+			return false
+		}
+		labelSelector, err := metav1.LabelSelectorAsSelector(selector)
+		if err != nil {
+			wa.Log.Error(err, "Invalid label selector")
+			return false
+		}
+		return labelSelector.Matches(*cached)
+	}
+
 	var ns corev1.Namespace
-	err := wa.Client.Get(ctx, types.NamespacedName{Name: namespace}, &ns)
-	if err != nil {
+	if err := wa.Client.Get(ctx, types.NamespacedName{Name: namespace}, &ns); err != nil {
 		wa.Log.Error(err, "Failed to get namespace", "namespace", namespace)
+		nsCache[namespace] = nil
 		return false
 	}
+	nsLabels := labels.Set(ns.Labels)
+	nsCache[namespace] = &nsLabels
+
 	labelSelector, err := metav1.LabelSelectorAsSelector(selector)
 	if err != nil {
 		wa.Log.Error(err, "Invalid label selector")
 		return false
 	}
-	return labelSelector.Matches(labels.Set(ns.Labels))
+	return labelSelector.Matches(nsLabels)
 }
 
 // principalMatches checks if the user or groups match the principals.
