@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	metav1ac "k8s.io/client-go/applyconfigurations/meta/v1"
+	"k8s.io/client-go/util/retry"
 	sigs_client "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -155,25 +156,34 @@ func (r *BindDefinitionReconciler) deleteServiceAccount(
 		logger.V(2).Info("ServiceAccount is referenced by other BindDefinitions - NOT deleting, updating source-names",
 			"bindDefinitionName", bindDef.Name, "serviceAccount", sa.Name, "namespace", sa.Namespace)
 
-		// Remove our BD name from the source-names annotation
-		if sa.Annotations != nil {
-			oldSourceNames := sa.Annotations[helpers.SourceNamesAnnotation]
-			newSourceNames := helpers.RemoveSourceName(oldSourceNames, bindDef.Name)
-			if newSourceNames != oldSourceNames {
-				if sa.Annotations == nil {
-					sa.Annotations = make(map[string]string)
-				}
-				sa.Annotations[helpers.SourceNamesAnnotation] = newSourceNames
-				if err := r.client.Update(ctx, sa); err != nil {
-					logger.Error(err, "Failed to update source-names annotation on retained ServiceAccount",
-						"bindDefinitionName", bindDef.Name, "serviceAccount", sa.Name, "namespace", sa.Namespace)
-					// Non-fatal - continue with deletion cleanup
-				} else {
-					logger.V(2).Info("Updated source-names annotation on retained ServiceAccount",
-						"bindDefinitionName", bindDef.Name, "serviceAccount", sa.Name,
-						"oldSourceNames", oldSourceNames, "newSourceNames", newSourceNames)
-				}
+		patched := false
+		if patchErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			fresh := &corev1.ServiceAccount{}
+			if getErr := r.client.Get(ctx, types.NamespacedName{Name: sa.Name, Namespace: sa.Namespace}, fresh); getErr != nil {
+				return getErr
 			}
+			if fresh.Annotations == nil {
+				return nil
+			}
+			oldSourceNames := fresh.Annotations[helpers.SourceNamesAnnotation]
+			newSourceNames := helpers.RemoveSourceName(oldSourceNames, bindDef.Name)
+			if newSourceNames == oldSourceNames {
+				return nil
+			}
+			orig := fresh.DeepCopy()
+			fresh.Annotations[helpers.SourceNamesAnnotation] = newSourceNames
+			if err := r.client.Patch(ctx, fresh, sigs_client.MergeFromWithOptions(orig, sigs_client.MergeFromWithOptimisticLock{})); err != nil {
+				return err
+			}
+			patched = true
+			return nil
+		}); patchErr != nil {
+			logger.Error(patchErr, "Failed to update source-names annotation on retained ServiceAccount",
+				"bindDefinitionName", bindDef.Name, "serviceAccount", sa.Name, "namespace", sa.Namespace)
+			// Non-fatal - continue with deletion cleanup
+		} else if patched {
+			logger.V(2).Info("Updated source-names annotation on retained ServiceAccount",
+				"bindDefinitionName", bindDef.Name, "serviceAccount", sa.Name)
 		}
 
 		r.recorder.Eventf(bindDef, nil, corev1.EventTypeNormal,
