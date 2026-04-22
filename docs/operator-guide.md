@@ -78,8 +78,8 @@ The auth-operator consists of two main components:
 
 | Component | Purpose | Replicas |
 |-----------|---------|----------|
-| **Controller Manager** | Reconciles RoleDefinitions, BindDefinitions | 1 (HA: 2+) |
-| **Webhook Server** | Validates namespace operations | 1 (HA: 2+) |
+| **Controller Manager** | Reconciles RoleDefinitions, BindDefinitions, RestrictedRoleDefinitions, RestrictedBindDefinitions, RBACPolicies | 1 (HA: 2+) |
+| **Webhook Server** | Validates CRD operations, namespace admission | 1 (HA: 2+) |
 
 ### Component Interaction
 
@@ -92,9 +92,11 @@ The auth-operator consists of two main components:
 ┌───────────────────────┐        ┌────────────────────────────┐
 │   Controller Manager  │        │     Webhook Server         │
 │   ─────────────────   │        │     ───────────────        │
-│   • RoleDefinition    │        │   • Namespace validation   │
-│   • BindDefinition    │        │   • Label injection        │
-│   • API Discovery     │        │   • TDG migration          │
+│   • RoleDefinition    │        │   • CRD validation         │
+│   • BindDefinition    │        │   • Namespace admission    │
+│   • Restricted CRDs   │        │   • Label injection        │
+│   • RBACPolicy        │        │   • TDG migration          │
+│   • API Discovery     │        │                            │
 └───────────────────────┘        └────────────────────────────┘
             │                                  │
             ▼                                  ▼
@@ -111,6 +113,25 @@ The auth-operator consists of two main components:
 | RoleDefinition | 60 seconds | Drift protection, CRD discovery |
 | BindDefinition | 60 seconds | Drift protection |
 | BindDefinition (missing refs) | 10s → 5min (exponential backoff) | Recovery with reduced API load |
+
+### Using Restricted CRDs
+
+Use the restricted CRD family when tenant-managed RBAC must stay inside
+platform guardrails.
+
+| Use Case | Recommended CRD |
+|----------|-----------------|
+| Single-team or trusted admin-managed RBAC without policy guardrails | `RoleDefinition` / `BindDefinition` |
+| Multi-tenant RBAC where role verbs/resources/subjects/namespaces must be constrained | `RBACPolicy` + `RestrictedRoleDefinition` / `RestrictedBindDefinition` |
+
+Restricted workflow:
+
+1. Platform admin creates an `RBACPolicy` that defines limits.
+2. Tenant creates `RestrictedRoleDefinition`/`RestrictedBindDefinition` with `spec.policyRef.name`.
+3. Admission webhook checks referenced policy existence and immutable fields.
+4. Controller enforces policy on every reconciliation and deprovisions managed RBAC resources on violations.
+
+Note: `spec.policyRef` on restricted resources is immutable after creation.
 
 ### BindDefinition Annotations
 
@@ -148,6 +169,9 @@ The auth-operator consists of two main components:
 | `--binddefinition-concurrency` | Max concurrent BindDefinition reconciliations | `5` |
 | `--roledefinition-concurrency` | Max concurrent RoleDefinition reconciliations | `5` |
 | `--webhookauthorizer-concurrency` | Max concurrent WebhookAuthorizer reconciliations | `1` |
+| `--rbacpolicy-concurrency` | Max concurrent RBACPolicy reconciliations | `5` |
+| `--restrictedbinddefinition-concurrency` | Max concurrent RestrictedBindDefinition reconciliations | `5` |
+| `--restrictedroledefinition-concurrency` | Max concurrent RestrictedRoleDefinition reconciliations | `5` |
 | `--cache-sync-timeout` | Timeout for waiting for CRDs to become available | `2m0s` |
 | `--graceful-shutdown-timeout` | Timeout for graceful shutdown of the manager | `30s` |
 | `--wait-for-crds` | Wait for required CRDs before starting controllers | `true` |

@@ -8,6 +8,8 @@ Copyright © 2025 Deutsche Telekom AG.
 package metrics
 
 import (
+	"sync"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 )
@@ -275,6 +277,27 @@ var (
 			Help:      "Total BindDefinitions enqueued during namespace-event fan-out (selector match)",
 		},
 	)
+
+	// PolicyViolationsActive tracks the number of active policy violations
+	// across all restricted resources per controller.
+	// A non-zero value indicates at least one managed restricted resource is
+	// non-compliant with its referenced RBACPolicy; the controller will attempt
+	// deprovisioning. Values are aggregated in-memory by resource name and
+	// exported as a single bounded-cardinality series per controller.
+	PolicyViolationsActive = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: Namespace,
+			Name:      "policy_violations_active",
+			Help:      "Total number of active policy violations across restricted resources, per controller (0 = compliant)",
+		},
+		[]string{"controller"},
+	)
+
+	policyViolationsMu sync.Mutex
+	// policyViolationsByResource tracks per-resource violation counts so the
+	// exported metric can publish a controller-level aggregate with bounded
+	// label cardinality.
+	policyViolationsByResource = make(map[string]map[string]int)
 )
 
 // allCollectors returns the full list of prometheus.Collector instances
@@ -303,6 +326,7 @@ func allCollectors() []prometheus.Collector {
 		AuthorizerRateLimitedTotal,
 		NamespaceFanoutSkipped,
 		NamespaceFanoutEnqueued,
+		PolicyViolationsActive,
 	}
 }
 
@@ -337,10 +361,13 @@ const (
 
 // ControllerName constants.
 const (
-	ControllerRoleDefinition        = "RoleDefinition"
-	ControllerBindDefinition        = "BindDefinition"
-	ControllerRoleBindingTerminator = "RoleBindingTerminator"
-	ControllerWebhookAuthorizer     = "WebhookAuthorizer"
+	ControllerRoleDefinition           = "RoleDefinition"
+	ControllerBindDefinition           = "BindDefinition"
+	ControllerRoleBindingTerminator    = "RoleBindingTerminator"
+	ControllerWebhookAuthorizer        = "WebhookAuthorizer"
+	ControllerRBACPolicy               = "RBACPolicy"
+	ControllerRestrictedBindDefinition = "RestrictedBindDefinition"
+	ControllerRestrictedRoleDefinition = "RestrictedRoleDefinition"
 )
 
 // ResourceType constants.
@@ -392,4 +419,54 @@ func DeleteAuthorizerSeries(authorizerName string) {
 		AuthorizerRequestsTotal.DeleteLabelValues(decision, authorizerName)
 	}
 	AuthorizerDeniedPrincipalHitsTotal.DeleteLabelValues(authorizerName)
+}
+
+// SetPolicyViolationsActive updates the active violation count for a specific
+// restricted resource and exports the aggregate total per controller.
+func SetPolicyViolationsActive(controller, name string, violations int) {
+	policyViolationsMu.Lock()
+	defer policyViolationsMu.Unlock()
+
+	resourceCounts, ok := policyViolationsByResource[controller]
+	if !ok {
+		resourceCounts = make(map[string]int)
+		policyViolationsByResource[controller] = resourceCounts
+	}
+
+	if violations <= 0 {
+		delete(resourceCounts, name)
+	} else {
+		resourceCounts[name] = violations
+	}
+
+	setPolicyViolationsAggregateLocked(controller, resourceCounts)
+}
+
+// DeletePolicyViolationContribution removes the in-memory contribution for a
+// deleted restricted resource and updates the controller-level aggregate gauge.
+func DeletePolicyViolationContribution(controller, name string) {
+	policyViolationsMu.Lock()
+	defer policyViolationsMu.Unlock()
+
+	resourceCounts, ok := policyViolationsByResource[controller]
+	if !ok {
+		return
+	}
+
+	delete(resourceCounts, name)
+	setPolicyViolationsAggregateLocked(controller, resourceCounts)
+}
+
+func setPolicyViolationsAggregateLocked(controller string, resourceCounts map[string]int) {
+	if len(resourceCounts) == 0 {
+		delete(policyViolationsByResource, controller)
+		PolicyViolationsActive.WithLabelValues(controller).Set(0)
+		return
+	}
+
+	total := 0
+	for _, count := range resourceCounts {
+		total += count
+	}
+	PolicyViolationsActive.WithLabelValues(controller).Set(float64(total))
 }

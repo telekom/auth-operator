@@ -342,6 +342,37 @@ func TestDeleteAuthorizerSeries(t *testing.T) {
 	}
 }
 
+func TestSetAndDeletePolicyViolationContribution(t *testing.T) {
+	controller := ControllerRestrictedBindDefinition
+	resourceA := "test-rbd-a"
+	resourceB := "test-rbd-b"
+
+	// Ensure a clean starting point for this controller label.
+	DeletePolicyViolationContribution(controller, resourceA)
+	DeletePolicyViolationContribution(controller, resourceB)
+
+	SetPolicyViolationsActive(controller, resourceA, 2)
+	SetPolicyViolationsActive(controller, resourceB, 3)
+
+	gauge, err := PolicyViolationsActive.GetMetricWithLabelValues(controller)
+	if err != nil {
+		t.Fatalf("failed to get policy violation metric: %v", err)
+	}
+	if val := getGaugeValue(t, gauge); val != 5 {
+		t.Errorf("expected aggregated policy violations to be 5, got %f", val)
+	}
+
+	SetPolicyViolationsActive(controller, resourceA, 0)
+	if val := getGaugeValue(t, gauge); val != 3 {
+		t.Errorf("expected aggregated policy violations to be 3 after clearing one resource, got %f", val)
+	}
+
+	DeletePolicyViolationContribution(controller, resourceB)
+	if val := getGaugeValue(t, gauge); val != 0 {
+		t.Errorf("expected aggregated policy violations to be 0 after deletion, got %f", val)
+	}
+}
+
 func TestConstants(t *testing.T) {
 	// Verify namespace constant
 	if Namespace != "auth_operator" {

@@ -9,6 +9,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -149,10 +150,25 @@ jobs:
       - name: Setup Go Environment
         uses: ./.github/actions/setup-go-env
 
-      - name: Generate manifests, code, Helm chart, and docs
+      - name: Generate kubebuilder/controller-gen outputs
         run: |
           make manifests
           make generate
+
+      - name: Verify kubebuilder/controller-gen outputs are committed
+        run: |
+          GENERATED_CHANGED=$(git diff --name-only | grep -E '^(config/crd/bases/|config/rbac/role\.yaml$|config/webhook/manifests\.yaml$|api/.+/zz_generated\.deepcopy\.go$|api/.+/applyconfiguration/)') || true
+          if [ -n "${GENERATED_CHANGED}" ]; then
+            echo "ERROR: kubebuilder/controller-gen outputs are out of date."
+            echo "Run 'make manifests generate' and commit the generated changes."
+            echo ""
+            echo "Changed generated files:"
+            echo "${GENERATED_CHANGED}"
+            exit 1
+          fi
+
+      - name: Generate Helm chart and docs
+        run: |
           make helm
           make docs
 

@@ -1,0 +1,372 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.0
+  name: restrictedbinddefinitions.authorization.t-caas.telekom.com
+spec:
+  group: authorization.t-caas.telekom.com
+  names:
+    kind: RestrictedBindDefinition
+    listKind: RestrictedBindDefinitionList
+    plural: restrictedbinddefinitions
+    shortNames:
+    - rbinddef
+    singular: restrictedbinddefinition
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - description: Whether the RestrictedBindDefinition is ready
+      jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - description: Whether the resource complies with its policy
+      jsonPath: .status.conditions[?(@.type=='PolicyCompliant')].status
+      name: Policy
+      type: string
+    - description: Time since creation
+      jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    - description: The name of the child object created by this RestrictedBindDefinition
+      jsonPath: .spec.targetName
+      name: Bind name
+      type: string
+    - description: The referenced RBACPolicy
+      jsonPath: .spec.policyRef.name
+      name: PolicyRef
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          RestrictedBindDefinition is the Schema for the restrictedbinddefinitions API.
+          It is similar to BindDefinition but requires a policy reference and enforces
+          RBAC guardrails defined by the referenced RBACPolicy.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: RestrictedBindDefinitionSpec defines the desired state of
+              RestrictedBindDefinition.
+            properties:
+              automountServiceAccountToken:
+                default: true
+                description: |-
+                  AutomountServiceAccountToken controls whether to automount API credentials
+                  for ServiceAccounts created by this RestrictedBindDefinition.
+                type: boolean
+              clusterRoleBindings:
+                description: ClusterRoleBindings defines cluster-scoped role bindings.
+                properties:
+                  clusterRoleRefs:
+                    description: ClusterRoleRefs references an existing ClusterRole
+                    items:
+                      type: string
+                    maxItems: 64
+                    type: array
+                type: object
+              policyRef:
+                description: |-
+                  PolicyRef references the RBACPolicy that governs this binding.
+                  This field is immutable after creation.
+                properties:
+                  name:
+                    description: Name of the RBACPolicy.
+                    maxLength: 253
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+              roleBindings:
+                description: RoleBindings defines namespace-scoped role bindings.
+                items:
+                  description: NamespaceBinding defines namespace-scoped role bindings.
+                  properties:
+                    clusterRoleRefs:
+                      description: ClusterRoleRefs references an existing ClusterRole
+                      items:
+                        type: string
+                      maxItems: 64
+                      type: array
+                    namespace:
+                      description: Namespace of the Role that should be bound to the
+                        subjects.
+                      type: string
+                    namespaceSelector:
+                      description: NamespaceSelector is a label selector which will
+                        match namespaces that should have the RoleBinding/s.
+                      items:
+                        description: |-
+                          A label selector is a label query over a set of resources. The result of matchLabels and
+                          matchExpressions are ANDed. An empty label selector matches all objects. A null
+                          label selector matches no objects.
+                        properties:
+                          matchExpressions:
+                            description: matchExpressions is a list of label selector
+                              requirements. The requirements are ANDed.
+                            items:
+                              description: |-
+                                A label selector requirement is a selector that contains values, a key, and an operator that
+                                relates the key and values.
+                              properties:
+                                key:
+                                  description: key is the label key that the selector
+                                    applies to.
+                                  type: string
+                                operator:
+                                  description: |-
+                                    operator represents a key's relationship to a set of values.
+                                    Valid operators are In, NotIn, Exists and DoesNotExist.
+                                  type: string
+                                values:
+                                  description: |-
+                                    values is an array of string values. If the operator is In or NotIn,
+                                    the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                    the values array must be empty. This array is replaced during a strategic
+                                    merge patch.
+                                  items:
+                                    type: string
+                                  type: array
+                                  x-kubernetes-list-type: atomic
+                              required:
+                              - key
+                              - operator
+                              type: object
+                            type: array
+                            x-kubernetes-list-type: atomic
+                          matchLabels:
+                            additionalProperties:
+                              type: string
+                            description: |-
+                              matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                              map is equivalent to an element of matchExpressions, whose key field is "key", the
+                              operator is "In", and the values array contains only "value". The requirements are ANDed.
+                            type: object
+                        type: object
+                        x-kubernetes-map-type: atomic
+                      maxItems: 16
+                      type: array
+                    roleRefs:
+                      description: RoleRefs references a specific Role that has to
+                        exist in the target namespaces
+                      items:
+                        type: string
+                      maxItems: 64
+                      type: array
+                  type: object
+                maxItems: 64
+                type: array
+              subjects:
+                description: |-
+                  Subjects lists the subjects that will be bound to the target ClusterRole/Role.
+                  Can be "User", "Group" or "ServiceAccount".
+                items:
+                  description: |-
+                    Subject contains a reference to the object or user identities a role binding applies to.  This can either hold a direct API object reference,
+                    or a value for non-objects such as user and group names.
+                  properties:
+                    apiGroup:
+                      description: |-
+                        APIGroup holds the API group of the referenced subject.
+                        Defaults to "" for ServiceAccount subjects.
+                        Defaults to "rbac.authorization.k8s.io" for User and Group subjects.
+                      type: string
+                    kind:
+                      description: |-
+                        Kind of object being referenced. Values defined by this API group are "User", "Group", and "ServiceAccount".
+                        If the Authorizer does not recognized the kind value, the Authorizer should report an error.
+                      type: string
+                    name:
+                      description: Name of the object being referenced.
+                      type: string
+                    namespace:
+                      description: |-
+                        Namespace of the referenced object.  If the object kind is non-namespace, such as "User" or "Group", and this value is not empty
+                        the Authorizer should report an error.
+                      type: string
+                  required:
+                  - kind
+                  - name
+                  type: object
+                  x-kubernetes-map-type: atomic
+                maxItems: 256
+                type: array
+              targetName:
+                description: |-
+                  TargetName is the name prefix for generated bindings. Generated binding
+                  names are derived from this value and suffixed with the binding kind, for
+                  example "targetName-clusterrolebinding" or "targetName-rolebinding".
+                  This field is immutable after creation.
+                  MaxLength=200 (not 253) to leave headroom for the longest suffix
+                  ("-clusterrolebinding" = 20 chars), keeping generated names within the
+                  Kubernetes 253-character object name limit.
+                maxLength: 200
+                minLength: 1
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                type: string
+            required:
+            - policyRef
+            - subjects
+            - targetName
+            type: object
+            x-kubernetes-validations:
+            - message: at least one binding with a referenced role must be specified
+              rule: (has(self.clusterRoleBindings) && has(self.clusterRoleBindings.clusterRoleRefs)
+                && size(self.clusterRoleBindings.clusterRoleRefs) > 0) || (has(self.roleBindings)
+                && self.roleBindings.exists(rb, (has(rb.clusterRoleRefs) && size(rb.clusterRoleRefs)
+                > 0) || (has(rb.roleRefs) && size(rb.roleRefs) > 0)))
+            - message: at least one subject must be specified
+              rule: size(self.subjects) > 0
+            - message: ServiceAccount subjects must specify a namespace
+              rule: self.subjects.all(s, s.kind != 'ServiceAccount' || (has(s.namespace)
+                && size(s.namespace) > 0))
+          status:
+            description: RestrictedBindDefinitionStatus defines the observed state
+              of RestrictedBindDefinition.
+            properties:
+              bindReconciled:
+                description: BindReconciled indicates whether bindings have been successfully
+                  reconciled.
+                type: boolean
+              conditions:
+                description: Conditions defines current service state.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              externalServiceAccounts:
+                description: |-
+                  ExternalServiceAccounts lists ServiceAccounts referenced by this RestrictedBindDefinition
+                  that were not created by the controller.
+                  Format: "<namespace>/<name>".
+                items:
+                  type: string
+                type: array
+              generatedServiceAccounts:
+                description: GeneratedServiceAccounts lists ServiceAccounts that were
+                  auto-created.
+                items:
+                  description: |-
+                    Subject contains a reference to the object or user identities a role binding applies to.  This can either hold a direct API object reference,
+                    or a value for non-objects such as user and group names.
+                  properties:
+                    apiGroup:
+                      description: |-
+                        APIGroup holds the API group of the referenced subject.
+                        Defaults to "" for ServiceAccount subjects.
+                        Defaults to "rbac.authorization.k8s.io" for User and Group subjects.
+                      type: string
+                    kind:
+                      description: |-
+                        Kind of object being referenced. Values defined by this API group are "User", "Group", and "ServiceAccount".
+                        If the Authorizer does not recognized the kind value, the Authorizer should report an error.
+                      type: string
+                    name:
+                      description: Name of the object being referenced.
+                      type: string
+                    namespace:
+                      description: |-
+                        Namespace of the referenced object.  If the object kind is non-namespace, such as "User" or "Group", and this value is not empty
+                        the Authorizer should report an error.
+                      type: string
+                  required:
+                  - kind
+                  - name
+                  type: object
+                  x-kubernetes-map-type: atomic
+                type: array
+              missingRoleRefs:
+                description: |-
+                  MissingRoleRefs lists role references that could not be resolved.
+                  Format: "ClusterRole/<name>" or "Role/<namespace>/<name>".
+                items:
+                  type: string
+                type: array
+              observedGeneration:
+                description: ObservedGeneration is the last observed generation of
+                  the resource.
+                format: int64
+                type: integer
+              policyViolations:
+                description: |-
+                  PolicyViolations lists policy violations detected during the last reconciliation.
+                  Format: "<fieldPath>: <message>" when a field path is available.
+                  Empty when all checks pass.
+                items:
+                  type: string
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

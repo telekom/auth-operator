@@ -117,7 +117,7 @@ var _ = Describe("RoleDefinition Webhook", func() {
 			Eventually(func(g Gomega) {
 				err := k8sClient.Create(ctx, rd2.DeepCopy(), client.DryRunAll)
 				g.Expect(err).To(HaveOccurred())
-				g.Expect(err.Error()).To(ContainSubstring("targetName shared-target-name already exists"))
+				g.Expect(err.Error()).To(ContainSubstring("spec.targetName"))
 			}).WithTimeout(10 * time.Second).WithPolling(250 * time.Millisecond).Should(Succeed())
 
 			// Cleanup
@@ -160,6 +160,42 @@ var _ = Describe("RoleDefinition Webhook", func() {
 			Expect(k8sClient.Create(ctx, rd2)).To(Succeed())
 
 			// Cleanup
+			Expect(k8sClient.Delete(ctx, rd1)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, rd2)).To(Succeed())
+		})
+
+		It("Should allow same targetName for namespaced Role targets in different namespaces", func() {
+			rd1 := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-same-name-role-team-a",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionNamespacedRole,
+					TargetName:      "shared-role-name",
+					TargetNamespace: "team-a",
+					ScopeNamespaced: true,
+				},
+			}
+			Expect(k8sClient.Create(ctx, rd1)).To(Succeed())
+
+			rd2 := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-same-name-role-team-b",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionNamespacedRole,
+					TargetName:      "shared-role-name",
+					TargetNamespace: "team-b",
+					ScopeNamespaced: true,
+				},
+			}
+			Eventually(func(g Gomega) {
+				err := k8sClient.Create(ctx, rd2.DeepCopy(), client.DryRunAll)
+				g.Expect(err).NotTo(HaveOccurred())
+			}).WithTimeout(10 * time.Second).WithPolling(250 * time.Millisecond).Should(Succeed())
+
+			Expect(k8sClient.Create(ctx, rd2)).To(Succeed())
+
 			Expect(k8sClient.Delete(ctx, rd1)).To(Succeed())
 			Expect(k8sClient.Delete(ctx, rd2)).To(Succeed())
 		})
@@ -498,6 +534,29 @@ var _ = Describe("RoleDefinition Webhook", func() {
 			Expect(k8sClient.Delete(ctx, rd)).To(Succeed())
 		})
 
+		It("should deny update that changes targetNamespace", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-immut-targetnamespace",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionNamespacedRole,
+					TargetName:      "test-immut-targetnamespace",
+					TargetNamespace: "team-a",
+					ScopeNamespaced: true,
+				},
+			}
+			Expect(k8sClient.Create(ctx, rd)).To(Succeed())
+
+			rd.Spec.TargetNamespace = "team-b"
+			err := k8sClient.Update(ctx, rd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("spec.targetNamespace"))
+			Expect(err.Error()).To(ContainSubstring("immutable"))
+
+			Expect(k8sClient.Delete(ctx, rd)).To(Succeed())
+		})
+
 		It("should allow update that does not change targetRole or targetName", func() {
 			rd := &RoleDefinition{
 				ObjectMeta: metav1.ObjectMeta{
@@ -757,7 +816,7 @@ var _ = Describe("RoleDefinition Webhook", func() {
 			}
 			err := k8sClient.Create(ctx, rd)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("duplicate"))
+			Expect(err.Error()).To(ContainSubstring("Duplicate"))
 		})
 
 		It("Should reject RestrictedAPIs verbs with invalid pattern (uppercase)", func() {

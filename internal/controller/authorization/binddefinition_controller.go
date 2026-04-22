@@ -74,7 +74,27 @@ const (
 	// permanently missing roles don't spin-loop endlessly yet still
 	// self-heal within a reasonable window once they appear.
 	roleRefRequeueMax = 5 * time.Minute
+
+	// maxActiveNamespaceNamesToLog bounds namespace-name logging to avoid
+	// oversized log lines that include large namespace sets.
+	maxActiveNamespaceNamesToLog = 20
 )
+
+func summarizeNamespaceNames(namespaces []corev1.Namespace, limit int) []string {
+	names := make([]string, 0, len(namespaces))
+	for _, ns := range namespaces {
+		names = append(names, ns.Name)
+	}
+	slices.Sort(names)
+
+	if limit <= 0 || len(names) <= limit {
+		return names
+	}
+
+	summary := append([]string{}, names[:limit]...)
+	summary = append(summary, fmt.Sprintf("... +%d more", len(names)-limit))
+	return summary
+}
 
 // ErrMissingRoleRefs indicates that one or more referenced roles do not exist in the cluster.
 var ErrMissingRoleRefs = errors.New("missing role references")
@@ -418,6 +438,7 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			metrics.RoleRefsMissing.DeleteLabelValues(bindDefinition.Name)
 			metrics.NamespacesActive.DeleteLabelValues(bindDefinition.Name)
 			metrics.ExternalSAsReferenced.DeleteLabelValues(bindDefinition.Name)
+			metrics.ServiceAccountSkippedPreExisting.DeleteLabelValues(bindDefinition.Name)
 		}
 		return result, err
 	}
@@ -466,10 +487,12 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		"totalNamespaces", len(namespaceSet))
 
 	activeNamespaces := r.filterActiveNamespaces(ctx, bindDefinition, namespaceSet)
-	logger.V(2).Info("Active namespaces filtered",
-		"bindDefinition", bindDefinition.Name,
-		"activeNamespaceCount", len(activeNamespaces),
-		"activeNamespaces", activeNamespaces)
+	if logger.V(2).Enabled() {
+		logger.V(2).Info("Active namespaces filtered",
+			"bindDefinition", bindDefinition.Name,
+			"activeNamespaceCount", len(activeNamespaces),
+			"activeNamespaceNames", summarizeNamespaceNames(activeNamespaces, maxActiveNamespaceNamesToLog))
+	}
 	metrics.NamespacesActive.WithLabelValues(bindDefinition.Name).Set(float64(len(activeNamespaces)))
 
 	// Reconcile all resources using ensure pattern (create-or-update via SSA)
@@ -923,9 +946,11 @@ func (r *BindDefinitionReconciler) applyServiceAccount(
 		WithOwnerReferences(saOwnerRefForBindDefinition(bindDef)).
 		WithAnnotations(helpers.BuildManagedSAAnnotations(sourceNames))
 
-	// Use per-BD FieldOwner so each BD's ownerRef is tracked independently.
-	// Without this, SSA would remove BD-A's ownerRef when BD-B applies its ownerRef.
-	fieldOwner := pkgssa.FieldOwnerForBD(bindDef.Name)
+	// Derive the SSA field manager via the shared FieldOwnerFor helper, scoped
+	// by this BindDefinition's name so separate BindDefinitions do not take
+	// ownership of each other's managed fields when they reconcile the same
+	// ServiceAccount.
+	fieldOwner := pkgssa.FieldOwnerFor(bindDef.Name)
 	result, patchErr := pkgssa.PatchApplyServiceAccount(ctx, r.client, ac, fieldOwner)
 	if patchErr != nil {
 		logger.Error(patchErr, "Failed to apply ServiceAccount",
@@ -1070,6 +1095,7 @@ func (r *BindDefinitionReconciler) reconcileDelete(
 	metrics.RoleRefsMissing.DeleteLabelValues(bindDefinition.Name)
 	metrics.NamespacesActive.DeleteLabelValues(bindDefinition.Name)
 	metrics.ExternalSAsReferenced.DeleteLabelValues(bindDefinition.Name)
+	metrics.ServiceAccountSkippedPreExisting.DeleteLabelValues(bindDefinition.Name)
 
 	conditions.MarkTrue(bindDefinition, authorizationv1alpha1.DeleteCondition, bindDefinition.Generation,
 		authorizationv1alpha1.DeleteReason, authorizationv1alpha1.DeleteMessage)

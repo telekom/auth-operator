@@ -117,9 +117,16 @@ var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 		cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "-k", fixturesPath, "--ignore-not-found=true")
 		_, _ = utils.Run(cmd)
 
-		// Use centralized cleanup
+		// Clean up custom resources without destroying the operator.
+		// cleanupAllCRDs uses kubectl delete which relies on the operator being
+		// running to remove finalizers; the operator namespace and webhooks must
+		// persist for other test suites.
+		cleanupAllCRDs()
 		clusterRoles := []string{"e2e-cluster-reader"}
-		CleanupForDevTests(operatorNamespace, clusterRoles)
+		for _, cr := range clusterRoles {
+			cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "clusterrole", cr, "--ignore-not-found=true")
+			_, _ = utils.Run(cmd)
+		}
 		utils.CleanupClusterResources("app.kubernetes.io/managed-by=auth-operator")
 		utils.CleanupResourcesByLabel("role", "app.kubernetes.io/managed-by=auth-operator", testNamespace)
 		utils.CleanupResourcesByLabel("rolebinding", "app.kubernetes.io/managed-by=auth-operator", testNamespace)
@@ -499,7 +506,7 @@ spec:
 				if err != nil {
 					return false
 				}
-				return string(statusOutput) == "False"
+				return string(statusOutput) == statusFalse
 			}, time.Minute, 5*time.Second).Should(BeTrue(),
 				"Expected RoleRefsValid condition to be False")
 
@@ -583,6 +590,9 @@ func cleanupCRDE2ETestState() {
 	utils.RemoveFinalizersForAll("roledefinition")
 	utils.RemoveFinalizersForAll("binddefinition")
 	utils.RemoveFinalizersForAll("webhookauthorizer")
+	utils.RemoveFinalizersForAll("restrictedbinddefinition")
+	utils.RemoveFinalizersForAll("restrictedroledefinition")
+	utils.RemoveFinalizersForAll("rbacpolicy")
 	utils.RemoveFinalizersForAll("rolebinding")
 	utils.RemoveFinalizersForAll("clusterrolebinding")
 	utils.RemoveFinalizersForAll("role")

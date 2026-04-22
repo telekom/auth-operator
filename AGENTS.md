@@ -39,6 +39,12 @@ test/e2e/                      Ginkgo E2E tests
 8. **Test patterns**: Use Ginkgo/Gomega for controller tests, standard `testing` for unit tests. Target >70% coverage.
 9. **Condition management**: Use `pkg/conditions.SetCondition()` — never set conditions manually on status.
 10. **Server-Side Apply**: Use `pkg/ssa` helpers for RBAC resources — never use `Update()` for managed objects.
+11. **Context-aware logging only**: In production controller/webhook code, derive loggers from context via `log.FromContext(ctx)` (or pass `ctx` and derive inside helpers). Do not pass raw logger instances across helper boundaries.
+12. **Tracing attributes**: For reconciler spans, include controller/resource/namespace attributes. For impersonated apply flows, add user attribute to the active span.
+13. **Sample set semantics**:
+   - `config/samples/`: structurally valid baseline samples for normal reconciliation paths.
+   - `config/samples/broken/`: structurally valid runtime-failure samples that MUST apply and then stall/partially reconcile.
+   - Webhook/schema-invalid examples stay outside the broken kustomization apply set.
 
 ## Testing
 

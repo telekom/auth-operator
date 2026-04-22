@@ -2,10 +2,13 @@
 
 ## Project Overview
 
-Auth Operator is a Kubernetes operator for T-CaaS that manages authentication (`authN`) and authorization (`authZ`) across multiple cluster consumers. It provides three CRDs:
+Auth Operator is a Kubernetes operator for T-CaaS that manages authentication (`authN`) and authorization (`authZ`) across multiple cluster consumers. It provides six CRDs:
 - **RoleDefinition**: Dynamically generates ClusterRoles/Roles based on API discovery
 - **BindDefinition**: Creates ClusterRoleBindings/RoleBindings for subjects (Users, Groups, ServiceAccounts)
 - **WebhookAuthorizer**: Configures webhook-based authorization decisions
+- **RBACPolicy**: Defines policy constraints for restricted CRDs (allowed/forbidden roles, namespaces, subjects)
+- **RestrictedRoleDefinition**: Policy-governed variant of RoleDefinition (must reference an RBACPolicy)
+- **RestrictedBindDefinition**: Policy-governed variant of BindDefinition (must reference an RBACPolicy)
 
 **Stack**: Go (see go.mod), Kubebuilder v4 (multi-group layout), controller-runtime v0.23, Ginkgo/Gomega testing, Helm chart  
 **Domain**: `t-caas.telekom.com` | **API Group**: `authorization.t-caas.telekom.com` | **Version**: `v1alpha1`
@@ -69,6 +72,9 @@ api/authorization/v1alpha1/
   roledefinition_types.go            # RoleDefinition CRD schema
   binddefinition_types.go            # BindDefinition CRD schema
   webhookauthorizer_types.go         # WebhookAuthorizer CRD schema
+  rbacpolicy_types.go                # RBACPolicy CRD schema
+  restrictedbinddefinition_types.go  # RestrictedBindDefinition CRD schema
+  restrictedroledefinition_types.go  # RestrictedRoleDefinition CRD schema
   *_webhook.go                       # Validation webhooks
   conditions.go                      # Condition type definitions
   groupversion_info.go               # API group registration
@@ -76,6 +82,10 @@ api/authorization/v1alpha1/
 internal/controller/authorization/
   roledefinition_controller.go       # RoleDefinition reconciliation
   binddefinition_controller.go       # BindDefinition reconciliation
+  rbacpolicy_controller.go           # RBACPolicy reconciliation
+  restrictedbinddefinition_controller.go  # RestrictedBindDefinition reconciliation
+  restrictedroledefinition_controller.go  # RestrictedRoleDefinition reconciliation
+  restricted_helpers.go              # Shared helpers for restricted CRDs
   *_helpers.go                       # Controller helpers
 internal/webhook/
   authorization/                     # Webhook handlers
@@ -86,6 +96,7 @@ pkg/
   helpers/                           # Shared helpers
   indexer/                           # Client indexer utilities
   metrics/                           # Prometheus metrics registration
+  policy/                            # RBACPolicy enforcement engine
   ssa/                               # Server-Side Apply helpers for RBAC
   system/                            # System-level utilities
 config/
@@ -244,6 +255,19 @@ logger.Info("msg", "key", val)
 logger.V(1).Info("debug")  // Verbose
 ```
 
+Use context-aware logging only in production controller/webhook code:
+- derive logger with `log.FromContext(ctx)` where logging happens, or
+- pass `ctx` into helpers and derive logger inside helper.
+
+Do not pass raw logger instances across helper boundaries when `ctx` is available.
+
+### Sample Set Semantics
+
+- `config/samples/` contains structurally valid baseline samples for normal reconciliation.
+- `config/samples/broken/` contains structurally valid runtime-failure samples that MUST apply,
+  then stall or partially reconcile.
+- Webhook/schema-invalid examples should not be part of the broken apply kustomization.
+
 ## Configuration Files
 
 | File | Purpose |
@@ -286,6 +310,9 @@ logger.V(1).Info("debug")  // Verbose
 | `--binddefinition-concurrency` | Max concurrent BindDefinition reconciliations | `5` |
 | `--roledefinition-concurrency` | Max concurrent RoleDefinition reconciliations | `5` |
 | `--webhookauthorizer-concurrency` | Max concurrent WebhookAuthorizer reconciliations | `1` |
+| `--rbacpolicy-concurrency` | Max concurrent RBACPolicy reconciliations | `5` |
+| `--restrictedbinddefinition-concurrency` | Max concurrent RestrictedBindDefinition reconciliations | `5` |
+| `--restrictedroledefinition-concurrency` | Max concurrent RestrictedRoleDefinition reconciliations | `5` |
 | `--cache-sync-timeout` | Timeout for waiting for CRDs to become available | `2m0s` |
 | `--graceful-shutdown-timeout` | Timeout for graceful shutdown of the manager | `30s` |
 | `--wait-for-crds` | Wait for required CRDs before starting controllers | `true` |
