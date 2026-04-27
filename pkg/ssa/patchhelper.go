@@ -61,10 +61,12 @@ func (r PatchApplyResult) String() string {
 // PatchApplyClusterRole reads the current ClusterRole from cache, compares it to
 // the desired ApplyConfiguration, and only sends an SSA Patch if there is a diff.
 // Returns the result (skipped/created/patched) and any error.
+// opts are forwarded to every c.Apply call (e.g. client.ForceOwnership).
 func PatchApplyClusterRole(
 	ctx context.Context,
 	c client.Client,
 	ac *rbacv1ac.ClusterRoleApplyConfiguration,
+	opts ...client.ApplyOption,
 ) (PatchApplyResult, error) {
 	if ac == nil || ac.Name == nil {
 		return 0, fmt.Errorf("clusterRole ApplyConfiguration must have a name")
@@ -75,13 +77,16 @@ func PatchApplyClusterRole(
 
 	logger := log.FromContext(ctx)
 
+	applyOptsForCreate := append([]client.ApplyOption{client.FieldOwner(FieldOwner)}, opts...)
+	applyOptsForPatch := append(applyOptsForCreate, client.ForceOwnership)
+
 	// Read via client (cache-backed in controllers).
 	existing := &rbacv1.ClusterRole{}
 	err := c.Get(ctx, types.NamespacedName{Name: *ac.Name}, existing)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			// Resource does not exist — must apply.
-			if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership); applyErr != nil {
+			if applyErr := c.Apply(ctx, ac, applyOptsForCreate...); applyErr != nil {
 				return 0, fmt.Errorf("create ClusterRole %s: %w", *ac.Name, applyErr)
 			}
 			return PatchApplyResultCreated, nil
@@ -96,7 +101,7 @@ func PatchApplyClusterRole(
 		return PatchApplyResultSkipped, nil
 	}
 
-	if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership); applyErr != nil {
+	if applyErr := c.Apply(ctx, ac, applyOptsForPatch...); applyErr != nil {
 		return 0, fmt.Errorf("patch ClusterRole %s: %w", *ac.Name, applyErr)
 	}
 	return PatchApplyResultPatched, nil
@@ -104,10 +109,12 @@ func PatchApplyClusterRole(
 
 // PatchApplyRole reads the current Role from cache, compares it to the desired
 // ApplyConfiguration, and only sends an SSA Patch if there is a diff.
+// opts are forwarded to every c.Apply call (e.g. client.ForceOwnership).
 func PatchApplyRole(
 	ctx context.Context,
 	c client.Client,
 	ac *rbacv1ac.RoleApplyConfiguration,
+	opts ...client.ApplyOption,
 ) (PatchApplyResult, error) {
 	if ac == nil || ac.Name == nil {
 		return 0, fmt.Errorf("role ApplyConfiguration must have a name")
@@ -121,11 +128,14 @@ func PatchApplyRole(
 
 	logger := log.FromContext(ctx)
 
+	applyOptsForCreate := append([]client.ApplyOption{client.FieldOwner(FieldOwner)}, opts...)
+	applyOptsForPatch := append(applyOptsForCreate, client.ForceOwnership)
+
 	existing := &rbacv1.Role{}
 	err := c.Get(ctx, types.NamespacedName{Name: *ac.Name, Namespace: *ac.Namespace}, existing)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership); applyErr != nil {
+			if applyErr := c.Apply(ctx, ac, applyOptsForCreate...); applyErr != nil {
 				return 0, fmt.Errorf("create Role %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 			}
 			return PatchApplyResultCreated, nil
@@ -139,7 +149,7 @@ func PatchApplyRole(
 		return PatchApplyResultSkipped, nil
 	}
 
-	if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership); applyErr != nil {
+	if applyErr := c.Apply(ctx, ac, applyOptsForPatch...); applyErr != nil {
 		return 0, fmt.Errorf("patch Role %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 	}
 	return PatchApplyResultPatched, nil
@@ -147,10 +157,12 @@ func PatchApplyRole(
 
 // PatchApplyClusterRoleBinding reads the current CRB from cache, compares it to
 // the desired ApplyConfiguration, and only sends an SSA Patch if there is a diff.
+// opts are forwarded to every c.Apply call (e.g. client.ForceOwnership).
 func PatchApplyClusterRoleBinding(
 	ctx context.Context,
 	c client.Client,
 	ac *rbacv1ac.ClusterRoleBindingApplyConfiguration,
+	opts ...client.ApplyOption,
 ) (PatchApplyResult, error) {
 	if ac == nil || ac.Name == nil {
 		return 0, fmt.Errorf("clusterRoleBinding ApplyConfiguration must have a name")
@@ -161,11 +173,14 @@ func PatchApplyClusterRoleBinding(
 
 	logger := log.FromContext(ctx)
 
+	applyOptsForCreate := append([]client.ApplyOption{client.FieldOwner(FieldOwner)}, opts...)
+	applyOptsForPatch := append(applyOptsForCreate, client.ForceOwnership)
+
 	existing := &rbacv1.ClusterRoleBinding{}
 	err := c.Get(ctx, types.NamespacedName{Name: *ac.Name}, existing)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership); applyErr != nil {
+			if applyErr := c.Apply(ctx, ac, applyOptsForCreate...); applyErr != nil {
 				return 0, fmt.Errorf("create ClusterRoleBinding %s: %w", *ac.Name, applyErr)
 			}
 			return PatchApplyResultCreated, nil
@@ -179,7 +194,7 @@ func PatchApplyClusterRoleBinding(
 		return PatchApplyResultSkipped, nil
 	}
 
-	if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership); applyErr != nil {
+	if applyErr := c.Apply(ctx, ac, applyOptsForPatch...); applyErr != nil {
 		return 0, fmt.Errorf("patch ClusterRoleBinding %s: %w", *ac.Name, applyErr)
 	}
 	return PatchApplyResultPatched, nil
@@ -187,10 +202,12 @@ func PatchApplyClusterRoleBinding(
 
 // PatchApplyRoleBinding reads the current RB from cache, compares it to the
 // desired ApplyConfiguration, and only sends an SSA Patch if there is a diff.
+// opts are forwarded to every c.Apply call (e.g. client.ForceOwnership).
 func PatchApplyRoleBinding(
 	ctx context.Context,
 	c client.Client,
 	ac *rbacv1ac.RoleBindingApplyConfiguration,
+	opts ...client.ApplyOption,
 ) (PatchApplyResult, error) {
 	if ac == nil || ac.Name == nil {
 		return 0, fmt.Errorf("roleBinding ApplyConfiguration must have a name")
@@ -204,11 +221,14 @@ func PatchApplyRoleBinding(
 
 	logger := log.FromContext(ctx)
 
+	applyOptsForCreate := append([]client.ApplyOption{client.FieldOwner(FieldOwner)}, opts...)
+	applyOptsForPatch := append(applyOptsForCreate, client.ForceOwnership)
+
 	existing := &rbacv1.RoleBinding{}
 	err := c.Get(ctx, types.NamespacedName{Name: *ac.Name, Namespace: *ac.Namespace}, existing)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership); applyErr != nil {
+			if applyErr := c.Apply(ctx, ac, applyOptsForCreate...); applyErr != nil {
 				return 0, fmt.Errorf("create RoleBinding %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 			}
 			return PatchApplyResultCreated, nil
@@ -222,7 +242,7 @@ func PatchApplyRoleBinding(
 		return PatchApplyResultSkipped, nil
 	}
 
-	if applyErr := c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership); applyErr != nil {
+	if applyErr := c.Apply(ctx, ac, applyOptsForPatch...); applyErr != nil {
 		return 0, fmt.Errorf("patch RoleBinding %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 	}
 	return PatchApplyResultPatched, nil
@@ -230,6 +250,9 @@ func PatchApplyRoleBinding(
 
 // PatchApplyServiceAccount reads the current SA from cache, compares it to the
 // desired ApplyConfiguration, and only sends an SSA Patch if there is a diff.
+// ForceOwnership is used on the patch path so that a second BindDefinition can
+// claim shared ownership of annotation fields already owned by another BD's
+// field manager, without triggering a conflict error.
 func PatchApplyServiceAccount(
 	ctx context.Context,
 	c client.Client,
@@ -251,11 +274,14 @@ func PatchApplyServiceAccount(
 
 	logger := log.FromContext(ctx)
 
+	applyOptsForCreate := []client.ApplyOption{client.FieldOwner(fieldOwner)}
+	applyOptsForPatch := append(applyOptsForCreate, client.ForceOwnership)
+
 	existing := &corev1.ServiceAccount{}
 	err := c.Get(ctx, types.NamespacedName{Name: *ac.Name, Namespace: *ac.Namespace}, existing)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			if applyErr := c.Apply(ctx, ac, client.FieldOwner(fieldOwner), client.ForceOwnership); applyErr != nil {
+			if applyErr := c.Apply(ctx, ac, applyOptsForCreate...); applyErr != nil {
 				return 0, fmt.Errorf("create ServiceAccount %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 			}
 			return PatchApplyResultCreated, nil
@@ -269,7 +295,7 @@ func PatchApplyServiceAccount(
 		return PatchApplyResultSkipped, nil
 	}
 
-	if applyErr := c.Apply(ctx, ac, client.FieldOwner(fieldOwner), client.ForceOwnership); applyErr != nil {
+	if applyErr := c.Apply(ctx, ac, applyOptsForPatch...); applyErr != nil {
 		return 0, fmt.Errorf("patch ServiceAccount %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 	}
 	return PatchApplyResultPatched, nil
