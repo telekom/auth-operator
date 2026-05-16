@@ -6,6 +6,7 @@ import (
 
 	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	webhooks "github.com/telekom/auth-operator/internal/webhook/authorization"
+	"github.com/telekom/auth-operator/pkg/indexer"
 
 	admissionv1 "k8s.io/api/admission/v1"
 	authenticationv1 "k8s.io/api/authentication/v1"
@@ -2340,6 +2341,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 			fakeClient := fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithRuntimeObjects(objects...).
+				WithIndex(&authzv1alpha1.BindDefinition{}, indexer.BindDefinitionHasRoleBindingsField, indexer.BindDefinitionHasRoleBindingsFunc).
 				Build()
 
 			decoder := crAdmission.NewDecoder(scheme)
@@ -2611,7 +2613,9 @@ func TestNamespaceValidatorSANamespaceInheritance(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			builder := fake.NewClientBuilder().WithScheme(scheme)
+			builder := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithIndex(&authzv1alpha1.BindDefinition{}, indexer.BindDefinitionHasRoleBindingsField, indexer.BindDefinitionHasRoleBindingsFunc)
 			if tt.saNamespace != nil {
 				builder = builder.WithObjects(tt.saNamespace)
 			}
