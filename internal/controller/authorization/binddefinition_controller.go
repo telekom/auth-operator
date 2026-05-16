@@ -34,6 +34,7 @@ import (
 	conditions "github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/discovery"
 	"github.com/telekom/auth-operator/pkg/helpers"
+	"github.com/telekom/auth-operator/pkg/indexer"
 	"github.com/telekom/auth-operator/pkg/metrics"
 	pkgssa "github.com/telekom/auth-operator/pkg/ssa"
 	"github.com/telekom/auth-operator/pkg/tracing"
@@ -189,9 +190,13 @@ func (r *BindDefinitionReconciler) namespaceToBindDefinitionRequests(ctx context
 
 	logger.V(2).Info("processing namespace event", "namespace", namespace.Name, "phase", namespace.Status.Phase)
 
-	// List all BindDefinition resources.
+	// List only BindDefinitions with at least one RoleBinding — cluster-only
+	// BindDefinitions (no RoleBindings) never need reconciliation on namespace
+	// events because they produce no namespace-scoped RBAC objects.
 	bindDefList := &authorizationv1alpha1.BindDefinitionList{}
-	err := r.client.List(ctx, bindDefList)
+	err := r.client.List(ctx, bindDefList,
+		client.MatchingFields{indexer.BindDefinitionHasRoleBindingsField: indexer.BindDefinitionHasRoleBindingsTrue},
+	)
 	if err != nil {
 		logger.Error(err, "failed to list BindDefinition resources", "namespace", namespace.Name)
 		return nil
@@ -205,13 +210,8 @@ func (r *BindDefinitionReconciler) namespaceToBindDefinitionRequests(ctx context
 	for i := range bindDefList.Items {
 		bindDef := &bindDefList.Items[i]
 		if !bindDefinitionMatchesNamespace(bindDef, namespace) {
-			if len(bindDef.Spec.RoleBindings) == 0 {
-				logger.V(3).Info("skipping BindDefinition (cluster-only, no roleBindings)",
-					"namespace", namespace.Name, "bindDefinition", bindDef.Name)
-			} else {
-				logger.V(3).Info("skipping BindDefinition (no matching selector)",
-					"namespace", namespace.Name, "bindDefinition", bindDef.Name)
-			}
+			logger.V(3).Info("skipping BindDefinition (no matching selector)",
+				"namespace", namespace.Name, "bindDefinition", bindDef.Name)
 			metrics.NamespaceFanoutSkipped.Inc()
 			continue
 		}
