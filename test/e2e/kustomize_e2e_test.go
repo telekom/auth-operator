@@ -53,7 +53,7 @@ var _ = Describe("Kustomize Overlay Validation", Label("kustomize"), func() {
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
-			cmd = exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-", "--dry-run=server", "--force-conflicts", "--server-side", "-o", "yaml")
+			cmd = exec.CommandContext(context.Background(), "kubectl", "apply", "--server-side", "--dry-run=server", "-f", "-", "-o", "yaml")
 			cmd.Stdin = strings.NewReader(string(output))
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Invalid YAML in config/default")
