@@ -109,10 +109,8 @@ func TestBindDefinitionHasRoleBindingsIndexWithFakeClient(t *testing.T) {
 	if err := fakeClient.List(ctx, &withoutRB, client.MatchingFields{BindDefinitionHasRoleBindingsField: "false"}); err != nil {
 		t.Fatalf("failed to list BindDefinitions without role bindings: %v", err)
 	}
-	if len(withoutRB.Items) != 1 {
-		t.Errorf("expected 1 BindDefinition without role bindings, got %d", len(withoutRB.Items))
-	} else if withoutRB.Items[0].Name != "bd-without-rb" {
-		t.Errorf("expected bd-without-rb, got %s", withoutRB.Items[0].Name)
+	if len(withoutRB.Items) != 0 {
+		t.Errorf("expected BindDefinitions without role bindings to be absent from the index, got %d", len(withoutRB.Items))
 	}
 }
 

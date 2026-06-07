@@ -295,7 +295,8 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
 
-		logger.V(1).Info("field index unavailable for BindDefinitions, falling back to unindexed list")
+		logger.V(1).Info("field index unavailable for BindDefinitions, falling back to unindexed list",
+			"field", indexer.BindDefinitionHasRoleBindingsField, "error", err)
 		allBindDefinitions := &authzv1alpha1.BindDefinitionList{}
 		if err := v.Client.List(ctx, allBindDefinitions); err != nil {
 			logger.Error(err, "failed to list BindDefinitions", "namespace", req.Name)

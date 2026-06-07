@@ -125,5 +125,5 @@ func BindDefinitionHasRoleBindingsFunc(obj client.Object) []string {
 	if len(bd.Spec.RoleBindings) > 0 {
 		return []string{BindDefinitionHasRoleBindingsTrue}
 	}
-	return []string{"false"}
+	return nil
 }
