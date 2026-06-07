@@ -96,7 +96,7 @@ func TestBindDefinitionHasRoleBindingsIndexWithFakeClient(t *testing.T) {
 	ctx := context.Background()
 
 	var withRB authorizationv1alpha1.BindDefinitionList
-	if err := fakeClient.List(ctx, &withRB, client.MatchingFields{BindDefinitionHasRoleBindingsField: "true"}); err != nil {
+	if err := fakeClient.List(ctx, &withRB, client.MatchingFields{BindDefinitionHasRoleBindingsField: BindDefinitionHasRoleBindingsTrue}); err != nil {
 		t.Fatalf("failed to list BindDefinitions with role bindings: %v", err)
 	}
 	if len(withRB.Items) != 1 {

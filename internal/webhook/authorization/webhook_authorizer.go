@@ -482,7 +482,8 @@ func isFieldIndexError(err error) bool {
 		return false
 	}
 	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "does not exist") && strings.Contains(msg, "index")
+	return strings.Contains(msg, "index") &&
+		(strings.Contains(msg, "does not exist") || strings.Contains(msg, "no index with name"))
 }
 
 func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAccessReview, items []authzv1alpha1.WebhookAuthorizer) evaluationResult {

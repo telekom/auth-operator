@@ -289,9 +289,25 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 	if err := v.Client.List(ctx, bindDefinitions,
 		client.MatchingFields{indexer.BindDefinitionHasRoleBindingsField: indexer.BindDefinitionHasRoleBindingsTrue},
 	); err != nil {
-		logger.Error(err, "failed to list BindDefinitions", "namespace", req.Name)
-		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()
-		return admission.Errored(http.StatusInternalServerError, err)
+		if !isFieldIndexError(err) {
+			logger.Error(err, "failed to list BindDefinitions", "namespace", req.Name)
+			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()
+			return admission.Errored(http.StatusInternalServerError, err)
+		}
+
+		logger.V(1).Info("field index unavailable for BindDefinitions, falling back to unindexed list")
+		allBindDefinitions := &authzv1alpha1.BindDefinitionList{}
+		if err := v.Client.List(ctx, allBindDefinitions); err != nil {
+			logger.Error(err, "failed to list BindDefinitions", "namespace", req.Name)
+			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()
+			return admission.Errored(http.StatusInternalServerError, err)
+		}
+		bindDefinitions.Items = make([]authzv1alpha1.BindDefinition, 0, len(allBindDefinitions.Items))
+		for _, bindDefinition := range allBindDefinitions.Items {
+			if len(bindDefinition.Spec.RoleBindings) > 0 {
+				bindDefinitions.Items = append(bindDefinitions.Items, bindDefinition)
+			}
+		}
 	}
 
 	logger.V(2).Info("checking authorization against BindDefinitions",
