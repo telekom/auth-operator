@@ -58,6 +58,9 @@ func newScheme(t *testing.T) *runtime.Scheme {
 	if err := authzv1alpha1.AddToScheme(s); err != nil {
 		t.Fatalf("failed to add authzv1alpha1 to scheme: %v", err)
 	}
+	if err := corev1.AddToScheme(s); err != nil {
+		t.Fatalf("failed to add corev1 to scheme: %v", err)
+	}
 	return s
 }
 
@@ -1452,7 +1455,7 @@ func TestResourceRuleIndex_ResourceNamesMatching(t *testing.T) {
 }
 
 func TestEvaluateSAR_NamespaceLabelCache_SingleGetPerNamespace(t *testing.T) {
-	scheme := newSchemeWithCore(t)
+	scheme := newScheme(t)
 
 	ns := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1497,10 +1500,7 @@ func TestEvaluateSAR_NamespaceLabelCache_SingleGetPerNamespace(t *testing.T) {
 	}
 
 	t.Run("single Get per namespace when namespace exists", func(t *testing.T) {
-		base := fake.NewClientBuilder().
-			WithScheme(scheme).
-			WithObjects(ns, &wa1, &wa2, &wa3).
-			Build()
+		base := newIndexedClient(scheme, ns, &wa1, &wa2, &wa3)
 
 		counter := &namespaceGetCountingClient{Client: base}
 		handler := &Authorizer{Client: counter, Log: logr.Discard()}
@@ -1524,9 +1524,7 @@ func TestEvaluateSAR_NamespaceLabelCache_SingleGetPerNamespace(t *testing.T) {
 	})
 
 	t.Run("single Get per namespace when namespace is missing", func(t *testing.T) {
-		base := fake.NewClientBuilder().
-			WithScheme(scheme).
-			Build()
+		base := newIndexedClient(scheme)
 
 		counter := &namespaceGetCountingClient{Client: base}
 		handler := &Authorizer{Client: counter, Log: logr.Discard()}
