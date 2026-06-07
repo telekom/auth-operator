@@ -514,11 +514,10 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 
 	// nsLabelCache is a per-request cache keyed by namespace name. A nil pointer
 	// value records a failed Get (namespace not found or error); a non-nil pointer
-	// holds the fetched label set, which may itself be an empty map. This
-	// avoids redundant client.Get calls and repeated error logging when multiple
-	// scoped authorizers target the same namespace in one SAR. The map must NOT
-	// be shared across requests to avoid stale label reads.
-	nsLabelCache := make(map[string]*labels.Set)
+	// holds the fetched label set, which may itself be an empty map. Initialize
+	// it lazily so cluster-scoped-only SARs avoid an unnecessary map allocation.
+	// The map must NOT be shared across requests to avoid stale label reads.
+	var nsLabelCache map[string]*labels.Set
 
 	for i, webhookAuthorizer := range items {
 		// Skip namespace-scoped authorizers for non-resource or cluster-scoped SARs
@@ -535,6 +534,9 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 					"authorizer", webhookAuthorizer.Name)
 				skipped++
 				continue
+			}
+			if nsLabelCache == nil {
+				nsLabelCache = make(map[string]*labels.Set)
 			}
 			matched, err := wa.namespaceMatches(ctx, resourceNS, &webhookAuthorizer.Spec.NamespaceSelector, nsLabelCache)
 			if err != nil {
