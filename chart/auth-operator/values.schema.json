@@ -162,12 +162,12 @@
           "properties": {
             "syncInterval": {
               "type": "string",
-              "description": "Interval between periodic API resource collections (e.g. '5m', '10m'). Increase to reduce API server load in stable clusters.",
+              "description": "Interval between periodic API resource collections (e.g. '5m', '10m'). Increase to reduce API server load in stable clusters. Use '0s' to fall back to the internal default.",
               "default": "5m"
             },
             "resyncInterval": {
               "type": "string",
-              "description": "Interval between full rescans to account for missed events (e.g. '15m', '30m'). Refreshes the CRD UUID map and API resources cache.",
+              "description": "Interval between full rescans to account for missed events (e.g. '15m', '30m'). Refreshes the CRD UUID map and API resources cache. Use '0s' to fall back to the internal default.",
               "default": "15m"
             }
           }
