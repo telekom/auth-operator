@@ -548,7 +548,7 @@ jobs:
           retention-days: 7
 
       - name: Comment PR with delta
-        if: steps.diff.outputs.has_diff == 'true' || steps.extract-errors.outputs.has_errors == 'true'
+        if: (steps.diff.outputs.has_diff == 'true' || steps.extract-errors.outputs.has_errors == 'true') && github.event.pull_request.head.repo.full_name == github.repository
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
@@ -729,7 +729,7 @@ jobs:
             }
 
       - name: Comment PR - no changes
-        if: steps.diff.outputs.has_diff == 'false' && steps.diff.outputs.main_fallback != 'true'
+        if: steps.diff.outputs.has_diff == 'false' && steps.diff.outputs.main_fallback != 'true' && github.event.pull_request.head.repo.full_name == github.repository
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
@@ -770,6 +770,11 @@ jobs:
                 issue_number: context.issue.number, body
               });
             }
+
+      - name: Skip PR comments for forked pull requests
+        if: github.event.pull_request.head.repo.full_name != github.repository
+        run: |
+          echo "::notice::Skipping output-delta PR comments for forked pull requests because GITHUB_TOKEN is read-only. Diff artifacts remain available in the workflow run."
 
       - name: Cleanup
         if: always()
