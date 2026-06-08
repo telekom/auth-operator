@@ -188,7 +188,7 @@ var _ = Describe("RoleDefinition Drift Detection and Rollback", func() {
 					Verbs:     []string{"get", "list"},
 				},
 			})
-			Expect(k8sClient.Apply(logCtx, driftedCRAC, client.FieldOwner(pkgssa.FieldOwner))).To(Succeed())
+			Expect(k8sClient.Apply(logCtx, driftedCRAC, client.FieldOwner("external-drift-manager"), client.ForceOwnership)).To(Succeed())
 
 			By("verifying drift occurred")
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "drift-clusterrole"}, cr)).To(Succeed())
@@ -241,7 +241,7 @@ var _ = Describe("RoleDefinition Drift Detection and Rollback", func() {
 				"drifted-label":                "drifted-value",
 				"app.kubernetes.io/managed-by": "someone-else",
 			}, cr.Rules)
-			Expect(k8sClient.Apply(logCtx, driftedCRAC, client.FieldOwner(pkgssa.FieldOwner))).To(Succeed())
+			Expect(k8sClient.Apply(logCtx, driftedCRAC, client.FieldOwner("external-drift-manager"), client.ForceOwnership)).To(Succeed())
 
 			By("reconciling to correct drift")
 			_, err = reconciler.Reconcile(logCtx, reconcile.Request{
@@ -338,7 +338,7 @@ var _ = Describe("RoleDefinition Drift Detection and Rollback", func() {
 					Verbs:     []string{"get"},
 				},
 			})
-			Expect(k8sClient.Apply(logCtx, driftedRoleAC, client.FieldOwner(pkgssa.FieldOwner))).To(Succeed())
+			Expect(k8sClient.Apply(logCtx, driftedRoleAC, client.FieldOwner("external-drift-manager"), client.ForceOwnership)).To(Succeed())
 
 			By("verifying drift occurred")
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "drift-role", Namespace: testNamespace.Name}, role)).To(Succeed())
@@ -393,7 +393,7 @@ var _ = Describe("RoleDefinition Drift Detection and Rollback", func() {
 				Verbs:     []string{"*"},
 			})
 			driftedRoleAC := pkgssa.RoleWithLabelsAndRules("drift-role", testNamespace.Name, role.Labels, driftedRules)
-			Expect(k8sClient.Apply(logCtx, driftedRoleAC, client.FieldOwner(pkgssa.FieldOwner))).To(Succeed())
+			Expect(k8sClient.Apply(logCtx, driftedRoleAC, client.FieldOwner("external-drift-manager"), client.ForceOwnership)).To(Succeed())
 
 			By("reconciling to remove unauthorized rules")
 			_, err = reconciler.Reconcile(logCtx, reconcile.Request{
