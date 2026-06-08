@@ -35,8 +35,8 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 			TargetName: "bd-platform",
 			Subjects: []rbacv1.Subject{
 				{
-					APIGroup: "rbac.authorization.k8s.io",
-					Kind:     "Group",
+					APIGroup: rbacv1.GroupName,
+					Kind:     rbacv1.GroupKind,
 					Name:     "oidc:platform-admins",
 				},
 			},
@@ -113,8 +113,8 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 			TargetName: "bd-owner-expression",
 			Subjects: []rbacv1.Subject{
 				{
-					APIGroup: "rbac.authorization.k8s.io",
-					Kind:     "Group",
+					APIGroup: rbacv1.GroupName,
+					Kind:     rbacv1.GroupKind,
 					Name:     "oidc:platform-admins",
 				},
 			},
@@ -2379,8 +2379,8 @@ func TestNamespaceValidatorFallsBackWhenBindDefinitionIndexUnavailable(t *testin
 		Spec: authzv1alpha1.BindDefinitionSpec{
 			Subjects: []rbacv1.Subject{
 				{
-					APIGroup: "rbac.authorization.k8s.io",
-					Kind:     "Group",
+					APIGroup: rbacv1.GroupName,
+					Kind:     rbacv1.GroupKind,
 					Name:     "oidc:platform-admins",
 				},
 			},
@@ -2401,8 +2401,8 @@ func TestNamespaceValidatorFallsBackWhenBindDefinitionIndexUnavailable(t *testin
 		Spec: authzv1alpha1.BindDefinitionSpec{
 			Subjects: []rbacv1.Subject{
 				{
-					APIGroup: "rbac.authorization.k8s.io",
-					Kind:     "Group",
+					APIGroup: rbacv1.GroupName,
+					Kind:     rbacv1.GroupKind,
 					Name:     "oidc:other-admins",
 				},
 			},
