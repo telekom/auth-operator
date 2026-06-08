@@ -8,6 +8,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -246,7 +247,7 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			desiredAC := ssa.ClusterRoleBindingWithSubjectsAndRoleRef("ph-conflict-crb", nil, desiredSubjects, roleRef)
 			_, err = ssa.PatchApplyClusterRoleBinding(testCtx, k8sClient, desiredAC)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("conflict"))
+			Expect(apierrors.IsConflict(err)).To(BeTrue())
 
 			result, err := ssa.PatchApplyClusterRoleBinding(testCtx, k8sClient, desiredAC, client.ForceOwnership)
 			Expect(err).NotTo(HaveOccurred())

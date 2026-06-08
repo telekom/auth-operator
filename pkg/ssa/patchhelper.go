@@ -246,9 +246,11 @@ func PatchApplyRoleBinding(
 
 // PatchApplyServiceAccount reads the current SA from cache, compares it to the
 // desired ApplyConfiguration, and only sends an SSA Patch if there is a diff.
-// ForceOwnership is used on the patch path to transfer ownership of the
-// operator-managed ServiceAccount annotation fields to the current
-// BindDefinition field manager without triggering a conflict error.
+// ForceOwnership is intentionally used on the patch path because multiple
+// BindDefinitions may co-manage the same ServiceAccount through distinct field
+// managers. The ApplyConfiguration is limited to the fields this operator
+// manages, so conflicts are resolved only for that explicit ServiceAccount
+// contract instead of making all patch helpers force ownership by default.
 func PatchApplyServiceAccount(
 	ctx context.Context,
 	c client.Client,
