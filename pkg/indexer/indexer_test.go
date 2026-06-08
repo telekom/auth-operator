@@ -529,7 +529,7 @@ func TestBindDefinitionHasRoleBindingsFunc(t *testing.T) {
 				},
 			},
 			indexFunc:  BindDefinitionHasRoleBindingsFunc,
-			wantValues: []string{"true"},
+			wantValues: []string{BindDefinitionHasRoleBindingsTrue},
 		},
 		{
 			name: "BD without RoleBindings returns false",
