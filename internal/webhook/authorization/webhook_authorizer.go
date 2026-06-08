@@ -518,8 +518,6 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 			}
 			matched, err := wa.namespaceMatches(ctx, resourceNS, &webhookAuthorizer.Spec.NamespaceSelector)
 			if err != nil {
-				wa.Log.Error(err, "failed to match namespace for authorizer",
-					"authorizer", webhookAuthorizer.Name, "namespace", resourceNS)
 				return evaluationResult{}, fmt.Errorf("namespace match for authorizer %s: %w", webhookAuthorizer.Name, err)
 			}
 			if !matched {
