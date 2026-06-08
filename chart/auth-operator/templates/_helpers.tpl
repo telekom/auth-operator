@@ -71,6 +71,37 @@ Image pull policy
 {{- end }}
 
 {{/*
+Resolve the current webhook CA bundle during Helm upgrades.
+
+The cert rotator owns webhook caBundle injection at runtime, but Helm upgrades
+render these webhook configurations again before waiting on the release. Reusing
+the live Secret or existing webhook caBundle prevents an upgrade from briefly
+removing the apiserver trust root before follow-up charts create auth CRs.
+*/}}
+{{- define "auth-operator.webhookCABundle" -}}
+{{- $root := .root -}}
+{{- $name := .name -}}
+{{- $kind := .kind -}}
+{{- $bundle := "" -}}
+{{- $secretName := printf "%s-webhook-certs" (include "auth-operator.fullname" $root) -}}
+{{- $secret := lookup "v1" "Secret" $root.Release.Namespace $secretName -}}
+{{- if and $secret $secret.data -}}
+{{- $bundle = (index $secret.data "ca.crt" | default "") -}}
+{{- end -}}
+{{- if not $bundle -}}
+{{- $webhookConfig := lookup "admissionregistration.k8s.io/v1" $kind "" $name -}}
+{{- if and $webhookConfig $webhookConfig.webhooks -}}
+{{- range $webhook := $webhookConfig.webhooks -}}
+{{- if and (not $bundle) $webhook.clientConfig $webhook.clientConfig.caBundle -}}
+{{- $bundle = $webhook.clientConfig.caBundle -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $bundle -}}
+{{- end }}
+
+{{/*
 Standard egress rules for operator pods (DNS + kube-apiserver).
 Both the controller-manager and the webhook-server need DNS resolution
 and kube-apiserver access, so this helper avoids duplicating the block.
@@ -108,5 +139,4 @@ limits the allowed ports.
 {{- toYaml .Values.networkPolicy.egress.additionalRules | nindent 0 }}
 {{- end }}
 {{- end }}
-
 
