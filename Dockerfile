@@ -1,10 +1,10 @@
 # Build stage
 # Go version is read from go.mod via GO_VERSION build arg
 # Default fallback if not provided (should match go.mod)
-ARG GO_VERSION=1.25
+ARG GO_VERSION=1.26.4
 # Digest pinned for supply-chain integrity; update with:
 #   docker buildx imagetools inspect golang:<version>-alpine
-FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine@sha256:f6751d823c26342f9506c03797d2527668d095b0a15f1862cddb4d927a7a4ced AS build
+FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine@sha256:f23e8b227fb4493eabe03bede4d5a32d04092da71962f1fb79b5f7d1e6c2a17f AS build
 
 ARG TARGETOS
 ARG TARGETARCH

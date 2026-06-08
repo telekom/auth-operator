@@ -16,7 +16,7 @@ var (
 	// SchemeGroupVersion is an alias for GroupVersion for backwards compatibility with generated code.
 	SchemeGroupVersion = GroupVersion
 	// SchemeBuilder is used to add go types to the GroupVersionKind scheme.
-	SchemeBuilder = &scheme.Builder{GroupVersion: GroupVersion}
+	SchemeBuilder = &scheme.Builder{GroupVersion: GroupVersion} //nolint:staticcheck // Kubebuilder still scaffolds this controller-runtime helper for API registration.
 
 	// AddToScheme adds the types in this group-version to the given scheme.
 	AddToScheme = SchemeBuilder.AddToScheme
