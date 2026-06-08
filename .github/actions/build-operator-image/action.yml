@@ -71,7 +71,10 @@ runs:
         echo "Building image: $IMAGE"
 
         # Extract Go version from go.mod (single source of truth)
-        GO_VERSION=$(grep -E '^go [0-9]+\.[0-9]+' go.mod | awk '{print $2}' | cut -d. -f1,2)
+        GO_VERSION=$(grep -E '^toolchain go' go.mod | sed 's/toolchain go//' || true)
+        if [ -z "$GO_VERSION" ]; then
+          GO_VERSION=$(grep -E '^go [0-9]' go.mod | awk '{print $2}')
+        fi
         echo "Using Go version from go.mod: $GO_VERSION"
 
         # Validate: cannot push to registry when loading to kind

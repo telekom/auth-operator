@@ -132,9 +132,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
+      - name: Extract Go version from toolchain or go directive
+        id: go-version
+        run: |
+          VERSION=$(grep -E '^toolchain go' go.mod | sed 's/toolchain go//' || true)
+          if [ -z "$VERSION" ]; then
+            VERSION=$(grep -E '^go [0-9]' go.mod | awk '{print $2}')
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
       - name: Build Docker image
         run: |
-          docker build -t auth-operator:scan .
+          docker build \
+            --build-arg GO_VERSION="${{ steps.go-version.outputs.version }}" \
+            -t auth-operator:scan .
 
       - name: Run Trivy vulnerability scanner (image)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
