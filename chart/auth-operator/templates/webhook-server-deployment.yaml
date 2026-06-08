@@ -96,6 +96,10 @@ spec:
         - mountPath: /tmp/k8s-webhook-server/serving-certs
           name: cert
           readOnly: true
+        {{- if .Values.metrics.auth.enabled }}
+        - mountPath: /tmp/k8s-metrics-server/serving-certs
+          name: metrics-certs
+        {{- end }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -133,3 +137,7 @@ spec:
         secret:
           defaultMode: 420
           secretName: {{ include "auth-operator.fullname" . }}-webhook-certs
+      {{- if .Values.metrics.auth.enabled }}
+      - name: metrics-certs
+        emptyDir: {}
+      {{- end }}

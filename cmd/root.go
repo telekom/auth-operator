@@ -50,6 +50,8 @@ var (
 	tracingInsecure     bool
 )
 
+const metricsCertDir = "/tmp/k8s-metrics-server/serving-certs"
+
 // redactSensitiveFlags returns a map of flags with sensitive values redacted.
 // Uses regex pattern matching to identify flags that may contain sensitive data.
 func redactSensitiveFlags() map[string]string {
