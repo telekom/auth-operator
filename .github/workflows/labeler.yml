@@ -17,9 +17,14 @@ jobs:
   labeler:
     name: Add Labels to PR
     runs-on: ubuntu-latest
-    if: github.event.pull_request.head.repo.full_name == github.repository
     steps:
+      - name: Skip labeler for forked pull requests
+        if: github.event.pull_request.head.repo.full_name != github.repository
+        run: |
+          echo "::notice::Skipping PR label updates for forked pull requests because GITHUB_TOKEN is read-only."
+
       - name: Add labels based on changed files
+        if: github.event.pull_request.head.repo.full_name == github.repository
         uses: actions/labeler@f27b608878404679385c85cfa523b85ccb86e213 # v6.1.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -28,9 +33,14 @@ jobs:
   size-label:
     name: Add Size Label
     runs-on: ubuntu-latest
-    if: github.event.pull_request.head.repo.full_name == github.repository
     steps:
+      - name: Skip size labeler for forked pull requests
+        if: github.event.pull_request.head.repo.full_name != github.repository
+        run: |
+          echo "::notice::Skipping PR size label updates for forked pull requests because GITHUB_TOKEN is read-only."
+
       - name: Add size label
+        if: github.event.pull_request.head.repo.full_name == github.repository
         uses: codelytv/pr-size-labeler@095a41fca88b8764fd9e008ad269bcdb82bb38b9 # v1.10.4
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
