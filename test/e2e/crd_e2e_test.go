@@ -604,7 +604,15 @@ func ensureTestNamespace() {
 	waitForTerminatingTestNamespace()
 	applyFixture("namespace_labeled.yaml")
 	Eventually(func() error {
-		return checkResourceExists("namespace", testNamespace, "")
+		cmd := exec.CommandContext(context.Background(), "kubectl", "get", "namespace", testNamespace, "-o", "jsonpath={.status.phase}")
+		output, err := utils.Run(cmd)
+		if err != nil {
+			return err
+		}
+		if string(output) != "Active" {
+			return fmt.Errorf("namespace %s phase is %s", testNamespace, string(output))
+		}
+		return nil
 	}, shortTimeout, shortPollInterval).Should(Succeed())
 }
 
@@ -707,6 +715,7 @@ func cleanupCRDE2ETestState() {
 	utils.CleanupResourcesByLabel("role", e2eLabelSelector, testNamespace)
 	utils.CleanupResourcesByLabel("rolebinding", e2eLabelSelector, testNamespace)
 	utils.CleanupResourcesByLabel("serviceaccount", e2eLabelSelector, testNamespace)
+	utils.CleanupNamespace(testNamespace)
 }
 
 // Context helper for timeout-based operations
