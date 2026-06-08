@@ -604,13 +604,17 @@ func ensureTestNamespace() {
 	waitForTerminatingTestNamespace()
 	applyFixture("namespace_labeled.yaml")
 	Eventually(func() error {
-		cmd := exec.CommandContext(context.Background(), "kubectl", "get", "namespace", testNamespace, "-o", "jsonpath={.status.phase}")
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		cmd := exec.CommandContext(ctx, "kubectl", "get", "namespace", testNamespace, "-o", "jsonpath={.status.phase}")
 		output, err := utils.Run(cmd)
 		if err != nil {
 			return err
 		}
-		if string(output) != "Active" {
-			return fmt.Errorf("namespace %s phase is %s", testNamespace, string(output))
+		phase := strings.TrimSpace(string(output))
+		if phase != "Active" {
+			return fmt.Errorf("namespace %s phase is %s", testNamespace, phase)
 		}
 		return nil
 	}, shortTimeout, shortPollInterval).Should(Succeed())

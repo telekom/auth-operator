@@ -404,7 +404,7 @@ func TestWebhookAuthorizerHasNamespaceSelectorFunc(t *testing.T) {
 				Spec:       authorizationv1alpha1.WebhookAuthorizerSpec{},
 			},
 			indexFunc:  WebhookAuthorizerHasNamespaceSelectorFunc,
-			wantValues: []string{"false"},
+			wantValues: []string{WebhookAuthorizerHasNamespaceSelectorFalse},
 		},
 		{
 			name: "with match expressions returns true",
