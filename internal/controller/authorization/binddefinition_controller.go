@@ -230,7 +230,7 @@ func (r *BindDefinitionReconciler) namespaceToBindDefinitionRequests(ctx context
 	for i := range bindDefList.Items {
 		bindDef := &bindDefList.Items[i]
 		if !bindDefinitionMatchesNamespace(bindDef, namespace) {
-			logger.V(3).Info("skipping BindDefinition (no matching selector)",
+			logger.V(3).Info("skipping BindDefinition (no matching namespace routing criteria)",
 				"namespace", namespace.Name, "bindDefinition", bindDef.Name)
 			metrics.NamespaceFanoutSkipped.Inc()
 			continue

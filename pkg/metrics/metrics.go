@@ -259,12 +259,12 @@ var (
 
 	// NamespaceFanoutSkipped counts how many rolebinding-scoped BindDefinitions
 	// were filtered out (not enqueued) during namespace-event fan-out because
-	// their selectors did not match the changed namespace.
+	// their namespace routing criteria did not match the changed namespace.
 	NamespaceFanoutSkipped = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Namespace: Namespace,
 			Name:      "namespace_fanout_skipped_total",
-			Help:      "Total rolebinding-scoped BindDefinitions skipped during namespace-event fan-out due to namespace selector mismatch",
+			Help:      "Total rolebinding-scoped BindDefinitions skipped during namespace-event fan-out because no namespace field or selector matched",
 		},
 	)
 
