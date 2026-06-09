@@ -139,6 +139,9 @@ is restricted to platform administrators.
 | `metrics.serviceMonitor.interval` | Scrape interval (empty = Prometheus default) | `""` |
 | `metrics.serviceMonitor.scrapeTimeout` | Scrape timeout | `""` |
 | `metrics.serviceMonitor.additionalLabels` | Extra labels on the ServiceMonitor | `{}` |
+| `metrics.serviceMonitor.scraperRBAC.create` | Create ClusterRole/ClusterRoleBinding that permits the Prometheus scraper ServiceAccount to GET `/metrics` when metrics auth is enabled | `false` |
+| `metrics.serviceMonitor.scraperRBAC.serviceAccount.name` | Prometheus scraper ServiceAccount name for chart-managed metrics reader RBAC | `""` |
+| `metrics.serviceMonitor.scraperRBAC.serviceAccount.namespace` | Prometheus scraper ServiceAccount namespace for chart-managed metrics reader RBAC (defaults to release namespace when empty) | `""` |
 | `metrics.serviceMonitor.tlsConfig.caFile` | CA certificate file for TLS verification of the metrics endpoint | `""` |
 | `metrics.serviceMonitor.tlsConfig.serverName` | Server name override for TLS SNI verification | `""` |
 | `metrics.serviceMonitor.tlsConfig.insecureSkipVerify` | Skip TLS verification (default `true` for controller-runtime self-signed certs; set `false` when `caFile`/`serverName` is provided) | `true` |

@@ -519,6 +519,33 @@
                 "type": "string"
               }
             },
+            "scraperRBAC": {
+              "type": "object",
+              "description": "Optional RBAC allowing the Prometheus scraper ServiceAccount to GET /metrics.",
+              "additionalProperties": false,
+              "properties": {
+                "create": {
+                  "type": "boolean",
+                  "description": "Create ClusterRole and ClusterRoleBinding for the Prometheus scraper ServiceAccount.",
+                  "default": false
+                },
+                "serviceAccount": {
+                  "type": "object",
+                  "description": "Prometheus scraper ServiceAccount to bind to the metrics reader role.",
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "Prometheus scraper ServiceAccount name."
+                    },
+                    "namespace": {
+                      "type": "string",
+                      "description": "Prometheus scraper ServiceAccount namespace. Defaults to release namespace when empty."
+                    }
+                  }
+                }
+              }
+            },
             "tlsConfig": {
               "type": "object",
               "description": "TLS configuration for Prometheus scraping.",

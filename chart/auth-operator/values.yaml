@@ -172,6 +172,13 @@ metrics:
     scrapeTimeout: ""
     # Additional labels for ServiceMonitor (e.g., for label-based selection)
     additionalLabels: {}
+    # Create RBAC that allows the Prometheus scraper ServiceAccount to GET /metrics.
+    # Required when metrics.auth.enabled=true unless equivalent RBAC exists externally.
+    scraperRBAC:
+      create: false
+      serviceAccount:
+        name: ""
+        namespace: ""
     tlsConfig:
       caFile: ""
       serverName: ""
