@@ -102,6 +102,9 @@ func selectedPolicyMatchesRequester(ctx context.Context, c client.Client, select
 
 	selected := &RBACPolicy{}
 	if err := c.Get(ctx, client.ObjectKey{Name: selectedPolicy}, selected); err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, err
+		}
 		return false, fmt.Errorf("get selected RBACPolicy %q: %w", selectedPolicy, err)
 	}
 
@@ -123,6 +126,15 @@ func validateDefaultPolicyForRequester(
 
 	selectedMatches, err := selectedPolicyMatchesRequester(ctx, c, selectedPolicy, req.UserInfo.Username, req.UserInfo.Groups)
 	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return apierrors.NewInvalid(
+				groupKind,
+				objName,
+				field.ErrorList{
+					field.NotFound(field.NewPath("spec", "policyRef", "name"), selectedPolicy),
+				},
+			)
+		}
 		log.FromContext(ctx).Error(err, "failed to evaluate selected policy assignment", "selectedPolicy", selectedPolicy)
 		return apierrors.NewInternalError(errors.New("unable to resolve default policy assignments"))
 	}

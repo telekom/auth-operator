@@ -11,6 +11,7 @@ import (
 
 	admissionv1 "k8s.io/api/admission/v1"
 	authenticationv1 "k8s.io/api/authentication/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -124,6 +125,16 @@ func TestValidateDefaultPolicyForRequester(t *testing.T) {
 	})
 	if err := validateDefaultPolicyForRequester(ctxSA, client, gk, "rrd-b", "policy-b"); err != nil {
 		t.Fatalf("expected policy-b to be allowed, got err: %v", err)
+	}
+
+	if err := validateDefaultPolicyForRequester(ctxGroup, client, gk, "rrd-missing", "missing-policy"); err == nil {
+		t.Fatal("expected missing selected policy to fail validation")
+	} else if !apierrors.IsInvalid(err) {
+		t.Fatalf("expected invalid error for missing selected policy, got: %v", err)
+	} else if apierrors.IsInternalError(err) {
+		t.Fatalf("expected missing selected policy not to become internal error, got: %v", err)
+	} else if !strings.Contains(err.Error(), "missing-policy") {
+		t.Fatalf("expected error to mention missing policy, got: %v", err)
 	}
 
 	// No admission request in context: skip enforcement.
