@@ -602,15 +602,15 @@ func TestBindDefinitionDriftDetection(t *testing.T) {
 		g.Expect(crb.Subjects).To(HaveLen(1))
 		g.Expect(crb.Subjects[0].Name).To(Equal("original-user"))
 
-		// Simulate drift via SSA under the operator's own field manager to avoid
-		// a field-manager conflict when the reconciler re-applies without ForceOwnership.
+		// Simulate drift from an external field manager. The reconciler is
+		// authoritative for generated bindings and must take ownership back.
 		driftedAC := pkgssa.ClusterRoleBindingWithSubjectsAndRoleRef(
 			crbName,
 			nil,
 			[]rbacv1.Subject{{Kind: "User", Name: "drifted-user", APIGroup: rbacv1.GroupName}},
 			rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "view"},
 		)
-		err = c.Apply(ctx, driftedAC, client.FieldOwner(pkgssa.FieldOwner))
+		err = c.Apply(ctx, driftedAC, client.FieldOwner("external-drift-manager"), client.ForceOwnership)
 		g.Expect(err).NotTo(HaveOccurred())
 
 		// Verify drift occurred
@@ -739,8 +739,8 @@ func TestBindDefinitionDriftDetection(t *testing.T) {
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(rb.Subjects[0].Name).To(Equal("rb-original-user"))
 
-		// Simulate drift via SSA under the operator's own field manager to avoid
-		// a field-manager conflict when the reconciler re-applies without ForceOwnership.
+		// Simulate drift from an external field manager. The reconciler is
+		// authoritative for generated bindings and must take ownership back.
 		driftedRBAC := pkgssa.RoleBindingWithSubjectsAndRoleRef(
 			rbName,
 			ns.Name,
@@ -748,7 +748,7 @@ func TestBindDefinitionDriftDetection(t *testing.T) {
 			[]rbacv1.Subject{{Kind: "User", Name: "drifted-rb-user", APIGroup: rbacv1.GroupName}},
 			rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "view"},
 		)
-		err = c.Apply(ctx, driftedRBAC, client.FieldOwner(pkgssa.FieldOwner))
+		err = c.Apply(ctx, driftedRBAC, client.FieldOwner("external-drift-manager"), client.ForceOwnership)
 		g.Expect(err).NotTo(HaveOccurred())
 
 		// Reconcile to correct
