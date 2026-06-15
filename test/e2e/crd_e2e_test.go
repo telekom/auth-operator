@@ -33,6 +33,17 @@ const (
 	crdStatusRunning = "Running"
 )
 
+var crdE2EFixtureResourceFiles = []string{
+	"roledefinition_clusterrole.yaml",
+	"roledefinition_role.yaml",
+	"binddefinition_clusterrolebinding.yaml",
+	"binddefinition_rolebinding.yaml",
+	"binddefinition_serviceaccount.yaml",
+	"webhookauthorizer_allow.yaml",
+	"webhookauthorizer_deny.yaml",
+	"webhookauthorizer_nonresource.yaml",
+}
+
 var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 
 	BeforeAll(func() {
@@ -639,8 +650,11 @@ func cleanupCRDE2ETestState() {
 	const e2eLabelSelector = "app.kubernetes.io/component=e2e-test"
 	const managedByLabelSelector = "app.kubernetes.io/managed-by=auth-operator"
 
-	cmd := utils.CommandContext(context.Background(), "kubectl", "delete", "-k", fixturesPath, "--ignore-not-found=true", "--wait=false", "--timeout=30s")
-	_, _ = utils.Run(cmd)
+	for _, fixtureFile := range crdE2EFixtureResourceFiles {
+		cmd := utils.CommandContext(context.Background(), "kubectl", "delete", "-f", filepath.Join(fixturesPath, fixtureFile),
+			"--ignore-not-found=true", "--wait=false", "--timeout=30s")
+		_, _ = utils.Run(cmd)
+	}
 
 	utils.RemoveFinalizersForAll("roledefinition")
 	utils.RemoveFinalizersForAll("binddefinition")
