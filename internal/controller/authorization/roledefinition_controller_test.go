@@ -1142,6 +1142,44 @@ func TestFilterAPIResourcesDeduplication(t *testing.T) {
 		}
 	})
 
+	t.Run("deduplicates resources across versions with different discovered verbs", func(t *testing.T) {
+		g := NewWithT(t)
+
+		rd := &authorizationv1alpha1.RoleDefinition{
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{},
+		}
+
+		apiResources := discovery.APIResourcesByGroupVersion{
+			"e2etest.auth-operator.io/v1": []metav1.APIResource{
+				{Name: "multiwidgets", Verbs: metav1.Verbs{"get", "list", "watch"}},
+			},
+			"e2etest.auth-operator.io/v1beta1": []metav1.APIResource{
+				{Name: "multiwidgets", Verbs: metav1.Verbs{"get", "list", "update"}},
+			},
+		}
+
+		r := &RoleDefinitionReconciler{}
+		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
+		g.Expect(err).NotTo(HaveOccurred())
+
+		occurrences := 0
+		var verbs []string
+		for _, rule := range rules {
+			if len(rule.APIGroups) != 1 || rule.APIGroups[0] != "e2etest.auth-operator.io" {
+				continue
+			}
+			for _, resource := range rule.Resources {
+				if resource == "multiwidgets" {
+					occurrences++
+					verbs = rule.Verbs
+				}
+			}
+		}
+
+		g.Expect(occurrences).To(Equal(1), "multiwidgets should appear in exactly one RBAC rule")
+		g.Expect(verbs).To(ConsistOf("get", "list", "update", "watch"))
+	})
+
 	t.Run("merges resources from multiple versions into a single rule per API group", func(t *testing.T) {
 		g := NewWithT(t)
 
@@ -1403,28 +1441,23 @@ func TestFilterAPIResourcesVerbRestrictionCombinations(t *testing.T) {
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(rules).NotTo(BeEmpty())
 
-		// Collect all verb sets for the apps group
-		restrictedVersionSeen := false
-		unrestrictedVersionSeen := false
+		// RBAC is version-agnostic, so the same resource exposed by a restricted
+		// and unrestricted served version is emitted once with the union of
+		// allowed verbs.
+		occurrences := 0
+		var verbs []string
 		for _, rule := range rules {
 			if len(rule.APIGroups) > 0 && rule.APIGroups[0] == appsGroup {
-				if len(rule.Verbs) == 2 {
-					// apps/v1 (restricted): only get, list should remain
-					restrictedVersionSeen = true
-					g.Expect(rule.Verbs).To(ContainElement("get"))
-					g.Expect(rule.Verbs).To(ContainElement("list"))
-					g.Expect(rule.Verbs).NotTo(ContainElement("create"))
-					g.Expect(rule.Verbs).NotTo(ContainElement("delete"))
-				} else {
-					// apps/v1alpha1 (unrestricted): all verbs should remain
-					unrestrictedVersionSeen = true
-					g.Expect(rule.Verbs).To(ContainElement("create"))
-					g.Expect(rule.Verbs).To(ContainElement("delete"))
+				for _, resource := range rule.Resources {
+					if resource == "deployments" {
+						occurrences++
+						verbs = rule.Verbs
+					}
 				}
 			}
 		}
-		g.Expect(restrictedVersionSeen).To(BeTrue(), "expected a rule with restricted verbs from apps/v1")
-		g.Expect(unrestrictedVersionSeen).To(BeTrue(), "expected a rule with unrestricted verbs from apps/v1alpha1")
+		g.Expect(occurrences).To(Equal(1), "deployments should appear in exactly one RBAC rule")
+		g.Expect(verbs).To(ConsistOf("create", "delete", "get", "list"))
 	})
 
 	t.Run("multiple API groups with different verb restrictions", func(t *testing.T) {
