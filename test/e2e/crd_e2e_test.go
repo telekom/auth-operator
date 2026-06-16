@@ -34,6 +34,8 @@ const (
 )
 
 var crdE2EFixtureResourceFiles = []string{
+	// Keep this in sync with test/e2e/fixtures/kustomization.yaml, excluding
+	// namespace_labeled.yaml because the CRD suite reuses the namespace between specs.
 	"roledefinition_clusterrole.yaml",
 	"roledefinition_role.yaml",
 	"binddefinition_clusterrolebinding.yaml",
@@ -653,7 +655,9 @@ func cleanupCRDE2ETestState() {
 	for _, fixtureFile := range crdE2EFixtureResourceFiles {
 		cmd := utils.CommandContext(context.Background(), "kubectl", "delete", "-f", filepath.Join(fixturesPath, fixtureFile),
 			"--ignore-not-found=true", "--wait=false", "--timeout=30s")
-		_, _ = utils.Run(cmd)
+		if output, err := utils.Run(cmd); err != nil {
+			_, _ = fmt.Fprintf(GinkgoWriter, "warning: failed to delete CRD e2e fixture %s: %v\n%s\n", fixtureFile, err, string(output))
+		}
 	}
 
 	utils.RemoveFinalizersForAll("roledefinition")
