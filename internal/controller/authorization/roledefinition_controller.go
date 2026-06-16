@@ -547,9 +547,7 @@ func buildPolicyRulesByAPIGroupAndVerbs(resourcesByAPIGroupAndName map[string]*a
 			}
 			rulesByAPIGroupAndVerbs[key] = existingRule
 		}
-		if !slices.Contains(existingRule.Resources, access.name) {
-			existingRule.Resources = append(existingRule.Resources, access.name)
-		}
+		existingRule.Resources = append(existingRule.Resources, access.name)
 	}
 	return rulesByAPIGroupAndVerbs
 }
