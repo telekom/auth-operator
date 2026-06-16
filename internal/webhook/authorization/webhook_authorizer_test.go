@@ -44,6 +44,15 @@ func newScheme(t *testing.T) *runtime.Scheme {
 	return s
 }
 
+func newSchemeWithCore(t *testing.T) *runtime.Scheme {
+	t.Helper()
+	s := newScheme(t)
+	if err := clientgoscheme.AddToScheme(s); err != nil {
+		t.Fatalf("failed to add clientgoscheme to scheme: %v", err)
+	}
+	return s
+}
+
 // newIndexedClient builds a fake client with the WebhookAuthorizer
 // hasNamespaceSelector field index registered, matching the real manager setup.
 func newIndexedClient(scheme *runtime.Scheme, objs ...client.Object) client.Client {
@@ -436,13 +445,7 @@ func TestEvaluateSAR_ResultFields(t *testing.T) {
 func TestEvaluateSAR_NamespaceGetError(t *testing.T) {
 	// Build a scheme that includes corev1 so the fake client recognises
 	// Namespace resources and returns a proper NotFound error.
-	s := runtime.NewScheme()
-	if err := authzv1alpha1.AddToScheme(s); err != nil {
-		t.Fatalf("failed to add authzv1alpha1 to scheme: %v", err)
-	}
-	if err := clientgoscheme.AddToScheme(s); err != nil {
-		t.Fatalf("failed to add clientgoscheme to scheme: %v", err)
-	}
+	s := newSchemeWithCore(t)
 
 	// WebhookAuthorizer with a NamespaceSelector so evaluateSAR will call
 	// namespaceMatches, which in turn calls Client.Get for the namespace.
@@ -460,7 +463,7 @@ func TestEvaluateSAR_NamespaceGetError(t *testing.T) {
 	}
 
 	// The fake client does NOT have the namespace "missing-ns" — Get will return NotFound.
-	cl := fake.NewClientBuilder().WithScheme(s).WithObjects(wa).Build()
+	cl := newIndexedClient(s, wa)
 	handler := &Authorizer{Client: cl, Log: logr.Discard()}
 
 	sar := &authzv1.SubjectAccessReview{
@@ -485,13 +488,7 @@ func TestEvaluateSAR_NamespaceGetError(t *testing.T) {
 func TestServeHTTP_NamespaceGetError_Returns500(t *testing.T) {
 	// Build a scheme that includes corev1 so the fake client recognises
 	// Namespace resources and returns a proper NotFound error.
-	s := runtime.NewScheme()
-	if err := authzv1alpha1.AddToScheme(s); err != nil {
-		t.Fatalf("failed to add authzv1alpha1 to scheme: %v", err)
-	}
-	if err := clientgoscheme.AddToScheme(s); err != nil {
-		t.Fatalf("failed to add clientgoscheme to scheme: %v", err)
-	}
+	s := newSchemeWithCore(t)
 
 	// WebhookAuthorizer with a NamespaceSelector so it becomes a scoped authorizer.
 	// evaluateSAR will call namespaceMatches, which calls Client.Get for the namespace.
@@ -510,15 +507,7 @@ func TestServeHTTP_NamespaceGetError_Returns500(t *testing.T) {
 
 	// Use an indexed client (matching real manager setup) with the WA but without
 	// the "missing-ns" Namespace object — Get will return NotFound.
-	cl := fake.NewClientBuilder().
-		WithScheme(s).
-		WithIndex(
-			&authzv1alpha1.WebhookAuthorizer{},
-			indexer.WebhookAuthorizerHasNamespaceSelectorField,
-			indexer.WebhookAuthorizerHasNamespaceSelectorFunc,
-		).
-		WithObjects(wa).
-		Build()
+	cl := newIndexedClient(s, wa)
 	handler := &Authorizer{Client: cl, Log: logr.Discard()}
 
 	sar := authzv1.SubjectAccessReview{
