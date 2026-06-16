@@ -1,3 +1,4 @@
+{{- $tracker := .Values.controller.tracker | default dict }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -34,8 +35,8 @@ spec:
         - --binddefinition-concurrency={{ .Values.controller.bindDefinitionConcurrency }}
         - --roledefinition-concurrency={{ .Values.controller.roleDefinitionConcurrency }}
         - --webhookauthorizer-concurrency={{ .Values.controller.webhookAuthorizerConcurrency }}
-        - --tracker-sync-interval={{ .Values.controller.tracker.syncInterval }}
-        - --tracker-resync-interval={{ .Values.controller.tracker.resyncInterval }}
+        - --tracker-sync-interval={{ get $tracker "syncInterval" | default "5m" }}
+        - --tracker-resync-interval={{ get $tracker "resyncInterval" | default "15m" }}
         - --verbosity={{ .Values.global.logLevel }}
         {{- if .Values.metrics.auth.enabled }}
         - --metrics-secure
