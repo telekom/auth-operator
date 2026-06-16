@@ -395,7 +395,7 @@ func TestWebhookAuthorizerHasNamespaceSelectorFunc(t *testing.T) {
 				},
 			},
 			indexFunc:  WebhookAuthorizerHasNamespaceSelectorFunc,
-			wantValues: []string{"true"},
+			wantValues: []string{WebhookAuthorizerHasNamespaceSelectorTrue},
 		},
 		{
 			name: "with empty namespace selector returns false",
@@ -419,7 +419,7 @@ func TestWebhookAuthorizerHasNamespaceSelectorFunc(t *testing.T) {
 				},
 			},
 			indexFunc:  WebhookAuthorizerHasNamespaceSelectorFunc,
-			wantValues: []string{"true"},
+			wantValues: []string{WebhookAuthorizerHasNamespaceSelectorTrue},
 		},
 		{
 			name:       "wrong object type returns nil",
@@ -476,7 +476,7 @@ func TestWebhookAuthorizerIndexWithFakeClient(t *testing.T) {
 	// Query global authorizers (no namespace selector).
 	var globalList authorizationv1alpha1.WebhookAuthorizerList
 	err := fakeClient.List(ctx, &globalList, client.MatchingFields{
-		WebhookAuthorizerHasNamespaceSelectorField: "false",
+		WebhookAuthorizerHasNamespaceSelectorField: WebhookAuthorizerHasNamespaceSelectorFalse,
 	})
 	if err != nil {
 		t.Fatalf("failed to list global authorizers: %v", err)
@@ -490,7 +490,7 @@ func TestWebhookAuthorizerIndexWithFakeClient(t *testing.T) {
 	// Query scoped authorizers (with namespace selector).
 	var scopedList authorizationv1alpha1.WebhookAuthorizerList
 	err = fakeClient.List(ctx, &scopedList, client.MatchingFields{
-		WebhookAuthorizerHasNamespaceSelectorField: "true",
+		WebhookAuthorizerHasNamespaceSelectorField: WebhookAuthorizerHasNamespaceSelectorTrue,
 	})
 	if err != nil {
 		t.Fatalf("failed to list scoped authorizers: %v", err)
@@ -541,7 +541,7 @@ func TestBindDefinitionHasRoleBindingsFunc(t *testing.T) {
 				},
 			},
 			indexFunc:  BindDefinitionHasRoleBindingsFunc,
-			wantValues: []string{"false"},
+			wantValues: []string{BindDefinitionHasRoleBindingsFalse},
 		},
 		{
 			name:       "wrong object type returns nil",
