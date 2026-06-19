@@ -18,8 +18,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
-  pull-requests: read
 
 env:
   REGISTRY: ghcr.io
@@ -28,6 +26,10 @@ jobs:
   cleanup-container-images:
     name: Cleanup PR Container Images
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      pull-requests: read
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -210,6 +212,10 @@ jobs:
   cleanup-helm-charts:
     name: Cleanup PR Helm Charts
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      pull-requests: read
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
