@@ -36,14 +36,40 @@ func EvaluateBindDefinition(
 	violations := []Violation{}
 
 	// Enforce appliesTo scope: roleBinding target namespaces must be within the policy's
-	// declared governance scope (static Namespaces list). NamespaceSelector-based scope
-	// enforcement requires runtime resolution and is delegated to the controller.
+	// declared governance scope. Static namespace entries and NamespaceSelector are
+	// combined with OR semantics.
 	for i, nb := range rbd.Spec.RoleBindings {
-		if nb.Namespace != "" && !namespaceInScope(policy.Spec.AppliesTo, nb.Namespace) {
+		if nb.Namespace != "" && !namespaceInScope(ctx, policy.Spec.AppliesTo, nb.Namespace, labelGetter) {
 			violations = append(violations, Violation{
 				Field:   fmt.Sprintf("spec.roleBindings[%d].namespace", i),
 				Message: fmt.Sprintf("namespace %q is outside the policy's appliesTo scope", nb.Namespace),
 			})
+		}
+		for j, selector := range nb.NamespaceSelector {
+			fieldPath := fmt.Sprintf("spec.roleBindings[%d].namespaceSelector[%d]", i, j)
+			if labelGetter == nil {
+				violations = append(violations, Violation{
+					Field:   fieldPath,
+					Message: "namespace selector cannot be evaluated without a label resolver",
+				})
+				continue
+			}
+			namespaces, err := labelGetter.ListNamespacesBySelector(ctx, &selector)
+			if err != nil {
+				violations = append(violations, Violation{
+					Field:   fieldPath,
+					Message: fmt.Sprintf("failed to resolve namespace selector: %v", err),
+				})
+				continue
+			}
+			for _, namespace := range namespaces {
+				if !namespaceInScope(ctx, policy.Spec.AppliesTo, namespace, labelGetter) {
+					violations = append(violations, Violation{
+						Field:   fmt.Sprintf("%s (resolved: %s)", fieldPath, namespace),
+						Message: fmt.Sprintf("namespace %q is outside the policy's appliesTo scope", namespace),
+					})
+				}
+			}
 		}
 	}
 

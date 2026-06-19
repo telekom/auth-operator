@@ -5,22 +5,32 @@
 package policy
 
 import (
+	"context"
 	"strings"
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 )
 
 // namespaceInScope returns true if namespace is within the policy's AppliesTo scope.
-// If the scope has no static Namespaces list (i.e. only a NamespaceSelector), this
-// function returns true to avoid false positives — selector-based scope enforcement
-// requires a LabelGetter and is delegated to the controller.
-// An empty scope (no Namespaces and no NamespaceSelector) is treated as global and
-// always returns true (backward-compatible: all existing policies are unrestricted).
-func namespaceInScope(scope authorizationv1alpha1.PolicyScope, namespace string) bool {
-	if len(scope.Namespaces) == 0 {
+// Static namespace entries and NamespaceSelector are combined with OR semantics.
+// A selector can only match when a LabelGetter is available and the target
+// namespace labels can be resolved. An empty scope is treated as global and
+// always returns true.
+func namespaceInScope(ctx context.Context, scope authorizationv1alpha1.PolicyScope, namespace string, lg LabelGetter) bool {
+	if len(scope.Namespaces) == 0 && scope.NamespaceSelector == nil {
 		return true
 	}
-	return containsString(scope.Namespaces, namespace)
+	if containsString(scope.Namespaces, namespace) {
+		return true
+	}
+	if scope.NamespaceSelector == nil || lg == nil {
+		return false
+	}
+	nsLabels, found := lg.GetNamespaceLabels(ctx, namespace)
+	if !found {
+		return false
+	}
+	return matchesSelector(scope.NamespaceSelector, nsLabels)
 }
 
 // MatchesWildcard checks if value matches a simple wildcard pattern.

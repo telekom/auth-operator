@@ -1315,4 +1315,111 @@ func TestEvaluateBindDefinition_AppliesToScope(t *testing.T) {
 			t.Errorf("expected no violations for global scope, got %v", violations)
 		}
 	})
+
+	t.Run("selector-only scope allows matching explicit namespace", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				AppliesTo: authorizationv1alpha1.PolicyScope{
+					NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "a"}},
+				},
+			},
+		}
+		rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+			Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+				RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+					{Namespace: "namespace-a"},
+				},
+				Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
+			},
+		}
+		lg := &fakeLabelGetter{namespaces: map[string]map[string]string{
+			"namespace-a": {"team": "a"},
+		}}
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, lg)
+		if len(violations) != 0 {
+			t.Errorf("expected no violations for selector-matching namespace, got %v", violations)
+		}
+	})
+
+	t.Run("selector-only scope rejects non-matching explicit namespace", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				AppliesTo: authorizationv1alpha1.PolicyScope{
+					NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "a"}},
+				},
+			},
+		}
+		rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+			Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+				RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+					{Namespace: "namespace-b"},
+				},
+				Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
+			},
+		}
+		lg := &fakeLabelGetter{namespaces: map[string]map[string]string{
+			"namespace-b": {"team": "b"},
+		}}
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, lg)
+		if len(violations) != 1 {
+			t.Fatalf("expected 1 violation for selector-nonmatching namespace, got %d: %v", len(violations), violations)
+		}
+	})
+
+	t.Run("selector-only scope rejects when explicit namespace labels cannot be resolved", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				AppliesTo: authorizationv1alpha1.PolicyScope{
+					NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "a"}},
+				},
+			},
+		}
+		rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+			Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+				RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+					{Namespace: "namespace-a"},
+				},
+				Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
+			},
+		}
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, nil)
+		if len(violations) != 1 {
+			t.Fatalf("expected 1 violation without label resolver, got %d: %v", len(violations), violations)
+		}
+	})
+
+	t.Run("selector-resolved roleBinding namespaces must match appliesTo selector", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				AppliesTo: authorizationv1alpha1.PolicyScope{
+					NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "a"}},
+				},
+			},
+		}
+		targetSelector := metav1.LabelSelector{MatchLabels: map[string]string{"bind": "yes"}}
+		rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+			Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+				RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+					{NamespaceSelector: []metav1.LabelSelector{targetSelector}},
+				},
+				Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
+			},
+		}
+		lg := &fakeLabelGetter{
+			namespaces: map[string]map[string]string{
+				"namespace-a": {"team": "a", "bind": "yes"},
+				"namespace-b": {"team": "b", "bind": "yes"},
+			},
+			selectorNamespaces: map[string][]string{
+				metav1.FormatLabelSelector(&targetSelector): {"namespace-a", "namespace-b"},
+			},
+		}
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, lg)
+		if len(violations) != 1 {
+			t.Fatalf("expected 1 violation for resolved namespace outside appliesTo selector, got %d: %v", len(violations), violations)
+		}
+		if violations[0].Field != "spec.roleBindings[0].namespaceSelector[0] (resolved: namespace-b)" {
+			t.Errorf("unexpected field: %q", violations[0].Field)
+		}
+	})
 }

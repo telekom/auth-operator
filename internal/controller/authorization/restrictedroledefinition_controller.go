@@ -277,7 +277,7 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 	}
 
 	// Step 6: Evaluate policy compliance.
-	violations := policy.EvaluateRoleDefinition(rbacPolicy, rrd)
+	violations := policy.EvaluateRoleDefinitionWithLabels(ctx, rbacPolicy, rrd, newLabelGetter(r.client))
 	if len(violations) > 0 {
 		rrd.Status.PolicyViolations = policy.ViolationStrings(violations)
 		result, err := handlePolicyViolations(ctx, rrd, rrd.Generation, violations, r.recorder, rrd, ViolationHandlerConfig{

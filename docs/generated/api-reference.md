@@ -306,7 +306,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `appliesTo` _[PolicyScope](#policyscope)_ | AppliesTo defines the namespace scope this policy governs.<br />Static Namespaces entries are enforced at evaluation time in the policy engine<br />(EvaluateBindDefinition / EvaluateRoleDefinition). NamespaceSelector-based<br />scope enforcement requires runtime label resolution and is delegated to the<br />controller during reconciliation. |  | Required: \{\} <br /> |
+| `appliesTo` _[PolicyScope](#policyscope)_ | AppliesTo defines the namespace scope this policy governs.<br />Static Namespaces entries and NamespaceSelector are enforced at evaluation time;<br />selector-based scope checks require a LabelGetter so namespace labels can be<br />resolved during controller reconciliation. |  | Required: \{\} <br /> |
 | `bindingLimits` _[BindingLimits](#bindinglimits)_ | BindingLimits constrains role bindings that may be created. |  | Optional: \{\} <br /> |
 | `roleLimits` _[RoleLimits](#rolelimits)_ | RoleLimits constrains roles that may be generated. |  | Optional: \{\} <br /> |
 | `subjectLimits` _[SubjectLimits](#subjectlimits)_ | SubjectLimits constrains the subjects a tenant may use. |  | Optional: \{\} <br /> |

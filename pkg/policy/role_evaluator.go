@@ -5,6 +5,7 @@
 package policy
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -15,11 +16,23 @@ import (
 // governing RBACPolicy and returns all violations. An empty slice
 // indicates full compliance.
 func EvaluateRoleDefinition(policy *authorizationv1alpha1.RBACPolicy, rrd *authorizationv1alpha1.RestrictedRoleDefinition) []Violation {
+	return EvaluateRoleDefinitionWithLabels(context.Background(), policy, rrd, nil)
+}
+
+// EvaluateRoleDefinitionWithLabels checks a RestrictedRoleDefinition against
+// its governing RBACPolicy, including selector-based appliesTo checks when a
+// LabelGetter is provided.
+func EvaluateRoleDefinitionWithLabels(
+	ctx context.Context,
+	policy *authorizationv1alpha1.RBACPolicy,
+	rrd *authorizationv1alpha1.RestrictedRoleDefinition,
+	labelGetter LabelGetter,
+) []Violation {
 	var violations []Violation
 
 	// Enforce appliesTo scope: the Role's target namespace must be within the policy's
-	// declared governance scope (static Namespaces list).
-	if rrd.Spec.TargetNamespace != "" && !namespaceInScope(policy.Spec.AppliesTo, rrd.Spec.TargetNamespace) {
+	// declared governance scope.
+	if rrd.Spec.TargetNamespace != "" && !namespaceInScope(ctx, policy.Spec.AppliesTo, rrd.Spec.TargetNamespace, labelGetter) {
 		violations = append(violations, Violation{
 			Field:   "spec.targetNamespace",
 			Message: fmt.Sprintf("namespace %q is outside the policy's appliesTo scope", rrd.Spec.TargetNamespace),

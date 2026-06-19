@@ -5,6 +5,7 @@
 package policy
 
 import (
+	"context"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -635,6 +636,54 @@ func TestEvaluateRoleDefinition_AppliesToScope(t *testing.T) {
 		violations := EvaluateRoleDefinition(policy, rrd)
 		if len(violations) != 0 {
 			t.Errorf("expected no violations for ClusterRole (no targetNamespace), got %v", violations)
+		}
+	})
+
+	t.Run("selector-only scope allows matching targetNamespace", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				AppliesTo: authorizationv1alpha1.PolicyScope{
+					NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "a"}},
+				},
+			},
+		}
+		rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+			Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+				TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
+				TargetName:      "test-role",
+				TargetNamespace: "namespace-a",
+			},
+		}
+		lg := &fakeLabelGetter{namespaces: map[string]map[string]string{
+			"namespace-a": {"team": "a"},
+		}}
+		violations := EvaluateRoleDefinitionWithLabels(context.Background(), policy, rrd, lg)
+		if len(violations) != 0 {
+			t.Errorf("expected no violations for selector-matching targetNamespace, got %v", violations)
+		}
+	})
+
+	t.Run("selector-only scope rejects non-matching targetNamespace", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				AppliesTo: authorizationv1alpha1.PolicyScope{
+					NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "a"}},
+				},
+			},
+		}
+		rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+			Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+				TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
+				TargetName:      "test-role",
+				TargetNamespace: "namespace-b",
+			},
+		}
+		lg := &fakeLabelGetter{namespaces: map[string]map[string]string{
+			"namespace-b": {"team": "b"},
+		}}
+		violations := EvaluateRoleDefinitionWithLabels(context.Background(), policy, rrd, lg)
+		if len(violations) != 1 {
+			t.Fatalf("expected 1 violation for selector-nonmatching targetNamespace, got %d: %v", len(violations), violations)
 		}
 	})
 }
