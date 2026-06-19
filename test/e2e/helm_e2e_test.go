@@ -483,7 +483,11 @@ spec:
 			Eventually(func() error {
 				return checkResourceExists("webhookauthorizer", "helm-e2e-authorizer", "")
 			}, reconcileTimeout, pollingInterval).Should(Succeed())
-			// Note: .status.authorizerConfigured is not implemented in the controller
+
+			By("Verifying WebhookAuthorizer status is configured")
+			Eventually(func() bool {
+				return checkWebhookAuthorizerConfigured("helm-e2e-authorizer")
+			}, reconcileTimeout, pollingInterval).Should(BeTrue())
 		})
 
 		It("should create WebhookAuthorizer with denied principals", func() {
@@ -515,7 +519,11 @@ spec:
 			Eventually(func() error {
 				return checkResourceExists("webhookauthorizer", "helm-e2e-authorizer-deny", "")
 			}, reconcileTimeout, pollingInterval).Should(Succeed())
-			// Note: .status.authorizerConfigured is not implemented in the controller
+
+			By("Verifying WebhookAuthorizer status is configured")
+			Eventually(func() bool {
+				return checkWebhookAuthorizerConfigured("helm-e2e-authorizer-deny")
+			}, reconcileTimeout, pollingInterval).Should(BeTrue())
 		})
 
 		It("should create WebhookAuthorizer with non-resource rules", func() {
@@ -546,7 +554,11 @@ spec:
 			Eventually(func() error {
 				return checkResourceExists("webhookauthorizer", "helm-e2e-authorizer-nonresource", "")
 			}, reconcileTimeout, pollingInterval).Should(Succeed())
-			// Note: .status.authorizerConfigured is not implemented in the controller
+
+			By("Verifying WebhookAuthorizer status is configured")
+			Eventually(func() bool {
+				return checkWebhookAuthorizerConfigured("helm-e2e-authorizer-nonresource")
+			}, reconcileTimeout, pollingInterval).Should(BeTrue())
 		})
 	})
 

@@ -105,7 +105,7 @@ resources:
 |--------|------|--------|-------------|
 | `auth_operator_authorizer_requests_total` | Counter | `decision`, `authorizer` | Total SubjectAccessReview evaluations. `decision`: `allowed`, `denied`, `no-opinion`, `error`. `authorizer`: WebhookAuthorizer CR name or `none`. |
 | `auth_operator_authorizer_request_duration_seconds` | Histogram | `decision` | Duration of SAR evaluation (seconds). |
-| `auth_operator_authorizer_active_rules` | Gauge | — | Total resource and non-resource rules across all WebhookAuthorizer resources (global + scoped). Updated on every request. |
+| `auth_operator_authorizer_active_rules` | Gauge | — | Total resource and non-resource rule entries across all WebhookAuthorizer resources. Includes global and namespace-scoped authorizers, even when a scoped authorizer is not evaluated for the current request. Updated on every request. |
 | `auth_operator_authorizer_denied_principal_hits_total` | Counter | `authorizer` | Number of SAR denials due to denied-principal matching. |
 | `auth_operator_authorizer_rate_limited_total` | Counter | — | SubjectAccessReview requests rejected due to rate limiting on the `/authorize` endpoint. A sustained non-zero rate indicates traffic exceeds `--authorize-rate-limit`. |
 

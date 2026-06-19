@@ -77,7 +77,7 @@ Auth Operator provides three CRDs for managing RBAC:
 |-----|---------|
 | **RoleDefinition** | Generates ClusterRoles/Roles using deny-list pattern |
 | **BindDefinition** | Creates ClusterRoleBindings/RoleBindings for subjects |
-| **WebhookAuthorizer** | Configures webhook-based authorization *(planned)* |
+| **WebhookAuthorizer** | Configures webhook-based SubjectAccessReview authorization |
 
 ### 1. Create a RoleDefinition
 
@@ -218,11 +218,21 @@ Bindings are named as: `{targetName}-{roleName}-binding`
 
 ### WebhookAuthorizer
 
-Configures fine-grained authorization decisions via webhook-based authorization.
+Configures fine-grained SubjectAccessReview decisions for the webhook server.
+Within a WebhookAuthorizer, denied principals are rejected before allow rules
+are evaluated. Allowed principals must also match a resource or non-resource
+rule. When multiple authorizers match, they are evaluated deterministically by
+name; the first allow or deny decision is returned.
 
-*Not yet implemented.*
+**Key capabilities:**
+- **Resource and non-resource rules** - Match Kubernetes API requests or paths such as `/healthz`
+- **Allow and deny principals** - Match users, groups, or ServiceAccount identities
+- **Namespace scoping** - Use `namespaceSelector` to limit resource requests to matching namespaces
+- **Status reporting** - Sets `status.authorizerConfigured=true` and `Ready=True` after reconciliation
 
 ![WebhookAuthorizer](docs/images/authorizer.png)
+
+**Example:** See [config/samples/authorization_v1alpha1_webhookauthorizer.yaml](config/samples/authorization_v1alpha1_webhookauthorizer.yaml)
 
 ---
 

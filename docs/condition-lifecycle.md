@@ -231,8 +231,27 @@ the operator has cleaned up dependent resources.
 
 ## WebhookAuthorizer-Specific Conditions
 
-The WebhookAuthorizer controller (see issue #49) uses these conditions to
-report the health and validity of each WebhookAuthorizer resource.
+The WebhookAuthorizer controller reports reconciliation progress with the
+standard `Reconciling`, `Ready`, and `Stalled` conditions. It also updates
+`status.observedGeneration` and `status.authorizerConfigured`.
+
+The admission webhook rejects malformed rules and principal-free specs before
+they are reconciled. Runtime status is therefore focused on whether the
+controller accepted the spec and whether namespace selector validation
+succeeded.
+
+The API package still exports legacy WebhookAuthorizer condition constants such
+as `RulesValid`, `NamespaceSelectorValid`, and `PrincipalConfigured` for
+compatibility. The current controller does not set those conditions.
+
+### Reconciling
+
+| Status | Reason | Message |
+|--------|--------|---------|
+| `True` | `Progressing` | Controller is reconciling the resource |
+
+Set before validation and cleared when the resource becomes `Ready` or
+`Stalled`.
 
 ### Ready
 
@@ -240,45 +259,40 @@ Overall readiness of the WebhookAuthorizer.
 
 | Status | Reason | Message |
 |--------|--------|---------|
-| `True` | `AuthorizerReady` | All rules are valid and the authorizer is actively processing requests |
-| `False` | `InvalidRules` | One or more resource/non-resource rules are malformed: *\<detail\>* |
-| `False` | `InvalidNamespaceSelector` | The namespace selector cannot be parsed: *\<detail\>* |
-| `False` | `NoPrincipals` | Neither allowedPrincipals nor deniedPrincipals are defined |
+| `True` | `Reconciled` | Resource is fully reconciled |
+| `False` | `Progressing` | Controller is reconciling the resource |
+| `False` | `Error` | Error during reconciliation: check operator logs for details |
 
-### RulesValid
+When `Ready=True`, the controller also sets
+`status.authorizerConfigured=true`.
 
-Validation status of resource and non-resource rules.
+### Stalled
 
-| Status | Reason | Message |
-|--------|--------|---------|
-| `True` | `AllRulesValid` | All resourceRules and nonResourceRules are syntactically valid |
-| `False` | `InvalidResourceRule` | A resourceRule contains invalid API groups, resources, or verbs: *\<detail\>* |
-| `False` | `InvalidNonResourceRule` | A nonResourceRule contains invalid paths or verbs: *\<detail\>* |
-
-### NamespaceSelectorValid
-
-Status of the namespace selector.
+Permanent reconciliation failure. The current controller uses this when the
+namespace selector cannot be parsed.
 
 | Status | Reason | Message |
 |--------|--------|---------|
-| `True` | `SelectorValid` | Namespace selector is parseable and matches namespaces |
-| `True` | `SelectorEmpty` | No namespace selector defined (matches all namespaces) |
-| `False` | `SelectorInvalid` | Namespace selector cannot be parsed: *\<detail\>* |
+| `True` | `Error` | Error during reconciliation: check operator logs for details |
 
-### PrincipalConfigured
+When `Stalled=True`, the controller sets `status.authorizerConfigured=false`
+and waits for a spec change before reconciling again.
 
-Status of principal configuration.
+### authorizerConfigured
 
-| Status | Reason | Message |
-|--------|--------|---------|
-| `True` | `PrincipalsConfigured` | AllowedPrincipals and/or DeniedPrincipals are defined |
-| `False` | `NoPrincipalsConfigured` | No principals defined — authorizer will never match |
-| `Unknown` | `PrincipalOverlap` | A principal appears in both allowed and denied lists: *\<detail\>* |
+`status.authorizerConfigured` is a compact readiness flag for scripts and
+JSONPath checks:
 
-### Reconciliation Sequence (WebhookAuthorizer)
+| Value | Meaning |
+|-------|---------|
+| `true` | The controller reconciled the WebhookAuthorizer and marked it `Ready=True` |
+| `false` or unset | Reconciliation has not completed or the resource is stalled |
+
+### Reconciliation Sequence
 
 ```
-NamespaceSelectorValid → RulesValid → PrincipalConfigured → Ready
+Reconciling -> Ready
+Reconciling -> Stalled
 ```
 
 ---
@@ -327,15 +341,14 @@ kubectl get roledefinitions -o json | \
 
 ## Operational Guidance
 
-### What to Do When a Condition Is False
+### Status and Admission Signals
 
-| Condition | When False | Recommended Action |
-|-----------|-----------|-------------------|
-| `Ready` | Resource not fully reconciled | Check `Stalled` and `Reconciling` conditions for details |
-| `RoleRefsValid` | Referenced roles missing | Create the missing ClusterRole/Role, or remove the reference from the BindDefinition |
-| `RulesValid` | Invalid resource/non-resource rules | Fix the rule syntax in the WebhookAuthorizer spec |
-| `NamespaceSelectorValid` | Unparseable label selector | Fix the label selector expression in the spec |
-| `PrincipalConfigured` | No principals defined | Add `allowedPrincipals` or `deniedPrincipals` to the WebhookAuthorizer |
+| Signal | Meaning | Recommended Action |
+|--------|---------|-------------------|
+| `Ready=False` | Resource not fully reconciled | Check `Stalled` and `Reconciling` conditions for details |
+| `RoleRefsValid=False` | Referenced roles missing | Create the missing ClusterRole/Role, or remove the reference from the BindDefinition |
+| `Stalled=True` | WebhookAuthorizer namespace selector failed validation during reconciliation | Fix the label selector expression in the spec |
+| Admission rejection | Invalid WebhookAuthorizer rules or missing principals | Fix the rejected field from the API error and apply the resource again |
 
 ### What to Do When a Condition Is True (Abnormal-True)
 
