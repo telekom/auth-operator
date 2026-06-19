@@ -443,8 +443,8 @@ func TestEvaluateSAR_ResultFields(t *testing.T) {
 }
 
 func TestEvaluateSAR_NamespaceGetError(t *testing.T) {
-	// Build a scheme that includes corev1 so the fake client recognises
-	// Namespace resources and returns a proper NotFound error.
+	// Build a scheme with Kubernetes built-in types so the fake client
+	// recognises Namespace resources and returns a proper NotFound error.
 	s := newSchemeWithCore(t)
 
 	// WebhookAuthorizer with a NamespaceSelector so evaluateSAR will call
@@ -486,8 +486,8 @@ func TestEvaluateSAR_NamespaceGetError(t *testing.T) {
 // TestServeHTTP_NamespaceGetError_Returns500 verifies that when evaluateSAR
 // returns an error (e.g. namespace Get fails), ServeHTTP responds with 500.
 func TestServeHTTP_NamespaceGetError_Returns500(t *testing.T) {
-	// Build a scheme that includes corev1 so the fake client recognises
-	// Namespace resources and returns a proper NotFound error.
+	// Build a scheme with Kubernetes built-in types so the fake client
+	// recognises Namespace resources and returns a proper NotFound error.
 	s := newSchemeWithCore(t)
 
 	// WebhookAuthorizer with a NamespaceSelector so it becomes a scoped authorizer.
