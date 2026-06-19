@@ -235,7 +235,8 @@ The WebhookAuthorizer controller reports reconciliation progress with the
 standard `Reconciling`, `Ready`, and `Stalled` conditions. It also updates
 `status.observedGeneration` and `status.authorizerConfigured`.
 
-The admission webhook rejects malformed rules and principal-free specs before
+Kubernetes admission rejects malformed rules and principal-free specs through
+CRD schema/CEL validation and the WebhookAuthorizer validation webhook before
 they are reconciled. Runtime status is therefore focused on whether the
 controller accepted the spec and whether namespace selector validation
 succeeded.
