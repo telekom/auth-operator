@@ -113,6 +113,27 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("name must not be empty"))
 		})
+
+		It("should fail on field-manager conflicts unless ForceOwnership is explicit", func() {
+			rules := []rbacv1.PolicyRule{
+				{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}},
+			}
+			externalRules := []rbacv1.PolicyRule{
+				{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"list"}},
+			}
+			externalAC := ssa.ClusterRoleWithLabelsAndRules("ph-conflict-cr", nil, externalRules)
+			err := k8sClient.Apply(testCtx, externalAC, client.FieldOwner("external-agent"), client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+
+			ac := ssa.ClusterRoleWithLabelsAndRules("ph-conflict-cr", nil, rules)
+			_, err = ssa.PatchApplyClusterRole(testCtx, k8sClient, ac)
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsConflict(err)).To(BeTrue())
+
+			result, err := ssa.PatchApplyClusterRole(testCtx, k8sClient, ac, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+		})
 	})
 
 	// -----------------------------------------------------------------------
@@ -169,6 +190,27 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			_, err := ssa.PatchApplyRole(testCtx, k8sClient, ac)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("namespace"))
+		})
+
+		It("should fail on field-manager conflicts unless ForceOwnership is explicit", func() {
+			rules := []rbacv1.PolicyRule{
+				{APIGroups: []string{""}, Resources: []string{"configmaps"}, Verbs: []string{"get"}},
+			}
+			externalRules := []rbacv1.PolicyRule{
+				{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"list"}},
+			}
+			externalAC := ssa.RoleWithLabelsAndRules("ph-conflict-role", "default", nil, externalRules)
+			err := k8sClient.Apply(testCtx, externalAC, client.FieldOwner("external-agent"), client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+
+			ac := ssa.RoleWithLabelsAndRules("ph-conflict-role", "default", nil, rules)
+			_, err = ssa.PatchApplyRole(testCtx, k8sClient, ac)
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsConflict(err)).To(BeTrue())
+
+			result, err := ssa.PatchApplyRole(testCtx, k8sClient, ac, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
 		})
 	})
 
@@ -311,6 +353,24 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			ac := ssa.RoleBindingWithSubjectsAndRoleRef("test", "", nil, nil, roleRef)
 			_, err := ssa.PatchApplyRoleBinding(testCtx, k8sClient, ac)
 			Expect(err).To(HaveOccurred())
+		})
+
+		It("should fail on field-manager conflicts unless ForceOwnership is explicit", func() {
+			subjects := []rbacv1.Subject{{Kind: "ServiceAccount", Name: "conflict-sa", Namespace: "default"}}
+			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: "ph-rb-target"}
+			externalSubjects := []rbacv1.Subject{{Kind: "Group", Name: "external-group", APIGroup: rbacv1.GroupName}}
+			externalAC := ssa.RoleBindingWithSubjectsAndRoleRef("ph-conflict-rb", "default", nil, externalSubjects, roleRef)
+			err := k8sClient.Apply(testCtx, externalAC, client.FieldOwner("external-agent"), client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+
+			ac := ssa.RoleBindingWithSubjectsAndRoleRef("ph-conflict-rb", "default", nil, subjects, roleRef)
+			_, err = ssa.PatchApplyRoleBinding(testCtx, k8sClient, ac)
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsConflict(err)).To(BeTrue())
+
+			result, err := ssa.PatchApplyRoleBinding(testCtx, k8sClient, ac, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
 		})
 	})
 
