@@ -489,7 +489,7 @@ func TestEvaluateSAR_ResultFields(t *testing.T) {
 		}
 		res, err := handler.evaluateSAR(context.Background(), sar, waList.Items)
 		if err != nil {
-			t.Fatal("unexpected error:", err)
+			t.Fatalf("evaluateSAR returned unexpected error: %v", err)
 		}
 		if !res.allowed {
 			t.Fatal("expected allowed")
@@ -511,7 +511,7 @@ func TestEvaluateSAR_ResultFields(t *testing.T) {
 		}
 		res, err := handler.evaluateSAR(context.Background(), sar, waList.Items)
 		if err != nil {
-			t.Fatal("unexpected error:", err)
+			t.Fatalf("evaluateSAR returned unexpected error: %v", err)
 		}
 		if res.allowed {
 			t.Fatal("expected denied")
@@ -536,7 +536,7 @@ func TestEvaluateSAR_ResultFields(t *testing.T) {
 		}
 		res, err := handler.evaluateSAR(context.Background(), sar, waList.Items)
 		if err != nil {
-			t.Fatal("unexpected error:", err)
+			t.Fatalf("evaluateSAR returned unexpected error: %v", err)
 		}
 		if res.allowed {
 			t.Fatal("expected denied")
@@ -1516,7 +1516,9 @@ func TestEvaluateSAR_NamespaceLabelCache_SingleGetPerNamespace(t *testing.T) {
 			},
 		}
 
-		handler.evaluateSAR(context.Background(), sar, []authzv1alpha1.WebhookAuthorizer{wa1, wa2, wa3})
+		if _, err := handler.evaluateSAR(context.Background(), sar, []authzv1alpha1.WebhookAuthorizer{wa1, wa2, wa3}); err != nil {
+			t.Fatalf("evaluateSAR returned unexpected error: %v", err)
+		}
 
 		if got := counter.getCount.Load(); got != 1 {
 			t.Errorf("expected exactly 1 namespace Get() for 3 authorizers targeting the same namespace, got %d", got)
@@ -1540,10 +1542,54 @@ func TestEvaluateSAR_NamespaceLabelCache_SingleGetPerNamespace(t *testing.T) {
 			},
 		}
 
-		handler.evaluateSAR(context.Background(), sar, []authzv1alpha1.WebhookAuthorizer{wa1, wa2, wa3})
+		if _, err := handler.evaluateSAR(context.Background(), sar, []authzv1alpha1.WebhookAuthorizer{wa1, wa2, wa3}); err == nil {
+			t.Fatal("expected namespace lookup error, got nil")
+		}
 
 		if got := counter.getCount.Load(); got != 1 {
 			t.Errorf("expected exactly 1 namespace Get() for missing namespace (negative cache), got %d", got)
 		}
 	})
+}
+
+func TestServeHTTP_NamespaceLabelCacheError_Returns500(t *testing.T) {
+	scheme := newScheme(t)
+
+	wa := &authzv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{Name: "scoped-wa"},
+		Spec: authzv1alpha1.WebhookAuthorizerSpec{
+			NamespaceSelector: metav1.LabelSelector{
+				MatchLabels: map[string]string{"env": "prod"},
+			},
+			AllowedPrincipals: []authzv1alpha1.Principal{{User: "alice"}},
+			ResourceRules: []authzv1.ResourceRule{
+				{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods"}},
+			},
+		},
+	}
+	cl := newIndexedClient(scheme, wa)
+	handler := &Authorizer{Client: cl, Log: logr.Discard()}
+
+	sar := authzv1.SubjectAccessReview{
+		Spec: authzv1.SubjectAccessReviewSpec{
+			User: "alice",
+			ResourceAttributes: &authzv1.ResourceAttributes{
+				Namespace: "missing-ns",
+				Verb:      "get",
+				Resource:  "pods",
+			},
+		},
+	}
+	body, err := json.Marshal(sar)
+	if err != nil {
+		t.Fatalf("failed to marshal SAR: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status %d, got %d; body: %s", http.StatusInternalServerError, rec.Code, rec.Body.String())
+	}
 }
