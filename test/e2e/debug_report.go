@@ -16,8 +16,12 @@ import (
 	"github.com/telekom/auth-operator/test/utils"
 )
 
-// statusTrue is the status condition value for ready nodes.
-const statusTrue = "True"
+const (
+	// statusTrue is the status condition value for ready nodes.
+	statusTrue = "True"
+	// statusBoolTrue is the lowercase boolean value emitted by kubectl JSONPath.
+	statusBoolTrue = "true"
+)
 
 // DebugReport represents a structured test debug report.
 type DebugReport struct {

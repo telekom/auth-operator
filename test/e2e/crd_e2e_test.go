@@ -585,7 +585,7 @@ func checkWebhookAuthorizerConfigured(name string) bool {
 	if err != nil {
 		return false
 	}
-	return strings.TrimSpace(string(output)) == "true"
+	return strings.TrimSpace(string(output)) == statusBoolTrue
 }
 
 func ensureTestNamespace() {

@@ -20,7 +20,7 @@ import (
 
 var (
 	// skipClusterSetup allows skipping cluster setup when running against an existing cluster
-	skipClusterSetup = os.Getenv("SKIP_CLUSTER_SETUP") == "true"
+	skipClusterSetup = os.Getenv("SKIP_CLUSTER_SETUP") == statusBoolTrue
 	// kindClusterName is the name of the kind cluster to use
 	kindClusterName = getEnvOrDefault("KIND_CLUSTER", "auth-operator-e2e")
 	// projectImage is the operator image to test
@@ -151,7 +151,7 @@ var _ = AfterEach(func() {
 		report.FullText(), report.State, report.StartTime.UTC().Format(time.RFC3339), report.EndTime.UTC().Format(time.RFC3339), report.RunTime)
 	_ = utils.SaveDebugInfoToFile(outputDir, "summary.md", summary)
 
-	forceAll := os.Getenv("E2E_COLLECT_ALL_SPECS") == "true"
+	forceAll := os.Getenv("E2E_COLLECT_ALL_SPECS") == statusBoolTrue
 	if report.Failed() || forceAll {
 		prevOutputDir := os.Getenv("E2E_OUTPUT_DIR")
 		_ = os.Setenv("E2E_OUTPUT_DIR", outputDir)
