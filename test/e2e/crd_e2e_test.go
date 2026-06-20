@@ -642,7 +642,12 @@ func testNamespaceDeleted() (bool, error) {
 }
 
 func crdE2EFixtureResourceFiles() ([]string, error) {
-	kustomizationPath := filepath.Join(fixturesPath, "kustomization.yaml")
+	projectDir, err := utils.GetProjectDir()
+	if err != nil {
+		return nil, fmt.Errorf("locate project dir: %w", err)
+	}
+	fixtureDir := filepath.Join(projectDir, fixturesPath)
+	kustomizationPath := filepath.Join(fixtureDir, "kustomization.yaml")
 	data, err := os.ReadFile(kustomizationPath)
 	if err != nil {
 		return nil, fmt.Errorf("read fixture kustomization: %w", err)
@@ -658,7 +663,7 @@ func crdE2EFixtureResourceFiles() ([]string, error) {
 		if resource == "namespace_labeled.yaml" {
 			continue
 		}
-		resources = append(resources, resource)
+		resources = append(resources, filepath.Join(fixtureDir, resource))
 	}
 	return resources, nil
 }
@@ -671,8 +676,8 @@ func cleanupCRDE2ETestState() {
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to read CRD e2e fixture resources")
 
 	for _, fixtureFile := range fixtureFiles {
-		cmd := utils.CommandContext(context.Background(), "kubectl", "delete", "-f", filepath.Join(fixturesPath, fixtureFile),
-			"--ignore-not-found=true", "--wait=false", "--timeout=30s")
+		cmd := utils.CommandContext(context.Background(), "kubectl", "delete", "-f", fixtureFile,
+			"--ignore-not-found=true", "--wait=false")
 		if _, err := utils.Run(cmd); err != nil {
 			_, _ = fmt.Fprintf(GinkgoWriter, "warning: failed to delete CRD e2e fixture %s: %v\n", fixtureFile, err)
 		}
