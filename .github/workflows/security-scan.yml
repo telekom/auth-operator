@@ -188,8 +188,9 @@ jobs:
           scan-type: 'config'
           scan-ref: '/tmp/helm-rendered.yaml'
           format: 'table'
-          severity: 'CRITICAL,HIGH,MEDIUM'
-          exit-code: '0'  # Don't fail on config issues, just report
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          trivyignores: '.trivyignore'
 
   dependency-review:
     name: Dependency Review
