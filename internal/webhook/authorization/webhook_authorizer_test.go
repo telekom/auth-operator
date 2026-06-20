@@ -68,6 +68,97 @@ func marshalSAR(t *testing.T, sar authzv1.SubjectAccessReview) []byte {
 	return body
 }
 
+func TestServeHTTP_EvaluatesMatchingAuthorizersByName(t *testing.T) {
+	scheme := newScheme(t)
+	sar := authzv1.SubjectAccessReview{
+		Spec: authzv1.SubjectAccessReviewSpec{
+			User: "alice",
+			ResourceAttributes: &authzv1.ResourceAttributes{
+				Verb:     "get",
+				Group:    "",
+				Resource: "pods",
+			},
+		},
+	}
+
+	newAllowAuthorizer := func(name string) authzv1alpha1.WebhookAuthorizer {
+		return authzv1alpha1.WebhookAuthorizer{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec: authzv1alpha1.WebhookAuthorizerSpec{
+				AllowedPrincipals: []authzv1alpha1.Principal{{User: "alice"}},
+				ResourceRules: []authzv1.ResourceRule{
+					{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods"}},
+				},
+			},
+		}
+	}
+	newDenyAuthorizer := func(name string) authzv1alpha1.WebhookAuthorizer {
+		return authzv1alpha1.WebhookAuthorizer{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec: authzv1alpha1.WebhookAuthorizerSpec{
+				DeniedPrincipals: []authzv1alpha1.Principal{{User: "alice"}},
+			},
+		}
+	}
+
+	tests := []struct {
+		name       string
+		authorizer []authzv1alpha1.WebhookAuthorizer
+		wantAllow  bool
+		wantReason string
+	}{
+		{
+			name: "first authorizer allows before later deny",
+			authorizer: []authzv1alpha1.WebhookAuthorizer{
+				newDenyAuthorizer("zzz-deny"),
+				newAllowAuthorizer("aaa-allow"),
+			},
+			wantAllow:  true,
+			wantReason: "aaa-allow",
+		},
+		{
+			name: "first authorizer denies before later allow",
+			authorizer: []authzv1alpha1.WebhookAuthorizer{
+				newAllowAuthorizer("zzz-allow"),
+				newDenyAuthorizer("aaa-deny"),
+			},
+			wantAllow:  false,
+			wantReason: "aaa-deny",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			objs := make([]client.Object, 0, len(tt.authorizer))
+			for i := range tt.authorizer {
+				objs = append(objs, &tt.authorizer[i])
+			}
+			handler := &Authorizer{
+				Client: newIndexedClient(scheme, objs...),
+				Log:    logr.Discard(),
+			}
+
+			req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(marshalSAR(t, sar)))
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d", rec.Code)
+			}
+
+			var resp authzv1.SubjectAccessReview
+			if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+				t.Fatalf("failed to decode response: %v", err)
+			}
+			if resp.Status.Allowed != tt.wantAllow {
+				t.Fatalf("expected allowed=%t, got %+v", tt.wantAllow, resp.Status)
+			}
+			if !strings.Contains(resp.Status.Reason, tt.wantReason) {
+				t.Fatalf("expected reason to mention %q, got %q", tt.wantReason, resp.Status.Reason)
+			}
+		})
+	}
+}
+
 func TestAuditLog_DenyDecisionAtV0(t *testing.T) {
 	var buf strings.Builder
 	logger := capturingLogger(&buf, 0)

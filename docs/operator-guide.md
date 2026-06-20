@@ -350,6 +350,9 @@ Key metrics:
 | `auth_operator_rbac_resources_applied_total` | Counter | RBAC resources created/updated |
 | `auth_operator_role_refs_missing` | Gauge | Missing role references |
 | `auth_operator_namespaces_active` | Gauge | Namespaces matching selectors |
+| `auth_operator_authorizer_requests_total` | Counter | WebhookAuthorizer SubjectAccessReview decisions by result and authorizer |
+| `auth_operator_authorizer_active_rules` | Gauge | Active WebhookAuthorizer resource and non-resource rule entries |
+| `auth_operator_authorizer_rate_limited_total` | Counter | SubjectAccessReview requests rejected by the `/authorize` rate limiter |
 
 ### Enable ServiceMonitor
 

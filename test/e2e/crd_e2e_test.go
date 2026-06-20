@@ -340,7 +340,11 @@ var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 			Eventually(func() error {
 				return checkResourceExists("webhookauthorizer", "e2e-test-authorizer-allow", "")
 			}, reconcileTimeout, pollingInterval).Should(Succeed())
-			// Note: .status.authorizerConfigured is not implemented in the controller
+
+			By("Verifying WebhookAuthorizer status is configured")
+			Eventually(func() bool {
+				return checkWebhookAuthorizerConfigured("e2e-test-authorizer-allow")
+			}, reconcileTimeout, pollingInterval).Should(BeTrue())
 
 			By("Verifying WebhookAuthorizer spec is correct")
 			cmd := utils.CommandContext(context.Background(), "kubectl", "get", "webhookauthorizer", "e2e-test-authorizer-allow",
@@ -358,7 +362,11 @@ var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 			Eventually(func() error {
 				return checkResourceExists("webhookauthorizer", "e2e-test-authorizer-deny", "")
 			}, reconcileTimeout, pollingInterval).Should(Succeed())
-			// Note: .status.authorizerConfigured is not implemented in the controller
+
+			By("Verifying WebhookAuthorizer status is configured")
+			Eventually(func() bool {
+				return checkWebhookAuthorizerConfigured("e2e-test-authorizer-deny")
+			}, reconcileTimeout, pollingInterval).Should(BeTrue())
 
 			By("Verifying WebhookAuthorizer has denied principals")
 			cmd := utils.CommandContext(context.Background(), "kubectl", "get", "webhookauthorizer", "e2e-test-authorizer-deny",
@@ -376,7 +384,11 @@ var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 			Eventually(func() error {
 				return checkResourceExists("webhookauthorizer", "e2e-test-authorizer-nonresource", "")
 			}, reconcileTimeout, pollingInterval).Should(Succeed())
-			// Note: .status.authorizerConfigured is not implemented in the controller
+
+			By("Verifying WebhookAuthorizer status is configured")
+			Eventually(func() bool {
+				return checkWebhookAuthorizerConfigured("e2e-test-authorizer-nonresource")
+			}, reconcileTimeout, pollingInterval).Should(BeTrue())
 
 			By("Verifying WebhookAuthorizer has non-resource rules")
 			cmd := utils.CommandContext(context.Background(), "kubectl", "get", "webhookauthorizer", "e2e-test-authorizer-nonresource",
@@ -563,6 +575,16 @@ func checkBindDefinitionReconciled(name string) bool {
 		return false
 	}
 	return string(output) == statusTrue
+}
+
+func checkWebhookAuthorizerConfigured(name string) bool {
+	cmd := exec.CommandContext(context.Background(), "kubectl", "get", "webhookauthorizer", name,
+		"-o", "jsonpath={.status.authorizerConfigured}")
+	output, err := utils.Run(cmd)
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(output)) == statusBoolTrue
 }
 
 func ensureTestNamespace() {
