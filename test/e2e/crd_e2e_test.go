@@ -574,16 +574,43 @@ func ensureTestNamespace() {
 }
 
 func waitForTerminatingTestNamespace() {
-	cmd := utils.CommandContext(context.Background(), "kubectl", "get", "namespace", testNamespace, "-o", "jsonpath={.metadata.deletionTimestamp}")
-	output, err := utils.Run(cmd)
-	if err != nil || strings.TrimSpace(string(output)) == "" {
+	var deletionTimestamp []byte
+	Eventually(func() error {
+		var err error
+		deletionTimestamp, err = getTestNamespaceDeletionTimestamp()
+		return err
+	}, shortTimeout, shortPollInterval).Should(Succeed())
+	if strings.TrimSpace(string(deletionTimestamp)) == "" {
 		return
 	}
 
 	By("Waiting for terminating test namespace to be deleted")
-	Eventually(func() bool {
-		return checkResourceExists("namespace", testNamespace, "") != nil
+	Eventually(func() (bool, error) {
+		return testNamespaceDeleted()
 	}, reconcileTimeout, pollingInterval).Should(BeTrue())
+}
+
+func getTestNamespaceDeletionTimestamp() ([]byte, error) {
+	cmd := utils.CommandContext(
+		context.Background(),
+		"kubectl",
+		"get",
+		"namespace",
+		testNamespace,
+		"--ignore-not-found=true",
+		"-o",
+		"jsonpath={.metadata.deletionTimestamp}",
+	)
+	return utils.Run(cmd)
+}
+
+func testNamespaceDeleted() (bool, error) {
+	cmd := utils.CommandContext(context.Background(), "kubectl", "get", "namespace", testNamespace, "--ignore-not-found=true", "-o", "name")
+	output, err := utils.Run(cmd)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(string(output)) == "", nil
 }
 
 func cleanupCRDE2ETestState() {
