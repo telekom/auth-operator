@@ -56,7 +56,7 @@ func (v *RestrictedRoleDefinitionValidator) ValidateCreate(ctx context.Context, 
 	if err := validateDefaultPolicyForRequester(
 		ctx,
 		v.Client,
-		schema.GroupKind{Group: GroupVersion.Group, Kind: "RestrictedRoleDefinition"},
+		schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedRoleDefinitionKind},
 		obj.Name,
 		obj.Spec.PolicyRef.Name,
 	); err != nil {
@@ -90,7 +90,7 @@ func (v *RestrictedRoleDefinitionValidator) ValidateUpdate(ctx context.Context, 
 	}
 	if len(allErrs) > 0 {
 		return nil, apierrors.NewInvalid(
-			schema.GroupKind{Group: GroupVersion.Group, Kind: "RestrictedRoleDefinition"},
+			schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedRoleDefinitionKind},
 			newObj.Name, allErrs)
 	}
 
@@ -132,7 +132,7 @@ func (v *RestrictedRoleDefinitionValidator) validateRestrictedRoleDefinitionSpec
 			logger.Info("validation failed: duplicate targetName",
 				"name", obj.Name, "targetName", obj.Spec.TargetName, "conflictsWith", existing.Name)
 			return apierrors.NewInvalid(
-				schema.GroupKind{Group: GroupVersion.Group, Kind: "RestrictedRoleDefinition"},
+				schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedRoleDefinitionKind},
 				obj.Name,
 				field.ErrorList{field.Duplicate(field.NewPath("spec", "targetName"),
 					fmt.Sprintf("%s (already used by RestrictedRoleDefinition %q)", obj.Spec.TargetName, existing.Name))})
@@ -151,7 +151,7 @@ func (v *RestrictedRoleDefinitionValidator) validateRestrictedRoleDefinitionSpec
 	for _, existing := range rdList.Items {
 		if roleTargetCollision(obj.Spec.TargetRole, obj.Spec.TargetNamespace, existing.Spec.TargetRole, existing.Spec.TargetNamespace) {
 			return apierrors.NewInvalid(
-				schema.GroupKind{Group: GroupVersion.Group, Kind: "RestrictedRoleDefinition"},
+				schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedRoleDefinitionKind},
 				obj.Name,
 				field.ErrorList{field.Duplicate(field.NewPath("spec", "targetName"),
 					fmt.Sprintf("%s (already used by RoleDefinition %q)", obj.Spec.TargetName, existing.Name))})
@@ -176,7 +176,7 @@ func validateNoDuplicateRestrictedRRDAPIs(obj *RestrictedRoleDefinition) error {
 	for i, group := range obj.Spec.RestrictedAPIs {
 		if prev, ok := seen[group.Name]; ok {
 			return apierrors.NewInvalid(
-				schema.GroupKind{Group: GroupVersion.Group, Kind: "RestrictedRoleDefinition"},
+				schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedRoleDefinitionKind},
 				obj.Name,
 				field.ErrorList{field.Duplicate(
 					field.NewPath("spec", "restrictedApis").Index(i).Child("name"),
@@ -196,7 +196,7 @@ func validateRestrictedRoleDefinitionAPIsVersions(obj *RestrictedRoleDefinition)
 		for j, gv := range group.Versions {
 			if !strings.HasPrefix(gv.Version, "v") || len(gv.Version) > maxVersionLength {
 				return apierrors.NewInvalid(
-					schema.GroupKind{Group: GroupVersion.Group, Kind: "RestrictedRoleDefinition"},
+					schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedRoleDefinitionKind},
 					obj.Name,
 					field.ErrorList{field.Invalid(
 						field.NewPath("spec", "restrictedApis").Index(i).Child("versions").Index(j).Child("version"),
@@ -216,7 +216,7 @@ func (v *RestrictedRoleDefinitionValidator) validatePolicyRefExists(ctx context.
 	if err := v.Client.Get(ctx, client.ObjectKey{Name: obj.Spec.PolicyRef.Name}, rbacPolicy); err != nil {
 		if apierrors.IsNotFound(err) {
 			return apierrors.NewInvalid(
-				schema.GroupKind{Group: GroupVersion.Group, Kind: "RestrictedRoleDefinition"},
+				schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedRoleDefinitionKind},
 				obj.Name,
 				field.ErrorList{field.NotFound(
 					field.NewPath("spec", "policyRef", "name"),

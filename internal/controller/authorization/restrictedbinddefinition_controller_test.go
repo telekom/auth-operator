@@ -843,7 +843,7 @@ func TestRBD_OwnerRefForRestricted(t *testing.T) {
 		},
 	}
 
-	ref := ownerRefForRestricted(rbd, "RestrictedBindDefinition")
+	ref := ownerRefForRestricted(rbd, authorizationv1alpha1.RestrictedBindDefinitionKind)
 	g.Expect(ref).NotTo(gomega.BeNil())
 	g.Expect(*ref.Name).To(gomega.Equal("owner-rbd"))
 	g.Expect(*ref.UID).To(gomega.Equal(types.UID("test-uid-123")))

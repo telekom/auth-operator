@@ -462,7 +462,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdReconcileResources(
 			crbName, helpers.BuildResourceLabels(rbd.Labels), rbd.Spec.Subjects,
 			rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: clusterRoleRef},
 		)
-		ac.WithOwnerReferences(ownerRefForRestricted(rbd, "RestrictedBindDefinition")).
+		ac.WithOwnerReferences(ownerRefForRestricted(rbd, authorizationv1alpha1.RestrictedBindDefinitionKind)).
 			WithAnnotations(helpers.BuildResourceAnnotations("RestrictedBindDefinition", rbd.Name))
 
 		if result, err := pkgssa.PatchApplyClusterRoleBinding(ctx, applyClient, ac, pkgssa.FieldOwnerFor(rbd.Name)); err != nil {
@@ -655,7 +655,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdEnsureServiceAccounts(
 
 		ac := pkgssa.ServiceAccountWith(subject.Name, subject.Namespace,
 			helpers.BuildResourceLabels(rbd.Labels), automountToken).
-			WithOwnerReferences(ownerRefForRestricted(rbd, "RestrictedBindDefinition")).
+			WithOwnerReferences(ownerRefForRestricted(rbd, authorizationv1alpha1.RestrictedBindDefinitionKind)).
 			WithAnnotations(helpers.BuildResourceAnnotations("RestrictedBindDefinition", rbd.Name))
 		if _, err := pkgssa.PatchApplyServiceAccount(ctx, applyClient, ac, pkgssa.FieldOwnerFor(rbd.Name)); err != nil {
 			return fmt.Errorf("apply ServiceAccount %s/%s: %w", subject.Namespace, subject.Name, err)
@@ -682,7 +682,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdEnsureRoleBinding(
 		rbName, namespace, helpers.BuildResourceLabels(rbd.Labels), rbd.Spec.Subjects,
 		rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: roleKind, Name: roleRef},
 	)
-	ac.WithOwnerReferences(ownerRefForRestricted(rbd, "RestrictedBindDefinition")).
+	ac.WithOwnerReferences(ownerRefForRestricted(rbd, authorizationv1alpha1.RestrictedBindDefinitionKind)).
 		WithAnnotations(helpers.BuildResourceAnnotations("RestrictedBindDefinition", rbd.Name))
 
 	if result, err := pkgssa.PatchApplyRoleBinding(ctx, applyClient, ac, pkgssa.FieldOwnerFor(rbd.Name)); err != nil {

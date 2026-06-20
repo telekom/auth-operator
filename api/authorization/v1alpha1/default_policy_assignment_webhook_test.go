@@ -96,7 +96,7 @@ func TestValidateDefaultPolicyForRequester(t *testing.T) {
 		},
 	).Build()
 
-	gk := schema.GroupKind{Group: GroupVersion.Group, Kind: "RestrictedRoleDefinition"}
+	gk := schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedRoleDefinitionKind}
 
 	ctxGroup := admission.NewContextWithRequest(context.Background(), admission.Request{
 		AdmissionRequest: admissionv1.AdmissionRequest{
@@ -133,6 +133,8 @@ func TestValidateDefaultPolicyForRequester(t *testing.T) {
 		t.Fatalf("expected invalid error for missing selected policy, got: %v", err)
 	} else if apierrors.IsInternalError(err) {
 		t.Fatalf("expected missing selected policy not to become internal error, got: %v", err)
+	} else if !strings.Contains(err.Error(), "spec.policyRef.name") {
+		t.Fatalf("expected error to identify spec.policyRef.name, got: %v", err)
 	} else if !strings.Contains(err.Error(), "missing-policy") {
 		t.Fatalf("expected error to mention missing policy, got: %v", err)
 	}
@@ -140,5 +142,24 @@ func TestValidateDefaultPolicyForRequester(t *testing.T) {
 	// No admission request in context: skip enforcement.
 	if err := validateDefaultPolicyForRequester(context.Background(), client, gk, "rrd-c", "anything"); err != nil {
 		t.Fatalf("expected no error without admission context, got: %v", err)
+	}
+}
+
+func TestSelectedPolicyMatchesRequesterReturnsNotFound(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := AddToScheme(scheme); err != nil {
+		t.Fatalf("add scheme: %v", err)
+	}
+
+	client := fake.NewClientBuilder().WithScheme(scheme).Build()
+	matches, err := selectedPolicyMatchesRequester(context.Background(), client, "missing-policy", "alice", nil)
+	if err == nil {
+		t.Fatal("expected missing selected policy to return an error")
+	}
+	if matches {
+		t.Fatal("expected missing selected policy not to match requester")
+	}
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("expected NotFound error for missing selected policy, got: %v", err)
 	}
 }

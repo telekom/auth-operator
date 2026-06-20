@@ -9,8 +9,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// RestrictedBindDefinition-related constants for finalizers.
+// RestrictedBindDefinition-related constants.
 const (
+	// RestrictedBindDefinitionKind is the Kubernetes kind name for RestrictedBindDefinition.
+	RestrictedBindDefinitionKind = "RestrictedBindDefinition"
 	// RestrictedBindDefinitionFinalizer is the finalizer used to prevent orphaned resources.
 	RestrictedBindDefinitionFinalizer = "restrictedbinddefinition.authorization.t-caas.telekom.com/finalizer"
 )

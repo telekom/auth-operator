@@ -39,11 +39,11 @@ func TestOwnerRefForRestricted(t *testing.T) {
 		},
 	}
 
-	ref := ownerRefForRestricted(obj, "RestrictedBindDefinition")
+	ref := ownerRefForRestricted(obj, authorizationv1alpha1.RestrictedBindDefinitionKind)
 	g.Expect(ref).NotTo(gomega.BeNil())
 	g.Expect(*ref.Name).To(gomega.Equal("test-rbd"))
 	g.Expect(*ref.UID).To(gomega.Equal(types.UID("uid-abc")))
-	g.Expect(*ref.Kind).To(gomega.Equal("RestrictedBindDefinition"))
+	g.Expect(*ref.Kind).To(gomega.Equal(authorizationv1alpha1.RestrictedBindDefinitionKind))
 	g.Expect(*ref.APIVersion).To(gomega.Equal("authorization.t-caas.telekom.com/v1alpha1"))
 	g.Expect(*ref.Controller).To(gomega.BeTrue())
 	g.Expect(*ref.BlockOwnerDeletion).To(gomega.BeTrue())
@@ -59,8 +59,8 @@ func TestOwnerRefForRestricted_DifferentKind(t *testing.T) {
 		},
 	}
 
-	ref := ownerRefForRestricted(obj, "RestrictedRoleDefinition")
-	g.Expect(*ref.Kind).To(gomega.Equal("RestrictedRoleDefinition"))
+	ref := ownerRefForRestricted(obj, authorizationv1alpha1.RestrictedRoleDefinitionKind)
+	g.Expect(*ref.Kind).To(gomega.Equal(authorizationv1alpha1.RestrictedRoleDefinitionKind))
 	g.Expect(*ref.Name).To(gomega.Equal("test-rrd"))
 }
 
@@ -177,14 +177,14 @@ func TestIsOwnedByRestrictedBindDefinition(t *testing.T) {
 		{
 			name: "owned by RestrictedBindDefinition",
 			refs: []metav1.OwnerReference{
-				{APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: "RestrictedBindDefinition", Name: "rbd1"},
+				{APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: authorizationv1alpha1.RestrictedBindDefinitionKind, Name: "rbd1"},
 			},
 			expect: true,
 		},
 		{
 			name: "wrong API version",
 			refs: []metav1.OwnerReference{
-				{APIVersion: "apps/v1", Kind: "RestrictedBindDefinition", Name: "rbd1"},
+				{APIVersion: "apps/v1", Kind: authorizationv1alpha1.RestrictedBindDefinitionKind, Name: "rbd1"},
 			},
 			expect: false,
 		},

@@ -523,6 +523,18 @@ var _ = Describe("BindDefinition Controller", func() {
 	})
 })
 
+func TestSummarizeNamespaceNames(t *testing.T) {
+	namespaces := []corev1.Namespace{
+		{ObjectMeta: metav1.ObjectMeta{Name: "zeta"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "alpha"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "middle"}},
+	}
+
+	g := NewWithT(t)
+	g.Expect(summarizeNamespaceNames(namespaces, 0)).To(Equal([]string{"alpha", "middle", "zeta"}))
+	g.Expect(summarizeNamespaceNames(namespaces, 2)).To(Equal([]string{"zeta", "alpha", "... +1 more"}))
+}
+
 // TestReconcileTerminatingNamespaces verifies that the controller properly handles terminating namespaces
 // and logs blocking resources with detailed information.
 //

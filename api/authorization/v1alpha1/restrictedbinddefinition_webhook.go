@@ -59,7 +59,7 @@ func (v *RestrictedBindDefinitionValidator) ValidateCreate(ctx context.Context, 
 	if err := validateDefaultPolicyForRequester(
 		ctx,
 		v.Client,
-		schema.GroupKind{Group: GroupVersion.Group, Kind: "RestrictedBindDefinition"},
+		schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedBindDefinitionKind},
 		obj.Name,
 		obj.Spec.PolicyRef.Name,
 	); err != nil {
@@ -87,7 +87,7 @@ func (v *RestrictedBindDefinitionValidator) ValidateUpdate(ctx context.Context, 
 	}
 	if len(allErrs) > 0 {
 		return nil, apierrors.NewInvalid(
-			schema.GroupKind{Group: GroupVersion.Group, Kind: "RestrictedBindDefinition"},
+			schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedBindDefinitionKind},
 			newObj.Name, allErrs)
 	}
 
@@ -133,7 +133,7 @@ func (v *RestrictedBindDefinitionValidator) validateRestrictedBindDefinitionSpec
 			logger.Info("validation failed: duplicate targetName",
 				"name", obj.Name, "targetName", obj.Spec.TargetName, "conflictsWith", existing.Name)
 			return apierrors.NewInvalid(
-				schema.GroupKind{Group: GroupVersion.Group, Kind: "RestrictedBindDefinition"},
+				schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedBindDefinitionKind},
 				obj.Name,
 				field.ErrorList{field.Duplicate(field.NewPath("spec", "targetName"),
 					fmt.Sprintf("%s (already used by RestrictedBindDefinition %q)", obj.Spec.TargetName, existing.Name))})
@@ -154,7 +154,7 @@ func (v *RestrictedBindDefinitionValidator) validateRestrictedBindDefinitionSpec
 	}
 	for _, existing := range bdList.Items {
 		return apierrors.NewInvalid(
-			schema.GroupKind{Group: GroupVersion.Group, Kind: "RestrictedBindDefinition"},
+			schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedBindDefinitionKind},
 			obj.Name,
 			field.ErrorList{field.Duplicate(field.NewPath("spec", "targetName"),
 				fmt.Sprintf("%s (already used by BindDefinition %q)", obj.Spec.TargetName, existing.Name))})
@@ -168,7 +168,7 @@ func (v *RestrictedBindDefinitionValidator) validateRestrictedBindDefinitionSpec
 		default:
 			fldErr := field.NotSupported(field.NewPath("spec", "subjects").Index(i).Child("kind"), subject.Kind, supportedSubjectKinds)
 			return apierrors.NewInvalid(
-				schema.GroupKind{Group: GroupVersion.Group, Kind: "RestrictedBindDefinition"},
+				schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedBindDefinitionKind},
 				obj.Name, field.ErrorList{fldErr})
 		}
 	}
@@ -178,7 +178,7 @@ func (v *RestrictedBindDefinitionValidator) validateRestrictedBindDefinitionSpec
 		for j, sel := range nb.NamespaceSelector {
 			if _, err := metav1.LabelSelectorAsSelector(&sel); err != nil {
 				return apierrors.NewInvalid(
-					schema.GroupKind{Group: GroupVersion.Group, Kind: "RestrictedBindDefinition"},
+					schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedBindDefinitionKind},
 					obj.Name,
 					field.ErrorList{field.Invalid(
 						field.NewPath("spec", "roleBindings").Index(i).Child("namespaceSelector").Index(j),

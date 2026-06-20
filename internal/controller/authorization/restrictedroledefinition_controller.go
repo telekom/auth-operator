@@ -511,7 +511,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdEnsureRole(
 		return err
 	}
 
-	ownerRef := ownerRefForRestricted(rrd, "RestrictedRoleDefinition")
+	ownerRef := ownerRefForRestricted(rrd, authorizationv1alpha1.RestrictedRoleDefinitionKind)
 	labelsMap := helpers.BuildResourceLabels(rrd.Labels)
 	annotations := helpers.BuildResourceAnnotations("RestrictedRoleDefinition", rrd.Name)
 

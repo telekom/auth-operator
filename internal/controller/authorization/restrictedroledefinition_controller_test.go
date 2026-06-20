@@ -414,7 +414,7 @@ func TestRRD_OwnerRefForRestricted(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "owner-rrd", UID: "uid-456"},
 	}
 
-	ref := ownerRefForRestricted(rrd, "RestrictedRoleDefinition")
+	ref := ownerRefForRestricted(rrd, authorizationv1alpha1.RestrictedRoleDefinitionKind)
 	g.Expect(ref).NotTo(BeNil())
 	g.Expect(*ref.Name).To(Equal("owner-rrd"))
 	g.Expect(*ref.UID).To(Equal(types.UID("uid-456")))

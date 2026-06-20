@@ -8,8 +8,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// RestrictedRoleDefinition-related constants for finalizers.
+// RestrictedRoleDefinition-related constants.
 const (
+	// RestrictedRoleDefinitionKind is the Kubernetes kind name for RestrictedRoleDefinition.
+	RestrictedRoleDefinitionKind = "RestrictedRoleDefinition"
 	// RestrictedRoleDefinitionFinalizer is the finalizer used to prevent orphaned resources.
 	RestrictedRoleDefinitionFinalizer = "restrictedroledefinition.authorization.t-caas.telekom.com/finalizer"
 )
@@ -32,9 +34,9 @@ type RestrictedRoleDefinitionSpec struct {
 	// TargetName is the name of the target role.
 	// This field is immutable after creation.
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinLength=5
-	// +kubebuilder:validation:MaxLength=63
-	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
 	TargetName string `json:"targetName"`
 
 	// TargetNamespace is the target namespace for the Role.

@@ -5,6 +5,7 @@
 package v1alpha1
 
 import (
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -69,6 +70,30 @@ var _ = Describe("RestrictedRoleDefinition Webhook", func() {
 			Expect(k8sClient.Delete(ctx, rrd)).To(Succeed())
 		})
 
+		It("Should admit Kubernetes subdomain targetName values", func() {
+			for _, tt := range []struct {
+				name       string
+				targetName string
+			}{
+				{name: "test-rrd-subdomain-dot", targetName: "team.alpha.reader"},
+				{name: "test-rrd-subdomain-long", targetName: strings.Repeat("a", 64)},
+			} {
+				rrd := &RestrictedRoleDefinition{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: tt.name,
+					},
+					Spec: RestrictedRoleDefinitionSpec{
+						PolicyRef:       RBACPolicyReference{Name: policy.Name},
+						TargetRole:      DefinitionClusterRole,
+						TargetName:      tt.targetName,
+						ScopeNamespaced: false,
+					},
+				}
+				Expect(k8sClient.Create(ctx, rrd)).To(Succeed())
+				Expect(k8sClient.Delete(ctx, rrd)).To(Succeed())
+			}
+		})
+
 		It("Should deny when referenced RBACPolicy does not exist", func() {
 			rrd := &RestrictedRoleDefinition{
 				ObjectMeta: metav1.ObjectMeta{
@@ -119,6 +144,40 @@ var _ = Describe("RestrictedRoleDefinition Webhook", func() {
 			}).WithTimeout(testTimeoutSeconds * time.Second).WithPolling(250 * time.Millisecond).Should(Succeed())
 
 			Expect(k8sClient.Delete(ctx, rrd1)).To(Succeed())
+		})
+
+		It("Should deny targetName collision with RoleDefinition", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rd-rrd-collision",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "shared-rd-rrd-target",
+					ScopeNamespaced: false,
+				},
+			}
+			Expect(k8sClient.Create(ctx, rd)).To(Succeed())
+
+			rrd := &RestrictedRoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rrd-rd-collision",
+				},
+				Spec: RestrictedRoleDefinitionSpec{
+					PolicyRef:       RBACPolicyReference{Name: policy.Name},
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "shared-rd-rrd-target",
+					ScopeNamespaced: false,
+				},
+			}
+			Eventually(func(g Gomega) {
+				err := k8sClient.Create(ctx, rrd.DeepCopy(), client.DryRunAll)
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(err.Error()).To(ContainSubstring("RoleDefinition"))
+				g.Expect(err.Error()).To(ContainSubstring("spec.targetName"))
+			}).WithTimeout(testTimeoutSeconds * time.Second).WithPolling(250 * time.Millisecond).Should(Succeed())
+
+			Expect(k8sClient.Delete(ctx, rd)).To(Succeed())
 		})
 
 		It("Should allow same targetName for different targetRole", func() {
@@ -212,6 +271,32 @@ var _ = Describe("RestrictedRoleDefinition Webhook", func() {
 			err := k8sClient.Create(ctx, rrd)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("Duplicate"))
+		})
+
+		It("Should reject invalid RestrictedAPIs version strings", func() {
+			rrd := &RestrictedRoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rrd-invalid-api-version",
+				},
+				Spec: RestrictedRoleDefinitionSpec{
+					PolicyRef:       RBACPolicyReference{Name: policy.Name},
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-rrd-invalid-api-version",
+					ScopeNamespaced: false,
+					RestrictedAPIs: []RestrictedAPIGroup{
+						{
+							Name: "apps",
+							Versions: []metav1.GroupVersionForDiscovery{
+								{GroupVersion: "apps/1", Version: "1"},
+							},
+						},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, rrd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("spec.restrictedApis[0].versions[0].version"))
+			Expect(err.Error()).To(ContainSubstring("must start with 'v'"))
 		})
 
 		It("Should allow RestrictedAPIs with verb restrictions", func() {

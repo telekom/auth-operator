@@ -249,9 +249,9 @@ spec:
                 description: |-
                   TargetName is the name of the target role.
                   This field is immutable after creation.
-                maxLength: 63
-                minLength: 5
-                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                maxLength: 253
+                minLength: 1
+                pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
                 type: string
               targetNamespace:
                 description: |-

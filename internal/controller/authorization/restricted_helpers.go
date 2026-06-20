@@ -169,7 +169,7 @@ func markPolicyCompliant(
 // contain an entry for a RestrictedBindDefinition resource.
 func isOwnedByRestrictedBindDefinition(ownerReferences []metav1.OwnerReference) bool {
 	for _, ref := range ownerReferences {
-		if ref.Kind == "RestrictedBindDefinition" && ref.APIVersion == authorizationv1alpha1.GroupVersion.String() {
+		if ref.Kind == authorizationv1alpha1.RestrictedBindDefinitionKind && ref.APIVersion == authorizationv1alpha1.GroupVersion.String() {
 			return true
 		}
 	}
@@ -181,7 +181,7 @@ func isOwnedByRestrictedBindDefinition(ownerReferences []metav1.OwnerReference) 
 // UIDs when deciding whether to adopt a pre-existing ServiceAccount.
 func findOwningRBDRef(ownerReferences []metav1.OwnerReference) *metav1.OwnerReference {
 	for i, ref := range ownerReferences {
-		if ref.Kind == "RestrictedBindDefinition" && ref.APIVersion == authorizationv1alpha1.GroupVersion.String() {
+		if ref.Kind == authorizationv1alpha1.RestrictedBindDefinitionKind && ref.APIVersion == authorizationv1alpha1.GroupVersion.String() {
 			return &ownerReferences[i]
 		}
 	}

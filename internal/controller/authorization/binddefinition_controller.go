@@ -85,9 +85,9 @@ func summarizeNamespaceNames(namespaces []corev1.Namespace, limit int) []string 
 	for _, ns := range namespaces {
 		names = append(names, ns.Name)
 	}
-	slices.Sort(names)
 
 	if limit <= 0 || len(names) <= limit {
+		slices.Sort(names)
 		return names
 	}
 
