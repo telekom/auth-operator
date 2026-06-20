@@ -1145,7 +1145,10 @@ func CollectAndSaveAllDebugInfo(testContext string) {
 
 	// Save to files for CI artifacts
 	outputDir := GetE2EOutputDirForContext(testContext)
-	_ = os.MkdirAll(outputDir, 0o750)
+	if err := os.MkdirAll(outputDir, 0o750); err != nil {
+		DebugLogf(1, "failed to create debug output directory %s: %v", outputDir, err)
+		return
+	}
 
 	// Cluster dump
 	cmd := CommandContext(context.Background(), "kubectl", "cluster-info", "dump", "--output-directory", filepath.Join(outputDir, "cluster-dump"))

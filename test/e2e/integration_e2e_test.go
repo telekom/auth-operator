@@ -21,7 +21,6 @@ package e2e
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -67,14 +66,14 @@ var _ = Describe("Integration Tests - Complex Multi-CRD Scenarios", Ordered, Lab
 		})
 
 		By("Installing auth-operator via Helm")
-		cmd := exec.CommandContext(context.Background(), "make", "docker-build", "IMG=auth-operator:e2e-test")
+		cmd := utils.CommandContext(context.Background(), "make", "docker-build", "IMG=auth-operator:e2e-test")
 		// Run make from project root
 		_, _ = utils.Run(cmd)
 
-		cmd = exec.CommandContext(context.Background(), "kind", "load", "docker-image", "auth-operator:e2e-test", "--name", kindClusterName)
+		cmd = utils.CommandContext(context.Background(), "kind", "load", "docker-image", "auth-operator:e2e-test", "--name", kindClusterName)
 		_, _ = utils.Run(cmd)
 
-		cmd = exec.CommandContext(context.Background(), "helm", "upgrade", "--install", integrationRelease, helmChartPathInt,
+		cmd = utils.CommandContext(context.Background(), "helm", "upgrade", "--install", integrationRelease, helmChartPathInt,
 			"-n", integrationNamespace,
 			"--set", "image.repository=auth-operator",
 			"--set", "image.tag=e2e-test",
@@ -281,7 +280,7 @@ spec:
 
 			By("Verifying ClusterRoleBindings have correct subjects")
 			for _, crbName := range expectedCRBs {
-				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrolebinding", crbName,
+				cmd := utils.CommandContext(context.Background(), "kubectl", "get", "clusterrolebinding", crbName,
 					"-o", "jsonpath={.subjects}")
 				output, err := utils.Run(cmd)
 				Expect(err).NotTo(HaveOccurred())
@@ -407,7 +406,7 @@ spec:
 			}, reconcileTimeoutInt, pollingIntervalInt).Should(Succeed())
 
 			By("Verifying ClusterRoleBinding has both ServiceAccount subjects")
-			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrolebinding", crbName,
+			cmd := utils.CommandContext(context.Background(), "kubectl", "get", "clusterrolebinding", crbName,
 				"-o", "jsonpath={.subjects}")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -444,7 +443,7 @@ spec:
 			}, reconcileTimeoutInt, pollingIntervalInt).Should(Succeed())
 
 			By("Verifying ClusterRoleBinding references the view ClusterRole")
-			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrolebinding", crbName,
+			cmd := utils.CommandContext(context.Background(), "kubectl", "get", "clusterrolebinding", crbName,
 				"-o", "jsonpath={.roleRef.name}")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -463,7 +462,7 @@ spec:
 			}
 
 			By("Deleting the multi-role BindDefinition")
-			cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "binddefinition", "int-binddefinition-multi-role")
+			cmd := utils.CommandContext(context.Background(), "kubectl", "delete", "binddefinition", "int-binddefinition-multi-role")
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -487,7 +486,7 @@ spec:
 			Expect(checkResourceExists("role", "int-ns-configmap-reader", testNS1)).To(Succeed())
 
 			By("Deleting the namespaced RoleDefinition")
-			cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "roledefinition", "int-roledefinition-ns-configmap")
+			cmd := utils.CommandContext(context.Background(), "kubectl", "delete", "roledefinition", "int-roledefinition-ns-configmap")
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -504,7 +503,7 @@ spec:
 })
 
 func verifyIntegrationControllerReady(namespace string) error {
-	cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pods",
+	cmd := utils.CommandContext(context.Background(), "kubectl", "get", "pods",
 		"-l", "control-plane=controller-manager",
 		"-n", namespace,
 		"-o", "jsonpath={.items[*].status.phase}")
@@ -519,10 +518,10 @@ func verifyIntegrationControllerReady(namespace string) error {
 }
 
 func createNamespaceIfNotExists(name string, labels map[string]string) {
-	cmd := exec.CommandContext(context.Background(), "kubectl", "create", "ns", name, "--dry-run=client", "-o", "yaml")
+	cmd := utils.CommandContext(context.Background(), "kubectl", "create", "ns", name, "--dry-run=client", "-o", "yaml")
 	output, _ := utils.Run(cmd)
 
-	cmd = exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
+	cmd = utils.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
 	cmd.Stdin = strings.NewReader(string(output))
 	_, _ = utils.Run(cmd)
 
@@ -532,13 +531,13 @@ func createNamespaceIfNotExists(name string, labels map[string]string) {
 		for k, v := range labels {
 			labelArgs = append(labelArgs, fmt.Sprintf("%s=%s", k, v))
 		}
-		cmd = exec.CommandContext(context.Background(), "kubectl", labelArgs...)
+		cmd = utils.CommandContext(context.Background(), "kubectl", labelArgs...)
 		_, _ = utils.Run(cmd)
 	}
 }
 
 func applyYAML(yaml string) {
-	cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
+	cmd := utils.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
 	cmd.Stdin = strings.NewReader(yaml)
 	output, err := utils.Run(cmd)
 	ExpectWithOffset(2, err).NotTo(HaveOccurred(), "Failed to apply YAML: %s\nOutput: %s", yaml, string(output))

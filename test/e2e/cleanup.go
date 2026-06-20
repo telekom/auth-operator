@@ -111,7 +111,6 @@ func resourcesGone(opts CleanupOptions) bool {
 	return true
 }
 
-// #nosec G204 -- resource kind and name are controlled test fixtures, not user input.
 func resourceExists(kind, name string) bool {
 	attemptCtx, attemptCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer attemptCancel()

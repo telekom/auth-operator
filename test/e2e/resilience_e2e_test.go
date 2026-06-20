@@ -11,7 +11,6 @@ package e2e
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -62,7 +61,7 @@ var _ = Describe("Resilience - Webhook Failure Injection", Ordered, Label("compl
 			"--wait",
 			"--timeout", "5m",
 		)
-		cmd := exec.CommandContext(context.Background(), "helm", helmArgs...)
+		cmd := utils.CommandContext(context.Background(), "helm", helmArgs...)
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to install Helm chart for webhook-failure tests")
 
@@ -83,7 +82,7 @@ var _ = Describe("Resilience - Webhook Failure Injection", Ordered, Label("compl
 
 		By("Cleaning up webhook failure test resources")
 		By("Uninstalling webhook failure Helm release")
-		cmd := exec.CommandContext(context.Background(), "helm", "uninstall", whResilienceRelease,
+		cmd := utils.CommandContext(context.Background(), "helm", "uninstall", whResilienceRelease,
 			"-n", whResilienceNS, "--wait", "--timeout", "2m")
 		_, _ = utils.Run(cmd)
 
@@ -102,7 +101,7 @@ var _ = Describe("Resilience - Webhook Failure Injection", Ordered, Label("compl
 			whDeployName := whResilienceRelease + "-webhook-server"
 
 			By("Identifying the webhook TLS secret")
-			cmd := exec.CommandContext(context.Background(), "kubectl", "get", "secrets",
+			cmd := utils.CommandContext(context.Background(), "kubectl", "get", "secrets",
 				"-n", whResilienceNS,
 				"-l", "authorization.t-caas.telekom.com/component=webhook",
 				"-o", "jsonpath={.items[*].metadata.name}")
@@ -117,14 +116,14 @@ var _ = Describe("Resilience - Webhook Failure Injection", Ordered, Label("compl
 			_, _ = fmt.Fprintf(GinkgoWriter, "Found TLS secret: %s\n", tlsSecretName)
 
 			By("Scaling webhook deployment to zero to avoid dual-pod conflicts during cert reset")
-			cmd = exec.CommandContext(context.Background(), "kubectl", "scale", "deployment",
+			cmd = utils.CommandContext(context.Background(), "kubectl", "scale", "deployment",
 				whDeployName, "-n", whResilienceNS, "--replicas=0")
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Waiting for all webhook pods to terminate")
 			Eventually(func() int {
-				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pods",
+				cmd := utils.CommandContext(context.Background(), "kubectl", "get", "pods",
 					"-l", "control-plane=webhook-server",
 					"-n", whResilienceNS,
 					"-o", "name")
@@ -141,14 +140,14 @@ var _ = Describe("Resilience - Webhook Failure Injection", Ordered, Label("compl
 				"All webhook pods should be terminated before cert invalidation")
 
 			By("Clearing TLS data from the secret to invalidate certs and trigger rotation")
-			cmd = exec.CommandContext(context.Background(), "kubectl", "patch", "secret", tlsSecretName,
+			cmd = utils.CommandContext(context.Background(), "kubectl", "patch", "secret", tlsSecretName,
 				"-n", whResilienceNS,
 				"--type=merge", "-p", `{"data":{"tls.crt":"","tls.key":"","ca.crt":""}}`)
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Scaling webhook deployment back to one replica to trigger cert-rotator re-initialization")
-			cmd = exec.CommandContext(context.Background(), "kubectl", "scale", "deployment",
+			cmd = utils.CommandContext(context.Background(), "kubectl", "scale", "deployment",
 				whDeployName, "-n", whResilienceNS, "--replicas=1")
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -159,7 +158,7 @@ var _ = Describe("Resilience - Webhook Failure Injection", Ordered, Label("compl
 			// Validate tls.crt and tls.key (the primary cert fields) rather than ca.crt alone,
 			// since the cert-rotator's CAName may differ from the literal "ca.crt" key.
 			Eventually(func() bool {
-				certCmd := exec.CommandContext(context.Background(), "kubectl", "get", "secret", tlsSecretName,
+				certCmd := utils.CommandContext(context.Background(), "kubectl", "get", "secret", tlsSecretName,
 					"-n", whResilienceNS,
 					"-o", "jsonpath={.data.tls\\.crt}")
 				tlsCrt, err := utils.Run(certCmd)
@@ -167,7 +166,7 @@ var _ = Describe("Resilience - Webhook Failure Injection", Ordered, Label("compl
 					return false
 				}
 
-				keyCmd := exec.CommandContext(context.Background(), "kubectl", "get", "secret", tlsSecretName,
+				keyCmd := utils.CommandContext(context.Background(), "kubectl", "get", "secret", tlsSecretName,
 					"-n", whResilienceNS,
 					"-o", "jsonpath={.data.tls\\.key}")
 				tlsKey, err := utils.Run(keyCmd)
@@ -206,7 +205,7 @@ spec:
   restrictedVerbs:
     - delete
 `, tlsTestRDName)
-			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
+			cmd := utils.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(roleDefYAML)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "RoleDefinition admission should succeed after TLS recovery")
@@ -217,10 +216,10 @@ spec:
 			}, whReconcileTimeout, whPollInterval).Should(Succeed())
 
 			By("Cleaning up test RoleDefinition")
-			cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "roledefinition", tlsTestRDName,
+			cmd = utils.CommandContext(context.Background(), "kubectl", "delete", "roledefinition", tlsTestRDName,
 				"--ignore-not-found=true")
 			_, _ = utils.Run(cmd)
-			cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "clusterrole",
+			cmd = utils.CommandContext(context.Background(), "kubectl", "delete", "clusterrole",
 				"resilience-wh-tls-generated-role", "--ignore-not-found=true")
 			_, _ = utils.Run(cmd)
 		})
@@ -231,7 +230,7 @@ spec:
 
 		It("should handle admission requests while webhook is scaled to zero", func() {
 			By("Scaling the webhook server deployment to zero replicas")
-			cmd := exec.CommandContext(context.Background(), "kubectl", "scale", "deployment",
+			cmd := utils.CommandContext(context.Background(), "kubectl", "scale", "deployment",
 				"-l", "control-plane=webhook-server",
 				"-n", whResilienceNS,
 				"--replicas=0")
@@ -240,7 +239,7 @@ spec:
 
 			By("Waiting for webhook pods to terminate")
 			Eventually(func() int {
-				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pods",
+				cmd := utils.CommandContext(context.Background(), "kubectl", "get", "pods",
 					"-l", "control-plane=webhook-server",
 					"-n", whResilienceNS,
 					"-o", "name")
@@ -266,7 +265,7 @@ spec:
   restrictedVerbs:
     - delete
 `, scaledDownTestRDName)
-			cmd = exec.CommandContext(context.Background(), "kubectl", "apply", "--dry-run=server", "-f", "-")
+			cmd = utils.CommandContext(context.Background(), "kubectl", "apply", "--dry-run=server", "-f", "-")
 			cmd.Stdin = strings.NewReader(roleDefYAML)
 			_, err = utils.Run(cmd)
 			// With failurePolicy: Fail, admission must be rejected when the webhook endpoint is unreachable.
@@ -275,7 +274,7 @@ spec:
 
 		It("should recover reconciliation once webhook is restored", func() {
 			By("Scaling the webhook server deployment back to one replica")
-			cmd := exec.CommandContext(context.Background(), "kubectl", "scale", "deployment",
+			cmd := utils.CommandContext(context.Background(), "kubectl", "scale", "deployment",
 				"-l", "control-plane=webhook-server",
 				"-n", whResilienceNS,
 				"--replicas=1")
@@ -300,7 +299,7 @@ spec:
   restrictedVerbs:
     - delete
 `, scaledDownTestRDName)
-			cmd = exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
+			cmd = utils.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(roleDefYAML)
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Admission should succeed after webhook recovery")
@@ -311,10 +310,10 @@ spec:
 			}, whReconcileTimeout, whPollInterval).Should(Succeed())
 
 			By("Cleaning up test RoleDefinition")
-			cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "roledefinition", scaledDownTestRDName,
+			cmd = utils.CommandContext(context.Background(), "kubectl", "delete", "roledefinition", scaledDownTestRDName,
 				"--ignore-not-found=true")
 			_, _ = utils.Run(cmd)
-			cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "clusterrole",
+			cmd = utils.CommandContext(context.Background(), "kubectl", "delete", "clusterrole",
 				"resilience-wh-scaled-generated-role", "--ignore-not-found=true")
 			_, _ = utils.Run(cmd)
 		})
@@ -363,7 +362,7 @@ var _ = Describe("Resilience - SSA Ownership Conflicts", Ordered, Label("complex
 			"--wait",
 			"--timeout", "5m",
 		)
-		cmd := exec.CommandContext(context.Background(), "helm", helmArgs...)
+		cmd := utils.CommandContext(context.Background(), "helm", helmArgs...)
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to install Helm chart for SSA conflict tests")
 
@@ -384,7 +383,7 @@ var _ = Describe("Resilience - SSA Ownership Conflicts", Ordered, Label("complex
 
 		By("Cleaning up SSA conflict test resources")
 		By("Uninstalling SSA conflict Helm release")
-		cmd := exec.CommandContext(context.Background(), "helm", "uninstall", ssaResilienceRelease,
+		cmd := utils.CommandContext(context.Background(), "helm", "uninstall", ssaResilienceRelease,
 			"-n", ssaResilienceNS, "--wait", "--timeout", "2m")
 		_, _ = utils.Run(cmd)
 
@@ -412,7 +411,7 @@ spec:
     - delete
     - deletecollection
 `, ssaExternalRDName, ssaExternalCRName)
-			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
+			cmd := utils.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(roleDefYAML)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -428,7 +427,7 @@ spec:
 			// Overwrite rules to an empty list using a JSON merge patch (--type=merge).
 			// The operator should detect the drift and re-apply the correct rules via SSA.
 			patchJSON := `{"rules": []}`
-			cmd := exec.CommandContext(context.Background(), "kubectl", "patch", "clusterrole", ssaExternalCRName,
+			cmd := utils.CommandContext(context.Background(), "kubectl", "patch", "clusterrole", ssaExternalCRName,
 				"--type=merge",
 				"-p", patchJSON)
 			_, err := utils.Run(cmd)
@@ -436,7 +435,7 @@ spec:
 
 			By("Verifying the operator re-applies the correct rules via SSA reconciliation")
 			Eventually(func() (bool, error) {
-				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrole", ssaExternalCRName,
+				cmd := utils.CommandContext(context.Background(), "kubectl", "get", "clusterrole", ssaExternalCRName,
 					"-o", "jsonpath={.rules}")
 				output, err := utils.Run(cmd)
 				if err != nil {
@@ -450,7 +449,7 @@ spec:
 
 		It("should clean up after SSA external-modification test", func() {
 			By("Deleting the test RoleDefinition")
-			cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "roledefinition", ssaExternalRDName,
+			cmd := utils.CommandContext(context.Background(), "kubectl", "delete", "roledefinition", ssaExternalRDName,
 				"--ignore-not-found=true")
 			_, _ = utils.Run(cmd)
 
@@ -482,7 +481,7 @@ spec:
   restrictedVerbs:
     - delete
 `, ssaConflictRDName, ssaConflictCRName)
-			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
+			cmd := utils.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(roleDefYAML)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -506,7 +505,7 @@ rules:
     verbs: ["get"]
 `, ssaConflictCRName)
 
-			cmd := exec.CommandContext(context.Background(), "kubectl", "apply",
+			cmd := utils.CommandContext(context.Background(), "kubectl", "apply",
 				"--server-side",
 				"--field-manager=resilience-test-conflict-manager",
 				"--force-conflicts",
@@ -527,7 +526,7 @@ rules:
 
 			By("Verifying the ClusterRole rules are non-empty after operator reconciliation")
 			Eventually(func() (bool, error) {
-				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrole", ssaConflictCRName,
+				cmd := utils.CommandContext(context.Background(), "kubectl", "get", "clusterrole", ssaConflictCRName,
 					"-o", "jsonpath={.rules}")
 				output, err := utils.Run(cmd)
 				if err != nil {
@@ -542,7 +541,7 @@ rules:
 		It("should verify managedFields lists the operator as a field manager", func() {
 			By("Checking that the operator's field manager entry exists on the ClusterRole")
 			Eventually(func() bool {
-				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "clusterrole", ssaConflictCRName,
+				cmd := utils.CommandContext(context.Background(), "kubectl", "get", "clusterrole", ssaConflictCRName,
 					"-o", "jsonpath={.metadata.managedFields[*].manager}")
 				output, err := utils.Run(cmd)
 				if err != nil {
@@ -558,12 +557,12 @@ rules:
 
 		It("should clean up after SSA conflict test", func() {
 			By("Deleting the test RoleDefinition")
-			cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "roledefinition", ssaConflictRDName,
+			cmd := utils.CommandContext(context.Background(), "kubectl", "delete", "roledefinition", ssaConflictRDName,
 				"--ignore-not-found=true")
 			_, _ = utils.Run(cmd)
 
 			By("Cleaning up residual ClusterRole if still present")
-			cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "clusterrole", ssaConflictCRName,
+			cmd = utils.CommandContext(context.Background(), "kubectl", "delete", "clusterrole", ssaConflictCRName,
 				"--ignore-not-found=true")
 			_, _ = utils.Run(cmd)
 		})
@@ -593,10 +592,10 @@ var _ = Describe("Resilience - HA Failover", Ordered, Label("ha", "resilience"),
 		By("Setting up HA failover resilience test environment")
 
 		By("Creating HA operator namespace")
-		cmd := exec.CommandContext(context.Background(), "kubectl", "create", "ns", haResilienceNS,
+		cmd := utils.CommandContext(context.Background(), "kubectl", "create", "ns", haResilienceNS,
 			"--dry-run=client", "-o", "yaml")
 		yamlOutput, _ := utils.Run(cmd)
-		cmd = exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
+		cmd = utils.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
 		cmd.Stdin = strings.NewReader(string(yamlOutput))
 		_, _ = utils.Run(cmd)
 
@@ -622,7 +621,7 @@ var _ = Describe("Resilience - HA Failover", Ordered, Label("ha", "resilience"),
 			"--wait",
 			"--timeout", "8m",
 		)
-		cmd = exec.CommandContext(context.Background(), "helm", helmArgs...)
+		cmd = utils.CommandContext(context.Background(), "helm", helmArgs...)
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to install Helm chart for HA resilience tests")
 
@@ -647,7 +646,7 @@ var _ = Describe("Resilience - HA Failover", Ordered, Label("ha", "resilience"),
 
 		By("Cleaning up HA resilience test resources")
 		By("Uninstalling HA resilience Helm release")
-		cmd := exec.CommandContext(context.Background(), "helm", "uninstall", haResilienceRelease,
+		cmd := utils.CommandContext(context.Background(), "helm", "uninstall", haResilienceRelease,
 			"-n", haResilienceNS, "--wait", "--timeout", "2m")
 		_, _ = utils.Run(cmd)
 
@@ -658,7 +657,7 @@ var _ = Describe("Resilience - HA Failover", Ordered, Label("ha", "resilience"),
 		It("should have 3 controller pods running", func() {
 			By("Verifying all 3 controller pods are in Running phase")
 			Eventually(func() int {
-				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pods",
+				cmd := utils.CommandContext(context.Background(), "kubectl", "get", "pods",
 					"-l", "control-plane=controller-manager",
 					"-n", haResilienceNS,
 					"-o", "jsonpath={.items[*].status.phase}")
@@ -681,7 +680,7 @@ var _ = Describe("Resilience - HA Failover", Ordered, Label("ha", "resilience"),
 		It("should have a leader elected via the lease", func() {
 			By("Waiting for a leader identity to appear on the lease")
 			Eventually(func() string {
-				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "lease",
+				cmd := utils.CommandContext(context.Background(), "kubectl", "get", "lease",
 					haLeaseName,
 					"-n", haResilienceNS,
 					"-o", "jsonpath={.spec.holderIdentity}")
@@ -704,14 +703,14 @@ var _ = Describe("Resilience - HA Failover", Ordered, Label("ha", "resilience"),
 			if len(leaderParts) > 0 {
 				leaderPod := leaderParts[0]
 				_, _ = fmt.Fprintf(GinkgoWriter, "Deleting leader pod: %s\n", leaderPod)
-				cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "pod", leaderPod,
+				cmd := utils.CommandContext(context.Background(), "kubectl", "delete", "pod", leaderPod,
 					"-n", haResilienceNS, "--grace-period=0", "--force")
 				_, _ = utils.Run(cmd)
 			}
 
 			By("Waiting for a new leader to be elected (different from the original)")
 			Eventually(func() bool {
-				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "lease",
+				cmd := utils.CommandContext(context.Background(), "kubectl", "get", "lease",
 					haLeaseName,
 					"-n", haResilienceNS,
 					"-o", "jsonpath={.spec.holderIdentity}")
@@ -726,7 +725,7 @@ var _ = Describe("Resilience - HA Failover", Ordered, Label("ha", "resilience"),
 
 			By("Verifying the system recovers to 3 running controller pods")
 			Eventually(func() int {
-				cmd := exec.CommandContext(context.Background(), "kubectl", "get", "pods",
+				cmd := utils.CommandContext(context.Background(), "kubectl", "get", "pods",
 					"-l", "control-plane=controller-manager",
 					"-n", haResilienceNS,
 					"--field-selector=status.phase=Running",
@@ -755,7 +754,7 @@ spec:
   restrictedVerbs:
     - delete
 `, failoverRDName)
-			cmd := exec.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
+			cmd := utils.CommandContext(context.Background(), "kubectl", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(roleDefYAML)
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "RoleDefinition should be admitted while HA leader election is enabled")
@@ -767,10 +766,10 @@ spec:
 				"Reconciler should generate the ClusterRole in HA mode")
 
 			By("Cleaning up failover test resources")
-			cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "roledefinition", failoverRDName,
+			cmd = utils.CommandContext(context.Background(), "kubectl", "delete", "roledefinition", failoverRDName,
 				"--ignore-not-found=true")
 			_, _ = utils.Run(cmd)
-			cmd = exec.CommandContext(context.Background(), "kubectl", "delete", "clusterrole",
+			cmd = utils.CommandContext(context.Background(), "kubectl", "delete", "clusterrole",
 				"resilience-ha-failover-generated-role", "--ignore-not-found=true")
 			_, _ = utils.Run(cmd)
 		})
