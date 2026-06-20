@@ -60,6 +60,12 @@ type RoleDefinitionReconciler struct {
 	tracer          trace.Tracer
 }
 
+type apiResourceAccess struct {
+	apiGroup string
+	name     string
+	verbs    map[string]struct{}
+}
+
 // setTracer implements tracerSetter.
 func (r *RoleDefinitionReconciler) setTracer(t trace.Tracer) { r.tracer = t }
 
@@ -433,7 +439,7 @@ func (r *RoleDefinitionReconciler) filterAPIResourcesForRoleDefinition(
 	logger := log.FromContext(ctx)
 	logger.V(3).Info("filtering API resources for RoleDefinition",
 		"roleDefinition", roleDefinition.Name, "apiGroupCount", len(apiResources))
-	rulesByAPIGroupAndVerbs := make(map[string]*rbacv1.PolicyRule)
+	resourcesByAPIGroupAndName := make(map[string]*apiResourceAccess)
 
 	// Filter API Resources based on RoleDefinition spec.
 	//
@@ -449,83 +455,99 @@ func (r *RoleDefinitionReconciler) filterAPIResourcesForRoleDefinition(
 			return nil, fmt.Errorf("failed to parse GroupVersion %q: %w", gv, err)
 		}
 
-		// Check if this group/version is restricted and collect per-API-group verb restrictions.
-		// When Versions is empty, restrict all versions of the group.
-		// When Versions is specified, restrict only the listed versions.
-		// When Verbs is empty, the entire API group is fully blocked.
-		// When Verbs is specified, only those verbs are restricted (group remains partially allowed).
-		var apiGroupRestrictedVerbs []string
-		var apiIsRestricted bool
-		for _, ag := range roleDefinition.Spec.RestrictedAPIs {
-			if ag.Name != groupVersion.Group {
-				continue
-			}
-			if len(ag.Versions) > 0 {
-				if !slices.ContainsFunc(ag.Versions, func(v metav1.GroupVersionForDiscovery) bool {
-					return v.Version == groupVersion.Version
-				}) {
-					continue
-				}
-			}
-			apiIsRestricted = true
-			apiGroupRestrictedVerbs = ag.Verbs
-			break
-		}
-
-		// Skip fully restricted API groups (no verb-level granularity)
+		apiGroupRestrictedVerbs, apiIsRestricted := restrictedVerbsForGroupVersion(roleDefinition, groupVersion)
 		if apiIsRestricted && len(apiGroupRestrictedVerbs) == 0 {
 			continue
 		}
 
-		resourceIsRestrictedByRuleFunc := func(res metav1.APIResource) func(metav1.APIResource) bool {
-			return func(rule metav1.APIResource) bool {
-				return res.Name == rule.Name && groupVersion.Group == rule.Group
-			}
-		}
-
 		for _, res := range apiResources {
-			// Skip restricted resources
-			resourceIsRestricted := slices.ContainsFunc(roleDefinition.Spec.RestrictedResources, resourceIsRestrictedByRuleFunc(res))
-			if resourceIsRestricted {
-				continue
-			}
-
-			// Filter namespaced scope
-			if res.Namespaced && !roleDefinition.Spec.ScopeNamespaced {
-				continue
-			}
-
-			// Filter verbs: remove globally restricted verbs AND per-API-group restricted verbs
-			verbs := make([]string, 0)
-			for _, verb := range res.Verbs {
-				if !slices.Contains(roleDefinition.Spec.RestrictedVerbs, verb) &&
-					!slices.Contains(apiGroupRestrictedVerbs, verb) {
-					verbs = append(verbs, verb)
-				}
-			}
+			verbs := allowedVerbsForAPIResource(roleDefinition, groupVersion.Group, res, apiGroupRestrictedVerbs)
 			if len(verbs) == 0 {
 				continue
 			}
-			// Use API group (not group/version) as the key because RBAC
-			// PolicyRules are version-agnostic. Multiple versions of the
-			// same group exposing the same resource must be merged into a
-			// single rule to avoid duplicate entries in the ClusterRole.
-			key := fmt.Sprintf("%s|%v", groupVersion.Group, verbs)
-			existingRule, exists := rulesByAPIGroupAndVerbs[key]
-			if !exists {
-				existingRule = &rbacv1.PolicyRule{
-					APIGroups: []string{groupVersion.Group},
-					Verbs:     verbs,
-				}
-				rulesByAPIGroupAndVerbs[key] = existingRule
-			}
-
-			// Deduplicate: the same resource may appear in multiple
-			// versions of the API group.
-			if !slices.Contains(existingRule.Resources, res.Name) {
-				existingRule.Resources = append(existingRule.Resources, res.Name)
-			}
+			addAPIResourceAccess(resourcesByAPIGroupAndName, groupVersion.Group, res.Name, verbs)
 		}
 	}
-	return rulesByAPIGroupAndVerbs, nil
+
+	return buildPolicyRulesByAPIGroupAndVerbs(resourcesByAPIGroupAndName), nil
+}
+
+func restrictedVerbsForGroupVersion(roleDefinition *authorizationv1alpha1.RoleDefinition, groupVersion schema.GroupVersion) ([]string, bool) {
+	for _, apiGroup := range roleDefinition.Spec.RestrictedAPIs {
+		if apiGroup.Name != groupVersion.Group {
+			continue
+		}
+		if len(apiGroup.Versions) > 0 && !slices.ContainsFunc(apiGroup.Versions, func(v metav1.GroupVersionForDiscovery) bool {
+			return v.Version == groupVersion.Version
+		}) {
+			continue
+		}
+		return apiGroup.Verbs, true
+	}
+	return nil, false
+}
+
+func allowedVerbsForAPIResource(
+	roleDefinition *authorizationv1alpha1.RoleDefinition,
+	apiGroup string,
+	resource metav1.APIResource,
+	apiGroupRestrictedVerbs []string,
+) []string {
+	if isRestrictedAPIResource(roleDefinition, apiGroup, resource) || resource.Namespaced && !roleDefinition.Spec.ScopeNamespaced {
+		return nil
+	}
+
+	verbs := make([]string, 0, len(resource.Verbs))
+	for _, verb := range resource.Verbs {
+		if slices.Contains(roleDefinition.Spec.RestrictedVerbs, verb) || slices.Contains(apiGroupRestrictedVerbs, verb) {
+			continue
+		}
+		verbs = append(verbs, verb)
+	}
+	return verbs
+}
+
+func isRestrictedAPIResource(roleDefinition *authorizationv1alpha1.RoleDefinition, apiGroup string, resource metav1.APIResource) bool {
+	return slices.ContainsFunc(roleDefinition.Spec.RestrictedResources, func(rule metav1.APIResource) bool {
+		return resource.Name == rule.Name && apiGroup == rule.Group
+	})
+}
+
+func addAPIResourceAccess(resourcesByAPIGroupAndName map[string]*apiResourceAccess, apiGroup, resourceName string, verbs []string) {
+	key := fmt.Sprintf("%s|%s", apiGroup, resourceName)
+	access, exists := resourcesByAPIGroupAndName[key]
+	if !exists {
+		access = &apiResourceAccess{
+			apiGroup: apiGroup,
+			name:     resourceName,
+			verbs:    make(map[string]struct{}, len(verbs)),
+		}
+		resourcesByAPIGroupAndName[key] = access
+	}
+	for _, verb := range verbs {
+		access.verbs[verb] = struct{}{}
+	}
+}
+
+func buildPolicyRulesByAPIGroupAndVerbs(resourcesByAPIGroupAndName map[string]*apiResourceAccess) map[string]*rbacv1.PolicyRule {
+	rulesByAPIGroupAndVerbs := make(map[string]*rbacv1.PolicyRule)
+	for _, access := range resourcesByAPIGroupAndName {
+		verbs := make([]string, 0, len(access.verbs))
+		for verb := range access.verbs {
+			verbs = append(verbs, verb)
+		}
+		slices.Sort(verbs)
+
+		key := fmt.Sprintf("%s|%v", access.apiGroup, verbs)
+		existingRule, exists := rulesByAPIGroupAndVerbs[key]
+		if !exists {
+			existingRule = &rbacv1.PolicyRule{
+				APIGroups: []string{access.apiGroup},
+				Verbs:     verbs,
+			}
+			rulesByAPIGroupAndVerbs[key] = existingRule
+		}
+		existingRule.Resources = append(existingRule.Resources, access.name)
+	}
+	return rulesByAPIGroupAndVerbs
 }
