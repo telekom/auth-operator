@@ -21,6 +21,9 @@ const statusTrue = "True"
 // statusFalse is the condition status value for False.
 const statusFalse = "False"
 
+// statusBoolTrue is the lowercase boolean value used by JSONPath and env flag checks.
+const statusBoolTrue = "true"
+
 // DebugReport represents a structured test debug report.
 type DebugReport struct {
 	Metadata    reportMetadata  `json:"metadata"`
