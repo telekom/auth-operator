@@ -34,6 +34,8 @@ spec:
         - --binddefinition-concurrency={{ .Values.controller.bindDefinitionConcurrency }}
         - --roledefinition-concurrency={{ .Values.controller.roleDefinitionConcurrency }}
         - --webhookauthorizer-concurrency={{ .Values.controller.webhookAuthorizerConcurrency }}
+        - --tracker-sync-interval={{ .Values.controller.tracker.syncInterval }}
+        - --tracker-resync-interval={{ .Values.controller.tracker.resyncInterval }}
         - --verbosity={{ .Values.global.logLevel }}
         {{- if .Values.metrics.auth.enabled }}
         - --metrics-secure
