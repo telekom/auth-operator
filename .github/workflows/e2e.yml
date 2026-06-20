@@ -46,9 +46,23 @@ jobs:
       - name: Run envtest-based tests
         run: make test
 
+  e2e-compile:
+    name: E2E Compile Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Go Environment
+        uses: ./.github/actions/setup-go-env
+
+      - name: Compile E2E tests
+        run: make test-e2e-compile
+
   e2e-basic:
     name: E2E Basic Tests
     runs-on: ubuntu-latest
+    needs: e2e-compile
     if: github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'basic' || github.event.inputs.test_suite == 'all'
     steps:
       - name: Checkout
@@ -93,6 +107,7 @@ jobs:
   e2e-helm:
     name: E2E Helm Tests
     runs-on: ubuntu-latest
+    needs: e2e-compile
     if: github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'helm' || github.event.inputs.test_suite == 'all'
     steps:
       - name: Checkout
@@ -138,6 +153,7 @@ jobs:
   e2e-complex:
     name: E2E Complex Tests
     runs-on: ubuntu-latest
+    needs: e2e-compile
     if: github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'complex' || github.event.inputs.test_suite == 'all'
     steps:
       - name: Checkout
@@ -183,6 +199,7 @@ jobs:
   e2e-ha:
     name: E2E HA Tests
     runs-on: ubuntu-latest
+    needs: e2e-compile
     if: github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'ha' || github.event.inputs.test_suite == 'all'
     steps:
       - name: Checkout
@@ -228,6 +245,7 @@ jobs:
   e2e-full-chain:
     name: E2E Full Chain (Popular CRDs)
     runs-on: ubuntu-latest
+    needs: e2e-compile
     if: github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'all'
     steps:
       - name: Checkout

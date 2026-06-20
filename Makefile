@@ -145,6 +145,10 @@ test-e2e-setup-multi: kind-create-multi kind-load-image-multi install ## Set up 
 test-e2e: ## Run base e2e tests against existing kind cluster.
 	KIND_CLUSTER=$(KIND_CLUSTER_NAME) IMG=$(E2E_IMG) go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="!helm && !complex && !integration && !golden && !ha && !leader-election && !dev" -timeout 30m
 
+.PHONY: test-e2e-compile
+test-e2e-compile: ## Compile e2e tests without creating a kind cluster.
+	go test -tags e2e ./test/e2e/ -run '^$$'
+
 .PHONY: test-e2e-full
 test-e2e-full: ## Run full e2e test suite (fresh cluster each run, configurable cleanup).
 	@set -e; \
