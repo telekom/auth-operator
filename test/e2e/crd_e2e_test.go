@@ -566,10 +566,24 @@ func checkBindDefinitionReconciled(name string) bool {
 }
 
 func ensureTestNamespace() {
+	waitForTerminatingTestNamespace()
 	applyFixture("namespace_labeled.yaml")
 	Eventually(func() error {
 		return checkResourceExists("namespace", testNamespace, "")
 	}, shortTimeout, shortPollInterval).Should(Succeed())
+}
+
+func waitForTerminatingTestNamespace() {
+	cmd := utils.CommandContext(context.Background(), "kubectl", "get", "namespace", testNamespace, "-o", "jsonpath={.metadata.deletionTimestamp}")
+	output, err := utils.Run(cmd)
+	if err != nil || strings.TrimSpace(string(output)) == "" {
+		return
+	}
+
+	By("Waiting for terminating test namespace to be deleted")
+	Eventually(func() bool {
+		return checkResourceExists("namespace", testNamespace, "") != nil
+	}, reconcileTimeout, pollingInterval).Should(BeTrue())
 }
 
 func cleanupCRDE2ETestState() {
