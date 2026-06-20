@@ -415,6 +415,7 @@ export-images: drawio ## Export PNG images from a Draw.io diagram.
 .PHONY: docs
 docs: crd-ref-docs ## Generate markdown API reference into docs directory.
 	${LOCALBIN}/crd-ref-docs --source-path=api --config=docs/crd-ref-docs-config.yaml --renderer=markdown --output-mode=single --output-path=docs/generated/api-reference.md
+	perl -0pi -e 's/\n+\z/\n/' docs/generated/api-reference.md
 	mkdir -p docs/api-reference
 	cp docs/generated/api-reference.md docs/api-reference/authorization.t-caas.telekom.com.md
 
