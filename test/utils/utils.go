@@ -1127,9 +1127,15 @@ func SaveDebugInfoToFile(outputDir, filename, content string) error {
 	if err := os.MkdirAll(outputDir, 0o750); err != nil {
 		return err
 	}
+	if err := os.Chmod(outputDir, 0o750); err != nil {
+		return err
+	}
 
 	filePath := filepath.Join(outputDir, filename)
-	return os.WriteFile(filePath, []byte(content), 0o600)
+	if err := os.WriteFile(filePath, []byte(content), 0o600); err != nil {
+		return err
+	}
+	return os.Chmod(filePath, 0o600)
 }
 
 // CollectAndSaveAllDebugInfo collects all debug info and saves to files
