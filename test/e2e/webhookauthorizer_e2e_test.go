@@ -9,7 +9,6 @@ package e2e
 import (
 	"context"
 	"encoding/json"
-	"os/exec"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -44,11 +43,11 @@ var _ = Describe("WebhookAuthorizer E2E", Ordered, Label("integration"), func() 
 		})
 
 		By("Installing auth-operator via Helm for WebhookAuthorizer E2E")
-		cmd := exec.CommandContext(context.Background(), "kind", "load", "docker-image",
+		cmd := utils.CommandContext(context.Background(), "kind", "load", "docker-image",
 			projectImage, "--name", kindClusterName)
 		_, _ = utils.Run(cmd)
 
-		cmd = exec.CommandContext(context.Background(), "helm", "upgrade", "--install",
+		cmd = utils.CommandContext(context.Background(), "helm", "upgrade", "--install",
 			waRelease, helmChartPath,
 			"-n", waNamespace,
 			"--set", "image.repository=auth-operator",
@@ -63,12 +62,12 @@ var _ = Describe("WebhookAuthorizer E2E", Ordered, Label("integration"), func() 
 
 	AfterAll(func() {
 		By("Uninstalling auth-operator Helm release")
-		cmd := exec.CommandContext(context.Background(), "helm", "uninstall", waRelease, "-n", waNamespace)
+		cmd := utils.CommandContext(context.Background(), "helm", "uninstall", waRelease, "-n", waNamespace)
 		_, _ = utils.Run(cmd)
 
 		By("Cleaning up e2e namespaces")
 		for _, ns := range []string{waNamespace, testNSLabeled, testNSPlain} {
-			cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "ns", ns, "--ignore-not-found")
+			cmd := utils.CommandContext(context.Background(), "kubectl", "delete", "ns", ns, "--ignore-not-found")
 			_, _ = utils.Run(cmd)
 		}
 	})
@@ -94,13 +93,13 @@ spec:
 		})
 
 		AfterAll(func() {
-			cmd := exec.CommandContext(context.Background(), "kubectl", "delete",
+			cmd := utils.CommandContext(context.Background(), "kubectl", "delete",
 				"webhookauthorizer", "wa-e2e-basic", "--ignore-not-found")
 			_, _ = utils.Run(cmd)
 		})
 
 		It("should show WebhookAuthorizer as created", func() {
-			cmd := exec.CommandContext(context.Background(), "kubectl", "get",
+			cmd := utils.CommandContext(context.Background(), "kubectl", "get",
 				"webhookauthorizer", "wa-e2e-basic", "-o", "json")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Failed to get WebhookAuthorizer")
@@ -132,13 +131,13 @@ spec:
 		})
 
 		AfterAll(func() {
-			cmd := exec.CommandContext(context.Background(), "kubectl", "delete",
+			cmd := utils.CommandContext(context.Background(), "kubectl", "delete",
 				"webhookauthorizer", "wa-e2e-ns-selector", "--ignore-not-found")
 			_, _ = utils.Run(cmd)
 		})
 
 		It("should show namespace-scoped WebhookAuthorizer", func() {
-			cmd := exec.CommandContext(context.Background(), "kubectl", "get",
+			cmd := utils.CommandContext(context.Background(), "kubectl", "get",
 				"webhookauthorizer", "wa-e2e-ns-selector", "-o", "jsonpath={.spec.namespaceSelector}")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -167,14 +166,14 @@ spec:
 		})
 
 		AfterAll(func() {
-			cmd := exec.CommandContext(context.Background(), "kubectl", "delete",
+			cmd := utils.CommandContext(context.Background(), "kubectl", "delete",
 				"webhookauthorizer", "wa-e2e-live-update", "--ignore-not-found")
 			_, _ = utils.Run(cmd)
 		})
 
 		It("should reflect resource changes", func() {
 			By("Verifying initial state")
-			cmd := exec.CommandContext(context.Background(), "kubectl", "get",
+			cmd := utils.CommandContext(context.Background(), "kubectl", "get",
 				"webhookauthorizer", "wa-e2e-live-update", "-o", "jsonpath={.spec.allowedPrincipals[0].user}")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -182,7 +181,7 @@ spec:
 
 			By("Updating the WebhookAuthorizer to change allowed user")
 			patchJSON := `{"spec":{"allowedPrincipals":[{"user":"e2e-updated-user"}]}}`
-			cmd = exec.CommandContext(context.Background(), "kubectl", "patch",
+			cmd = utils.CommandContext(context.Background(), "kubectl", "patch",
 				"webhookauthorizer", "wa-e2e-live-update",
 				"--type=merge", "-p", patchJSON)
 			output, err = utils.Run(cmd)
@@ -190,7 +189,7 @@ spec:
 
 			By("Verifying updated state")
 			Eventually(func() string {
-				cmd := exec.CommandContext(context.Background(), "kubectl", "get",
+				cmd := utils.CommandContext(context.Background(), "kubectl", "get",
 					"webhookauthorizer", "wa-e2e-live-update",
 					"-o", "jsonpath={.spec.allowedPrincipals[0].user}")
 				output, _ := utils.Run(cmd)
@@ -236,14 +235,14 @@ spec:
 
 		AfterAll(func() {
 			for _, name := range []string{"wa-e2e-multi-1", "wa-e2e-multi-2"} {
-				cmd := exec.CommandContext(context.Background(), "kubectl", "delete",
+				cmd := utils.CommandContext(context.Background(), "kubectl", "delete",
 					"webhookauthorizer", name, "--ignore-not-found")
 				_, _ = utils.Run(cmd)
 			}
 		})
 
 		It("should list both WebhookAuthorizers", func() {
-			cmd := exec.CommandContext(context.Background(), "kubectl", "get",
+			cmd := utils.CommandContext(context.Background(), "kubectl", "get",
 				"webhookauthorizer", "-o", "json")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -273,7 +272,7 @@ spec:
 		})
 
 		AfterAll(func() {
-			cmd := exec.CommandContext(context.Background(), "kubectl", "delete",
+			cmd := utils.CommandContext(context.Background(), "kubectl", "delete",
 				"webhookauthorizer", "wa-e2e-status", "--ignore-not-found")
 			_, _ = utils.Run(cmd)
 		})
@@ -282,7 +281,7 @@ spec:
 			// The controller (if running) should update conditions.
 			// This test verifies the CRD supports the status subresource.
 			Eventually(func() bool {
-				cmd := exec.CommandContext(context.Background(), "kubectl", "get",
+				cmd := utils.CommandContext(context.Background(), "kubectl", "get",
 					"webhookauthorizer", "wa-e2e-status", "-o", "json")
 				output, err := utils.Run(cmd)
 				if err != nil {
@@ -317,20 +316,20 @@ spec:
 			applyYAML(waDeleteYAML)
 
 			By("Verifying it exists")
-			cmd := exec.CommandContext(context.Background(), "kubectl", "get",
+			cmd := utils.CommandContext(context.Background(), "kubectl", "get",
 				"webhookauthorizer", "wa-e2e-delete")
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Deleting the WebhookAuthorizer")
-			cmd = exec.CommandContext(context.Background(), "kubectl", "delete",
+			cmd = utils.CommandContext(context.Background(), "kubectl", "delete",
 				"webhookauthorizer", "wa-e2e-delete", "--timeout=30s")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Delete failed: %s", string(output))
 
 			By("Verifying it's gone")
 			Eventually(func() bool {
-				cmd := exec.CommandContext(context.Background(), "kubectl", "get",
+				cmd := utils.CommandContext(context.Background(), "kubectl", "get",
 					"webhookauthorizer", "wa-e2e-delete")
 				_, err := utils.Run(cmd)
 				return err != nil // Should error (NotFound)
@@ -358,13 +357,13 @@ spec:
 		})
 
 		AfterAll(func() {
-			cmd := exec.CommandContext(context.Background(), "kubectl", "delete",
+			cmd := utils.CommandContext(context.Background(), "kubectl", "delete",
 				"webhookauthorizer", "wa-e2e-nonresource", "--ignore-not-found")
 			_, _ = utils.Run(cmd)
 		})
 
 		It("should have non-resource rules in spec", func() {
-			cmd := exec.CommandContext(context.Background(), "kubectl", "get",
+			cmd := utils.CommandContext(context.Background(), "kubectl", "get",
 				"webhookauthorizer", "wa-e2e-nonresource",
 				"-o", "jsonpath={.spec.nonResourceRules[0].nonResourceURLs}")
 			output, err := utils.Run(cmd)

@@ -3,7 +3,6 @@ package e2e
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/onsi/ginkgo/v2"
@@ -27,7 +26,7 @@ func TakeSnapshot() (*ResourceSnapshot, error) {
 	snapshot := &ResourceSnapshot{}
 
 	// Capture namespaces (excluding system namespaces)
-	cmd := exec.CommandContext(context.Background(), "kubectl", "get", "ns", "-o", "jsonpath={.items[*].metadata.name}")
+	cmd := utils.CommandContext(context.Background(), "kubectl", "get", "ns", "-o", "jsonpath={.items[*].metadata.name}")
 	output, err := utils.Run(cmd)
 	if err == nil {
 		allNS := strings.Fields(string(output))
@@ -44,7 +43,7 @@ func TakeSnapshot() (*ResourceSnapshot, error) {
 	}
 
 	// Capture ClusterRoles (only auth-operator created)
-	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "clusterroles",
+	cmd = utils.CommandContext(context.Background(), "kubectl", "get", "clusterroles",
 		"-l", "app.kubernetes.io/managed-by=auth-operator",
 		"-o", "jsonpath={.items[*].metadata.name}")
 	output, err = utils.Run(cmd)
@@ -53,7 +52,7 @@ func TakeSnapshot() (*ResourceSnapshot, error) {
 	}
 
 	// Capture ClusterRoleBindings (only auth-operator created)
-	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "clusterrolebindings",
+	cmd = utils.CommandContext(context.Background(), "kubectl", "get", "clusterrolebindings",
 		"-l", "app.kubernetes.io/managed-by=auth-operator",
 		"-o", "jsonpath={.items[*].metadata.name}")
 	output, err = utils.Run(cmd)
@@ -62,7 +61,7 @@ func TakeSnapshot() (*ResourceSnapshot, error) {
 	}
 
 	// Capture RoleDefinitions
-	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "roledefinitions", "-A",
+	cmd = utils.CommandContext(context.Background(), "kubectl", "get", "roledefinitions", "-A",
 		"-o", "jsonpath={range .items[*]}{.metadata.namespace}/{.metadata.name}{\" \"}{end}")
 	output, err = utils.Run(cmd)
 	if err == nil {
@@ -70,7 +69,7 @@ func TakeSnapshot() (*ResourceSnapshot, error) {
 	}
 
 	// Capture BindDefinitions
-	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "binddefinitions", "-A",
+	cmd = utils.CommandContext(context.Background(), "kubectl", "get", "binddefinitions", "-A",
 		"-o", "jsonpath={range .items[*]}{.metadata.namespace}/{.metadata.name}{\" \"}{end}")
 	output, err = utils.Run(cmd)
 	if err == nil {
@@ -78,7 +77,7 @@ func TakeSnapshot() (*ResourceSnapshot, error) {
 	}
 
 	// Capture WebhookAuthorizers
-	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "webhookauthorizers", "-A",
+	cmd = utils.CommandContext(context.Background(), "kubectl", "get", "webhookauthorizers", "-A",
 		"-o", "jsonpath={range .items[*]}{.metadata.namespace}/{.metadata.name}{\" \"}{end}")
 	output, err = utils.Run(cmd)
 	if err == nil {
@@ -86,7 +85,7 @@ func TakeSnapshot() (*ResourceSnapshot, error) {
 	}
 
 	// Capture ValidatingWebhookConfigurations (auth-operator related)
-	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "validatingwebhookconfigurations",
+	cmd = utils.CommandContext(context.Background(), "kubectl", "get", "validatingwebhookconfigurations",
 		"-o", "jsonpath={.items[?(@.metadata.name=~\".*auth-operator.*\")].metadata.name}")
 	output, err = utils.Run(cmd)
 	if err == nil {
@@ -94,7 +93,7 @@ func TakeSnapshot() (*ResourceSnapshot, error) {
 	}
 
 	// Capture MutatingWebhookConfigurations (auth-operator related)
-	cmd = exec.CommandContext(context.Background(), "kubectl", "get", "mutatingwebhookconfigurations",
+	cmd = utils.CommandContext(context.Background(), "kubectl", "get", "mutatingwebhookconfigurations",
 		"-o", "jsonpath={.items[?(@.metadata.name=~\".*auth-operator.*\")].metadata.name}")
 	output, err = utils.Run(cmd)
 	if err == nil {

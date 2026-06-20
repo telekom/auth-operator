@@ -16,7 +16,6 @@ on:
 
 permissions:
   contents: read
-  security-events: write
 
 # Cancel in-progress runs when a new run is triggered for the same branch/PR
 concurrency:

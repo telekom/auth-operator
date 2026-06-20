@@ -20,7 +20,6 @@ package e2e
 
 import (
 	"context"
-	"os/exec"
 	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -34,7 +33,7 @@ var _ = Describe("Kustomize Overlay Validation", Label("kustomize"), func() {
 	Context("Default Overlay", func() {
 		It("should build without errors", func() {
 			By("Building the default kustomize overlay")
-			cmd := exec.CommandContext(context.Background(), "kustomize", "build", "config/default")
+			cmd := utils.CommandContext(context.Background(), "kustomize", "build", "config/default")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Kustomize build failed for config/default")
 			Expect(string(output)).NotTo(BeEmpty())
@@ -49,7 +48,7 @@ var _ = Describe("Kustomize Overlay Validation", Label("kustomize"), func() {
 
 		It("should have valid YAML syntax", func() {
 			By("Building and validating YAML with kustomize")
-			cmd := exec.CommandContext(context.Background(), "kustomize", "build", "config/default")
+			cmd := utils.CommandContext(context.Background(), "kustomize", "build", "config/default")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -72,7 +71,7 @@ var _ = Describe("Kustomize Overlay Validation", Label("kustomize"), func() {
 	Context("CRD Overlay", func() {
 		It("should build without errors", func() {
 			By("Building the CRD kustomize overlay")
-			cmd := exec.CommandContext(context.Background(), "kustomize", "build", "config/crd")
+			cmd := utils.CommandContext(context.Background(), "kustomize", "build", "config/crd")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Kustomize build failed for config/crd")
 			Expect(string(output)).NotTo(BeEmpty())
@@ -92,7 +91,7 @@ var _ = Describe("Kustomize Overlay Validation", Label("kustomize"), func() {
 	Context("RBAC Overlay", func() {
 		It("should build without errors", func() {
 			By("Building the RBAC kustomize overlay")
-			cmd := exec.CommandContext(context.Background(), "kustomize", "build", "config/rbac")
+			cmd := utils.CommandContext(context.Background(), "kustomize", "build", "config/rbac")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Kustomize build failed for config/rbac")
 			Expect(string(output)).NotTo(BeEmpty())
@@ -108,7 +107,7 @@ var _ = Describe("Kustomize Overlay Validation", Label("kustomize"), func() {
 	Context("Manager Overlay", func() {
 		It("should build without errors", func() {
 			By("Building the manager kustomize overlay")
-			cmd := exec.CommandContext(context.Background(), "kustomize", "build", "config/manager")
+			cmd := utils.CommandContext(context.Background(), "kustomize", "build", "config/manager")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Kustomize build failed for config/manager")
 			Expect(string(output)).NotTo(BeEmpty())
@@ -122,7 +121,7 @@ var _ = Describe("Kustomize Overlay Validation", Label("kustomize"), func() {
 	Context("Webhook Overlay", func() {
 		It("should build without errors", func() {
 			By("Building the webhook kustomize overlay")
-			cmd := exec.CommandContext(context.Background(), "kustomize", "build", "config/webhook")
+			cmd := utils.CommandContext(context.Background(), "kustomize", "build", "config/webhook")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Kustomize build failed for config/webhook")
 			Expect(string(output)).NotTo(BeEmpty())
@@ -136,7 +135,7 @@ var _ = Describe("Kustomize Overlay Validation", Label("kustomize"), func() {
 	Context("Cert-Manager Overlay", func() {
 		It("should build without errors", func() {
 			By("Building the cert-manager kustomize overlay")
-			cmd := exec.CommandContext(context.Background(), "kustomize", "build", "config/certmanager")
+			cmd := utils.CommandContext(context.Background(), "kustomize", "build", "config/certmanager")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Kustomize build failed for config/certmanager")
 			Expect(string(output)).NotTo(BeEmpty())
@@ -151,7 +150,7 @@ var _ = Describe("Kustomize Overlay Validation", Label("kustomize"), func() {
 	Context("Prometheus Overlay", func() {
 		It("should build without errors", func() {
 			By("Building the prometheus kustomize overlay")
-			cmd := exec.CommandContext(context.Background(), "kustomize", "build", "config/prometheus")
+			cmd := utils.CommandContext(context.Background(), "kustomize", "build", "config/prometheus")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Kustomize build failed for config/prometheus")
 			Expect(string(output)).NotTo(BeEmpty())
@@ -165,7 +164,7 @@ var _ = Describe("Kustomize Overlay Validation", Label("kustomize"), func() {
 	Context("Manifest Consistency", func() {
 		It("should have matching CRD versions across overlays", func() {
 			By("Building CRD overlay")
-			crdCmd := exec.CommandContext(context.Background(), "kustomize", "build", "config/crd")
+			crdCmd := utils.CommandContext(context.Background(), "kustomize", "build", "config/crd")
 			crdOutput, err := utils.Run(crdCmd)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -175,7 +174,7 @@ var _ = Describe("Kustomize Overlay Validation", Label("kustomize"), func() {
 
 		It("should have consistent namespace references", func() {
 			By("Building default overlay")
-			cmd := exec.CommandContext(context.Background(), "kustomize", "build", "config/default")
+			cmd := utils.CommandContext(context.Background(), "kustomize", "build", "config/default")
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 

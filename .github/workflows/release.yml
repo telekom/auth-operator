@@ -12,11 +12,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
-  packages: write
-  id-token: write
-  security-events: write  # For uploading Trivy SARIF results
-  attestations: write     # For GitHub artifact attestations
+  contents: read
 
 env:
   REGISTRY: ghcr.io
@@ -452,7 +448,6 @@ jobs:
     continue-on-error: true  # Artifactory mirror is best-effort; must not block releases
     permissions:
       packages: read
-      id-token: write
     runs-on: ubuntu-latest
     steps:
       - name: Login to GHCR

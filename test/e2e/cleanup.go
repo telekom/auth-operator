@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -48,11 +47,11 @@ func CleanupTestResources(opts CleanupOptions) {
 	}
 
 	for _, cr := range opts.ClusterRoles {
-		cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "clusterrole", cr, "--ignore-not-found=true")
+		cmd := utils.CommandContext(context.Background(), "kubectl", "delete", "clusterrole", cr, "--ignore-not-found=true")
 		_, _ = utils.Run(cmd)
 	}
 	for _, crb := range opts.ClusterRoleBindings {
-		cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "clusterrolebinding", crb, "--ignore-not-found=true")
+		cmd := utils.CommandContext(context.Background(), "kubectl", "delete", "clusterrolebinding", crb, "--ignore-not-found=true")
 		_, _ = utils.Run(cmd)
 	}
 
@@ -112,11 +111,10 @@ func resourcesGone(opts CleanupOptions) bool {
 	return true
 }
 
-// #nosec G204 -- resource kind and name are controlled test fixtures, not user input.
 func resourceExists(kind, name string) bool {
 	attemptCtx, attemptCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer attemptCancel()
-	cmd := exec.CommandContext(attemptCtx, "kubectl", "get", kind, name, "--ignore-not-found", "-o", "name")
+	cmd := utils.CommandContext(attemptCtx, "kubectl", "get", kind, name, "--ignore-not-found", "-o", "name")
 	out, err := utils.Run(cmd)
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "warning: kubectl get %s %s failed: %v\n", kind, name, err)
@@ -129,7 +127,7 @@ func resourceExists(kind, name string) bool {
 func cleanupAllCRDs() {
 	resources := []string{"roledefinition", "binddefinition", "webhookauthorizer"}
 	for _, resource := range resources {
-		cmd := exec.CommandContext(context.Background(), "kubectl", "delete", resource, "-A", "--all", "--ignore-not-found=true")
+		cmd := utils.CommandContext(context.Background(), "kubectl", "delete", resource, "-A", "--all", "--ignore-not-found=true")
 		_, _ = utils.Run(cmd)
 	}
 }
@@ -213,15 +211,15 @@ func CleanupComplete(namespaces, clusterRoles, clusterRoleBindings []string, web
 // Use within tests for cleanup between test cases.
 func CleanupCRDsByName(roledefs, binddefs, webhookauthorizers []string) {
 	for _, name := range binddefs {
-		cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "binddefinition", name, "--ignore-not-found=true")
+		cmd := utils.CommandContext(context.Background(), "kubectl", "delete", "binddefinition", name, "--ignore-not-found=true")
 		_, _ = utils.Run(cmd)
 	}
 	for _, name := range roledefs {
-		cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "roledefinition", name, "--ignore-not-found=true")
+		cmd := utils.CommandContext(context.Background(), "kubectl", "delete", "roledefinition", name, "--ignore-not-found=true")
 		_, _ = utils.Run(cmd)
 	}
 	for _, name := range webhookauthorizers {
-		cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "webhookauthorizer", name, "--ignore-not-found=true")
+		cmd := utils.CommandContext(context.Background(), "kubectl", "delete", "webhookauthorizer", name, "--ignore-not-found=true")
 		_, _ = utils.Run(cmd)
 	}
 }
@@ -232,10 +230,10 @@ func CleanupAllCRDsInNamespace(namespace string) {
 	resources := []string{"binddefinition", "roledefinition", "webhookauthorizer"}
 	for _, resource := range resources {
 		if namespace != "" {
-			cmd := exec.CommandContext(context.Background(), "kubectl", "delete", resource, "--all", "-n", namespace, "--ignore-not-found=true")
+			cmd := utils.CommandContext(context.Background(), "kubectl", "delete", resource, "--all", "-n", namespace, "--ignore-not-found=true")
 			_, _ = utils.Run(cmd)
 		} else {
-			cmd := exec.CommandContext(context.Background(), "kubectl", "delete", resource, "--all", "--ignore-not-found=true")
+			cmd := utils.CommandContext(context.Background(), "kubectl", "delete", resource, "--all", "--ignore-not-found=true")
 			_, _ = utils.Run(cmd)
 		}
 	}
@@ -243,6 +241,6 @@ func CleanupAllCRDsInNamespace(namespace string) {
 
 // CleanupAllWebhookAuthorizersClusterWide deletes all WebhookAuthorizers (cluster-scoped).
 func CleanupAllWebhookAuthorizersClusterWide() {
-	cmd := exec.CommandContext(context.Background(), "kubectl", "delete", "webhookauthorizer", "--all", "--ignore-not-found=true")
+	cmd := utils.CommandContext(context.Background(), "kubectl", "delete", "webhookauthorizer", "--all", "--ignore-not-found=true")
 	_, _ = utils.Run(cmd)
 }
