@@ -1,0 +1,48 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: Fuzz Smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly on Saturdays, after the regular Scorecard run.
+    - cron: '15 2 * * 6'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  go-fuzz-smoke:
+    name: Go fuzz smoke
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Go Environment
+        uses: ./.github/actions/setup-go-env
+
+      - name: Run API fuzz targets
+        run: |
+          set -euo pipefail
+
+          targets=$(go test ./api/authorization/v1alpha1 -run=^$ -list '^Fuzz' | awk '/^Fuzz/ { print $1 }')
+          if [ -z "${targets}" ]; then
+            echo "No fuzz targets found"
+            exit 1
+          fi
+
+          for target in ${targets}; do
+            echo "Running ${target}"
+            go test ./api/authorization/v1alpha1 -run=^$ -fuzz="^${target}$" -fuzztime=10s -parallel=2
+          done
