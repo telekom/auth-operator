@@ -2346,6 +2346,64 @@ func TestEnsureRoleBindings(t *testing.T) {
 		g.Expect(roleRB.RoleRef.Name).To(Equal("developer"))
 	})
 
+	t.Run("recreates owned RoleBinding when roleRef kind changes", func(t *testing.T) {
+		g := NewWithT(t)
+
+		ns := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: "transition-ns"},
+			Status:     corev1.NamespaceStatus{Phase: corev1.NamespaceActive},
+		}
+		bindDef := &authorizationv1alpha1.BindDefinition{
+			TypeMeta: metav1.TypeMeta{
+				APIVersion: authorizationv1alpha1.GroupVersion.String(),
+				Kind:       "BindDefinition",
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "transition-bd",
+				UID:  "transition-bd-uid",
+			},
+			Spec: authorizationv1alpha1.BindDefinitionSpec{
+				TargetName: "transition-target",
+				Subjects: []rbacv1.Subject{
+					{Kind: rbacv1.GroupKind, Name: "devs", APIGroup: rbacv1.GroupName},
+				},
+				RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+					{Namespace: "transition-ns", RoleRefs: []string{"admin"}},
+				},
+			},
+		}
+		existing := &rbacv1.RoleBinding{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      helpers.BuildBindingName("transition-target", "admin"),
+				Namespace: "transition-ns",
+				OwnerReferences: []metav1.OwnerReference{{
+					APIVersion:         authorizationv1alpha1.GroupVersion.String(),
+					Kind:               "BindDefinition",
+					Name:               bindDef.Name,
+					UID:                bindDef.UID,
+					Controller:         ptr.To(true),
+					BlockOwnerDeletion: ptr.To(true),
+				}},
+			},
+			Subjects: bindDef.Spec.Subjects,
+			RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "admin"},
+		}
+
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bindDef, ns, existing).Build()
+		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
+
+		_, perRoleBindingNamespaces, err := r.collectNamespaces(ctx, bindDef)
+		g.Expect(err).NotTo(HaveOccurred())
+
+		err = r.ensureRoleBindings(ctx, bindDef, perRoleBindingNamespaces)
+		g.Expect(err).NotTo(HaveOccurred())
+
+		var rb rbacv1.RoleBinding
+		g.Expect(c.Get(ctx, types.NamespacedName{Name: existing.Name, Namespace: existing.Namespace}, &rb)).To(Succeed())
+		g.Expect(rb.RoleRef).To(Equal(rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: "admin"}))
+		g.Expect(rb.Subjects).To(ConsistOf(bindDef.Spec.Subjects))
+	})
+
 	t.Run("skips terminating namespaces", func(t *testing.T) {
 		g := NewWithT(t)
 
@@ -4501,16 +4559,11 @@ func TestReconcile_MissingRolePolicy_Ignore(t *testing.T) {
 	g.Expect(c.Get(ctx, types.NamespacedName{Name: bd.Name}, &updated)).To(Succeed())
 	g.Expect(updated.Status.MissingRoleRefs).To(BeEmpty())
 
-	// RoleRefsValid condition: the controller sets MarkUnknown for ignore mode,
-	// but applyStatus uses SSA (ApplyConfiguration) which reconstructs the
-	// conditions slice. The fake client's SSA handling merges the Ready=True
-	// condition set by markReady and produces RoleRefsValid=True as the observed
-	// state. In a real cluster (envtest), the Unknown condition is preserved.
-	// This assertion reflects the fake-client behavior; the envtest-based Ginkgo
-	// suite covers the actual ignore-mode condition semantics.
+	// RoleRefsValid condition reports that validation was intentionally skipped.
 	roleRefCond := findCondition(updated.Status.Conditions, string(authorizationv1alpha1.RoleRefValidCondition))
 	g.Expect(roleRefCond).NotTo(BeNil())
-	g.Expect(roleRefCond.Status).To(Equal(metav1.ConditionTrue))
+	g.Expect(roleRefCond.Status).To(Equal(metav1.ConditionUnknown))
+	g.Expect(roleRefCond.Reason).To(Equal(string(authorizationv1alpha1.RoleRefValidationSkippedReason)))
 
 	// Verify that RBAC resources are still created despite missing role refs.
 	// In ignore mode, the controller should proceed with creating bindings.

@@ -54,9 +54,9 @@ func saOwnerRefForBindDefinition(bindDef *authorizationv1alpha1.BindDefinition) 
 
 // hasOwnerRef checks if the object has an ownerReference pointing to the given owner (by UID).
 // Unlike metav1.IsControlledBy, this matches any ownerRef regardless of the controller flag.
-func hasOwnerRef(obj, owner metav1.ObjectMetaAccessor) bool {
-	ownerUID := owner.(metav1.Object).GetUID()
-	for _, ref := range obj.(metav1.Object).GetOwnerReferences() {
+func hasOwnerRef(obj, owner metav1.Object) bool {
+	ownerUID := owner.GetUID()
+	for _, ref := range obj.GetOwnerReferences() {
 		if ref.UID == ownerUID {
 			return true
 		}

@@ -172,6 +172,13 @@ spec:
                       maxItems: 64
                       type: array
                   type: object
+                  x-kubernetes-validations:
+                  - message: roleBindings entries with role refs must specify namespace
+                      or namespaceSelector
+                    rule: ((!has(self.clusterRoleRefs) || size(self.clusterRoleRefs)
+                      == 0) && (!has(self.roleRefs) || size(self.roleRefs) == 0))
+                      || (has(self.namespace) && size(self.namespace) > 0) || (has(self.namespaceSelector)
+                      && size(self.namespaceSelector) > 0)
                 maxItems: 64
                 type: array
               subjects:

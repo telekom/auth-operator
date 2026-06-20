@@ -664,13 +664,14 @@ func (r *BindDefinitionReconciler) reconcileResources(
 				authorizationv1alpha1.RoleRefValidReason, authorizationv1alpha1.RoleRefValidMessage)
 		}
 	} else {
-		// Ignore mode: skip validation, clear status, mark condition true.
+		// Ignore mode: skip validation, clear status, and report that validation
+		// was intentionally skipped.
 		logger.V(2).Info("reconcileResources: Skipping role reference validation (policy=ignore)",
 			"bindDefinition", bindDefinition.Name)
 		bindDefinition.Status.MissingRoleRefs = nil
 		metrics.RoleRefsMissing.WithLabelValues(bindDefinition.Name).Set(0)
-		conditions.MarkTrue(bindDefinition, authorizationv1alpha1.RoleRefValidCondition, bindDefinition.Generation,
-			authorizationv1alpha1.RoleRefValidReason, authorizationv1alpha1.RoleRefValidMessage)
+		conditions.MarkUnknown(bindDefinition, authorizationv1alpha1.RoleRefValidCondition, bindDefinition.Generation,
+			authorizationv1alpha1.RoleRefValidationSkippedReason, authorizationv1alpha1.RoleRefValidationSkippedMessage)
 	}
 
 	// Ensure ServiceAccounts
@@ -844,6 +845,18 @@ func (r *BindDefinitionReconciler) ensureSingleRoleBinding(
 ) error {
 	logger := log.FromContext(ctx)
 	rbName := helpers.BuildBindingName(bindDef.Spec.TargetName, roleRef)
+	desiredRoleRef := rbacv1.RoleRef{
+		APIGroup: rbacv1.GroupName,
+		Kind:     roleKind,
+		Name:     roleRef,
+	}
+
+	if err := r.deleteOwnedRoleBindingOnRoleRefChange(ctx, bindDef, namespace, rbName, desiredRoleRef); err != nil {
+		conditions.MarkFalse(bindDef, authorizationv1alpha1.CreateCondition, bindDef.Generation,
+			authorizationv1alpha1.CreateReason, authorizationv1alpha1.CreateMessage)
+		r.applyStatusNonFatal(ctx, bindDef)
+		return err
+	}
 
 	// Build the RoleBinding using SSA ApplyConfiguration
 	ac := pkgssa.RoleBindingWithSubjectsAndRoleRef(
@@ -851,11 +864,7 @@ func (r *BindDefinitionReconciler) ensureSingleRoleBinding(
 		namespace,
 		helpers.BuildResourceLabels(bindDef.Labels),
 		bindDef.Spec.Subjects,
-		rbacv1.RoleRef{
-			APIGroup: rbacv1.GroupName,
-			Kind:     roleKind,
-			Name:     roleRef,
-		},
+		desiredRoleRef,
 	)
 
 	// Add owner reference and source-tracing annotations
@@ -880,6 +889,27 @@ func (r *BindDefinitionReconciler) ensureSingleRoleBinding(
 	} else {
 		metrics.RBACResourcesApplied.WithLabelValues(metrics.ResourceRoleBinding).Inc()
 	}
+	return nil
+}
+
+func (r *BindDefinitionReconciler) deleteOwnedRoleBindingOnRoleRefChange(
+	ctx context.Context,
+	bindDef *authorizationv1alpha1.BindDefinition,
+	namespace string,
+	name string,
+	desiredRoleRef rbacv1.RoleRef,
+) error {
+	existing := &rbacv1.RoleBinding{}
+	if err := r.client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, existing); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	if !hasOwnerRef(existing, bindDef) || existing.RoleRef == desiredRoleRef {
+		return nil
+	}
+	if err := r.client.Delete(ctx, existing); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("delete RoleBinding %s/%s before roleRef change: %w", namespace, name, err)
+	}
+	metrics.RBACResourcesDeleted.WithLabelValues(metrics.ResourceRoleBinding).Inc()
 	return nil
 }
 

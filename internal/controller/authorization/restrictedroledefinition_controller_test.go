@@ -17,6 +17,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -49,6 +50,7 @@ func newRRDTestReconcilerFake(objs ...client.Object) (*RestrictedRoleDefinitionR
 		Build()
 	return &RestrictedRoleDefinitionReconciler{
 		client:   c,
+		reader:   c,
 		scheme:   s,
 		recorder: events.NewFakeRecorder(10),
 	}, c
@@ -311,12 +313,22 @@ func TestRRD_ResolveApplyClient_ImpersonationFactoryError(t *testing.T) {
 func TestRRD_Deprovision_ClusterRole(t *testing.T) {
 	g := NewWithT(t)
 
+	controller := true
 	cr := &rbacv1.ClusterRole{
-		ObjectMeta: metav1.ObjectMeta{Name: "deprov-test-role"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "deprov-test-role",
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: authorizationv1alpha1.GroupVersion.String(),
+				Kind:       authorizationv1alpha1.RestrictedRoleDefinitionKind,
+				Name:       "deprov-rrd",
+				UID:        "deprov-rrd-uid",
+				Controller: &controller,
+			}},
+		},
 	}
 
 	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
-		ObjectMeta: metav1.ObjectMeta{Name: "deprov-rrd"},
+		ObjectMeta: metav1.ObjectMeta{Name: "deprov-rrd", UID: "deprov-rrd-uid"},
 		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
 			TargetName: "deprov-test-role",
 			TargetRole: authorizationv1alpha1.DefinitionClusterRole,
@@ -330,6 +342,46 @@ func TestRRD_Deprovision_ClusterRole(t *testing.T) {
 	// ClusterRole should be deleted.
 	var deleted rbacv1.ClusterRole
 	g.Expect(c.Get(rrdCtx(), types.NamespacedName{Name: "deprov-test-role"}, &deleted)).NotTo(Succeed())
+
+	recorder, ok := r.recorder.(*events.FakeRecorder)
+	g.Expect(ok).To(BeTrue())
+	close(recorder.Events)
+	emitted := make([]string, 0, len(recorder.Events))
+	for event := range recorder.Events {
+		emitted = append(emitted, event)
+	}
+	g.Expect(emitted).NotTo(BeEmpty())
+	g.Expect(emitted[len(emitted)-1]).To(ContainSubstring(authorizationv1alpha1.EventReasonDeprovisioned))
+	g.Expect(emitted[len(emitted)-1]).NotTo(ContainSubstring("policy violations"))
+}
+
+func TestRRD_Deprovision_UnownedClusterRoleIsPreserved(t *testing.T) {
+	g := NewWithT(t)
+
+	cr := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "system-cluster-role"},
+		Rules: []rbacv1.PolicyRule{{
+			APIGroups: []string{""},
+			Resources: []string{"secrets"},
+			Verbs:     []string{"get"},
+		}},
+	}
+
+	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "deprov-rrd", UID: "deprov-rrd-uid"},
+		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+			TargetName: "system-cluster-role",
+			TargetRole: authorizationv1alpha1.DefinitionClusterRole,
+		},
+	}
+
+	r, c := newRRDTestReconcilerFake(cr, rrd)
+	err := r.rrdDeprovision(rrdCtx(), rrd)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	var kept rbacv1.ClusterRole
+	g.Expect(c.Get(rrdCtx(), types.NamespacedName{Name: "system-cluster-role"}, &kept)).To(Succeed())
+	g.Expect(kept.Rules).To(HaveLen(1))
 }
 
 func TestRRD_Deprovision_AlreadyDeleted(t *testing.T) {
@@ -351,12 +403,23 @@ func TestRRD_Deprovision_AlreadyDeleted(t *testing.T) {
 func TestRRD_Deprovision_NamespacedRole(t *testing.T) {
 	g := NewWithT(t)
 
+	controller := true
 	role := &rbacv1.Role{
-		ObjectMeta: metav1.ObjectMeta{Name: "deprov-ns-role", Namespace: "my-ns"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "deprov-ns-role",
+			Namespace: "my-ns",
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: authorizationv1alpha1.GroupVersion.String(),
+				Kind:       authorizationv1alpha1.RestrictedRoleDefinitionKind,
+				Name:       "deprov-rrd-ns",
+				UID:        "deprov-rrd-ns-uid",
+				Controller: &controller,
+			}},
+		},
 	}
 
 	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
-		ObjectMeta: metav1.ObjectMeta{Name: "deprov-rrd-ns"},
+		ObjectMeta: metav1.ObjectMeta{Name: "deprov-rrd-ns", UID: "deprov-rrd-ns-uid"},
 		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
 			TargetName:      "deprov-ns-role",
 			TargetNamespace: "my-ns",
@@ -372,6 +435,38 @@ func TestRRD_Deprovision_NamespacedRole(t *testing.T) {
 	g.Expect(c.Get(rrdCtx(), types.NamespacedName{
 		Name: "deprov-ns-role", Namespace: "my-ns",
 	}, &deleted)).NotTo(Succeed())
+}
+
+func TestRRD_Deprovision_UnownedNamespacedRoleIsPreserved(t *testing.T) {
+	g := NewWithT(t)
+
+	role := &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{Name: "system-role", Namespace: "my-ns"},
+		Rules: []rbacv1.PolicyRule{{
+			APIGroups: []string{""},
+			Resources: []string{"pods"},
+			Verbs:     []string{"list"},
+		}},
+	}
+
+	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "deprov-rrd-ns", UID: "deprov-rrd-ns-uid"},
+		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+			TargetName:      "system-role",
+			TargetNamespace: "my-ns",
+			TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
+		},
+	}
+
+	r, c := newRRDTestReconcilerFake(role, rrd)
+	err := r.rrdDeprovision(rrdCtx(), rrd)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	var kept rbacv1.Role
+	g.Expect(c.Get(rrdCtx(), types.NamespacedName{
+		Name: "system-role", Namespace: "my-ns",
+	}, &kept)).To(Succeed())
+	g.Expect(kept.Rules).To(HaveLen(1))
 }
 
 func TestRRD_Deprovision_InvalidTargetRole(t *testing.T) {
@@ -536,6 +631,40 @@ func TestRRD_EnsureRole_ClusterRole(t *testing.T) {
 	g.Expect(cr.Rules[0].Resources).To(ContainElement("pods"))
 }
 
+func TestRRD_EnsureRole_ClusterRoleClearsStaleRulesWhenDesiredRulesEmpty(t *testing.T) {
+	g := NewWithT(t)
+
+	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "clear-cr-rrd", UID: "uid-clear-cr"},
+		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+			TargetName: "clear-cluster-role",
+			TargetRole: authorizationv1alpha1.DefinitionClusterRole,
+		},
+	}
+	existing := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "clear-cluster-role",
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: authorizationv1alpha1.GroupVersion.String(),
+				Kind:       authorizationv1alpha1.RestrictedRoleDefinitionKind,
+				Name:       rrd.Name,
+				UID:        rrd.UID,
+			}},
+		},
+		Rules: []rbacv1.PolicyRule{
+			{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"get"}},
+		},
+	}
+
+	r, c := newRRDTestReconcilerFake(rrd, existing)
+	err := r.rrdEnsureRole(rrdCtx(), rrd, nil, c)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	var cr rbacv1.ClusterRole
+	g.Expect(c.Get(rrdCtx(), types.NamespacedName{Name: "clear-cluster-role"}, &cr)).To(Succeed())
+	g.Expect(cr.Rules).To(BeEmpty())
+}
+
 func TestRRD_EnsureRole_NamespacedRole(t *testing.T) {
 	g := NewWithT(t)
 
@@ -560,6 +689,7 @@ func TestRRD_EnsureRole_NamespacedRole(t *testing.T) {
 		Build()
 	r := &RestrictedRoleDefinitionReconciler{
 		client:   c,
+		reader:   c,
 		scheme:   s,
 		recorder: events.NewFakeRecorder(10),
 	}
@@ -576,6 +706,43 @@ func TestRRD_EnsureRole_NamespacedRole(t *testing.T) {
 	}, &role)).To(Succeed())
 	g.Expect(role.Rules).To(HaveLen(1))
 	g.Expect(role.Rules[0].Resources).To(ContainElement("services"))
+}
+
+func TestRRD_EnsureRole_NamespacedRoleClearsStaleRulesWhenDesiredRulesEmpty(t *testing.T) {
+	g := NewWithT(t)
+
+	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "clear-role-rrd", UID: "uid-clear-role"},
+		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+			TargetName:      "clear-role",
+			TargetNamespace: "clear-ns",
+			TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
+		},
+	}
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "clear-ns"}}
+	existing := &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "clear-role",
+			Namespace: "clear-ns",
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: authorizationv1alpha1.GroupVersion.String(),
+				Kind:       authorizationv1alpha1.RestrictedRoleDefinitionKind,
+				Name:       rrd.Name,
+				UID:        rrd.UID,
+			}},
+		},
+		Rules: []rbacv1.PolicyRule{
+			{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"get"}},
+		},
+	}
+
+	r, c := newRRDTestReconcilerFake(rrd, ns, existing)
+	err := r.rrdEnsureRole(rrdCtx(), rrd, nil, c)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	var role rbacv1.Role
+	g.Expect(c.Get(rrdCtx(), types.NamespacedName{Name: "clear-role", Namespace: "clear-ns"}, &role)).To(Succeed())
+	g.Expect(role.Rules).To(BeEmpty())
 }
 
 func TestRRD_Reconcile_WithTracer(t *testing.T) {
@@ -708,6 +875,33 @@ func TestRRD_PolicyToRestrictedRoleDefinitions_ListError(t *testing.T) {
 	policy := &authorizationv1alpha1.RBACPolicy{ObjectMeta: metav1.ObjectMeta{Name: "any"}}
 	requests := r.policyToRestrictedRoleDefinitions(rrdCtx(), policy)
 	g.Expect(requests).To(BeNil())
+}
+
+func TestRRD_FilterResource_ScopeNamespacedTrueExcludesClusterScoped(t *testing.T) {
+	g := NewWithT(t)
+
+	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+			ScopeNamespaced: true,
+		},
+	}
+	rulesByKey := make(map[string]*rbacv1.PolicyRule)
+
+	rrdFilterResource(rrd, schema.GroupVersion{Version: "v1"},
+		metav1.APIResource{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get"}},
+		nil,
+		rulesByKey)
+	rrdFilterResource(rrd, schema.GroupVersion{Version: "v1"},
+		metav1.APIResource{Name: "nodes", Namespaced: false, Verbs: metav1.Verbs{"get"}},
+		nil,
+		rulesByKey)
+
+	resources := make([]string, 0, len(rulesByKey))
+	for _, rule := range rulesByKey {
+		resources = append(resources, rule.Resources...)
+	}
+	g.Expect(resources).To(ContainElement("pods"))
+	g.Expect(resources).NotTo(ContainElement("nodes"))
 }
 
 func TestRRD_QueueAll(t *testing.T) {
@@ -900,6 +1094,87 @@ var _ = Describe("RestrictedRoleDefinition Controller", func() {
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: rrd.Name}, &updated)).To(Succeed())
 			Expect(updated.Status.RoleReconciled).To(BeTrue())
 			Expect(conditions.IsReady(&updated)).To(BeTrue())
+		})
+
+		It("should stall and preserve an unowned target ClusterRole", func() {
+			By("waiting for ResourceTracker to be ready")
+			Eventually(func() bool {
+				_, err := resourceTracker.GetAPIResources()
+				return err == nil
+			}, "30s", "1s").Should(BeTrue())
+
+			suffix := time.Now().UnixNano()
+			pol := &authorizationv1alpha1.RBACPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: fmt.Sprintf("envtest-ownership-policy-%d", suffix),
+				},
+				Spec: authorizationv1alpha1.RBACPolicySpec{
+					AppliesTo: authorizationv1alpha1.PolicyScope{
+						Namespaces: []string{"default"},
+					},
+					RoleLimits: &authorizationv1alpha1.RoleLimits{
+						AllowClusterRoles: true,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, pol)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, pol) }()
+
+			targetName := fmt.Sprintf("envtest-unowned-role-%d", suffix)
+			existing := &rbacv1.ClusterRole{
+				ObjectMeta: metav1.ObjectMeta{Name: targetName},
+				Rules: []rbacv1.PolicyRule{
+					{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"get"}},
+				},
+			}
+			Expect(k8sClient.Create(ctx, existing)).To(Succeed())
+
+			rrd = &authorizationv1alpha1.RestrictedRoleDefinition{
+				TypeMeta: metav1.TypeMeta{
+					APIVersion: authorizationv1alpha1.GroupVersion.String(),
+					Kind:       "RestrictedRoleDefinition",
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name: fmt.Sprintf("envtest-ownership-rrd-%d", suffix),
+				},
+				Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+					PolicyRef:       authorizationv1alpha1.RBACPolicyReference{Name: pol.Name},
+					TargetName:      targetName,
+					TargetRole:      authorizationv1alpha1.DefinitionClusterRole,
+					ScopeNamespaced: false,
+					RestrictedVerbs: []string{"delete", "deletecollection"},
+				},
+			}
+			Expect(k8sClient.Create(ctx, rrd)).To(Succeed())
+			rrd.TypeMeta = metav1.TypeMeta{
+				APIVersion: authorizationv1alpha1.GroupVersion.String(),
+				Kind:       "RestrictedRoleDefinition",
+			}
+
+			var err error
+			reconciler, err = NewRestrictedRoleDefinitionReconciler(
+				k8sClient, scheme.Scheme, recorder, resourceTracker)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("reconciling")
+			logCtx := ctrllog.IntoContext(ctx, logger)
+			_, err = reconciler.Reconcile(logCtx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: rrd.Name},
+			})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("already exists and is not owned"))
+
+			By("verifying the existing ClusterRole was preserved")
+			var kept rbacv1.ClusterRole
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: targetName}, &kept)).To(Succeed())
+			Expect(kept.OwnerReferences).To(BeEmpty())
+			Expect(kept.Rules).To(ConsistOf(existing.Rules))
+
+			By("verifying stalled status")
+			var updated authorizationv1alpha1.RestrictedRoleDefinition
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: rrd.Name}, &updated)).To(Succeed())
+			Expect(updated.Status.RoleReconciled).To(BeFalse())
+			Expect(conditions.IsStalled(&updated)).To(BeTrue())
 		})
 	})
 })

@@ -61,6 +61,7 @@ import (
 // RestrictedRoleDefinitionReconciler reconciles a RestrictedRoleDefinition object.
 type RestrictedRoleDefinitionReconciler struct {
 	client          client.Client
+	reader          client.Reader
 	scheme          *runtime.Scheme
 	recorder        events.EventRecorder
 	resourceTracker *discovery.ResourceTracker
@@ -95,6 +96,7 @@ func NewRestrictedRoleDefinitionReconciler(
 
 	r := &RestrictedRoleDefinitionReconciler{
 		client:                    cachedClient,
+		reader:                    cachedClient,
 		scheme:                    scheme,
 		recorder:                  recorder,
 		resourceTracker:           resourceTracker,
@@ -113,6 +115,9 @@ func (r *RestrictedRoleDefinitionReconciler) SetupWithManager(mgr ctrl.Manager, 
 	if r.restConfig == nil {
 		r.restConfig = mgr.GetConfig()
 	}
+	if r.reader == nil || r.reader == r.client {
+		r.reader = mgr.GetAPIReader()
+	}
 
 	trackerChannel := source.Channel(r.trackerEvents, handler.EnqueueRequestsFromMapFunc(r.queueAll()))
 
@@ -127,6 +132,13 @@ func (r *RestrictedRoleDefinitionReconciler) SetupWithManager(mgr ctrl.Manager, 
 		WatchesRawSource(trackerChannel).
 		WithOptions(controller.TypedOptions[reconcile.Request]{MaxConcurrentReconciles: concurrency}).
 		Complete(r)
+}
+
+func (r *RestrictedRoleDefinitionReconciler) ownershipReader() client.Reader {
+	if r.reader != nil {
+		return r.reader
+	}
+	return r.client
 }
 
 func (r *RestrictedRoleDefinitionReconciler) rrdResolveApplyClient(
@@ -440,7 +452,7 @@ func rrdFilterResource(
 	}
 
 	// Filter by namespace scope.
-	if res.Namespaced && !rrd.Spec.ScopeNamespaced {
+	if res.Namespaced != rrd.Spec.ScopeNamespaced {
 		return
 	}
 
@@ -504,7 +516,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdEnsureRole(
 
 	// Pre-flight ownership check: verify the target role is not already controlled
 	// by a different owner. This produces a clearer error/event than the raw API rejection.
-	if err := checkRestrictedRoleOwnership(ctx, r.client, r.recorder, rrd,
+	if err := checkRestrictedRoleOwnership(ctx, r.ownershipReader(), r.recorder, rrd,
 		rrd.Spec.TargetRole, rrd.Spec.TargetName, rrd.Spec.TargetNamespace); err != nil {
 		conditions.MarkFalse(rrd, authorizationv1alpha1.OwnerRefCondition, rrd.Generation,
 			authorizationv1alpha1.OwnerRefReason, "ownership conflict (check operator logs for details)")
@@ -517,6 +529,9 @@ func (r *RestrictedRoleDefinitionReconciler) rrdEnsureRole(
 
 	switch rrd.Spec.TargetRole {
 	case authorizationv1alpha1.DefinitionClusterRole:
+		if err := r.rrdClearClusterRoleRulesIfEmpty(ctx, applyClient, rrd.Spec.TargetName, finalRules); err != nil {
+			return err
+		}
 		ac := pkgssa.ClusterRoleWithLabelsAndRules(
 			rrd.Spec.TargetName, labelsMap, finalRules,
 		).WithOwnerReferences(ownerRef).WithAnnotations(annotations)
@@ -531,6 +546,9 @@ func (r *RestrictedRoleDefinitionReconciler) rrdEnsureRole(
 			metrics.RBACResourcesApplied.WithLabelValues(metrics.ResourceClusterRole).Inc()
 		}
 	case authorizationv1alpha1.DefinitionNamespacedRole:
+		if err := r.rrdClearRoleRulesIfEmpty(ctx, applyClient, rrd.Spec.TargetNamespace, rrd.Spec.TargetName, finalRules); err != nil {
+			return err
+		}
 		ac := pkgssa.RoleWithLabelsAndRules(
 			rrd.Spec.TargetName, rrd.Spec.TargetNamespace, labelsMap, finalRules,
 		).WithOwnerReferences(ownerRef).WithAnnotations(annotations)
@@ -555,6 +573,53 @@ func (r *RestrictedRoleDefinitionReconciler) rrdEnsureRole(
 	return nil
 }
 
+func (r *RestrictedRoleDefinitionReconciler) rrdClearClusterRoleRulesIfEmpty(
+	ctx context.Context,
+	applyClient client.Client,
+	name string,
+	finalRules []rbacv1.PolicyRule,
+) error {
+	if len(finalRules) > 0 {
+		return nil
+	}
+	existing := &rbacv1.ClusterRole{}
+	if err := r.ownershipReader().Get(ctx, client.ObjectKey{Name: name}, existing); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	if len(existing.Rules) == 0 {
+		return nil
+	}
+	patch := client.RawPatch(types.MergePatchType, []byte(`{"rules":null}`))
+	if err := applyClient.Patch(ctx, existing, patch); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("clear ClusterRole %s rules: %w", name, err)
+	}
+	return nil
+}
+
+func (r *RestrictedRoleDefinitionReconciler) rrdClearRoleRulesIfEmpty(
+	ctx context.Context,
+	applyClient client.Client,
+	namespace string,
+	name string,
+	finalRules []rbacv1.PolicyRule,
+) error {
+	if len(finalRules) > 0 {
+		return nil
+	}
+	existing := &rbacv1.Role{}
+	if err := r.ownershipReader().Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, existing); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	if len(existing.Rules) == 0 {
+		return nil
+	}
+	patch := client.RawPatch(types.MergePatchType, []byte(`{"rules":null}`))
+	if err := applyClient.Patch(ctx, existing, patch); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("clear Role %s/%s rules: %w", namespace, name, err)
+	}
+	return nil
+}
+
 // rrdDeprovision deletes the managed role.
 func (r *RestrictedRoleDefinitionReconciler) rrdDeprovision(
 	ctx context.Context,
@@ -576,13 +641,38 @@ func (r *RestrictedRoleDefinitionReconciler) rrdDeprovision(
 		return fmt.Errorf("%w: got %q", ErrInvalidTargetRole, rrd.Spec.TargetRole)
 	}
 
+	if err := r.client.Get(ctx, client.ObjectKeyFromObject(role), role); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("get %s %s before deprovision: %w", rrd.Spec.TargetRole, rrd.Spec.TargetName, err)
+	}
+	if !hasOwnerRef(role, rrd) {
+		logger.Info("skipping deprovision of target role because it is not owned by this RestrictedRoleDefinition",
+			"targetRole", rrd.Spec.TargetRole,
+			"targetName", rrd.Spec.TargetName,
+			"targetNamespace", rrd.Spec.TargetNamespace,
+			"rrd", rrd.Name)
+		r.recorder.Eventf(rrd, nil, corev1.EventTypeWarning,
+			authorizationv1alpha1.EventReasonOwnership, authorizationv1alpha1.EventActionReconcile,
+			"Skipped deprovisioning %s %s because it is not owned by this RestrictedRoleDefinition",
+			rrd.Spec.TargetRole, rrd.Spec.TargetName)
+		return nil
+	}
+
 	if err := r.client.Delete(ctx, role); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("delete %s %s: %w", rrd.Spec.TargetRole, rrd.Spec.TargetName, err)
+	}
+	switch rrd.Spec.TargetRole {
+	case authorizationv1alpha1.DefinitionClusterRole:
+		metrics.RBACResourcesDeleted.WithLabelValues(metrics.ResourceClusterRole).Inc()
+	case authorizationv1alpha1.DefinitionNamespacedRole:
+		metrics.RBACResourcesDeleted.WithLabelValues(metrics.ResourceRole).Inc()
 	}
 
 	r.recorder.Eventf(rrd, nil, corev1.EventTypeWarning,
 		authorizationv1alpha1.EventReasonDeprovisioned, authorizationv1alpha1.EventActionReconcile,
-		"Deprovisioned %s %s due to policy violations", rrd.Spec.TargetRole, rrd.Spec.TargetName)
+		"Deprovisioned owned %s %s", rrd.Spec.TargetRole, rrd.Spec.TargetName)
 	return nil
 }
 

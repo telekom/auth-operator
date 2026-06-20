@@ -136,6 +136,7 @@ func handlePolicyViolations(
 	// reserved for transient infrastructure errors (e.g. API server failures).
 	conditions.MarkFalse(obj, conditions.ReadyConditionType, generation,
 		authorizationv1alpha1.DeprovisionedReason, "deprovisioned due to policy violations")
+	conditions.Delete(obj, conditions.ReconcilingConditionType)
 
 	if err := cfg.ApplyStatus(ctx); err != nil {
 		metrics.ReconcileTotal.WithLabelValues(cfg.ControllerLabel, metrics.ResultError).Inc()
@@ -188,12 +189,12 @@ func findOwningRBDRef(ownerReferences []metav1.OwnerReference) *metav1.OwnerRefe
 	return nil
 }
 
-// checkRestrictedRoleOwnership verifies that the target role (if it already exists)
-// is not controlled by a different owner. This prevents silently taking over roles
-// managed by other controllers or other restricted definitions.
+// checkRestrictedRoleOwnership verifies that the target role (if it already
+// exists) is already owned by this RestrictedRoleDefinition. This prevents
+// silently taking over unmanaged roles or roles managed by other controllers.
 func checkRestrictedRoleOwnership(
 	ctx context.Context,
-	c client.Client,
+	reader client.Reader,
 	recorder events.EventRecorder,
 	owner client.Object,
 	targetRole string,
@@ -215,11 +216,15 @@ func checkRestrictedRoleOwnership(
 		return fmt.Errorf("unknown targetRole %q", targetRole)
 	}
 
-	if err := c.Get(ctx, key, existing); err != nil {
+	if err := reader.Get(ctx, key, existing); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil // Target doesn't exist yet — will be created by SSA.
 		}
 		return fmt.Errorf("check existing %s %v: %w", targetRole, key, err)
+	}
+
+	if hasOwnerRef(existing, owner) {
+		return nil
 	}
 
 	for _, ref := range existing.GetOwnerReferences() {
@@ -236,5 +241,63 @@ func checkRestrictedRoleOwnership(
 		}
 	}
 
-	return nil
+	logger.Info("Target role already exists without this RestrictedRoleDefinition owner",
+		"roleName", targetName,
+		"targetRole", targetRole,
+		"owner", owner.GetName(),
+		"ownerUID", owner.GetUID())
+	recorder.Eventf(owner, nil, corev1.EventTypeWarning,
+		authorizationv1alpha1.EventReasonOwnership, authorizationv1alpha1.EventActionReconcile,
+		"Target %s %s already exists and is not owned by RestrictedRoleDefinition %s (UID: %s)",
+		targetRole, targetName, owner.GetName(), owner.GetUID())
+	return fmt.Errorf("target %s %s already exists and is not owned by RestrictedRoleDefinition %s (UID: %s)",
+		targetRole, targetName, owner.GetName(), owner.GetUID())
+}
+
+func checkRestrictedBindingOwnership(
+	ctx context.Context,
+	reader client.Reader,
+	recorder events.EventRecorder,
+	owner client.Object,
+	targetKind string,
+	targetName string,
+	targetNamespace string,
+) error {
+	logger := log.FromContext(ctx)
+
+	var existing client.Object
+	key := client.ObjectKey{Name: targetName}
+	switch targetKind {
+	case "ClusterRoleBinding":
+		existing = &rbacv1.ClusterRoleBinding{}
+	case "RoleBinding":
+		existing = &rbacv1.RoleBinding{}
+		key.Namespace = targetNamespace
+	default:
+		return fmt.Errorf("unknown target binding kind %q", targetKind)
+	}
+
+	if err := reader.Get(ctx, key, existing); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("check existing %s %v: %w", targetKind, key, err)
+	}
+
+	if hasOwnerRef(existing, owner) {
+		return nil
+	}
+
+	logger.Info("Target binding already exists without this RestrictedBindDefinition owner",
+		"bindingKind", targetKind,
+		"bindingName", targetName,
+		"bindingNamespace", targetNamespace,
+		"owner", owner.GetName(),
+		"ownerUID", owner.GetUID())
+	recorder.Eventf(owner, nil, corev1.EventTypeWarning,
+		authorizationv1alpha1.EventReasonOwnership, authorizationv1alpha1.EventActionReconcile,
+		"Target %s %s already exists and is not owned by RestrictedBindDefinition %s (UID: %s)",
+		targetKind, targetName, owner.GetName(), owner.GetUID())
+	return fmt.Errorf("target %s %s already exists and is not owned by RestrictedBindDefinition %s (UID: %s)",
+		targetKind, targetName, owner.GetName(), owner.GetUID())
 }

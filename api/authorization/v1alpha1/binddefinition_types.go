@@ -49,6 +49,7 @@ type ClusterBinding struct {
 }
 
 // NamespaceBinding defines namespace-scoped role bindings.
+// +kubebuilder:validation:XValidation:rule="((!has(self.clusterRoleRefs) || size(self.clusterRoleRefs) == 0) && (!has(self.roleRefs) || size(self.roleRefs) == 0)) || (has(self.namespace) && size(self.namespace) > 0) || (has(self.namespaceSelector) && size(self.namespaceSelector) > 0)",message="roleBindings entries with role refs must specify namespace or namespaceSelector"
 type NamespaceBinding struct {
 	// ClusterRoleRefs references an existing ClusterRole
 	// +kubebuilder:validation:Optional

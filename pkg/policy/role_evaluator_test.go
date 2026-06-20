@@ -13,6 +13,13 @@ import (
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 )
 
+func policyWithDefaultRoleLimits(policy *authorizationv1alpha1.RBACPolicy) *authorizationv1alpha1.RBACPolicy {
+	if policy.Spec.RoleLimits == nil {
+		policy.Spec.RoleLimits = &authorizationv1alpha1.RoleLimits{AllowClusterRoles: true}
+	}
+	return policy
+}
+
 func TestEvaluateRoleDefinition_NoLimits(t *testing.T) {
 	policy := &authorizationv1alpha1.RBACPolicy{}
 	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
@@ -23,8 +30,11 @@ func TestEvaluateRoleDefinition_NoLimits(t *testing.T) {
 	}
 
 	violations := EvaluateRoleDefinition(policy, rrd)
-	if len(violations) != 0 {
-		t.Errorf("expected no violations, got %v", violations)
+	if len(violations) != 1 {
+		t.Fatalf("expected 1 violation for missing roleLimits, got %d: %v", len(violations), violations)
+	}
+	if violations[0].Field != "spec.policyRef" {
+		t.Errorf("expected field spec.policyRef, got %q", violations[0].Field)
 	}
 }
 
@@ -195,6 +205,32 @@ func TestEvaluateRoleDefinition_ForbiddenAPIGroups_VersionBypass(t *testing.T) {
 	violations := EvaluateRoleDefinition(policy, rrd)
 	if len(violations) != 1 {
 		t.Fatalf("expected 1 violation (version-specific restriction does not fully exclude group), got %d: %v", len(violations), violations)
+	}
+}
+
+func TestEvaluateRoleDefinition_ForbiddenAPIGroups_VerbScopedBypass(t *testing.T) {
+	policy := &authorizationv1alpha1.RBACPolicy{
+		Spec: authorizationv1alpha1.RBACPolicySpec{
+			RoleLimits: &authorizationv1alpha1.RoleLimits{
+				ForbiddenAPIGroups: []string{"apps"},
+			},
+		},
+	}
+
+	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+			TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
+			TargetName:      "test-role",
+			TargetNamespace: "default",
+			RestrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{
+				{Name: "apps", Verbs: []string{"get"}},
+			},
+		},
+	}
+
+	violations := EvaluateRoleDefinition(policy, rrd)
+	if len(violations) != 1 {
+		t.Fatalf("expected 1 violation (verb-scoped restriction does not fully exclude group), got %d: %v", len(violations), violations)
 	}
 }
 
@@ -478,6 +514,19 @@ func TestIsAPIGroupExcluded_VerbLevelChecks(t *testing.T) {
 			t.Error("expected isAPIGroupExcluded=false for partially restricted group (specific version only)")
 		}
 	})
+
+	t.Run("verb-scoped group does not skip verb check", func(t *testing.T) {
+		rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+			Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+				RestrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{
+					{Name: "apps", Verbs: []string{"delete"}},
+				},
+			},
+		}
+		if isAPIGroupExcluded(rrd, "apps") {
+			t.Error("expected isAPIGroupExcluded=false for verb-scoped restricted group")
+		}
+	})
 }
 
 func TestForbiddenResourceVerbs_PartialGroupRestriction_DoesNotSkipVerbs(t *testing.T) {
@@ -509,7 +558,7 @@ func TestForbiddenResourceVerbs_PartialGroupRestriction_DoesNotSkipVerbs(t *test
 			},
 		}
 
-		violations := EvaluateRoleDefinition(policy, rrd)
+		violations := EvaluateRoleDefinition(policyWithDefaultRoleLimits(policy), rrd)
 		if len(violations) == 0 {
 			t.Error("expected violation: partial apps group restriction should not skip the delete-verb check")
 		}
@@ -527,7 +576,7 @@ func TestForbiddenResourceVerbs_PartialGroupRestriction_DoesNotSkipVerbs(t *test
 			},
 		}
 
-		violations := EvaluateRoleDefinition(policy, rrd)
+		violations := EvaluateRoleDefinition(policyWithDefaultRoleLimits(policy), rrd)
 		if len(violations) != 0 {
 			t.Errorf("expected no violations when delete is in RestrictedVerbs, got %v", violations)
 		}
@@ -545,9 +594,53 @@ func TestForbiddenResourceVerbs_PartialGroupRestriction_DoesNotSkipVerbs(t *test
 			},
 		}
 
-		violations := EvaluateRoleDefinition(policy, rrd)
+		violations := EvaluateRoleDefinition(policyWithDefaultRoleLimits(policy), rrd)
 		if len(violations) != 0 {
 			t.Errorf("expected no violations when apps group is fully restricted, got %v", violations)
+		}
+	})
+
+	t.Run("all-version group verb restriction covers matching forbidden verb", func(t *testing.T) {
+		rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+			Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+				TargetRole: authorizationv1alpha1.DefinitionClusterRole,
+				TargetName: "test-role",
+				RestrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{
+					{Name: "apps", Verbs: []string{"delete"}},
+				},
+			},
+		}
+
+		violations := EvaluateRoleDefinition(policyWithDefaultRoleLimits(policy), rrd)
+		if len(violations) != 0 {
+			t.Errorf("expected no violations when apps/delete is covered by a group verb restriction, got %v", violations)
+		}
+	})
+
+	t.Run("all-version group verb restriction does not cover other forbidden verbs", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				RoleLimits: &authorizationv1alpha1.RoleLimits{
+					AllowClusterRoles: true,
+					ForbiddenResourceVerbs: []authorizationv1alpha1.ResourceVerbRule{
+						{Resource: "deployments", APIGroup: "apps", Verbs: []string{"delete", "patch"}},
+					},
+				},
+			},
+		}
+		rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+			Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+				TargetRole: authorizationv1alpha1.DefinitionClusterRole,
+				TargetName: "test-role",
+				RestrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{
+					{Name: "apps", Verbs: []string{"delete"}},
+				},
+			},
+		}
+
+		violations := EvaluateRoleDefinition(policyWithDefaultRoleLimits(policy), rrd)
+		if len(violations) != 1 {
+			t.Fatalf("expected one violation for uncovered patch verb, got %d: %v", len(violations), violations)
 		}
 	})
 
@@ -564,7 +657,7 @@ func TestForbiddenResourceVerbs_PartialGroupRestriction_DoesNotSkipVerbs(t *test
 				RestrictedVerbs: []string{"delete"},
 			},
 		}
-		violations := EvaluateRoleDefinition(policy, rrd)
+		violations := EvaluateRoleDefinition(policyWithDefaultRoleLimits(policy), rrd)
 		// Only "delete" is a ForbiddenResourceVerb. Since delete IS in RestrictedVerbs,
 		// no violation should be reported.
 		if len(violations) != 0 {
@@ -589,7 +682,7 @@ func TestEvaluateRoleDefinition_AppliesToScope(t *testing.T) {
 				TargetNamespace: "namespace-a",
 			},
 		}
-		violations := EvaluateRoleDefinition(policy, rrd)
+		violations := EvaluateRoleDefinition(policyWithDefaultRoleLimits(policy), rrd)
 		if len(violations) != 0 {
 			t.Errorf("expected no violations for targetNamespace in scope, got %v", violations)
 		}
@@ -610,7 +703,7 @@ func TestEvaluateRoleDefinition_AppliesToScope(t *testing.T) {
 				TargetNamespace: "namespace-b",
 			},
 		}
-		violations := EvaluateRoleDefinition(policy, rrd)
+		violations := EvaluateRoleDefinition(policyWithDefaultRoleLimits(policy), rrd)
 		if len(violations) != 1 {
 			t.Fatalf("expected 1 violation for targetNamespace outside scope, got %d: %v", len(violations), violations)
 		}
@@ -633,7 +726,7 @@ func TestEvaluateRoleDefinition_AppliesToScope(t *testing.T) {
 				TargetName: "test-role",
 			},
 		}
-		violations := EvaluateRoleDefinition(policy, rrd)
+		violations := EvaluateRoleDefinition(policyWithDefaultRoleLimits(policy), rrd)
 		if len(violations) != 0 {
 			t.Errorf("expected no violations for ClusterRole (no targetNamespace), got %v", violations)
 		}
@@ -657,7 +750,7 @@ func TestEvaluateRoleDefinition_AppliesToScope(t *testing.T) {
 		lg := &fakeLabelGetter{namespaces: map[string]map[string]string{
 			"namespace-a": {"team": "a"},
 		}}
-		violations := EvaluateRoleDefinitionWithLabels(context.Background(), policy, rrd, lg)
+		violations := EvaluateRoleDefinitionWithLabels(context.Background(), policyWithDefaultRoleLimits(policy), rrd, lg)
 		if len(violations) != 0 {
 			t.Errorf("expected no violations for selector-matching targetNamespace, got %v", violations)
 		}
@@ -681,7 +774,7 @@ func TestEvaluateRoleDefinition_AppliesToScope(t *testing.T) {
 		lg := &fakeLabelGetter{namespaces: map[string]map[string]string{
 			"namespace-b": {"team": "b"},
 		}}
-		violations := EvaluateRoleDefinitionWithLabels(context.Background(), policy, rrd, lg)
+		violations := EvaluateRoleDefinitionWithLabels(context.Background(), policyWithDefaultRoleLimits(policy), rrd, lg)
 		if len(violations) != 1 {
 			t.Fatalf("expected 1 violation for selector-nonmatching targetNamespace, got %d: %v", len(violations), violations)
 		}

@@ -368,6 +368,9 @@ docker-push: ## Push docker image with the manager.
 helm: manifests kustomize ## Generate the complete Helm chart
 	rm -f chart/auth-operator/crds/*
 	$(KUSTOMIZE) build config/crd -o chart/auth-operator/crds
+	for file in chart/auth-operator/crds/apiextensions.k8s.io_v1_customresourcedefinition_*; do \
+		mv "$$file" "chart/auth-operator/crds/$${file#chart/auth-operator/crds/apiextensions.k8s.io_v1_customresourcedefinition_}"; \
+	done
 	pushd "chart/auth-operator" && \
 	$(KUSTOMIZE) build . -o crds && \
 	for file in crds/apiextensions.k8s.io_v1_customresourcedefinition_*; do \

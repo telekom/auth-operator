@@ -56,6 +56,9 @@ webhooks:
 - admissionReviewVersions:
   - v1
   clientConfig:
+    {{- if $caBundle }}
+    caBundle: {{ $caBundle | quote }}
+    {{- end }}
     service:
       name: '{{ include "auth-operator.fullname" . }}-webhook-service'
       namespace: '{{ .Release.Namespace }}'
@@ -76,6 +79,9 @@ webhooks:
 - admissionReviewVersions:
   - v1
   clientConfig:
+    {{- if $caBundle }}
+    caBundle: {{ $caBundle | quote }}
+    {{- end }}
     service:
       name: '{{ include "auth-operator.fullname" . }}-webhook-service'
       namespace: '{{ .Release.Namespace }}'
@@ -96,6 +102,9 @@ webhooks:
 - admissionReviewVersions:
   - v1
   clientConfig:
+    {{- if $caBundle }}
+    caBundle: {{ $caBundle | quote }}
+    {{- end }}
     service:
       name: '{{ include "auth-operator.fullname" . }}-webhook-service'
       namespace: '{{ .Release.Namespace }}'

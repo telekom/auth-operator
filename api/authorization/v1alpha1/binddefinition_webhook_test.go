@@ -253,6 +253,25 @@ var _ = Describe("BindDefinition Webhook", func() {
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("ServiceAccount subjects must specify a namespace"))
 		})
+
+		It("should deny a BindDefinition roleBinding with refs but no namespace target", func() {
+			bd := &BindDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-cel-rb-no-target",
+				},
+				Spec: BindDefinitionSpec{
+					TargetName: "test-cel-rb-no-target",
+					Subjects:   validSubjects,
+					RoleBindings: []NamespaceBinding{
+						{RoleRefs: []string{"reader"}},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, bd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("roleBindings entries with role refs must specify namespace or namespaceSelector"))
+			Expect(err.Error()).To(ContainSubstring("spec.roleBindings[0]"))
+		})
 	})
 
 	Context("Subject Kind Validation", func() {

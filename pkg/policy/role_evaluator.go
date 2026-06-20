@@ -28,6 +28,13 @@ func EvaluateRoleDefinitionWithLabels(
 	rrd *authorizationv1alpha1.RestrictedRoleDefinition,
 	labelGetter LabelGetter,
 ) []Violation {
+	if policy == nil {
+		return []Violation{{Field: "<policy>", Message: "policy must not be nil"}}
+	}
+	if rrd == nil {
+		return []Violation{{Field: "<rrd>", Message: "RestrictedRoleDefinition must not be nil"}}
+	}
+
 	var violations []Violation
 
 	// Enforce appliesTo scope: the Role's target namespace must be within the policy's
@@ -40,7 +47,10 @@ func EvaluateRoleDefinitionWithLabels(
 	}
 
 	if policy.Spec.RoleLimits == nil {
-		return violations
+		return append(violations, Violation{
+			Field:   "spec.policyRef",
+			Message: "policy roleLimits must be configured to allow role generation",
+		})
 	}
 
 	return append(violations, evaluateRoleLimits(policy.Spec.RoleLimits, rrd)...)
@@ -104,7 +114,8 @@ func evaluateRoleLimits(limits *authorizationv1alpha1.RoleLimits, rrd *authoriza
 		// Check which verbs are not globally restricted.
 		var uncovered []string
 		for _, verb := range rule.Verbs {
-			if !ContainsStringOrWildcard(rrd.Spec.RestrictedVerbs, verb) {
+			if !ContainsStringOrWildcard(rrd.Spec.RestrictedVerbs, verb) &&
+				!isAPIGroupVerbRestricted(rrd, rule.APIGroup, verb) {
 				uncovered = append(uncovered, verb)
 			}
 		}
@@ -123,12 +134,12 @@ func evaluateRoleLimits(limits *authorizationv1alpha1.RoleLimits, rrd *authoriza
 }
 
 // isAPIGroupFullyRestricted returns true if the API group is listed in
-// RestrictedAPIs with an empty Versions list, meaning the entire group (all
-// versions) is restricted. Specifying a subset of versions would allow other
-// versions through at runtime.
+// RestrictedAPIs with empty Versions and empty Verbs lists, meaning the entire
+// group (all versions and verbs) is restricted. Specifying versions or verbs
+// leaves part of the group available at runtime.
 func isAPIGroupFullyRestricted(rrd *authorizationv1alpha1.RestrictedRoleDefinition, group string) bool {
 	for _, api := range rrd.Spec.RestrictedAPIs {
-		if api.Name == group && len(api.Versions) == 0 {
+		if api.Name == group && len(api.Versions) == 0 && len(api.Verbs) == 0 {
 			return true
 		}
 	}
@@ -160,16 +171,30 @@ func isResourceExcludedForGroup(rrd *authorizationv1alpha1.RestrictedRoleDefinit
 	return false
 }
 
-// isAPIGroupExcluded returns true only if the API group is fully excluded in RestrictedAPIs,
-// meaning it is listed with an empty Versions slice (all versions restricted).
+// isAPIGroupExcluded returns true only if the API group is fully excluded in
+// RestrictedAPIs, meaning it is listed with empty Versions and Verbs slices.
 //
-// A group listed with a specific subset of versions is only partially restricted:
-// the remaining versions would still be accessible at runtime, so we cannot
-// consider the group "excluded" for the purpose of skipping ForbiddenResourceVerbs checks.
-// In that case, verb-level restrictions must still be verified independently.
+// A group listed with a specific subset of versions or verbs is only partially
+// restricted: the remaining versions or verbs would still be accessible at
+// runtime, so we cannot consider the group "excluded" for skipping
+// ForbiddenResourceVerbs checks.
 func isAPIGroupExcluded(rrd *authorizationv1alpha1.RestrictedRoleDefinition, apiGroup string) bool {
 	for _, api := range rrd.Spec.RestrictedAPIs {
-		if api.Name == apiGroup && len(api.Versions) == 0 {
+		if api.Name == apiGroup && len(api.Versions) == 0 && len(api.Verbs) == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// isAPIGroupVerbRestricted returns true if RestrictedAPIs removes the given verb
+// from all versions in the API group. Version-scoped entries do not count here
+// because Kubernetes RBAC rules are version-agnostic and another version can
+// still expose the same resource.
+func isAPIGroupVerbRestricted(rrd *authorizationv1alpha1.RestrictedRoleDefinition, apiGroup, verb string) bool {
+	for _, api := range rrd.Spec.RestrictedAPIs {
+		if api.Name == apiGroup && len(api.Versions) == 0 && len(api.Verbs) > 0 &&
+			ContainsStringOrWildcard(api.Verbs, verb) {
 			return true
 		}
 	}

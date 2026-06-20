@@ -143,19 +143,9 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 	// Determine the missing-role policy from annotation.
 	policy := r.GetMissingRolePolicy()
 
-	// Always validate namespace selector syntax, regardless of missing-role policy.
-	// Invalid selectors are a configuration error and must not be silently ignored.
-	for _, roleBinding := range r.Spec.RoleBindings {
-		for _, nsSelector := range roleBinding.NamespaceSelector {
-			if isLabelSelectorEmpty(&nsSelector) {
-				continue
-			}
-			if _, err := metav1.LabelSelectorAsSelector(&nsSelector); err != nil {
-				logger.Info("validation failed: invalid namespaceSelector",
-					"name", r.Name, "error", err.Error())
-				return warnings, apierrors.NewBadRequest(fmt.Sprintf("invalid namespaceSelector: %v", err))
-			}
-		}
+	if err := validateNamespaceBindings(schema.GroupKind{Group: GroupVersion.Group, Kind: "BindDefinition"}, r.Name, r.Spec.RoleBindings); err != nil {
+		logger.Info("validation failed: invalid roleBindings", "name", r.Name, "error", err.Error())
+		return warnings, err
 	}
 
 	if policy == MissingRolePolicyIgnore {
@@ -364,4 +354,34 @@ func (v *BindDefinitionValidator) ValidateDelete(ctx context.Context, obj *BindD
 // More efficient than using reflect.DeepEqual.
 func isLabelSelectorEmpty(selector *metav1.LabelSelector) bool {
 	return selector == nil || (len(selector.MatchLabels) == 0 && len(selector.MatchExpressions) == 0)
+}
+
+func validateNamespaceBindings(kind schema.GroupKind, name string, bindings []NamespaceBinding) error {
+	for i, binding := range bindings {
+		if (len(binding.ClusterRoleRefs) > 0 || len(binding.RoleRefs) > 0) &&
+			binding.Namespace == "" &&
+			len(binding.NamespaceSelector) == 0 {
+			return apierrors.NewInvalid(
+				kind,
+				name,
+				field.ErrorList{field.Required(
+					field.NewPath("spec", "roleBindings").Index(i).Child("namespace"),
+					"roleBindings entries with role refs must specify namespace or namespaceSelector")})
+		}
+		for j, selector := range binding.NamespaceSelector {
+			if isLabelSelectorEmpty(&selector) {
+				continue
+			}
+			if _, err := metav1.LabelSelectorAsSelector(&selector); err != nil {
+				return apierrors.NewInvalid(
+					kind,
+					name,
+					field.ErrorList{field.Invalid(
+						field.NewPath("spec", "roleBindings").Index(i).Child("namespaceSelector").Index(j),
+						selector,
+						err.Error())})
+			}
+		}
+	}
+	return nil
 }

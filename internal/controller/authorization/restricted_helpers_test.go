@@ -70,6 +70,8 @@ func TestHandlePolicyViolations_Success(t *testing.T) {
 	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-rbd", Generation: 2},
 	}
+	conditions.MarkReconciling(rbd, rbd.Generation,
+		authorizationv1alpha1.ReconcilingReasonProgressing, authorizationv1alpha1.ReconcilingMessageProgressing)
 
 	deprovisionCalled := false
 	reconciledValue := true
@@ -105,6 +107,7 @@ func TestHandlePolicyViolations_Success(t *testing.T) {
 	g.Expect(condReady).NotTo(gomega.BeNil())
 	g.Expect(condReady.Status).To(gomega.Equal(metav1.ConditionFalse))
 	g.Expect(condReady.Reason).To(gomega.Equal(string(authorizationv1alpha1.DeprovisionedReason)))
+	g.Expect(conditions.IsReconciling(rbd)).To(gomega.BeFalse())
 }
 
 func TestHandlePolicyViolations_DeprovisionError(t *testing.T) {
@@ -296,6 +299,32 @@ func TestCheckRestrictedRoleOwnership_NotFound(t *testing.T) {
 	err := checkRestrictedRoleOwnership(helperCtx(), c, recorder, rrd,
 		authorizationv1alpha1.DefinitionClusterRole, "nonexistent-role", "")
 	g.Expect(err).NotTo(gomega.HaveOccurred())
+}
+
+func TestCheckRestrictedRoleOwnership_UnownedExistingRoleRejected(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-rrd",
+			UID:  "rrd-uid-111",
+		},
+		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+			TargetName: "my-role",
+			TargetRole: authorizationv1alpha1.DefinitionClusterRole,
+		},
+	}
+
+	existingRole := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-role"},
+	}
+
+	c := newFakeClient(existingRole)
+	recorder := events.NewFakeRecorder(10)
+	err := checkRestrictedRoleOwnership(helperCtx(), c, recorder, rrd,
+		rrd.Spec.TargetRole, rrd.Spec.TargetName, "")
+	g.Expect(err).To(gomega.HaveOccurred())
+	g.Expect(err.Error()).To(gomega.ContainSubstring("already exists and is not owned"))
 }
 
 func TestCheckRestrictedRoleOwnership_NamespacedRole(t *testing.T) {

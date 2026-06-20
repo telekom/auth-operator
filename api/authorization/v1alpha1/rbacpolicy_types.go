@@ -79,11 +79,12 @@ type BindingLimits struct {
 	// +kubebuilder:default=false
 	AllowClusterRoleBindings bool `json:"allowClusterRoleBindings"`
 
-	// ClusterRoleBindingLimits constrains which ClusterRoles may be referenced in CRBs.
+	// ClusterRoleBindingLimits constrains which ClusterRoles may be referenced
+	// from ClusterRoleBindings or RoleBindings.
 	// +kubebuilder:validation:Optional
 	ClusterRoleBindingLimits *RoleRefLimits `json:"clusterRoleBindingLimits,omitempty"`
 
-	// RoleBindingLimits constrains which ClusterRoles/Roles may be referenced in RBs.
+	// RoleBindingLimits constrains which namespaced Roles may be referenced in RoleBindings.
 	// +kubebuilder:validation:Optional
 	RoleBindingLimits *RoleRefLimits `json:"roleBindingLimits,omitempty"`
 

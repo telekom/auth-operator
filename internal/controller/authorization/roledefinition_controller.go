@@ -499,7 +499,8 @@ func allowedVerbsForAPIResource(
 	resource metav1.APIResource,
 	apiGroupRestrictedVerbs []string,
 ) []string {
-	if isRestrictedAPIResource(roleDefinition, apiGroup, resource) || resource.Namespaced && !roleDefinition.Spec.ScopeNamespaced {
+	if isRestrictedAPIResource(roleDefinition, apiGroup, resource) ||
+		resource.Namespaced != roleDefinition.Spec.ScopeNamespaced {
 		return nil
 	}
 

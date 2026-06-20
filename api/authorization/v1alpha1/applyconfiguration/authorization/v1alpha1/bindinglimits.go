@@ -25,9 +25,10 @@ type BindingLimitsApplyConfiguration struct {
 	// AllowClusterRoleBindings controls whether ClusterRoleBindings may be created.
 	// Default is false (deny by default).
 	AllowClusterRoleBindings *bool `json:"allowClusterRoleBindings,omitempty"`
-	// ClusterRoleBindingLimits constrains which ClusterRoles may be referenced in CRBs.
+	// ClusterRoleBindingLimits constrains which ClusterRoles may be referenced
+	// from ClusterRoleBindings or RoleBindings.
 	ClusterRoleBindingLimits *RoleRefLimitsApplyConfiguration `json:"clusterRoleBindingLimits,omitempty"`
-	// RoleBindingLimits constrains which ClusterRoles/Roles may be referenced in RBs.
+	// RoleBindingLimits constrains which namespaced Roles may be referenced in RoleBindings.
 	RoleBindingLimits *RoleRefLimitsApplyConfiguration `json:"roleBindingLimits,omitempty"`
 	// TargetNamespaceLimits constrains which namespaces may be targeted.
 	TargetNamespaceLimits *NamespaceLimitsApplyConfiguration `json:"targetNamespaceLimits,omitempty"`

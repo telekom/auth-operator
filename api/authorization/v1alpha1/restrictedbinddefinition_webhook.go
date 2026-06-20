@@ -11,7 +11,6 @@ import (
 
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -173,21 +172,7 @@ func (v *RestrictedBindDefinitionValidator) validateRestrictedBindDefinitionSpec
 		}
 	}
 
-	// Validate namespace selectors in roleBindings.
-	for i, nb := range obj.Spec.RoleBindings {
-		for j, sel := range nb.NamespaceSelector {
-			if _, err := metav1.LabelSelectorAsSelector(&sel); err != nil {
-				return apierrors.NewInvalid(
-					schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedBindDefinitionKind},
-					obj.Name,
-					field.ErrorList{field.Invalid(
-						field.NewPath("spec", "roleBindings").Index(i).Child("namespaceSelector").Index(j),
-						sel, err.Error())})
-			}
-		}
-	}
-
-	return nil
+	return validateNamespaceBindings(schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedBindDefinitionKind}, obj.Name, obj.Spec.RoleBindings)
 }
 
 // validatePolicyRefExists verifies that the referenced RBACPolicy exists and returns

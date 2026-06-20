@@ -231,6 +231,28 @@ var _ = Describe("RestrictedBindDefinition Webhook", func() {
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("ServiceAccount subjects must specify a namespace"))
 		})
+
+		It("Should deny a RestrictedBindDefinition roleBinding with refs but no namespace target", func() {
+			rbd := &RestrictedBindDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rbd-cel-rb-no-target",
+				},
+				Spec: RestrictedBindDefinitionSpec{
+					PolicyRef:  RBACPolicyReference{Name: policy.Name},
+					TargetName: "test-rbd-cel-rb-no-target",
+					Subjects: []rbacv1.Subject{
+						{Kind: rbacv1.GroupKind, APIGroup: rbacv1.GroupName, Name: "test-group"},
+					},
+					RoleBindings: []NamespaceBinding{
+						{RoleRefs: []string{"reader"}},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, rbd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("roleBindings entries with role refs must specify namespace or namespaceSelector"))
+			Expect(err.Error()).To(ContainSubstring("spec.roleBindings[0]"))
+		})
 	})
 
 	Context("When updating RestrictedBindDefinition under Validating Webhook", func() {

@@ -11,6 +11,8 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -29,6 +31,7 @@ import (
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/helpers"
+	"github.com/telekom/auth-operator/pkg/metrics"
 )
 
 func TestRBD_Reconcile_ImpersonationEnabled_UsesImpersonatedClient(t *testing.T) {
@@ -63,7 +66,7 @@ func TestRBD_Reconcile_ImpersonationEnabled_UsesImpersonatedClient(t *testing.T)
 		},
 	}
 
-	r, c := newRBDTestReconciler(pol, rbd)
+	r, c := newRBDTestReconciler(rbdPolicyWithDefaultAllowances(pol), rbd)
 	r.restConfig = &rest.Config{Host: "https://cluster.local"}
 
 	var capturedUsername string
@@ -116,7 +119,7 @@ func TestRBD_Reconcile_ImpersonationFactoryError_MarksStalled(t *testing.T) {
 		},
 	}
 
-	r, c := newRBDTestReconciler(pol, rbd)
+	r, c := newRBDTestReconciler(rbdPolicyWithDefaultAllowances(pol), rbd)
 	r.restConfig = &rest.Config{Host: "https://cluster.local"}
 	r.impersonatedClientFactory = func(_ *rest.Config, _ *runtime.Scheme, _ string) (client.Client, error) {
 		return nil, fmt.Errorf("failed to build impersonated client")
@@ -147,6 +150,39 @@ func newRBDTestReconciler(objs ...client.Object) (*RestrictedBindDefinitionRecon
 
 func rbdCtx() context.Context {
 	return ctrllog.IntoContext(context.Background(), logr.Discard())
+}
+
+func ptrBool(v bool) *bool { return &v }
+
+func readGaugeValue(t *testing.T, gauge prometheus.Gauge) float64 {
+	t.Helper()
+	metric := &dto.Metric{}
+	if err := gauge.(prometheus.Metric).Write(metric); err != nil {
+		t.Fatalf("write gauge: %v", err)
+	}
+	return metric.GetGauge().GetValue()
+}
+
+func rbdPolicyWithDefaultAllowances(policy *authorizationv1alpha1.RBACPolicy) *authorizationv1alpha1.RBACPolicy {
+	if policy.Spec.BindingLimits == nil {
+		policy.Spec.BindingLimits = &authorizationv1alpha1.BindingLimits{AllowClusterRoleBindings: true}
+	}
+	if policy.Spec.BindingLimits.ClusterRoleBindingLimits == nil {
+		policy.Spec.BindingLimits.ClusterRoleBindingLimits = &authorizationv1alpha1.RoleRefLimits{
+			AllowedRoleRefs: []string{"edit", "view"},
+		}
+	}
+	if policy.Spec.BindingLimits.RoleBindingLimits == nil {
+		policy.Spec.BindingLimits.RoleBindingLimits = &authorizationv1alpha1.RoleRefLimits{
+			AllowedRoleRefs: []string{"edit", "my-role", "view"},
+		}
+	}
+	if policy.Spec.SubjectLimits == nil {
+		policy.Spec.SubjectLimits = &authorizationv1alpha1.SubjectLimits{
+			AllowedKinds: []string{rbacv1.UserKind, rbacv1.GroupKind, rbacv1.ServiceAccountKind},
+		}
+	}
+	return policy
 }
 
 func TestRBD_Reconcile_NotFound(t *testing.T) {
@@ -230,7 +266,7 @@ func TestRBD_Reconcile_PolicyViolation_Deprovision(t *testing.T) {
 		},
 	}
 
-	r, c := newRBDTestReconciler(pol, rbd)
+	r, c := newRBDTestReconciler(rbdPolicyWithDefaultAllowances(pol), rbd)
 	result, err := r.Reconcile(rbdCtx(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: "violating-rbd"},
 	})
@@ -452,7 +488,7 @@ func TestRBD_Reconcile_PolicyCompliant_CreatesClusterRoleBindings(t *testing.T) 
 		},
 	}
 
-	r, c := newRBDTestReconciler(pol, rbd)
+	r, c := newRBDTestReconciler(rbdPolicyWithDefaultAllowances(pol), rbd)
 	result, err := r.Reconcile(rbdCtx(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: "compliant-rbd"},
 	})
@@ -472,6 +508,88 @@ func TestRBD_Reconcile_PolicyCompliant_CreatesClusterRoleBindings(t *testing.T) 
 	g.Expect(updated.Status.BindReconciled).To(gomega.BeTrue())
 	g.Expect(conditions.IsReady(&updated)).To(gomega.BeTrue())
 	g.Expect(updated.Status.PolicyViolations).To(gomega.BeEmpty())
+}
+
+func TestRBD_ReconcileResources_UnownedClusterRoleBindingIsPreserved(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "safe-rbd", UID: "safe-rbd-uid"},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			TargetName: "safe-target",
+			Subjects: []rbacv1.Subject{
+				{Kind: rbacv1.UserKind, Name: "alice", APIGroup: rbacv1.GroupName},
+			},
+			ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
+				ClusterRoleRefs: []string{"view"},
+			},
+		},
+	}
+	existing := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "safe-target-view-binding"},
+		Subjects: []rbacv1.Subject{
+			{Kind: rbacv1.UserKind, Name: "existing", APIGroup: rbacv1.GroupName},
+		},
+		RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "admin"},
+	}
+
+	r, c := newRBDTestReconciler(rbd, existing)
+	err := r.rbdReconcileResources(rbdCtx(), rbd, c, nil)
+	g.Expect(err).To(gomega.HaveOccurred())
+	g.Expect(err.Error()).To(gomega.ContainSubstring("already exists and is not owned"))
+
+	var kept rbacv1.ClusterRoleBinding
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: "safe-target-view-binding"}, &kept)).To(gomega.Succeed())
+	g.Expect(kept.RoleRef.Name).To(gomega.Equal("admin"))
+	g.Expect(kept.Subjects).To(gomega.ConsistOf(existing.Subjects))
+	g.Expect(kept.OwnerReferences).To(gomega.BeEmpty())
+}
+
+func TestRBD_Reconcile_UnownedClusterRoleBindingStallsAndPreservesObject(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	pol := rbdPolicyWithDefaultAllowances(&authorizationv1alpha1.RBACPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "ownership-policy", Generation: 1},
+		Spec: authorizationv1alpha1.RBACPolicySpec{
+			AppliesTo: authorizationv1alpha1.PolicyScope{Namespaces: []string{"default"}},
+		},
+	})
+	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "ownership-rbd", UID: "ownership-rbd-uid", Generation: 1},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			PolicyRef:  authorizationv1alpha1.RBACPolicyReference{Name: pol.Name},
+			TargetName: "ownership-target",
+			Subjects: []rbacv1.Subject{
+				{Kind: rbacv1.UserKind, Name: "alice", APIGroup: rbacv1.GroupName},
+			},
+			ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
+				ClusterRoleRefs: []string{"view"},
+			},
+		},
+	}
+	existing := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "ownership-target-view-binding"},
+		Subjects: []rbacv1.Subject{
+			{Kind: rbacv1.UserKind, Name: "existing", APIGroup: rbacv1.GroupName},
+		},
+		RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "admin"},
+	}
+
+	r, c := newRBDTestReconciler(pol, rbd, existing)
+	_, err := r.Reconcile(rbdCtx(), ctrl.Request{NamespacedName: types.NamespacedName{Name: rbd.Name}})
+	g.Expect(err).To(gomega.HaveOccurred())
+	g.Expect(err.Error()).To(gomega.ContainSubstring("already exists and is not owned"))
+
+	var kept rbacv1.ClusterRoleBinding
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: existing.Name}, &kept)).To(gomega.Succeed())
+	g.Expect(kept.RoleRef.Name).To(gomega.Equal("admin"))
+	g.Expect(kept.Subjects).To(gomega.ConsistOf(existing.Subjects))
+	g.Expect(kept.OwnerReferences).To(gomega.BeEmpty())
+
+	var updated authorizationv1alpha1.RestrictedBindDefinition
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: rbd.Name}, &updated)).To(gomega.Succeed())
+	g.Expect(updated.Status.BindReconciled).To(gomega.BeFalse())
+	g.Expect(conditions.IsStalled(&updated)).To(gomega.BeTrue())
 }
 
 func TestRBD_Reconcile_PolicyCompliant_CreatesRoleBindings(t *testing.T) {
@@ -518,7 +636,7 @@ func TestRBD_Reconcile_PolicyCompliant_CreatesRoleBindings(t *testing.T) {
 		},
 	}
 
-	r, c := newRBDTestReconciler(pol, rbd, ns)
+	r, c := newRBDTestReconciler(rbdPolicyWithDefaultAllowances(pol), rbd, ns)
 	result, err := r.Reconcile(rbdCtx(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: "ns-rbd"},
 	})
@@ -532,6 +650,93 @@ func TestRBD_Reconcile_PolicyCompliant_CreatesRoleBindings(t *testing.T) {
 		Name:      "ns-target-edit-binding",
 	}, &rb)).To(gomega.Succeed())
 	g.Expect(rb.RoleRef.Name).To(gomega.Equal("edit"))
+}
+
+func TestRBD_ReconcileResources_UnownedRoleBindingIsPreserved(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "target-ns"}}
+	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "safe-rbd", UID: "safe-rbd-uid"},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			TargetName: "safe-target",
+			Subjects: []rbacv1.Subject{
+				{Kind: rbacv1.UserKind, Name: "alice", APIGroup: rbacv1.GroupName},
+			},
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+				{Namespace: "target-ns", ClusterRoleRefs: []string{"edit"}},
+			},
+		},
+	}
+	existing := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "safe-target-edit-binding", Namespace: "target-ns"},
+		Subjects: []rbacv1.Subject{
+			{Kind: rbacv1.UserKind, Name: "existing", APIGroup: rbacv1.GroupName},
+		},
+		RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "admin"},
+	}
+
+	r, c := newRBDTestReconciler(rbd, ns, existing)
+	err := r.rbdReconcileResources(rbdCtx(), rbd, c, nil)
+	g.Expect(err).To(gomega.HaveOccurred())
+	g.Expect(err.Error()).To(gomega.ContainSubstring("already exists and is not owned"))
+
+	var kept rbacv1.RoleBinding
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: "safe-target-edit-binding", Namespace: "target-ns"}, &kept)).To(gomega.Succeed())
+	g.Expect(kept.RoleRef.Name).To(gomega.Equal("admin"))
+	g.Expect(kept.Subjects).To(gomega.ConsistOf(existing.Subjects))
+	g.Expect(kept.OwnerReferences).To(gomega.BeEmpty())
+}
+
+func TestRBD_Reconcile_UnownedRoleBindingStallsAndPreservesObject(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	pol := rbdPolicyWithDefaultAllowances(&authorizationv1alpha1.RBACPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "ownership-rb-policy", Generation: 1},
+		Spec: authorizationv1alpha1.RBACPolicySpec{
+			AppliesTo: authorizationv1alpha1.PolicyScope{Namespaces: []string{"target-ns"}},
+			BindingLimits: &authorizationv1alpha1.BindingLimits{
+				AllowClusterRoleBindings: false,
+			},
+		},
+	})
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "target-ns"}}
+	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "ownership-rb-rbd", UID: "ownership-rb-rbd-uid", Generation: 1},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			PolicyRef:  authorizationv1alpha1.RBACPolicyReference{Name: pol.Name},
+			TargetName: "ownership-rb-target",
+			Subjects: []rbacv1.Subject{
+				{Kind: rbacv1.UserKind, Name: "alice", APIGroup: rbacv1.GroupName},
+			},
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+				{Namespace: "target-ns", ClusterRoleRefs: []string{"edit"}},
+			},
+		},
+	}
+	existing := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "ownership-rb-target-edit-binding", Namespace: "target-ns"},
+		Subjects: []rbacv1.Subject{
+			{Kind: rbacv1.UserKind, Name: "existing", APIGroup: rbacv1.GroupName},
+		},
+		RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "admin"},
+	}
+
+	r, c := newRBDTestReconciler(pol, rbd, ns, existing)
+	_, err := r.Reconcile(rbdCtx(), ctrl.Request{NamespacedName: types.NamespacedName{Name: rbd.Name}})
+	g.Expect(err).To(gomega.HaveOccurred())
+	g.Expect(err.Error()).To(gomega.ContainSubstring("already exists and is not owned"))
+
+	var kept rbacv1.RoleBinding
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: existing.Name, Namespace: existing.Namespace}, &kept)).To(gomega.Succeed())
+	g.Expect(kept.RoleRef.Name).To(gomega.Equal("admin"))
+	g.Expect(kept.Subjects).To(gomega.ConsistOf(existing.Subjects))
+	g.Expect(kept.OwnerReferences).To(gomega.BeEmpty())
+
+	var updated authorizationv1alpha1.RestrictedBindDefinition
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: rbd.Name}, &updated)).To(gomega.Succeed())
+	g.Expect(updated.Status.BindReconciled).To(gomega.BeFalse())
+	g.Expect(conditions.IsStalled(&updated)).To(gomega.BeTrue())
 }
 
 func TestRBD_Reconcile_PolicyCompliant_CreatesServiceAccount(t *testing.T) {
@@ -584,7 +789,7 @@ func TestRBD_Reconcile_PolicyCompliant_CreatesServiceAccount(t *testing.T) {
 		},
 	}
 
-	r, c := newRBDTestReconciler(pol, rbd, ns)
+	r, c := newRBDTestReconciler(rbdPolicyWithDefaultAllowances(pol), rbd, ns)
 	result, err := r.Reconcile(rbdCtx(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: "sa-rbd"},
 	})
@@ -605,6 +810,98 @@ func TestRBD_Reconcile_PolicyCompliant_CreatesServiceAccount(t *testing.T) {
 	g.Expect(updated.Status.GeneratedServiceAccounts[0].Name).To(gomega.Equal("my-sa"))
 	g.Expect(updated.Status.GeneratedServiceAccounts[0].Namespace).To(gomega.Equal("sa-ns"))
 	g.Expect(updated.Status.ExternalServiceAccounts).To(gomega.BeEmpty())
+}
+
+func TestRBD_Reconcile_ServiceAccountPolicyAutomountFalse(t *testing.T) {
+	g := gomega.NewWithT(t)
+	automountFalse := false
+
+	pol := &authorizationv1alpha1.RBACPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "sa-policy-automount-false", Generation: 1},
+		Spec: authorizationv1alpha1.RBACPolicySpec{
+			AppliesTo: authorizationv1alpha1.PolicyScope{Namespaces: []string{"default"}},
+			SubjectLimits: &authorizationv1alpha1.SubjectLimits{
+				AllowedKinds: []string{rbacv1.ServiceAccountKind},
+				ServiceAccountLimits: &authorizationv1alpha1.ServiceAccountLimits{
+					Creation: &authorizationv1alpha1.SACreationConfig{
+						AllowAutoCreate:              true,
+						AutomountServiceAccountToken: &automountFalse,
+					},
+				},
+			},
+		},
+	}
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "sa-policy-ns"}}
+	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "sa-policy-rbd", Generation: 1},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			PolicyRef:  authorizationv1alpha1.RBACPolicyReference{Name: "sa-policy-automount-false"},
+			TargetName: "sa-policy-target",
+			Subjects: []rbacv1.Subject{
+				{Kind: rbacv1.ServiceAccountKind, Name: "policy-sa", Namespace: "sa-policy-ns"},
+			},
+			ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
+				ClusterRoleRefs: []string{"view"},
+			},
+		},
+	}
+
+	r, c := newRBDTestReconciler(rbdPolicyWithDefaultAllowances(pol), rbd, ns)
+	result, err := r.Reconcile(rbdCtx(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "sa-policy-rbd"}})
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	g.Expect(result.RequeueAfter).To(gomega.Equal(DefaultRequeueInterval))
+
+	var sa corev1.ServiceAccount
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Namespace: "sa-policy-ns", Name: "policy-sa"}, &sa)).To(gomega.Succeed())
+	g.Expect(sa.AutomountServiceAccountToken).NotTo(gomega.BeNil())
+	g.Expect(*sa.AutomountServiceAccountToken).To(gomega.BeFalse())
+}
+
+func TestRBD_Reconcile_ServiceAccountPolicyAutomountFalseCapsRBDTrue(t *testing.T) {
+	g := gomega.NewWithT(t)
+	automountFalse := false
+	automountTrue := true
+
+	pol := &authorizationv1alpha1.RBACPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "sa-policy-automount-cap", Generation: 1},
+		Spec: authorizationv1alpha1.RBACPolicySpec{
+			AppliesTo: authorizationv1alpha1.PolicyScope{Namespaces: []string{"default"}},
+			SubjectLimits: &authorizationv1alpha1.SubjectLimits{
+				AllowedKinds: []string{rbacv1.ServiceAccountKind},
+				ServiceAccountLimits: &authorizationv1alpha1.ServiceAccountLimits{
+					Creation: &authorizationv1alpha1.SACreationConfig{
+						AllowAutoCreate:              true,
+						AutomountServiceAccountToken: &automountFalse,
+					},
+				},
+			},
+		},
+	}
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "sa-cap-ns"}}
+	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "sa-cap-rbd", Generation: 1},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			PolicyRef:                    authorizationv1alpha1.RBACPolicyReference{Name: "sa-policy-automount-cap"},
+			TargetName:                   "sa-cap-target",
+			AutomountServiceAccountToken: &automountTrue,
+			Subjects: []rbacv1.Subject{
+				{Kind: rbacv1.ServiceAccountKind, Name: "cap-sa", Namespace: "sa-cap-ns"},
+			},
+			ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
+				ClusterRoleRefs: []string{"view"},
+			},
+		},
+	}
+
+	r, c := newRBDTestReconciler(rbdPolicyWithDefaultAllowances(pol), rbd, ns)
+	result, err := r.Reconcile(rbdCtx(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "sa-cap-rbd"}})
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	g.Expect(result.RequeueAfter).To(gomega.Equal(DefaultRequeueInterval))
+
+	var sa corev1.ServiceAccount
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Namespace: "sa-cap-ns", Name: "cap-sa"}, &sa)).To(gomega.Succeed())
+	g.Expect(sa.AutomountServiceAccountToken).NotTo(gomega.BeNil())
+	g.Expect(*sa.AutomountServiceAccountToken).To(gomega.BeFalse())
 }
 
 func TestRBD_Reconcile_DetectsExternalServiceAccount(t *testing.T) {
@@ -637,7 +934,7 @@ func TestRBD_Reconcile_DetectsExternalServiceAccount(t *testing.T) {
 		},
 	}
 
-	r, c := newRBDTestReconciler(pol, rbd, ns, externalSA)
+	r, c := newRBDTestReconciler(rbdPolicyWithDefaultAllowances(pol), rbd, ns, externalSA)
 	result, err := r.Reconcile(rbdCtx(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: "ext-rbd"},
 	})
@@ -683,7 +980,7 @@ func TestRBD_Reconcile_AllowAutoCreateFalse_SkipsSACreation(t *testing.T) {
 		},
 	}
 
-	r, c := newRBDTestReconciler(pol, rbd, ns)
+	r, c := newRBDTestReconciler(rbdPolicyWithDefaultAllowances(pol), rbd, ns)
 	result, err := r.Reconcile(rbdCtx(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "ac-rbd"}})
 	g.Expect(err).NotTo(gomega.HaveOccurred())
 	g.Expect(result.RequeueAfter).To(gomega.Equal(DefaultRequeueInterval))
@@ -695,6 +992,61 @@ func TestRBD_Reconcile_AllowAutoCreateFalse_SkipsSACreation(t *testing.T) {
 	var updated authorizationv1alpha1.RestrictedBindDefinition
 	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: "ac-rbd"}, &updated)).To(gomega.Succeed())
 	g.Expect(updated.Status.GeneratedServiceAccounts).To(gomega.BeEmpty())
+
+	var crb rbacv1.ClusterRoleBinding
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: "ac-target-view-binding"}, &crb)).To(gomega.Succeed())
+	g.Expect(crb.Subjects).To(gomega.BeEmpty(), "missing SAs must not be pre-staged in RBAC subjects")
+}
+
+func TestRBD_Reconcile_ServiceAccountCreationNamespaceDenied_DoesNotBindMissingSA(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	pol := rbdPolicyWithDefaultAllowances(&authorizationv1alpha1.RBACPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "sa-namespace-policy", Generation: 1},
+		Spec: authorizationv1alpha1.RBACPolicySpec{
+			AppliesTo: authorizationv1alpha1.PolicyScope{Namespaces: []string{"default"}},
+			SubjectLimits: &authorizationv1alpha1.SubjectLimits{
+				AllowedKinds: []string{rbacv1.ServiceAccountKind},
+				ServiceAccountLimits: &authorizationv1alpha1.ServiceAccountLimits{
+					Creation: &authorizationv1alpha1.SACreationConfig{
+						AllowAutoCreate:           true,
+						AllowedCreationNamespaces: []string{"allowed-ns"},
+					},
+				},
+			},
+		},
+	})
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "blocked-ns"}}
+	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "sa-namespace-rbd", Generation: 1},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			PolicyRef:  authorizationv1alpha1.RBACPolicyReference{Name: pol.Name},
+			TargetName: "sa-namespace-target",
+			Subjects: []rbacv1.Subject{
+				{Kind: rbacv1.ServiceAccountKind, Name: "blocked-sa", Namespace: "blocked-ns"},
+			},
+			ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
+				ClusterRoleRefs: []string{"view"},
+			},
+		},
+	}
+
+	r, c := newRBDTestReconciler(pol, rbd, ns)
+	result, err := r.Reconcile(rbdCtx(), ctrl.Request{NamespacedName: types.NamespacedName{Name: rbd.Name}})
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	g.Expect(result.RequeueAfter).To(gomega.Equal(DefaultRequeueInterval))
+
+	var sa corev1.ServiceAccount
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Namespace: "blocked-ns", Name: "blocked-sa"}, &sa)).NotTo(gomega.Succeed())
+
+	var crb rbacv1.ClusterRoleBinding
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: "sa-namespace-target-view-binding"}, &crb)).To(gomega.Succeed())
+	g.Expect(crb.Subjects).To(gomega.BeEmpty(), "missing SAs outside the creation scope must not be pre-staged")
+
+	var updated authorizationv1alpha1.RestrictedBindDefinition
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: rbd.Name}, &updated)).To(gomega.Succeed())
+	g.Expect(updated.Status.GeneratedServiceAccounts).To(gomega.BeEmpty())
+	g.Expect(updated.Status.ExternalServiceAccounts).To(gomega.BeEmpty())
 }
 
 func TestRBD_Reconcile_DisableAdoptionTrue_SkipsAdoption(t *testing.T) {
@@ -748,7 +1100,7 @@ func TestRBD_Reconcile_DisableAdoptionTrue_SkipsAdoption(t *testing.T) {
 		},
 	}
 
-	r, c := newRBDTestReconciler(pol, rbd, ns, ownedSA)
+	r, c := newRBDTestReconciler(rbdPolicyWithDefaultAllowances(pol), rbd, ns, ownedSA)
 	result, err := r.Reconcile(rbdCtx(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "da-rbd"}})
 	g.Expect(err).NotTo(gomega.HaveOccurred())
 	g.Expect(result.RequeueAfter).To(gomega.Equal(DefaultRequeueInterval))
@@ -812,6 +1164,17 @@ func TestRBD_DeprovisionCleansUpResources(t *testing.T) {
 	// Unowned CRB should still exist.
 	var keptCrb rbacv1.ClusterRoleBinding
 	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: "unowned-crb"}, &keptCrb)).To(gomega.Succeed())
+
+	recorder, ok := r.recorder.(*events.FakeRecorder)
+	g.Expect(ok).To(gomega.BeTrue())
+	close(recorder.Events)
+	emitted := make([]string, 0, len(recorder.Events))
+	for event := range recorder.Events {
+		emitted = append(emitted, event)
+	}
+	g.Expect(emitted).NotTo(gomega.BeEmpty())
+	g.Expect(emitted[len(emitted)-1]).To(gomega.ContainSubstring(authorizationv1alpha1.EventReasonDeprovisioned))
+	g.Expect(emitted[len(emitted)-1]).NotTo(gomega.ContainSubstring("policy violations"))
 }
 
 func TestRBD_MarkStalled(t *testing.T) {
@@ -931,7 +1294,7 @@ func TestRBD_Reconcile_TerminatingNamespaceSkipped(t *testing.T) {
 		},
 	}
 
-	r, c := newRBDTestReconciler(pol, rbd, ns)
+	r, c := newRBDTestReconciler(rbdPolicyWithDefaultAllowances(pol), rbd, ns)
 	result, err := r.Reconcile(rbdCtx(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: "term-rbd"},
 	})
@@ -1053,6 +1416,137 @@ func TestRBD_PolicyToRestrictedBindDefinitions_ListError(t *testing.T) {
 
 	policy := &authorizationv1alpha1.RBACPolicy{ObjectMeta: metav1.ObjectMeta{Name: "any"}}
 	requests := r.policyToRestrictedBindDefinitions(rbdCtx(), policy)
+	g.Expect(requests).To(gomega.BeNil())
+}
+
+func TestRBD_ClusterRoleToRestrictedBindDefinitions(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	clusterBindingRBD := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "cluster-binding-rbd"},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
+				ClusterRoleRefs: []string{"view"},
+			},
+		},
+	}
+	roleBindingClusterRoleRBD := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "role-binding-cluster-role-rbd"},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+				{Namespace: "team-a", ClusterRoleRefs: []string{"view"}},
+			},
+		},
+	}
+	localRoleOnlyRBD := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "local-role-only-rbd"},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+				{Namespace: "team-a", RoleRefs: []string{"view"}},
+			},
+		},
+	}
+
+	r, _ := newRBDTestReconciler(clusterBindingRBD, roleBindingClusterRoleRBD, localRoleOnlyRBD)
+	requests := r.clusterRoleToRestrictedBindDefinitions(rbdCtx(), &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "view"},
+	})
+
+	g.Expect(requests).To(gomega.ConsistOf(
+		ctrl.Request{NamespacedName: types.NamespacedName{Name: "cluster-binding-rbd"}},
+		ctrl.Request{NamespacedName: types.NamespacedName{Name: "role-binding-cluster-role-rbd"}},
+	))
+}
+
+func TestRBD_ClusterRoleToRestrictedBindDefinitions_ListError(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	scheme := newTestScheme()
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithInterceptorFuncs(interceptor.Funcs{
+			List: func(_ context.Context, _ client.WithWatch, _ client.ObjectList, _ ...client.ListOption) error {
+				return fmt.Errorf("injected list error")
+			},
+		}).
+		Build()
+	r := NewRestrictedBindDefinitionReconciler(c, scheme, events.NewFakeRecorder(10))
+
+	requests := r.clusterRoleToRestrictedBindDefinitions(rbdCtx(), &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "view"},
+	})
+	g.Expect(requests).To(gomega.BeNil())
+}
+
+func TestRBD_RoleToRestrictedBindDefinitions(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	explicitNamespaceRBD := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "explicit-role-rbd"},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+				{Namespace: "team-a", RoleRefs: []string{"edit"}},
+			},
+		},
+	}
+	selectorRBD := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "selector-role-rbd"},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+				{NamespaceSelector: []metav1.LabelSelector{{MatchLabels: map[string]string{"team": "a"}}}, RoleRefs: []string{"edit"}},
+			},
+		},
+	}
+	otherNamespaceRBD := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "other-namespace-role-rbd"},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+				{Namespace: "team-b", RoleRefs: []string{"edit"}},
+			},
+		},
+	}
+	clusterRoleRefRBD := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "cluster-role-ref-rbd"},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+				{Namespace: "team-a", ClusterRoleRefs: []string{"edit"}},
+			},
+		},
+	}
+
+	r, _ := newRBDTestReconciler(explicitNamespaceRBD, selectorRBD, otherNamespaceRBD, clusterRoleRefRBD)
+	requests := r.roleToRestrictedBindDefinitions(rbdCtx(), &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{Name: "edit", Namespace: "team-a"},
+	})
+
+	g.Expect(requests).To(gomega.ConsistOf(
+		ctrl.Request{NamespacedName: types.NamespacedName{Name: "explicit-role-rbd"}},
+		ctrl.Request{NamespacedName: types.NamespacedName{Name: "selector-role-rbd"}},
+	))
+
+	nonMatchingRequests := r.roleToRestrictedBindDefinitions(rbdCtx(), &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{Name: "view", Namespace: "team-a"},
+	})
+	g.Expect(nonMatchingRequests).To(gomega.BeEmpty())
+}
+
+func TestRBD_RoleToRestrictedBindDefinitions_ListError(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	scheme := newTestScheme()
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithInterceptorFuncs(interceptor.Funcs{
+			List: func(_ context.Context, _ client.WithWatch, _ client.ObjectList, _ ...client.ListOption) error {
+				return fmt.Errorf("injected list error")
+			},
+		}).
+		Build()
+	r := NewRestrictedBindDefinitionReconciler(c, scheme, events.NewFakeRecorder(10))
+
+	requests := r.roleToRestrictedBindDefinitions(rbdCtx(), &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{Name: "edit", Namespace: "team-a"},
+	})
 	g.Expect(requests).To(gomega.BeNil())
 }
 
@@ -1201,7 +1695,7 @@ func TestRBD_Reconcile_FinalizerAlreadyPresent(t *testing.T) {
 		},
 	}
 
-	r, _ := newRBDTestReconciler(pol, rbd)
+	r, _ := newRBDTestReconciler(rbdPolicyWithDefaultAllowances(pol), rbd)
 	result, err := r.Reconcile(rbdCtx(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: "fin-rbd"},
 	})
@@ -1244,7 +1738,7 @@ func TestRBD_ReconcileResources_RoleBindingsWithRoleRefs(t *testing.T) {
 		},
 	}
 
-	r, c := newRBDTestReconciler(pol, rbd, ns)
+	r, c := newRBDTestReconciler(rbdPolicyWithDefaultAllowances(pol), rbd, ns)
 	result, err := r.Reconcile(rbdCtx(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: "rb-rr-rbd"},
 	})
@@ -1262,6 +1756,102 @@ func TestRBD_ReconcileResources_RoleBindingsWithRoleRefs(t *testing.T) {
 	rbRoleName := "rb-rr-target-my-role-binding"
 	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: rbRoleName, Namespace: "rb-ns"}, &rbRole)).To(gomega.Succeed())
 	g.Expect(rbRole.RoleRef.Kind).To(gomega.Equal("Role"))
+}
+
+func TestRBD_Reconcile_ReportsMissingRoleRefsWhileReady(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	pol := &authorizationv1alpha1.RBACPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "missing-role-policy", Generation: 1},
+		Spec: authorizationv1alpha1.RBACPolicySpec{
+			AppliesTo: authorizationv1alpha1.PolicyScope{Namespaces: []string{"default"}},
+			BindingLimits: &authorizationv1alpha1.BindingLimits{
+				AllowClusterRoleBindings: true,
+				ClusterRoleBindingLimits: &authorizationv1alpha1.RoleRefLimits{
+					AllowedRoleRefs: []string{"missing-view"},
+				},
+			},
+			SubjectLimits: &authorizationv1alpha1.SubjectLimits{
+				AllowedKinds: []string{rbacv1.UserKind},
+			},
+		},
+	}
+	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "missing-role-rbd", Generation: 1},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			PolicyRef:  authorizationv1alpha1.RBACPolicyReference{Name: pol.Name},
+			TargetName: "missing-role-target",
+			Subjects: []rbacv1.Subject{
+				{Kind: rbacv1.UserKind, Name: "alice", APIGroup: rbacv1.GroupName},
+			},
+			ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
+				ClusterRoleRefs: []string{"missing-view"},
+			},
+		},
+	}
+
+	r, c := newRBDTestReconciler(pol, rbd)
+	result, err := r.Reconcile(rbdCtx(), ctrl.Request{NamespacedName: types.NamespacedName{Name: rbd.Name}})
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	g.Expect(result.RequeueAfter).To(gomega.Equal(DefaultRequeueInterval))
+
+	var updated authorizationv1alpha1.RestrictedBindDefinition
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: rbd.Name}, &updated)).To(gomega.Succeed())
+	g.Expect(updated.Status.MissingRoleRefs).To(gomega.ConsistOf("ClusterRole/missing-view"))
+	g.Expect(updated.Status.BindReconciled).To(gomega.BeTrue())
+	g.Expect(conditions.IsReady(&updated)).To(gomega.BeTrue())
+
+	gauge, err := metrics.RoleRefsMissing.GetMetricWithLabelValues(rbd.Name)
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	g.Expect(readGaugeValue(t, gauge)).To(gomega.Equal(float64(1)))
+}
+
+func TestRBD_ReconcileResources_RecreatesOwnedRoleBindingWhenRoleRefKindChanges(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	rbdUID := types.UID("transition-rbd-uid")
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "transition-ns"}}
+	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "transition-rbd", UID: rbdUID, Generation: 1},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			TargetName: "transition-target",
+			Subjects: []rbacv1.Subject{
+				{Kind: rbacv1.UserKind, Name: "alice", APIGroup: rbacv1.GroupName},
+			},
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+				{Namespace: "transition-ns", RoleRefs: []string{"edit"}},
+			},
+		},
+	}
+	existing := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "transition-target-edit-binding",
+			Namespace: "transition-ns",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion:         authorizationv1alpha1.GroupVersion.String(),
+					Kind:               authorizationv1alpha1.RestrictedBindDefinitionKind,
+					Name:               rbd.Name,
+					UID:                rbdUID,
+					Controller:         ptrBool(true),
+					BlockOwnerDeletion: ptrBool(true),
+				},
+			},
+		},
+		Subjects: []rbacv1.Subject{
+			{Kind: rbacv1.UserKind, Name: "alice", APIGroup: rbacv1.GroupName},
+		},
+		RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "edit"},
+	}
+
+	r, c := newRBDTestReconciler(rbd, ns, existing)
+	err := r.rbdReconcileResources(rbdCtx(), rbd, c, nil)
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+
+	var rb rbacv1.RoleBinding
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: existing.Name, Namespace: existing.Namespace}, &rb)).To(gomega.Succeed())
+	g.Expect(rb.RoleRef).To(gomega.Equal(rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: "edit"}))
+	g.Expect(rb.Subjects).To(gomega.ConsistOf(rbd.Spec.Subjects))
 }
 
 func TestRBD_ReconcileResources_NamespaceGetError(t *testing.T) {
@@ -1360,7 +1950,7 @@ func TestRBD_SAAdoption_UIDMismatch_TreatsAsExternal(t *testing.T) {
 	recorder := events.NewFakeRecorder(10)
 	c := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(pol, rbd, ns, ownedSA).
+		WithObjects(rbdPolicyWithDefaultAllowances(pol), rbd, ns, ownedSA).
 		WithStatusSubresource(
 			&authorizationv1alpha1.RestrictedBindDefinition{},
 			&authorizationv1alpha1.RBACPolicy{},

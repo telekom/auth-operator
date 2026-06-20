@@ -97,14 +97,13 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 		return nil, err
 	}
 
-	// Use field index for efficient lookup by TargetName. Limit to 2 so we only need
-	// to read until the first collision is found (one result == self on update, two == conflict).
-	// The field index constrains results to the small set matching this targetName;
-	// the context timeout provides the hard latency bound.
+	// Use field index for efficient lookup by TargetName. All same-name
+	// candidates must be scanned because namespaced Role targets can share
+	// targetName across different targetNamespace values.
 	roleDefinitionList := &RoleDefinitionList{}
 	if err := v.Client.List(ctx, roleDefinitionList, client.MatchingFields{
 		TargetNameField: obj.Spec.TargetName,
-	}, client.Limit(2)); err != nil {
+	}); err != nil {
 		logger.Error(err, "failed to list RoleDefinitions", "targetName", obj.Spec.TargetName)
 		return nil, listErrorToAdmission("RoleDefinitions", err)
 	}
@@ -122,11 +121,11 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 		}
 	}
 
-	// Check for cross-type targetName collision with RestrictedRoleDefinitions (only need first match).
+	// Check for cross-type targetName collision with RestrictedRoleDefinitions.
 	rrdList := &RestrictedRoleDefinitionList{}
 	if err := v.Client.List(ctx, rrdList, client.MatchingFields{
 		TargetNameField: obj.Spec.TargetName,
-	}, client.Limit(1)); err != nil {
+	}); err != nil {
 		logger.Error(err, "failed to list RestrictedRoleDefinitions", "targetName", obj.Spec.TargetName)
 		return nil, listErrorToAdmission("RestrictedRoleDefinitions", err)
 	}
@@ -186,14 +185,13 @@ func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 		return nil, err
 	}
 
-	// Use field index for efficient lookup by TargetName. Limit to 2 so we only need
-	// to read until the first collision is found (one result == self on update, two == conflict).
-	// The field index constrains results to the small set matching this targetName;
-	// the context timeout provides the hard latency bound.
+	// Use field index for efficient lookup by TargetName. All same-name
+	// candidates must be scanned because namespaced Role targets can share
+	// targetName across different targetNamespace values.
 	roleDefinitionList := &RoleDefinitionList{}
 	if err := v.Client.List(ctx, roleDefinitionList, client.MatchingFields{
 		TargetNameField: newObj.Spec.TargetName,
-	}, client.Limit(2)); err != nil {
+	}); err != nil {
 		logger.Error(err, "failed to list RoleDefinitions", "targetName", newObj.Spec.TargetName)
 		return nil, listErrorToAdmission("RoleDefinitions", err)
 	}
@@ -215,7 +213,7 @@ func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 	rrdList := &RestrictedRoleDefinitionList{}
 	if err := v.Client.List(ctx, rrdList, client.MatchingFields{
 		TargetNameField: newObj.Spec.TargetName,
-	}, client.Limit(1)); err != nil {
+	}); err != nil {
 		logger.Error(err, "failed to list RestrictedRoleDefinitions", "targetName", newObj.Spec.TargetName)
 		return nil, listErrorToAdmission("RestrictedRoleDefinitions", err)
 	}

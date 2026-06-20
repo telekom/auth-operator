@@ -100,8 +100,8 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `allowClusterRoleBindings` _boolean_ | AllowClusterRoleBindings controls whether ClusterRoleBindings may be created.<br />Default is false (deny by default). | false | Optional: \{\} <br /> |
-| `clusterRoleBindingLimits` _[RoleRefLimits](#rolereflimits)_ | ClusterRoleBindingLimits constrains which ClusterRoles may be referenced in CRBs. |  | Optional: \{\} <br /> |
-| `roleBindingLimits` _[RoleRefLimits](#rolereflimits)_ | RoleBindingLimits constrains which ClusterRoles/Roles may be referenced in RBs. |  | Optional: \{\} <br /> |
+| `clusterRoleBindingLimits` _[RoleRefLimits](#rolereflimits)_ | ClusterRoleBindingLimits constrains which ClusterRoles may be referenced<br />from ClusterRoleBindings or RoleBindings. |  | Optional: \{\} <br /> |
+| `roleBindingLimits` _[RoleRefLimits](#rolereflimits)_ | RoleBindingLimits constrains which namespaced Roles may be referenced in RoleBindings. |  | Optional: \{\} <br /> |
 | `targetNamespaceLimits` _[NamespaceLimits](#namespacelimits)_ | TargetNamespaceLimits constrains which namespaces may be targeted. |  | Optional: \{\} <br /> |
 
 
@@ -741,7 +741,3 @@ _Appears in:_
 | `observedGeneration` _integer_ | ObservedGeneration is the last observed generation of the resource.<br />This is used by kstatus to determine if the resource is current. |  | Optional: \{\} <br /> |
 | `authorizerConfigured` _boolean_ | Not extremely important as most status updates are driven by Conditions. We read the JSONPath from this status field to signify webhook authorizer as configured. |  | Optional: \{\} <br /> |
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#condition-v1-meta) array_ | Conditions defines current service state of the Webhook authorizer. All conditions should evaluate to true to signify successful configuration. |  | Optional: \{\} <br /> |
-
-
-
-

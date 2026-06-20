@@ -134,8 +134,9 @@ spec:
                       Default is false (deny by default).
                     type: boolean
                   clusterRoleBindingLimits:
-                    description: ClusterRoleBindingLimits constrains which ClusterRoles
-                      may be referenced in CRBs.
+                    description: |-
+                      ClusterRoleBindingLimits constrains which ClusterRoles may be referenced
+                      from ClusterRoleBindings or RoleBindings.
                     properties:
                       allowedRoleRefSelector:
                         description: AllowedRoleRefSelector selects allowed roles
@@ -251,8 +252,8 @@ spec:
                         type: array
                     type: object
                   roleBindingLimits:
-                    description: RoleBindingLimits constrains which ClusterRoles/Roles
-                      may be referenced in RBs.
+                    description: RoleBindingLimits constrains which namespaced Roles
+                      may be referenced in RoleBindings.
                     properties:
                       allowedRoleRefSelector:
                         description: AllowedRoleRefSelector selects allowed roles
