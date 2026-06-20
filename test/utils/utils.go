@@ -1124,10 +1124,10 @@ func jsonMarshalIndent(v interface{}, indent string) ([]byte, error) {
 
 // SaveDebugInfoToFile saves debug info to a file in the output directory.
 func SaveDebugInfoToFile(outputDir, filename, content string) error {
-	if err := os.MkdirAll(outputDir, 0o750); err != nil {
+	if err := os.MkdirAll(outputDir, 0o700); err != nil {
 		return err
 	}
-	if err := os.Chmod(outputDir, 0o750); err != nil {
+	if err := os.Chmod(outputDir, 0o700); err != nil { // #nosec G302 -- debug artifact directories need owner execute permission.
 		return err
 	}
 
