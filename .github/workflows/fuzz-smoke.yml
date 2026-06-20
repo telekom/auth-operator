@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -44,5 +44,5 @@ jobs:
 
           for target in ${targets}; do
             echo "Running ${target}"
-            go test ./api/authorization/v1alpha1 -run=^$ -fuzz="^${target}$" -fuzztime=10s -parallel=2
+            go test ./api/authorization/v1alpha1 -run=^$ -fuzz="^${target}$" -fuzztime=10s -timeout=2m -parallel=2
           done
