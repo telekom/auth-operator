@@ -17,9 +17,9 @@ import (
 )
 
 const (
-	// statusTrue is the status condition value for ready nodes.
+	// statusTrue is the Kubernetes condition status value used by readiness checks.
 	statusTrue = "True"
-	// statusBoolTrue is the lowercase boolean value emitted by kubectl JSONPath.
+	// statusBoolTrue is the lowercase boolean value used by JSONPath and env flag checks.
 	statusBoolTrue = "true"
 )
 
