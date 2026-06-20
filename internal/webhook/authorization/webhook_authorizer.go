@@ -194,7 +194,18 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return strings.Compare(a.Name, b.Name)
 	})
 
-	result := wa.evaluateSAR(ctx, &sar, items)
+	result, evalErr := wa.evaluateSAR(ctx, &sar, items)
+	if evalErr != nil {
+		wa.Log.Error(evalErr, "failed to evaluate SubjectAccessReview",
+			"latency", time.Since(start).String())
+		if span := trace.SpanFromContext(ctx); span.IsRecording() {
+			span.RecordError(evalErr)
+			span.SetStatus(codes.Error, "evaluation error")
+		}
+		wa.recordErrorMetrics(start)
+		http.Error(w, "internal evaluation error", http.StatusInternalServerError)
+		return
+	}
 
 	// Count total rules across ALL WebhookAuthorizer resources (global + scoped)
 	// for the gauge. This is request-independent: even if a namespace-scoped
@@ -486,7 +497,7 @@ func isFieldIndexError(err error) bool {
 		(strings.Contains(msg, "does not exist") || strings.Contains(msg, "no index with name"))
 }
 
-func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAccessReview, items []authzv1alpha1.WebhookAuthorizer) evaluationResult {
+func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAccessReview, items []authzv1alpha1.WebhookAuthorizer) (evaluationResult, error) {
 	evaluated := 0
 	skipped := 0
 
@@ -506,7 +517,11 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 				skipped++
 				continue
 			}
-			if !wa.namespaceMatches(ctx, resourceNS, &webhookAuthorizer.Spec.NamespaceSelector) {
+			matched, err := wa.namespaceMatches(ctx, resourceNS, &webhookAuthorizer.Spec.NamespaceSelector)
+			if err != nil {
+				return evaluationResult{}, fmt.Errorf("namespace match for authorizer %s: %w", webhookAuthorizer.Name, err)
+			}
+			if !matched {
 				wa.Log.V(2).Info("namespace selector did not match, skipping",
 					"authorizer", webhookAuthorizer.Name,
 					"namespace", resourceNS)
@@ -533,7 +548,7 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 				matchedField:   "deniedPrincipal",
 				evaluatedCount: evaluated,
 				skippedCount:   skipped,
-			}
+			}, nil
 		}
 
 		// Check AllowedPrincipals.
@@ -549,7 +564,7 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 						matchedField:   "resourceRule",
 						evaluatedCount: evaluated,
 						skippedCount:   skipped,
-					}
+					}, nil
 				}
 			}
 			if sar.Spec.NonResourceAttributes != nil {
@@ -563,7 +578,7 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 						matchedField:   "nonResourceRule",
 						evaluatedCount: evaluated,
 						skippedCount:   skipped,
-					}
+					}, nil
 				}
 			}
 		}
@@ -577,11 +592,13 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 		matchedRule:    -1,
 		evaluatedCount: evaluated,
 		skippedCount:   skipped,
-	}
+	}, nil
 }
 
 // namespaceMatches checks if the namespace matches the selector.
-func (wa *Authorizer) namespaceMatches(ctx context.Context, namespace string, selector *metav1.LabelSelector) bool {
+// On API errors the error is returned so callers can fail-closed rather than
+// skipping the authorizer as if it were a non-match.
+func (wa *Authorizer) namespaceMatches(ctx context.Context, namespace string, selector *metav1.LabelSelector) (bool, error) {
 	if wa.Tracer != nil {
 		var span trace.Span
 		ctx, span = wa.Tracer.Start(ctx, "webhook.NamespaceMatch",
@@ -590,20 +607,17 @@ func (wa *Authorizer) namespaceMatches(ctx context.Context, namespace string, se
 	}
 
 	if namespace == "" {
-		return false
+		return false, nil
 	}
 	var ns corev1.Namespace
-	err := wa.Client.Get(ctx, types.NamespacedName{Name: namespace}, &ns)
-	if err != nil {
-		wa.Log.Error(err, "Failed to get namespace", "namespace", namespace)
-		return false
+	if err := wa.Client.Get(ctx, types.NamespacedName{Name: namespace}, &ns); err != nil {
+		return false, fmt.Errorf("get namespace %s: %w", namespace, err)
 	}
 	labelSelector, err := metav1.LabelSelectorAsSelector(selector)
 	if err != nil {
-		wa.Log.Error(err, "Invalid label selector")
-		return false
+		return false, fmt.Errorf("parse namespace label selector: %w", err)
 	}
-	return labelSelector.Matches(labels.Set(ns.Labels))
+	return labelSelector.Matches(labels.Set(ns.Labels)), nil
 }
 
 // principalMatches checks if the user or groups match the principals.
