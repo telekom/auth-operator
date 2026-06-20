@@ -6,6 +6,7 @@ import (
 
 	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	webhooks "github.com/telekom/auth-operator/internal/webhook/authorization"
+	"github.com/telekom/auth-operator/pkg/indexer"
 
 	admissionv1 "k8s.io/api/admission/v1"
 	authenticationv1 "k8s.io/api/authentication/v1"
@@ -34,8 +35,8 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 			TargetName: "bd-platform",
 			Subjects: []rbacv1.Subject{
 				{
-					APIGroup: "rbac.authorization.k8s.io",
-					Kind:     "Group",
+					APIGroup: rbacv1.GroupName,
+					Kind:     rbacv1.GroupKind,
 					Name:     "oidc:platform-admins",
 				},
 			},
@@ -112,8 +113,8 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 			TargetName: "bd-owner-expression",
 			Subjects: []rbacv1.Subject{
 				{
-					APIGroup: "rbac.authorization.k8s.io",
-					Kind:     "Group",
+					APIGroup: rbacv1.GroupName,
+					Kind:     rbacv1.GroupKind,
 					Name:     "oidc:platform-admins",
 				},
 			},
@@ -2340,6 +2341,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 			fakeClient := fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithRuntimeObjects(objects...).
+				WithIndex(&authzv1alpha1.BindDefinition{}, indexer.BindDefinitionHasRoleBindingsField, indexer.BindDefinitionHasRoleBindingsFunc).
 				Build()
 
 			decoder := crAdmission.NewDecoder(scheme)
@@ -2364,6 +2366,83 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestNamespaceValidatorFallsBackWhenBindDefinitionIndexUnavailable(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(authzv1alpha1.AddToScheme(scheme))
+
+	bindDefPlatform := &authzv1alpha1.BindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "platform-binddefinition"},
+		Spec: authzv1alpha1.BindDefinitionSpec{
+			Subjects: []rbacv1.Subject{
+				{
+					APIGroup: rbacv1.GroupName,
+					Kind:     rbacv1.GroupKind,
+					Name:     "oidc:platform-admins",
+				},
+			},
+			RoleBindings: []authzv1alpha1.NamespaceBinding{{
+				ClusterRoleRefs: []string{"platform-admin"},
+				NamespaceSelector: []metav1.LabelSelector{
+					{
+						MatchLabels: map[string]string{
+							"t-caas.telekom.com/owner": "platform",
+						},
+					},
+				},
+			}},
+		},
+	}
+	bindDefWithoutRoleBindings := &authzv1alpha1.BindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "without-role-bindings"},
+		Spec: authzv1alpha1.BindDefinitionSpec{
+			Subjects: []rbacv1.Subject{
+				{
+					APIGroup: rbacv1.GroupName,
+					Kind:     rbacv1.GroupKind,
+					Name:     "oidc:other-admins",
+				},
+			},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(bindDefPlatform, bindDefWithoutRoleBindings).
+		Build()
+
+	validator := &webhooks.NamespaceValidator{
+		Client:  fakeClient,
+		Decoder: crAdmission.NewDecoder(scheme),
+	}
+
+	targetNS := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "platform-ns",
+			Labels: map[string]string{
+				"t-caas.telekom.com/owner": "platform",
+			},
+		},
+	}
+	req := crAdmission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Kind:      metav1.GroupVersionKind{Group: "", Version: "v1", Kind: "Namespace"},
+			Name:      targetNS.Name,
+			Operation: admissionv1.Create,
+			UserInfo: authenticationv1.UserInfo{
+				Username: "platform-user",
+				Groups:   []string{"oidc:platform-admins"},
+			},
+			Object: runtime.RawExtension{Raw: mustMarshalJSON(t, targetNS)},
+		},
+	}
+
+	resp := validator.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Fatalf("expected indexed-list fallback to allow request, got denied: %s", resp.Result.Message)
 	}
 }
 
@@ -2611,7 +2690,9 @@ func TestNamespaceValidatorSANamespaceInheritance(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			builder := fake.NewClientBuilder().WithScheme(scheme)
+			builder := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithIndex(&authzv1alpha1.BindDefinition{}, indexer.BindDefinitionHasRoleBindingsField, indexer.BindDefinitionHasRoleBindingsFunc)
 			if tt.saNamespace != nil {
 				builder = builder.WithObjects(tt.saNamespace)
 			}

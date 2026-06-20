@@ -547,6 +547,7 @@ func TestIsFieldIndexError(t *testing.T) {
 	}{
 		{"nil error", nil, false},
 		{"index does not exist", fmt.Errorf("Index with name %s does not exist", "foo"), true},
+		{"index not registered", fmt.Errorf("no index with name %s has been registered", "foo"), true},
 		{"wrapped index error", fmt.Errorf("list failed: %w", fmt.Errorf("Index with name %s does not exist", "bar")), true},
 		{"RBAC forbidden", fmt.Errorf("forbidden: User cannot list resource"), false},
 		{"network error", fmt.Errorf("dial tcp: connection refused"), false},

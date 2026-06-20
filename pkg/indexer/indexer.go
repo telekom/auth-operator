@@ -26,6 +26,16 @@ const (
 	// This allows the webhook handler to efficiently filter authorizers that
 	// need namespace matching versus those that apply globally.
 	WebhookAuthorizerHasNamespaceSelectorField = ".spec.hasNamespaceSelector"
+
+	// BindDefinitionHasRoleBindingsField indexes only BindDefinitions that define
+	// at least one RoleBinding (i.e. namespace-scoped bindings). Used by the
+	// namespace validating webhook to skip cluster-only BindDefinitions and avoid
+	// a full O(N) scan on every namespace admission call.
+	BindDefinitionHasRoleBindingsField = ".spec.hasRoleBindings"
+
+	// BindDefinitionHasRoleBindingsTrue is the index value for BindDefinitions
+	// that have at least one RoleBinding entry.
+	BindDefinitionHasRoleBindingsTrue = "true"
 )
 
 // SetupIndexes registers field indexes on the manager's cache for efficient lookups.
@@ -76,6 +86,19 @@ func SetupIndexes(ctx context.Context, mgr manager.Manager) error {
 		return fmt.Errorf("failed to create index for WebhookAuthorizer.Spec.HasNamespaceSelector: %w", err)
 	}
 
+	// Index BindDefinitions that have at least one RoleBinding.
+	// This allows the namespace validating webhook to skip cluster-only
+	// BindDefinitions and limit the in-memory selector scan to candidates
+	// that can actually produce namespace-scoped bindings.
+	if err := mgr.GetFieldIndexer().IndexField(
+		ctx,
+		&authorizationv1alpha1.BindDefinition{},
+		BindDefinitionHasRoleBindingsField,
+		BindDefinitionHasRoleBindingsFunc,
+	); err != nil {
+		return fmt.Errorf("failed to create index for BindDefinitions with RoleBindings: %w", err)
+	}
+
 	return nil
 }
 
@@ -90,4 +113,18 @@ func WebhookAuthorizerHasNamespaceSelectorFunc(obj client.Object) []string {
 		return []string{"false"}
 	}
 	return []string{"true"}
+}
+
+// BindDefinitionHasRoleBindingsFunc emits the true index value for
+// BindDefinitions that have RoleBindings. BindDefinitions without RoleBindings
+// are intentionally absent from the index.
+func BindDefinitionHasRoleBindingsFunc(obj client.Object) []string {
+	bd, ok := obj.(*authorizationv1alpha1.BindDefinition)
+	if !ok {
+		return nil
+	}
+	if len(bd.Spec.RoleBindings) > 0 {
+		return []string{BindDefinitionHasRoleBindingsTrue}
+	}
+	return nil
 }
