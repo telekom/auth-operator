@@ -8,9 +8,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 
+	"github.com/telekom/auth-operator/pkg/helpers"
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -172,7 +176,108 @@ func (v *RestrictedBindDefinitionValidator) validateRestrictedBindDefinitionSpec
 		}
 	}
 
-	return validateNamespaceBindings(schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedBindDefinitionKind}, obj.Name, obj.Spec.RoleBindings)
+	kind := schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedBindDefinitionKind}
+	if err := validateNamespaceBindings(kind, obj.Name, obj.Spec.RoleBindings); err != nil {
+		return err
+	}
+	return v.validateRoleBindingNameCollisions(ctx, kind, obj)
+}
+
+type roleBindingNameClaim struct {
+	roleKind string
+	roleRef  string
+	path     *field.Path
+}
+
+func (v *RestrictedBindDefinitionValidator) validateRoleBindingNameCollisions(
+	ctx context.Context,
+	kind schema.GroupKind,
+	obj *RestrictedBindDefinition,
+) error {
+	claims := make(map[string]roleBindingNameClaim)
+	for i, binding := range obj.Spec.RoleBindings {
+		namespaces, err := v.resolveRoleBindingNamespacesForValidation(ctx, binding)
+		if err != nil {
+			return err
+		}
+		for _, namespace := range namespaces {
+			for j, roleRef := range binding.ClusterRoleRefs {
+				path := field.NewPath("spec", "roleBindings").Index(i).Child("clusterRoleRefs").Index(j)
+				if err := recordRoleBindingNameClaim(kind, obj.Name, obj.Spec.TargetName, claims, namespace, "ClusterRole", roleRef, path); err != nil {
+					return err
+				}
+			}
+			for j, roleRef := range binding.RoleRefs {
+				path := field.NewPath("spec", "roleBindings").Index(i).Child("roleRefs").Index(j)
+				if err := recordRoleBindingNameClaim(kind, obj.Name, obj.Spec.TargetName, claims, namespace, "Role", roleRef, path); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (v *RestrictedBindDefinitionValidator) resolveRoleBindingNamespacesForValidation(
+	ctx context.Context,
+	binding NamespaceBinding,
+) ([]string, error) {
+	if binding.Namespace != "" {
+		return []string{binding.Namespace}, nil
+	}
+
+	namespaceSet := make(map[string]struct{})
+	for _, namespaceSelector := range binding.NamespaceSelector {
+		selector, err := metav1.LabelSelectorAsSelector(&namespaceSelector)
+		if err != nil {
+			return nil, apierrors.NewInvalid(
+				schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedBindDefinitionKind},
+				"",
+				field.ErrorList{field.Invalid(field.NewPath("spec", "roleBindings").Child("namespaceSelector"), namespaceSelector, err.Error())})
+		}
+		namespaceList := &corev1.NamespaceList{}
+		if err := v.Client.List(ctx, namespaceList, client.MatchingLabelsSelector{Selector: selector}); err != nil {
+			return nil, apierrors.NewInternalError(errors.New("unable to list namespaces for RoleBinding name collision validation"))
+		}
+		for _, namespace := range namespaceList.Items {
+			if namespace.Status.Phase == corev1.NamespaceTerminating {
+				continue
+			}
+			namespaceSet[namespace.Name] = struct{}{}
+		}
+	}
+
+	namespaces := make([]string, 0, len(namespaceSet))
+	for namespace := range namespaceSet {
+		namespaces = append(namespaces, namespace)
+	}
+	sort.Strings(namespaces)
+	return namespaces, nil
+}
+
+func recordRoleBindingNameClaim(
+	kind schema.GroupKind,
+	objectName, targetName string,
+	claims map[string]roleBindingNameClaim,
+	namespace, roleKind, roleRef string,
+	path *field.Path,
+) error {
+	bindingName := helpers.BuildBindingName(targetName, roleRef)
+	key := namespace + "/" + bindingName
+	if existing, ok := claims[key]; ok {
+		if existing.roleKind == roleKind && existing.roleRef == roleRef {
+			return nil
+		}
+		return apierrors.NewInvalid(
+			kind,
+			objectName,
+			field.ErrorList{field.Duplicate(
+				path,
+				fmt.Sprintf("%s %q collides with %s %q at %s/%s",
+					roleKind, roleRef, existing.roleKind, existing.roleRef, namespace, bindingName))})
+	}
+	claims[key] = roleBindingNameClaim{roleKind: roleKind, roleRef: roleRef, path: path}
+	return nil
 }
 
 // validatePolicyRefExists verifies that the referenced RBACPolicy exists and returns

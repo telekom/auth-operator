@@ -2116,6 +2116,47 @@ func TestRBD_ReconcileResources_RoleBindingsWithRoleRefs(t *testing.T) {
 	g.Expect(rbRole.RoleRef.Kind).To(gomega.Equal("Role"))
 }
 
+func TestRBD_ReconcileResources_RejectsRoleBindingNameCollision(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "collision-ns"}}
+	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "rb-collision-rbd",
+			Generation: 1,
+			Finalizers: []string{authorizationv1alpha1.RestrictedBindDefinitionFinalizer},
+		},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			TargetName: "rb-collision-target",
+			Subjects: []rbacv1.Subject{
+				{Kind: rbacv1.GroupKind, Name: "devs"},
+			},
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+				{
+					Namespace:       "collision-ns",
+					ClusterRoleRefs: []string{"view"},
+				},
+				{
+					Namespace: "collision-ns",
+					RoleRefs:  []string{"view"},
+				},
+			},
+		},
+	}
+
+	r, c := newRBDTestReconciler(rbd, ns)
+	err := r.rbdReconcileResources(rbdCtx(), rbd, c, nil)
+	g.Expect(err).To(gomega.HaveOccurred())
+	g.Expect(err.Error()).To(gomega.ContainSubstring("RoleBinding name collision"))
+	g.Expect(err.Error()).To(gomega.ContainSubstring("rb-collision-target-view-binding"))
+
+	var rb rbacv1.RoleBinding
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{
+		Name:      "rb-collision-target-view-binding",
+		Namespace: "collision-ns",
+	}, &rb)).To(gomega.MatchError(gomega.ContainSubstring("not found")))
+}
+
 func TestRBD_Reconcile_ReportsMissingRoleRefsWhileReady(t *testing.T) {
 	g := gomega.NewWithT(t)
 

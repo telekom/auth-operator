@@ -541,6 +541,9 @@ func (r *RestrictedBindDefinitionReconciler) rbdReconcileResources(
 	if err := r.rbdPruneStaleServiceAccounts(ctx, rbd, desiredSAs); err != nil {
 		return err
 	}
+	if err := r.rbdValidateRoleBindingNameCollisions(ctx, rbd); err != nil {
+		return err
+	}
 
 	// Ensure ClusterRoleBindings.
 	desiredCRBs := make(map[string]struct{})
@@ -598,6 +601,58 @@ func (r *RestrictedBindDefinitionReconciler) rbdReconcileResources(
 
 	// Prune stale owned resources that are no longer in the desired set.
 	return r.rbdPruneStaleResources(ctx, rbd, desiredCRBs, desiredRBs)
+}
+
+type rbdRoleBindingNameClaim struct {
+	roleKind string
+	roleRef  string
+}
+
+func (r *RestrictedBindDefinitionReconciler) rbdValidateRoleBindingNameCollisions(
+	ctx context.Context,
+	rbd *authorizationv1alpha1.RestrictedBindDefinition,
+) error {
+	claims := make(map[string]rbdRoleBindingNameClaim)
+	for _, roleBinding := range rbd.Spec.RoleBindings {
+		targetNamespaces, err := r.rbdResolveNamespaces(ctx, roleBinding)
+		if err != nil {
+			return fmt.Errorf("resolve namespaces for RoleBinding collision validation: %w", err)
+		}
+		for _, namespace := range targetNamespaces {
+			if conditions.IsNamespaceTerminating(&namespace) {
+				continue
+			}
+			for _, clusterRoleRef := range roleBinding.ClusterRoleRefs {
+				if err := rbdRecordRoleBindingNameClaim(rbd.Spec.TargetName, claims, namespace.Name, "ClusterRole", clusterRoleRef); err != nil {
+					return err
+				}
+			}
+			for _, roleRef := range roleBinding.RoleRefs {
+				if err := rbdRecordRoleBindingNameClaim(rbd.Spec.TargetName, claims, namespace.Name, "Role", roleRef); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func rbdRecordRoleBindingNameClaim(
+	targetName string,
+	claims map[string]rbdRoleBindingNameClaim,
+	namespace, roleKind, roleRef string,
+) error {
+	bindingName := helpers.BuildBindingName(targetName, roleRef)
+	key := namespace + "/" + bindingName
+	if existing, ok := claims[key]; ok {
+		if existing.roleKind == roleKind && existing.roleRef == roleRef {
+			return nil
+		}
+		return fmt.Errorf("RoleBinding name collision for %s/%s: %s %q and %s %q generate the same binding name",
+			namespace, bindingName, existing.roleKind, existing.roleRef, roleKind, roleRef)
+	}
+	claims[key] = rbdRoleBindingNameClaim{roleKind: roleKind, roleRef: roleRef}
+	return nil
 }
 
 func rbdClearDeprovisionedStatus(rbd *authorizationv1alpha1.RestrictedBindDefinition) {

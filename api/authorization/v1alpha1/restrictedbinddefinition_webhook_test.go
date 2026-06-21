@@ -282,6 +282,35 @@ var _ = Describe("RestrictedBindDefinition Webhook", func() {
 			Expect(err.Error()).To(ContainSubstring("spec.roleBindings[0].roleRefs[0]"))
 			Expect(err.Error()).To(ContainSubstring("Duplicate value"))
 		})
+
+		It("Should deny RoleBinding name collisions across separate roleBinding entries", func() {
+			rbd := &RestrictedBindDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rbd-cross-entry-rb-name-collision",
+				},
+				Spec: RestrictedBindDefinitionSpec{
+					PolicyRef:  RBACPolicyReference{Name: policy.Name},
+					TargetName: "test-rbd-cross-entry-rb-name-collision",
+					Subjects: []rbacv1.Subject{
+						{Kind: rbacv1.GroupKind, APIGroup: rbacv1.GroupName, Name: "test-group"},
+					},
+					RoleBindings: []NamespaceBinding{
+						{
+							Namespace:       "default",
+							ClusterRoleRefs: []string{"reader"},
+						},
+						{
+							Namespace: "default",
+							RoleRefs:  []string{"reader"},
+						},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, rbd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("spec.roleBindings[1].roleRefs[0]"))
+			Expect(err.Error()).To(ContainSubstring("collides with ClusterRole"))
+		})
 	})
 
 	Context("When updating RestrictedBindDefinition under Validating Webhook", func() {
