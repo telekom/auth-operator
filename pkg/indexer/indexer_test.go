@@ -115,10 +115,8 @@ func TestBindDefinitionHasRoleBindingsIndexWithFakeClient(t *testing.T) {
 	if err := fakeClient.List(ctx, &withoutRB, client.MatchingFields{BindDefinitionHasRoleBindingsField: BindDefinitionHasRoleBindingsFalse}); err != nil {
 		t.Fatalf("failed to list BindDefinitions without role bindings: %v", err)
 	}
-	if len(withoutRB.Items) != 1 {
-		t.Errorf("expected 1 BindDefinition without role bindings, got %d", len(withoutRB.Items))
-	} else if withoutRB.Items[0].Name != "bd-without-rb" {
-		t.Errorf("expected bd-without-rb, got %s", withoutRB.Items[0].Name)
+	if len(withoutRB.Items) != 0 {
+		t.Errorf("expected sparse false index to return 0 BindDefinitions, got %d", len(withoutRB.Items))
 	}
 }
 
@@ -534,7 +532,7 @@ func TestBindDefinitionHasRoleBindingsFunc(t *testing.T) {
 			wantValues: []string{BindDefinitionHasRoleBindingsTrue},
 		},
 		{
-			name: "BD without RoleBindings returns false",
+			name: "BD without RoleBindings is omitted from sparse index",
 			object: &authorizationv1alpha1.BindDefinition{
 				ObjectMeta: metav1.ObjectMeta{Name: "bd-without-rb"},
 				Spec: authorizationv1alpha1.BindDefinitionSpec{
@@ -543,7 +541,7 @@ func TestBindDefinitionHasRoleBindingsFunc(t *testing.T) {
 				},
 			},
 			indexFunc:  BindDefinitionHasRoleBindingsFunc,
-			wantValues: []string{BindDefinitionHasRoleBindingsFalse},
+			wantValues: nil,
 		},
 		{
 			name:       "wrong object type returns nil",

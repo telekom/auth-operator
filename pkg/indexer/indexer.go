@@ -44,10 +44,10 @@ const (
 	// WebhookAuthorizers that do not define a namespace selector.
 	WebhookAuthorizerHasNamespaceSelectorFalse = "false"
 
-	// BindDefinitionHasRoleBindingsField indexes BindDefinitions by whether they
-	// define at least one RoleBinding (i.e. namespace-scoped bindings). Used to
-	// skip cluster-only BindDefinitions in namespace validating webhook and
-	// namespace event fan-out hot paths.
+	// BindDefinitionHasRoleBindingsField indexes BindDefinitions that define at
+	// least one RoleBinding (i.e. namespace-scoped bindings). Cluster-only
+	// BindDefinitions are omitted from the index because hot paths only query
+	// the true value.
 	BindDefinitionHasRoleBindingsField = ".spec.hasRoleBindings"
 
 	// BindDefinitionHasRoleBindingsTrue is the index value for BindDefinitions
@@ -55,7 +55,8 @@ const (
 	BindDefinitionHasRoleBindingsTrue = "true"
 
 	// BindDefinitionHasRoleBindingsFalse is the index value for BindDefinitions
-	// that do not have RoleBinding entries.
+	// that do not have RoleBinding entries. BindDefinitionHasRoleBindingsFunc
+	// does not emit this value so the field index remains sparse.
 	BindDefinitionHasRoleBindingsFalse = "false"
 
 	// RestrictedBindDefinitionPolicyRefField indexes RestrictedBindDefinition
@@ -363,7 +364,7 @@ func BindDefinitionHasRoleBindingsFunc(obj client.Object) []string {
 	if len(bd.Spec.RoleBindings) > 0 {
 		return []string{BindDefinitionHasRoleBindingsTrue}
 	}
-	return []string{BindDefinitionHasRoleBindingsFalse}
+	return nil
 }
 
 // RoleDefinitionTargetNameFunc extracts the RoleDefinition target name.
