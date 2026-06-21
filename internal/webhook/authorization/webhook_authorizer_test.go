@@ -1533,7 +1533,7 @@ func TestEvaluateSAR_NamespaceLabelCache_SingleGetPerNamespace(t *testing.T) {
 
 		cache := make(map[string]namespaceLabelCacheEntry)
 		selector := &wa1.Spec.NamespaceSelector
-		for i := 0; i < 2; i++ {
+		for range 2 {
 			matches, err := handler.namespaceMatches(context.Background(), "missing-ns", selector, cache)
 			if err == nil {
 				t.Fatal("expected namespace lookup error, got nil")
