@@ -43,6 +43,9 @@ spec:
     clusterRoleBindingLimits:
       allowedRoleRefs:
         - "sample-*"
+    roleBindingLimits:
+      allowedRoleRefs:
+        - "sample-*"
   roleLimits:
     allowClusterRoles: true
   subjectLimits:

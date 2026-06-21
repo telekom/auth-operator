@@ -467,21 +467,102 @@ jobs:
             echo "::notice::config/samples/broken/ not present in this tag; skipping broken-sample apply"
           fi
 
+          wait_condition() {
+            local resource="$1"
+            local selector="$2"
+            local condition="$3"
+            local expected="$4"
+            local message_substring="${5:-}"
+            local timeout="${6:-180}"
+            local deadline=$((SECONDS + timeout))
+            local output count pending
+
+            while true; do
+              output="$(kubectl get "$resource" -l "$selector" -o yaml)"
+              count="$(yq '.items | length' <<<"$output")"
+              if [ "$count" = "0" ]; then
+                echo "::error::No $resource resources match selector '$selector'"
+                return 1
+              fi
+
+              if [ -n "$message_substring" ]; then
+                pending="$(CONDITION_TYPE="$condition" CONDITION_STATUS="$expected" MESSAGE_SUBSTRING="$message_substring" yq -r '.items[] | select(([.status.conditions[]? | select(.type == strenv(CONDITION_TYPE) and .status == strenv(CONDITION_STATUS) and ((.message // "") | contains(strenv(MESSAGE_SUBSTRING))))] | length) == 0) | .metadata.name' <<<"$output")"
+              else
+                pending="$(CONDITION_TYPE="$condition" CONDITION_STATUS="$expected" yq -r '.items[] | select(([.status.conditions[]? | select(.type == strenv(CONDITION_TYPE) and .status == strenv(CONDITION_STATUS))] | length) == 0) | .metadata.name' <<<"$output")"
+              fi
+
+              if [ -z "$pending" ]; then
+                echo "All $count $resource resources matching '$selector' have $condition=$expected"
+                return 0
+              fi
+
+              if [ "$SECONDS" -ge "$deadline" ]; then
+                echo "::error::$resource resources still missing $condition=$expected after ${timeout}s: $(tr '\n' ' ' <<<"$pending")"
+                kubectl get "$resource" -l "$selector" -o yaml
+                return 1
+              fi
+
+              echo "Waiting for $resource $condition=$expected ($selector); pending: $(tr '\n' ' ' <<<"$pending")"
+              sleep 5
+            done
+          }
+
           wait_ready() {
             local resource="$1"
-            kubectl wait --for=condition=Ready "$resource" \
-              -l 't-caas.telekom.com/sample-case!=impersonated-failed' \
-              --timeout=180s
+            kubectl wait --for=condition=Ready "$resource" --all --timeout=180s
+          }
+
+          wait_missing_role_refs() {
+            local resource="$1"
+            local selector="$2"
+            local timeout="${3:-180}"
+            local deadline=$((SECONDS + timeout))
+            local output count pending
+
+            while true; do
+              output="$(kubectl get "$resource" -l "$selector" -o yaml)"
+              count="$(yq '.items | length' <<<"$output")"
+              if [ "$count" = "0" ]; then
+                echo "::error::No $resource resources match selector '$selector'"
+                return 1
+              fi
+
+              pending="$(yq -r '.items[] | select(((.status.missingRoleRefs // []) | length) == 0) | .metadata.name' <<<"$output")"
+              if [ -z "$pending" ]; then
+                echo "All $count $resource resources matching '$selector' report missingRoleRefs"
+                return 0
+              fi
+
+              if [ "$SECONDS" -ge "$deadline" ]; then
+                echo "::error::$resource resources still missing status.missingRoleRefs after ${timeout}s: $(tr '\n' ' ' <<<"$pending")"
+                kubectl get "$resource" -l "$selector" -o yaml
+                return 1
+              fi
+
+              echo "Waiting for $resource missingRoleRefs ($selector); pending: $(tr '\n' ' ' <<<"$pending")"
+              sleep 5
+            done
           }
           wait_ready roledefinition
           wait_ready binddefinition
           wait_ready rbacpolicy
-          wait_ready restrictedbinddefinition
-          wait_ready restrictedroledefinition
+          wait_condition restrictedbinddefinition 't-caas.telekom.com/sample-case in (allowed,partial,impersonated-allowed)' Ready True
+          wait_condition restrictedbinddefinition 't-caas.telekom.com/sample-case in (allowed,partial,impersonated-allowed)' PolicyCompliant True
+          wait_missing_role_refs restrictedbinddefinition 't-caas.telekom.com/sample-case=partial'
+          wait_condition restrictedroledefinition 't-caas.telekom.com/sample-case in (allowed,partial,impersonated-allowed)' Ready True
+          wait_condition restrictedroledefinition 't-caas.telekom.com/sample-case in (allowed,partial,impersonated-allowed)' PolicyCompliant True
+          wait_condition restrictedbinddefinition 't-caas.telekom.com/sample-case in (blocked,blocked-subject)' Ready False
+          wait_condition restrictedbinddefinition 't-caas.telekom.com/sample-case in (blocked,blocked-subject)' PolicyCompliant False
+          wait_condition restrictedroledefinition 't-caas.telekom.com/sample-case in (blocked,blocked-forbidden-verb)' Ready False
+          wait_condition restrictedroledefinition 't-caas.telekom.com/sample-case in (blocked,blocked-forbidden-verb)' PolicyCompliant False
+          wait_condition restrictedbinddefinition 't-caas.telekom.com/sample-case=impersonated-failed' Stalled True "authorization denied"
+          wait_condition restrictedroledefinition 't-caas.telekom.com/sample-case=impersonated-failed' Stalled True "authorization denied"
 
           echo "Waiting 15s for reconciliation to fully settle..."
           sleep 15
           wait_ready binddefinition
+          wait_condition restrictedbinddefinition 't-caas.telekom.com/sample-case in (allowed,partial,impersonated-allowed)' Ready True
+          wait_condition restrictedroledefinition 't-caas.telekom.com/sample-case in (allowed,partial,impersonated-allowed)' Ready True
 
           bash hack/ci/capture-operator-output.sh /tmp/pr-output
 

@@ -328,6 +328,9 @@ spec:
       - sample-tenant-a
   bindingLimits:
     allowClusterRoleBindings: false
+    clusterRoleBindingLimits:
+      allowedRoleRefs:
+        - "sample-*"
     roleBindingLimits:
       allowedRoleRefs:
         - "sample-*"

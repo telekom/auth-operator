@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Security scans now fail on gosec and high/critical/medium Helm-template Trivy findings instead of reporting them as green advisory output.
 - Helm-template Trivy scans now use a documented `.trivyignore` allowlist for the operator's intentional privileged RBAC findings, keeping new unsuppressed findings blocking.
-- Output delta now fails PR feedback generation when expected-valid PR sample resources do not become Ready.
+- Output delta now fails PR feedback generation when expected-ready samples do not become Ready, expected policy-denied samples do not report policy denial, or expected authorization-denied impersonation samples do not stall with authorization-denied status.
 
 ## [0.4.0-rc.13] — Pre-release
 
