@@ -246,11 +246,12 @@ func PatchApplyRoleBinding(
 
 // PatchApplyServiceAccount reads the current SA from cache, compares it to the
 // desired ApplyConfiguration, and only sends an SSA Patch if there is a diff.
-// ForceOwnership is intentionally used on the patch path because multiple
-// BindDefinitions may co-manage the same ServiceAccount through distinct field
-// managers. The ApplyConfiguration is limited to the fields this operator
-// manages, so conflicts are resolved only for that explicit ServiceAccount
-// contract instead of making all patch helpers force ownership by default.
+// ForceOwnership is intentionally used on the patch path and create-conflict
+// retry because multiple BindDefinitions may co-manage the same ServiceAccount
+// through distinct field managers. The ApplyConfiguration is limited to the
+// fields this operator manages, so conflicts are resolved only for that explicit
+// ServiceAccount contract instead of making all patch helpers force ownership by
+// default.
 func PatchApplyServiceAccount(
 	ctx context.Context,
 	c client.Client,
@@ -280,6 +281,14 @@ func PatchApplyServiceAccount(
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			if applyErr := c.Apply(ctx, ac, applyOptsForCreate...); applyErr != nil {
+				if apierrors.IsConflict(applyErr) {
+					logger.V(2).Info("ServiceAccount appeared during create apply, retrying forced patch",
+						"serviceAccount", *ac.Name, "namespace", *ac.Namespace)
+					if retryErr := c.Apply(ctx, ac, applyOptsForPatch...); retryErr != nil {
+						return 0, fmt.Errorf("patch ServiceAccount %s/%s after create conflict: %w", *ac.Namespace, *ac.Name, retryErr)
+					}
+					return PatchApplyResultPatched, nil
+				}
 				return 0, fmt.Errorf("create ServiceAccount %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 			}
 			return PatchApplyResultCreated, nil

@@ -5,11 +5,16 @@
 package ssa_test
 
 import (
+	"context"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -375,6 +380,52 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 	})
 
 	// -----------------------------------------------------------------------
+	// ServiceAccount
+	// -----------------------------------------------------------------------
+	Context("PatchApplyServiceAccount", func() {
+		It("should force patch co-managed ServiceAccounts when owned fields conflict", func() {
+			externalAC := ssa.ServiceAccountWith("ph-conflict-sa", "default",
+				map[string]string{"shared": "external"}, false).
+				WithAnnotations(map[string]string{"source": "external"})
+			err := k8sClient.Apply(testCtx, externalAC, client.FieldOwner("external-agent"), client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+
+			ac := ssa.ServiceAccountWith("ph-conflict-sa", "default",
+				map[string]string{"shared": "desired"}, true).
+				WithAnnotations(map[string]string{"source": "desired"})
+			result, err := ssa.PatchApplyServiceAccount(testCtx, k8sClient, ac, ssa.FieldOwnerForBD("ph-conflict-bd"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+
+			var sa corev1.ServiceAccount
+			Expect(k8sClient.Get(testCtx, types.NamespacedName{Name: "ph-conflict-sa", Namespace: "default"}, &sa)).To(Succeed())
+			Expect(sa.Labels).To(HaveKeyWithValue("shared", "desired"))
+			Expect(sa.Annotations).To(HaveKeyWithValue("source", "desired"))
+			Expect(sa.AutomountServiceAccountToken).NotTo(BeNil())
+			Expect(*sa.AutomountServiceAccountToken).To(BeTrue())
+		})
+
+		It("should retry as a patch when a ServiceAccount appears during create apply", func() {
+			name := types.NamespacedName{Name: "ph-create-race-sa", Namespace: "default"}
+			racingClient := &serviceAccountCreateRaceClient{Client: k8sClient, namespacedName: name}
+
+			ac := ssa.ServiceAccountWith(name.Name, name.Namespace,
+				map[string]string{"shared": "desired"}, true).
+				WithAnnotations(map[string]string{"source": "desired"})
+			result, err := ssa.PatchApplyServiceAccount(testCtx, racingClient, ac, ssa.FieldOwnerForBD("ph-race-bd"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+
+			var sa corev1.ServiceAccount
+			Expect(k8sClient.Get(testCtx, name, &sa)).To(Succeed())
+			Expect(sa.Labels).To(HaveKeyWithValue("shared", "desired"))
+			Expect(sa.Annotations).To(HaveKeyWithValue("source", "desired"))
+			Expect(sa.AutomountServiceAccountToken).NotTo(BeNil())
+			Expect(*sa.AutomountServiceAccountToken).To(BeTrue())
+		})
+	})
+
+	// -----------------------------------------------------------------------
 	// PatchApplyResult stringer
 	// -----------------------------------------------------------------------
 	Context("PatchApplyResult.String", func() {
@@ -386,3 +437,42 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 		})
 	})
 })
+
+type serviceAccountCreateRaceClient struct {
+	client.Client
+	namespacedName   types.NamespacedName
+	reportNotFound   bool
+	injectedConflict bool
+}
+
+func (c *serviceAccountCreateRaceClient) Get(
+	ctx context.Context,
+	key client.ObjectKey,
+	obj client.Object,
+	opts ...client.GetOption,
+) error {
+	if key == c.namespacedName && !c.reportNotFound {
+		c.reportNotFound = true
+		return apierrors.NewNotFound(schema.GroupResource{Resource: "serviceaccounts"}, key.Name)
+	}
+
+	return c.Client.Get(ctx, key, obj, opts...)
+}
+
+func (c *serviceAccountCreateRaceClient) Apply(
+	ctx context.Context,
+	obj runtime.ApplyConfiguration,
+	opts ...client.ApplyOption,
+) error {
+	if c.reportNotFound && !c.injectedConflict {
+		c.injectedConflict = true
+		externalAC := ssa.ServiceAccountWith(c.namespacedName.Name, c.namespacedName.Namespace,
+			map[string]string{"shared": "external"}, false).
+			WithAnnotations(map[string]string{"source": "external"})
+		if err := c.Client.Apply(ctx, externalAC, client.FieldOwner("external-agent"), client.ForceOwnership); err != nil {
+			return err
+		}
+	}
+
+	return c.Client.Apply(ctx, obj, opts...)
+}
