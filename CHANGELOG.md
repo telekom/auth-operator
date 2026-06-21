@@ -18,10 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - RestrictedBindDefinition now prunes generated ServiceAccounts that are no longer desired and clears stale generated/external ServiceAccount and missing-role status when deprovisioned.
 - Restricted owner references no longer request `blockOwnerDeletion`, avoiding unnecessary finalizer-update permissions for impersonated apply identities.
 - Impersonated apply client caching is bounded to prevent unbounded controller lifetime growth from distinct policy identities.
+- The Helm chart no longer grants ConfigMap access for leader election; controller-runtime uses the `coordination.k8s.io` Lease lock.
 
 ### CI
 
 - Security scans now fail on gosec and high/critical/medium Helm-template Trivy findings instead of reporting them as green advisory output.
+- Helm-template Trivy scans now use a documented `.trivyignore` allowlist for the operator's intentional privileged RBAC findings, keeping new unsuppressed findings blocking.
 - Output delta now fails PR feedback generation when expected-valid PR sample resources do not become Ready.
 
 ## [0.4.0-rc.13] — Pre-release
