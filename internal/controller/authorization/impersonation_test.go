@@ -244,7 +244,7 @@ func TestImpersonatedClientCache(t *testing.T) {
 		cache := newImpersonatedClientCache()
 		cfg := &rest.Config{Host: "https://cluster.local"}
 
-		for i := 0; i < maxImpersonatedClientCacheEntries+1; i++ {
+		for i := range maxImpersonatedClientCacheEntries + 1 {
 			_, err := cache.getOrCreate(fmt.Sprintf("system:serviceaccount:team-a:sa-%03d", i), cfg, scheme, factory)
 			g.Expect(err).NotTo(gomega.HaveOccurred())
 		}
