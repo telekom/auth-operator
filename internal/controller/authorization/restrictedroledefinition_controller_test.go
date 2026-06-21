@@ -77,6 +77,7 @@ func TestRRD_Reconcile_PolicyNotFound(t *testing.T) {
 	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       "test-rrd",
+			UID:        "test-rrd-uid",
 			Generation: 1,
 		},
 		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
@@ -84,9 +85,18 @@ func TestRRD_Reconcile_PolicyNotFound(t *testing.T) {
 			TargetName: "test-role-name",
 			TargetRole: authorizationv1alpha1.DefinitionClusterRole,
 		},
+		Status: authorizationv1alpha1.RestrictedRoleDefinitionStatus{
+			RoleReconciled: true,
+		},
+	}
+	ownedRole := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "test-role-name",
+			OwnerReferences: []metav1.OwnerReference{restrictedTestOwnerRef(authorizationv1alpha1.RestrictedRoleDefinitionKind, rrd.Name, rrd.UID)},
+		},
 	}
 
-	r, c := newRRDTestReconcilerFake(rrd)
+	r, c := newRRDTestReconcilerFake(rrd, ownedRole)
 	result, err := r.Reconcile(rrdCtx(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: "test-rrd"},
 	})
@@ -98,6 +108,9 @@ func TestRRD_Reconcile_PolicyNotFound(t *testing.T) {
 	g.Expect(updated.Status.PolicyViolations).To(HaveLen(1))
 	g.Expect(updated.Status.PolicyViolations[0]).To(ContainSubstring("missing-policy"))
 	g.Expect(conditions.IsStalled(&updated)).To(BeTrue())
+
+	var deletedRole rbacv1.ClusterRole
+	g.Expect(c.Get(rrdCtx(), types.NamespacedName{Name: ownedRole.Name}, &deletedRole)).NotTo(Succeed())
 }
 
 func TestRRD_Reconcile_PolicyViolation(t *testing.T) {
@@ -122,6 +135,7 @@ func TestRRD_Reconcile_PolicyViolation(t *testing.T) {
 	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       "violating-rrd",
+			UID:        "violating-rrd-uid",
 			Generation: 1,
 		},
 		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
@@ -129,9 +143,18 @@ func TestRRD_Reconcile_PolicyViolation(t *testing.T) {
 			TargetName: "violating-role",
 			TargetRole: authorizationv1alpha1.DefinitionClusterRole,
 		},
+		Status: authorizationv1alpha1.RestrictedRoleDefinitionStatus{
+			RoleReconciled: true,
+		},
+	}
+	ownedRole := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "violating-role",
+			OwnerReferences: []metav1.OwnerReference{restrictedTestOwnerRef(authorizationv1alpha1.RestrictedRoleDefinitionKind, rrd.Name, rrd.UID)},
+		},
 	}
 
-	r, c := newRRDTestReconcilerFake(pol, rrd)
+	r, c := newRRDTestReconcilerFake(pol, rrd, ownedRole)
 	result, err := r.Reconcile(rrdCtx(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: "violating-rrd"},
 	})
@@ -141,8 +164,10 @@ func TestRRD_Reconcile_PolicyViolation(t *testing.T) {
 	var updated authorizationv1alpha1.RestrictedRoleDefinition
 	g.Expect(c.Get(rrdCtx(), types.NamespacedName{Name: "violating-rrd"}, &updated)).To(Succeed())
 	g.Expect(updated.Status.PolicyViolations).NotTo(BeEmpty())
-	g.Expect(updated.Status.RoleReconciled).To(BeFalse())
 	g.Expect(conditions.IsReady(&updated)).To(BeFalse())
+
+	var deletedRole rbacv1.ClusterRole
+	g.Expect(c.Get(rrdCtx(), types.NamespacedName{Name: ownedRole.Name}, &deletedRole)).NotTo(Succeed())
 }
 
 func TestRRD_Reconcile_Deletion(t *testing.T) {
@@ -513,6 +538,8 @@ func TestRRD_OwnerRefForRestricted(t *testing.T) {
 	g.Expect(ref).NotTo(BeNil())
 	g.Expect(*ref.Name).To(Equal("owner-rrd"))
 	g.Expect(*ref.UID).To(Equal(types.UID("uid-456")))
+	g.Expect(*ref.Controller).To(BeTrue())
+	g.Expect(*ref.BlockOwnerDeletion).To(BeFalse())
 }
 
 func TestRRD_DiscoverAndFilter_TrackerNotStarted(t *testing.T) {

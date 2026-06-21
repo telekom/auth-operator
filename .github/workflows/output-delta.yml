@@ -424,12 +424,10 @@ jobs:
 
           make deploy IMG=auth-operator:pr
           echo "Waiting for operator to be ready..."
-          kubectl rollout status deployment/auth-operator-controller-manager -n auth-operator-system --timeout=180s 2>/dev/null || \
-            echo "::warning::Could not verify controller-manager readiness, continuing anyway"
+          kubectl rollout status deployment/auth-operator-controller-manager -n auth-operator-system --timeout=180s
 
           echo "Waiting for webhook server to be ready..."
-          kubectl rollout status deployment/auth-operator-webhook-server -n auth-operator-system --timeout=180s 2>/dev/null || \
-            echo "::warning::Could not verify webhook-server readiness, continuing anyway"
+          kubectl rollout status deployment/auth-operator-webhook-server -n auth-operator-system --timeout=180s
           sleep 5
 
           # Apply sample configs with retry (webhook may need additional time to be fully ready)
@@ -469,15 +467,21 @@ jobs:
             echo "::notice::config/samples/broken/ not present in this tag; skipping broken-sample apply"
           fi
 
-          kubectl wait --for=condition=Ready roledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RoleDefinitions not fully reconciled"
-          kubectl wait --for=condition=Ready binddefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some BindDefinitions not fully reconciled"
-          kubectl wait --for=condition=Ready rbacpolicy --all --timeout=180s 2>/dev/null || echo "::notice::Some RBACPolicies not fully reconciled"
-          kubectl wait --for=condition=Ready restrictedbinddefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RestrictedBindDefinitions not fully reconciled"
-          kubectl wait --for=condition=Ready restrictedroledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RestrictedRoleDefinitions not fully reconciled"
+          wait_ready() {
+            local resource="$1"
+            kubectl wait --for=condition=Ready "$resource" \
+              -l 't-caas.telekom.com/sample-case!=impersonated-failed' \
+              --timeout=180s
+          }
+          wait_ready roledefinition
+          wait_ready binddefinition
+          wait_ready rbacpolicy
+          wait_ready restrictedbinddefinition
+          wait_ready restrictedroledefinition
 
           echo "Waiting 15s for reconciliation to fully settle..."
           sleep 15
-          kubectl wait --for=condition=Ready binddefinition --all --timeout=60s 2>/dev/null || true
+          wait_ready binddefinition
 
           bash hack/ci/capture-operator-output.sh /tmp/pr-output
 

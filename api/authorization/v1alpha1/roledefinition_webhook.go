@@ -64,6 +64,20 @@ func listErrorToAdmission(resource string, err error) error {
 	return apierrors.NewInternalError(fmt.Errorf("unable to list %s: %w", resource, err))
 }
 
+// roleTargetMatchingFields narrows duplicate target lookups to only candidates
+// that can collide in the RBAC API. ClusterRole names are cluster-scoped, while
+// Role names are scoped by namespace.
+func roleTargetMatchingFields(targetName, targetRole, targetNamespace string) client.MatchingFields {
+	fields := client.MatchingFields{
+		TargetNameField: targetName,
+		TargetRoleField: targetRole,
+	}
+	if targetRole == DefinitionNamespacedRole {
+		fields[TargetNamespaceField] = targetNamespace
+	}
+	return fields
+}
+
 // validateNoDuplicateRestrictedAPIs rejects duplicate API group names in RestrictedAPIs.
 // Duplicate entries are ambiguous because only the first match is used during
 // filtering — subsequent entries for the same group name are silently ignored.
@@ -97,13 +111,10 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 		return nil, err
 	}
 
-	// Use field index for efficient lookup by TargetName. All same-name
-	// candidates must be scanned because namespaced Role targets can share
-	// targetName across different targetNamespace values.
+	// Use field indexes for efficient lookup by the exact RBAC target scope.
 	roleDefinitionList := &RoleDefinitionList{}
-	if err := v.Client.List(ctx, roleDefinitionList, client.MatchingFields{
-		TargetNameField: obj.Spec.TargetName,
-	}); err != nil {
+	if err := v.Client.List(ctx, roleDefinitionList,
+		roleTargetMatchingFields(obj.Spec.TargetName, obj.Spec.TargetRole, obj.Spec.TargetNamespace)); err != nil {
 		logger.Error(err, "failed to list RoleDefinitions", "targetName", obj.Spec.TargetName)
 		return nil, listErrorToAdmission("RoleDefinitions", err)
 	}
@@ -123,9 +134,8 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 
 	// Check for cross-type targetName collision with RestrictedRoleDefinitions.
 	rrdList := &RestrictedRoleDefinitionList{}
-	if err := v.Client.List(ctx, rrdList, client.MatchingFields{
-		TargetNameField: obj.Spec.TargetName,
-	}); err != nil {
+	if err := v.Client.List(ctx, rrdList,
+		roleTargetMatchingFields(obj.Spec.TargetName, obj.Spec.TargetRole, obj.Spec.TargetNamespace)); err != nil {
 		logger.Error(err, "failed to list RestrictedRoleDefinitions", "targetName", obj.Spec.TargetName)
 		return nil, listErrorToAdmission("RestrictedRoleDefinitions", err)
 	}
@@ -185,13 +195,10 @@ func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 		return nil, err
 	}
 
-	// Use field index for efficient lookup by TargetName. All same-name
-	// candidates must be scanned because namespaced Role targets can share
-	// targetName across different targetNamespace values.
+	// Use field indexes for efficient lookup by the exact RBAC target scope.
 	roleDefinitionList := &RoleDefinitionList{}
-	if err := v.Client.List(ctx, roleDefinitionList, client.MatchingFields{
-		TargetNameField: newObj.Spec.TargetName,
-	}); err != nil {
+	if err := v.Client.List(ctx, roleDefinitionList,
+		roleTargetMatchingFields(newObj.Spec.TargetName, newObj.Spec.TargetRole, newObj.Spec.TargetNamespace)); err != nil {
 		logger.Error(err, "failed to list RoleDefinitions", "targetName", newObj.Spec.TargetName)
 		return nil, listErrorToAdmission("RoleDefinitions", err)
 	}
@@ -211,9 +218,8 @@ func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 
 	// Keep cross-type targetName collision checks aligned with ValidateCreate.
 	rrdList := &RestrictedRoleDefinitionList{}
-	if err := v.Client.List(ctx, rrdList, client.MatchingFields{
-		TargetNameField: newObj.Spec.TargetName,
-	}); err != nil {
+	if err := v.Client.List(ctx, rrdList,
+		roleTargetMatchingFields(newObj.Spec.TargetName, newObj.Spec.TargetRole, newObj.Spec.TargetNamespace)); err != nil {
 		logger.Error(err, "failed to list RestrictedRoleDefinitions", "targetName", newObj.Spec.TargetName)
 		return nil, listErrorToAdmission("RestrictedRoleDefinitions", err)
 	}

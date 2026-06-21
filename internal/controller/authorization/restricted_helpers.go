@@ -36,8 +36,8 @@ func ownerRefForRestricted(obj client.Object, kind string) *metav1ac.OwnerRefere
 		kind,
 		obj.GetName(),
 		obj.GetUID(),
-		true, // controller
-		true, // blockOwnerDeletion
+		true,  // controller
+		false, // blockOwnerDeletion — impersonated apply identities should not need owner finalizer update permission
 	)
 }
 

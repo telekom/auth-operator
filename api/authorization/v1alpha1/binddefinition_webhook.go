@@ -368,6 +368,16 @@ func validateNamespaceBindings(kind schema.GroupKind, name string, bindings []Na
 					field.NewPath("spec", "roleBindings").Index(i).Child("namespace"),
 					"roleBindings entries with role refs must specify namespace or namespaceSelector")})
 		}
+		for j, roleRef := range binding.RoleRefs {
+			if slices.Contains(binding.ClusterRoleRefs, roleRef) {
+				return apierrors.NewInvalid(
+					kind,
+					name,
+					field.ErrorList{field.Duplicate(
+						field.NewPath("spec", "roleBindings").Index(i).Child("roleRefs").Index(j),
+						roleRef)})
+			}
+		}
 		for j, selector := range binding.NamespaceSelector {
 			if isLabelSelectorEmpty(&selector) {
 				continue

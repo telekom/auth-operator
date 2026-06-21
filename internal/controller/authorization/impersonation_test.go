@@ -6,6 +6,7 @@ package authorization
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/onsi/gomega"
@@ -231,5 +232,30 @@ func TestImpersonatedClientCache(t *testing.T) {
 
 		g.Expect(callCount).To(gomega.Equal(1), "factory should be called exactly once")
 		g.Expect(cl1).To(gomega.Equal(cl2), "both calls should return the same cached client")
+	})
+
+	t.Run("evicts oldest entries when capacity is exceeded", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		callCount := 0
+		factory := func(_ *rest.Config, _ *runtime.Scheme, _ string) (client.Client, error) {
+			callCount++
+			return baseClient, nil
+		}
+		cache := newImpersonatedClientCache()
+		cfg := &rest.Config{Host: "https://cluster.local"}
+
+		for i := 0; i < maxImpersonatedClientCacheEntries+1; i++ {
+			_, err := cache.getOrCreate(fmt.Sprintf("system:serviceaccount:team-a:sa-%03d", i), cfg, scheme, factory)
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+		}
+
+		cache.mu.RLock()
+		g.Expect(cache.cache).To(gomega.HaveLen(maxImpersonatedClientCacheEntries))
+		g.Expect(cache.order).To(gomega.HaveLen(maxImpersonatedClientCacheEntries))
+		cache.mu.RUnlock()
+
+		_, err := cache.getOrCreate("system:serviceaccount:team-a:sa-000", cfg, scheme, factory)
+		g.Expect(err).NotTo(gomega.HaveOccurred())
+		g.Expect(callCount).To(gomega.Equal(maxImpersonatedClientCacheEntries + 2))
 	})
 }

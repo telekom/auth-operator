@@ -278,6 +278,12 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 			r.recorder.Eventf(rrd, nil, corev1.EventTypeWarning,
 				authorizationv1alpha1.EventReasonPolicyNotFound, authorizationv1alpha1.EventActionReconcile,
 				"Referenced RBACPolicy %q not found", rrd.Spec.PolicyRef.Name)
+			if err := r.rrdDeprovision(ctx, rrd); err != nil {
+				r.rrdMarkStalled(ctx, rrd, err)
+				metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
+				metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
+				return ctrl.Result{}, fmt.Errorf("deprovision RestrictedRoleDefinition %s after missing policy %s: %w", rrd.Name, rrd.Spec.PolicyRef.Name, err)
+			}
 			r.rrdApplyStatusAndMarkStalled(ctx, rrd, "policy not found")
 			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultDegraded).Inc()
 			return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil

@@ -10,6 +10,14 @@ import "time"
 // This index must be registered with the manager before use.
 const TargetNameField = ".spec.targetName"
 
+// TargetRoleField is the field index for efficient lookups by Spec.TargetRole.
+// This index must be registered with the manager before use.
+const TargetRoleField = ".spec.targetRole"
+
+// TargetNamespaceField is the field index for efficient lookups by Spec.TargetNamespace.
+// This index must be registered with the manager before use.
+const TargetNamespaceField = ".spec.targetNamespace"
+
 // maxVersionLength is the upper bound for API version strings (e.g. "v1beta2").
 // Shared by RoleDefinition and RestrictedRoleDefinition validation.
 const maxVersionLength = 20

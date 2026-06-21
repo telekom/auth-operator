@@ -19,15 +19,17 @@ import (
 
 type impersonatedClientFactory func(cfg *rest.Config, scheme *runtime.Scheme, username string) (client.Client, error)
 
+const maxImpersonatedClientCacheEntries = 256
+
 // impersonatedClientCache caches impersonated clients by username to avoid
 // creating a new HTTP connection pool on every reconcile cycle.
 // The cache is safe for concurrent use and lives for the lifetime of the
-// controller, so entries are never evicted (the set of impersonation targets
-// is small and bounded by the number of distinct impersonation usernames
-// observed over the controller's lifetime).
+// controller. Entries are bounded so user-controlled RBACPolicy specs cannot
+// grow the cache without limit over the controller's lifetime.
 type impersonatedClientCache struct {
 	mu    sync.RWMutex
 	cache map[string]client.Client
+	order []string
 	group singleflight.Group
 }
 
@@ -86,7 +88,14 @@ func (c *impersonatedClientCache) getOrCreate(
 			c.mu.Unlock()
 			return existing, nil
 		}
+		if len(c.order) >= maxImpersonatedClientCacheEntries {
+			oldest := c.order[0]
+			copy(c.order, c.order[1:])
+			c.order = c.order[:len(c.order)-1]
+			delete(c.cache, oldest)
+		}
 		c.cache[username] = built
+		c.order = append(c.order, username)
 		c.mu.Unlock()
 		return built, nil
 	})

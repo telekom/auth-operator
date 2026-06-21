@@ -10,6 +10,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - RestrictedRoleDefinition enforces immutable `spec.policyRef`, `spec.targetRole`, `spec.targetName`, and `spec.targetNamespace` after creation. RestrictedBindDefinition enforces immutable `spec.policyRef` and `spec.targetName` after creation. RoleDefinition now also enforces immutable `spec.targetNamespace`. To change these fields, recreate the resource with the desired values.
+- BindDefinition and RestrictedBindDefinition now reject a single `roleBindings[]` entry that references the same name through both `roleRefs` and `clusterRoleRefs`, because both would target the same generated RoleBinding name with different immutable `roleRef.kind` values.
+
+### Fixed
+
+- RestrictedBindDefinition and RestrictedRoleDefinition now deprovision owned RBAC resources when their referenced RBACPolicy is missing, preventing stale access after policy deletion or drift.
+- RestrictedBindDefinition now prunes generated ServiceAccounts that are no longer desired and clears stale generated/external ServiceAccount and missing-role status when deprovisioned.
+- Restricted owner references no longer request `blockOwnerDeletion`, avoiding unnecessary finalizer-update permissions for impersonated apply identities.
+- Impersonated apply client caching is bounded to prevent unbounded controller lifetime growth from distinct policy identities.
+
+### CI
+
+- Security scans now fail on gosec and high/critical/medium Helm-template Trivy findings instead of reporting them as green advisory output.
+- Output delta now fails PR feedback generation when expected-valid PR sample resources do not become Ready.
 
 ## [0.4.0-rc.13] — Pre-release
 

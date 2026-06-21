@@ -116,12 +116,10 @@ func (v *RestrictedRoleDefinitionValidator) validateRestrictedRoleDefinitionSpec
 	logger := log.FromContext(ctx).WithName("restrictedroledefinition-webhook")
 
 	// Check duplicate targetName. Collisions are scoped by targetRole and,
-	// for Role targets, targetNamespace. All same-name candidates must be
-	// scanned because different namespaces may legitimately share targetName.
+	// for Role targets, targetNamespace.
 	rrdList := &RestrictedRoleDefinitionList{}
-	if err := v.Client.List(ctx, rrdList, client.MatchingFields{
-		TargetNameField: obj.Spec.TargetName,
-	}); err != nil {
+	if err := v.Client.List(ctx, rrdList,
+		roleTargetMatchingFields(obj.Spec.TargetName, obj.Spec.TargetRole, obj.Spec.TargetNamespace)); err != nil {
 		logger.Error(err, "failed to list RestrictedRoleDefinitions", "targetName", obj.Spec.TargetName)
 		return listErrorToAdmission("RestrictedRoleDefinitions", err)
 	}
@@ -141,9 +139,8 @@ func (v *RestrictedRoleDefinitionValidator) validateRestrictedRoleDefinitionSpec
 
 	// Check for cross-type targetName collision with RoleDefinitions.
 	rdList := &RoleDefinitionList{}
-	if err := v.Client.List(ctx, rdList, client.MatchingFields{
-		TargetNameField: obj.Spec.TargetName,
-	}); err != nil {
+	if err := v.Client.List(ctx, rdList,
+		roleTargetMatchingFields(obj.Spec.TargetName, obj.Spec.TargetRole, obj.Spec.TargetNamespace)); err != nil {
 		logger.Error(err, "failed to list RoleDefinitions", "targetName", obj.Spec.TargetName)
 		return listErrorToAdmission("RoleDefinitions", err)
 	}

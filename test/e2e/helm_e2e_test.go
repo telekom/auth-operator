@@ -232,20 +232,19 @@ var _ = Describe("Helm Chart E2E", Ordered, Label("helm"), func() {
 		})
 
 		It("should have CRDs installed", func() {
-			By("Checking RoleDefinition CRD exists")
-			cmd := utils.CommandContext(context.Background(), "kubectl", "get", "crd", "roledefinitions.authorization.t-caas.telekom.com") // #nosec G204
-			_, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred())
-
-			By("Checking BindDefinition CRD exists")
-			cmd = utils.CommandContext(context.Background(), "kubectl", "get", "crd", "binddefinitions.authorization.t-caas.telekom.com") // #nosec G204
-			_, err = utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred())
-
-			By("Checking WebhookAuthorizer CRD exists")
-			cmd = utils.CommandContext(context.Background(), "kubectl", "get", "crd", "webhookauthorizers.authorization.t-caas.telekom.com") // #nosec G204
-			_, err = utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred())
+			for _, crd := range []string{
+				"roledefinitions.authorization.t-caas.telekom.com",
+				"binddefinitions.authorization.t-caas.telekom.com",
+				"webhookauthorizers.authorization.t-caas.telekom.com",
+				"rbacpolicies.authorization.t-caas.telekom.com",
+				"restrictedroledefinitions.authorization.t-caas.telekom.com",
+				"restrictedbinddefinitions.authorization.t-caas.telekom.com",
+			} {
+				By("Checking CRD exists: " + crd)
+				cmd := utils.CommandContext(context.Background(), "kubectl", "get", "crd", crd) // #nosec G204
+				_, err := utils.Run(cmd)
+				Expect(err).NotTo(HaveOccurred())
+			}
 		})
 
 		It("should have RBAC resources created", func() {
@@ -446,6 +445,100 @@ spec:
 				}
 				return strings.Contains(string(output), "helm-e2e-auto-sa")
 			}, reconcileTimeout, pollingInterval).Should(BeTrue())
+		})
+
+		It("should create restricted RBAC resources through the Helm-installed controller", func() {
+			By("Creating an RBACPolicy for restricted Helm testing")
+			restrictedYAML := fmt.Sprintf(`
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RBACPolicy
+metadata:
+  name: helm-e2e-restricted-policy
+spec:
+  appliesTo:
+    namespaces:
+      - %s
+  roleLimits:
+    allowClusterRoles: false
+    forbiddenVerbs:
+      - create
+      - update
+      - patch
+      - delete
+  bindingLimits:
+    allowClusterRoleBindings: false
+    roleBindingLimits:
+      allowedRoleRefs:
+        - helm-e2e-restricted-role
+  subjectLimits:
+    allowedKinds:
+      - Group
+---
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedRoleDefinition
+metadata:
+  name: helm-e2e-restricted-role
+spec:
+  policyRef:
+    name: helm-e2e-restricted-policy
+  targetRole: Role
+  targetName: helm-e2e-restricted-role
+  targetNamespace: %s
+  scopeNamespaced: true
+  restrictedVerbs:
+    - create
+    - update
+    - patch
+    - delete
+---
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedBindDefinition
+metadata:
+  name: helm-e2e-restricted-binding
+spec:
+  policyRef:
+    name: helm-e2e-restricted-policy
+  targetName: helm-e2e-restricted-binding
+  subjects:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group
+      name: helm-e2e-restricted-group
+  roleBindings:
+    - namespace: %s
+      roleRefs:
+        - helm-e2e-restricted-role
+`, helmTestNamespace, helmTestNamespace, helmTestNamespace)
+			cmd := utils.CommandContext(context.Background(), "kubectl", "apply", "-f", "-") // #nosec G204
+			cmd.Stdin = strings.NewReader(restrictedYAML)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Waiting for RBACPolicy readiness")
+			Eventually(func() bool {
+				return checkResourceCondition("rbacpolicy", "helm-e2e-restricted-policy", "Ready")
+			}, reconcileTimeout, pollingInterval).Should(BeTrue())
+
+			By("Waiting for RestrictedRoleDefinition readiness")
+			Eventually(func() bool {
+				return checkResourceCondition("restrictedroledefinition", "helm-e2e-restricted-role", "PolicyCompliant") &&
+					checkResourceCondition("restrictedroledefinition", "helm-e2e-restricted-role", "Ready")
+			}, reconcileTimeout, pollingInterval).Should(BeTrue())
+
+			By("Waiting for restricted Role to be generated")
+			Eventually(func() error {
+				return checkResourceExists("role", "helm-e2e-restricted-role", helmTestNamespace)
+			}, reconcileTimeout, pollingInterval).Should(Succeed())
+
+			By("Waiting for RestrictedBindDefinition readiness")
+			Eventually(func() bool {
+				return checkResourceCondition("restrictedbinddefinition", "helm-e2e-restricted-binding", "PolicyCompliant") &&
+					checkResourceCondition("restrictedbinddefinition", "helm-e2e-restricted-binding", "Ready")
+			}, reconcileTimeout, pollingInterval).Should(BeTrue())
+
+			By("Waiting for restricted RoleBinding to be generated")
+			Eventually(func() error {
+				return checkResourceExists("rolebinding", "helm-e2e-restricted-binding-helm-e2e-restricted-role-binding", helmTestNamespace)
+			}, reconcileTimeout, pollingInterval).Should(Succeed())
 		})
 
 		It("should create WebhookAuthorizer with allowed principals", func() {

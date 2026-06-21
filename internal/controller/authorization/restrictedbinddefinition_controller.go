@@ -449,7 +449,14 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 				authorizationv1alpha1.EventReasonPolicyNotFound, authorizationv1alpha1.EventActionReconcile,
 				"Referenced RBACPolicy %q not found", rbd.Spec.PolicyRef.Name)
 			rbd.Status.PolicyViolations = []string{fmt.Sprintf("policy %q not found", rbd.Spec.PolicyRef.Name)}
-			r.rbdApplyStatusAndMarkStalled(ctx, rbd)
+			if err := r.rbdDeprovision(ctx, rbd); err != nil {
+				r.rbdMarkStalled(ctx, rbd, err)
+				metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
+				metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
+				return ctrl.Result{}, fmt.Errorf("deprovision RestrictedBindDefinition %s after missing policy %s: %w", rbd.Name, rbd.Spec.PolicyRef.Name, err)
+			}
+			rbdClearDeprovisionedStatus(rbd)
+			r.rbdApplyStatusAndMarkStalled(ctx, rbd, "policy not found")
 			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultDegraded).Inc()
 			return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
 		}
@@ -465,10 +472,16 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 		result, err := handlePolicyViolations(ctx, rbd, rbd.Generation, violations, r.recorder, rbd, ViolationHandlerConfig{
 			ControllerLabel: metrics.ControllerRestrictedBindDefinition,
 			ResourceKind:    "RestrictedBindDefinition",
-			Deprovision:     func(ctx context.Context) error { return r.rbdDeprovision(ctx, rbd) },
-			MarkStalled:     func(ctx context.Context, err error) { r.rbdMarkStalled(ctx, rbd, err) },
-			SetReconciled:   func(v bool) { rbd.Status.BindReconciled = v },
-			ApplyStatus:     func(ctx context.Context) error { return ssa.ApplyRestrictedBindDefinitionStatus(ctx, r.client, rbd) },
+			Deprovision: func(ctx context.Context) error {
+				if err := r.rbdDeprovision(ctx, rbd); err != nil {
+					return err
+				}
+				rbdClearDeprovisionedStatus(rbd)
+				return nil
+			},
+			MarkStalled:   func(ctx context.Context, err error) { r.rbdMarkStalled(ctx, rbd, err) },
+			SetReconciled: func(v bool) { rbd.Status.BindReconciled = v },
+			ApplyStatus:   func(ctx context.Context) error { return ssa.ApplyRestrictedBindDefinitionStatus(ctx, r.client, rbd) },
 		})
 		return result, err
 	}
@@ -541,6 +554,10 @@ func (r *RestrictedBindDefinitionReconciler) rbdReconcileResources(
 	if err != nil {
 		return err
 	}
+	desiredSAs := rbdDesiredServiceAccounts(rbd.Status.GeneratedServiceAccounts)
+	if err := r.rbdPruneStaleServiceAccounts(ctx, rbd, desiredSAs); err != nil {
+		return err
+	}
 
 	// Ensure ClusterRoleBindings.
 	desiredCRBs := make(map[string]struct{})
@@ -598,6 +615,26 @@ func (r *RestrictedBindDefinitionReconciler) rbdReconcileResources(
 
 	// Prune stale owned resources that are no longer in the desired set.
 	return r.rbdPruneStaleResources(ctx, rbd, desiredCRBs, desiredRBs)
+}
+
+func rbdClearDeprovisionedStatus(rbd *authorizationv1alpha1.RestrictedBindDefinition) {
+	rbd.Status.GeneratedServiceAccounts = nil
+	rbd.Status.ExternalServiceAccounts = nil
+	rbd.Status.MissingRoleRefs = nil
+	rbd.Status.BindReconciled = false
+	metrics.RoleRefsMissing.WithLabelValues(rbd.Name).Set(0)
+	metrics.NamespacesActive.WithLabelValues(rbd.Name).Set(0)
+}
+
+func rbdDesiredServiceAccounts(subjects []rbacv1.Subject) map[string]struct{} {
+	desiredSAs := make(map[string]struct{}, len(subjects))
+	for _, subject := range subjects {
+		if subject.Kind != rbacv1.ServiceAccountKind {
+			continue
+		}
+		desiredSAs[subject.Namespace+"/"+subject.Name] = struct{}{}
+	}
+	return desiredSAs
 }
 
 // rbdPruneStaleResources deletes owned ClusterRoleBindings and RoleBindings
@@ -661,6 +698,36 @@ func (r *RestrictedBindDefinitionReconciler) rbdPruneStaleResources(
 				return fmt.Errorf("delete stale RoleBinding %s/%s: %w", rb.Namespace, rb.Name, err)
 			}
 			metrics.RBACResourcesDeleted.WithLabelValues(metrics.ResourceRoleBinding).Inc()
+		}
+	}
+
+	return nil
+}
+
+func (r *RestrictedBindDefinitionReconciler) rbdPruneStaleServiceAccounts(
+	ctx context.Context,
+	rbd *authorizationv1alpha1.RestrictedBindDefinition,
+	desiredSAs map[string]struct{},
+) error {
+	logger := log.FromContext(ctx)
+
+	saList := &corev1.ServiceAccountList{}
+	if err := r.client.List(ctx, saList,
+		client.MatchingLabels{helpers.ManagedByLabelStandard: helpers.ManagedByValue}); err != nil {
+		return fmt.Errorf("list ServiceAccounts for pruning: %w", err)
+	}
+	for i := range saList.Items {
+		sa := &saList.Items[i]
+		if !hasOwnerRef(sa, rbd) {
+			continue
+		}
+		key := sa.Namespace + "/" + sa.Name
+		if _, ok := desiredSAs[key]; ok {
+			continue
+		}
+		logger.Info("pruning stale ServiceAccount", "namespace", sa.Namespace, "name", sa.Name, "rbd", rbd.Name)
+		if err := r.client.Delete(ctx, sa); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("delete stale ServiceAccount %s: %w", key, err)
 		}
 	}
 
@@ -950,9 +1017,13 @@ func (r *RestrictedBindDefinitionReconciler) rbdDeprovision(
 		}
 	}
 
+	if err := r.rbdPruneStaleServiceAccounts(ctx, rbd, nil); err != nil {
+		return err
+	}
+
 	r.recorder.Eventf(rbd, nil, corev1.EventTypeWarning,
 		authorizationv1alpha1.EventReasonDeprovisioned, authorizationv1alpha1.EventActionReconcile,
-		"Deprovisioned all owned RBAC resources")
+		"Deprovisioned all owned RBAC resources and generated ServiceAccounts")
 
 	return nil
 }
@@ -1012,10 +1083,11 @@ func (r *RestrictedBindDefinitionReconciler) rbdMarkStalled(
 func (r *RestrictedBindDefinitionReconciler) rbdApplyStatusAndMarkStalled(
 	ctx context.Context,
 	rbd *authorizationv1alpha1.RestrictedBindDefinition,
+	msg string,
 ) {
 	logger := log.FromContext(ctx)
 	conditions.MarkStalled(rbd, rbd.Generation,
-		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, "policy not found")
+		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, msg)
 	rbd.Status.BindReconciled = false
 	rbd.Status.ObservedGeneration = rbd.Generation
 	if err := ssa.ApplyRestrictedBindDefinitionStatus(ctx, r.client, rbd); err != nil {

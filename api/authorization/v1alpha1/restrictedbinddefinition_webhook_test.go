@@ -10,6 +10,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -95,7 +96,9 @@ var _ = Describe("RestrictedBindDefinition Webhook", func() {
 			}
 			err := k8sClient.Create(ctx, rbd)
 			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsInvalid(err)).To(BeTrue())
 			Expect(err.Error()).To(ContainSubstring("nonexistent-policy"))
+			Expect(err.Error()).To(ContainSubstring("spec.policyRef.name"))
 		})
 
 		It("Should deny duplicate targetName", func() {
@@ -252,6 +255,32 @@ var _ = Describe("RestrictedBindDefinition Webhook", func() {
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("roleBindings entries with role refs must specify namespace or namespaceSelector"))
 			Expect(err.Error()).To(ContainSubstring("spec.roleBindings[0]"))
+		})
+
+		It("Should deny a RestrictedBindDefinition roleBinding that references the same Role and ClusterRole name", func() {
+			rbd := &RestrictedBindDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rbd-cel-rb-name-collision",
+				},
+				Spec: RestrictedBindDefinitionSpec{
+					PolicyRef:  RBACPolicyReference{Name: policy.Name},
+					TargetName: "test-rbd-cel-rb-name-collision",
+					Subjects: []rbacv1.Subject{
+						{Kind: rbacv1.GroupKind, APIGroup: rbacv1.GroupName, Name: "test-group"},
+					},
+					RoleBindings: []NamespaceBinding{
+						{
+							Namespace:       "default",
+							ClusterRoleRefs: []string{"reader"},
+							RoleRefs:        []string{"reader"},
+						},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, rbd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("spec.roleBindings[0].roleRefs[0]"))
+			Expect(err.Error()).To(ContainSubstring("Duplicate value"))
 		})
 	})
 

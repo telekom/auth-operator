@@ -20,6 +20,12 @@ const (
 	// RoleDefinitionTargetNameField is the field index for RoleDefinition.Spec.TargetName.
 	RoleDefinitionTargetNameField = authorizationv1alpha1.TargetNameField
 
+	// RoleDefinitionTargetRoleField is the field index for RoleDefinition.Spec.TargetRole.
+	RoleDefinitionTargetRoleField = authorizationv1alpha1.TargetRoleField
+
+	// RoleDefinitionTargetNamespaceField is the field index for RoleDefinition.Spec.TargetNamespace.
+	RoleDefinitionTargetNamespaceField = authorizationv1alpha1.TargetNamespaceField
+
 	// BindDefinitionTargetNameField is the field index for BindDefinition.Spec.TargetName.
 	BindDefinitionTargetNameField = authorizationv1alpha1.TargetNameField
 
@@ -70,28 +76,50 @@ const (
 	// by TargetName for duplicate detection in webhook validation.
 	RestrictedRoleDefinitionTargetNameField = authorizationv1alpha1.TargetNameField
 
+	// RestrictedRoleDefinitionTargetRoleField indexes RestrictedRoleDefinition
+	// by TargetRole for duplicate detection in webhook validation.
+	RestrictedRoleDefinitionTargetRoleField = authorizationv1alpha1.TargetRoleField
+
+	// RestrictedRoleDefinitionTargetNamespaceField indexes RestrictedRoleDefinition
+	// by TargetNamespace for duplicate detection in webhook validation.
+	RestrictedRoleDefinitionTargetNamespaceField = authorizationv1alpha1.TargetNamespaceField
+
 	// RBACPolicyHasDefaultAssignmentField indexes RBACPolicy resources by whether
 	// defaultAssignment is configured.
 	RBACPolicyHasDefaultAssignmentField = authorizationv1alpha1.HasDefaultAssignmentField
 )
 
-// SetupIndexes registers field indexes shared by controllers and webhooks.
+// SetupBaseIndexes registers field indexes for legacy controller/webhook types.
 // This should be called before starting the manager.
-func SetupIndexes(ctx context.Context, mgr manager.Manager) error {
+func SetupBaseIndexes(ctx context.Context, mgr manager.Manager) error {
 	// Index RoleDefinition by Spec.TargetName for duplicate detection in webhook validation
 	if err := mgr.GetFieldIndexer().IndexField(
 		ctx,
 		&authorizationv1alpha1.RoleDefinition{},
 		RoleDefinitionTargetNameField,
-		func(obj client.Object) []string {
-			rd, ok := obj.(*authorizationv1alpha1.RoleDefinition)
-			if !ok || rd.Spec.TargetName == "" {
-				return nil
-			}
-			return []string{rd.Spec.TargetName}
-		},
+		RoleDefinitionTargetNameFunc,
 	); err != nil {
 		return fmt.Errorf("failed to create index for RoleDefinition.Spec.TargetName: %w", err)
+	}
+
+	// Index RoleDefinition by Spec.TargetRole for scoped duplicate detection.
+	if err := mgr.GetFieldIndexer().IndexField(
+		ctx,
+		&authorizationv1alpha1.RoleDefinition{},
+		RoleDefinitionTargetRoleField,
+		RoleDefinitionTargetRoleFunc,
+	); err != nil {
+		return fmt.Errorf("failed to create index for RoleDefinition.Spec.TargetRole: %w", err)
+	}
+
+	// Index RoleDefinition by Spec.TargetNamespace for scoped duplicate detection.
+	if err := mgr.GetFieldIndexer().IndexField(
+		ctx,
+		&authorizationv1alpha1.RoleDefinition{},
+		RoleDefinitionTargetNamespaceField,
+		RoleDefinitionTargetNamespaceFunc,
+	); err != nil {
+		return fmt.Errorf("failed to create index for RoleDefinition.Spec.TargetNamespace: %w", err)
 	}
 
 	// Index BindDefinition by Spec.TargetName for duplicate detection in webhook validation
@@ -136,6 +164,12 @@ func SetupIndexes(ctx context.Context, mgr manager.Manager) error {
 		return fmt.Errorf("failed to create index for BindDefinitions with RoleBindings: %w", err)
 	}
 
+	return nil
+}
+
+// SetupRestrictedIndexes registers field indexes for RBACPolicy and restricted CRDs.
+// This should be called only when those CRDs are installed and used by the manager.
+func SetupRestrictedIndexes(ctx context.Context, mgr manager.Manager) error {
 	// Index RestrictedBindDefinition by PolicyRef.Name for reverse lookups from RBACPolicy.
 	if err := mgr.GetFieldIndexer().IndexField(
 		ctx,
@@ -197,15 +231,29 @@ func SetupIndexes(ctx context.Context, mgr manager.Manager) error {
 		ctx,
 		&authorizationv1alpha1.RestrictedRoleDefinition{},
 		RestrictedRoleDefinitionTargetNameField,
-		func(obj client.Object) []string {
-			rrd, ok := obj.(*authorizationv1alpha1.RestrictedRoleDefinition)
-			if !ok || rrd.Spec.TargetName == "" {
-				return nil
-			}
-			return []string{rrd.Spec.TargetName}
-		},
+		RestrictedRoleDefinitionTargetNameFunc,
 	); err != nil {
 		return fmt.Errorf("failed to create index for RestrictedRoleDefinition.Spec.TargetName: %w", err)
+	}
+
+	// Index RestrictedRoleDefinition by TargetRole for duplicate detection.
+	if err := mgr.GetFieldIndexer().IndexField(
+		ctx,
+		&authorizationv1alpha1.RestrictedRoleDefinition{},
+		RestrictedRoleDefinitionTargetRoleField,
+		RestrictedRoleDefinitionTargetRoleFunc,
+	); err != nil {
+		return fmt.Errorf("failed to create index for RestrictedRoleDefinition.Spec.TargetRole: %w", err)
+	}
+
+	// Index RestrictedRoleDefinition by TargetNamespace for duplicate detection.
+	if err := mgr.GetFieldIndexer().IndexField(
+		ctx,
+		&authorizationv1alpha1.RestrictedRoleDefinition{},
+		RestrictedRoleDefinitionTargetNamespaceField,
+		RestrictedRoleDefinitionTargetNamespaceFunc,
+	); err != nil {
+		return fmt.Errorf("failed to create index for RestrictedRoleDefinition.Spec.TargetNamespace: %w", err)
 	}
 
 	// Index RBACPolicy by whether defaultAssignment is set.
@@ -221,14 +269,29 @@ func SetupIndexes(ctx context.Context, mgr manager.Manager) error {
 	return nil
 }
 
+// SetupIndexes registers all field indexes shared by controllers and webhooks.
+// This should be called before starting the manager.
+func SetupIndexes(ctx context.Context, mgr manager.Manager) error {
+	if err := SetupBaseIndexes(ctx, mgr); err != nil {
+		return err
+	}
+	return SetupRestrictedIndexes(ctx, mgr)
+}
+
 // SetupControllerIndexes registers controller-only field indexes on the
 // manager's cache for efficient reconciliation lookups.
 //
 // These indexes intentionally exclude webhook managers because they would start
 // additional informers for RBAC binding types, requiring broader permissions
 // than admission webhooks otherwise need.
-func SetupControllerIndexes(ctx context.Context, mgr manager.Manager) error {
-	if err := SetupIndexes(ctx, mgr); err != nil {
+func SetupControllerIndexes(ctx context.Context, mgr manager.Manager, includeRestricted bool) error {
+	if err := SetupBaseIndexes(ctx, mgr); err != nil {
+		return err
+	}
+	if !includeRestricted {
+		return nil
+	}
+	if err := SetupRestrictedIndexes(ctx, mgr); err != nil {
 		return err
 	}
 
@@ -280,6 +343,33 @@ func BindDefinitionHasRoleBindingsFunc(obj client.Object) []string {
 		return []string{BindDefinitionHasRoleBindingsTrue}
 	}
 	return nil
+}
+
+// RoleDefinitionTargetNameFunc extracts the RoleDefinition target name.
+func RoleDefinitionTargetNameFunc(obj client.Object) []string {
+	rd, ok := obj.(*authorizationv1alpha1.RoleDefinition)
+	if !ok || rd.Spec.TargetName == "" {
+		return nil
+	}
+	return []string{rd.Spec.TargetName}
+}
+
+// RoleDefinitionTargetRoleFunc extracts the RoleDefinition target role kind.
+func RoleDefinitionTargetRoleFunc(obj client.Object) []string {
+	rd, ok := obj.(*authorizationv1alpha1.RoleDefinition)
+	if !ok || rd.Spec.TargetRole == "" {
+		return nil
+	}
+	return []string{rd.Spec.TargetRole}
+}
+
+// RoleDefinitionTargetNamespaceFunc extracts the RoleDefinition target namespace.
+func RoleDefinitionTargetNamespaceFunc(obj client.Object) []string {
+	rd, ok := obj.(*authorizationv1alpha1.RoleDefinition)
+	if !ok || rd.Spec.TargetNamespace == "" {
+		return nil
+	}
+	return []string{rd.Spec.TargetNamespace}
 }
 
 // RestrictedBindDefinitionPolicyRefFunc extracts the RBACPolicy name from a
@@ -370,6 +460,33 @@ func RestrictedRoleDefinitionPolicyRefFunc(obj client.Object) []string {
 		return nil
 	}
 	return []string{rrd.Spec.PolicyRef.Name}
+}
+
+// RestrictedRoleDefinitionTargetNameFunc extracts the RestrictedRoleDefinition target name.
+func RestrictedRoleDefinitionTargetNameFunc(obj client.Object) []string {
+	rrd, ok := obj.(*authorizationv1alpha1.RestrictedRoleDefinition)
+	if !ok || rrd.Spec.TargetName == "" {
+		return nil
+	}
+	return []string{rrd.Spec.TargetName}
+}
+
+// RestrictedRoleDefinitionTargetRoleFunc extracts the RestrictedRoleDefinition target role kind.
+func RestrictedRoleDefinitionTargetRoleFunc(obj client.Object) []string {
+	rrd, ok := obj.(*authorizationv1alpha1.RestrictedRoleDefinition)
+	if !ok || rrd.Spec.TargetRole == "" {
+		return nil
+	}
+	return []string{rrd.Spec.TargetRole}
+}
+
+// RestrictedRoleDefinitionTargetNamespaceFunc extracts the RestrictedRoleDefinition target namespace.
+func RestrictedRoleDefinitionTargetNamespaceFunc(obj client.Object) []string {
+	rrd, ok := obj.(*authorizationv1alpha1.RestrictedRoleDefinition)
+	if !ok || rrd.Spec.TargetNamespace == "" {
+		return nil
+	}
+	return []string{rrd.Spec.TargetNamespace}
 }
 
 // RBACPolicyHasDefaultAssignmentFunc extracts whether an RBACPolicy has

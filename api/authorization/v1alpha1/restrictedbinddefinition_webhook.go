@@ -184,8 +184,14 @@ func (v *RestrictedBindDefinitionValidator) validatePolicyRefExists(ctx context.
 	rbacPolicy := &RBACPolicy{}
 	if err := v.Client.Get(ctx, client.ObjectKey{Name: obj.Spec.PolicyRef.Name}, rbacPolicy); err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil, apierrors.NewBadRequest(
-				fmt.Sprintf("referenced RBACPolicy %q does not exist", obj.Spec.PolicyRef.Name))
+			return nil, apierrors.NewInvalid(
+				schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedBindDefinitionKind},
+				obj.Name,
+				field.ErrorList{field.NotFound(
+					field.NewPath("spec", "policyRef", "name"),
+					obj.Spec.PolicyRef.Name,
+				)},
+			)
 		}
 		if apierrors.IsTimeout(err) || apierrors.IsServerTimeout(err) || apierrors.IsServiceUnavailable(err) {
 			logger.Error(err, "transient error fetching RBACPolicy", "policyRef", obj.Spec.PolicyRef.Name)

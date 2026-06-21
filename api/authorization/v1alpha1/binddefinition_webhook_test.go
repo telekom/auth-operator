@@ -272,6 +272,29 @@ var _ = Describe("BindDefinition Webhook", func() {
 			Expect(err.Error()).To(ContainSubstring("roleBindings entries with role refs must specify namespace or namespaceSelector"))
 			Expect(err.Error()).To(ContainSubstring("spec.roleBindings[0]"))
 		})
+
+		It("should deny a BindDefinition roleBinding that references the same Role and ClusterRole name", func() {
+			bd := &BindDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-cel-rb-name-collision",
+				},
+				Spec: BindDefinitionSpec{
+					TargetName: "test-cel-rb-name-collision",
+					Subjects:   validSubjects,
+					RoleBindings: []NamespaceBinding{
+						{
+							Namespace:       "default",
+							ClusterRoleRefs: []string{"reader"},
+							RoleRefs:        []string{"reader"},
+						},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, bd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("spec.roleBindings[0].roleRefs[0]"))
+			Expect(err.Error()).To(ContainSubstring("Duplicate value"))
+		})
 	})
 
 	Context("Subject Kind Validation", func() {

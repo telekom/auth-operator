@@ -22,7 +22,10 @@ rules:
   verbs:
   - get
   - update
-# --- ServiceAccount management (BindDefinition) ---
+# --- ServiceAccount management (BindDefinition and restricted impersonated apply) ---
+# NOTE: serviceaccounts/impersonate is required by RBACPolicy impersonation.
+# Access to create/update RBACPolicy objects must be treated as the control
+# point for selecting tenant apply identities.
 - apiGroups:
   - ""
   resources:

@@ -142,11 +142,12 @@ and their status is kept up to date.`,
 			return fmt.Errorf("unable to add resource tracker to manager: %w", err)
 		}
 
+		includeRestricted := rbacPolicyConcurrency > 0 || restrictedBindDefinitionConcurrency > 0 || restrictedRoleDefinitionConcurrency > 0
+
 		// Wait for CRDs to be available before setting up controllers
 		// This prevents cache sync timeout errors when CRDs are not yet installed
 		if waitForCRDs {
 			includeWA := webhookAuthorizerConcurrency > 0
-			includeRestricted := rbacPolicyConcurrency > 0 || restrictedBindDefinitionConcurrency > 0 || restrictedRoleDefinitionConcurrency > 0
 			if err := waitForRequiredCRDs(ctx, cfg, cacheSyncTimeout, includeWA, includeRestricted); err != nil {
 				return fmt.Errorf("failed waiting for required CRDs: %w", err)
 			}
@@ -155,7 +156,7 @@ and their status is kept up to date.`,
 		// Setup field indexes for efficient lookups.
 		// Controller-specific indexes may watch RBAC binding types and therefore
 		// must not be registered in the webhook-only manager.
-		if err := indexer.SetupControllerIndexes(ctx, mgr); err != nil {
+		if err := indexer.SetupControllerIndexes(ctx, mgr, includeRestricted); err != nil {
 			return fmt.Errorf("unable to setup controller field indexes: %w", err)
 		}
 		setupLog.Info("field indexes configured for cached client")

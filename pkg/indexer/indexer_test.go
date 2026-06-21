@@ -20,6 +20,12 @@ func TestIndexerConstants(t *testing.T) {
 	if RoleDefinitionTargetNameField != ".spec.targetName" {
 		t.Errorf("RoleDefinitionTargetNameField = %q, want %q", RoleDefinitionTargetNameField, ".spec.targetName")
 	}
+	if RoleDefinitionTargetRoleField != ".spec.targetRole" {
+		t.Errorf("RoleDefinitionTargetRoleField = %q, want %q", RoleDefinitionTargetRoleField, ".spec.targetRole")
+	}
+	if RoleDefinitionTargetNamespaceField != ".spec.targetNamespace" {
+		t.Errorf("RoleDefinitionTargetNamespaceField = %q, want %q", RoleDefinitionTargetNamespaceField, ".spec.targetNamespace")
+	}
 	if BindDefinitionTargetNameField != ".spec.targetName" {
 		t.Errorf("BindDefinitionTargetNameField = %q, want %q", BindDefinitionTargetNameField, ".spec.targetName")
 	}
@@ -115,14 +121,6 @@ func TestBindDefinitionHasRoleBindingsIndexWithFakeClient(t *testing.T) {
 }
 
 func TestRoleDefinitionIndexExtractor(t *testing.T) {
-	indexFunc := func(obj client.Object) []string {
-		rd, ok := obj.(*authorizationv1alpha1.RoleDefinition)
-		if !ok || rd.Spec.TargetName == "" {
-			return nil
-		}
-		return []string{rd.Spec.TargetName}
-	}
-
 	runIndexExtractorTests(t, []indexExtractorTest{
 		{
 			name: "valid RoleDefinition with targetName",
@@ -135,7 +133,7 @@ func TestRoleDefinitionIndexExtractor(t *testing.T) {
 					TargetName: "test-role",
 				},
 			},
-			indexFunc:  indexFunc,
+			indexFunc:  RoleDefinitionTargetNameFunc,
 			wantValues: []string{"test-role"},
 		},
 		{
@@ -149,8 +147,30 @@ func TestRoleDefinitionIndexExtractor(t *testing.T) {
 					TargetName: "",
 				},
 			},
-			indexFunc:  indexFunc,
+			indexFunc:  RoleDefinitionTargetNameFunc,
 			wantValues: nil,
+		},
+		{
+			name: "valid RoleDefinition with targetRole",
+			object: &authorizationv1alpha1.RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-rd"},
+				Spec: authorizationv1alpha1.RoleDefinitionSpec{
+					TargetRole: authorizationv1alpha1.DefinitionNamespacedRole,
+				},
+			},
+			indexFunc:  RoleDefinitionTargetRoleFunc,
+			wantValues: []string{authorizationv1alpha1.DefinitionNamespacedRole},
+		},
+		{
+			name: "valid RoleDefinition with targetNamespace",
+			object: &authorizationv1alpha1.RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-rd"},
+				Spec: authorizationv1alpha1.RoleDefinitionSpec{
+					TargetNamespace: "team-a",
+				},
+			},
+			indexFunc:  RoleDefinitionTargetNamespaceFunc,
+			wantValues: []string{"team-a"},
 		},
 	})
 }
@@ -272,6 +292,68 @@ func TestIndexerWithFakeClient(t *testing.T) {
 
 	if len(list.Items) != 0 {
 		t.Errorf("expected 0 RoleDefinitions with non-existent target, got %d", len(list.Items))
+	}
+}
+
+func TestRoleDefinitionScopedTargetIndexesWithFakeClient(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := authorizationv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add scheme: %v", err)
+	}
+
+	rdTeamA := &authorizationv1alpha1.RoleDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "rd-team-a"},
+		Spec: authorizationv1alpha1.RoleDefinitionSpec{
+			TargetName:      "reader",
+			TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
+			TargetNamespace: "team-a",
+		},
+	}
+	rdTeamB := &authorizationv1alpha1.RoleDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "rd-team-b"},
+		Spec: authorizationv1alpha1.RoleDefinitionSpec{
+			TargetName:      "reader",
+			TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
+			TargetNamespace: "team-b",
+		},
+	}
+	rdCluster := &authorizationv1alpha1.RoleDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "rd-cluster"},
+		Spec: authorizationv1alpha1.RoleDefinitionSpec{
+			TargetName: "reader",
+			TargetRole: authorizationv1alpha1.DefinitionClusterRole,
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(rdTeamA, rdTeamB, rdCluster).
+		WithIndex(&authorizationv1alpha1.RoleDefinition{}, RoleDefinitionTargetNameField, RoleDefinitionTargetNameFunc).
+		WithIndex(&authorizationv1alpha1.RoleDefinition{}, RoleDefinitionTargetRoleField, RoleDefinitionTargetRoleFunc).
+		WithIndex(&authorizationv1alpha1.RoleDefinition{}, RoleDefinitionTargetNamespaceField, RoleDefinitionTargetNamespaceFunc).
+		Build()
+
+	var list authorizationv1alpha1.RoleDefinitionList
+	if err := fakeClient.List(context.Background(), &list, client.MatchingFields{
+		RoleDefinitionTargetNameField:      "reader",
+		RoleDefinitionTargetRoleField:      authorizationv1alpha1.DefinitionNamespacedRole,
+		RoleDefinitionTargetNamespaceField: "team-a",
+	}); err != nil {
+		t.Fatalf("failed to list scoped RoleDefinitions: %v", err)
+	}
+	if len(list.Items) != 1 || list.Items[0].Name != "rd-team-a" {
+		t.Fatalf("expected only rd-team-a, got %#v", list.Items)
+	}
+
+	list = authorizationv1alpha1.RoleDefinitionList{}
+	if err := fakeClient.List(context.Background(), &list, client.MatchingFields{
+		RoleDefinitionTargetNameField: "reader",
+		RoleDefinitionTargetRoleField: authorizationv1alpha1.DefinitionClusterRole,
+	}); err != nil {
+		t.Fatalf("failed to list cluster RoleDefinitions: %v", err)
+	}
+	if len(list.Items) != 1 || list.Items[0].Name != "rd-cluster" {
+		t.Fatalf("expected only rd-cluster, got %#v", list.Items)
 	}
 }
 

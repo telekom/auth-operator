@@ -139,6 +139,26 @@ var _ = BeforeSuite(func() {
 		})
 	Expect(err).NotTo(HaveOccurred())
 
+	err = mgr.GetFieldIndexer().IndexField(ctx, &RoleDefinition{}, TargetRoleField,
+		func(obj client.Object) []string {
+			rd, ok := obj.(*RoleDefinition)
+			if !ok || rd.Spec.TargetRole == "" {
+				return nil
+			}
+			return []string{rd.Spec.TargetRole}
+		})
+	Expect(err).NotTo(HaveOccurred())
+
+	err = mgr.GetFieldIndexer().IndexField(ctx, &RoleDefinition{}, TargetNamespaceField,
+		func(obj client.Object) []string {
+			rd, ok := obj.(*RoleDefinition)
+			if !ok || rd.Spec.TargetNamespace == "" {
+				return nil
+			}
+			return []string{rd.Spec.TargetNamespace}
+		})
+	Expect(err).NotTo(HaveOccurred())
+
 	err = mgr.GetFieldIndexer().IndexField(ctx, &BindDefinition{}, TargetNameField,
 		func(obj client.Object) []string {
 			bd, ok := obj.(*BindDefinition)
@@ -166,6 +186,26 @@ var _ = BeforeSuite(func() {
 				return nil
 			}
 			return []string{rrd.Spec.TargetName}
+		})
+	Expect(err).NotTo(HaveOccurred())
+
+	err = mgr.GetFieldIndexer().IndexField(ctx, &RestrictedRoleDefinition{}, TargetRoleField,
+		func(obj client.Object) []string {
+			rrd, ok := obj.(*RestrictedRoleDefinition)
+			if !ok || rrd.Spec.TargetRole == "" {
+				return nil
+			}
+			return []string{rrd.Spec.TargetRole}
+		})
+	Expect(err).NotTo(HaveOccurred())
+
+	err = mgr.GetFieldIndexer().IndexField(ctx, &RestrictedRoleDefinition{}, TargetNamespaceField,
+		func(obj client.Object) []string {
+			rrd, ok := obj.(*RestrictedRoleDefinition)
+			if !ok || rrd.Spec.TargetNamespace == "" {
+				return nil
+			}
+			return []string{rrd.Spec.TargetNamespace}
 		})
 	Expect(err).NotTo(HaveOccurred())
 

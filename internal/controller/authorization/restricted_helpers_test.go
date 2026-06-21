@@ -46,7 +46,7 @@ func TestOwnerRefForRestricted(t *testing.T) {
 	g.Expect(*ref.Kind).To(gomega.Equal(authorizationv1alpha1.RestrictedBindDefinitionKind))
 	g.Expect(*ref.APIVersion).To(gomega.Equal("authorization.t-caas.telekom.com/v1alpha1"))
 	g.Expect(*ref.Controller).To(gomega.BeTrue())
-	g.Expect(*ref.BlockOwnerDeletion).To(gomega.BeTrue())
+	g.Expect(*ref.BlockOwnerDeletion).To(gomega.BeFalse())
 }
 
 func TestOwnerRefForRestricted_DifferentKind(t *testing.T) {
