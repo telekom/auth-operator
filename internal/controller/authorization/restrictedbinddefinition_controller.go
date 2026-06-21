@@ -287,7 +287,7 @@ func (r *RestrictedBindDefinitionReconciler) namespaceToRestrictedBindDefinition
 		requests := make([]reconcile.Request, 0, len(fullList.Items))
 		for i := range fullList.Items {
 			rbd := &fullList.Items[i]
-			if !restrictedBindDefinitionMatchesNamespace(rbd, namespace) {
+			if !restrictedBindDefinitionNeedsNamespaceReconcile(rbd, namespace) {
 				metrics.NamespaceFanoutSkipped.Inc()
 				continue
 			}
@@ -315,46 +315,29 @@ func (r *RestrictedBindDefinitionReconciler) namespaceToRestrictedBindDefinition
 	}
 
 	for i := range selectorList.Items {
-		rbd := &selectorList.Items[i]
-		if !restrictedBindDefinitionMatchesNamespace(rbd, namespace) {
-			metrics.NamespaceFanoutSkipped.Inc()
-			continue
-		}
-		queueRequest(rbd.Name)
+		queueRequest(selectorList.Items[i].Name)
 	}
 
 	return requests
 }
 
-// restrictedBindDefinitionMatchesNamespace returns true if the RBD has any
-// roleBinding entry whose explicit namespace or namespace selector matches ns.
-func restrictedBindDefinitionMatchesNamespace(rbd *authorizationv1alpha1.RestrictedBindDefinition, ns *corev1.Namespace) bool {
+// restrictedBindDefinitionNeedsNamespaceReconcile returns true if a namespace
+// event can change the RBD's desired RoleBindings. Selector-based bindings must
+// reconcile on every namespace event because label removals need immediate stale
+// RoleBinding cleanup even though the current labels no longer match.
+func restrictedBindDefinitionNeedsNamespaceReconcile(rbd *authorizationv1alpha1.RestrictedBindDefinition, ns *corev1.Namespace) bool {
 	if len(rbd.Spec.RoleBindings) == 0 {
 		return false
 	}
 	if conditions.IsNamespaceTerminating(ns) {
 		return true
 	}
-	nsLabels := labels.Set(ns.GetLabels())
-	selectorCache := make(map[string]labels.Selector)
 	for _, rb := range rbd.Spec.RoleBindings {
 		if rb.Namespace == ns.Name {
 			return true
 		}
-		for _, sel := range rb.NamespaceSelector {
-			cacheKey := metav1.FormatLabelSelector(&sel)
-			selector, ok := selectorCache[cacheKey]
-			if !ok {
-				var err error
-				selector, err = metav1.LabelSelectorAsSelector(&sel)
-				if err != nil {
-					return true
-				}
-				selectorCache[cacheKey] = selector
-			}
-			if selector.Matches(nsLabels) {
-				return true
-			}
+		if len(rb.NamespaceSelector) > 0 {
+			return true
 		}
 	}
 	return false
@@ -713,8 +696,14 @@ func (r *RestrictedBindDefinitionReconciler) rbdPruneStaleServiceAccounts(
 
 	saList := &corev1.ServiceAccountList{}
 	if err := r.client.List(ctx, saList,
-		client.MatchingLabels{helpers.ManagedByLabelStandard: helpers.ManagedByValue}); err != nil {
-		return fmt.Errorf("list ServiceAccounts for pruning: %w", err)
+		client.MatchingFields{indexer.RestrictedBindDefinitionOwnerRefField: rbd.Name}); err != nil {
+		if !helpers.IsMissingFieldIndexError(err) {
+			return fmt.Errorf("list owned ServiceAccounts for pruning: %w", err)
+		}
+		if listErr := r.client.List(ctx, saList,
+			client.MatchingLabels{helpers.ManagedByLabelStandard: helpers.ManagedByValue}); listErr != nil {
+			return fmt.Errorf("list ServiceAccounts for pruning (fallback): %w", listErr)
+		}
 	}
 	for i := range saList.Items {
 		sa := &saList.Items[i]
@@ -837,6 +826,10 @@ func (r *RestrictedBindDefinitionReconciler) rbdClassifyExistingServiceAccount(
 			"ServiceAccount %s/%s is already owned by a different RestrictedBindDefinition (UID: %s)",
 			subject.Namespace, subject.Name, ownerRBD.UID)
 		return true, false, key
+	}
+
+	if hasOwnerRef(existing, rbd) {
+		return false, true, ""
 	}
 
 	if saCreationConfig != nil && saCreationConfig.DisableAdoption {

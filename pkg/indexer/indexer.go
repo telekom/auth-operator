@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -67,9 +68,9 @@ const (
 	// namespaceSelector entry.
 	RestrictedBindDefinitionHasNamespaceSelectorField = ".spec.hasNamespaceSelector"
 
-	// RestrictedBindDefinitionOwnerRefField indexes RoleBinding and
-	// ClusterRoleBinding resources by RestrictedBindDefinition owner name for
-	// efficient deprovision cleanup.
+	// RestrictedBindDefinitionOwnerRefField indexes RoleBinding,
+	// ClusterRoleBinding, and ServiceAccount resources by RestrictedBindDefinition
+	// owner name for efficient deprovision cleanup.
 	RestrictedBindDefinitionOwnerRefField = ".metadata.ownerReferences.restrictedbinddefinition"
 
 	// RestrictedRoleDefinitionTargetNameField indexes RestrictedRoleDefinition
@@ -315,6 +316,16 @@ func SetupControllerIndexes(ctx context.Context, mgr manager.Manager, includeRes
 		return fmt.Errorf("failed to create index for RoleBinding RestrictedBindDefinition owner references: %w", err)
 	}
 
+	// Index ServiceAccount by RestrictedBindDefinition owner name.
+	if err := mgr.GetFieldIndexer().IndexField(
+		ctx,
+		&corev1.ServiceAccount{},
+		RestrictedBindDefinitionOwnerRefField,
+		RestrictedBindDefinitionOwnerRefFunc,
+	); err != nil {
+		return fmt.Errorf("failed to create index for ServiceAccount RestrictedBindDefinition owner references: %w", err)
+	}
+
 	return nil
 }
 
@@ -423,12 +434,14 @@ func RestrictedBindDefinitionHasNamespaceSelectorFunc(obj client.Object) []strin
 }
 
 // RestrictedBindDefinitionOwnerRefFunc extracts RestrictedBindDefinition owner
-// reference names from RoleBinding or ClusterRoleBinding objects.
+// reference names from generated child objects.
 func RestrictedBindDefinitionOwnerRefFunc(obj client.Object) []string {
 	switch typed := obj.(type) {
 	case *rbacv1.ClusterRoleBinding:
 		return restrictedBindDefinitionOwnerNames(typed.OwnerReferences)
 	case *rbacv1.RoleBinding:
+		return restrictedBindDefinitionOwnerNames(typed.OwnerReferences)
+	case *corev1.ServiceAccount:
 		return restrictedBindDefinitionOwnerNames(typed.OwnerReferences)
 	default:
 		return nil

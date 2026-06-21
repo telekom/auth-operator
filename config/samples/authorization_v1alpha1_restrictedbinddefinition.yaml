@@ -207,9 +207,6 @@ spec:
       apiGroup: ""
   roleBindings:
     - namespace: sample-tenant-a
-      clusterRoleRefs:
-        - sample-existing-cluster-role
-        - sample-missing-cluster-role
       roleRefs:
         - sample-existing-role
         - sample-missing-role

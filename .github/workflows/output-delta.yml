@@ -515,7 +515,8 @@ jobs:
           wait_missing_role_refs() {
             local resource="$1"
             local selector="$2"
-            local timeout="${3:-180}"
+            local expected_ref="${3:-}"
+            local timeout="${4:-180}"
             local deadline=$((SECONDS + timeout))
             local output count pending
 
@@ -527,14 +528,22 @@ jobs:
                 return 1
               fi
 
-              pending="$(yq -r '.items[] | select(((.status.missingRoleRefs // []) | length) == 0) | .metadata.name' <<<"$output")"
+              if [ -n "$expected_ref" ]; then
+                pending="$(EXPECTED_REF="$expected_ref" yq -r '.items[] | select(([.status.missingRoleRefs[]? | select(. == strenv(EXPECTED_REF))] | length) == 0) | .metadata.name' <<<"$output")"
+              else
+                pending="$(yq -r '.items[] | select(((.status.missingRoleRefs // []) | length) == 0) | .metadata.name' <<<"$output")"
+              fi
               if [ -z "$pending" ]; then
-                echo "All $count $resource resources matching '$selector' report missingRoleRefs"
+                if [ -n "$expected_ref" ]; then
+                  echo "All $count $resource resources matching '$selector' report missingRoleRefs entry '$expected_ref'"
+                else
+                  echo "All $count $resource resources matching '$selector' report missingRoleRefs"
+                fi
                 return 0
               fi
 
               if [ "$SECONDS" -ge "$deadline" ]; then
-                echo "::error::$resource resources still missing status.missingRoleRefs after ${timeout}s: $(tr '\n' ' ' <<<"$pending")"
+                echo "::error::$resource resources still missing expected status.missingRoleRefs after ${timeout}s: $(tr '\n' ' ' <<<"$pending")"
                 kubectl get "$resource" -l "$selector" -o yaml
                 return 1
               fi
@@ -543,18 +552,53 @@ jobs:
               sleep 5
             done
           }
+
+          wait_policy_violation() {
+            local resource="$1"
+            local selector="$2"
+            local expected_violation="$3"
+            local timeout="${4:-180}"
+            local deadline=$((SECONDS + timeout))
+            local output count pending
+
+            while true; do
+              output="$(kubectl get "$resource" -l "$selector" -o yaml)"
+              count="$(yq '.items | length' <<<"$output")"
+              if [ "$count" = "0" ]; then
+                echo "::error::No $resource resources match selector '$selector'"
+                return 1
+              fi
+
+              pending="$(EXPECTED_VIOLATION="$expected_violation" yq -r '.items[] | select((([.status.conditions[]? | select(.type == "PolicyCompliant" and .status == "False" and .reason == "ViolationsDetected")] | length) == 0) or (([.status.policyViolations[]? | select(. == strenv(EXPECTED_VIOLATION))] | length) == 0)) | .metadata.name' <<<"$output")"
+              if [ -z "$pending" ]; then
+                echo "All $count $resource resources matching '$selector' report expected policy violation"
+                return 0
+              fi
+
+              if [ "$SECONDS" -ge "$deadline" ]; then
+                echo "::error::$resource resources still missing expected policy violation after ${timeout}s: $(tr '\n' ' ' <<<"$pending")"
+                kubectl get "$resource" -l "$selector" -o yaml
+                return 1
+              fi
+
+              echo "Waiting for $resource policy violation ($selector); pending: $(tr '\n' ' ' <<<"$pending")"
+              sleep 5
+            done
+          }
           wait_ready roledefinition
           wait_ready binddefinition
           wait_ready rbacpolicy
           wait_condition restrictedbinddefinition 't-caas.telekom.com/sample-case in (allowed,partial,impersonated-allowed)' Ready True
           wait_condition restrictedbinddefinition 't-caas.telekom.com/sample-case in (allowed,partial,impersonated-allowed)' PolicyCompliant True
-          wait_missing_role_refs restrictedbinddefinition 't-caas.telekom.com/sample-case=partial'
+          wait_missing_role_refs restrictedbinddefinition 't-caas.telekom.com/sample-case=partial' 'Role/sample-tenant-a/sample-missing-role'
           wait_condition restrictedroledefinition 't-caas.telekom.com/sample-case in (allowed,partial,impersonated-allowed)' Ready True
           wait_condition restrictedroledefinition 't-caas.telekom.com/sample-case in (allowed,partial,impersonated-allowed)' PolicyCompliant True
           wait_condition restrictedbinddefinition 't-caas.telekom.com/sample-case in (blocked,blocked-subject)' Ready False
-          wait_condition restrictedbinddefinition 't-caas.telekom.com/sample-case in (blocked,blocked-subject)' PolicyCompliant False
+          wait_policy_violation restrictedbinddefinition 't-caas.telekom.com/sample-case=blocked' 'spec.clusterRoleBindings: ClusterRoleBindings are not allowed by policy'
+          wait_policy_violation restrictedbinddefinition 't-caas.telekom.com/sample-case=blocked-subject' 'spec.subjects[0].kind: subject kind "User" is not allowed by policy'
           wait_condition restrictedroledefinition 't-caas.telekom.com/sample-case in (blocked,blocked-forbidden-verb)' Ready False
-          wait_condition restrictedroledefinition 't-caas.telekom.com/sample-case in (blocked,blocked-forbidden-verb)' PolicyCompliant False
+          wait_policy_violation restrictedroledefinition 't-caas.telekom.com/sample-case=blocked' 'spec.targetRole: ClusterRoles are not allowed by policy'
+          wait_policy_violation restrictedroledefinition 't-caas.telekom.com/sample-case=blocked-forbidden-verb' 'spec.restrictedVerbs: forbidden verb "escalate" must be listed in restrictedVerbs'
           wait_condition restrictedbinddefinition 't-caas.telekom.com/sample-case=impersonated-failed' Stalled True "authorization denied"
           wait_condition restrictedroledefinition 't-caas.telekom.com/sample-case=impersonated-failed' Stalled True "authorization denied"
 
@@ -563,6 +607,11 @@ jobs:
           wait_ready binddefinition
           wait_condition restrictedbinddefinition 't-caas.telekom.com/sample-case in (allowed,partial,impersonated-allowed)' Ready True
           wait_condition restrictedroledefinition 't-caas.telekom.com/sample-case in (allowed,partial,impersonated-allowed)' Ready True
+          wait_missing_role_refs restrictedbinddefinition 't-caas.telekom.com/sample-case=partial' 'Role/sample-tenant-a/sample-missing-role'
+          wait_policy_violation restrictedbinddefinition 't-caas.telekom.com/sample-case=blocked' 'spec.clusterRoleBindings: ClusterRoleBindings are not allowed by policy'
+          wait_policy_violation restrictedbinddefinition 't-caas.telekom.com/sample-case=blocked-subject' 'spec.subjects[0].kind: subject kind "User" is not allowed by policy'
+          wait_policy_violation restrictedroledefinition 't-caas.telekom.com/sample-case=blocked' 'spec.targetRole: ClusterRoles are not allowed by policy'
+          wait_policy_violation restrictedroledefinition 't-caas.telekom.com/sample-case=blocked-forbidden-verb' 'spec.restrictedVerbs: forbidden verb "escalate" must be listed in restrictedVerbs'
 
           bash hack/ci/capture-operator-output.sh /tmp/pr-output
 
