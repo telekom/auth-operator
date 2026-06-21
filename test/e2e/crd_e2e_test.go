@@ -607,7 +607,7 @@ func ensureTestNamespace() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		cmd := exec.CommandContext(ctx, "kubectl", "get", "namespace", testNamespace, "-o", "jsonpath={.status.phase}")
+		cmd := utils.CommandContext(ctx, "kubectl", "get", "namespace", testNamespace, "-o", "jsonpath={.status.phase}")
 		output, err := utils.Run(cmd)
 		if err != nil {
 			return err
