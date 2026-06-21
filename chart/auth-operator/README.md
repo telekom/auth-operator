@@ -82,6 +82,9 @@ Image reference precedence: `digest` > `tag` > `Chart.AppVersion`
 | `controller.rbacPolicyConcurrency` | Max concurrent RBACPolicy reconciliations (0 to disable) | `5` |
 | `controller.restrictedBindDefinitionConcurrency` | Max concurrent RestrictedBindDefinition reconciliations (0 to disable) | `5` |
 | `controller.restrictedRoleDefinitionConcurrency` | Max concurrent RestrictedRoleDefinition reconciliations (0 to disable) | `5` |
+| `controller.impersonation.enabled` | Create ServiceAccount impersonation RBAC grants for RBACPolicy apply operations | `false` |
+| `controller.impersonation.clusterWide` | Grant serviceaccounts/impersonate cluster-wide when impersonation is enabled | `false` |
+| `controller.impersonation.serviceAccounts` | Namespaced ServiceAccounts the controller may impersonate when clusterWide is false | `[]` |
 
 ### Webhook Server Configuration
 
@@ -115,6 +118,11 @@ ClusterRoles following the principle of least privilege:
 
 Secrets access (for TLS certificates) is scoped to the operator namespace via
 a namespaced Role, not a ClusterRole.
+
+ServiceAccount impersonation for `RBACPolicy` apply operations is opt-in. Prefer
+`controller.impersonation.serviceAccounts` for named apply identities; use
+`controller.impersonation.clusterWide=true` only when `RBACPolicy` write access
+is restricted to platform administrators.
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|

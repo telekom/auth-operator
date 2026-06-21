@@ -1,0 +1,52 @@
+{{- $impersonation := .Values.controller.impersonation -}}
+{{- if $impersonation.enabled -}}
+{{- if and $impersonation.clusterWide (gt (len $impersonation.serviceAccounts) 0) -}}
+{{- fail "controller.impersonation.clusterWide and controller.impersonation.serviceAccounts are mutually exclusive" -}}
+{{- end -}}
+{{- if and (not $impersonation.clusterWide) (eq (len $impersonation.serviceAccounts) 0) -}}
+{{- fail "controller.impersonation.enabled requires controller.impersonation.clusterWide=true or at least one controller.impersonation.serviceAccounts entry" -}}
+{{- end -}}
+{{- if not $impersonation.clusterWide -}}
+{{- $fullName := include "auth-operator.fullname" . -}}
+{{- range $index, $serviceAccount := $impersonation.serviceAccounts }}
+{{- if or (not $serviceAccount.namespace) (not $serviceAccount.name) -}}
+{{- fail (printf "controller.impersonation.serviceAccounts[%d] requires namespace and name" $index) -}}
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ printf "%s-impersonate-%s" $fullName $serviceAccount.name | trunc 63 | trimSuffix "-" }}
+  namespace: {{ $serviceAccount.namespace | quote }}
+  labels:
+    app.kubernetes.io/component: controller-manager
+  {{- include "auth-operator.labels" $ | nindent 4 }}
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts
+  resourceNames:
+  - {{ $serviceAccount.name | quote }}
+  verbs:
+  - impersonate
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ printf "%s-impersonate-%s" $fullName $serviceAccount.name | trunc 63 | trimSuffix "-" }}
+  namespace: {{ $serviceAccount.namespace | quote }}
+  labels:
+    app.kubernetes.io/component: controller-manager
+  {{- include "auth-operator.labels" $ | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ printf "%s-impersonate-%s" $fullName $serviceAccount.name | trunc 63 | trimSuffix "-" }}
+subjects:
+- kind: ServiceAccount
+  name: {{ printf "%s-controller-manager" $fullName | quote }}
+  namespace: {{ $.Release.Namespace | quote }}
+{{- end }}
+{{- end }}
+{{- end }}

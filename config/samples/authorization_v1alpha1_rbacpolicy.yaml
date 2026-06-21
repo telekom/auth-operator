@@ -11,6 +11,9 @@
 # - Role limits (forbidden verbs, resources, API groups, resource-verb combos)
 # - Subject limits (allowed/forbidden kinds, name patterns, SA constraints)
 # - ServiceAccount creation config (auto-create, namespace restrictions)
+# - Impersonation for admin-created policies. Admission checks only that the
+#   referenced ServiceAccount name and namespace are set; its Kubernetes RBAC
+#   grants are the runtime permission boundary for apply operations.
 # =============================================================================
 
 ---
@@ -43,6 +46,9 @@ spec:
         namespace: team-alpha
   impersonation:
     enabled: true
+    # This policy is expected to be created by a platform admin. The referenced
+    # ServiceAccount must already have the Kubernetes RBAC grants needed by the
+    # generated restricted resources.
     serviceAccountRef:
       name: team-alpha-rbac-applier
       namespace: team-alpha
@@ -160,6 +166,7 @@ spec:
         namespace: ci-runners
   impersonation:
     enabled: true
+    # This identity is the apply-time permission boundary for generated RBAC.
     serviceAccountRef:
       name: ci-rbac-applier
       namespace: ci-runners
@@ -288,6 +295,7 @@ spec:
         namespace: sample-authz
   impersonation:
     enabled: true
+    # Sample admin identity with matching grants in edge-case-prerequisites.yaml.
     serviceAccountRef:
       name: sample-impersonation-admin
       namespace: sample-authz

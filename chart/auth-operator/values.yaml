@@ -53,6 +53,19 @@ controller:
   # Number of concurrent reconcilers for RestrictedRoleDefinition controller (0 to disable).
   # Tune independently from roleDefinitionConcurrency for policy-governed workloads.
   restrictedRoleDefinitionConcurrency: 5
+  # RBAC grants for RBACPolicy apply-time ServiceAccount impersonation.
+  # Disabled by default so installations that do not use impersonation do not
+  # grant the controller serviceaccounts/impersonate.
+  impersonation:
+    enabled: false
+    # Grant serviceaccounts/impersonate cluster-wide. Only enable this when
+    # RBACPolicy write access is restricted to platform administrators.
+    clusterWide: false
+    # Namespaced ServiceAccounts the controller may impersonate when clusterWide is false.
+    # Each entry creates a Role/RoleBinding in the ServiceAccount namespace.
+    serviceAccounts: []
+    # - namespace: team-a
+    #   name: team-a-rbac-applier
   # ResourceTracker interval configuration
   tracker:
     # Interval between periodic API resource collections.

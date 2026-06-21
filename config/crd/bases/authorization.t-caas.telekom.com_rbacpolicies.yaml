@@ -488,7 +488,9 @@ spec:
                   serviceAccountRef:
                     description: |-
                       ServiceAccountRef is the ServiceAccount identity used for impersonated apply operations.
-                      Required when enabled is true.
+                      Required when enabled is true. Only platform administrators should be allowed
+                      to configure this field because the operator does not perform a SubjectAccessReview
+                      for the referenced identity at admission time.
                     properties:
                       name:
                         description: Name of the ServiceAccount.
@@ -760,8 +762,11 @@ spec:
                             type: boolean
                           disableAdoption:
                             default: false
-                            description: DisableAdoption prevents adoption of pre-existing
-                              ServiceAccounts.
+                            description: |-
+                              DisableAdoption records that pre-existing ServiceAccounts must stay external
+                              unless they are already owned by the same RestrictedBindDefinition. Unowned
+                              ServiceAccounts and ServiceAccounts owned by another RestrictedBindDefinition
+                              are always treated as external subjects and are never adopted or modified.
                             type: boolean
                         type: object
                       forbiddenNamespacePrefixes:

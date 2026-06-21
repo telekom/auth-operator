@@ -332,8 +332,14 @@ ci-checks: verify helm-lint ## Run all CI checks locally before pushing.
 
 .PHONY: helm-lint
 helm-lint: ## Lint Helm chart.
-	@command -v helm >/dev/null 2>&1 || (echo "helm not installed, skipping helm-lint" && exit 0)
+	@if ! command -v helm >/dev/null 2>&1; then echo "helm not installed, skipping helm-lint"; exit 0; fi
 	helm lint chart/auth-operator --strict
+	$(MAKE) verify-helm-rbac
+
+.PHONY: verify-helm-rbac
+verify-helm-rbac: ## Verify rendered Helm RBAC permission contracts.
+	@if ! command -v helm >/dev/null 2>&1; then echo "helm not installed, skipping verify-helm-rbac"; exit 0; fi
+	hack/verify-helm-rbac.sh
 
 ##@ Build
 

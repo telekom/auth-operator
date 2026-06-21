@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# Optional RBACPolicy impersonation grant.
+# Add this file and impersonation_clusterrole.yaml to config/rbac/kustomization.yaml
+# only when RBACPolicy write access is restricted to platform administrators.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: impersonation-clusterrolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: impersonation-role
+subjects:
+- kind: ServiceAccount
+  name: manager
+  namespace: system

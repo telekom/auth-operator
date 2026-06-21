@@ -117,16 +117,16 @@ var (
 		[]string{"resource_type"},
 	)
 
-	// RoleRefsMissing tracks the number of BindDefinitions whose referenced
-	// Roles or ClusterRoles do not yet exist. The gauge is set to the count of
-	// missing references per BindDefinition during each reconciliation.
+	// RoleRefsMissing tracks the number of BindDefinition or RestrictedBindDefinition
+	// referenced Roles or ClusterRoles that do not yet exist. The gauge is set to
+	// the count of missing references per source resource during each reconciliation.
 	// A non-zero value triggers a faster requeue so the condition self-heals
 	// once the referenced roles are created.
 	RoleRefsMissing = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: Namespace,
 			Name:      "role_refs_missing",
-			Help:      "Number of missing role references per BindDefinition (0 = all refs valid)",
+			Help:      "Number of missing role references per binding source resource (0 = all refs valid)",
 		},
 		[]string{"binddefinition"},
 	)

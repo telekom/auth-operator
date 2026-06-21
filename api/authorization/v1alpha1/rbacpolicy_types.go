@@ -219,7 +219,10 @@ type SACreationConfig struct {
 	// +kubebuilder:validation:Optional
 	AutomountServiceAccountToken *bool `json:"automountServiceAccountToken,omitempty"`
 
-	// DisableAdoption prevents adoption of pre-existing ServiceAccounts.
+	// DisableAdoption records that pre-existing ServiceAccounts must stay external
+	// unless they are already owned by the same RestrictedBindDefinition. Unowned
+	// ServiceAccounts and ServiceAccounts owned by another RestrictedBindDefinition
+	// are always treated as external subjects and are never adopted or modified.
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:default=false
 	DisableAdoption bool `json:"disableAdoption"`
@@ -295,6 +298,10 @@ type DefaultPolicyAssignment struct {
 
 // ImpersonationConfig controls apply-time ServiceAccount impersonation for
 // RestrictedBindDefinition and RestrictedRoleDefinition reconciliation.
+// RBACPolicy write access is a cluster trust boundary: a policy author can choose
+// any ServiceAccount identity here, and admission only validates that the reference
+// fields are non-empty. The impersonated ServiceAccount's own Kubernetes RBAC is
+// the authoritative permission check during apply operations.
 type ImpersonationConfig struct {
 	// Enabled enables ServiceAccount impersonation during restricted resource apply operations.
 	// +kubebuilder:validation:Optional
@@ -302,7 +309,9 @@ type ImpersonationConfig struct {
 	Enabled bool `json:"enabled"`
 
 	// ServiceAccountRef is the ServiceAccount identity used for impersonated apply operations.
-	// Required when enabled is true.
+	// Required when enabled is true. Only platform administrators should be allowed
+	// to configure this field because the operator does not perform a SubjectAccessReview
+	// for the referenced identity at admission time.
 	// +kubebuilder:validation:Optional
 	ServiceAccountRef *SARef `json:"serviceAccountRef,omitempty"`
 }

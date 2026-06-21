@@ -30,7 +30,7 @@ jobs:
       - name: Load versions from versions.env
         run: |
           # Source versions.env as single source of truth
-          grep -v '^#' versions.env | grep -v '^$' >> $GITHUB_ENV
+          grep -v '^#' versions.env | grep -v '^$' >> "$GITHUB_ENV"
 
       - name: Setup Go Environment
         uses: ./.github/actions/setup-go-env
@@ -63,14 +63,14 @@ jobs:
       - name: Load versions from versions.env
         run: |
           # Source versions.env as single source of truth
-          grep -v '^#' versions.env | grep -v '^$' >> $GITHUB_ENV
+          grep -v '^#' versions.env | grep -v '^$' >> "$GITHUB_ENV"
 
       - name: Setup Go Environment
         uses: ./.github/actions/setup-go-env
 
       - name: Install envtest
         run: |
-          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@${ENVTEST_VERSION}
+          go install "sigs.k8s.io/controller-runtime/tools/setup-envtest@${ENVTEST_VERSION}"
           setup-envtest use 1.34.1 --bin-dir ./bin
           echo "Envtest binaries installed to: $(setup-envtest use 1.34.1 --bin-dir ./bin -p path)"
 
@@ -89,7 +89,8 @@ jobs:
             exit 1
           fi
 
-          go test -race $(go list ./... | grep -v /e2e) -coverprofile=coverage.out -covermode=atomic
+          mapfile -t packages < <(go list ./... | grep -v /e2e)
+          go test -race "${packages[@]}" -coverprofile=coverage.out -covermode=atomic
         env:
           CGO_ENABLED: "1"
 
@@ -194,7 +195,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Load versions from versions.env
-        run: grep -v '^#' versions.env | grep -v '^$' >> $GITHUB_ENV
+        run: grep -v '^#' versions.env | grep -v '^$' >> "$GITHUB_ENV"
 
       - name: Setup Helm
         uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5.0.0
@@ -202,7 +203,7 @@ jobs:
           version: ${{ env.HELM_VERSION }}
 
       - name: Lint Helm chart
-        run: helm lint chart/auth-operator --strict
+        run: make helm-lint
 
   security:
     name: Security Scan
@@ -270,11 +271,11 @@ jobs:
           git fetch --tags
           TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
           if [ -z "$TAG" ]; then
-            echo "tag_found=false" >> $GITHUB_OUTPUT
+            echo "tag_found=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          echo "tag_found=true" >> $GITHUB_OUTPUT
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "tag_found=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Log in to Container Registry
         if: steps.tag.outputs.tag_found == 'true'

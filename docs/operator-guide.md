@@ -133,6 +133,42 @@ Restricted workflow:
 
 Note: `spec.policyRef` on restricted resources is immutable after creation.
 
+### RBACPolicy Trust Boundaries
+
+`RBACPolicy` write access is a platform-admin privilege. A policy can select the
+ServiceAccount used for impersonated apply operations, and admission validates
+only that the configured `spec.impersonation.serviceAccountRef` name and
+namespace are present. Kubernetes RBAC on that impersonated ServiceAccount is the
+runtime permission boundary for generated Role, ClusterRole, RoleBinding, and
+ClusterRoleBinding changes.
+
+Grant tenants access to `RestrictedRoleDefinition` and `RestrictedBindDefinition`
+instead of granting them write access to `RBACPolicy`. Keep the impersonated
+ServiceAccount grants narrow and review them as part of the cluster-level
+authorization boundary.
+
+The default Helm chart does not grant `serviceaccounts/impersonate`. Enable
+`controller.impersonation.enabled` and prefer explicit
+`controller.impersonation.serviceAccounts` entries for the ServiceAccounts that
+policies may use. `controller.impersonation.clusterWide=true` grants
+cluster-wide ServiceAccount impersonation and should be used only when
+`RBACPolicy` writers are trusted platform administrators.
+
+For Kustomize deployments, the generated manager ClusterRole also omits
+`serviceaccounts/impersonate` by default. Add
+`config/rbac/impersonation_clusterrole.yaml` and
+`config/rbac/impersonation_clusterrolebinding.yaml` to
+`config/rbac/kustomization.yaml` only for installations that intentionally allow
+RBACPolicy impersonation.
+
+When `subjectLimits.serviceAccountLimits.creation.allowAutoCreate` is enabled,
+the controller can create missing ServiceAccounts in allowed namespaces. Existing
+unowned ServiceAccounts and ServiceAccounts owned by another
+RestrictedBindDefinition are treated as external subjects and are not adopted or
+modified, regardless of `disableAdoption`. Setting `disableAdoption: true` makes
+that conservative intent explicit; ServiceAccounts already owned by the same
+RestrictedBindDefinition continue to be reconciled.
+
 ### BindDefinition Annotations
 
 | Annotation | Values | Default | Description |
@@ -372,7 +408,7 @@ Key metrics:
 | `auth_operator_reconcile_duration_seconds` | Histogram | Reconciliation latency |
 | `auth_operator_reconcile_errors_total` | Counter | Errors by type |
 | `auth_operator_rbac_resources_applied_total` | Counter | RBAC resources created/updated |
-| `auth_operator_role_refs_missing` | Gauge | Missing role references |
+| `auth_operator_role_refs_missing` | Gauge | Missing role references for BindDefinition and RestrictedBindDefinition |
 | `auth_operator_namespaces_active` | Gauge | Namespaces matching selectors |
 | `auth_operator_authorizer_requests_total` | Counter | WebhookAuthorizer SubjectAccessReview decisions by result and authorizer |
 | `auth_operator_authorizer_active_rules` | Gauge | Active WebhookAuthorizer resource and non-resource rule entries |

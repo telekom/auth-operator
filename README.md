@@ -172,6 +172,12 @@ See the [Operator Guide](docs/operator-guide.md) for the full reference.
 
 See [values.yaml](./chart/auth-operator/values.yaml) for all options.
 
+RBACPolicy impersonation RBAC is not granted by default. Enable
+`controller.impersonation.enabled` with either explicit `serviceAccounts` entries
+or `clusterWide=true` only when RBACPolicy writers are platform-admin trusted.
+Kustomize deployments can opt in by adding the optional
+`config/rbac/impersonation_clusterrole*.yaml` resources.
+
 ---
 
 ## CRD Reference

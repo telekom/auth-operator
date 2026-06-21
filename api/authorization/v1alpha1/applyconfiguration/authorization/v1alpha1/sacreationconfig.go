@@ -34,7 +34,10 @@ type SACreationConfigApplyConfiguration struct {
 	AllowedCreationNamespaces []string `json:"allowedCreationNamespaces,omitempty"`
 	// AutomountServiceAccountToken controls automount for auto-created SAs.
 	AutomountServiceAccountToken *bool `json:"automountServiceAccountToken,omitempty"`
-	// DisableAdoption prevents adoption of pre-existing ServiceAccounts.
+	// DisableAdoption records that pre-existing ServiceAccounts must stay external
+	// unless they are already owned by the same RestrictedBindDefinition. Unowned
+	// ServiceAccounts and ServiceAccounts owned by another RestrictedBindDefinition
+	// are always treated as external subjects and are never adopted or modified.
 	DisableAdoption *bool `json:"disableAdoption,omitempty"`
 }
 

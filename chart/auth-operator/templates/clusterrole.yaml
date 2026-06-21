@@ -22,10 +22,7 @@ rules:
   verbs:
   - get
   - update
-# --- ServiceAccount management (BindDefinition and restricted impersonated apply) ---
-# NOTE: serviceaccounts/impersonate is required by RBACPolicy impersonation.
-# Access to create/update RBACPolicy objects must be treated as the control
-# point for selecting tenant apply identities.
+# --- ServiceAccount management (BindDefinition and RestrictedBindDefinition auto-create) ---
 - apiGroups:
   - ""
   resources:
@@ -34,11 +31,22 @@ rules:
   - create
   - delete
   - get
-  - impersonate
   - list
   - patch
   - update
   - watch
+{{- if and .Values.controller.impersonation.enabled .Values.controller.impersonation.clusterWide }}
+# --- ServiceAccount impersonation (RBACPolicy) ---
+# WARNING: serviceaccounts/impersonate lets the controller apply as any
+# ServiceAccount. Keep this cluster-wide grant disabled unless RBACPolicy write
+# access is restricted to platform administrators.
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts
+  verbs:
+  - impersonate
+{{- end }}
 # --- Event recording ---
 - apiGroups:
   - ""
@@ -49,10 +57,10 @@ rules:
   - create
   - patch
   - update
-# --- API discovery (RoleDefinition — needs broad read to discover all resources) ---
-# NOTE: This broad read access is required by design. The RoleDefinition controller
-# must discover all API resources to generate accurate ClusterRoles/Roles.
-# The discovery API (/api, /apis) only lists resource types, not instances.
+# --- Broad object reads (RoleDefinition and namespace-termination checks) ---
+# NOTE: This grants get/list/watch on object metadata/specs across installed APIs.
+# It supports dynamic RoleDefinition output and cleanup/status checks and is part
+# of the controller deployment trust boundary.
 - apiGroups:
   - '*'
   resources:

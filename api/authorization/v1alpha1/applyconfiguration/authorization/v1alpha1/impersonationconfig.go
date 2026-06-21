@@ -22,11 +22,17 @@ package v1alpha1
 //
 // ImpersonationConfig controls apply-time ServiceAccount impersonation for
 // RestrictedBindDefinition and RestrictedRoleDefinition reconciliation.
+// RBACPolicy write access is a cluster trust boundary: a policy author can choose
+// any ServiceAccount identity here, and admission only validates that the reference
+// fields are non-empty. The impersonated ServiceAccount's own Kubernetes RBAC is
+// the authoritative permission check during apply operations.
 type ImpersonationConfigApplyConfiguration struct {
 	// Enabled enables ServiceAccount impersonation during restricted resource apply operations.
 	Enabled *bool `json:"enabled,omitempty"`
 	// ServiceAccountRef is the ServiceAccount identity used for impersonated apply operations.
-	// Required when enabled is true.
+	// Required when enabled is true. Only platform administrators should be allowed
+	// to configure this field because the operator does not perform a SubjectAccessReview
+	// for the referenced identity at admission time.
 	ServiceAccountRef *SARefApplyConfiguration `json:"serviceAccountRef,omitempty"`
 }
 

@@ -146,6 +146,10 @@ _Appears in:_
 
 ImpersonationConfig controls apply-time ServiceAccount impersonation for
 RestrictedBindDefinition and RestrictedRoleDefinition reconciliation.
+RBACPolicy write access is a cluster trust boundary: a policy author can choose
+any ServiceAccount identity here, and admission only validates that the reference
+fields are non-empty. The impersonated ServiceAccount's own Kubernetes RBAC is
+the authoritative permission check during apply operations.
 
 
 
@@ -155,7 +159,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `enabled` _boolean_ | Enabled enables ServiceAccount impersonation during restricted resource apply operations. | false | Optional: \{\} <br /> |
-| `serviceAccountRef` _[SARef](#saref)_ | ServiceAccountRef is the ServiceAccount identity used for impersonated apply operations.<br />Required when enabled is true. |  | Optional: \{\} <br /> |
+| `serviceAccountRef` _[SARef](#saref)_ | ServiceAccountRef is the ServiceAccount identity used for impersonated apply operations.<br />Required when enabled is true. Only platform administrators should be allowed<br />to configure this field because the operator does not perform a SubjectAccessReview<br />for the referenced identity at admission time. |  | Optional: \{\} <br /> |
 
 
 
@@ -626,7 +630,7 @@ _Appears in:_
 | `allowedCreationNamespaceSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#labelselector-v1-meta)_ | AllowedCreationNamespaceSelector selects namespaces where SA creation is allowed. |  | Optional: \{\} <br /> |
 | `allowedCreationNamespaces` _string array_ | AllowedCreationNamespaces is an explicit list of namespaces where SA creation is allowed. |  | MaxItems: 128 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
 | `automountServiceAccountToken` _boolean_ | AutomountServiceAccountToken controls automount for auto-created SAs. |  | Optional: \{\} <br /> |
-| `disableAdoption` _boolean_ | DisableAdoption prevents adoption of pre-existing ServiceAccounts. | false | Optional: \{\} <br /> |
+| `disableAdoption` _boolean_ | DisableAdoption records that pre-existing ServiceAccounts must stay external<br />unless they are already owned by the same RestrictedBindDefinition. Unowned<br />ServiceAccounts and ServiceAccounts owned by another RestrictedBindDefinition<br />are always treated as external subjects and are never adopted or modified. | false | Optional: \{\} <br /> |
 
 
 #### SARef

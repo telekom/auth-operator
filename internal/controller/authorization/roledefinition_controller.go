@@ -43,8 +43,9 @@ import (
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,verbs=get;list;watch;create;update;patch;delete;escalate;bind
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch;create;update;patch;delete;escalate;bind
 // +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list;watch
-// Note: The controller requires broad read access to discover all API resources for dynamic role generation.
-// This is inherent to the controller's purpose of creating roles based on API discovery.
+// Note: The controller requires broad object read access for dynamic role generation
+// and namespace-termination cleanup checks. This exposes object metadata/specs to
+// the controller and is part of the deployment trust boundary.
 // +kubebuilder:rbac:groups=*,resources=*,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch;update
 // +kubebuilder:rbac:groups="coordination.k8s.io",resources=leases,verbs=get;list;update;create;delete
