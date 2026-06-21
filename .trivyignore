@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: CC0-1.0
+#
+# These Kubernetes RBAC findings are expected for this operator and are documented
+# inline in the rendered ClusterRoles. The Helm security job still fails on any
+# unignored HIGH/CRITICAL finding.
+
+# RoleDefinition discovery must list API resources across groups so generated
+# Role/ClusterRole output stays accurate.
+KSV-0046
+
+# BindDefinition intentionally manages RoleBindings/ClusterRoleBindings and the
+# generated roles they reference.
+KSV-0050
+
+# The webhook server certificate controller must patch admission webhook
+# configurations with its CA bundle.
+KSV-0114

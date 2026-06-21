@@ -578,7 +578,7 @@ func checkBindDefinitionReconciled(name string) bool {
 }
 
 func checkWebhookAuthorizerConfigured(name string) bool {
-	cmd := exec.CommandContext(context.Background(), "kubectl", "get", "webhookauthorizer", name,
+	cmd := utils.CommandContext(context.Background(), "kubectl", "get", "webhookauthorizer", name,
 		"-o", "jsonpath={.status.authorizerConfigured}")
 	output, err := utils.Run(cmd)
 	if err != nil {

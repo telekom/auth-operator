@@ -182,14 +182,26 @@ jobs:
             --set image.tag=v1.0.0 \
             > /tmp/helm-rendered.yaml
 
-      - name: Run Trivy on Helm templates
+      - name: Report Trivy MEDIUM Helm findings
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        continue-on-error: true
+        with:
+          scan-type: 'config'
+          scan-ref: '/tmp/helm-rendered.yaml'
+          format: 'table'
+          severity: 'MEDIUM'
+          exit-code: '0'
+          trivyignores: '.trivyignore'
+
+      - name: Enforce Trivy HIGH and CRITICAL Helm findings
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: 'config'
           scan-ref: '/tmp/helm-rendered.yaml'
           format: 'table'
-          severity: 'CRITICAL,HIGH,MEDIUM'
-          exit-code: '0'  # Don't fail on config issues, just report
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          trivyignores: '.trivyignore'
 
   dependency-review:
     name: Dependency Review
