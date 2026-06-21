@@ -553,7 +553,7 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 					matchedRule:    -1,
 					evaluatedCount: evaluated,
 					skippedCount:   skipped,
-				}, err
+				}, fmt.Errorf("WebhookAuthorizer %q namespace selector: %w", webhookAuthorizer.Name, err)
 			}
 			if !matches {
 				wa.Log.V(2).Info("namespace selector did not match, skipping",
@@ -652,8 +652,7 @@ func (wa *Authorizer) namespaceMatches(ctx context.Context, namespace string, se
 		}
 		labelSelector, err := metav1.LabelSelectorAsSelector(selector)
 		if err != nil {
-			wa.Log.Error(err, "Invalid label selector")
-			return false, err
+			return false, fmt.Errorf("parse namespace selector for namespace %q: %w", namespace, err)
 		}
 		return labelSelector.Matches(cached.labels), nil
 	}
@@ -663,7 +662,6 @@ func (wa *Authorizer) namespaceMatches(ctx context.Context, namespace string, se
 	defer cancel()
 	if err := wa.Client.Get(getCtx, types.NamespacedName{Name: namespace}, &ns); err != nil {
 		wrappedErr := fmt.Errorf("get namespace %q: %w", namespace, err)
-		wa.Log.Error(wrappedErr, "Failed to get namespace", "namespace", namespace)
 		nsCache[namespace] = namespaceLabelCacheEntry{err: wrappedErr}
 		return false, wrappedErr
 	}
@@ -672,8 +670,7 @@ func (wa *Authorizer) namespaceMatches(ctx context.Context, namespace string, se
 
 	labelSelector, err := metav1.LabelSelectorAsSelector(selector)
 	if err != nil {
-		wa.Log.Error(err, "Invalid label selector")
-		return false, err
+		return false, fmt.Errorf("parse namespace selector for namespace %q: %w", namespace, err)
 	}
 	return labelSelector.Matches(nsLabels), nil
 }

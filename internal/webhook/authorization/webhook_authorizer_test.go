@@ -1531,23 +1531,20 @@ func TestEvaluateSAR_NamespaceLabelCache_SingleGetPerNamespace(t *testing.T) {
 		counter := &namespaceGetCountingClient{Client: base}
 		handler := &Authorizer{Client: counter, Log: logr.Discard()}
 
-		sar := &authzv1.SubjectAccessReview{
-			Spec: authzv1.SubjectAccessReviewSpec{
-				User: "unknown",
-				ResourceAttributes: &authzv1.ResourceAttributes{
-					Namespace: "missing-ns",
-					Verb:      "get",
-					Resource:  "pods",
-				},
-			},
-		}
-
-		if _, err := handler.evaluateSAR(context.Background(), sar, []authzv1alpha1.WebhookAuthorizer{wa1, wa2, wa3}); err == nil {
-			t.Fatal("expected namespace lookup error, got nil")
+		cache := make(map[string]namespaceLabelCacheEntry)
+		selector := &wa1.Spec.NamespaceSelector
+		for i := 0; i < 2; i++ {
+			matches, err := handler.namespaceMatches(context.Background(), "missing-ns", selector, cache)
+			if err == nil {
+				t.Fatal("expected namespace lookup error, got nil")
+			}
+			if matches {
+				t.Fatal("namespaceMatches returned true for missing namespace")
+			}
 		}
 
 		if got := counter.getCount.Load(); got != 1 {
-			t.Errorf("expected exactly 1 namespace Get() for missing namespace (negative cache), got %d", got)
+			t.Errorf("expected exactly 1 namespace Get() for repeated missing namespace lookup, got %d", got)
 		}
 	})
 }
