@@ -989,6 +989,9 @@ func TestDeleteServiceAccountUnit(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "shared-sa",
 				Namespace: "test-ns",
+				Annotations: map[string]string{
+					helpers.SourceNamesAnnotation: "other-bd,shared-sa-bd",
+				},
 				OwnerReferences: []metav1.OwnerReference{
 					{APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: "BindDefinition", Name: "shared-sa-bd", UID: "shared-sa-uid", Controller: &isController},
 				},
@@ -1001,6 +1004,10 @@ func TestDeleteServiceAccountUnit(t *testing.T) {
 		result, err := r.deleteServiceAccount(ctx, bindDef, "shared-sa", "test-ns")
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(result).To(Equal(deleteResultNoOwnerRef))
+
+		retainedSA := &corev1.ServiceAccount{}
+		g.Expect(c.Get(ctx, client.ObjectKey{Name: "shared-sa", Namespace: "test-ns"}, retainedSA)).To(Succeed())
+		g.Expect(retainedSA.Annotations).To(HaveKeyWithValue(helpers.SourceNamesAnnotation, "other-bd"))
 	})
 }
 
