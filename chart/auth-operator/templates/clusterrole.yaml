@@ -125,8 +125,8 @@ rules:
   - list
   - watch
 # --- RBAC management (RoleDefinition + BindDefinition) ---
-# WARNING: The escalate and bind verbs are required for the operator to create
-# ClusterRoles/Roles with arbitrary permissions and bind them to subjects.
+# WARNING: The bind/escalate verbs below are required for the operator to
+# create ClusterRoles/Roles with arbitrary permissions and bind them to subjects.
 # A compromised controller SA could escalate privileges. Mitigate by:
 # - Restricting network access to the controller pod
 # - Monitoring RBAC changes via audit logging
@@ -139,7 +139,6 @@ rules:
   verbs:
   - create
   - delete
-  - escalate
   - get
   - list
   - patch
