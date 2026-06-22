@@ -112,11 +112,11 @@ func TestBindDefinitionHasRoleBindingsIndexWithFakeClient(t *testing.T) {
 	}
 
 	var withoutRB authorizationv1alpha1.BindDefinitionList
-	if err := fakeClient.List(ctx, &withoutRB, client.MatchingFields{BindDefinitionHasRoleBindingsField: "false"}); err != nil {
+	if err := fakeClient.List(ctx, &withoutRB, client.MatchingFields{BindDefinitionHasRoleBindingsField: BindDefinitionHasRoleBindingsFalse}); err != nil {
 		t.Fatalf("failed to list BindDefinitions without role bindings: %v", err)
 	}
 	if len(withoutRB.Items) != 0 {
-		t.Errorf("expected BindDefinitions without role bindings to be absent from the index, got %d", len(withoutRB.Items))
+		t.Errorf("expected sparse false index to return 0 BindDefinitions, got %d", len(withoutRB.Items))
 	}
 }
 
@@ -395,7 +395,7 @@ func TestWebhookAuthorizerHasNamespaceSelectorFunc(t *testing.T) {
 				},
 			},
 			indexFunc:  WebhookAuthorizerHasNamespaceSelectorFunc,
-			wantValues: []string{"true"},
+			wantValues: []string{WebhookAuthorizerHasNamespaceSelectorTrue},
 		},
 		{
 			name: "with empty namespace selector returns false",
@@ -404,7 +404,7 @@ func TestWebhookAuthorizerHasNamespaceSelectorFunc(t *testing.T) {
 				Spec:       authorizationv1alpha1.WebhookAuthorizerSpec{},
 			},
 			indexFunc:  WebhookAuthorizerHasNamespaceSelectorFunc,
-			wantValues: []string{"false"},
+			wantValues: []string{WebhookAuthorizerHasNamespaceSelectorFalse},
 		},
 		{
 			name: "with match expressions returns true",
@@ -419,7 +419,7 @@ func TestWebhookAuthorizerHasNamespaceSelectorFunc(t *testing.T) {
 				},
 			},
 			indexFunc:  WebhookAuthorizerHasNamespaceSelectorFunc,
-			wantValues: []string{"true"},
+			wantValues: []string{WebhookAuthorizerHasNamespaceSelectorTrue},
 		},
 		{
 			name:       "wrong object type returns nil",
@@ -476,7 +476,7 @@ func TestWebhookAuthorizerIndexWithFakeClient(t *testing.T) {
 	// Query global authorizers (no namespace selector).
 	var globalList authorizationv1alpha1.WebhookAuthorizerList
 	err := fakeClient.List(ctx, &globalList, client.MatchingFields{
-		WebhookAuthorizerHasNamespaceSelectorField: "false",
+		WebhookAuthorizerHasNamespaceSelectorField: WebhookAuthorizerHasNamespaceSelectorFalse,
 	})
 	if err != nil {
 		t.Fatalf("failed to list global authorizers: %v", err)
@@ -490,7 +490,7 @@ func TestWebhookAuthorizerIndexWithFakeClient(t *testing.T) {
 	// Query scoped authorizers (with namespace selector).
 	var scopedList authorizationv1alpha1.WebhookAuthorizerList
 	err = fakeClient.List(ctx, &scopedList, client.MatchingFields{
-		WebhookAuthorizerHasNamespaceSelectorField: "true",
+		WebhookAuthorizerHasNamespaceSelectorField: WebhookAuthorizerHasNamespaceSelectorTrue,
 	})
 	if err != nil {
 		t.Fatalf("failed to list scoped authorizers: %v", err)
@@ -510,6 +510,48 @@ func TestWebhookAuthorizerIndexWithFakeClient(t *testing.T) {
 	if len(emptyList.Items) != 0 {
 		t.Errorf("expected 0 authorizers for invalid index value, got %d", len(emptyList.Items))
 	}
+}
+
+func TestBindDefinitionHasRoleBindingsFunc(t *testing.T) {
+	subject := rbacv1.Subject{Kind: rbacv1.UserKind, Name: "alice"}
+
+	tests := []indexExtractorTest{
+		{
+			name: "BD with RoleBindings returns true",
+			object: &authorizationv1alpha1.BindDefinition{
+				ObjectMeta: metav1.ObjectMeta{Name: "bd-with-rb"},
+				Spec: authorizationv1alpha1.BindDefinitionSpec{
+					TargetName: "with-rb",
+					Subjects:   []rbacv1.Subject{subject},
+					RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+						{ClusterRoleRefs: []string{"view"}},
+					},
+				},
+			},
+			indexFunc:  BindDefinitionHasRoleBindingsFunc,
+			wantValues: []string{BindDefinitionHasRoleBindingsTrue},
+		},
+		{
+			name: "BD without RoleBindings is omitted from sparse index",
+			object: &authorizationv1alpha1.BindDefinition{
+				ObjectMeta: metav1.ObjectMeta{Name: "bd-without-rb"},
+				Spec: authorizationv1alpha1.BindDefinitionSpec{
+					TargetName: "without-rb",
+					Subjects:   []rbacv1.Subject{subject},
+				},
+			},
+			indexFunc:  BindDefinitionHasRoleBindingsFunc,
+			wantValues: nil,
+		},
+		{
+			name:       "wrong object type returns nil",
+			object:     &authorizationv1alpha1.RoleDefinition{ObjectMeta: metav1.ObjectMeta{Name: "rd"}},
+			indexFunc:  BindDefinitionHasRoleBindingsFunc,
+			wantValues: nil,
+		},
+	}
+
+	runIndexExtractorTests(t, tests)
 }
 
 func TestRestrictedBindDefinitionPolicyRefFunc(t *testing.T) {
