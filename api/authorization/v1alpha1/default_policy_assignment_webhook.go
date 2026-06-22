@@ -17,8 +17,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
-
-	"github.com/telekom/auth-operator/pkg/helpers"
 )
 
 type requesterServiceAccount struct {
@@ -67,18 +65,10 @@ func requesterMatchesDefaultAssignment(da *DefaultPolicyAssignment, username str
 	return false
 }
 
-func resolveDefaultPoliciesForRequester(ctx context.Context, c client.Client, username string, groups []string) ([]string, error) {
+func resolveDefaultPoliciesForRequester(ctx context.Context, c client.Reader, username string, groups []string) ([]string, error) {
 	policyList := &RBACPolicyList{}
-	if err := c.List(ctx, policyList, client.MatchingFields{HasDefaultAssignmentField: "true"}); err != nil {
-		if !helpers.IsMissingFieldIndexError(err) {
-			return nil, fmt.Errorf("list RBACPolicies with default assignment: %w", err)
-		}
-
-		// Fallback for tests/misconfigured managers without the RBACPolicy
-		// default-assignment field index.
-		if listErr := c.List(ctx, policyList); listErr != nil {
-			return nil, fmt.Errorf("list RBACPolicies: %w", listErr)
-		}
+	if err := c.List(ctx, policyList); err != nil {
+		return nil, fmt.Errorf("list RBACPolicies: %w", err)
 	}
 
 	matchedPolicies := make([]string, 0)
@@ -95,7 +85,7 @@ func resolveDefaultPoliciesForRequester(ctx context.Context, c client.Client, us
 	return matchedPolicies, nil
 }
 
-func selectedPolicyMatchesRequester(ctx context.Context, c client.Client, selectedPolicy, username string, groups []string) (bool, error) {
+func selectedPolicyMatchesRequester(ctx context.Context, c client.Reader, selectedPolicy, username string, groups []string) (bool, error) {
 	if selectedPolicy == "" {
 		return false, nil
 	}
@@ -113,7 +103,7 @@ func selectedPolicyMatchesRequester(ctx context.Context, c client.Client, select
 
 func validateDefaultPolicyForRequester(
 	ctx context.Context,
-	c client.Client,
+	c client.Reader,
 	groupKind schema.GroupKind,
 	objName, selectedPolicy string,
 ) error {

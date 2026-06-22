@@ -22,6 +22,10 @@ import (
 // +kubebuilder:object:generate=false
 type RestrictedRoleDefinitionValidator struct {
 	Client client.Client
+	// Reader is a non-cached API reader used for requester default-policy
+	// enforcement. Admission-time policy assignment is a security boundary, so
+	// it must not fail open when the informer cache lags behind the API server.
+	Reader client.Reader
 }
 
 var _ admission.Validator[*RestrictedRoleDefinition] = &RestrictedRoleDefinitionValidator{}
@@ -29,7 +33,10 @@ var _ admission.Validator[*RestrictedRoleDefinition] = &RestrictedRoleDefinition
 // SetupWebhookWithManager will setup the manager to manage the webhooks.
 func (r *RestrictedRoleDefinition) SetupWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr, r).
-		WithValidator(&RestrictedRoleDefinitionValidator{Client: mgr.GetClient()}).
+		WithValidator(&RestrictedRoleDefinitionValidator{
+			Client: mgr.GetClient(),
+			Reader: mgr.GetAPIReader(),
+		}).
 		Complete()
 }
 
@@ -55,7 +62,7 @@ func (v *RestrictedRoleDefinitionValidator) ValidateCreate(ctx context.Context, 
 	// Enforce requester-based default policy assignment, if configured.
 	if err := validateDefaultPolicyForRequester(
 		ctx,
-		v.Client,
+		v.defaultPolicyReader(),
 		schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedRoleDefinitionKind},
 		obj.Name,
 		obj.Spec.PolicyRef.Name,
@@ -109,6 +116,13 @@ func (v *RestrictedRoleDefinitionValidator) ValidateUpdate(ctx context.Context, 
 // ValidateDelete implements admission.Validator for RestrictedRoleDefinition.
 func (v *RestrictedRoleDefinitionValidator) ValidateDelete(_ context.Context, _ *RestrictedRoleDefinition) (admission.Warnings, error) {
 	return nil, nil
+}
+
+func (v *RestrictedRoleDefinitionValidator) defaultPolicyReader() client.Reader {
+	if v.Reader != nil {
+		return v.Reader
+	}
+	return v.Client
 }
 
 // validateRestrictedRoleDefinitionSpec validates the spec for duplicate targetName.

@@ -11,10 +11,12 @@ import (
 
 	admissionv1 "k8s.io/api/admission/v1"
 	authenticationv1 "k8s.io/api/authentication/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
@@ -46,6 +48,110 @@ func TestParseRequesterServiceAccount(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRestrictedValidatorsUseReaderForDefaultPolicyAssignment(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := AddToScheme(scheme); err != nil {
+		t.Fatalf("add scheme: %v", err)
+	}
+
+	selectedPolicy := &RBACPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "selected-policy"},
+		Spec: RBACPolicySpec{
+			AppliesTo: PolicyScope{Namespaces: []string{"default"}},
+		},
+	}
+	assignedPolicy := &RBACPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "assigned-policy"},
+		Spec: RBACPolicySpec{
+			AppliesTo: PolicyScope{Namespaces: []string{"default"}},
+			DefaultAssignment: &DefaultPolicyAssignment{
+				Groups: []string{"oidc:team-a-admins"},
+			},
+		},
+	}
+
+	newIndexedClient := func(objs ...client.Object) client.Client {
+		return fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(objs...).
+			WithIndex(&RestrictedBindDefinition{}, TargetNameField, func(obj client.Object) []string {
+				return []string{obj.(*RestrictedBindDefinition).Spec.TargetName}
+			}).
+			WithIndex(&BindDefinition{}, TargetNameField, func(obj client.Object) []string {
+				return []string{obj.(*BindDefinition).Spec.TargetName}
+			}).
+			WithIndex(&RestrictedRoleDefinition{}, TargetNameField, func(obj client.Object) []string {
+				return []string{obj.(*RestrictedRoleDefinition).Spec.TargetName}
+			}).
+			WithIndex(&RestrictedRoleDefinition{}, TargetRoleField, func(obj client.Object) []string {
+				return []string{obj.(*RestrictedRoleDefinition).Spec.TargetRole}
+			}).
+			WithIndex(&RestrictedRoleDefinition{}, TargetNamespaceField, func(obj client.Object) []string {
+				return []string{obj.(*RestrictedRoleDefinition).Spec.TargetNamespace}
+			}).
+			WithIndex(&RoleDefinition{}, TargetNameField, func(obj client.Object) []string {
+				return []string{obj.(*RoleDefinition).Spec.TargetName}
+			}).
+			WithIndex(&RoleDefinition{}, TargetRoleField, func(obj client.Object) []string {
+				return []string{obj.(*RoleDefinition).Spec.TargetRole}
+			}).
+			WithIndex(&RoleDefinition{}, TargetNamespaceField, func(obj client.Object) []string {
+				return []string{obj.(*RoleDefinition).Spec.TargetNamespace}
+			}).
+			Build()
+	}
+
+	cachedClient := newIndexedClient(selectedPolicy.DeepCopy())
+	apiReader := newIndexedClient(selectedPolicy.DeepCopy(), assignedPolicy)
+
+	ctxGroup := admission.NewContextWithRequest(context.Background(), admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			UserInfo: authenticationv1.UserInfo{
+				Username: "alice",
+				Groups:   []string{"oidc:team-a-admins"},
+			},
+		},
+	})
+
+	t.Run("RestrictedBindDefinition", func(t *testing.T) {
+		validator := &RestrictedBindDefinitionValidator{Client: cachedClient, Reader: apiReader}
+		rbd := &RestrictedBindDefinition{
+			ObjectMeta: metav1.ObjectMeta{Name: "reader-rbd"},
+			Spec: RestrictedBindDefinitionSpec{
+				PolicyRef:  RBACPolicyReference{Name: selectedPolicy.Name},
+				TargetName: "reader-rbd",
+				Subjects: []rbacv1.Subject{
+					{Kind: rbacv1.UserKind, APIGroup: rbacv1.GroupName, Name: "alice"},
+				},
+				ClusterRoleBindings: &ClusterBinding{ClusterRoleRefs: []string{"view"}},
+			},
+		}
+		if _, err := validator.ValidateCreate(ctxGroup, rbd); err == nil {
+			t.Fatal("expected stale cached client not to hide default-policy assignment")
+		} else if !strings.Contains(err.Error(), "assigned-policy") {
+			t.Fatalf("expected error to mention API-reader assignment, got: %v", err)
+		}
+	})
+
+	t.Run("RestrictedRoleDefinition", func(t *testing.T) {
+		validator := &RestrictedRoleDefinitionValidator{Client: cachedClient, Reader: apiReader}
+		rrd := &RestrictedRoleDefinition{
+			ObjectMeta: metav1.ObjectMeta{Name: "reader-rrd"},
+			Spec: RestrictedRoleDefinitionSpec{
+				PolicyRef:       RBACPolicyReference{Name: selectedPolicy.Name},
+				TargetRole:      DefinitionClusterRole,
+				TargetName:      "reader-rrd",
+				ScopeNamespaced: false,
+			},
+		}
+		if _, err := validator.ValidateCreate(ctxGroup, rrd); err == nil {
+			t.Fatal("expected stale cached client not to hide default-policy assignment")
+		} else if !strings.Contains(err.Error(), "assigned-policy") {
+			t.Fatalf("expected error to mention API-reader assignment, got: %v", err)
+		}
+	})
 }
 
 func TestRequesterMatchesDefaultAssignment(t *testing.T) {

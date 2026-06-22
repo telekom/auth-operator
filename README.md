@@ -167,7 +167,7 @@ See the [Operator Guide](docs/operator-guide.md) for the full reference.
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `controller.replicas` | Controller replica count | `1` |
-| `webhookServer.replicas` | Webhook server replica count | `1` |
+| `webhookServer.replicas` | Webhook server replica count | `2` |
 | `controller.podDisruptionBudget.enabled` | Enable PDB | `false` |
 
 See [values.yaml](./chart/auth-operator/values.yaml) for all options.

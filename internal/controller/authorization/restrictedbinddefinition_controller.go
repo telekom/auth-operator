@@ -523,11 +523,12 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 	metrics.RoleRefsMissing.WithLabelValues(rbd.Name).Set(float64(len(missingRoles)))
 
 	// Step 8: Mark Ready.
-	// Ready=true is intentional even when missingRoleRefs is non-empty: bindings are
-	// created immediately and become effective once referenced roles appear (best-effort,
-	// eventually-consistent behaviour). Missing refs are observable via
-	// status.missingRoleRefs and the RoleRefsMissing metric. Unlike BindDefinition, no
-	// RoleRefsValid condition is emitted here; add one if stricter signalling is needed.
+	if len(missingRoles) > 0 {
+		return r.rbdHandleMissingRoleRefs(ctx, rbd, missingRoles)
+	}
+
+	conditions.MarkTrue(rbd, authorizationv1alpha1.RoleRefValidCondition, rbd.Generation,
+		authorizationv1alpha1.RoleRefValidReason, authorizationv1alpha1.RoleRefValidMessage)
 	rbd.Status.BindReconciled = true
 	conditions.MarkReady(rbd, rbd.Generation,
 		authorizationv1alpha1.ReadyReasonReconciled, authorizationv1alpha1.ReadyMessageReconciled)
@@ -540,6 +541,30 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 	}
 
 	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultSuccess).Inc()
+	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
+}
+
+func (r *RestrictedBindDefinitionReconciler) rbdHandleMissingRoleRefs(
+	ctx context.Context,
+	rbd *authorizationv1alpha1.RestrictedBindDefinition,
+	missingRoles []string,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	conditions.MarkFalse(rbd, authorizationv1alpha1.RoleRefValidCondition, rbd.Generation,
+		authorizationv1alpha1.RoleRefInvalidReason, authorizationv1alpha1.RoleRefInvalidMessage, missingRoles)
+	conditions.MarkNotReady(rbd, rbd.Generation,
+		authorizationv1alpha1.RoleRefInvalidReason, authorizationv1alpha1.RoleRefInvalidMessage, missingRoles)
+	r.recorder.Eventf(rbd, nil, corev1.EventTypeWarning,
+		authorizationv1alpha1.EventReasonRoleRefNotFound, authorizationv1alpha1.EventActionValidate,
+		"Referenced roles not found: %v. Bindings were created but are ineffective until roles exist.", missingRoles)
+	rbd.Status.BindReconciled = false
+	if err := ssa.ApplyRestrictedBindDefinitionStatus(ctx, r.client, rbd); err != nil {
+		logger.Error(err, "failed to apply RestrictedBindDefinition status", "name", rbd.Name)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
+		return ctrl.Result{}, fmt.Errorf("apply RestrictedBindDefinition %s status: %w", rbd.Name, err)
+	}
+	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultDegraded).Inc()
 	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
 }
 
@@ -569,6 +594,9 @@ func (r *RestrictedBindDefinitionReconciler) rbdReconcileResources(
 		crbName := helpers.BuildBindingName(rbd.Spec.TargetName, clusterRoleRef)
 		desiredCRBs[crbName] = struct{}{}
 		if err := checkRestrictedBindingOwnership(ctx, r.ownershipReader(), r.recorder, rbd, "ClusterRoleBinding", crbName, ""); err != nil {
+			return err
+		}
+		if err := r.rbdClearClusterRoleBindingSubjectsIfEmpty(ctx, applyClient, crbName, effectiveSubjects); err != nil {
 			return err
 		}
 		ac := pkgssa.ClusterRoleBindingWithSubjectsAndRoleRef(
@@ -955,6 +983,9 @@ func (r *RestrictedBindDefinitionReconciler) rbdEnsureRoleBinding(
 	if err := r.rbdDeleteOwnedRoleBindingOnRoleRefChange(ctx, rbd, namespace, rbName, desiredRoleRef); err != nil {
 		return err
 	}
+	if err := r.rbdClearRoleBindingSubjectsIfEmpty(ctx, applyClient, namespace, rbName, subjects); err != nil {
+		return err
+	}
 	ac := pkgssa.RoleBindingWithSubjectsAndRoleRef(
 		rbName, namespace, helpers.BuildResourceLabels(rbd.Labels), subjects, desiredRoleRef,
 	)
@@ -989,6 +1020,53 @@ func (r *RestrictedBindDefinitionReconciler) rbdDeleteOwnedRoleBindingOnRoleRefC
 		return fmt.Errorf("delete RoleBinding %s/%s before roleRef change: %w", namespace, name, err)
 	}
 	metrics.RBACResourcesDeleted.WithLabelValues(metrics.ResourceRoleBinding).Inc()
+	return nil
+}
+
+func (r *RestrictedBindDefinitionReconciler) rbdClearClusterRoleBindingSubjectsIfEmpty(
+	ctx context.Context,
+	applyClient client.Client,
+	name string,
+	subjects []rbacv1.Subject,
+) error {
+	if len(subjects) > 0 {
+		return nil
+	}
+	existing := &rbacv1.ClusterRoleBinding{}
+	if err := r.ownershipReader().Get(ctx, types.NamespacedName{Name: name}, existing); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	if len(existing.Subjects) == 0 {
+		return nil
+	}
+	patch := client.RawPatch(types.MergePatchType, []byte(`{"subjects":[]}`))
+	if err := applyClient.Patch(ctx, existing, patch); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("clear ClusterRoleBinding %s subjects: %w", name, err)
+	}
+	return nil
+}
+
+func (r *RestrictedBindDefinitionReconciler) rbdClearRoleBindingSubjectsIfEmpty(
+	ctx context.Context,
+	applyClient client.Client,
+	namespace string,
+	name string,
+	subjects []rbacv1.Subject,
+) error {
+	if len(subjects) > 0 {
+		return nil
+	}
+	existing := &rbacv1.RoleBinding{}
+	if err := r.ownershipReader().Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, existing); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	if len(existing.Subjects) == 0 {
+		return nil
+	}
+	patch := client.RawPatch(types.MergePatchType, []byte(`{"subjects":[]}`))
+	if err := applyClient.Patch(ctx, existing, patch); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("clear RoleBinding %s/%s subjects: %w", namespace, name, err)
+	}
 	return nil
 }
 

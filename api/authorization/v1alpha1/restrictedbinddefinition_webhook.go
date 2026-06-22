@@ -27,6 +27,10 @@ import (
 // +kubebuilder:object:generate=false
 type RestrictedBindDefinitionValidator struct {
 	Client client.Client
+	// Reader is a non-cached API reader used for requester default-policy
+	// enforcement. Admission-time policy assignment is a security boundary, so
+	// it must not fail open when the informer cache lags behind the API server.
+	Reader client.Reader
 }
 
 var _ admission.Validator[*RestrictedBindDefinition] = &RestrictedBindDefinitionValidator{}
@@ -34,7 +38,10 @@ var _ admission.Validator[*RestrictedBindDefinition] = &RestrictedBindDefinition
 // SetupWebhookWithManager will setup the manager to manage the webhooks.
 func (r *RestrictedBindDefinition) SetupWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr, r).
-		WithValidator(&RestrictedBindDefinitionValidator{Client: mgr.GetClient()}).
+		WithValidator(&RestrictedBindDefinitionValidator{
+			Client: mgr.GetClient(),
+			Reader: mgr.GetAPIReader(),
+		}).
 		Complete()
 }
 
@@ -61,7 +68,7 @@ func (v *RestrictedBindDefinitionValidator) ValidateCreate(ctx context.Context, 
 	// Enforce requester-based default policy assignment, if configured.
 	if err := validateDefaultPolicyForRequester(
 		ctx,
-		v.Client,
+		v.defaultPolicyReader(),
 		schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedBindDefinitionKind},
 		obj.Name,
 		obj.Spec.PolicyRef.Name,
@@ -110,6 +117,13 @@ func (v *RestrictedBindDefinitionValidator) ValidateUpdate(ctx context.Context, 
 // ValidateDelete implements admission.Validator for RestrictedBindDefinition.
 func (v *RestrictedBindDefinitionValidator) ValidateDelete(_ context.Context, _ *RestrictedBindDefinition) (admission.Warnings, error) {
 	return nil, nil
+}
+
+func (v *RestrictedBindDefinitionValidator) defaultPolicyReader() client.Reader {
+	if v.Reader != nil {
+		return v.Reader
+	}
+	return v.Client
 }
 
 // validateRestrictedBindDefinitionSpec validates the spec for duplicate targetName
