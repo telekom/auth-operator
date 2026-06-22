@@ -134,8 +134,8 @@ func init() {
 		"The address the metrics endpoint binds to. Use \"0\" to disable metrics serving.")
 
 	rootCmd.PersistentFlags().BoolVar(&metricsSecure, "metrics-secure", false,
-		"Require authentication and authorization for the metrics endpoint. "+
-			"When enabled, the operator uses TokenReview and SubjectAccessReview to protect /metrics.")
+		"Serve metrics over HTTPS/TLS and require authentication/authorization. "+
+			"When enabled, certificates are loaded from --metrics-cert-dir and /metrics is protected with TokenReview and SubjectAccessReview.")
 
 	// Tracing flags
 	rootCmd.PersistentFlags().BoolVar(&tracingEnabled, "tracing-enabled", false,
