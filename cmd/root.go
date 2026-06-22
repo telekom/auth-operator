@@ -50,6 +50,8 @@ var (
 	tracingInsecure     bool
 )
 
+const metricsCertDir = "/tmp/k8s-metrics-server/serving-certs"
+
 // redactSensitiveFlags returns a map of flags with sensitive values redacted.
 // Uses regex pattern matching to identify flags that may contain sensitive data.
 func redactSensitiveFlags() map[string]string {
@@ -132,8 +134,8 @@ func init() {
 		"The address the metrics endpoint binds to. Use \"0\" to disable metrics serving.")
 
 	rootCmd.PersistentFlags().BoolVar(&metricsSecure, "metrics-secure", false,
-		"Require authentication and authorization for the metrics endpoint. "+
-			"When enabled, the operator uses TokenReview and SubjectAccessReview to protect /metrics.")
+		"Serve metrics over HTTPS/TLS and require authentication/authorization. "+
+			"When enabled, certificates are generated and maintained in "+metricsCertDir+" and /metrics is protected with TokenReview and SubjectAccessReview.")
 
 	// Tracing flags
 	rootCmd.PersistentFlags().BoolVar(&tracingEnabled, "tracing-enabled", false,

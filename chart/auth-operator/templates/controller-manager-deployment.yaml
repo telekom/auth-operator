@@ -84,6 +84,11 @@ spec:
         resources: {{- toYaml .Values.controller.resources | nindent 10 }}
         securityContext:
           {{- toYaml .Values.containerSecurityContext | nindent 10 }}
+        {{- if .Values.metrics.auth.enabled }}
+        volumeMounts:
+        - mountPath: /tmp/k8s-metrics-server/serving-certs
+          name: metrics-certs
+        {{- end }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -92,6 +97,11 @@ spec:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       serviceAccountName: {{ include "auth-operator.fullname" . }}-controller-manager
       terminationGracePeriodSeconds: {{ .Values.controller.terminationGracePeriodSeconds | default 35 }}
+      {{- if .Values.metrics.auth.enabled }}
+      volumes:
+      - name: metrics-certs
+        emptyDir: {}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

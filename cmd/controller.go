@@ -122,7 +122,9 @@ and their status is kept up to date.`,
 
 			Metrics: metricsserver.Options{
 				BindAddress:    metricsAddr,
+				SecureServing:  metricsSecure,
 				FilterProvider: metricsFilterProvider(),
+				CertDir:        metricsCertDir,
 			},
 			LeaderElection:          enableLeaderElection,
 			LeaderElectionID:        "auth.t-caas.telekom.com",

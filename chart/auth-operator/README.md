@@ -132,13 +132,19 @@ is restricted to platform administrators.
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `metrics.auth.enabled` | Require authentication/authorization for `/metrics` endpoint | `false` |
+| `metrics.auth.enabled` | Require authentication/authorization for `/metrics` and serve metrics over HTTPS | `false` |
 | `metrics.service.enabled` | Create a dedicated metrics Service | `true` |
 | `metrics.service.port` | Metrics service port | `8080` |
 | `metrics.serviceMonitor.enabled` | Create a Prometheus ServiceMonitor | `false` |
 | `metrics.serviceMonitor.interval` | Scrape interval (empty = Prometheus default) | `""` |
 | `metrics.serviceMonitor.scrapeTimeout` | Scrape timeout | `""` |
 | `metrics.serviceMonitor.additionalLabels` | Extra labels on the ServiceMonitor | `{}` |
+| `metrics.serviceMonitor.scraperRBAC.create` | Create ClusterRole/ClusterRoleBinding that permits the Prometheus scraper ServiceAccount to GET `/metrics` when metrics auth is enabled | `false` |
+| `metrics.serviceMonitor.scraperRBAC.serviceAccount.name` | Prometheus scraper ServiceAccount name for chart-managed metrics reader RBAC | `""` |
+| `metrics.serviceMonitor.scraperRBAC.serviceAccount.namespace` | Prometheus scraper ServiceAccount namespace for chart-managed metrics reader RBAC (defaults to release namespace when empty) | `""` |
+| `metrics.serviceMonitor.tlsConfig.caFile` | CA certificate file for TLS verification of the metrics endpoint | `""` |
+| `metrics.serviceMonitor.tlsConfig.serverName` | Server name override for TLS SNI verification | `""` |
+| `metrics.serviceMonitor.tlsConfig.insecureSkipVerify` | Skip TLS verification (default `true` for controller-runtime self-signed certs; set `false` when `caFile`/`serverName` is provided) | `true` |
 
 For the full list of exposed metrics and recommended alert rules, see the
 [Metrics and Alerting documentation](https://github.com/telekom/auth-operator/blob/main/docs/metrics-and-alerting.md).
