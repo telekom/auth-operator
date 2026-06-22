@@ -14,6 +14,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -43,6 +44,8 @@ var _ = BeforeSuite(func() {
 	// Create a fresh scheme to avoid mutating global state
 	testScheme := runtime.NewScheme()
 	err := rbacv1.AddToScheme(testScheme)
+	Expect(err).NotTo(HaveOccurred())
+	err = corev1.AddToScheme(testScheme)
 	Expect(err).NotTo(HaveOccurred())
 
 	testEnv = &envtest.Environment{

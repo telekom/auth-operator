@@ -768,7 +768,7 @@ func (r *BindDefinitionReconciler) ensureClusterRoleBindings(
 			WithAnnotations(helpers.BuildResourceAnnotations("BindDefinition", bindDef.Name))
 
 		// Apply using SSA with cache-aware diffing — skip if unchanged.
-		result, err := pkgssa.PatchApplyClusterRoleBinding(ctx, r.client, ac)
+		result, err := pkgssa.PatchApplyClusterRoleBinding(ctx, r.client, ac, client.ForceOwnership)
 		if err != nil {
 			logger.Error(err, "Failed to ensure ClusterRoleBinding",
 				"bindDefinitionName", bindDef.Name, "clusterRoleBindingName", crbName)
@@ -872,7 +872,7 @@ func (r *BindDefinitionReconciler) ensureSingleRoleBinding(
 		WithAnnotations(helpers.BuildResourceAnnotations("BindDefinition", bindDef.Name))
 
 	// Apply using SSA with cache-aware diffing — skip if unchanged.
-	result, err := pkgssa.PatchApplyRoleBinding(ctx, r.client, ac)
+	result, err := pkgssa.PatchApplyRoleBinding(ctx, r.client, ac, client.ForceOwnership)
 	if err != nil {
 		logger.Error(err, "Failed to ensure RoleBinding",
 			"bindDefinitionName", bindDef.Name, "roleBindingName", rbName, "namespace", namespace)

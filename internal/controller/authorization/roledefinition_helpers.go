@@ -334,7 +334,10 @@ func (r *RoleDefinitionReconciler) ensureRole(
 				return err
 			}
 		}
-		result, err := pkgssa.PatchApplyClusterRole(ctx, r.client, ac)
+		// RoleDefinitions own their generated RBAC resources end-to-end. Force
+		// ownership here so drift correction can reclaim fields modified by
+		// external managers while shared SSA helpers remain non-forcing by default.
+		result, err := pkgssa.PatchApplyClusterRole(ctx, r.client, ac, client.ForceOwnership)
 		if err != nil {
 			logger.Error(err, "Failed to apply ClusterRole via SSA",
 				"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
@@ -355,7 +358,10 @@ func (r *RoleDefinitionReconciler) ensureRole(
 		if err := r.clearRoleRulesIfEmpty(ctx, roleDefinition.Spec.TargetNamespace, roleDefinition.Spec.TargetName, finalRules); err != nil {
 			return err
 		}
-		result, err := pkgssa.PatchApplyRole(ctx, r.client, ac)
+		// RoleDefinitions own their generated RBAC resources end-to-end. Force
+		// ownership here so drift correction can reclaim fields modified by
+		// external managers while shared SSA helpers remain non-forcing by default.
+		result, err := pkgssa.PatchApplyRole(ctx, r.client, ac, client.ForceOwnership)
 		if err != nil {
 			logger.Error(err, "Failed to apply Role via SSA",
 				"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
