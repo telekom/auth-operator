@@ -815,7 +815,7 @@ func TestBindDefinitionDriftDetection(t *testing.T) {
 				bindDef.Name, bindDef.UID, false, false,
 			)).
 			WithAnnotations(helpers.BuildManagedSAAnnotations(bindDef.Name))
-		err = c.Apply(ctx, driftedSAAC, client.FieldOwner(pkgssa.FieldOwnerForBD(bindDef.Name)))
+		err = c.Apply(ctx, driftedSAAC, client.FieldOwner(pkgssa.FieldOwnerFor(bindDef.Name)))
 		g.Expect(err).NotTo(HaveOccurred())
 
 		// Reconcile to correct
@@ -1647,7 +1647,7 @@ func TestEnsureServiceAccounts(t *testing.T) {
 				bindDef.Name, bindDef.UID, false, false,
 			)).
 			WithAnnotations(helpers.BuildManagedSAAnnotations(bindDef.Name))
-		_, applyErr := pkgssa.PatchApplyServiceAccount(ctx, c, existingSAAC, pkgssa.FieldOwnerForBD(bindDef.Name))
+		_, applyErr := pkgssa.PatchApplyServiceAccount(ctx, c, existingSAAC, pkgssa.FieldOwnerFor(bindDef.Name))
 		g.Expect(applyErr).NotTo(HaveOccurred())
 
 		_, _, err := r.ensureServiceAccounts(ctx, bindDef)
@@ -2124,7 +2124,7 @@ func TestSANotOwnedByThisBindDef(t *testing.T) {
 		otherBDSAAC := pkgssa.ServiceAccountWith("contested-sa", "test-ns",
 			map[string]string{helpers.ManagedByLabelStandard: helpers.ManagedByValue}, false).
 			WithOwnerReferences(otherBDOwnerRef)
-		_, seedErr := pkgssa.PatchApplyServiceAccount(ctx, c, otherBDSAAC, pkgssa.FieldOwnerForBD("other-bd"))
+		_, seedErr := pkgssa.PatchApplyServiceAccount(ctx, c, otherBDSAAC, pkgssa.FieldOwnerFor("other-bd"))
 		g.Expect(seedErr).NotTo(HaveOccurred())
 
 		err := r.applyServiceAccount(ctx, bindDef, bindDef.Spec.Subjects[0], false)
@@ -2799,7 +2799,7 @@ func TestApplyServiceAccount(t *testing.T) {
 		existingSAAC := pkgssa.ServiceAccountWith("existing-sa", "default",
 			map[string]string{"old": "label"}, false).
 			WithAnnotations(helpers.BuildManagedSAAnnotations("upd-sa-bd"))
-		_, seedErr := pkgssa.PatchApplyServiceAccount(ctx, c, existingSAAC, pkgssa.FieldOwnerForBD("upd-sa-bd"))
+		_, seedErr := pkgssa.PatchApplyServiceAccount(ctx, c, existingSAAC, pkgssa.FieldOwnerFor("upd-sa-bd"))
 		g.Expect(seedErr).NotTo(HaveOccurred())
 
 		err := r.applyServiceAccount(ctx, bindDef, subject, true)

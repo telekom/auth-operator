@@ -393,7 +393,7 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			ac := ssa.ServiceAccountWith("ph-conflict-sa", "default",
 				map[string]string{"shared": "desired"}, true).
 				WithAnnotations(map[string]string{"source": "desired"})
-			result, err := ssa.PatchApplyServiceAccount(testCtx, k8sClient, ac, ssa.FieldOwnerForBD("ph-conflict-bd"))
+			result, err := ssa.PatchApplyServiceAccount(testCtx, k8sClient, ac, ssa.FieldOwnerFor("ph-conflict-bd"))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
 
@@ -412,7 +412,7 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			ac := ssa.ServiceAccountWith(name.Name, name.Namespace,
 				map[string]string{"shared": "desired"}, true).
 				WithAnnotations(map[string]string{"source": "desired"})
-			result, err := ssa.PatchApplyServiceAccount(testCtx, racingClient, ac, ssa.FieldOwnerForBD("ph-race-bd"))
+			result, err := ssa.PatchApplyServiceAccount(testCtx, racingClient, ac, ssa.FieldOwnerFor("ph-race-bd"))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
 

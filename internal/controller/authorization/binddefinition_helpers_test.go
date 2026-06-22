@@ -537,7 +537,7 @@ var _ = Describe("BindDefinition Helpers", func() {
 				helpers.BuildResourceLabels(bindDef.Labels), false).
 				WithOwnerReferences(saOwnerRefForBindDefinition(bindDef)).
 				WithAnnotations(helpers.BuildManagedSAAnnotations(bindDef.Name))
-			_, applyErr := pkgssa.PatchApplyServiceAccount(ctx, k8sClient, saAC, pkgssa.FieldOwnerForBD(bindDef.Name))
+			_, applyErr := pkgssa.PatchApplyServiceAccount(ctx, k8sClient, saAC, pkgssa.FieldOwnerFor(bindDef.Name))
 			Expect(applyErr).NotTo(HaveOccurred())
 
 			// Update BindDefinition to set automountServiceAccountToken=true
@@ -595,7 +595,7 @@ var _ = Describe("BindDefinition Helpers", func() {
 				helpers.BuildResourceLabels(bindDef.Labels), true).
 				WithOwnerReferences(saOwnerRefForBindDefinition(bindDef)).
 				WithAnnotations(helpers.BuildManagedSAAnnotations(bindDef.Name))
-			_, err2 := pkgssa.PatchApplyServiceAccount(ctx, k8sClient, saAC2, pkgssa.FieldOwnerForBD(bindDef.Name))
+			_, err2 := pkgssa.PatchApplyServiceAccount(ctx, k8sClient, saAC2, pkgssa.FieldOwnerFor(bindDef.Name))
 			Expect(err2).NotTo(HaveOccurred())
 
 			// Update BindDefinition to set automountServiceAccountToken=false
