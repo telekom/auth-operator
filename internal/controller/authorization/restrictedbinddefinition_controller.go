@@ -154,6 +154,41 @@ func (r *RestrictedBindDefinitionReconciler) rbdResolveApplyClient(
 	)
 }
 
+func (r *RestrictedBindDefinitionReconciler) rbdEvaluatePolicy(
+	ctx context.Context,
+	rbd *authorizationv1alpha1.RestrictedBindDefinition,
+	rbacPolicy *authorizationv1alpha1.RBACPolicy,
+) (result ctrl.Result, handled bool, retErr error) {
+	labelGetter := newLabelGetter(r.client)
+	violations := policy.EvaluateBindDefinition(ctx, rbacPolicy, rbd, labelGetter)
+	if err := labelGetter.Err(); err != nil {
+		r.rbdMarkStalled(ctx, rbd, err)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
+		return ctrl.Result{}, true, fmt.Errorf("evaluate policy selectors for RestrictedBindDefinition %s: %w", rbd.Name, err)
+	}
+	if len(violations) == 0 {
+		return ctrl.Result{}, false, nil
+	}
+
+	rbd.Status.PolicyViolations = policy.ViolationStrings(violations)
+	result, err := handlePolicyViolations(ctx, rbd, rbd.Generation, violations, r.recorder, rbd, ViolationHandlerConfig{
+		ControllerLabel: metrics.ControllerRestrictedBindDefinition,
+		ResourceKind:    "RestrictedBindDefinition",
+		Deprovision: func(ctx context.Context) error {
+			if err := r.rbdDeprovision(ctx, rbd); err != nil {
+				return err
+			}
+			rbdClearDeprovisionedStatus(rbd)
+			return nil
+		},
+		MarkStalled:   func(ctx context.Context, err error) { r.rbdMarkStalled(ctx, rbd, err) },
+		SetReconciled: func(v bool) { rbd.Status.BindReconciled = v },
+		ApplyStatus:   func(ctx context.Context) error { return ssa.ApplyRestrictedBindDefinitionStatus(ctx, r.client, rbd) },
+	})
+	return result, true, err
+}
+
 // policyToRestrictedBindDefinitions maps an RBACPolicy event to reconcile requests
 // for all RestrictedBindDefinitions referencing that policy.
 func (r *RestrictedBindDefinitionReconciler) policyToRestrictedBindDefinitions(ctx context.Context, obj client.Object) []reconcile.Request {
@@ -448,30 +483,7 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 	}
 
 	// Step 6: Evaluate policy compliance.
-	labelGetter := newLabelGetter(r.client)
-	violations := policy.EvaluateBindDefinition(ctx, rbacPolicy, rbd, labelGetter)
-	if err := labelGetter.Err(); err != nil {
-		r.rbdMarkStalled(ctx, rbd, err)
-		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
-		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
-		return ctrl.Result{}, fmt.Errorf("evaluate policy selectors for RestrictedBindDefinition %s: %w", rbd.Name, err)
-	}
-	if len(violations) > 0 {
-		rbd.Status.PolicyViolations = policy.ViolationStrings(violations)
-		result, err := handlePolicyViolations(ctx, rbd, rbd.Generation, violations, r.recorder, rbd, ViolationHandlerConfig{
-			ControllerLabel: metrics.ControllerRestrictedBindDefinition,
-			ResourceKind:    "RestrictedBindDefinition",
-			Deprovision: func(ctx context.Context) error {
-				if err := r.rbdDeprovision(ctx, rbd); err != nil {
-					return err
-				}
-				rbdClearDeprovisionedStatus(rbd)
-				return nil
-			},
-			MarkStalled:   func(ctx context.Context, err error) { r.rbdMarkStalled(ctx, rbd, err) },
-			SetReconciled: func(v bool) { rbd.Status.BindReconciled = v },
-			ApplyStatus:   func(ctx context.Context) error { return ssa.ApplyRestrictedBindDefinitionStatus(ctx, r.client, rbd) },
-		})
+	if result, handled, err := r.rbdEvaluatePolicy(ctx, rbd, rbacPolicy); handled {
 		return result, err
 	}
 

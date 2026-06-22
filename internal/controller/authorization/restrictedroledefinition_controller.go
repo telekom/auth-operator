@@ -153,6 +153,35 @@ func (r *RestrictedRoleDefinitionReconciler) rrdResolveApplyClient(
 	)
 }
 
+func (r *RestrictedRoleDefinitionReconciler) rrdEvaluatePolicy(
+	ctx context.Context,
+	rrd *authorizationv1alpha1.RestrictedRoleDefinition,
+	rbacPolicy *authorizationv1alpha1.RBACPolicy,
+) (result ctrl.Result, handled bool, retErr error) {
+	labelGetter := newLabelGetter(r.client)
+	violations := policy.EvaluateRoleDefinitionWithLabels(ctx, rbacPolicy, rrd, labelGetter)
+	if err := labelGetter.Err(); err != nil {
+		r.rrdMarkStalled(ctx, rrd, err)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
+		return ctrl.Result{}, true, fmt.Errorf("evaluate policy selectors for RestrictedRoleDefinition %s: %w", rrd.Name, err)
+	}
+	if len(violations) == 0 {
+		return ctrl.Result{}, false, nil
+	}
+
+	rrd.Status.PolicyViolations = policy.ViolationStrings(violations)
+	result, err := handlePolicyViolations(ctx, rrd, rrd.Generation, violations, r.recorder, rrd, ViolationHandlerConfig{
+		ControllerLabel: metrics.ControllerRestrictedRoleDefinition,
+		ResourceKind:    "RestrictedRoleDefinition",
+		Deprovision:     func(ctx context.Context) error { return r.rrdDeprovision(ctx, rrd) },
+		MarkStalled:     func(ctx context.Context, err error) { r.rrdMarkStalled(ctx, rrd, err) },
+		SetReconciled:   func(v bool) { rrd.Status.RoleReconciled = v },
+		ApplyStatus:     func(ctx context.Context) error { return ssa.ApplyRestrictedRoleDefinitionStatus(ctx, r.client, rrd) },
+	})
+	return result, true, err
+}
+
 // queueAll enqueues all RestrictedRoleDefinitions for reconciliation.
 func (r *RestrictedRoleDefinitionReconciler) queueAll() handler.MapFunc {
 	return func(ctx context.Context, _ client.Object) []reconcile.Request {
@@ -279,24 +308,7 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 	}
 
 	// Step 6: Evaluate policy compliance.
-	labelGetter := newLabelGetter(r.client)
-	violations := policy.EvaluateRoleDefinitionWithLabels(ctx, rbacPolicy, rrd, labelGetter)
-	if err := labelGetter.Err(); err != nil {
-		r.rrdMarkStalled(ctx, rrd, err)
-		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
-		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
-		return ctrl.Result{}, fmt.Errorf("evaluate policy selectors for RestrictedRoleDefinition %s: %w", rrd.Name, err)
-	}
-	if len(violations) > 0 {
-		rrd.Status.PolicyViolations = policy.ViolationStrings(violations)
-		result, err := handlePolicyViolations(ctx, rrd, rrd.Generation, violations, r.recorder, rrd, ViolationHandlerConfig{
-			ControllerLabel: metrics.ControllerRestrictedRoleDefinition,
-			ResourceKind:    "RestrictedRoleDefinition",
-			Deprovision:     func(ctx context.Context) error { return r.rrdDeprovision(ctx, rrd) },
-			MarkStalled:     func(ctx context.Context, err error) { r.rrdMarkStalled(ctx, rrd, err) },
-			SetReconciled:   func(v bool) { rrd.Status.RoleReconciled = v },
-			ApplyStatus:     func(ctx context.Context) error { return ssa.ApplyRestrictedRoleDefinitionStatus(ctx, r.client, rrd) },
-		})
+	if result, handled, err := r.rrdEvaluatePolicy(ctx, rrd, rbacPolicy); handled {
 		return result, err
 	}
 
