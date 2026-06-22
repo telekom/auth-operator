@@ -526,9 +526,14 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 	if len(missingRoles) > 0 {
 		return r.rbdHandleMissingRoleRefs(ctx, rbd, missingRoles)
 	}
+	if len(rbd.Status.SkippedServiceAccounts) > 0 {
+		return r.rbdHandleSkippedServiceAccounts(ctx, rbd)
+	}
 
 	conditions.MarkTrue(rbd, authorizationv1alpha1.RoleRefValidCondition, rbd.Generation,
 		authorizationv1alpha1.RoleRefValidReason, authorizationv1alpha1.RoleRefValidMessage)
+	conditions.MarkTrue(rbd, authorizationv1alpha1.ServiceAccountRefsReadyCondition, rbd.Generation,
+		authorizationv1alpha1.ServiceAccountRefsReadyReason, authorizationv1alpha1.ServiceAccountRefsReadyMessage)
 	rbd.Status.BindReconciled = true
 	conditions.MarkReady(rbd, rbd.Generation,
 		authorizationv1alpha1.ReadyReasonReconciled, authorizationv1alpha1.ReadyMessageReconciled)
@@ -542,6 +547,33 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 
 	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultSuccess).Inc()
 	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
+}
+
+func (r *RestrictedBindDefinitionReconciler) rbdHandleSkippedServiceAccounts(
+	ctx context.Context,
+	rbd *authorizationv1alpha1.RestrictedBindDefinition,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	conditions.MarkTrue(rbd, authorizationv1alpha1.RoleRefValidCondition, rbd.Generation,
+		authorizationv1alpha1.RoleRefValidReason, authorizationv1alpha1.RoleRefValidMessage)
+	conditions.MarkFalse(rbd, authorizationv1alpha1.ServiceAccountRefsReadyCondition, rbd.Generation,
+		authorizationv1alpha1.ServiceAccountRefsSkippedReason,
+		authorizationv1alpha1.ServiceAccountRefsSkippedMessage, rbd.Status.SkippedServiceAccounts)
+	conditions.MarkNotReady(rbd, rbd.Generation,
+		authorizationv1alpha1.ServiceAccountRefsSkippedReason,
+		authorizationv1alpha1.ServiceAccountRefsSkippedMessage, rbd.Status.SkippedServiceAccounts)
+	r.recorder.Eventf(rbd, nil, corev1.EventTypeWarning,
+		authorizationv1alpha1.EventReasonServiceAccountSkipped, authorizationv1alpha1.EventActionValidate,
+		"ServiceAccount subjects were skipped and not bound: %v", rbd.Status.SkippedServiceAccounts)
+	rbd.Status.BindReconciled = false
+	if err := ssa.ApplyRestrictedBindDefinitionStatus(ctx, r.client, rbd); err != nil {
+		logger.Error(err, "failed to apply RestrictedBindDefinition status", "name", rbd.Name)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
+		return ctrl.Result{}, fmt.Errorf("apply RestrictedBindDefinition %s status: %w", rbd.Name, err)
+	}
+	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultDegraded).Inc()
+	return ctrl.Result{RequeueAfter: RoleRefRequeueInterval}, nil
 }
 
 func (r *RestrictedBindDefinitionReconciler) rbdHandleMissingRoleRefs(
@@ -705,6 +737,7 @@ func rbdClearDeprovisionedStatus(rbd *authorizationv1alpha1.RestrictedBindDefini
 	rbd.Status.GeneratedServiceAccounts = nil
 	rbd.Status.ExternalServiceAccounts = nil
 	rbd.Status.MissingRoleRefs = nil
+	rbd.Status.SkippedServiceAccounts = nil
 	rbd.Status.BindReconciled = false
 	metrics.RoleRefsMissing.WithLabelValues(rbd.Name).Set(0)
 	metrics.NamespacesActive.WithLabelValues(rbd.Name).Set(0)
@@ -838,6 +871,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdEnsureServiceAccounts(
 	effectiveSubjects := make([]rbacv1.Subject, 0, len(rbd.Spec.Subjects))
 	var generatedSAs []rbacv1.Subject
 	var externalSAs []string
+	var skippedSAs []string
 
 	for _, subject := range rbd.Spec.Subjects {
 		if subject.Kind != authorizationv1alpha1.BindSubjectServiceAccount {
@@ -848,11 +882,13 @@ func (r *RestrictedBindDefinitionReconciler) rbdEnsureServiceAccounts(
 		if err := r.client.Get(ctx, types.NamespacedName{Name: subject.Namespace}, ns); err != nil {
 			if apierrors.IsNotFound(err) {
 				logger.V(2).Info("SA namespace not found, skipping", "namespace", subject.Namespace)
+				skippedSAs = append(skippedSAs, rbdSkippedServiceAccount(subject, "namespace not found"))
 				continue
 			}
 			return nil, fmt.Errorf("get namespace %s: %w", subject.Namespace, err)
 		}
 		if conditions.IsNamespaceTerminating(ns) {
+			skippedSAs = append(skippedSAs, rbdSkippedServiceAccount(subject, "namespace terminating"))
 			continue
 		}
 
@@ -875,11 +911,12 @@ func (r *RestrictedBindDefinitionReconciler) rbdEnsureServiceAccounts(
 				continue
 			}
 		} else {
-			createSA, err := r.rbdCanCreateMissingServiceAccount(ctx, subject, ns, saCreationConfig)
+			createSA, skipReason, err := r.rbdCanCreateMissingServiceAccount(ctx, subject, ns, saCreationConfig)
 			if err != nil {
 				return nil, err
 			}
 			if !createSA {
+				skippedSAs = append(skippedSAs, rbdSkippedServiceAccount(subject, skipReason))
 				continue
 			}
 		}
@@ -899,6 +936,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdEnsureServiceAccounts(
 
 	rbd.Status.GeneratedServiceAccounts = generatedSAs
 	rbd.Status.ExternalServiceAccounts = externalSAs
+	rbd.Status.SkippedServiceAccounts = skippedSAs
 	return effectiveSubjects, nil
 }
 
@@ -947,24 +985,31 @@ func (r *RestrictedBindDefinitionReconciler) rbdCanCreateMissingServiceAccount(
 	subject rbacv1.Subject,
 	namespace *corev1.Namespace,
 	saCreationConfig *authorizationv1alpha1.SACreationConfig,
-) (bool, error) {
+) (bool, string, error) {
 	logger := log.FromContext(ctx)
 	if saCreationConfig == nil || !saCreationConfig.AllowAutoCreate {
 		logger.V(1).Info("skipping ServiceAccount creation: AllowAutoCreate is false",
 			"serviceAccount", subject.Name, "namespace", subject.Namespace)
-		return false, nil
+		return false, "auto-create disabled", nil
 	}
 
 	allowed, err := rbdSAAllowedCreationNamespace(saCreationConfig, namespace)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
 	if !allowed {
 		logger.V(1).Info("skipping ServiceAccount creation: namespace is not allowed by policy",
 			"serviceAccount", subject.Name, "namespace", subject.Namespace)
-		return false, nil
+		return false, "namespace not allowed by policy", nil
 	}
-	return true, nil
+	return true, "", nil
+}
+
+func rbdSkippedServiceAccount(subject rbacv1.Subject, reason string) string {
+	if reason == "" {
+		reason = "skipped"
+	}
+	return fmt.Sprintf("%s/%s: %s", subject.Namespace, subject.Name, reason)
 }
 
 // rbdEnsureRoleBinding ensures a single RoleBinding exists.

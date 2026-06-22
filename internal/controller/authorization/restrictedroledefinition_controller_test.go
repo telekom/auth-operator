@@ -1012,6 +1012,32 @@ func TestRRD_FilterResource_ScopeNamespacedTrueExcludesClusterScoped(t *testing.
 	g.Expect(resources).NotTo(ContainElement("nodes"))
 }
 
+func TestRRD_FilterResource_NormalizesVerbOrderForRuleGrouping(t *testing.T) {
+	g := NewWithT(t)
+
+	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+			ScopeNamespaced: true,
+		},
+	}
+	rulesByKey := make(map[string]*rbacv1.PolicyRule)
+
+	rrdFilterResource(rrd, schema.GroupVersion{Version: "v1"},
+		metav1.APIResource{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"list", "get"}},
+		nil,
+		rulesByKey)
+	rrdFilterResource(rrd, schema.GroupVersion{Version: "v1"},
+		metav1.APIResource{Name: "services", Namespaced: true, Verbs: metav1.Verbs{"get", "list"}},
+		nil,
+		rulesByKey)
+
+	g.Expect(rulesByKey).To(HaveLen(1))
+	for _, rule := range rulesByKey {
+		g.Expect(rule.Verbs).To(Equal([]string{"get", "list"}))
+		g.Expect(rule.Resources).To(ConsistOf("pods", "services"))
+	}
+}
+
 func TestRRD_QueueAll(t *testing.T) {
 	g := NewWithT(t)
 

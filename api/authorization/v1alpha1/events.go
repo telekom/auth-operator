@@ -43,6 +43,10 @@ const (
 	// multiple BindDefinitions (co-owned via non-controller ownerRefs).
 	EventReasonServiceAccountShared = "ServiceAccountShared"
 
+	// EventReasonServiceAccountSkipped indicates a ServiceAccount subject was skipped
+	// and not bound.
+	EventReasonServiceAccountSkipped = "ServiceAccountSkipped"
+
 	// EventReasonServiceAccountRetained indicates a ServiceAccount was not deleted
 	// because other BindDefinitions still reference it.
 	EventReasonServiceAccountRetained = "ServiceAccountRetained"

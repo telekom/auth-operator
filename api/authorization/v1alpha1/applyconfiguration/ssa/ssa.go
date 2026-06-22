@@ -212,6 +212,11 @@ func RestrictedBindDefinitionStatusFrom(status *authorizationv1alpha1.Restricted
 		result.WithExternalServiceAccounts(sa)
 	}
 
+	result.SkippedServiceAccounts = make([]string, 0, len(status.SkippedServiceAccounts))
+	for _, sa := range status.SkippedServiceAccounts {
+		result.WithSkippedServiceAccounts(sa)
+	}
+
 	result.PolicyViolations = make([]string, 0, len(status.PolicyViolations))
 	for _, v := range status.PolicyViolations {
 		result.WithPolicyViolations(v)

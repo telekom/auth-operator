@@ -40,6 +40,10 @@ type RestrictedBindDefinitionStatusApplyConfiguration struct {
 	// that were not created by the controller.
 	// Format: "<namespace>/<name>".
 	ExternalServiceAccounts []string `json:"externalServiceAccounts,omitempty"`
+	// SkippedServiceAccounts lists ServiceAccount subjects that could not be
+	// created or bound during the last reconciliation.
+	// Format: "<namespace>/<name>: <reason>".
+	SkippedServiceAccounts []string `json:"skippedServiceAccounts,omitempty"`
 	// PolicyViolations lists policy violations detected during the last reconciliation.
 	// Format: "<fieldPath>: <message>" when a field path is available.
 	// Empty when all checks pass.
@@ -96,6 +100,16 @@ func (b *RestrictedBindDefinitionStatusApplyConfiguration) WithMissingRoleRefs(v
 func (b *RestrictedBindDefinitionStatusApplyConfiguration) WithExternalServiceAccounts(values ...string) *RestrictedBindDefinitionStatusApplyConfiguration {
 	for i := range values {
 		b.ExternalServiceAccounts = append(b.ExternalServiceAccounts, values[i])
+	}
+	return b
+}
+
+// WithSkippedServiceAccounts adds the given value to the SkippedServiceAccounts field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the SkippedServiceAccounts field.
+func (b *RestrictedBindDefinitionStatusApplyConfiguration) WithSkippedServiceAccounts(values ...string) *RestrictedBindDefinitionStatusApplyConfiguration {
+	for i := range values {
+		b.SkippedServiceAccounts = append(b.SkippedServiceAccounts, values[i])
 	}
 	return b
 }

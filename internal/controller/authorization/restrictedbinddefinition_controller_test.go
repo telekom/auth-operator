@@ -709,7 +709,8 @@ func TestRBD_Reconcile_PolicyCompliant_CreatesRoleBindings(t *testing.T) {
 		},
 	}
 
-	r, c := newRBDTestReconciler(rbdPolicyWithDefaultAllowances(pol), rbd, ns)
+	clusterRole := &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "view"}}
+	r, c := newRBDTestReconciler(rbdPolicyWithDefaultAllowances(pol), rbd, ns, clusterRole)
 	result, err := r.Reconcile(rbdCtx(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: "ns-rbd"},
 	})
@@ -862,7 +863,8 @@ func TestRBD_Reconcile_PolicyCompliant_CreatesServiceAccount(t *testing.T) {
 		},
 	}
 
-	r, c := newRBDTestReconciler(rbdPolicyWithDefaultAllowances(pol), rbd, ns)
+	clusterRole := &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "view"}}
+	r, c := newRBDTestReconciler(rbdPolicyWithDefaultAllowances(pol), rbd, ns, clusterRole)
 	result, err := r.Reconcile(rbdCtx(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: "sa-rbd"},
 	})
@@ -1127,10 +1129,11 @@ func TestRBD_Reconcile_AllowAutoCreateFalse_SkipsSACreation(t *testing.T) {
 		},
 	}
 
-	r, c := newRBDTestReconciler(rbdPolicyWithDefaultAllowances(pol), rbd, ns)
+	clusterRole := &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "view"}}
+	r, c := newRBDTestReconciler(rbdPolicyWithDefaultAllowances(pol), rbd, ns, clusterRole)
 	result, err := r.Reconcile(rbdCtx(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "ac-rbd"}})
 	g.Expect(err).NotTo(gomega.HaveOccurred())
-	g.Expect(result.RequeueAfter).To(gomega.Equal(DefaultRequeueInterval))
+	g.Expect(result.RequeueAfter).To(gomega.Equal(RoleRefRequeueInterval))
 
 	var sa corev1.ServiceAccount
 	err = c.Get(rbdCtx(), types.NamespacedName{Namespace: "ac-ns", Name: "ac-sa"}, &sa)
@@ -1139,6 +1142,12 @@ func TestRBD_Reconcile_AllowAutoCreateFalse_SkipsSACreation(t *testing.T) {
 	var updated authorizationv1alpha1.RestrictedBindDefinition
 	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: "ac-rbd"}, &updated)).To(gomega.Succeed())
 	g.Expect(updated.Status.GeneratedServiceAccounts).To(gomega.BeEmpty())
+	g.Expect(updated.Status.SkippedServiceAccounts).To(gomega.ConsistOf("ac-ns/ac-sa: auto-create disabled"))
+	g.Expect(updated.Status.BindReconciled).To(gomega.BeFalse())
+	g.Expect(conditions.IsReady(&updated)).To(gomega.BeFalse())
+	saCondition := conditions.Get(&updated, authorizationv1alpha1.ServiceAccountRefsReadyCondition)
+	g.Expect(saCondition).NotTo(gomega.BeNil())
+	g.Expect(saCondition.Status).To(gomega.Equal(metav1.ConditionFalse))
 
 	var crb rbacv1.ClusterRoleBinding
 	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: "ac-target-view-binding"}, &crb)).To(gomega.Succeed())
@@ -1178,10 +1187,11 @@ func TestRBD_Reconcile_ServiceAccountCreationNamespaceDenied_DoesNotBindMissingS
 		},
 	}
 
-	r, c := newRBDTestReconciler(pol, rbd, ns)
+	clusterRole := &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "view"}}
+	r, c := newRBDTestReconciler(pol, rbd, ns, clusterRole)
 	result, err := r.Reconcile(rbdCtx(), ctrl.Request{NamespacedName: types.NamespacedName{Name: rbd.Name}})
 	g.Expect(err).NotTo(gomega.HaveOccurred())
-	g.Expect(result.RequeueAfter).To(gomega.Equal(DefaultRequeueInterval))
+	g.Expect(result.RequeueAfter).To(gomega.Equal(RoleRefRequeueInterval))
 
 	var sa corev1.ServiceAccount
 	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Namespace: "blocked-ns", Name: "blocked-sa"}, &sa)).NotTo(gomega.Succeed())
@@ -1194,6 +1204,9 @@ func TestRBD_Reconcile_ServiceAccountCreationNamespaceDenied_DoesNotBindMissingS
 	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: rbd.Name}, &updated)).To(gomega.Succeed())
 	g.Expect(updated.Status.GeneratedServiceAccounts).To(gomega.BeEmpty())
 	g.Expect(updated.Status.ExternalServiceAccounts).To(gomega.BeEmpty())
+	g.Expect(updated.Status.SkippedServiceAccounts).To(gomega.ConsistOf("blocked-ns/blocked-sa: namespace not allowed by policy"))
+	g.Expect(updated.Status.BindReconciled).To(gomega.BeFalse())
+	g.Expect(conditions.IsReady(&updated)).To(gomega.BeFalse())
 }
 
 func TestRBD_Reconcile_DisableAdoptionTrue_SkipsAdoption(t *testing.T) {
@@ -2271,7 +2284,7 @@ func TestRBD_Reconcile_ClearsStaleBindingSubjectsWhenEffectiveSubjectsBecomeEmpt
 	r, c := newRBDTestReconciler(pol, rbd, ns, clusterRole, role, existingCRB, existingRB)
 	result, err := r.Reconcile(rbdCtx(), ctrl.Request{NamespacedName: types.NamespacedName{Name: rbd.Name}})
 	g.Expect(err).NotTo(gomega.HaveOccurred())
-	g.Expect(result.RequeueAfter).To(gomega.Equal(DefaultRequeueInterval))
+	g.Expect(result.RequeueAfter).To(gomega.Equal(RoleRefRequeueInterval))
 
 	var crb rbacv1.ClusterRoleBinding
 	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: existingCRB.Name}, &crb)).To(gomega.Succeed())
@@ -2280,6 +2293,11 @@ func TestRBD_Reconcile_ClearsStaleBindingSubjectsWhenEffectiveSubjectsBecomeEmpt
 	var rb rbacv1.RoleBinding
 	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: existingRB.Name, Namespace: existingRB.Namespace}, &rb)).To(gomega.Succeed())
 	g.Expect(rb.Subjects).To(gomega.BeEmpty(), "stale RoleBinding subjects must be cleared")
+
+	var updated authorizationv1alpha1.RestrictedBindDefinition
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: rbd.Name}, &updated)).To(gomega.Succeed())
+	g.Expect(updated.Status.SkippedServiceAccounts).To(gomega.ConsistOf("target-ns/missing-sa: auto-create disabled"))
+	g.Expect(conditions.IsReady(&updated)).To(gomega.BeFalse())
 }
 
 func TestRBD_ReconcileResources_RecreatesOwnedRoleBindingWhenRoleRefKindChanges(t *testing.T) {

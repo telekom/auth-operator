@@ -502,7 +502,8 @@ func rrdFilterResource(
 		return
 	}
 
-	key := fmt.Sprintf("%s|%v", groupVersion.Group, verbs)
+	slices.Sort(verbs)
+	key := fmt.Sprintf("%s|%s", groupVersion.Group, strings.Join(verbs, ","))
 	existing, exists := rulesByKey[key]
 	if !exists {
 		existing = &rbacv1.PolicyRule{

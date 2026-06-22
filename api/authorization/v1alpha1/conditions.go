@@ -169,6 +169,24 @@ const (
 	RoleRefValidationSkippedMessage AuthZConditionMessage = "Role reference validation skipped (missing-role-policy=ignore)"
 )
 
+// ServiceAccount reference validation related condition constants.
+const (
+	// ServiceAccountRefsReadyCondition indicates whether ServiceAccount subjects
+	// that need controller action are present and bound.
+	ServiceAccountRefsReadyCondition AuthZConditionType = "ServiceAccountRefsReady"
+	// ServiceAccountRefsReadyReason is used when all ServiceAccount subjects are
+	// present and safe to bind.
+	ServiceAccountRefsReadyReason AuthZConditionReason = "ServiceAccountRefsReady"
+	// ServiceAccountRefsReadyMessage is the message for valid ServiceAccount references.
+	ServiceAccountRefsReadyMessage AuthZConditionMessage = "All ServiceAccount subjects are present"
+
+	// ServiceAccountRefsSkippedReason is used when one or more ServiceAccount subjects
+	// could not be created or bound.
+	ServiceAccountRefsSkippedReason AuthZConditionReason = "ServiceAccountRefsSkipped"
+	// ServiceAccountRefsSkippedMessage is the format string for skipped ServiceAccounts.
+	ServiceAccountRefsSkippedMessage AuthZConditionMessage = "Skipped ServiceAccount subjects: %v"
+)
+
 // ReadyCondition is the generic Ready condition type shared by all CRD controllers.
 // It uses the kstatus "Ready" convention.
 const ReadyCondition AuthZConditionType = "Ready"

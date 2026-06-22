@@ -372,6 +372,14 @@ spec:
                 items:
                   type: string
                 type: array
+              skippedServiceAccounts:
+                description: |-
+                  SkippedServiceAccounts lists ServiceAccount subjects that could not be
+                  created or bound during the last reconciliation.
+                  Format: "<namespace>/<name>: <reason>".
+                items:
+                  type: string
+                type: array
             type: object
         type: object
     served: true

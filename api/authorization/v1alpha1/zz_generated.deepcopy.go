@@ -705,6 +705,11 @@ func (in *RestrictedBindDefinitionStatus) DeepCopyInto(out *RestrictedBindDefini
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.SkippedServiceAccounts != nil {
+		in, out := &in.SkippedServiceAccounts, &out.SkippedServiceAccounts
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.PolicyViolations != nil {
 		in, out := &in.PolicyViolations, &out.PolicyViolations
 		*out = make([]string, len(*in))

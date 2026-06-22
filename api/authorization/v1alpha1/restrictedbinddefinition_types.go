@@ -87,6 +87,12 @@ type RestrictedBindDefinitionStatus struct {
 	// +kubebuilder:validation:Optional
 	ExternalServiceAccounts []string `json:"externalServiceAccounts,omitempty"`
 
+	// SkippedServiceAccounts lists ServiceAccount subjects that could not be
+	// created or bound during the last reconciliation.
+	// Format: "<namespace>/<name>: <reason>".
+	// +kubebuilder:validation:Optional
+	SkippedServiceAccounts []string `json:"skippedServiceAccounts,omitempty"`
+
 	// PolicyViolations lists policy violations detected during the last reconciliation.
 	// Format: "<fieldPath>: <message>" when a field path is available.
 	// Empty when all checks pass.

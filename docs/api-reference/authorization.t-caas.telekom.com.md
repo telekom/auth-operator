@@ -438,6 +438,7 @@ _Appears in:_
 | `generatedServiceAccounts` _[Subject](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#subject-v1-rbac) array_ | GeneratedServiceAccounts lists ServiceAccounts that were auto-created. |  | Optional: \{\} <br /> |
 | `missingRoleRefs` _string array_ | MissingRoleRefs lists role references that could not be resolved.<br />Format: "ClusterRole/<name>" or "Role/<namespace>/<name>". |  | Optional: \{\} <br /> |
 | `externalServiceAccounts` _string array_ | ExternalServiceAccounts lists ServiceAccounts referenced by this RestrictedBindDefinition<br />that were not created by the controller.<br />Format: "<namespace>/<name>". |  | Optional: \{\} <br /> |
+| `skippedServiceAccounts` _string array_ | SkippedServiceAccounts lists ServiceAccount subjects that could not be<br />created or bound during the last reconciliation.<br />Format: "<namespace>/<name>: <reason>". |  | Optional: \{\} <br /> |
 | `policyViolations` _string array_ | PolicyViolations lists policy violations detected during the last reconciliation.<br />Format: "<fieldPath>: <message>" when a field path is available.<br />Empty when all checks pass. |  | Optional: \{\} <br /> |
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#condition-v1-meta) array_ | Conditions defines current service state. |  | Optional: \{\} <br /> |
 

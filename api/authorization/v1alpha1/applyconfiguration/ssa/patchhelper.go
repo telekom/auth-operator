@@ -328,6 +328,9 @@ func restrictedBindDefinitionStatusEqual(a, b *authorizationv1alpha1.RestrictedB
 	if !slices.Equal(a.ExternalServiceAccounts, b.ExternalServiceAccounts) {
 		return false
 	}
+	if !slices.Equal(a.SkippedServiceAccounts, b.SkippedServiceAccounts) {
+		return false
+	}
 	if !slices.Equal(a.PolicyViolations, b.PolicyViolations) {
 		return false
 	}
