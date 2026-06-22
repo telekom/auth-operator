@@ -6,6 +6,7 @@ package authorization
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
@@ -22,11 +23,23 @@ import (
 // clientLabelGetter implements policy.LabelGetter using a controller-runtime client.
 type clientLabelGetter struct {
 	reader client.Reader
+	err    error
 }
 
+var _ policy.LabelGetter = (*clientLabelGetter)(nil)
+
 // newLabelGetter creates a LabelGetter backed by the given client.
-func newLabelGetter(reader client.Reader) policy.LabelGetter {
+func newLabelGetter(reader client.Reader) *clientLabelGetter {
 	return &clientLabelGetter{reader: reader}
+}
+
+// Err returns transient API errors seen while resolving selector inputs.
+func (g *clientLabelGetter) Err() error {
+	return g.err
+}
+
+func (g *clientLabelGetter) recordError(err error) {
+	g.err = errors.Join(g.err, err)
 }
 
 // GetNamespaceLabels returns the labels for the given namespace.
@@ -34,6 +47,7 @@ func (g *clientLabelGetter) GetNamespaceLabels(ctx context.Context, name string)
 	ns := &corev1.Namespace{}
 	if err := g.reader.Get(ctx, types.NamespacedName{Name: name}, ns); err != nil {
 		if !apierrors.IsNotFound(err) {
+			g.recordError(fmt.Errorf("get namespace %s labels: %w", name, err))
 			log.FromContext(ctx).V(2).Info("failed to get namespace labels", "namespace", name, "error", err)
 		}
 		return nil, false
@@ -46,6 +60,7 @@ func (g *clientLabelGetter) GetClusterRoleLabels(ctx context.Context, name strin
 	cr := &rbacv1.ClusterRole{}
 	if err := g.reader.Get(ctx, types.NamespacedName{Name: name}, cr); err != nil {
 		if !apierrors.IsNotFound(err) {
+			g.recordError(fmt.Errorf("get ClusterRole %s labels: %w", name, err))
 			log.FromContext(ctx).V(2).Info("failed to get clusterrole labels", "clusterRole", name, "error", err)
 		}
 		return nil, false
@@ -58,6 +73,7 @@ func (g *clientLabelGetter) GetRoleLabels(ctx context.Context, namespace, name s
 	role := &rbacv1.Role{}
 	if err := g.reader.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, role); err != nil {
 		if !apierrors.IsNotFound(err) {
+			g.recordError(fmt.Errorf("get Role %s/%s labels: %w", namespace, name, err))
 			log.FromContext(ctx).V(2).Info("failed to get role labels", "namespace", namespace, "role", name, "error", err)
 		}
 		return nil, false
@@ -73,6 +89,7 @@ func (g *clientLabelGetter) ListNamespacesBySelector(ctx context.Context, select
 	}
 	nsList := &corev1.NamespaceList{}
 	if err := g.reader.List(ctx, nsList, client.MatchingLabelsSelector{Selector: sel}); err != nil {
+		g.recordError(fmt.Errorf("list namespaces by selector: %w", err))
 		return nil, fmt.Errorf("list namespaces by selector: %w", err)
 	}
 	names := make([]string, 0, len(nsList.Items))

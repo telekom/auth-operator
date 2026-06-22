@@ -448,7 +448,14 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 	}
 
 	// Step 6: Evaluate policy compliance.
-	violations := policy.EvaluateBindDefinition(ctx, rbacPolicy, rbd, newLabelGetter(r.client))
+	labelGetter := newLabelGetter(r.client)
+	violations := policy.EvaluateBindDefinition(ctx, rbacPolicy, rbd, labelGetter)
+	if err := labelGetter.Err(); err != nil {
+		r.rbdMarkStalled(ctx, rbd, err)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
+		return ctrl.Result{}, fmt.Errorf("evaluate policy selectors for RestrictedBindDefinition %s: %w", rbd.Name, err)
+	}
 	if len(violations) > 0 {
 		rbd.Status.PolicyViolations = policy.ViolationStrings(violations)
 		result, err := handlePolicyViolations(ctx, rbd, rbd.Generation, violations, r.recorder, rbd, ViolationHandlerConfig{

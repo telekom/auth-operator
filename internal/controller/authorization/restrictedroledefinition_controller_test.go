@@ -170,6 +170,87 @@ func TestRRD_Reconcile_PolicyViolation(t *testing.T) {
 	g.Expect(c.Get(rrdCtx(), types.NamespacedName{Name: ownedRole.Name}, &deletedRole)).NotTo(Succeed())
 }
 
+func TestRRD_Reconcile_PolicyScopeSelectorGetError_MarksStalledAndPreservesRole(t *testing.T) {
+	g := NewWithT(t)
+
+	pol := &authorizationv1alpha1.RBACPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "selector-policy", Generation: 1},
+		Spec: authorizationv1alpha1.RBACPolicySpec{
+			AppliesTo: authorizationv1alpha1.PolicyScope{
+				NamespaceSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"team": "a"},
+				},
+			},
+			RoleLimits: &authorizationv1alpha1.RoleLimits{
+				AllowClusterRoles: true,
+			},
+		},
+	}
+	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "selector-error-rrd",
+			UID:        "selector-error-rrd-uid",
+			Generation: 1,
+			Finalizers: []string{authorizationv1alpha1.RestrictedRoleDefinitionFinalizer},
+		},
+		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+			PolicyRef:       authorizationv1alpha1.RBACPolicyReference{Name: pol.Name},
+			TargetName:      "selector-role",
+			TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
+			TargetNamespace: "team-a",
+		},
+	}
+	ownedRole := &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      rrd.Spec.TargetName,
+			Namespace: rrd.Spec.TargetNamespace,
+			OwnerReferences: []metav1.OwnerReference{
+				restrictedTestOwnerRef(authorizationv1alpha1.RestrictedRoleDefinitionKind, rrd.Name, rrd.UID),
+			},
+		},
+		Rules: []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}}},
+	}
+
+	s := newTestScheme()
+	c := fake.NewClientBuilder().
+		WithScheme(s).
+		WithObjects(pol, rrd, ownedRole).
+		WithStatusSubresource(
+			&authorizationv1alpha1.RestrictedRoleDefinition{},
+			&authorizationv1alpha1.RBACPolicy{},
+		).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if _, ok := obj.(*corev1.Namespace); ok && key.Name == rrd.Spec.TargetNamespace {
+					return fmt.Errorf("injected namespace selector get error")
+				}
+				return cl.Get(ctx, key, obj, opts...)
+			},
+		}).
+		Build()
+	r := &RestrictedRoleDefinitionReconciler{
+		client:   c,
+		reader:   c,
+		scheme:   s,
+		recorder: events.NewFakeRecorder(10),
+	}
+
+	result, err := r.Reconcile(rrdCtx(), ctrl.Request{NamespacedName: types.NamespacedName{Name: rrd.Name}})
+
+	g.Expect(result).To(Equal(ctrl.Result{}))
+	g.Expect(err).To(HaveOccurred())
+	g.Expect(err.Error()).To(ContainSubstring("evaluate policy selectors for RestrictedRoleDefinition"))
+
+	var keptRole rbacv1.Role
+	g.Expect(c.Get(rrdCtx(), types.NamespacedName{Namespace: ownedRole.Namespace, Name: ownedRole.Name}, &keptRole)).To(Succeed())
+
+	var updated authorizationv1alpha1.RestrictedRoleDefinition
+	g.Expect(c.Get(rrdCtx(), types.NamespacedName{Name: rrd.Name}, &updated)).To(Succeed())
+	g.Expect(conditions.IsStalled(&updated)).To(BeTrue())
+	g.Expect(conditions.GetReason(&updated, conditions.StalledConditionType)).To(Equal(string(authorizationv1alpha1.StalledReasonError)))
+	g.Expect(updated.Status.RoleReconciled).To(BeFalse())
+}
+
 func TestRRD_Reconcile_Deletion(t *testing.T) {
 	g := NewWithT(t)
 
