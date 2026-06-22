@@ -330,6 +330,9 @@ func (r *RoleDefinitionReconciler) ensureRole(
 			if err := r.clearAggregationRuleIfSet(ctx, roleDefinition.Spec.TargetName); err != nil {
 				return err
 			}
+			if err := r.clearClusterRoleRulesIfEmpty(ctx, roleDefinition.Spec.TargetName, finalRules); err != nil {
+				return err
+			}
 		}
 		result, err := pkgssa.PatchApplyClusterRole(ctx, r.client, ac)
 		if err != nil {
@@ -349,6 +352,9 @@ func (r *RoleDefinitionReconciler) ensureRole(
 			mergedLabels,
 			finalRules,
 		).WithOwnerReferences(ownerRef).WithAnnotations(annotations)
+		if err := r.clearRoleRulesIfEmpty(ctx, roleDefinition.Spec.TargetNamespace, roleDefinition.Spec.TargetName, finalRules); err != nil {
+			return err
+		}
 		result, err := pkgssa.PatchApplyRole(ctx, r.client, ac)
 		if err != nil {
 			logger.Error(err, "Failed to apply Role via SSA",
@@ -474,6 +480,42 @@ func (r *RoleDefinitionReconciler) clearRulesOnAggregationTransition(ctx context
 		if err := r.client.Patch(ctx, existing, patch); err != nil {
 			return fmt.Errorf("clearing rules on transition to aggregation-based: %w", err)
 		}
+	}
+	return nil
+}
+
+func (r *RoleDefinitionReconciler) clearClusterRoleRulesIfEmpty(ctx context.Context, name string, finalRules []rbacv1.PolicyRule) error {
+	if len(finalRules) > 0 {
+		return nil
+	}
+	existing := &rbacv1.ClusterRole{}
+	if err := r.client.Get(ctx, client.ObjectKey{Name: name}, existing); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	if len(existing.Rules) == 0 {
+		return nil
+	}
+	patch := client.RawPatch(types.MergePatchType, []byte(`{"rules":null}`))
+	if err := r.client.Patch(ctx, existing, patch); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("clearing empty desired ClusterRole rules: %w", err)
+	}
+	return nil
+}
+
+func (r *RoleDefinitionReconciler) clearRoleRulesIfEmpty(ctx context.Context, namespace, name string, finalRules []rbacv1.PolicyRule) error {
+	if len(finalRules) > 0 {
+		return nil
+	}
+	existing := &rbacv1.Role{}
+	if err := r.client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, existing); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	if len(existing.Rules) == 0 {
+		return nil
+	}
+	patch := client.RawPatch(types.MergePatchType, []byte(`{"rules":null}`))
+	if err := r.client.Patch(ctx, existing, patch); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("clearing empty desired Role rules: %w", err)
 	}
 	return nil
 }

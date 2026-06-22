@@ -8,6 +8,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -493,7 +494,10 @@ func TestFilterAPIResourcesForRoleDefinition(t *testing.T) {
 		}
 
 		apiResources := discovery.APIResourcesByGroupVersion{
-			"v1": {{Name: "pods", Verbs: metav1.Verbs{"get", "list"}, Namespaced: true}},
+			"v1": {
+				{Name: "pods", Verbs: metav1.Verbs{"get", "list"}, Namespaced: true},
+				{Name: "nodes", Verbs: metav1.Verbs{"get"}, Namespaced: false},
+			},
 		}
 
 		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
@@ -502,6 +506,9 @@ func TestFilterAPIResourcesForRoleDefinition(t *testing.T) {
 		}
 		if !rulesContainResource(rules, "pods") {
 			t.Error("namespaced resource 'pods' should be included when ScopeNamespaced=true")
+		}
+		if rulesContainResource(rules, "nodes") {
+			t.Error("cluster-scoped resource 'nodes' should be filtered when ScopeNamespaced=true")
 		}
 	})
 
@@ -1058,6 +1065,92 @@ func TestHandleDeletionDeleteError(t *testing.T) {
 	_, err = r.handleDeletion(ctx, rd, builtRole)
 	g.Expect(err).To(HaveOccurred())
 	g.Expect(err.Error()).To(ContainSubstring("injected delete error"))
+}
+
+func TestEnsureRoleClusterRoleClearsStaleRulesWhenDesiredRulesEmpty(t *testing.T) {
+	ctx := context.Background()
+	g := NewWithT(t)
+
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+
+	rd := &authorizationv1alpha1.RoleDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "clear-rd", UID: "clear-rd-uid"},
+		Spec: authorizationv1alpha1.RoleDefinitionSpec{
+			TargetRole: authorizationv1alpha1.DefinitionClusterRole,
+			TargetName: "clear-rd-cluster-role",
+		},
+	}
+	existing := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "clear-rd-cluster-role",
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: authorizationv1alpha1.GroupVersion.String(),
+				Kind:       "RoleDefinition",
+				Name:       rd.Name,
+				UID:        rd.UID,
+			}},
+		},
+		Rules: []rbacv1.PolicyRule{
+			{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"get"}},
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(rd, existing).Build()
+	r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	err := r.ensureRole(ctx, rd, nil)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	var cr rbacv1.ClusterRole
+	g.Expect(c.Get(ctx, client.ObjectKey{Name: "clear-rd-cluster-role"}, &cr)).To(Succeed())
+	g.Expect(cr.Rules).To(BeEmpty())
+}
+
+func TestEnsureRoleNamespacedRoleClearsStaleRulesWhenDesiredRulesEmpty(t *testing.T) {
+	ctx := context.Background()
+	g := NewWithT(t)
+
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+	_ = corev1.AddToScheme(s)
+
+	rd := &authorizationv1alpha1.RoleDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "clear-ns-rd", UID: "clear-ns-rd-uid"},
+		Spec: authorizationv1alpha1.RoleDefinitionSpec{
+			TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
+			TargetName:      "clear-rd-role",
+			TargetNamespace: "clear-rd-ns",
+		},
+	}
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "clear-rd-ns"}}
+	existing := &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "clear-rd-role",
+			Namespace: "clear-rd-ns",
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: authorizationv1alpha1.GroupVersion.String(),
+				Kind:       "RoleDefinition",
+				Name:       rd.Name,
+				UID:        rd.UID,
+			}},
+		},
+		Rules: []rbacv1.PolicyRule{
+			{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"get"}},
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(rd, ns, existing).Build()
+	r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	err := r.ensureRole(ctx, rd, nil)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	var role rbacv1.Role
+	g.Expect(c.Get(ctx, client.ObjectKey{Namespace: "clear-rd-ns", Name: "clear-rd-role"}, &role)).To(Succeed())
+	g.Expect(role.Rules).To(BeEmpty())
 }
 
 func TestEnsureRoleWithAggregationLabels(t *testing.T) {

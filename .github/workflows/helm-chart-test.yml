@@ -31,7 +31,7 @@ jobs:
           fetch-depth: 0
 
       - name: Load versions from versions.env
-        run: grep -v '^#' versions.env | grep -v '^$' >> $GITHUB_ENV
+        run: grep -v '^#' versions.env | grep -v '^$' >> "$GITHUB_ENV"
 
       - name: Setup Helm
         uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5.0.0
@@ -60,7 +60,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Load versions from versions.env
-        run: grep -v '^#' versions.env | grep -v '^$' >> $GITHUB_ENV
+        run: grep -v '^#' versions.env | grep -v '^$' >> "$GITHUB_ENV"
 
       - name: Setup Helm
         uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5.0.0
@@ -70,6 +70,9 @@ jobs:
       - name: Validate default values
         run: |
           helm template auth-operator ./chart/auth-operator --debug
+
+      - name: Verify rendered RBAC permissions
+        run: make verify-helm-rbac
 
       - name: Validate with custom values
         run: |
@@ -104,7 +107,7 @@ jobs:
           fetch-depth: 0
 
       - name: Load versions from versions.env
-        run: grep -v '^#' versions.env | grep -v '^$' >> $GITHUB_ENV
+        run: grep -v '^#' versions.env | grep -v '^$' >> "$GITHUB_ENV"
 
       - name: Extract Go version from toolchain or go directive
         id: go-version
@@ -113,7 +116,7 @@ jobs:
           if [ -z "$VERSION" ]; then
             VERSION=$(grep -E '^go [0-9]' go.mod | awk '{print $2}')
           fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Setup Go
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0

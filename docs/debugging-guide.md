@@ -332,6 +332,57 @@ kubectl get namespace <ns> --show-labels
 
 ---
 
+## Restricted CRD Troubleshooting
+
+### PolicyCompliance Failures (RestrictedRoleDefinition / RestrictedBindDefinition)
+
+**Symptoms:**
+- `PolicyCompliant=False`
+- `Ready=False` with deprovisioning message
+- `status.policyViolations` contains violation entries
+
+**Diagnostics:**
+
+```bash
+# Inspect policy compliance condition and violation details
+kubectl get restrictedroledefinition <name> -o jsonpath='{.status.conditions[?(@.type=="PolicyCompliant")]}' | jq .
+kubectl get restrictedbinddefinition <name> -o jsonpath='{.status.conditions[?(@.type=="PolicyCompliant")]}' | jq .
+
+kubectl get restrictedroledefinition <name> -o jsonpath='{.status.policyViolations}' | jq .
+kubectl get restrictedbinddefinition <name> -o jsonpath='{.status.policyViolations}' | jq .
+
+# Confirm referenced policy exists
+kubectl get rbacpolicy <policy-name>
+```
+
+**Common Causes:**
+
+| Issue | Solution |
+|-------|----------|
+| Forbidden verbs/resources configured in policy | Remove violating refs in restricted resource or update policy |
+| Namespace outside policy scope | Adjust `roleBindings.namespace` / `namespaceSelector` or update policy scope |
+| Referenced policy missing | Recreate policy or update `spec.policyRef.name` (requires recreating resource due to immutability) |
+
+### RBACPolicy Deletion Blocked
+
+**Symptoms:**
+- `kubectl delete rbacpolicy <name>` returns forbidden error
+
+**Diagnostics:**
+
+```bash
+# Find restricted resources still referencing the policy
+kubectl get restrictedbinddefinitions,restrictedroledefinitions -o json | \
+  jq '.items[] | select(.spec.policyRef.name=="<policy-name>") | .kind + "/" + .metadata.name'
+```
+
+**Resolution:**
+
+1. Delete or migrate all referencing restricted resources.
+2. Retry deleting the policy.
+
+---
+
 ## Certificate Issues
 
 ### TLS Certificate Errors
@@ -560,6 +611,23 @@ kubectl get binddefinition <name> -o jsonpath='{.status.missingRoleRefs}'
 
 Create the missing role (e.g., via RoleDefinition) or remove the reference.
 
+### RestrictedBindDefinition shows ServiceAccountRefsReady=False
+
+One or more ServiceAccount subjects were not included in generated bindings
+because they do not currently exist and could not be created safely. Check the
+condition and skipped subject list:
+
+```bash
+kubectl get restrictedbinddefinition <name> -o jsonpath='{.status.conditions[?(@.type=="ServiceAccountRefsReady")]}'
+kubectl get restrictedbinddefinition <name> -o jsonpath='{.status.skippedServiceAccounts}'
+```
+
+Each skipped entry is reported as `<namespace>/<name>: <reason>`, for example
+`auto-create disabled`, `namespace not found`, `namespace is terminating`, or
+`namespace not allowed by policy`. Enable ServiceAccount auto-creation in the
+referenced RBACPolicy, create the ServiceAccount yourself, or adjust the
+creation namespace policy.
+
 ### "SSA apply failed" / "conflict with field manager"
 
 Another controller or manual edit is competing for ownership of a field
@@ -600,6 +668,16 @@ This is expected behavior. The operator creates bindings regardless of whether
 all referenced roles exist (`missing-role-policy=warn` by default). Users
 bound to missing roles simply have no permissions from those roles. The
 `missingRoleRefs` status field lists the unresolved references.
+
+### RestrictedBindDefinition Ready=False with missingRoleRefs and skippedServiceAccounts
+
+RestrictedBindDefinition reports role-reference and ServiceAccount readiness
+independently. Inspect both fields:
+
+```bash
+kubectl get restrictedbinddefinition <name> -o jsonpath='{.status.missingRoleRefs}'
+kubectl get restrictedbinddefinition <name> -o jsonpath='{.status.skippedServiceAccounts}'
+```
 
 ### Namespace labels changed but RoleBindings not updated
 

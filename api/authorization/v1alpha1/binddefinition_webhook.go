@@ -31,6 +31,47 @@ var supportedSubjectKinds = []string{rbacv1.UserKind, rbacv1.GroupKind, rbacv1.S
 
 var _ admission.Validator[*BindDefinition] = &BindDefinitionValidator{}
 
+// checkRoleExists checks whether a Role exists in the given namespace, using
+// roleCache to avoid redundant lookups. It returns an error on API failures;
+// on NotFound the missing ref is appended to *missingRoles and nil is returned.
+func (v *BindDefinitionValidator) checkRoleExists(
+	ctx context.Context,
+	namespace, roleRef, bdName string,
+	policy MissingRolePolicy,
+	roleCache map[string]bool,
+	missingRoles *[]string,
+) error {
+	logger := log.FromContext(ctx)
+	roleKey := namespace + "/" + roleRef
+	if exists, checked := roleCache[roleKey]; checked {
+		if !exists {
+			ref := fmt.Sprintf("Role/%s/%s", namespace, roleRef)
+			if !slices.Contains(*missingRoles, ref) {
+				*missingRoles = append(*missingRoles, ref)
+			}
+		}
+		return nil
+	}
+	role := &rbacv1.Role{}
+	key := client.ObjectKey{Namespace: namespace, Name: roleRef}
+	if err := v.Client.Get(ctx, key, role); err != nil {
+		if apierrors.IsNotFound(err) {
+			roleCache[roleKey] = false
+			logger.Info("role not found",
+				"name", bdName, "roleName", roleRef, "namespace", namespace, "policy", string(policy))
+			ref := fmt.Sprintf("Role/%s/%s", namespace, roleRef)
+			if !slices.Contains(*missingRoles, ref) {
+				*missingRoles = append(*missingRoles, ref)
+			}
+			return nil
+		}
+		logger.Error(err, "failed to fetch role", "roleName", roleRef, "namespace", namespace)
+		return fmt.Errorf("error fetching role '%s' in namespace '%s': %w", roleRef, namespace, err)
+	}
+	roleCache[roleKey] = true
+	return nil
+}
+
 // SetupWebhookWithManager will setup the manager to manage the webhooks.
 func (r *BindDefinition) SetupWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr, r).
@@ -46,10 +87,15 @@ func (r *BindDefinition) SetupWebhookWithManager(mgr ctrl.Manager) error {
 // "ignore", role checks are skipped entirely. The controller will also handle missing
 // roles during reconciliation and set appropriate conditions.
 func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context, r *BindDefinition) (admission.Warnings, error) {
+	ctx, cancel := context.WithTimeout(ctx, WebhookCacheTimeout)
+	defer cancel()
+
 	logger := log.FromContext(ctx).WithName("binddefinition-webhook")
 	var warnings admission.Warnings
 
-	// Use field index for efficient lookup by TargetName
+	// Use field index for efficient lookup by TargetName. The field index constrains
+	// results to the small set matching this targetName; the context timeout provides
+	// the hard latency bound.
 	bindDefinitionList := &BindDefinitionList{}
 	if err := v.Client.List(ctx, bindDefinitionList, client.MatchingFields{
 		TargetNameField: r.Spec.TargetName,
@@ -64,8 +110,21 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 		if bindDefinition.Name != r.Name {
 			logger.Info("validation failed: duplicate targetName",
 				"name", r.Name, "targetName", r.Spec.TargetName, "conflictsWith", bindDefinition.Name)
-			return nil, apierrors.NewBadRequest(fmt.Sprintf("targetName %s already exists in BindDefinition %s", r.Spec.TargetName, bindDefinition.Name))
+			return nil, apierrors.NewBadRequest(fmt.Sprintf("targetName %s is already in use by BindDefinition %q", r.Spec.TargetName, bindDefinition.Name))
 		}
+	}
+
+	// Check for cross-type targetName collision with RestrictedBindDefinitions (only need first match).
+	rbdList := &RestrictedBindDefinitionList{}
+	if err := v.Client.List(ctx, rbdList, client.MatchingFields{
+		TargetNameField: r.Spec.TargetName,
+	}, client.Limit(1)); err != nil {
+		logger.Error(err, "failed to list RestrictedBindDefinitions", "targetName", r.Spec.TargetName)
+		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RestrictedBindDefinitions: %w", err))
+	}
+	for _, existing := range rbdList.Items {
+		return nil, apierrors.NewBadRequest(
+			fmt.Sprintf("targetName %s is already in use by RestrictedBindDefinition %q", r.Spec.TargetName, existing.Name))
 	}
 
 	// Validate subject Kinds are one of the RBAC-supported types.
@@ -84,19 +143,9 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 	// Determine the missing-role policy from annotation.
 	policy := r.GetMissingRolePolicy()
 
-	// Always validate namespace selector syntax, regardless of missing-role policy.
-	// Invalid selectors are a configuration error and must not be silently ignored.
-	for _, roleBinding := range r.Spec.RoleBindings {
-		for _, nsSelector := range roleBinding.NamespaceSelector {
-			if isLabelSelectorEmpty(&nsSelector) {
-				continue
-			}
-			if _, err := metav1.LabelSelectorAsSelector(&nsSelector); err != nil {
-				logger.Info("validation failed: invalid namespaceSelector",
-					"name", r.Name, "error", err.Error())
-				return warnings, apierrors.NewBadRequest(fmt.Sprintf("invalid namespaceSelector: %v", err))
-			}
-		}
+	if err := validateNamespaceBindings(schema.GroupKind{Group: GroupVersion.Group, Kind: "BindDefinition"}, r.Name, r.Spec.RoleBindings); err != nil {
+		logger.Info("validation failed: invalid roleBindings", "name", r.Name, "error", err.Error())
+		return warnings, err
 	}
 
 	if policy == MissingRolePolicyIgnore {
@@ -105,11 +154,26 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 	blockOnMissing := policy == MissingRolePolicyError
 	var missingRoles []string
 
+	// Cache existence results to avoid redundant informer-cache lookups
+	// when the same role is referenced in multiple roleBinding entries.
+	clusterRoleExists := make(map[string]bool) // name → exists
+	roleExists := make(map[string]bool)        // "namespace/name" → exists
+
 	// Validate ClusterRoleRefs in cluster-scoped bindings
 	for _, clusterRoleRef := range r.Spec.ClusterRoleBindings.ClusterRoleRefs {
+		if exists, checked := clusterRoleExists[clusterRoleRef]; checked {
+			if !exists {
+				ref := fmt.Sprintf("ClusterRole/%s", clusterRoleRef)
+				if !slices.Contains(missingRoles, ref) {
+					missingRoles = append(missingRoles, ref)
+				}
+			}
+			continue
+		}
 		clusterRole := &rbacv1.ClusterRole{}
 		if err := v.Client.Get(ctx, client.ObjectKey{Name: clusterRoleRef}, clusterRole); err != nil {
 			if apierrors.IsNotFound(err) {
+				clusterRoleExists[clusterRoleRef] = false
 				logger.Info("clusterrole not found",
 					"name", r.Name, "clusterRoleName", clusterRoleRef, "policy", string(policy))
 				ref := fmt.Sprintf("ClusterRole/%s", clusterRoleRef)
@@ -118,17 +182,29 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 				}
 			} else {
 				logger.Error(err, "failed to fetch clusterrole", "clusterRoleName", clusterRoleRef)
-				return warnings, apierrors.NewInternalError(fmt.Errorf("error fetching clusterrole '%s': %w", clusterRoleRef, err))
+				return warnings, apierrors.NewInternalError(fmt.Errorf("unable to fetch ClusterRole: %w", err))
 			}
+		} else {
+			clusterRoleExists[clusterRoleRef] = true
 		}
 	}
 
 	for _, roleBinding := range r.Spec.RoleBindings {
 		// Validate ClusterRoleRefs in namespaced bindings
 		for _, clusterRoleRef := range roleBinding.ClusterRoleRefs {
+			if exists, checked := clusterRoleExists[clusterRoleRef]; checked {
+				if !exists {
+					ref := fmt.Sprintf("ClusterRole/%s", clusterRoleRef)
+					if !slices.Contains(missingRoles, ref) {
+						missingRoles = append(missingRoles, ref)
+					}
+				}
+				continue
+			}
 			clusterRole := &rbacv1.ClusterRole{}
 			if err := v.Client.Get(ctx, client.ObjectKey{Name: clusterRoleRef}, clusterRole); err != nil {
 				if apierrors.IsNotFound(err) {
+					clusterRoleExists[clusterRoleRef] = false
 					logger.Info("clusterrole not found",
 						"name", r.Name, "clusterRoleName", clusterRoleRef, "policy", string(policy))
 					ref := fmt.Sprintf("ClusterRole/%s", clusterRoleRef)
@@ -137,8 +213,10 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 					}
 				} else {
 					logger.Error(err, "failed to fetch clusterrole", "clusterRoleName", clusterRoleRef)
-					return warnings, apierrors.NewInternalError(fmt.Errorf("error fetching clusterrole '%s': %w", clusterRoleRef, err))
+					return warnings, apierrors.NewInternalError(fmt.Errorf("unable to fetch ClusterRole: %w", err))
 				}
+			} else {
+				clusterRoleExists[clusterRoleRef] = true
 			}
 		}
 
@@ -182,23 +260,10 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 					continue
 				}
 				for _, roleRef := range roleBinding.RoleRefs {
-					role := &rbacv1.Role{}
-					key := client.ObjectKey{
-						Namespace: ns.Name,
-						Name:      roleRef,
-					}
-					if err := v.Client.Get(ctx, key, role); err != nil {
-						if apierrors.IsNotFound(err) {
-							logger.Info("role not found",
-								"name", r.Name, "roleName", roleRef, "namespace", ns.Name, "policy", string(policy))
-							ref := fmt.Sprintf("Role/%s/%s", ns.Name, roleRef)
-							if !slices.Contains(missingRoles, ref) {
-								missingRoles = append(missingRoles, ref)
-							}
-						} else {
-							logger.Error(err, "failed to fetch role", "roleName", roleRef, "namespace", ns.Name)
-							return warnings, apierrors.NewInternalError(fmt.Errorf("error fetching role '%s' in namespace '%s': %w", roleRef, ns.Name, err))
-						}
+					if err := v.checkRoleExists(ctx, ns.Name, roleRef, r.Name, policy, roleExists, &missingRoles); err != nil {
+						logger.Error(err, "failed to validate role reference",
+							"name", r.Name, "namespace", ns.Name, "roleName", roleRef)
+						return warnings, apierrors.NewInternalError(fmt.Errorf("unable to validate role reference: %w", err))
 					}
 				}
 			}
@@ -214,29 +279,16 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 					continue
 				}
 				logger.Error(err, "failed to get namespace", "namespace", roleBinding.Namespace)
-				return warnings, apierrors.NewInternalError(fmt.Errorf("error fetching namespace %q: %w", roleBinding.Namespace, err))
+				return warnings, apierrors.NewInternalError(fmt.Errorf("unable to get namespace: %w", err))
 			}
 			if ns.Status.Phase == corev1.NamespaceTerminating {
 				continue
 			}
 			for _, roleRef := range roleBinding.RoleRefs {
-				role := &rbacv1.Role{}
-				key := client.ObjectKey{
-					Namespace: roleBinding.Namespace,
-					Name:      roleRef,
-				}
-				if err := v.Client.Get(ctx, key, role); err != nil {
-					if apierrors.IsNotFound(err) {
-						logger.Info("role not found",
-							"name", r.Name, "roleName", roleRef, "namespace", roleBinding.Namespace, "policy", string(policy))
-						ref := fmt.Sprintf("Role/%s/%s", roleBinding.Namespace, roleRef)
-						if !slices.Contains(missingRoles, ref) {
-							missingRoles = append(missingRoles, ref)
-						}
-					} else {
-						logger.Error(err, "failed to fetch role", "roleName", roleRef, "namespace", roleBinding.Namespace)
-						return warnings, apierrors.NewInternalError(fmt.Errorf("error fetching role '%s' in namespace '%s': %w", roleRef, roleBinding.Namespace, err))
-					}
+				if err := v.checkRoleExists(ctx, roleBinding.Namespace, roleRef, r.Name, policy, roleExists, &missingRoles); err != nil {
+					logger.Error(err, "failed to validate role reference",
+						"name", r.Name, "namespace", roleBinding.Namespace, "roleName", roleRef)
+					return warnings, apierrors.NewInternalError(fmt.Errorf("unable to validate role reference: %w", err))
 				}
 			}
 		}
@@ -302,4 +354,44 @@ func (v *BindDefinitionValidator) ValidateDelete(ctx context.Context, obj *BindD
 // More efficient than using reflect.DeepEqual.
 func isLabelSelectorEmpty(selector *metav1.LabelSelector) bool {
 	return selector == nil || (len(selector.MatchLabels) == 0 && len(selector.MatchExpressions) == 0)
+}
+
+func validateNamespaceBindings(kind schema.GroupKind, name string, bindings []NamespaceBinding) error {
+	for i, binding := range bindings {
+		if (len(binding.ClusterRoleRefs) > 0 || len(binding.RoleRefs) > 0) &&
+			binding.Namespace == "" &&
+			len(binding.NamespaceSelector) == 0 {
+			return apierrors.NewInvalid(
+				kind,
+				name,
+				field.ErrorList{field.Required(
+					field.NewPath("spec", "roleBindings").Index(i).Child("namespace"),
+					"roleBindings entries with role refs must specify namespace or namespaceSelector")})
+		}
+		for j, roleRef := range binding.RoleRefs {
+			if slices.Contains(binding.ClusterRoleRefs, roleRef) {
+				return apierrors.NewInvalid(
+					kind,
+					name,
+					field.ErrorList{field.Duplicate(
+						field.NewPath("spec", "roleBindings").Index(i).Child("roleRefs").Index(j),
+						roleRef)})
+			}
+		}
+		for j, selector := range binding.NamespaceSelector {
+			if isLabelSelectorEmpty(&selector) {
+				continue
+			}
+			if _, err := metav1.LabelSelectorAsSelector(&selector); err != nil {
+				return apierrors.NewInvalid(
+					kind,
+					name,
+					field.ErrorList{field.Invalid(
+						field.NewPath("spec", "roleBindings").Index(i).Child("namespaceSelector").Index(j),
+						selector,
+						err.Error())})
+			}
+		}
+	}
+	return nil
 }

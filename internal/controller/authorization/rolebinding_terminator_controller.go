@@ -36,7 +36,7 @@ import (
 )
 
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions,verbs=get;list
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete;escalate
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=namespaces/status,verbs=get;update
@@ -492,6 +492,7 @@ func (r *RoleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request)
 			logger.V(1).Info("blocking resource found", "namespace", namespace.Name, "resourceType", resourceType, "count", br.Count, "names", br.Names)
 		}
 
+		old := namespace.DeepCopy()
 		conditions.MarkTrue(
 			conditions.NewNamespaceWrapper(&namespace),
 			authorizationv1alpha1.NamespaceTerminationBlockedCondition,
@@ -499,9 +500,9 @@ func (r *RoleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request)
 			authorizationv1alpha1.NamespaceTerminationBlockedReason,
 			conditions.ConditionMessage(fmt.Sprintf("%s: %s", authorizationv1alpha1.NamespaceTerminationBlockedMessage, formatBlockingResourcesMessage(blockingResources))),
 		)
-		// Best-effort status update on Namespace (core type) — SSA migration deferred.
-		// Low conflict risk: runs only during namespace termination, errors are non-fatal.
-		if err := r.client.Status().Update(ctx, &namespace); err != nil {
+		// Best-effort status patch on Namespace (core type) — SSA migration deferred.
+		// Uses optimistic lock to avoid overwriting concurrent updates.
+		if err := r.client.Status().Patch(ctx, &namespace, client.MergeFromWithOptions(old, client.MergeFromWithOptimisticLock{})); err != nil {
 			logger.Error(err, "Failed to update Namespace status with blocking resources information", "namespace", namespace.Name)
 		}
 
@@ -540,6 +541,7 @@ func (r *RoleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request)
 		logger.V(3).Info("RoleBinding does not have finalizer", "roleBindingName", roleBinding.Name)
 	}
 
+	oldNS := namespace.DeepCopy()
 	conditions.MarkFalse(
 		conditions.NewNamespaceWrapper(&namespace),
 		authorizationv1alpha1.NamespaceTerminationBlockedCondition,
@@ -547,9 +549,9 @@ func (r *RoleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request)
 		authorizationv1alpha1.NamespaceTerminationAllowedReason,
 		authorizationv1alpha1.NamespaceTerminationAllowedMessage,
 	)
-	// Best-effort status update on Namespace (core type) — SSA migration deferred.
-	// Low conflict risk: runs only during namespace termination, errors are non-fatal.
-	if err := r.client.Status().Update(ctx, &namespace); err != nil {
+	// Best-effort status patch on Namespace (core type) — SSA migration deferred.
+	// Uses optimistic lock to avoid overwriting concurrent updates.
+	if err := r.client.Status().Patch(ctx, &namespace, client.MergeFromWithOptions(oldNS, client.MergeFromWithOptimisticLock{})); err != nil {
 		logger.Error(err, "failed to update Namespace status with blocking resources information", "namespace", namespace.Name)
 	}
 

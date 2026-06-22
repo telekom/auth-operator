@@ -18,7 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
-	authv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/api/authorization/v1alpha1/applyconfiguration/ssa"
 	pkgssa "github.com/telekom/auth-operator/pkg/ssa"
 )
@@ -30,7 +30,7 @@ func TestSSA(t *testing.T) {
 
 func newTestScheme() *runtime.Scheme {
 	scheme := runtime.NewScheme()
-	err := authv1alpha1.AddToScheme(scheme)
+	err := authorizationv1alpha1.AddToScheme(scheme)
 	Expect(err).NotTo(HaveOccurred())
 	return scheme
 }
@@ -46,16 +46,16 @@ var _ = Describe("SSA Status Apply Functions", func() {
 		It("should successfully apply status to an existing RoleDefinition", func() {
 			scheme := newTestScheme()
 
-			rd := &authv1alpha1.RoleDefinition{
+			rd := &authorizationv1alpha1.RoleDefinition{
 				TypeMeta: metav1.TypeMeta{
-					APIVersion: authv1alpha1.GroupVersion.String(),
+					APIVersion: authorizationv1alpha1.GroupVersion.String(),
 					Kind:       "RoleDefinition",
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-roledefinition",
 				},
-				Spec: authv1alpha1.RoleDefinitionSpec{
-					TargetRole: authv1alpha1.DefinitionClusterRole,
+				Spec: authorizationv1alpha1.RoleDefinitionSpec{
+					TargetRole: authorizationv1alpha1.DefinitionClusterRole,
 					TargetName: "test-role",
 				},
 			}
@@ -63,7 +63,7 @@ var _ = Describe("SSA Status Apply Functions", func() {
 			c := fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithObjects(rd).
-				WithStatusSubresource(&authv1alpha1.RoleDefinition{}).
+				WithStatusSubresource(&authorizationv1alpha1.RoleDefinition{}).
 				Build()
 
 			// Update status
@@ -82,7 +82,7 @@ var _ = Describe("SSA Status Apply Functions", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Verify the status was updated
-			var updated authv1alpha1.RoleDefinition
+			var updated authorizationv1alpha1.RoleDefinition
 			err = c.Get(context.Background(), client.ObjectKeyFromObject(rd), &updated)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(updated.Status.RoleReconciled).To(BeTrue())
@@ -98,7 +98,7 @@ var _ = Describe("SSA Status Apply Functions", func() {
 			// SubResource("status").Apply on a non-existent parent returns NotFound.
 			c := fake.NewClientBuilder().
 				WithScheme(scheme).
-				WithStatusSubresource(&authv1alpha1.RoleDefinition{}).
+				WithStatusSubresource(&authorizationv1alpha1.RoleDefinition{}).
 				WithInterceptorFuncs(interceptor.Funcs{
 					SubResourceApply: func(_ context.Context, _ client.Client, _ string, _ runtime.ApplyConfiguration, _ ...client.SubResourceApplyOption) error {
 						return fmt.Errorf("roledefinitions \"non-existent\" not found")
@@ -106,11 +106,11 @@ var _ = Describe("SSA Status Apply Functions", func() {
 				}).
 				Build()
 
-			rd := &authv1alpha1.RoleDefinition{
+			rd := &authorizationv1alpha1.RoleDefinition{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "non-existent",
 				},
-				Status: authv1alpha1.RoleDefinitionStatus{
+				Status: authorizationv1alpha1.RoleDefinitionStatus{
 					RoleReconciled: true,
 				},
 			}
@@ -124,19 +124,19 @@ var _ = Describe("SSA Status Apply Functions", func() {
 		It("should update existing status with new conditions", func() {
 			scheme := newTestScheme()
 
-			rd := &authv1alpha1.RoleDefinition{
+			rd := &authorizationv1alpha1.RoleDefinition{
 				TypeMeta: metav1.TypeMeta{
-					APIVersion: authv1alpha1.GroupVersion.String(),
+					APIVersion: authorizationv1alpha1.GroupVersion.String(),
 					Kind:       "RoleDefinition",
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-roledefinition",
 				},
-				Spec: authv1alpha1.RoleDefinitionSpec{
-					TargetRole: authv1alpha1.DefinitionClusterRole,
+				Spec: authorizationv1alpha1.RoleDefinitionSpec{
+					TargetRole: authorizationv1alpha1.DefinitionClusterRole,
 					TargetName: "test-role",
 				},
-				Status: authv1alpha1.RoleDefinitionStatus{
+				Status: authorizationv1alpha1.RoleDefinitionStatus{
 					RoleReconciled: false,
 					Conditions: []metav1.Condition{
 						{
@@ -153,7 +153,7 @@ var _ = Describe("SSA Status Apply Functions", func() {
 			c := fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithObjects(rd).
-				WithStatusSubresource(&authv1alpha1.RoleDefinition{}).
+				WithStatusSubresource(&authorizationv1alpha1.RoleDefinition{}).
 				Build()
 
 			// First update
@@ -166,7 +166,7 @@ var _ = Describe("SSA Status Apply Functions", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Verify first update
-			var updated authv1alpha1.RoleDefinition
+			var updated authorizationv1alpha1.RoleDefinition
 			err = c.Get(context.Background(), client.ObjectKeyFromObject(rd), &updated)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(updated.Status.RoleReconciled).To(BeTrue())
@@ -184,7 +184,7 @@ var _ = Describe("SSA Status Apply Functions", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Verify second update
-			var finalUpdated authv1alpha1.RoleDefinition
+			var finalUpdated authorizationv1alpha1.RoleDefinition
 			err = c.Get(context.Background(), client.ObjectKeyFromObject(rd), &finalUpdated)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(finalUpdated.Status.Conditions).To(HaveLen(2))
@@ -195,15 +195,15 @@ var _ = Describe("SSA Status Apply Functions", func() {
 		It("should successfully apply status with service accounts", func() {
 			scheme := newTestScheme()
 
-			bd := &authv1alpha1.BindDefinition{
+			bd := &authorizationv1alpha1.BindDefinition{
 				TypeMeta: metav1.TypeMeta{
-					APIVersion: authv1alpha1.GroupVersion.String(),
+					APIVersion: authorizationv1alpha1.GroupVersion.String(),
 					Kind:       "BindDefinition",
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-binddefinition",
 				},
-				Spec: authv1alpha1.BindDefinitionSpec{
+				Spec: authorizationv1alpha1.BindDefinitionSpec{
 					TargetName: "test-binding",
 					Subjects: []rbacv1.Subject{
 						{Kind: "User", Name: "test-user", APIGroup: rbacv1.GroupName},
@@ -214,7 +214,7 @@ var _ = Describe("SSA Status Apply Functions", func() {
 			c := fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithObjects(bd).
-				WithStatusSubresource(&authv1alpha1.BindDefinition{}).
+				WithStatusSubresource(&authorizationv1alpha1.BindDefinition{}).
 				Build()
 
 			// Update status
@@ -236,7 +236,7 @@ var _ = Describe("SSA Status Apply Functions", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Verify the status was updated
-			var updated authv1alpha1.BindDefinition
+			var updated authorizationv1alpha1.BindDefinition
 			err = c.Get(context.Background(), client.ObjectKeyFromObject(bd), &updated)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(updated.Status.BindReconciled).To(BeTrue())
@@ -253,7 +253,7 @@ var _ = Describe("SSA Status Apply Functions", func() {
 			// SubResource("status").Apply on a non-existent parent returns NotFound.
 			c := fake.NewClientBuilder().
 				WithScheme(scheme).
-				WithStatusSubresource(&authv1alpha1.BindDefinition{}).
+				WithStatusSubresource(&authorizationv1alpha1.BindDefinition{}).
 				WithInterceptorFuncs(interceptor.Funcs{
 					SubResourceApply: func(_ context.Context, _ client.Client, _ string, _ runtime.ApplyConfiguration, _ ...client.SubResourceApplyOption) error {
 						return fmt.Errorf("binddefinitions \"non-existent\" not found")
@@ -261,11 +261,11 @@ var _ = Describe("SSA Status Apply Functions", func() {
 				}).
 				Build()
 
-			bd := &authv1alpha1.BindDefinition{
+			bd := &authorizationv1alpha1.BindDefinition{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "non-existent",
 				},
-				Status: authv1alpha1.BindDefinitionStatus{
+				Status: authorizationv1alpha1.BindDefinitionStatus{
 					BindReconciled: true,
 				},
 			}
@@ -279,15 +279,15 @@ var _ = Describe("SSA Status Apply Functions", func() {
 		It("should handle multiple conditions", func() {
 			scheme := newTestScheme()
 
-			bd := &authv1alpha1.BindDefinition{
+			bd := &authorizationv1alpha1.BindDefinition{
 				TypeMeta: metav1.TypeMeta{
-					APIVersion: authv1alpha1.GroupVersion.String(),
+					APIVersion: authorizationv1alpha1.GroupVersion.String(),
 					Kind:       "BindDefinition",
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-binddefinition",
 				},
-				Spec: authv1alpha1.BindDefinitionSpec{
+				Spec: authorizationv1alpha1.BindDefinitionSpec{
 					TargetName: "test-binding",
 					Subjects: []rbacv1.Subject{
 						{Kind: "User", Name: "test-user", APIGroup: rbacv1.GroupName},
@@ -298,7 +298,7 @@ var _ = Describe("SSA Status Apply Functions", func() {
 			c := fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithObjects(bd).
-				WithStatusSubresource(&authv1alpha1.BindDefinition{}).
+				WithStatusSubresource(&authorizationv1alpha1.BindDefinition{}).
 				Build()
 
 			// Set multiple conditions
@@ -330,7 +330,7 @@ var _ = Describe("SSA Status Apply Functions", func() {
 			err := ssa.ApplyBindDefinitionStatus(context.Background(), c, bd)
 			Expect(err).NotTo(HaveOccurred())
 
-			var updated authv1alpha1.BindDefinition
+			var updated authorizationv1alpha1.BindDefinition
 			err = c.Get(context.Background(), client.ObjectKeyFromObject(bd), &updated)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(updated.Status.BindReconciled).To(BeTrue())
@@ -342,21 +342,21 @@ var _ = Describe("SSA Status Apply Functions", func() {
 		It("should successfully apply status", func() {
 			scheme := newTestScheme()
 
-			wa := &authv1alpha1.WebhookAuthorizer{
+			wa := &authorizationv1alpha1.WebhookAuthorizer{
 				TypeMeta: metav1.TypeMeta{
-					APIVersion: authv1alpha1.GroupVersion.String(),
+					APIVersion: authorizationv1alpha1.GroupVersion.String(),
 					Kind:       "WebhookAuthorizer",
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-webhookauthorizer",
 				},
-				Spec: authv1alpha1.WebhookAuthorizerSpec{},
+				Spec: authorizationv1alpha1.WebhookAuthorizerSpec{},
 			}
 
 			c := fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithObjects(wa).
-				WithStatusSubresource(&authv1alpha1.WebhookAuthorizer{}).
+				WithStatusSubresource(&authorizationv1alpha1.WebhookAuthorizer{}).
 				Build()
 
 			// Update status
@@ -375,7 +375,7 @@ var _ = Describe("SSA Status Apply Functions", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Verify the status was updated
-			var updated authv1alpha1.WebhookAuthorizer
+			var updated authorizationv1alpha1.WebhookAuthorizer
 			err = c.Get(context.Background(), client.ObjectKeyFromObject(wa), &updated)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(updated.Status.AuthorizerConfigured).To(BeTrue())
@@ -387,19 +387,19 @@ var _ = Describe("SSA Status Apply Functions", func() {
 		It("should skip apply when status is unchanged", func() {
 			scheme := newTestScheme()
 
-			rd := &authv1alpha1.RoleDefinition{
+			rd := &authorizationv1alpha1.RoleDefinition{
 				TypeMeta: metav1.TypeMeta{
-					APIVersion: authv1alpha1.GroupVersion.String(),
+					APIVersion: authorizationv1alpha1.GroupVersion.String(),
 					Kind:       "RoleDefinition",
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-rd-skip",
 				},
-				Spec: authv1alpha1.RoleDefinitionSpec{
-					TargetRole: authv1alpha1.DefinitionClusterRole,
+				Spec: authorizationv1alpha1.RoleDefinitionSpec{
+					TargetRole: authorizationv1alpha1.DefinitionClusterRole,
 					TargetName: "skip-role",
 				},
-				Status: authv1alpha1.RoleDefinitionStatus{
+				Status: authorizationv1alpha1.RoleDefinitionStatus{
 					RoleReconciled: true,
 					Conditions: []metav1.Condition{
 						{
@@ -415,7 +415,7 @@ var _ = Describe("SSA Status Apply Functions", func() {
 			c := fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithObjects(rd).
-				WithStatusSubresource(&authv1alpha1.RoleDefinition{}).
+				WithStatusSubresource(&authorizationv1alpha1.RoleDefinition{}).
 				Build()
 
 			// Apply the same status — should be skipped.
@@ -427,19 +427,19 @@ var _ = Describe("SSA Status Apply Functions", func() {
 		It("should apply when status has changed", func() {
 			scheme := newTestScheme()
 
-			rd := &authv1alpha1.RoleDefinition{
+			rd := &authorizationv1alpha1.RoleDefinition{
 				TypeMeta: metav1.TypeMeta{
-					APIVersion: authv1alpha1.GroupVersion.String(),
+					APIVersion: authorizationv1alpha1.GroupVersion.String(),
 					Kind:       "RoleDefinition",
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-rd-change",
 				},
-				Spec: authv1alpha1.RoleDefinitionSpec{
-					TargetRole: authv1alpha1.DefinitionClusterRole,
+				Spec: authorizationv1alpha1.RoleDefinitionSpec{
+					TargetRole: authorizationv1alpha1.DefinitionClusterRole,
 					TargetName: "change-role",
 				},
-				Status: authv1alpha1.RoleDefinitionStatus{
+				Status: authorizationv1alpha1.RoleDefinitionStatus{
 					RoleReconciled: false,
 				},
 			}
@@ -447,7 +447,7 @@ var _ = Describe("SSA Status Apply Functions", func() {
 			c := fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithObjects(rd).
-				WithStatusSubresource(&authv1alpha1.RoleDefinition{}).
+				WithStatusSubresource(&authorizationv1alpha1.RoleDefinition{}).
 				Build()
 
 			// Update status — should not be skipped.
@@ -462,21 +462,21 @@ var _ = Describe("SSA Status Apply Functions", func() {
 		It("should skip apply when status is unchanged", func() {
 			scheme := newTestScheme()
 
-			bd := &authv1alpha1.BindDefinition{
+			bd := &authorizationv1alpha1.BindDefinition{
 				TypeMeta: metav1.TypeMeta{
-					APIVersion: authv1alpha1.GroupVersion.String(),
+					APIVersion: authorizationv1alpha1.GroupVersion.String(),
 					Kind:       "BindDefinition",
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-bd-skip",
 				},
-				Spec: authv1alpha1.BindDefinitionSpec{
+				Spec: authorizationv1alpha1.BindDefinitionSpec{
 					TargetName: "skip-binding",
 					Subjects: []rbacv1.Subject{
 						{Kind: "User", Name: "u", APIGroup: rbacv1.GroupName},
 					},
 				},
-				Status: authv1alpha1.BindDefinitionStatus{
+				Status: authorizationv1alpha1.BindDefinitionStatus{
 					BindReconciled: true,
 					GeneratedServiceAccounts: []rbacv1.Subject{
 						{Kind: "ServiceAccount", Name: "sa1", Namespace: "ns1"},
@@ -495,7 +495,7 @@ var _ = Describe("SSA Status Apply Functions", func() {
 			c := fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithObjects(bd).
-				WithStatusSubresource(&authv1alpha1.BindDefinition{}).
+				WithStatusSubresource(&authorizationv1alpha1.BindDefinition{}).
 				Build()
 
 			result, err := ssa.PatchApplyBindDefinitionStatus(context.Background(), c, bd)
@@ -506,21 +506,21 @@ var _ = Describe("SSA Status Apply Functions", func() {
 		It("should apply when GeneratedServiceAccounts changed", func() {
 			scheme := newTestScheme()
 
-			bd := &authv1alpha1.BindDefinition{
+			bd := &authorizationv1alpha1.BindDefinition{
 				TypeMeta: metav1.TypeMeta{
-					APIVersion: authv1alpha1.GroupVersion.String(),
+					APIVersion: authorizationv1alpha1.GroupVersion.String(),
 					Kind:       "BindDefinition",
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-bd-change",
 				},
-				Spec: authv1alpha1.BindDefinitionSpec{
+				Spec: authorizationv1alpha1.BindDefinitionSpec{
 					TargetName: "change-binding",
 					Subjects: []rbacv1.Subject{
 						{Kind: "User", Name: "u", APIGroup: rbacv1.GroupName},
 					},
 				},
-				Status: authv1alpha1.BindDefinitionStatus{
+				Status: authorizationv1alpha1.BindDefinitionStatus{
 					BindReconciled: true,
 				},
 			}
@@ -528,7 +528,7 @@ var _ = Describe("SSA Status Apply Functions", func() {
 			c := fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithObjects(bd).
-				WithStatusSubresource(&authv1alpha1.BindDefinition{}).
+				WithStatusSubresource(&authorizationv1alpha1.BindDefinition{}).
 				Build()
 
 			bd.Status.GeneratedServiceAccounts = []rbacv1.Subject{
@@ -545,16 +545,16 @@ var _ = Describe("SSA Status Apply Functions", func() {
 		It("should skip apply when status is unchanged", func() {
 			scheme := newTestScheme()
 
-			wa := &authv1alpha1.WebhookAuthorizer{
+			wa := &authorizationv1alpha1.WebhookAuthorizer{
 				TypeMeta: metav1.TypeMeta{
-					APIVersion: authv1alpha1.GroupVersion.String(),
+					APIVersion: authorizationv1alpha1.GroupVersion.String(),
 					Kind:       "WebhookAuthorizer",
 				},
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-wa-skip",
 				},
-				Spec: authv1alpha1.WebhookAuthorizerSpec{},
-				Status: authv1alpha1.WebhookAuthorizerStatus{
+				Spec: authorizationv1alpha1.WebhookAuthorizerSpec{},
+				Status: authorizationv1alpha1.WebhookAuthorizerStatus{
 					AuthorizerConfigured: true,
 					Conditions: []metav1.Condition{
 						{
@@ -570,7 +570,7 @@ var _ = Describe("SSA Status Apply Functions", func() {
 			c := fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithObjects(wa).
-				WithStatusSubresource(&authv1alpha1.WebhookAuthorizer{}).
+				WithStatusSubresource(&authorizationv1alpha1.WebhookAuthorizer{}).
 				Build()
 
 			result, err := ssa.PatchApplyWebhookAuthorizerStatus(context.Background(), c, wa)
@@ -588,7 +588,7 @@ var _ = Describe("SSA Status Conversion Functions", func() {
 		})
 
 		It("should convert an empty status", func() {
-			status := &authv1alpha1.RoleDefinitionStatus{}
+			status := &authorizationv1alpha1.RoleDefinitionStatus{}
 			result := ssa.RoleDefinitionStatusFrom(status)
 			Expect(result).NotTo(BeNil())
 			Expect(result.RoleReconciled).NotTo(BeNil())
@@ -596,7 +596,7 @@ var _ = Describe("SSA Status Conversion Functions", func() {
 		})
 
 		It("should convert status with conditions", func() {
-			status := &authv1alpha1.RoleDefinitionStatus{
+			status := &authorizationv1alpha1.RoleDefinitionStatus{
 				RoleReconciled: true,
 				Conditions: []metav1.Condition{
 					{
@@ -632,7 +632,7 @@ var _ = Describe("SSA Status Conversion Functions", func() {
 		})
 
 		It("should convert status with service accounts", func() {
-			status := &authv1alpha1.BindDefinitionStatus{
+			status := &authorizationv1alpha1.BindDefinitionStatus{
 				BindReconciled: true,
 				GeneratedServiceAccounts: []rbacv1.Subject{
 					{Kind: "ServiceAccount", Name: "sa1", Namespace: "ns1"},
@@ -664,7 +664,7 @@ var _ = Describe("SSA Status Conversion Functions", func() {
 		})
 
 		It("should convert status with conditions", func() {
-			status := &authv1alpha1.WebhookAuthorizerStatus{
+			status := &authorizationv1alpha1.WebhookAuthorizerStatus{
 				AuthorizerConfigured: true,
 				Conditions: []metav1.Condition{
 					{

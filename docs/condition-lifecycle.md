@@ -53,7 +53,6 @@ encountered a persistent error; **absent** when healthy.
 | Status | Reason | Meaning |
 |--------|--------|---------|
 | `True` | `Error` | A reconciliation error occurred |
-| `True` | `MissingDependency` | A required dependency is missing |
 | *(deleted)* | — | Reconciliation succeeded or progressing |
 
 **Lifecycle**: Set via `MarkStalled()` on unrecoverable errors. Deleted when
@@ -231,28 +230,8 @@ the operator has cleaned up dependent resources.
 
 ## WebhookAuthorizer-Specific Conditions
 
-The WebhookAuthorizer controller reports reconciliation progress with the
-standard `Reconciling`, `Ready`, and `Stalled` conditions. It also updates
-`status.observedGeneration` and `status.authorizerConfigured`.
-
-Kubernetes admission rejects malformed rules and principal-free specs through
-CRD schema/CEL validation and the WebhookAuthorizer validation webhook before
-they are reconciled. Runtime status is therefore focused on whether the
-controller accepted the spec and whether namespace selector validation
-succeeded.
-
-The API package still exports legacy WebhookAuthorizer condition constants such
-as `RulesValid`, `NamespaceSelectorValid`, and `PrincipalConfigured` for
-compatibility. The current controller does not set those conditions.
-
-### Reconciling
-
-| Status | Reason | Message |
-|--------|--------|---------|
-| `True` | `Progressing` | Controller is reconciling the resource |
-
-Set before validation and cleared when the resource becomes `Ready` or
-`Stalled`.
+The WebhookAuthorizer controller (see issue #49) uses these conditions to
+report the health and validity of each WebhookAuthorizer resource.
 
 ### Ready
 
@@ -260,40 +239,150 @@ Overall readiness of the WebhookAuthorizer.
 
 | Status | Reason | Message |
 |--------|--------|---------|
-| `True` | `Reconciled` | Resource is fully reconciled |
-| `False` | `Progressing` | Controller is reconciling the resource |
-| `False` | `Error` | Error during reconciliation: check operator logs for details |
+| `True` | `AuthorizerReady` | All rules are valid and the authorizer is actively processing requests |
+| `False` | `InvalidRules` | One or more resource/non-resource rules are malformed: *\<detail\>* |
+| `False` | `InvalidNamespaceSelector` | The namespace selector cannot be parsed: *\<detail\>* |
+| `False` | `NoPrincipals` | Neither allowedPrincipals nor deniedPrincipals are defined |
 
-When `Ready=True`, the controller also sets
-`status.authorizerConfigured=true`.
+### RulesValid
 
-### Stalled
-
-Permanent reconciliation failure. The current controller uses this when the
-namespace selector cannot be parsed.
+Validation status of resource and non-resource rules.
 
 | Status | Reason | Message |
 |--------|--------|---------|
-| `True` | `Error` | Error during reconciliation: check operator logs for details |
+| `True` | `AllRulesValid` | All resourceRules and nonResourceRules are syntactically valid |
+| `False` | `InvalidResourceRule` | A resourceRule contains invalid API groups, resources, or verbs: *\<detail\>* |
+| `False` | `InvalidNonResourceRule` | A nonResourceRule contains invalid paths or verbs: *\<detail\>* |
 
-When `Stalled=True`, the controller sets `status.authorizerConfigured=false`
-and waits for a spec change before reconciling again.
+### NamespaceSelectorValid
 
-### authorizerConfigured
+Status of the namespace selector.
 
-`status.authorizerConfigured` is a compact readiness flag for scripts and
-JSONPath checks:
+| Status | Reason | Message |
+|--------|--------|---------|
+| `True` | `SelectorValid` | Namespace selector is parseable and matches namespaces |
+| `True` | `SelectorEmpty` | No namespace selector defined (matches all namespaces) |
+| `False` | `SelectorInvalid` | Namespace selector cannot be parsed: *\<detail\>* |
 
-| Value | Meaning |
-|-------|---------|
-| `true` | The controller reconciled the WebhookAuthorizer and marked it `Ready=True` |
-| `false` or unset | Reconciliation has not completed or the resource is stalled |
+### PrincipalConfigured
 
-### Reconciliation Sequence
+Status of principal configuration.
+
+| Status | Reason | Message |
+|--------|--------|---------|
+| `True` | `PrincipalsConfigured` | AllowedPrincipals and/or DeniedPrincipals are defined |
+| `False` | `NoPrincipalsConfigured` | No principals defined — authorizer will never match |
+| `Unknown` | `PrincipalOverlap` | A principal appears in both allowed and denied lists: *\<detail\>* |
+
+### Reconciliation Sequence (WebhookAuthorizer)
 
 ```
-Reconciling -> Ready
-Reconciling -> Stalled
+NamespaceSelectorValid → RulesValid → PrincipalConfigured → Ready
+```
+
+---
+
+## RBACPolicy Conditions
+
+RBACPolicy uses the standard kstatus conditions (`Ready`, `Stalled`).
+
+### Ready
+
+| Status | Reason | Message |
+|--------|--------|---------|
+| `True` | `Reconciled` | Reconciled successfully |
+| `False` | — | Set implicitly when Stalled is True |
+
+### Stalled
+
+| Status | Reason | Message |
+|--------|--------|---------|
+| `True` | `Error` | An error occurred; check operator logs for details |
+
+**Lifecycle**: Set when the controller fails to list or evaluate restricted
+resources during reconciliation. Cleared on the next successful reconciliation.
+
+---
+
+## Restricted CRD Conditions
+
+RestrictedRoleDefinition and RestrictedBindDefinition use the standard kstatus
+conditions (`Ready`, `Reconciling`, `Stalled`) plus these domain-specific
+conditions.
+
+### PolicyCompliant
+
+Reports whether the resource complies with its referenced RBACPolicy.
+
+| Status | Reason | Message |
+|--------|--------|---------|
+| `True` | `AllChecksPass` | All policy checks pass |
+| `False` | `ViolationsDetected` | Policy violations detected: *\<details\>* |
+| `False` | `PolicyNotFound` | Referenced RBACPolicy %q not found |
+| `False` | `PolicyScopeNotMatched` | Target namespaces are outside policy scope |
+
+**Lifecycle**: Evaluated on every reconciliation after fetching the referenced
+RBACPolicy. When violations are detected, the controller triggers
+deprovisioning of managed RBAC resources.
+
+### RoleRefsValid
+
+RestrictedBindDefinition reports whether all referenced Roles and ClusterRoles
+exist after binding resources have been reconciled.
+
+| Status | Reason | Message |
+|--------|--------|---------|
+| `True` | `RoleRefValidation` | All referenced roles exist |
+| `False` | `RoleRefNotFound` | Referenced roles not found: *\<details\>* |
+
+Missing references are also listed in `status.missingRoleRefs`.
+
+### ServiceAccountRefsReady
+
+RestrictedBindDefinition reports whether all ServiceAccount subjects are present
+or could be safely created before they are included in generated bindings.
+
+| Status | Reason | Message |
+|--------|--------|---------|
+| `True` | `ServiceAccountRefsReady` | All ServiceAccount subjects are present |
+| `False` | `ServiceAccountRefsSkipped` | Skipped ServiceAccount subjects: *\<details\>* |
+
+Skipped subjects are listed in `status.skippedServiceAccounts` as
+`<namespace>/<name>: <reason>`. The controller sets this condition independently
+from `RoleRefsValid`, so both missing role refs and skipped ServiceAccounts can
+be reported in the same reconciliation.
+
+### Deprovisioned (Policy Violation)
+
+When policy violations are detected, the controller deprovisions all managed
+RBAC resources and marks the resource as non-ready:
+
+| Condition | Status | Reason | Message |
+|-----------|--------|--------|---------|
+| `PolicyCompliant` | `False` | `ViolationsDetected` | violation details (up to 10) |
+| `Ready` | `False` | `Deprovisioned` | deprovisioned due to policy violations |
+
+If deprovision itself fails, the controller additionally sets `Stalled=True`
+to signal an operational error requiring investigation.
+
+### Reconciliation Sequence (RestrictedRoleDefinition)
+
+```
+PolicyCompliant → Discover APIs → Filter APIs → EnsureRole → Ready
+    │
+    └─ (violations) → Deprovision → Ready=False (Deprovisioned)
+```
+
+### Reconciliation Sequence (RestrictedBindDefinition)
+
+```
+Reconciling → Finalizer → FetchPolicy → PolicyCompliant
+  │
+  └─ (compliant) → EnsureServiceAccounts → EnsureBindings → ValidateRoles → Ready
+    │
+    ├─ (missing roles) → RoleRefsValid=False → Ready=False
+    ├─ (skipped ServiceAccounts) → ServiceAccountRefsReady=False → Ready=False
+    └─ (violations) → Deprovision → Ready=False (Deprovisioned)
 ```
 
 ---
@@ -342,14 +431,20 @@ kubectl get roledefinitions -o json | \
 
 ## Operational Guidance
 
-### Status and Admission Signals
+### What to Do When a Condition Is False
 
-| Signal | Meaning | Recommended Action |
-|--------|---------|-------------------|
-| `Ready=False` | Resource not fully reconciled | Check `Stalled` and `Reconciling` conditions for details |
-| `RoleRefsValid=False` | Referenced roles missing | Create the missing ClusterRole/Role, or remove the reference from the BindDefinition |
-| `Stalled=True` | WebhookAuthorizer namespace selector failed validation during reconciliation | Fix the label selector expression in the spec |
-| Admission rejection | Invalid WebhookAuthorizer rules or missing principals | Fix the rejected field from the API error and apply the resource again |
+| Condition | When False | Recommended Action |
+|-----------|-----------|-------------------|
+| `Ready` | Resource not fully reconciled | Check `Stalled` and `Reconciling` conditions for details |
+| `PolicyCompliant` | Policy violations detected | Fix the spec to comply with the referenced RBACPolicy, or update the policy |
+| `RoleRefsValid` | Referenced roles missing | Create the missing ClusterRole/Role, or remove the reference from the BindDefinition |
+| `RulesValid` | Invalid resource/non-resource rules | Fix the rule syntax in the WebhookAuthorizer spec |
+| `NamespaceSelectorValid` | Unparseable label selector | Fix the label selector expression in the spec |
+| `PrincipalConfigured` | No principals defined | Add `allowedPrincipals` or `deniedPrincipals` to the WebhookAuthorizer |
+
+Admission rejection indicates invalid WebhookAuthorizer rules, missing
+principals, or invalid restricted-resource policy input. Fix the rejected field
+from the API error and apply the resource again.
 
 ### What to Do When a Condition Is True (Abnormal-True)
 

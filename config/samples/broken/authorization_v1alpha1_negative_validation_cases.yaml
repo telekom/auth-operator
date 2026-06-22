@@ -1,0 +1,171 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# =============================================================================
+# Negative Validation Samples (INTENTIONALLY INVALID)
+# =============================================================================
+# IMPORTANT:
+# - These objects are expected to be rejected by webhook/schema validation.
+# - This file is intentionally NOT referenced by config/samples/kustomization.yaml.
+# - It is intentionally excluded from config/samples/broken/kustomization.yaml,
+#   because the CI broken-sample apply set is reserved for structurally valid
+#   manifests that must apply and then fail/partially reconcile at runtime.
+# =============================================================================
+
+---
+# CASE: Invalid impersonation config (missing serviceAccountRef)
+# Expected: webhook rejection (serviceAccountRef required when enabled=true).
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RBACPolicy
+metadata:
+  name: sample-negative-rbacpolicy-impersonation-missing-ref
+  labels:
+    t-caas.telekom.com/sample-case: blocked-webhook
+spec:
+  appliesTo:
+    namespaces:
+      - sample-tenant-a
+  impersonation:
+    enabled: true
+
+---
+# CASE: Invalid default assignment (empty block)
+# Expected: webhook rejection (must define at least one group or serviceAccount).
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RBACPolicy
+metadata:
+  name: sample-negative-rbacpolicy-default-assignment-empty
+  labels:
+    t-caas.telekom.com/sample-case: blocked-webhook
+spec:
+  appliesTo:
+    namespaces:
+      - sample-tenant-a
+  defaultAssignment: {}
+
+---
+# CASE: Invalid ServiceAccountRef (missing namespace)
+# Expected: webhook rejection (serviceAccountRef.namespace required).
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RBACPolicy
+metadata:
+  name: sample-negative-rbacpolicy-impersonation-missing-namespace
+  labels:
+    t-caas.telekom.com/sample-case: blocked-webhook
+spec:
+  appliesTo:
+    namespaces:
+      - sample-tenant-a
+  impersonation:
+    enabled: true
+    serviceAccountRef:
+      name: sample-impersonation-admin
+
+---
+# CASE: BindDefinition rejected when missing-role-policy=error and role is missing.
+# Expected: webhook rejection before persistence.
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: sample-negative-binddefinition-missing-role-error
+  labels:
+    t-caas.telekom.com/sample-case: blocked-webhook
+  annotations:
+    authorization.t-caas.telekom.com/missing-role-policy: error
+spec:
+  targetName: sample-negative-bd-missing-role
+  subjects:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: Group
+      name: sample-negative-group
+  roleBindings:
+    - namespace: sample-tenant-a
+      roleRefs:
+        - sample-role-does-not-exist
+
+---
+# CASE: RoleDefinition invalid aggregateFrom on namespaced Role.
+# Expected: webhook rejection (aggregateFrom only for ClusterRole).
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: sample-negative-roledefinition-aggregatefrom-role
+  labels:
+    t-caas.telekom.com/sample-case: blocked-webhook
+spec:
+  targetRole: Role
+  targetName: sample-negative-role
+  targetNamespace: sample-tenant-a
+  scopeNamespaced: true
+  aggregateFrom:
+    clusterRoleSelectors:
+      - matchLabels:
+          t-caas.telekom.com/rbac-fragment: "true"
+
+---
+# CASE: RoleDefinition invalid breakglassAllowed on namespaced Role.
+# Expected: webhook rejection (breakglassAllowed only for ClusterRole).
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: sample-negative-roledefinition-breakglass-role
+  labels:
+    t-caas.telekom.com/sample-case: blocked-webhook
+spec:
+  targetRole: Role
+  targetName: sample-negative-breakglass-role
+  targetNamespace: sample-tenant-a
+  scopeNamespaced: true
+  breakglassAllowed: true
+
+---
+# CASE: RestrictedRoleDefinition missing targetNamespace for Role target.
+# Expected: schema/CEL validation rejection.
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedRoleDefinition
+metadata:
+  name: sample-negative-restrictedroledefinition-missing-namespace
+  labels:
+    t-caas.telekom.com/sample-case: blocked-webhook
+spec:
+  policyRef:
+    name: sample-policy-allow-all-paths
+  targetRole: Role
+  targetName: sample-negative-restricted-role
+  scopeNamespaced: true
+
+---
+# CASE: RestrictedBindDefinition ServiceAccount subject without namespace.
+# Expected: schema/CEL validation rejection.
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RestrictedBindDefinition
+metadata:
+  name: sample-negative-restrictedbinddefinition-sa-no-namespace
+  labels:
+    t-caas.telekom.com/sample-case: blocked-webhook
+spec:
+  policyRef:
+    name: sample-policy-allow-all-paths
+  targetName: sample-negative-restricted-bind
+  subjects:
+    - kind: ServiceAccount
+      name: sample-negative-sa
+      apiGroup: ""
+  roleBindings:
+    - namespace: sample-tenant-a
+      roleRefs:
+        - sample-existing-role
+
+---
+# CASE: WebhookAuthorizer missing both rule sets.
+# Expected: schema/XValidation rejection (requires resourceRules/nonResourceRules).
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: WebhookAuthorizer
+metadata:
+  name: sample-negative-webhookauthorizer-no-rules
+  labels:
+    t-caas.telekom.com/sample-case: blocked-webhook
+spec:
+  allowedPrincipals:
+    - user: system:serviceaccount:sample-authz:sample-impersonation-admin

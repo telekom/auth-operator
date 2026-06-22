@@ -74,7 +74,27 @@ const (
 	// permanently missing roles don't spin-loop endlessly yet still
 	// self-heal within a reasonable window once they appear.
 	roleRefRequeueMax = 5 * time.Minute
+
+	// maxActiveNamespaceNamesToLog bounds namespace-name logging to avoid
+	// oversized log lines that include large namespace sets.
+	maxActiveNamespaceNamesToLog = 20
 )
+
+func summarizeNamespaceNames(namespaces []corev1.Namespace, limit int) []string {
+	names := make([]string, 0, len(namespaces))
+	for _, ns := range namespaces {
+		names = append(names, ns.Name)
+	}
+
+	if limit <= 0 || len(names) <= limit {
+		slices.Sort(names)
+		return names
+	}
+
+	summary := append([]string{}, names[:limit]...)
+	summary = append(summary, fmt.Sprintf("... +%d more", len(names)-limit))
+	return summary
+}
 
 // ErrMissingRoleRefs indicates that one or more referenced roles do not exist in the cluster.
 var ErrMissingRoleRefs = errors.New("missing role references")
@@ -84,8 +104,8 @@ var ErrMissingRoleRefs = errors.New("missing role references")
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions/finalizers,verbs=update
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,verbs=get;list;watch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,verbs=get;list;watch;create;update;patch;delete;escalate
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete;escalate
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch;update
 // +kubebuilder:rbac:groups="events.k8s.io",resources=events,verbs=create;patch;update
@@ -418,6 +438,7 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			metrics.RoleRefsMissing.DeleteLabelValues(bindDefinition.Name)
 			metrics.NamespacesActive.DeleteLabelValues(bindDefinition.Name)
 			metrics.ExternalSAsReferenced.DeleteLabelValues(bindDefinition.Name)
+			metrics.ServiceAccountSkippedPreExisting.DeleteLabelValues(bindDefinition.Name)
 		}
 		return result, err
 	}
@@ -466,10 +487,12 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		"totalNamespaces", len(namespaceSet))
 
 	activeNamespaces := r.filterActiveNamespaces(ctx, bindDefinition, namespaceSet)
-	logger.V(2).Info("Active namespaces filtered",
-		"bindDefinition", bindDefinition.Name,
-		"activeNamespaceCount", len(activeNamespaces),
-		"activeNamespaces", activeNamespaces)
+	if logger.V(2).Enabled() {
+		logger.V(2).Info("Active namespaces filtered",
+			"bindDefinition", bindDefinition.Name,
+			"activeNamespaceCount", len(activeNamespaces),
+			"activeNamespaceNames", summarizeNamespaceNames(activeNamespaces, maxActiveNamespaceNamesToLog))
+	}
 	metrics.NamespacesActive.WithLabelValues(bindDefinition.Name).Set(float64(len(activeNamespaces)))
 
 	// Reconcile all resources using ensure pattern (create-or-update via SSA)
@@ -641,13 +664,14 @@ func (r *BindDefinitionReconciler) reconcileResources(
 				authorizationv1alpha1.RoleRefValidReason, authorizationv1alpha1.RoleRefValidMessage)
 		}
 	} else {
-		// Ignore mode: skip validation, clear status, mark condition true.
+		// Ignore mode: skip validation, clear status, and report that validation
+		// was intentionally skipped.
 		logger.V(2).Info("reconcileResources: Skipping role reference validation (policy=ignore)",
 			"bindDefinition", bindDefinition.Name)
 		bindDefinition.Status.MissingRoleRefs = nil
 		metrics.RoleRefsMissing.WithLabelValues(bindDefinition.Name).Set(0)
-		conditions.MarkTrue(bindDefinition, authorizationv1alpha1.RoleRefValidCondition, bindDefinition.Generation,
-			authorizationv1alpha1.RoleRefValidReason, authorizationv1alpha1.RoleRefValidMessage)
+		conditions.MarkUnknown(bindDefinition, authorizationv1alpha1.RoleRefValidCondition, bindDefinition.Generation,
+			authorizationv1alpha1.RoleRefValidationSkippedReason, authorizationv1alpha1.RoleRefValidationSkippedMessage)
 	}
 
 	// Ensure ServiceAccounts
@@ -821,6 +845,18 @@ func (r *BindDefinitionReconciler) ensureSingleRoleBinding(
 ) error {
 	logger := log.FromContext(ctx)
 	rbName := helpers.BuildBindingName(bindDef.Spec.TargetName, roleRef)
+	desiredRoleRef := rbacv1.RoleRef{
+		APIGroup: rbacv1.GroupName,
+		Kind:     roleKind,
+		Name:     roleRef,
+	}
+
+	if err := r.deleteOwnedRoleBindingOnRoleRefChange(ctx, bindDef, namespace, rbName, desiredRoleRef); err != nil {
+		conditions.MarkFalse(bindDef, authorizationv1alpha1.CreateCondition, bindDef.Generation,
+			authorizationv1alpha1.CreateReason, authorizationv1alpha1.CreateMessage)
+		r.applyStatusNonFatal(ctx, bindDef)
+		return err
+	}
 
 	// Build the RoleBinding using SSA ApplyConfiguration
 	ac := pkgssa.RoleBindingWithSubjectsAndRoleRef(
@@ -828,11 +864,7 @@ func (r *BindDefinitionReconciler) ensureSingleRoleBinding(
 		namespace,
 		helpers.BuildResourceLabels(bindDef.Labels),
 		bindDef.Spec.Subjects,
-		rbacv1.RoleRef{
-			APIGroup: rbacv1.GroupName,
-			Kind:     roleKind,
-			Name:     roleRef,
-		},
+		desiredRoleRef,
 	)
 
 	// Add owner reference and source-tracing annotations
@@ -857,6 +889,27 @@ func (r *BindDefinitionReconciler) ensureSingleRoleBinding(
 	} else {
 		metrics.RBACResourcesApplied.WithLabelValues(metrics.ResourceRoleBinding).Inc()
 	}
+	return nil
+}
+
+func (r *BindDefinitionReconciler) deleteOwnedRoleBindingOnRoleRefChange(
+	ctx context.Context,
+	bindDef *authorizationv1alpha1.BindDefinition,
+	namespace string,
+	name string,
+	desiredRoleRef rbacv1.RoleRef,
+) error {
+	existing := &rbacv1.RoleBinding{}
+	if err := r.client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, existing); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	if !hasOwnerRef(existing, bindDef) || existing.RoleRef == desiredRoleRef {
+		return nil
+	}
+	if err := r.client.Delete(ctx, existing); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("delete RoleBinding %s/%s before roleRef change: %w", namespace, name, err)
+	}
+	metrics.RBACResourcesDeleted.WithLabelValues(metrics.ResourceRoleBinding).Inc()
 	return nil
 }
 
@@ -923,9 +976,11 @@ func (r *BindDefinitionReconciler) applyServiceAccount(
 		WithOwnerReferences(saOwnerRefForBindDefinition(bindDef)).
 		WithAnnotations(helpers.BuildManagedSAAnnotations(sourceNames))
 
-	// Use per-BD FieldOwner so each BD's ownerRef is tracked independently.
-	// Without this, SSA would remove BD-A's ownerRef when BD-B applies its ownerRef.
-	fieldOwner := pkgssa.FieldOwnerForBD(bindDef.Name)
+	// Derive the SSA field manager via the shared FieldOwnerFor helper, scoped
+	// by this BindDefinition's name so separate BindDefinitions do not take
+	// ownership of each other's managed fields when they reconcile the same
+	// ServiceAccount.
+	fieldOwner := pkgssa.FieldOwnerFor(bindDef.Name)
 	result, patchErr := pkgssa.PatchApplyServiceAccount(ctx, r.client, ac, fieldOwner)
 	if patchErr != nil {
 		logger.Error(patchErr, "Failed to apply ServiceAccount",
@@ -1070,6 +1125,7 @@ func (r *BindDefinitionReconciler) reconcileDelete(
 	metrics.RoleRefsMissing.DeleteLabelValues(bindDefinition.Name)
 	metrics.NamespacesActive.DeleteLabelValues(bindDefinition.Name)
 	metrics.ExternalSAsReferenced.DeleteLabelValues(bindDefinition.Name)
+	metrics.ServiceAccountSkippedPreExisting.DeleteLabelValues(bindDefinition.Name)
 
 	conditions.MarkTrue(bindDefinition, authorizationv1alpha1.DeleteCondition, bindDefinition.Generation,
 		authorizationv1alpha1.DeleteReason, authorizationv1alpha1.DeleteMessage)

@@ -169,9 +169,33 @@ const (
 	RoleRefValidationSkippedMessage AuthZConditionMessage = "Role reference validation skipped (missing-role-policy=ignore)"
 )
 
+// ServiceAccount reference validation related condition constants.
+const (
+	// ServiceAccountRefsReadyCondition indicates whether ServiceAccount subjects
+	// that need controller action are present and bound.
+	ServiceAccountRefsReadyCondition AuthZConditionType = "ServiceAccountRefsReady"
+	// ServiceAccountRefsReadyReason is used when all ServiceAccount subjects are
+	// present and safe to bind.
+	ServiceAccountRefsReadyReason AuthZConditionReason = "ServiceAccountRefsReady"
+	// ServiceAccountRefsReadyMessage is the message for valid ServiceAccount references.
+	ServiceAccountRefsReadyMessage AuthZConditionMessage = "All ServiceAccount subjects are present"
+
+	// ServiceAccountRefsSkippedReason is used when one or more ServiceAccount subjects
+	// could not be created or bound.
+	ServiceAccountRefsSkippedReason AuthZConditionReason = "ServiceAccountRefsSkipped"
+	// ServiceAccountRefsSkippedMessage is the format string for skipped ServiceAccounts.
+	ServiceAccountRefsSkippedMessage AuthZConditionMessage = "Skipped ServiceAccount subjects: %v"
+)
+
+// ReadyCondition is the generic Ready condition type shared by all CRD controllers.
+// It uses the kstatus "Ready" convention.
+const ReadyCondition AuthZConditionType = "Ready"
+
 // WebhookAuthorizer condition types.
 const (
 	// WebhookAuthorizerReadyCondition indicates overall readiness of the WebhookAuthorizer.
+	//
+	// Deprecated: Use ReadyCondition for new code. Kept for backwards compatibility.
 	WebhookAuthorizerReadyCondition AuthZConditionType = "Ready"
 	// WebhookAuthorizerRulesValidCondition indicates whether resource and non-resource rules are valid.
 	WebhookAuthorizerRulesValidCondition AuthZConditionType = "RulesValid"
@@ -264,4 +288,36 @@ const (
 	WAPrincipalMessageNotConfigured AuthZConditionMessage = "No principals defined — authorizer will never match"
 	// WAPrincipalMessageOverlap is the message when principals overlap.
 	WAPrincipalMessageOverlap AuthZConditionMessage = "A principal appears in both allowed and denied lists: %s"
+)
+
+// RBACPolicy compliance condition constants.
+const (
+	// PolicyCompliantCondition indicates whether the resource complies with its RBACPolicy.
+	PolicyCompliantCondition AuthZConditionType = "PolicyCompliant"
+
+	// PolicyCompliantReasonAllChecksPass is the reason when all policy checks pass.
+	PolicyCompliantReasonAllChecksPass AuthZConditionReason = "AllChecksPass"
+	// PolicyCompliantMessageAllChecksPass is the message when all policy checks pass.
+	PolicyCompliantMessageAllChecksPass AuthZConditionMessage = "All policy checks pass"
+
+	// PolicyCompliantReasonViolationsDetected is the reason when policy violations are found.
+	PolicyCompliantReasonViolationsDetected AuthZConditionReason = "ViolationsDetected"
+	// PolicyCompliantMessageViolationsDetected is the format message for policy violations.
+	PolicyCompliantMessageViolationsDetected AuthZConditionMessage = "Policy violations detected: %s"
+
+	// PolicyCompliantReasonPolicyNotFound is the reason when the referenced policy does not exist.
+	PolicyCompliantReasonPolicyNotFound AuthZConditionReason = "PolicyNotFound"
+	// PolicyCompliantMessagePolicyNotFound is the format message when the referenced policy is missing.
+	PolicyCompliantMessagePolicyNotFound AuthZConditionMessage = "Referenced RBACPolicy %q not found"
+
+	// PolicyCompliantReasonPolicyScopeNotMatched is the reason when the policy scope does not match.
+	PolicyCompliantReasonPolicyScopeNotMatched AuthZConditionReason = "PolicyScopeNotMatched"
+	// PolicyCompliantMessagePolicyScopeNotMatched is the message when policy scope doesn't match target namespaces.
+	PolicyCompliantMessagePolicyScopeNotMatched AuthZConditionMessage = "Target namespaces are outside policy scope"
+)
+
+// Deprovisioned condition constants for restricted resources.
+const (
+	// DeprovisionedReason is the reason when resources are deprovisioned due to policy violations.
+	DeprovisionedReason AuthZConditionReason = "Deprovisioned"
 )

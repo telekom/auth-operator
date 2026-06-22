@@ -30,6 +30,7 @@ import (
 	conditions "github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/discovery"
 	"github.com/telekom/auth-operator/pkg/metrics"
+	"github.com/telekom/auth-operator/pkg/policy"
 	pkgssa "github.com/telekom/auth-operator/pkg/ssa"
 	"github.com/telekom/auth-operator/pkg/tracing"
 
@@ -43,12 +44,17 @@ import (
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,verbs=get;list;watch;create;update;patch;delete;escalate;bind
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch;create;update;patch;delete;escalate;bind
 // +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list;watch
-// Note: The controller requires broad read access to discover all API resources for dynamic role generation.
-// This is inherent to the controller's purpose of creating roles based on API discovery.
+// Note: The controller requires broad object read access for dynamic role generation
+// and namespace-termination cleanup checks. This exposes object metadata/specs to
+// the controller and is part of the deployment trust boundary.
 // +kubebuilder:rbac:groups=*,resources=*,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch;update
 // +kubebuilder:rbac:groups="coordination.k8s.io",resources=leases,verbs=get;list;update;create;delete
 // +kubebuilder:rbac:groups="events.k8s.io",resources=events,verbs=create;patch;update
+
+// queueAllTimeout is the maximum time spent listing all resources when
+// re-queuing reconciliations after a tracker event (e.g. CRD discovery change).
+const queueAllTimeout = 10 * time.Second
 
 // RoleDefinitionReconciler reconciles a RoleDefinition object.
 type RoleDefinitionReconciler struct {
@@ -123,7 +129,9 @@ func (r *RoleDefinitionReconciler) queueAll() handler.MapFunc {
 
 		// List all RoleDefinition resources
 		roleDefList := &authorizationv1alpha1.RoleDefinitionList{}
-		err := r.client.List(ctx, roleDefList)
+		listCtx, cancel := context.WithTimeout(ctx, queueAllTimeout)
+		defer cancel()
+		err := r.client.List(listCtx, roleDefList)
 		if err != nil {
 			logger.Error(err, "failed to list RoleDefinition resources")
 			return nil
@@ -474,7 +482,7 @@ func (r *RoleDefinitionReconciler) filterAPIResourcesForRoleDefinition(
 
 func restrictedVerbsForGroupVersion(roleDefinition *authorizationv1alpha1.RoleDefinition, groupVersion schema.GroupVersion) ([]string, bool) {
 	for _, apiGroup := range roleDefinition.Spec.RestrictedAPIs {
-		if apiGroup.Name != groupVersion.Group {
+		if !policy.MatchesAPIGroup(apiGroup.Name, groupVersion.Group) {
 			continue
 		}
 		if len(apiGroup.Versions) > 0 && !slices.ContainsFunc(apiGroup.Versions, func(v metav1.GroupVersionForDiscovery) bool {
@@ -493,7 +501,8 @@ func allowedVerbsForAPIResource(
 	resource metav1.APIResource,
 	apiGroupRestrictedVerbs []string,
 ) []string {
-	if isRestrictedAPIResource(roleDefinition, apiGroup, resource) || resource.Namespaced && !roleDefinition.Spec.ScopeNamespaced {
+	if isRestrictedAPIResource(roleDefinition, apiGroup, resource) ||
+		resource.Namespaced != roleDefinition.Spec.ScopeNamespaced {
 		return nil
 	}
 
@@ -509,7 +518,7 @@ func allowedVerbsForAPIResource(
 
 func isRestrictedAPIResource(roleDefinition *authorizationv1alpha1.RoleDefinition, apiGroup string, resource metav1.APIResource) bool {
 	return slices.ContainsFunc(roleDefinition.Spec.RestrictedResources, func(rule metav1.APIResource) bool {
-		return resource.Name == rule.Name && apiGroup == rule.Group
+		return restrictedAPIResourceMatches(resource.Name, apiGroup, rule, false)
 	})
 }
 

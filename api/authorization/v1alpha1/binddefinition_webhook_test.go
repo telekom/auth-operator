@@ -89,7 +89,7 @@ var _ = Describe("BindDefinition Webhook", func() {
 			Eventually(func(g Gomega) {
 				err := k8sClient.Create(ctx, bd2.DeepCopy(), client.DryRunAll)
 				g.Expect(err).To(HaveOccurred())
-				g.Expect(err.Error()).To(ContainSubstring("targetName shared-bd-target already exists"))
+				g.Expect(err.Error()).To(ContainSubstring("targetName shared-bd-target is already in use"))
 			}).WithTimeout(10 * time.Second).WithPolling(250 * time.Millisecond).Should(Succeed())
 
 			// Cleanup
@@ -252,6 +252,48 @@ var _ = Describe("BindDefinition Webhook", func() {
 			err := k8sClient.Create(ctx, bd)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("ServiceAccount subjects must specify a namespace"))
+		})
+
+		It("should deny a BindDefinition roleBinding with refs but no namespace target", func() {
+			bd := &BindDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-cel-rb-no-target",
+				},
+				Spec: BindDefinitionSpec{
+					TargetName: "test-cel-rb-no-target",
+					Subjects:   validSubjects,
+					RoleBindings: []NamespaceBinding{
+						{RoleRefs: []string{"reader"}},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, bd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("roleBindings entries with role refs must specify namespace or namespaceSelector"))
+			Expect(err.Error()).To(ContainSubstring("spec.roleBindings[0]"))
+		})
+
+		It("should deny a BindDefinition roleBinding that references the same Role and ClusterRole name", func() {
+			bd := &BindDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-cel-rb-name-collision",
+				},
+				Spec: BindDefinitionSpec{
+					TargetName: "test-cel-rb-name-collision",
+					Subjects:   validSubjects,
+					RoleBindings: []NamespaceBinding{
+						{
+							Namespace:       "default",
+							ClusterRoleRefs: []string{"reader"},
+							RoleRefs:        []string{"reader"},
+						},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, bd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("spec.roleBindings[0].roleRefs[0]"))
+			Expect(err.Error()).To(ContainSubstring("Duplicate value"))
 		})
 	})
 

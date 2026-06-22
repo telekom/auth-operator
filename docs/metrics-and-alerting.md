@@ -76,15 +76,21 @@ resources:
 |--------|------|--------|-------------|
 | `auth_operator_rbac_resources_applied_total` | Counter | `resource_type` | Resources created or updated via SSA. Types: `ClusterRole`, `Role`, `ClusterRoleBinding`, `RoleBinding`, `ServiceAccount`. |
 | `auth_operator_rbac_resources_deleted_total` | Counter | `resource_type` | Resources deleted during finalizer cleanup. |
-| `auth_operator_managed_resources` | Gauge | `controller`, `resource_type`, `name` | Current number of managed resources per source resource (BindDefinition). Use `sum by (resource_type)(…)` for cluster-wide totals. |
+| `auth_operator_managed_resources` | Gauge | `controller`, `resource_type`, `name` | Current number of managed resources per source resource. Use `sum by (resource_type)(…)` for cluster-wide totals. |
 
-### BindDefinition Health
+### Binding Health
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `auth_operator_role_refs_missing` | Gauge | `binddefinition` | Number of referenced Roles/ClusterRoles that do not exist. Non-zero triggers a faster 10 s requeue. |
+| `auth_operator_role_refs_missing` | Gauge | `binddefinition` | Number of referenced Roles/ClusterRoles that do not exist for a BindDefinition or RestrictedBindDefinition. Non-zero triggers a faster 10 s requeue. |
 | `auth_operator_namespaces_active` | Gauge | `binddefinition` | Number of active (non-terminating) namespaces matching selectors. |
 | `auth_operator_serviceaccount_skipped_preexisting_total` | Counter | `binddefinition` | Pre-existing ServiceAccounts that were intentionally not adopted (no OwnerRef added). |
+
+### Policy Compliance (Restricted CRDs)
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `auth_operator_policy_violations_active` | Gauge | `controller` | Total number of active policy violations aggregated across all restricted resources managed by a controller. The per-resource violation counts are tracked internally and summed to produce this gauge (0 = all resources compliant). Non-zero indicates at least one resource is non-compliant and may be deprovisioned. |
 
 ### API Discovery
 
@@ -157,7 +163,7 @@ thresholds and `for` durations to your environment.
   labels:
     severity: warning
   annotations:
-    summary: "BindDefinition {{ $labels.binddefinition }} has missing role references"
+    summary: "Binding source {{ $labels.binddefinition }} has missing role references"
     description: "{{ $value }} role refs are unresolved for >15 min. Check if the referenced RoleDefinition exists."
 ```
 

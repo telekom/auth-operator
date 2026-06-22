@@ -71,13 +71,16 @@ kubectl get crds | grep t-caas.telekom.com
 
 ## Quick Start
 
-Auth Operator provides three CRDs for managing RBAC:
+Auth Operator provides six CRDs for managing RBAC:
 
 | CRD | Purpose |
 |-----|---------|
 | **RoleDefinition** | Generates ClusterRoles/Roles using deny-list pattern |
 | **BindDefinition** | Creates ClusterRoleBindings/RoleBindings for subjects |
 | **WebhookAuthorizer** | Configures webhook-based SubjectAccessReview authorization |
+| **RBACPolicy** | Defines policy constraints for restricted CRDs |
+| **RestrictedRoleDefinition** | Policy-governed variant of RoleDefinition |
+| **RestrictedBindDefinition** | Policy-governed variant of BindDefinition |
 
 ### 1. Create a RoleDefinition
 
@@ -164,10 +167,16 @@ See the [Operator Guide](docs/operator-guide.md) for the full reference.
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `controller.replicas` | Controller replica count | `1` |
-| `webhookServer.replicas` | Webhook server replica count | `1` |
+| `webhookServer.replicas` | Webhook server replica count | `2` |
 | `controller.podDisruptionBudget.enabled` | Enable PDB | `false` |
 
 See [values.yaml](./chart/auth-operator/values.yaml) for all options.
+
+RBACPolicy impersonation RBAC is not granted by default. Enable
+`controller.impersonation.enabled` with either explicit `serviceAccounts` entries
+or `clusterWide=true` only when RBACPolicy writers are platform-admin trusted.
+Kustomize deployments can opt in by adding the optional
+`config/rbac/impersonation_clusterrole*.yaml` resources.
 
 ---
 

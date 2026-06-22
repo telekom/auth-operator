@@ -15,12 +15,14 @@ import (
 	"github.com/telekom/auth-operator/test/utils"
 )
 
-const (
-	// statusTrue is the Kubernetes condition status value used by readiness checks.
-	statusTrue = "True"
-	// statusBoolTrue is the lowercase boolean value used by JSONPath and env flag checks.
-	statusBoolTrue = "true"
-)
+// statusTrue is the condition status value for True.
+const statusTrue = "True"
+
+// statusFalse is the condition status value for False.
+const statusFalse = "False"
+
+// statusBoolTrue is the lowercase boolean value used by JSONPath and env flag checks.
+const statusBoolTrue = "true"
 
 // DebugReport represents a structured test debug report.
 type DebugReport struct {
@@ -140,7 +142,7 @@ func collectClusterInfo() clusterInfo {
 	info := clusterInfo{}
 
 	// Get Kubernetes version
-	cmd := utils.CommandContext(context.Background(), "kubectl", "version", "-o", "json")
+	cmd := utils.CommandContext(context.Background(), "kubectl", "version", "-o", "json") // #nosec G204
 	output, err := utils.Run(cmd)
 	if err == nil {
 		var versionInfo map[string]interface{}
@@ -152,7 +154,7 @@ func collectClusterInfo() clusterInfo {
 	}
 
 	// Get node count and status
-	cmd = utils.CommandContext(context.Background(), "kubectl", "get", "nodes", "-o", "jsonpath={.items[*].status.conditions[?(@.type=='Ready')].status}")
+	cmd = utils.CommandContext(context.Background(), "kubectl", "get", "nodes", "-o", "jsonpath={.items[*].status.conditions[?(@.type=='Ready')].status}") // #nosec G204
 	output, err = utils.Run(cmd)
 	if err == nil {
 		statuses := strings.Fields(string(output))
@@ -172,7 +174,7 @@ func collectClusterInfo() clusterInfo {
 	}
 
 	// Check API server
-	cmd = utils.CommandContext(context.Background(), "kubectl", "cluster-info")
+	cmd = utils.CommandContext(context.Background(), "kubectl", "cluster-info") // #nosec G204
 	_, err = utils.Run(cmd)
 	info.APIServerReady = err == nil
 
@@ -183,49 +185,52 @@ func collectResourceSummary() resourceSummary {
 	summary := resourceSummary{}
 
 	// Count RoleDefinitions
-	cmd := utils.CommandContext(context.Background(), "kubectl", "get", "roledefinitions", "-A", "-o", "jsonpath={.items[*].metadata.name}")
+	cmd := utils.CommandContext(context.Background(), "kubectl", "get", "roledefinitions", "-A", "-o", "jsonpath={.items[*].metadata.name}") // #nosec G204
 	output, _ := utils.Run(cmd)
 	if strings.TrimSpace(string(output)) != "" {
 		summary.RoleDefinitions = len(strings.Fields(string(output)))
 	}
 
 	// Count BindDefinitions
-	cmd = utils.CommandContext(context.Background(), "kubectl", "get", "binddefinitions", "-A", "-o", "jsonpath={.items[*].metadata.name}")
+	cmd = utils.CommandContext(context.Background(), "kubectl", "get", "binddefinitions", "-A", "-o", "jsonpath={.items[*].metadata.name}") // #nosec G204
 	output, _ = utils.Run(cmd)
 	if strings.TrimSpace(string(output)) != "" {
 		summary.BindDefinitions = len(strings.Fields(string(output)))
 	}
 
 	// Count WebhookAuthorizers
-	cmd = utils.CommandContext(context.Background(), "kubectl", "get", "webhookauthorizers", "-A", "-o", "jsonpath={.items[*].metadata.name}")
+	cmd = utils.CommandContext(context.Background(), "kubectl", "get", "webhookauthorizers", "-A", "-o", "jsonpath={.items[*].metadata.name}") // #nosec G204
 	output, _ = utils.Run(cmd)
 	if strings.TrimSpace(string(output)) != "" {
 		summary.WebhookAuthorizers = len(strings.Fields(string(output)))
 	}
 
 	// Count generated ClusterRoles (labeled by auth-operator)
-	cmd = utils.CommandContext(context.Background(), "kubectl", "get", "clusterroles", "-l", "app.kubernetes.io/managed-by=auth-operator", "-o", "jsonpath={.items[*].metadata.name}")
+	cmd = utils.CommandContext(context.Background(), "kubectl", "get", "clusterroles", // #nosec G204
+		"-l", "app.kubernetes.io/managed-by=auth-operator", "-o", "jsonpath={.items[*].metadata.name}")
 	output, _ = utils.Run(cmd)
 	if strings.TrimSpace(string(output)) != "" {
 		summary.GeneratedClusterRoles = len(strings.Fields(string(output)))
 	}
 
 	// Count generated Roles (labeled by auth-operator)
-	cmd = utils.CommandContext(context.Background(), "kubectl", "get", "roles", "-A", "-l", "app.kubernetes.io/managed-by=auth-operator", "-o", "jsonpath={.items[*].metadata.name}")
+	cmd = utils.CommandContext(context.Background(), "kubectl", "get", "roles", "-A", // #nosec G204
+		"-l", "app.kubernetes.io/managed-by=auth-operator", "-o", "jsonpath={.items[*].metadata.name}")
 	output, _ = utils.Run(cmd)
 	if strings.TrimSpace(string(output)) != "" {
 		summary.GeneratedRoles = len(strings.Fields(string(output)))
 	}
 
 	// Get operator pod names
-	cmd = utils.CommandContext(context.Background(), "kubectl", "get", "pods", "-A", "-l", "control-plane=controller-manager", "-o", "jsonpath={.items[*].metadata.name}")
+	cmd = utils.CommandContext(context.Background(), "kubectl", "get", "pods", "-A", // #nosec G204
+		"-l", "control-plane=controller-manager", "-o", "jsonpath={.items[*].metadata.name}")
 	output, _ = utils.Run(cmd)
 	if strings.TrimSpace(string(output)) != "" {
 		summary.OperatorPods = strings.Fields(string(output))
 	}
 
 	// Get webhook pod names
-	cmd = utils.CommandContext(context.Background(), "kubectl", "get", "pods", "-A", "-l", "control-plane=webhook-server", "-o", "jsonpath={.items[*].metadata.name}")
+	cmd = utils.CommandContext(context.Background(), "kubectl", "get", "pods", "-A", "-l", "control-plane=webhook-server", "-o", "jsonpath={.items[*].metadata.name}") // #nosec G204
 	output, _ = utils.Run(cmd)
 	if strings.TrimSpace(string(output)) != "" {
 		summary.WebhookPods = strings.Fields(string(output))
@@ -238,7 +243,7 @@ func collectRecentErrors() []errorEntry {
 	var errors []errorEntry
 
 	// Get warning/error events from last 10 minutes
-	cmd := utils.CommandContext(context.Background(), "kubectl", "get", "events", "-A",
+	cmd := utils.CommandContext(context.Background(), "kubectl", "get", "events", "-A", // #nosec G204
 		"--field-selector=type!=Normal",
 		"-o", "jsonpath={range .items[*]}{.involvedObject.kind}/{.involvedObject.name}|{.message}|{.lastTimestamp}\n{end}")
 	output, _ := utils.Run(cmd)
@@ -274,7 +279,7 @@ func collectRecentErrors() []errorEntry {
 
 // SaveDebugReport saves the debug report to a JSON file.
 func SaveDebugReport(report *DebugReport, outputDir string) error {
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+	if err := os.MkdirAll(outputDir, 0o750); err != nil {
 		return err
 	}
 
@@ -284,7 +289,7 @@ func SaveDebugReport(report *DebugReport, outputDir string) error {
 	}
 
 	reportPath := filepath.Join(outputDir, "debug-report.json")
-	if err := os.WriteFile(reportPath, data, 0o644); err != nil {
+	if err := os.WriteFile(reportPath, data, 0o600); err != nil {
 		return err
 	}
 

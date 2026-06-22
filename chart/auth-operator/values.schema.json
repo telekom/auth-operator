@@ -155,6 +155,61 @@
           "minimum": 0,
           "default": 1
         },
+        "rbacPolicyConcurrency": {
+          "type": "integer",
+          "description": "Number of concurrent reconcilers for RBACPolicy controller (0 to disable).",
+          "minimum": 0,
+          "default": 5
+        },
+        "restrictedBindDefinitionConcurrency": {
+          "type": "integer",
+          "description": "Number of concurrent reconcilers for RestrictedBindDefinition controller (0 to disable).",
+          "minimum": 0,
+          "default": 5
+        },
+        "restrictedRoleDefinitionConcurrency": {
+          "type": "integer",
+          "description": "Number of concurrent reconcilers for RestrictedRoleDefinition controller (0 to disable).",
+          "minimum": 0,
+          "default": 5
+        },
+        "impersonation": {
+          "type": "object",
+          "description": "RBAC grants for RBACPolicy apply-time ServiceAccount impersonation.",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Create ServiceAccount impersonation RBAC grants for the controller.",
+              "default": false
+            },
+            "clusterWide": {
+              "type": "boolean",
+              "description": "Grant serviceaccounts/impersonate cluster-wide. Only enable when RBACPolicy write access is restricted to platform administrators.",
+              "default": false
+            },
+            "serviceAccounts": {
+              "type": "array",
+              "description": "Namespaced ServiceAccounts the controller may impersonate when clusterWide is false.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "namespace": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": ["namespace", "name"]
+              },
+              "default": []
+            }
+          }
+        },
         "tracker": {
           "type": "object",
           "description": "ResourceTracker interval configuration.",

@@ -1,6 +1,6 @@
 apiVersion: v2
 name: auth-operator
-description: A Kubernetes operator for managing RBAC with RoleDefinitions, BindDefinitions, and WebhookAuthorizers
+description: A Kubernetes operator for managing Kubernetes RBAC with generated roles, bindings, webhook authorization, and policy-governed restricted RBAC APIs
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
@@ -21,7 +21,7 @@ keywords:
 annotations:
   # OCI standard annotations
   org.opencontainers.image.title: auth-operator
-  org.opencontainers.image.description: A Kubernetes operator for managing RBAC with RoleDefinitions, BindDefinitions, and WebhookAuthorizers
+  org.opencontainers.image.description: A Kubernetes operator for managing Kubernetes RBAC with generated roles, bindings, webhook authorization, and policy-governed restricted RBAC APIs
   org.opencontainers.image.url: https://github.com/telekom/auth-operator
   org.opencontainers.image.source: https://github.com/telekom/auth-operator
   org.opencontainers.image.vendor: Deutsche Telekom AG
@@ -62,28 +62,86 @@ annotations:
       name: webhookauthorizers.authorization.t-caas.telekom.com
       displayName: WebhookAuthorizer
       description: Configures webhook-based authorization decisions
+    - kind: RBACPolicy
+      version: v1alpha1
+      name: rbacpolicies.authorization.t-caas.telekom.com
+      displayName: RBACPolicy
+      description: Defines policy limits for RestrictedRoleDefinitions and RestrictedBindDefinitions
+    - kind: RestrictedRoleDefinition
+      version: v1alpha1
+      name: restrictedroledefinitions.authorization.t-caas.telekom.com
+      displayName: RestrictedRoleDefinition
+      description: Generates bounded Roles or ClusterRoles under an RBACPolicy
+    - kind: RestrictedBindDefinition
+      version: v1alpha1
+      name: restrictedbinddefinitions.authorization.t-caas.telekom.com
+      displayName: RestrictedBindDefinition
+      description: Creates bounded RoleBindings or ClusterRoleBindings under an RBACPolicy
   artifacthub.io/crdsExamples: |
     - apiVersion: authorization.t-caas.telekom.com/v1alpha1
       kind: RoleDefinition
       metadata:
         name: example-role
       spec:
-        roleType: ClusterRole
-        rules:
-          - apiGroups: [""]
-            resources: ["pods", "services"]
-            verbs: ["get", "list", "watch"]
+        targetRole: ClusterRole
+        targetName: example-role
+        scopeNamespaced: false
+        restrictedVerbs: ["create", "update", "patch", "delete"]
     - apiVersion: authorization.t-caas.telekom.com/v1alpha1
       kind: BindDefinition
       metadata:
         name: example-binding
       spec:
-        roleRef:
-          kind: ClusterRole
-          name: example-role
+        targetName: example-binding
         subjects:
           - kind: Group
+            apiGroup: rbac.authorization.k8s.io
             name: developers
+        clusterRoleBindings:
+          clusterRoleRefs: ["example-role"]
+    - apiVersion: authorization.t-caas.telekom.com/v1alpha1
+      kind: RBACPolicy
+      metadata:
+        name: tenant-rbac-policy
+      spec:
+        appliesTo:
+          namespaces: ["team-a"]
+        roleLimits:
+          allowClusterRoles: false
+          forbiddenVerbs: ["impersonate", "escalate", "bind"]
+        bindingLimits:
+          allowClusterRoleBindings: false
+          roleBindingLimits:
+            allowedRoleRefs: ["tenant-*"]
+        subjectLimits:
+          allowedKinds: ["Group", "ServiceAccount"]
+    - apiVersion: authorization.t-caas.telekom.com/v1alpha1
+      kind: RestrictedRoleDefinition
+      metadata:
+        name: tenant-reader-role
+      spec:
+        policyRef:
+          name: tenant-rbac-policy
+        targetName: tenant-reader
+        targetRole: Role
+        targetNamespace: team-a
+        scopeNamespaced: true
+        restrictedVerbs: ["create", "update", "patch", "delete"]
+    - apiVersion: authorization.t-caas.telekom.com/v1alpha1
+      kind: RestrictedBindDefinition
+      metadata:
+        name: tenant-reader-binding
+      spec:
+        policyRef:
+          name: tenant-rbac-policy
+        targetName: tenant-reader
+        subjects:
+          - kind: Group
+            apiGroup: rbac.authorization.k8s.io
+            name: team-a-developers
+        roleBindings:
+          - namespace: team-a
+            roleRefs: ["tenant-reader"]
   artifacthub.io/images: |
     - name: auth-operator
       image: ghcr.io/telekom/auth-operator:0.1.0

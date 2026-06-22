@@ -88,19 +88,19 @@ var _ = Describe("SSA Helper Functions", func() {
 		})
 	})
 
-	Context("FieldOwnerForBD", func() {
-		It("should return prefixed name for short BD names", func() {
-			result := ssa.FieldOwnerForBD("my-binddefinition")
+	Context("FieldOwnerFor", func() {
+		It("should return prefixed name for short resource names", func() {
+			result := ssa.FieldOwnerFor("my-binddefinition")
 			Expect(result).To(Equal("auth-operator/my-binddefinition"))
 		})
 
-		It("should fit within 128 characters for any BD name", func() {
-			// Very long BD name (253 chars is max K8s name)
+		It("should fit within 128 characters for any resource name", func() {
+			// Very long name (253 chars is max K8s name)
 			longName := ""
 			for range 253 {
 				longName += "a"
 			}
-			result := ssa.FieldOwnerForBD(longName)
+			result := ssa.FieldOwnerFor(longName)
 			Expect(len(result)).To(BeNumerically("<=", 128))
 		})
 
@@ -109,8 +109,8 @@ var _ = Describe("SSA Helper Functions", func() {
 			for range 200 {
 				longName += "x"
 			}
-			result1 := ssa.FieldOwnerForBD(longName)
-			result2 := ssa.FieldOwnerForBD(longName)
+			result1 := ssa.FieldOwnerFor(longName)
+			result2 := ssa.FieldOwnerFor(longName)
 			Expect(result1).To(Equal(result2))
 		})
 
@@ -121,8 +121,8 @@ var _ = Describe("SSA Helper Functions", func() {
 				longName1 += "a"
 				longName2 += "b"
 			}
-			result1 := ssa.FieldOwnerForBD(longName1)
-			result2 := ssa.FieldOwnerForBD(longName2)
+			result1 := ssa.FieldOwnerFor(longName1)
+			result2 := ssa.FieldOwnerFor(longName2)
 			Expect(result1).NotTo(Equal(result2))
 		})
 
@@ -132,7 +132,7 @@ var _ = Describe("SSA Helper Functions", func() {
 			for range 100 {
 				shortEnoughName += "x"
 			}
-			result := ssa.FieldOwnerForBD(shortEnoughName)
+			result := ssa.FieldOwnerFor(shortEnoughName)
 			Expect(result).To(Equal("auth-operator/" + shortEnoughName))
 		})
 	})

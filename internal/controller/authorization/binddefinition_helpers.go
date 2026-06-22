@@ -54,9 +54,9 @@ func saOwnerRefForBindDefinition(bindDef *authorizationv1alpha1.BindDefinition) 
 
 // hasOwnerRef checks if the object has an ownerReference pointing to the given owner (by UID).
 // Unlike metav1.IsControlledBy, this matches any ownerRef regardless of the controller flag.
-func hasOwnerRef(obj, owner metav1.ObjectMetaAccessor) bool {
-	ownerUID := owner.(metav1.Object).GetUID()
-	for _, ref := range obj.(metav1.Object).GetOwnerReferences() {
+func hasOwnerRef(obj, owner metav1.Object) bool {
+	ownerUID := owner.GetUID()
+	for _, ref := range obj.GetOwnerReferences() {
 		if ref.UID == ownerUID {
 			return true
 		}
@@ -160,11 +160,12 @@ func (r *BindDefinitionReconciler) deleteServiceAccount(
 			oldSourceNames := sa.Annotations[helpers.SourceNamesAnnotation]
 			newSourceNames := helpers.RemoveSourceName(oldSourceNames, bindDef.Name)
 			if newSourceNames != oldSourceNames {
+				old := sa.DeepCopy()
 				if sa.Annotations == nil {
 					sa.Annotations = make(map[string]string)
 				}
 				sa.Annotations[helpers.SourceNamesAnnotation] = newSourceNames
-				if err := r.client.Update(ctx, sa); err != nil {
+				if err := r.client.Patch(ctx, sa, sigs_client.MergeFromWithOptions(old, sigs_client.MergeFromWithOptimisticLock{})); err != nil {
 					logger.Error(err, "Failed to update source-names annotation on retained ServiceAccount",
 						"bindDefinitionName", bindDef.Name, "serviceAccount", sa.Name, "namespace", sa.Namespace)
 					// Non-fatal - continue with deletion cleanup

@@ -5,6 +5,9 @@ resources:
 - bases/authorization.t-caas.telekom.com_roledefinitions.yaml
 - bases/authorization.t-caas.telekom.com_binddefinitions.yaml
 - bases/authorization.t-caas.telekom.com_webhookauthorizers.yaml
+- bases/authorization.t-caas.telekom.com_rbacpolicies.yaml
+- bases/authorization.t-caas.telekom.com_restrictedbinddefinitions.yaml
+- bases/authorization.t-caas.telekom.com_restrictedroledefinitions.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 # patches:

@@ -1,6 +1,6 @@
 # Auth Operator Helm Chart
 
-A Kubernetes operator for managing RBAC with RoleDefinitions, BindDefinitions, and WebhookAuthorizers.
+A Kubernetes operator for managing RBAC with RoleDefinitions, BindDefinitions, WebhookAuthorizers, RBACPolicies, RestrictedRoleDefinitions, and RestrictedBindDefinitions.
 
 ## Prerequisites
 
@@ -76,6 +76,15 @@ Image reference precedence: `digest` > `tag` > `Chart.AppVersion`
 | `controller.startupProbe.periodSeconds` | How often to perform the startup probe | `2` |
 | `controller.podDisruptionBudget.enabled` | Enable PDB | `false` |
 | `controller.podDisruptionBudget.minAvailable` | Minimum available pods | `1` |
+| `controller.bindDefinitionConcurrency` | Max concurrent BindDefinition reconciliations | `10` |
+| `controller.roleDefinitionConcurrency` | Max concurrent RoleDefinition reconciliations | `10` |
+| `controller.webhookAuthorizerConcurrency` | Max concurrent WebhookAuthorizer reconciliations | `1` |
+| `controller.rbacPolicyConcurrency` | Max concurrent RBACPolicy reconciliations (0 to disable) | `5` |
+| `controller.restrictedBindDefinitionConcurrency` | Max concurrent RestrictedBindDefinition reconciliations (0 to disable) | `5` |
+| `controller.restrictedRoleDefinitionConcurrency` | Max concurrent RestrictedRoleDefinition reconciliations (0 to disable) | `5` |
+| `controller.impersonation.enabled` | Create ServiceAccount impersonation RBAC grants for RBACPolicy apply operations | `false` |
+| `controller.impersonation.clusterWide` | Grant serviceaccounts/impersonate cluster-wide when impersonation is enabled | `false` |
+| `controller.impersonation.serviceAccounts` | Namespaced ServiceAccounts the controller may impersonate when clusterWide is false | `[]` |
 
 ### Webhook Server Configuration
 
@@ -109,6 +118,11 @@ ClusterRoles following the principle of least privilege:
 
 Secrets access (for TLS certificates) is scoped to the operator namespace via
 a namespaced Role, not a ClusterRole.
+
+ServiceAccount impersonation for `RBACPolicy` apply operations is opt-in. Prefer
+`controller.impersonation.serviceAccounts` for named apply identities; use
+`controller.impersonation.clusterWide=true` only when `RBACPolicy` write access
+is restricted to platform administrators.
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
@@ -171,15 +185,21 @@ helm uninstall auth-operator --namespace auth-operator-system
 > kubectl delete crd roledefinitions.authorization.t-caas.telekom.com
 > kubectl delete crd binddefinitions.authorization.t-caas.telekom.com
 > kubectl delete crd webhookauthorizers.authorization.t-caas.telekom.com
+> kubectl delete crd rbacpolicies.authorization.t-caas.telekom.com
+> kubectl delete crd restrictedroledefinitions.authorization.t-caas.telekom.com
+> kubectl delete crd restrictedbinddefinitions.authorization.t-caas.telekom.com
 > ```
 
 ## CRDs
 
-This chart installs three Custom Resource Definitions:
+This chart installs six Custom Resource Definitions:
 
 - **RoleDefinition** - Dynamically generates ClusterRoles/Roles based on API discovery
 - **BindDefinition** - Creates ClusterRoleBindings/RoleBindings for subjects (Users, Groups, ServiceAccounts)
 - **WebhookAuthorizer** - Configures webhook-based authorization decisions
+- **RBACPolicy** - Defines policy constraints for restricted RBAC resources
+- **RestrictedRoleDefinition** - Policy-governed RoleDefinition with automatic deprovisioning on violations
+- **RestrictedBindDefinition** - Policy-governed BindDefinition with automatic deprovisioning on violations
 
 For detailed API documentation, see the [API Reference](https://github.com/telekom/auth-operator/blob/main/docs/api-reference/authorization.t-caas.telekom.com.md).
 

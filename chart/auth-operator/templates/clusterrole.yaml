@@ -22,7 +22,7 @@ rules:
   verbs:
   - get
   - update
-# --- ServiceAccount management (BindDefinition) ---
+# --- ServiceAccount management (BindDefinition and RestrictedBindDefinition auto-create) ---
 - apiGroups:
   - ""
   resources:
@@ -35,6 +35,18 @@ rules:
   - patch
   - update
   - watch
+{{- if and .Values.controller.impersonation.enabled .Values.controller.impersonation.clusterWide }}
+# --- ServiceAccount impersonation (RBACPolicy) ---
+# WARNING: serviceaccounts/impersonate lets the controller apply as any
+# ServiceAccount. Keep this cluster-wide grant disabled unless RBACPolicy write
+# access is restricted to platform administrators.
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts
+  verbs:
+  - impersonate
+{{- end }}
 # --- Event recording ---
 - apiGroups:
   - ""
@@ -45,10 +57,10 @@ rules:
   - create
   - patch
   - update
-# --- API discovery (RoleDefinition — needs broad read to discover all resources) ---
-# NOTE: This broad read access is required by design. The RoleDefinition controller
-# must discover all API resources to generate accurate ClusterRoles/Roles.
-# The discovery API (/api, /apis) only lists resource types, not instances.
+# --- Broad object reads (RoleDefinition and namespace-termination checks) ---
+# NOTE: This grants get/list/watch on object metadata/specs across installed APIs.
+# It supports dynamic RoleDefinition output and cleanup/status checks and is part
+# of the controller deployment trust boundary.
 - apiGroups:
   - '*'
   resources:
@@ -71,6 +83,9 @@ rules:
   - authorization.t-caas.telekom.com
   resources:
   - binddefinitions
+  - rbacpolicies
+  - restrictedbinddefinitions
+  - restrictedroledefinitions
   - roledefinitions
   verbs:
   - get
@@ -82,6 +97,9 @@ rules:
   - authorization.t-caas.telekom.com
   resources:
   - binddefinitions/finalizers
+  - rbacpolicies/finalizers
+  - restrictedbinddefinitions/finalizers
+  - restrictedroledefinitions/finalizers
   - roledefinitions/finalizers
   verbs:
   - update
@@ -89,6 +107,9 @@ rules:
   - authorization.t-caas.telekom.com
   resources:
   - binddefinitions/status
+  - rbacpolicies/status
+  - restrictedbinddefinitions/status
+  - restrictedroledefinitions/status
   - roledefinitions/status
   - webhookauthorizers/status
   verbs:
@@ -104,8 +125,8 @@ rules:
   - list
   - watch
 # --- RBAC management (RoleDefinition + BindDefinition) ---
-# WARNING: The escalate and bind verbs are required for the operator to create
-# ClusterRoles/Roles with arbitrary permissions and bind them to subjects.
+# WARNING: The bind/escalate verbs below are required for the operator to
+# create ClusterRoles/Roles with arbitrary permissions and bind them to subjects.
 # A compromised controller SA could escalate privileges. Mitigate by:
 # - Restricting network access to the controller pod
 # - Monitoring RBAC changes via audit logging
@@ -118,7 +139,6 @@ rules:
   verbs:
   - create
   - delete
-  - escalate
   - get
   - list
   - patch
@@ -182,6 +202,9 @@ rules:
   - authorization.t-caas.telekom.com
   resources:
   - binddefinitions
+  - rbacpolicies
+  - restrictedbinddefinitions
+  - restrictedroledefinitions
   - roledefinitions
   verbs:
   - get
@@ -191,6 +214,9 @@ rules:
   - authorization.t-caas.telekom.com
   resources:
   - binddefinitions/status
+  - rbacpolicies/status
+  - restrictedbinddefinitions/status
+  - restrictedroledefinitions/status
   - webhookauthorizers/status
   verbs:
   - get

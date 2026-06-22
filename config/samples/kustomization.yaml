@@ -10,4 +10,10 @@ resources:
   - authorization_v1alpha1_roledefinition.yaml
   - authorization_v1alpha1_binddefinition.yaml
   - authorization_v1alpha1_webhookauthorizer.yaml
+  # Restricted CRDs — policy must be created before restricted definitions
+  - authorization_v1alpha1_rbacpolicy.yaml
+  - authorization_v1alpha1_restrictedbinddefinition.yaml
+  - authorization_v1alpha1_restrictedroledefinition.yaml
+  # NOTE: Broken sample cases live under config/samples/broken/ and are applied
+  # explicitly in CI output-delta to surface expected failure behavior.
 # +kubebuilder:scaffold:manifestskustomizesamples

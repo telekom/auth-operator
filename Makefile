@@ -332,8 +332,14 @@ ci-checks: verify helm-lint ## Run all CI checks locally before pushing.
 
 .PHONY: helm-lint
 helm-lint: ## Lint Helm chart.
-	@command -v helm >/dev/null 2>&1 || (echo "helm not installed, skipping helm-lint" && exit 0)
+	@if ! command -v helm >/dev/null 2>&1; then echo "helm not installed, skipping helm-lint"; exit 0; fi
 	helm lint chart/auth-operator --strict
+	$(MAKE) verify-helm-rbac
+
+.PHONY: verify-helm-rbac
+verify-helm-rbac: ## Verify rendered Helm RBAC permission contracts.
+	@if ! command -v helm >/dev/null 2>&1; then echo "helm not installed, skipping verify-helm-rbac"; exit 0; fi
+	hack/verify-helm-rbac.sh
 
 ##@ Build
 
@@ -368,6 +374,9 @@ docker-push: ## Push docker image with the manager.
 helm: manifests kustomize ## Generate the complete Helm chart
 	rm -f chart/auth-operator/crds/*
 	$(KUSTOMIZE) build config/crd -o chart/auth-operator/crds
+	for file in chart/auth-operator/crds/apiextensions.k8s.io_v1_customresourcedefinition_*; do \
+		mv "$$file" "chart/auth-operator/crds/$${file#chart/auth-operator/crds/apiextensions.k8s.io_v1_customresourcedefinition_}"; \
+	done
 	pushd "chart/auth-operator" && \
 	$(KUSTOMIZE) build . -o crds && \
 	for file in crds/apiextensions.k8s.io_v1_customresourcedefinition_*; do \
@@ -412,6 +421,9 @@ export-images: drawio ## Export PNG images from a Draw.io diagram.
 .PHONY: docs
 docs: crd-ref-docs ## Generate markdown API reference into docs directory.
 	${LOCALBIN}/crd-ref-docs --source-path=api --config=docs/crd-ref-docs-config.yaml --renderer=markdown --output-mode=single --output-path=docs/generated/api-reference.md
+	perl -0pi -e 's/\n+\z/\n/' docs/generated/api-reference.md
+	mkdir -p docs/api-reference
+	cp docs/generated/api-reference.md docs/api-reference/authorization.t-caas.telekom.com.md
 
 
 ##@ Deployment

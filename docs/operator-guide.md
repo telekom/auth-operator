@@ -78,8 +78,8 @@ The auth-operator consists of two main components:
 
 | Component | Purpose | Replicas |
 |-----------|---------|----------|
-| **Controller Manager** | Reconciles RoleDefinitions, BindDefinitions | 1 (HA: 2+) |
-| **Webhook Server** | Validates namespace operations | 1 (HA: 2+) |
+| **Controller Manager** | Reconciles RoleDefinitions, BindDefinitions, RestrictedRoleDefinitions, RestrictedBindDefinitions, RBACPolicies | 1 (HA: 2+) |
+| **Webhook Server** | Validates CRD operations, namespace admission | 1 (HA: 2+) |
 
 ### Component Interaction
 
@@ -92,9 +92,11 @@ The auth-operator consists of two main components:
 ┌───────────────────────┐        ┌────────────────────────────┐
 │   Controller Manager  │        │     Webhook Server         │
 │   ─────────────────   │        │     ───────────────        │
-│   • RoleDefinition    │        │   • Namespace validation   │
-│   • BindDefinition    │        │   • Label injection        │
-│   • API Discovery     │        │   • TDG migration          │
+│   • RoleDefinition    │        │   • CRD validation         │
+│   • BindDefinition    │        │   • Namespace admission    │
+│   • Restricted CRDs   │        │   • Label injection        │
+│   • RBACPolicy        │        │   • TDG migration          │
+│   • API Discovery     │        │                            │
 └───────────────────────┘        └────────────────────────────┘
             │                                  │
             ▼                                  ▼
@@ -111,6 +113,61 @@ The auth-operator consists of two main components:
 | RoleDefinition | 60 seconds | Drift protection, CRD discovery |
 | BindDefinition | 60 seconds | Drift protection |
 | BindDefinition (missing refs) | 10s → 5min (exponential backoff) | Recovery with reduced API load |
+
+### Using Restricted CRDs
+
+Use the restricted CRD family when tenant-managed RBAC must stay inside
+platform guardrails.
+
+| Use Case | Recommended CRD |
+|----------|-----------------|
+| Single-team or trusted admin-managed RBAC without policy guardrails | `RoleDefinition` / `BindDefinition` |
+| Multi-tenant RBAC where role verbs/resources/subjects/namespaces must be constrained | `RBACPolicy` + `RestrictedRoleDefinition` / `RestrictedBindDefinition` |
+
+Restricted workflow:
+
+1. Platform admin creates an `RBACPolicy` that defines limits.
+2. Tenant creates `RestrictedRoleDefinition`/`RestrictedBindDefinition` with `spec.policyRef.name`.
+3. Admission webhook checks referenced policy existence and immutable fields.
+4. Controller enforces policy on every reconciliation and deprovisions managed RBAC resources on violations.
+
+Note: `spec.policyRef` on restricted resources is immutable after creation.
+
+### RBACPolicy Trust Boundaries
+
+`RBACPolicy` write access is a platform-admin privilege. A policy can select the
+ServiceAccount used for impersonated apply operations, and admission validates
+only that the configured `spec.impersonation.serviceAccountRef` name and
+namespace are present. Kubernetes RBAC on that impersonated ServiceAccount is the
+runtime permission boundary for generated Role, ClusterRole, RoleBinding, and
+ClusterRoleBinding changes.
+
+Grant tenants access to `RestrictedRoleDefinition` and `RestrictedBindDefinition`
+instead of granting them write access to `RBACPolicy`. Keep the impersonated
+ServiceAccount grants narrow and review them as part of the cluster-level
+authorization boundary.
+
+The default Helm chart does not grant `serviceaccounts/impersonate`. Enable
+`controller.impersonation.enabled` and prefer explicit
+`controller.impersonation.serviceAccounts` entries for the ServiceAccounts that
+policies may use. `controller.impersonation.clusterWide=true` grants
+cluster-wide ServiceAccount impersonation and should be used only when
+`RBACPolicy` writers are trusted platform administrators.
+
+For Kustomize deployments, the generated manager ClusterRole also omits
+`serviceaccounts/impersonate` by default. Add
+`config/rbac/impersonation_clusterrole.yaml` and
+`config/rbac/impersonation_clusterrolebinding.yaml` to
+`config/rbac/kustomization.yaml` only for installations that intentionally allow
+RBACPolicy impersonation.
+
+When `subjectLimits.serviceAccountLimits.creation.allowAutoCreate` is enabled,
+the controller can create missing ServiceAccounts in allowed namespaces. Existing
+unowned ServiceAccounts and ServiceAccounts owned by another
+RestrictedBindDefinition are treated as external subjects and are not adopted or
+modified, regardless of `disableAdoption`. Setting `disableAdoption: true` makes
+that conservative intent explicit; ServiceAccounts already owned by the same
+RestrictedBindDefinition continue to be reconciled.
 
 ### BindDefinition Annotations
 
@@ -148,6 +205,9 @@ The auth-operator consists of two main components:
 | `--binddefinition-concurrency` | Max concurrent BindDefinition reconciliations | `5` |
 | `--roledefinition-concurrency` | Max concurrent RoleDefinition reconciliations | `5` |
 | `--webhookauthorizer-concurrency` | Max concurrent WebhookAuthorizer reconciliations | `1` |
+| `--rbacpolicy-concurrency` | Max concurrent RBACPolicy reconciliations | `5` |
+| `--restrictedbinddefinition-concurrency` | Max concurrent RestrictedBindDefinition reconciliations | `5` |
+| `--restrictedroledefinition-concurrency` | Max concurrent RestrictedRoleDefinition reconciliations | `5` |
 | `--cache-sync-timeout` | Timeout for waiting for CRDs to become available | `2m0s` |
 | `--graceful-shutdown-timeout` | Timeout for graceful shutdown of the manager | `30s` |
 | `--wait-for-crds` | Wait for required CRDs before starting controllers | `true` |
@@ -348,7 +408,7 @@ Key metrics:
 | `auth_operator_reconcile_duration_seconds` | Histogram | Reconciliation latency |
 | `auth_operator_reconcile_errors_total` | Counter | Errors by type |
 | `auth_operator_rbac_resources_applied_total` | Counter | RBAC resources created/updated |
-| `auth_operator_role_refs_missing` | Gauge | Missing role references |
+| `auth_operator_role_refs_missing` | Gauge | Missing role references for BindDefinition and RestrictedBindDefinition |
 | `auth_operator_namespaces_active` | Gauge | Namespaces matching selectors |
 | `auth_operator_authorizer_requests_total` | Counter | WebhookAuthorizer SubjectAccessReview decisions by result and authorizer |
 | `auth_operator_authorizer_active_rules` | Gauge | Active WebhookAuthorizer resource and non-resource rule entries |
