@@ -308,20 +308,6 @@ func PatchApplyServiceAccount(
 	return PatchApplyResultPatched, nil
 }
 
-func normalizeFieldOwner(fieldOwnerOverride ...string) (string, error) {
-	if len(fieldOwnerOverride) == 0 {
-		return FieldOwner, nil
-	}
-	if len(fieldOwnerOverride) > 1 {
-		return "", fmt.Errorf("at most one fieldOwner override is supported")
-	}
-	fieldOwner := strings.TrimSpace(fieldOwnerOverride[0])
-	if fieldOwner == "" {
-		return "", fmt.Errorf("fieldOwner must not be empty")
-	}
-	return fieldOwner, nil
-}
-
 // Comparison helpers — these compare only the fields we own via SSA and ignore
 // server-managed fields (resourceVersion, uid, creationTimestamp, managedFields, etc.).
 
