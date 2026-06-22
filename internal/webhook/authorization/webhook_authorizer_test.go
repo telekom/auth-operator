@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/go-logr/logr"
@@ -14,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"golang.org/x/time/rate"
 	authzv1 "k8s.io/api/authorization/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -24,6 +26,21 @@ import (
 	"github.com/telekom/auth-operator/pkg/indexer"
 	pkgmetrics "github.com/telekom/auth-operator/pkg/metrics"
 )
+
+// namespaceGetCountingClient wraps a client.Client and counts Get calls for
+// Namespace objects so tests can verify the per-request namespace label cache
+// eliminates redundant lookups.
+type namespaceGetCountingClient struct {
+	client.Client
+	getCount atomic.Int64
+}
+
+func (c *namespaceGetCountingClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if _, ok := obj.(*corev1.Namespace); ok {
+		c.getCount.Add(1)
+	}
+	return c.Client.Get(ctx, key, obj, opts...)
+}
 
 // capturingLogger returns a logr.Logger that appends every log line to buf.
 // verbosity controls which V-levels are visible (0 = Info only, 2 = all).
@@ -40,6 +57,9 @@ func newScheme(t *testing.T) *runtime.Scheme {
 	s := runtime.NewScheme()
 	if err := authzv1alpha1.AddToScheme(s); err != nil {
 		t.Fatalf("failed to add authzv1alpha1 to scheme: %v", err)
+	}
+	if err := corev1.AddToScheme(s); err != nil {
+		t.Fatalf("failed to add corev1 to scheme: %v", err)
 	}
 	return s
 }
@@ -469,7 +489,7 @@ func TestEvaluateSAR_ResultFields(t *testing.T) {
 		}
 		res, err := handler.evaluateSAR(context.Background(), sar, waList.Items)
 		if err != nil {
-			t.Fatal("unexpected error:", err)
+			t.Fatalf("evaluateSAR returned unexpected error: %v", err)
 		}
 		if !res.allowed {
 			t.Fatal("expected allowed")
@@ -491,7 +511,7 @@ func TestEvaluateSAR_ResultFields(t *testing.T) {
 		}
 		res, err := handler.evaluateSAR(context.Background(), sar, waList.Items)
 		if err != nil {
-			t.Fatal("unexpected error:", err)
+			t.Fatalf("evaluateSAR returned unexpected error: %v", err)
 		}
 		if res.allowed {
 			t.Fatal("expected denied")
@@ -516,7 +536,7 @@ func TestEvaluateSAR_ResultFields(t *testing.T) {
 		}
 		res, err := handler.evaluateSAR(context.Background(), sar, waList.Items)
 		if err != nil {
-			t.Fatal("unexpected error:", err)
+			t.Fatalf("evaluateSAR returned unexpected error: %v", err)
 		}
 		if res.allowed {
 			t.Fatal("expected denied")
@@ -1432,4 +1452,141 @@ func TestResourceRuleIndex_ResourceNamesMatching(t *testing.T) {
 			t.Errorf("expected rule index 0 for wildcard ResourceNames, got %d", idx)
 		}
 	})
+}
+
+func TestEvaluateSAR_NamespaceLabelCache_SingleGetPerNamespace(t *testing.T) {
+	scheme := newScheme(t)
+
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "target-ns",
+			Labels: map[string]string{"env": "prod"},
+		},
+	}
+
+	selector := metav1.LabelSelector{
+		MatchLabels: map[string]string{"env": "prod"},
+	}
+
+	wa1 := authzv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{Name: "scoped-wa-1"},
+		Spec: authzv1alpha1.WebhookAuthorizerSpec{
+			NamespaceSelector: selector,
+			AllowedPrincipals: []authzv1alpha1.Principal{{User: "alice"}},
+			ResourceRules: []authzv1.ResourceRule{
+				{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods"}},
+			},
+		},
+	}
+	wa2 := authzv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{Name: "scoped-wa-2"},
+		Spec: authzv1alpha1.WebhookAuthorizerSpec{
+			NamespaceSelector: selector,
+			AllowedPrincipals: []authzv1alpha1.Principal{{User: "bob"}},
+			ResourceRules: []authzv1.ResourceRule{
+				{Verbs: []string{"list"}, APIGroups: []string{""}, Resources: []string{"pods"}},
+			},
+		},
+	}
+	wa3 := authzv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{Name: "scoped-wa-3"},
+		Spec: authzv1alpha1.WebhookAuthorizerSpec{
+			NamespaceSelector: selector,
+			AllowedPrincipals: []authzv1alpha1.Principal{{User: "carol"}},
+			ResourceRules: []authzv1.ResourceRule{
+				{Verbs: []string{"delete"}, APIGroups: []string{""}, Resources: []string{"pods"}},
+			},
+		},
+	}
+
+	t.Run("single Get per namespace when namespace exists", func(t *testing.T) {
+		base := newIndexedClient(scheme, ns, &wa1, &wa2, &wa3)
+
+		counter := &namespaceGetCountingClient{Client: base}
+		handler := &Authorizer{Client: counter, Log: logr.Discard()}
+
+		sar := &authzv1.SubjectAccessReview{
+			Spec: authzv1.SubjectAccessReviewSpec{
+				User: "unknown",
+				ResourceAttributes: &authzv1.ResourceAttributes{
+					Namespace: "target-ns",
+					Verb:      "get",
+					Resource:  "pods",
+				},
+			},
+		}
+
+		if _, err := handler.evaluateSAR(context.Background(), sar, []authzv1alpha1.WebhookAuthorizer{wa1, wa2, wa3}); err != nil {
+			t.Fatalf("evaluateSAR returned unexpected error: %v", err)
+		}
+
+		if got := counter.getCount.Load(); got != 1 {
+			t.Errorf("expected exactly 1 namespace Get() for 3 authorizers targeting the same namespace, got %d", got)
+		}
+	})
+
+	t.Run("single Get per namespace when namespace is missing", func(t *testing.T) {
+		base := newIndexedClient(scheme)
+
+		counter := &namespaceGetCountingClient{Client: base}
+		handler := &Authorizer{Client: counter, Log: logr.Discard()}
+
+		cache := make(map[string]namespaceLabelCacheEntry)
+		selector := &wa1.Spec.NamespaceSelector
+		for range 2 {
+			matches, err := handler.namespaceMatches(context.Background(), "missing-ns", selector, cache)
+			if err == nil {
+				t.Fatal("expected namespace lookup error, got nil")
+			}
+			if matches {
+				t.Fatal("namespaceMatches returned true for missing namespace")
+			}
+		}
+
+		if got := counter.getCount.Load(); got != 1 {
+			t.Errorf("expected exactly 1 namespace Get() for repeated missing namespace lookup, got %d", got)
+		}
+	})
+}
+
+func TestServeHTTP_NamespaceLabelCacheError_Returns500(t *testing.T) {
+	scheme := newScheme(t)
+
+	wa := &authzv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{Name: "scoped-wa"},
+		Spec: authzv1alpha1.WebhookAuthorizerSpec{
+			NamespaceSelector: metav1.LabelSelector{
+				MatchLabels: map[string]string{"env": "prod"},
+			},
+			AllowedPrincipals: []authzv1alpha1.Principal{{User: "alice"}},
+			ResourceRules: []authzv1.ResourceRule{
+				{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods"}},
+			},
+		},
+	}
+	cl := newIndexedClient(scheme, wa)
+	handler := &Authorizer{Client: cl, Log: logr.Discard()}
+
+	sar := authzv1.SubjectAccessReview{
+		Spec: authzv1.SubjectAccessReviewSpec{
+			User: "alice",
+			ResourceAttributes: &authzv1.ResourceAttributes{
+				Namespace: "missing-ns",
+				Verb:      "get",
+				Resource:  "pods",
+			},
+		},
+	}
+	body, err := json.Marshal(sar)
+	if err != nil {
+		t.Fatalf("failed to marshal SAR: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status %d, got %d; body: %s", http.StatusInternalServerError, rec.Code, rec.Body.String())
+	}
 }
