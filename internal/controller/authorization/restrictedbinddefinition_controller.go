@@ -456,30 +456,12 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 	}
 
 	// Step 5: Fetch referenced RBACPolicy.
-	rbacPolicy := &authorizationv1alpha1.RBACPolicy{}
-	if err := r.client.Get(ctx, types.NamespacedName{Name: rbd.Spec.PolicyRef.Name}, rbacPolicy); err != nil {
-		if apierrors.IsNotFound(err) {
-			logger.Info("referenced RBACPolicy not found", "name", rbd.Name, "policyRef", rbd.Spec.PolicyRef.Name)
-			conditions.MarkFalse(rbd, authorizationv1alpha1.PolicyCompliantCondition, rbd.Generation,
-				authorizationv1alpha1.PolicyCompliantReasonPolicyNotFound, authorizationv1alpha1.PolicyCompliantMessagePolicyNotFound, rbd.Spec.PolicyRef.Name)
-			r.recorder.Eventf(rbd, nil, corev1.EventTypeWarning,
-				authorizationv1alpha1.EventReasonPolicyNotFound, authorizationv1alpha1.EventActionReconcile,
-				"Referenced RBACPolicy %q not found", rbd.Spec.PolicyRef.Name)
-			rbd.Status.PolicyViolations = []string{fmt.Sprintf("policy %q not found", rbd.Spec.PolicyRef.Name)}
-			if err := r.rbdDeprovision(ctx, rbd); err != nil {
-				r.rbdMarkStalled(ctx, rbd, err)
-				metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
-				metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
-				return ctrl.Result{}, fmt.Errorf("deprovision RestrictedBindDefinition %s after missing policy %s: %w", rbd.Name, rbd.Spec.PolicyRef.Name, err)
-			}
-			rbdClearDeprovisionedStatus(rbd)
-			r.rbdApplyStatusAndMarkStalled(ctx, rbd, "policy not found")
-			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultDegraded).Inc()
-			return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
-		}
-		r.rbdMarkStalled(ctx, rbd, err)
-		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
-		return ctrl.Result{}, fmt.Errorf("fetch RBACPolicy %s: %w", rbd.Spec.PolicyRef.Name, err)
+	rbacPolicy, result, handled, err := r.rbdFetchPolicy(ctx, rbd)
+	if handled {
+		return result, err
+	}
+	if err != nil {
+		return ctrl.Result{}, err
 	}
 
 	// Step 6: Evaluate policy compliance.
@@ -549,6 +531,59 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
 }
 
+func (r *RestrictedBindDefinitionReconciler) rbdFetchPolicy(
+	ctx context.Context,
+	rbd *authorizationv1alpha1.RestrictedBindDefinition,
+) (rbacPolicy *authorizationv1alpha1.RBACPolicy, result ctrl.Result, handled bool, retErr error) {
+	rbacPolicy = &authorizationv1alpha1.RBACPolicy{}
+	if err := r.client.Get(ctx, types.NamespacedName{Name: rbd.Spec.PolicyRef.Name}, rbacPolicy); err != nil {
+		if apierrors.IsNotFound(err) {
+			result, retErr := r.rbdHandleMissingPolicy(ctx, rbd)
+			return nil, result, true, retErr
+		}
+		r.rbdMarkStalled(ctx, rbd, err)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
+		return nil, ctrl.Result{}, false, fmt.Errorf("fetch RBACPolicy %s: %w", rbd.Spec.PolicyRef.Name, err)
+	}
+	return rbacPolicy, ctrl.Result{}, false, nil
+}
+
+func (r *RestrictedBindDefinitionReconciler) rbdMarkSkippedServiceAccounts(
+	rbd *authorizationv1alpha1.RestrictedBindDefinition,
+) {
+	conditions.MarkFalse(rbd, authorizationv1alpha1.ServiceAccountRefsReadyCondition, rbd.Generation,
+		authorizationv1alpha1.ServiceAccountRefsSkippedReason,
+		authorizationv1alpha1.ServiceAccountRefsSkippedMessage, rbd.Status.SkippedServiceAccounts)
+	r.recorder.Eventf(rbd, nil, corev1.EventTypeWarning,
+		authorizationv1alpha1.EventReasonServiceAccountSkipped, authorizationv1alpha1.EventActionValidate,
+		"ServiceAccount subjects were skipped and not bound: %v", rbd.Status.SkippedServiceAccounts)
+}
+
+func (r *RestrictedBindDefinitionReconciler) rbdHandleMissingPolicy(
+	ctx context.Context,
+	rbd *authorizationv1alpha1.RestrictedBindDefinition,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	logger.Info("referenced RBACPolicy not found", "name", rbd.Name, "policyRef", rbd.Spec.PolicyRef.Name)
+	conditions.MarkFalse(rbd, authorizationv1alpha1.PolicyCompliantCondition, rbd.Generation,
+		authorizationv1alpha1.PolicyCompliantReasonPolicyNotFound, authorizationv1alpha1.PolicyCompliantMessagePolicyNotFound, rbd.Spec.PolicyRef.Name)
+	r.recorder.Eventf(rbd, nil, corev1.EventTypeWarning,
+		authorizationv1alpha1.EventReasonPolicyNotFound, authorizationv1alpha1.EventActionReconcile,
+		"Referenced RBACPolicy %q not found", rbd.Spec.PolicyRef.Name)
+	rbd.Status.PolicyViolations = []string{fmt.Sprintf("policy %q not found", rbd.Spec.PolicyRef.Name)}
+	if err := r.rbdDeprovision(ctx, rbd); err != nil {
+		r.rbdMarkStalled(ctx, rbd, err)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
+		return ctrl.Result{}, fmt.Errorf("deprovision RestrictedBindDefinition %s after missing policy %s: %w",
+			rbd.Name, rbd.Spec.PolicyRef.Name, err)
+	}
+	rbdClearDeprovisionedStatus(rbd)
+	r.rbdApplyStatusAndMarkStalled(ctx, rbd, "policy not found")
+	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultDegraded).Inc()
+	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
+}
+
 func (r *RestrictedBindDefinitionReconciler) rbdHandleSkippedServiceAccounts(
 	ctx context.Context,
 	rbd *authorizationv1alpha1.RestrictedBindDefinition,
@@ -556,15 +591,10 @@ func (r *RestrictedBindDefinitionReconciler) rbdHandleSkippedServiceAccounts(
 	logger := log.FromContext(ctx)
 	conditions.MarkTrue(rbd, authorizationv1alpha1.RoleRefValidCondition, rbd.Generation,
 		authorizationv1alpha1.RoleRefValidReason, authorizationv1alpha1.RoleRefValidMessage)
-	conditions.MarkFalse(rbd, authorizationv1alpha1.ServiceAccountRefsReadyCondition, rbd.Generation,
-		authorizationv1alpha1.ServiceAccountRefsSkippedReason,
-		authorizationv1alpha1.ServiceAccountRefsSkippedMessage, rbd.Status.SkippedServiceAccounts)
+	r.rbdMarkSkippedServiceAccounts(rbd)
 	conditions.MarkNotReady(rbd, rbd.Generation,
 		authorizationv1alpha1.ServiceAccountRefsSkippedReason,
 		authorizationv1alpha1.ServiceAccountRefsSkippedMessage, rbd.Status.SkippedServiceAccounts)
-	r.recorder.Eventf(rbd, nil, corev1.EventTypeWarning,
-		authorizationv1alpha1.EventReasonServiceAccountSkipped, authorizationv1alpha1.EventActionValidate,
-		"ServiceAccount subjects were skipped and not bound: %v", rbd.Status.SkippedServiceAccounts)
 	rbd.Status.BindReconciled = false
 	if err := ssa.ApplyRestrictedBindDefinitionStatus(ctx, r.client, rbd); err != nil {
 		logger.Error(err, "failed to apply RestrictedBindDefinition status", "name", rbd.Name)
@@ -584,6 +614,12 @@ func (r *RestrictedBindDefinitionReconciler) rbdHandleMissingRoleRefs(
 	logger := log.FromContext(ctx)
 	conditions.MarkFalse(rbd, authorizationv1alpha1.RoleRefValidCondition, rbd.Generation,
 		authorizationv1alpha1.RoleRefInvalidReason, authorizationv1alpha1.RoleRefInvalidMessage, missingRoles)
+	if len(rbd.Status.SkippedServiceAccounts) > 0 {
+		r.rbdMarkSkippedServiceAccounts(rbd)
+	} else {
+		conditions.MarkTrue(rbd, authorizationv1alpha1.ServiceAccountRefsReadyCondition, rbd.Generation,
+			authorizationv1alpha1.ServiceAccountRefsReadyReason, authorizationv1alpha1.ServiceAccountRefsReadyMessage)
+	}
 	conditions.MarkNotReady(rbd, rbd.Generation,
 		authorizationv1alpha1.RoleRefInvalidReason, authorizationv1alpha1.RoleRefInvalidMessage, missingRoles)
 	r.recorder.Eventf(rbd, nil, corev1.EventTypeWarning,
@@ -738,6 +774,8 @@ func rbdClearDeprovisionedStatus(rbd *authorizationv1alpha1.RestrictedBindDefini
 	rbd.Status.ExternalServiceAccounts = nil
 	rbd.Status.MissingRoleRefs = nil
 	rbd.Status.SkippedServiceAccounts = nil
+	conditions.Delete(rbd, authorizationv1alpha1.RoleRefValidCondition)
+	conditions.Delete(rbd, authorizationv1alpha1.ServiceAccountRefsReadyCondition)
 	rbd.Status.BindReconciled = false
 	metrics.RoleRefsMissing.WithLabelValues(rbd.Name).Set(0)
 	metrics.NamespacesActive.WithLabelValues(rbd.Name).Set(0)
@@ -985,7 +1023,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdCanCreateMissingServiceAccount(
 	subject rbacv1.Subject,
 	namespace *corev1.Namespace,
 	saCreationConfig *authorizationv1alpha1.SACreationConfig,
-) (bool, string, error) {
+) (create bool, skipReason string, retErr error) {
 	logger := log.FromContext(ctx)
 	if saCreationConfig == nil || !saCreationConfig.AllowAutoCreate {
 		logger.V(1).Info("skipping ServiceAccount creation: AllowAutoCreate is false",

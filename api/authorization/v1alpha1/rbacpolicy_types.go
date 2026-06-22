@@ -131,9 +131,9 @@ type RoleLimits struct {
 	ForbiddenResources []string `json:"forbiddenResources,omitempty"`
 
 	// ForbiddenAPIGroups is a list of API groups that must not appear in generated roles.
+	// Use an empty string for the core API group.
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=64
-	// +kubebuilder:validation:items:MinLength=1
 	ForbiddenAPIGroups []string `json:"forbiddenAPIGroups,omitempty"`
 
 	// ForbiddenResourceVerbs is a list of specific resource+verb combinations that are forbidden.

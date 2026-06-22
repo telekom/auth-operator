@@ -761,6 +761,95 @@ func TestFilterAPIResourcesAdditionalCases(t *testing.T) {
 		}
 	})
 
+	t.Run("excludes subresources when parent resource is restricted", func(t *testing.T) {
+		g := NewWithT(t)
+
+		rd := &authorizationv1alpha1.RoleDefinition{
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				RestrictedResources: []metav1.APIResource{
+					{Name: "pods", Group: ""},
+					{Name: "deployments/scale", Group: "apps"},
+				},
+			},
+		}
+
+		apiResources := discovery.APIResourcesByGroupVersion{
+			"v1": []metav1.APIResource{
+				{Name: "pods", Verbs: metav1.Verbs{"get"}},
+				{Name: "pods/log", Verbs: metav1.Verbs{"get"}},
+				{Name: "pods/exec", Verbs: metav1.Verbs{"create"}},
+				{Name: "services", Verbs: metav1.Verbs{"get"}},
+			},
+			"apps/v1": []metav1.APIResource{
+				{Name: "deployments", Verbs: metav1.Verbs{"get"}},
+				{Name: "deployments/scale", Verbs: metav1.Verbs{"update"}},
+			},
+		}
+
+		r := &RoleDefinitionReconciler{}
+		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
+		g.Expect(err).NotTo(HaveOccurred())
+
+		resources := make([]string, 0, len(rules))
+		for _, rule := range rules {
+			resources = append(resources, rule.Resources...)
+		}
+		g.Expect(resources).To(ConsistOf("services", "deployments"))
+	})
+
+	t.Run("excludes all resources when resource and group wildcards are restricted", func(t *testing.T) {
+		g := NewWithT(t)
+
+		rd := &authorizationv1alpha1.RoleDefinition{
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				RestrictedResources: []metav1.APIResource{
+					{Name: "*", Group: "*"},
+				},
+			},
+		}
+
+		apiResources := discovery.APIResourcesByGroupVersion{
+			"v1": []metav1.APIResource{
+				{Name: "pods", Verbs: metav1.Verbs{"get"}},
+				{Name: "pods/log", Verbs: metav1.Verbs{"get"}},
+			},
+			"apps/v1": []metav1.APIResource{
+				{Name: "deployments", Verbs: metav1.Verbs{"get"}},
+			},
+		}
+
+		r := &RoleDefinitionReconciler{}
+		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(rules).To(BeEmpty())
+	})
+
+	t.Run("excludes all API groups when wildcard API group is restricted", func(t *testing.T) {
+		g := NewWithT(t)
+
+		rd := &authorizationv1alpha1.RoleDefinition{
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				RestrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{
+					{Name: "*"},
+				},
+			},
+		}
+
+		apiResources := discovery.APIResourcesByGroupVersion{
+			"v1": []metav1.APIResource{
+				{Name: "pods", Verbs: metav1.Verbs{"get"}},
+			},
+			"apps/v1": []metav1.APIResource{
+				{Name: "deployments", Verbs: metav1.Verbs{"get"}},
+			},
+		}
+
+		r := &RoleDefinitionReconciler{}
+		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(rules).To(BeEmpty())
+	})
+
 	t.Run("excludes restricted verbs", func(t *testing.T) {
 		g := NewWithT(t)
 

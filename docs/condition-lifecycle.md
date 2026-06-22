@@ -325,6 +325,33 @@ Reports whether the resource complies with its referenced RBACPolicy.
 RBACPolicy. When violations are detected, the controller triggers
 deprovisioning of managed RBAC resources.
 
+### RoleRefsValid
+
+RestrictedBindDefinition reports whether all referenced Roles and ClusterRoles
+exist after binding resources have been reconciled.
+
+| Status | Reason | Message |
+|--------|--------|---------|
+| `True` | `RoleRefValidation` | All referenced roles exist |
+| `False` | `RoleRefNotFound` | Referenced roles not found: *\<details\>* |
+
+Missing references are also listed in `status.missingRoleRefs`.
+
+### ServiceAccountRefsReady
+
+RestrictedBindDefinition reports whether all ServiceAccount subjects are present
+or could be safely created before they are included in generated bindings.
+
+| Status | Reason | Message |
+|--------|--------|---------|
+| `True` | `ServiceAccountRefsReady` | All ServiceAccount subjects are present |
+| `False` | `ServiceAccountRefsSkipped` | Skipped ServiceAccount subjects: *\<details\>* |
+
+Skipped subjects are listed in `status.skippedServiceAccounts` as
+`<namespace>/<name>: <reason>`. The controller sets this condition independently
+from `RoleRefsValid`, so both missing role refs and skipped ServiceAccounts can
+be reported in the same reconciliation.
+
 ### Deprovisioned (Policy Violation)
 
 When policy violations are detected, the controller deprovisions all managed
@@ -353,6 +380,8 @@ Reconciling → Finalizer → FetchPolicy → PolicyCompliant
   │
   └─ (compliant) → EnsureServiceAccounts → EnsureBindings → ValidateRoles → Ready
     │
+    ├─ (missing roles) → RoleRefsValid=False → Ready=False
+    ├─ (skipped ServiceAccounts) → ServiceAccountRefsReady=False → Ready=False
     └─ (violations) → Deprovision → Ready=False (Deprovisioned)
 ```
 

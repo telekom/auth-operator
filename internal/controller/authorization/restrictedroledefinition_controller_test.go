@@ -1012,6 +1012,83 @@ func TestRRD_FilterResource_ScopeNamespacedTrueExcludesClusterScoped(t *testing.
 	g.Expect(resources).NotTo(ContainElement("nodes"))
 }
 
+func TestRRD_FilterResource_RestrictedParentResourceExcludesSubresources(t *testing.T) {
+	g := NewWithT(t)
+
+	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+			ScopeNamespaced: true,
+			RestrictedResources: []metav1.APIResource{
+				{Name: "pods"},
+				{Name: "deployments/scale", Group: "apps"},
+			},
+		},
+	}
+	rulesByKey := make(map[string]*rbacv1.PolicyRule)
+
+	for _, res := range []metav1.APIResource{
+		{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get"}},
+		{Name: "pods/log", Namespaced: true, Verbs: metav1.Verbs{"get"}},
+		{Name: "pods/exec", Namespaced: true, Verbs: metav1.Verbs{"create"}},
+		{Name: "services", Namespaced: true, Verbs: metav1.Verbs{"get"}},
+	} {
+		rrdFilterResource(rrd, schema.GroupVersion{Version: "v1"}, res, nil, rulesByKey)
+	}
+	rrdFilterResource(rrd, schema.GroupVersion{Group: "apps", Version: "v1"},
+		metav1.APIResource{Name: "deployments", Namespaced: true, Verbs: metav1.Verbs{"get"}}, nil, rulesByKey)
+	rrdFilterResource(rrd, schema.GroupVersion{Group: "apps", Version: "v1"},
+		metav1.APIResource{Name: "deployments/scale", Namespaced: true, Verbs: metav1.Verbs{"update"}}, nil, rulesByKey)
+
+	resources := make([]string, 0, len(rulesByKey))
+	for _, rule := range rulesByKey {
+		resources = append(resources, rule.Resources...)
+	}
+	g.Expect(resources).To(ConsistOf("services", "deployments"))
+}
+
+func TestRRD_FilterResource_RestrictedWildcardResourceExcludesAllResources(t *testing.T) {
+	g := NewWithT(t)
+
+	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+			ScopeNamespaced: true,
+			RestrictedResources: []metav1.APIResource{
+				{Name: "*"},
+			},
+		},
+	}
+	rulesByKey := make(map[string]*rbacv1.PolicyRule)
+
+	for _, res := range []metav1.APIResource{
+		{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"get"}},
+		{Name: "pods/log", Namespaced: true, Verbs: metav1.Verbs{"get"}},
+		{Name: "services", Namespaced: true, Verbs: metav1.Verbs{"get"}},
+	} {
+		rrdFilterResource(rrd, schema.GroupVersion{Version: "v1"}, res, nil, rulesByKey)
+	}
+	rrdFilterResource(rrd, schema.GroupVersion{Group: "apps", Version: "v1"},
+		metav1.APIResource{Name: "deployments", Namespaced: true, Verbs: metav1.Verbs{"get"}}, nil, rulesByKey)
+
+	g.Expect(rulesByKey).To(BeEmpty())
+}
+
+func TestRRD_CheckAPIRestriction_WildcardGroupMatchesEveryAPIGroup(t *testing.T) {
+	g := NewWithT(t)
+
+	for _, gv := range []schema.GroupVersion{
+		{Version: "v1"},
+		{Group: "apps", Version: "v1"},
+		{Group: "authorization.k8s.io", Version: "v1"},
+	} {
+		restricted, verbs := rrdCheckAPIRestriction(
+			[]authorizationv1alpha1.RestrictedAPIGroup{{Name: "*"}},
+			gv,
+		)
+		g.Expect(restricted).To(BeTrue(), "groupVersion=%s", gv.String())
+		g.Expect(verbs).To(BeEmpty(), "groupVersion=%s", gv.String())
+	}
+}
+
 func TestRRD_FilterResource_NormalizesVerbOrderForRuleGrouping(t *testing.T) {
 	g := NewWithT(t)
 

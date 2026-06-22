@@ -30,6 +30,7 @@ type RoleLimitsApplyConfiguration struct {
 	// ForbiddenResources is a list of resources that must not appear in generated roles.
 	ForbiddenResources []string `json:"forbiddenResources,omitempty"`
 	// ForbiddenAPIGroups is a list of API groups that must not appear in generated roles.
+	// Use an empty string for the core API group.
 	ForbiddenAPIGroups []string `json:"forbiddenAPIGroups,omitempty"`
 	// ForbiddenResourceVerbs is a list of specific resource+verb combinations that are forbidden.
 	ForbiddenResourceVerbs []ResourceVerbRuleApplyConfiguration `json:"forbiddenResourceVerbs,omitempty"`

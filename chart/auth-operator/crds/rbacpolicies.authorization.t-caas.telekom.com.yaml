@@ -514,10 +514,10 @@ spec:
                       Default is false (deny by default).
                     type: boolean
                   forbiddenAPIGroups:
-                    description: ForbiddenAPIGroups is a list of API groups that must
-                      not appear in generated roles.
+                    description: |-
+                      ForbiddenAPIGroups is a list of API groups that must not appear in generated roles.
+                      Use an empty string for the core API group.
                     items:
-                      minLength: 1
                       type: string
                     maxItems: 64
                     type: array

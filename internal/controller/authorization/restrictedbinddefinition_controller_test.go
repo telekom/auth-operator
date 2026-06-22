@@ -895,6 +895,12 @@ func TestRBD_Reconcile_ServiceAccountPolicyAutomountFalse(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "sa-policy-automount-false", Generation: 1},
 		Spec: authorizationv1alpha1.RBACPolicySpec{
 			AppliesTo: authorizationv1alpha1.PolicyScope{Namespaces: []string{"default"}},
+			BindingLimits: &authorizationv1alpha1.BindingLimits{
+				AllowClusterRoleBindings: true,
+				ClusterRoleBindingLimits: &authorizationv1alpha1.RoleRefLimits{
+					AllowedRoleRefs: []string{"view"},
+				},
+			},
 			SubjectLimits: &authorizationv1alpha1.SubjectLimits{
 				AllowedKinds: []string{rbacv1.ServiceAccountKind},
 				ServiceAccountLimits: &authorizationv1alpha1.ServiceAccountLimits{
@@ -1086,6 +1092,11 @@ func TestRBD_ClearDeprovisionedStatus(t *testing.T) {
 			},
 			ExternalServiceAccounts: []string{"default/external-sa"},
 			MissingRoleRefs:         []string{"ClusterRole/missing"},
+			SkippedServiceAccounts:  []string{"default/skipped-sa: auto-create disabled"},
+			Conditions: []metav1.Condition{
+				{Type: string(authorizationv1alpha1.RoleRefValidCondition), Status: metav1.ConditionFalse, Reason: "Missing"},
+				{Type: string(authorizationv1alpha1.ServiceAccountRefsReadyCondition), Status: metav1.ConditionFalse, Reason: "Skipped"},
+			},
 		},
 	}
 
@@ -1095,6 +1106,9 @@ func TestRBD_ClearDeprovisionedStatus(t *testing.T) {
 	g.Expect(rbd.Status.GeneratedServiceAccounts).To(gomega.BeEmpty())
 	g.Expect(rbd.Status.ExternalServiceAccounts).To(gomega.BeEmpty())
 	g.Expect(rbd.Status.MissingRoleRefs).To(gomega.BeEmpty())
+	g.Expect(rbd.Status.SkippedServiceAccounts).To(gomega.BeEmpty())
+	g.Expect(conditions.Get(rbd, authorizationv1alpha1.RoleRefValidCondition)).To(gomega.BeNil())
+	g.Expect(conditions.Get(rbd, authorizationv1alpha1.ServiceAccountRefsReadyCondition)).To(gomega.BeNil())
 }
 
 func TestRBD_Reconcile_AllowAutoCreateFalse_SkipsSACreation(t *testing.T) {
@@ -1152,6 +1166,68 @@ func TestRBD_Reconcile_AllowAutoCreateFalse_SkipsSACreation(t *testing.T) {
 	var crb rbacv1.ClusterRoleBinding
 	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: "ac-target-view-binding"}, &crb)).To(gomega.Succeed())
 	g.Expect(crb.Subjects).To(gomega.BeEmpty(), "missing SAs must not be pre-staged in RBAC subjects")
+}
+
+func TestRBD_Reconcile_MissingRoleAndSkippedServiceAccountReportsBothConditions(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	pol := &authorizationv1alpha1.RBACPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "missing-role-skipped-sa-policy", Generation: 1},
+		Spec: authorizationv1alpha1.RBACPolicySpec{
+			AppliesTo: authorizationv1alpha1.PolicyScope{Namespaces: []string{"default"}},
+			SubjectLimits: &authorizationv1alpha1.SubjectLimits{
+				AllowedKinds: []string{rbacv1.ServiceAccountKind},
+				ServiceAccountLimits: &authorizationv1alpha1.ServiceAccountLimits{
+					Creation: &authorizationv1alpha1.SACreationConfig{
+						AllowAutoCreate: false,
+					},
+				},
+			},
+		},
+	}
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "both-ns"}}
+	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "missing-role-skipped-sa-rbd", Generation: 1},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			PolicyRef:  authorizationv1alpha1.RBACPolicyReference{Name: pol.Name},
+			TargetName: "both-target",
+			Subjects: []rbacv1.Subject{
+				{Kind: rbacv1.ServiceAccountKind, Name: "both-sa", Namespace: "both-ns"},
+			},
+			ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
+				ClusterRoleRefs: []string{"view"},
+			},
+		},
+	}
+
+	r, c := newRBDTestReconciler(rbdPolicyWithDefaultAllowances(pol), rbd, ns)
+	result, err := r.Reconcile(rbdCtx(), ctrl.Request{NamespacedName: types.NamespacedName{Name: rbd.Name}})
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	g.Expect(result.RequeueAfter).To(gomega.Equal(DefaultRequeueInterval))
+
+	var updated authorizationv1alpha1.RestrictedBindDefinition
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: rbd.Name}, &updated)).To(gomega.Succeed())
+	g.Expect(updated.Status.MissingRoleRefs).To(gomega.ConsistOf("ClusterRole/view"))
+	g.Expect(updated.Status.SkippedServiceAccounts).To(gomega.Equal([]string{"both-ns/both-sa: auto-create disabled"}))
+	g.Expect(updated.Status.BindReconciled).To(gomega.BeFalse())
+	roleRefCondition := conditions.Get(&updated, authorizationv1alpha1.RoleRefValidCondition)
+	g.Expect(roleRefCondition).NotTo(gomega.BeNil())
+	g.Expect(roleRefCondition.Status).To(gomega.Equal(metav1.ConditionFalse))
+	saCondition := conditions.Get(&updated, authorizationv1alpha1.ServiceAccountRefsReadyCondition)
+	g.Expect(saCondition).NotTo(gomega.BeNil())
+	g.Expect(saCondition.Status).To(gomega.Equal(metav1.ConditionFalse))
+	g.Expect(conditions.IsReady(&updated)).To(gomega.BeFalse())
+
+	recorder, ok := r.recorder.(*events.FakeRecorder)
+	g.Expect(ok).To(gomega.BeTrue())
+	close(recorder.Events)
+	var foundSkippedEvent bool
+	for event := range recorder.Events {
+		if containsAll(event, "Warning", authorizationv1alpha1.EventReasonServiceAccountSkipped, "both-ns/both-sa") {
+			foundSkippedEvent = true
+		}
+	}
+	g.Expect(foundSkippedEvent).To(gomega.BeTrue(), "expected skipped ServiceAccount warning event")
 }
 
 func TestRBD_Reconcile_ServiceAccountCreationNamespaceDenied_DoesNotBindMissingSA(t *testing.T) {

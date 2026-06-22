@@ -149,6 +149,52 @@ func TestEvaluateRoleDefinition_ForbiddenAPIGroups(t *testing.T) {
 	}
 }
 
+func TestEvaluateRoleDefinition_ForbiddenAPIGroupsWildcard(t *testing.T) {
+	policy := &authorizationv1alpha1.RBACPolicy{
+		Spec: authorizationv1alpha1.RBACPolicySpec{
+			RoleLimits: &authorizationv1alpha1.RoleLimits{
+				ForbiddenAPIGroups: []string{"*"},
+			},
+		},
+	}
+
+	t.Run("wildcard restricted API group covers wildcard policy", func(t *testing.T) {
+		rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+			Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+				TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
+				TargetName:      "test-role",
+				TargetNamespace: "default",
+				RestrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{
+					{Name: "*"},
+				},
+			},
+		}
+
+		violations := EvaluateRoleDefinition(policy, rrd)
+		if len(violations) != 0 {
+			t.Fatalf("expected wildcard RestrictedAPIs to satisfy wildcard forbiddenAPIGroups, got %v", violations)
+		}
+	})
+
+	t.Run("single restricted API group does not cover wildcard policy", func(t *testing.T) {
+		rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+			Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+				TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
+				TargetName:      "test-role",
+				TargetNamespace: "default",
+				RestrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{
+					{Name: "apps"},
+				},
+			},
+		}
+
+		violations := EvaluateRoleDefinition(policy, rrd)
+		if len(violations) != 1 {
+			t.Fatalf("expected violation when only one API group is restricted, got %d: %v", len(violations), violations)
+		}
+	})
+}
+
 func TestEvaluateRoleDefinition_ForbiddenAPIGroups_Missing(t *testing.T) {
 	policy := &authorizationv1alpha1.RBACPolicy{
 		Spec: authorizationv1alpha1.RBACPolicySpec{
@@ -264,6 +310,83 @@ func TestEvaluateRoleDefinition_ForbiddenResources(t *testing.T) {
 	if violations[0].Field != "spec.restrictedResources" {
 		t.Errorf("expected field spec.restrictedResources, got %q", violations[0].Field)
 	}
+}
+
+func TestEvaluateRoleDefinition_ForbiddenResources_SubresourceAndWildcard(t *testing.T) {
+	t.Run("parent restricted resource covers forbidden subresource", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				RoleLimits: &authorizationv1alpha1.RoleLimits{
+					ForbiddenResources: []string{"pods/exec"},
+				},
+			},
+		}
+		rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+			Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+				TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
+				TargetName:      "test-role",
+				TargetNamespace: "default",
+				RestrictedResources: []metav1.APIResource{
+					{Name: "pods"},
+				},
+			},
+		}
+
+		violations := EvaluateRoleDefinition(policy, rrd)
+		if len(violations) != 0 {
+			t.Fatalf("expected parent restricted resource to satisfy forbidden subresource, got %v", violations)
+		}
+	})
+
+	t.Run("wildcard resource restriction covers wildcard policy", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				RoleLimits: &authorizationv1alpha1.RoleLimits{
+					ForbiddenResources: []string{"*"},
+				},
+			},
+		}
+		rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+			Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+				TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
+				TargetName:      "test-role",
+				TargetNamespace: "default",
+				RestrictedResources: []metav1.APIResource{
+					{Name: "*"},
+				},
+			},
+		}
+
+		violations := EvaluateRoleDefinition(policy, rrd)
+		if len(violations) != 0 {
+			t.Fatalf("expected wildcard RestrictedResources to satisfy wildcard forbiddenResources, got %v", violations)
+		}
+	})
+
+	t.Run("single restricted resource does not cover wildcard policy", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				RoleLimits: &authorizationv1alpha1.RoleLimits{
+					ForbiddenResources: []string{"*"},
+				},
+			},
+		}
+		rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+			Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+				TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
+				TargetName:      "test-role",
+				TargetNamespace: "default",
+				RestrictedResources: []metav1.APIResource{
+					{Name: "pods"},
+				},
+			},
+		}
+
+		violations := EvaluateRoleDefinition(policy, rrd)
+		if len(violations) != 1 {
+			t.Fatalf("expected violation when only one resource is restricted, got %d: %v", len(violations), violations)
+		}
+	})
 }
 
 func TestEvaluateRoleDefinition_ForbiddenResources_GroupBypass(t *testing.T) {
@@ -418,6 +541,38 @@ func TestEvaluateRoleDefinition_ForbiddenResourceVerbs(t *testing.T) {
 			},
 			restrictedRes:  []metav1.APIResource{{Name: "secrets"}},
 			wantViolations: 1, // pods/create not excluded
+		},
+		{
+			name: "parent resource covers forbidden subresource verb",
+			rules: []authorizationv1alpha1.ResourceVerbRule{
+				{Resource: "pods/exec", APIGroup: "", Verbs: []string{"create"}},
+			},
+			restrictedRes:  []metav1.APIResource{{Name: "pods"}},
+			wantViolations: 0,
+		},
+		{
+			name: "wildcard resource and group excluded via RestrictedResources",
+			rules: []authorizationv1alpha1.ResourceVerbRule{
+				{Resource: "*", APIGroup: "*", Verbs: []string{"delete"}},
+			},
+			restrictedRes:  []metav1.APIResource{{Name: "*"}},
+			wantViolations: 0,
+		},
+		{
+			name: "single resource does not cover wildcard resource verb rule",
+			rules: []authorizationv1alpha1.ResourceVerbRule{
+				{Resource: "*", APIGroup: "*", Verbs: []string{"delete"}},
+			},
+			restrictedRes:  []metav1.APIResource{{Name: "pods"}},
+			wantViolations: 1,
+		},
+		{
+			name: "wildcard API group excluded via RestrictedAPIs",
+			rules: []authorizationv1alpha1.ResourceVerbRule{
+				{Resource: "deployments", APIGroup: "*", Verbs: []string{"delete"}},
+			},
+			restrictedAPIs: []authorizationv1alpha1.RestrictedAPIGroup{{Name: "*"}},
+			wantViolations: 0,
 		},
 	}
 

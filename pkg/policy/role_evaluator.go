@@ -139,7 +139,7 @@ func evaluateRoleLimits(limits *authorizationv1alpha1.RoleLimits, rrd *authoriza
 // leaves part of the group available at runtime.
 func isAPIGroupFullyRestricted(rrd *authorizationv1alpha1.RestrictedRoleDefinition, group string) bool {
 	for _, api := range rrd.Spec.RestrictedAPIs {
-		if api.Name == group && len(api.Versions) == 0 && len(api.Verbs) == 0 {
+		if MatchesAPIGroup(api.Name, group) && len(api.Versions) == 0 && len(api.Verbs) == 0 {
 			return true
 		}
 	}
@@ -152,7 +152,7 @@ func isAPIGroupFullyRestricted(rrd *authorizationv1alpha1.RestrictedRoleDefiniti
 // excluded from that group at runtime, allowing it through from other groups.
 func isResourceFullyRestricted(rrd *authorizationv1alpha1.RestrictedRoleDefinition, res string) bool {
 	for _, rr := range rrd.Spec.RestrictedResources {
-		if rr.Name == res && rr.Group == "" {
+		if MatchesResourceName(rr.Name, res) && rr.Group == "" {
 			return true
 		}
 	}
@@ -164,7 +164,7 @@ func isResourceFullyRestricted(rrd *authorizationv1alpha1.RestrictedRoleDefiniti
 // matches the given apiGroup.
 func isResourceExcludedForGroup(rrd *authorizationv1alpha1.RestrictedRoleDefinition, resource, apiGroup string) bool {
 	for _, rr := range rrd.Spec.RestrictedResources {
-		if rr.Name == resource && (rr.Group == "" || rr.Group == apiGroup) {
+		if MatchesResourceName(rr.Name, resource) && APIGroupRestrictionCovers(rr.Group, apiGroup) {
 			return true
 		}
 	}
@@ -180,7 +180,7 @@ func isResourceExcludedForGroup(rrd *authorizationv1alpha1.RestrictedRoleDefinit
 // ForbiddenResourceVerbs checks.
 func isAPIGroupExcluded(rrd *authorizationv1alpha1.RestrictedRoleDefinition, apiGroup string) bool {
 	for _, api := range rrd.Spec.RestrictedAPIs {
-		if api.Name == apiGroup && len(api.Versions) == 0 && len(api.Verbs) == 0 {
+		if MatchesAPIGroup(api.Name, apiGroup) && len(api.Versions) == 0 && len(api.Verbs) == 0 {
 			return true
 		}
 	}
@@ -193,7 +193,7 @@ func isAPIGroupExcluded(rrd *authorizationv1alpha1.RestrictedRoleDefinition, api
 // still expose the same resource.
 func isAPIGroupVerbRestricted(rrd *authorizationv1alpha1.RestrictedRoleDefinition, apiGroup, verb string) bool {
 	for _, api := range rrd.Spec.RestrictedAPIs {
-		if api.Name == apiGroup && len(api.Versions) == 0 && len(api.Verbs) > 0 &&
+		if MatchesAPIGroup(api.Name, apiGroup) && len(api.Versions) == 0 && len(api.Verbs) > 0 &&
 			ContainsStringOrWildcard(api.Verbs, verb) {
 			return true
 		}

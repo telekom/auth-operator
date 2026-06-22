@@ -590,7 +590,7 @@ _Appears in:_
 | `allowClusterRoles` _boolean_ | AllowClusterRoles controls whether ClusterRoles may be generated.<br />Default is false (deny by default). | false | Optional: \{\} <br /> |
 | `forbiddenVerbs` _string array_ | ForbiddenVerbs is a list of verbs that must not appear in generated roles. |  | MaxItems: 16 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
 | `forbiddenResources` _string array_ | ForbiddenResources is a list of resources that must not appear in generated roles. |  | MaxItems: 128 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
-| `forbiddenAPIGroups` _string array_ | ForbiddenAPIGroups is a list of API groups that must not appear in generated roles. |  | MaxItems: 64 <br />Optional: \{\} <br />items:MinLength: 1 <br /> |
+| `forbiddenAPIGroups` _string array_ | ForbiddenAPIGroups is a list of API groups that must not appear in generated roles.<br />Use an empty string for the core API group. |  | MaxItems: 64 <br />Optional: \{\} <br /> |
 | `forbiddenResourceVerbs` _[ResourceVerbRule](#resourceverbrule) array_ | ForbiddenResourceVerbs is a list of specific resource+verb combinations that are forbidden. |  | MaxItems: 64 <br />Optional: \{\} <br /> |
 | `maxRulesPerRole` _integer_ | MaxRulesPerRole limits the number of rules in a single generated role. |  | Minimum: 1 <br />Optional: \{\} <br /> |
 

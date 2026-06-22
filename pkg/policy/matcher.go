@@ -105,6 +105,37 @@ func ContainsStringOrWildcard(slice []string, value string) bool {
 	return false
 }
 
+// MatchesAPIGroup checks whether a configured API group pattern matches an API group.
+func MatchesAPIGroup(pattern, apiGroup string) bool {
+	return MatchesWildcard(pattern, apiGroup)
+}
+
+// MatchesResourceName checks whether a configured resource pattern matches a
+// Kubernetes RBAC resource name. A parent resource also covers its subresources,
+// so "pods" matches "pods/exec" and "pods/log".
+func MatchesResourceName(pattern, resourceName string) bool {
+	if MatchesWildcard(pattern, resourceName) {
+		return true
+	}
+	if strings.Contains(pattern, "*") {
+		return false
+	}
+	return strings.HasPrefix(resourceName, pattern+"/")
+}
+
+// APIGroupRestrictionCovers checks whether a restricted resource API group
+// covers a required API group. An empty restricted group means all API groups,
+// matching RestrictedRoleDefinition RestrictedResources semantics.
+func APIGroupRestrictionCovers(restrictedGroup, requiredGroup string) bool {
+	if restrictedGroup == "" || restrictedGroup == "*" {
+		return true
+	}
+	if requiredGroup == "*" {
+		return false
+	}
+	return MatchesAPIGroup(restrictedGroup, requiredGroup)
+}
+
 // hasAnyPrefix checks if value starts with any of the given prefixes.
 func hasAnyPrefix(prefixes []string, value string) bool {
 	for _, p := range prefixes {

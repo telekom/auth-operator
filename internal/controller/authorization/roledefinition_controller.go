@@ -30,6 +30,7 @@ import (
 	conditions "github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/discovery"
 	"github.com/telekom/auth-operator/pkg/metrics"
+	"github.com/telekom/auth-operator/pkg/policy"
 	pkgssa "github.com/telekom/auth-operator/pkg/ssa"
 	"github.com/telekom/auth-operator/pkg/tracing"
 
@@ -481,7 +482,7 @@ func (r *RoleDefinitionReconciler) filterAPIResourcesForRoleDefinition(
 
 func restrictedVerbsForGroupVersion(roleDefinition *authorizationv1alpha1.RoleDefinition, groupVersion schema.GroupVersion) ([]string, bool) {
 	for _, apiGroup := range roleDefinition.Spec.RestrictedAPIs {
-		if apiGroup.Name != groupVersion.Group {
+		if !policy.MatchesAPIGroup(apiGroup.Name, groupVersion.Group) {
 			continue
 		}
 		if len(apiGroup.Versions) > 0 && !slices.ContainsFunc(apiGroup.Versions, func(v metav1.GroupVersionForDiscovery) bool {
@@ -517,7 +518,7 @@ func allowedVerbsForAPIResource(
 
 func isRestrictedAPIResource(roleDefinition *authorizationv1alpha1.RoleDefinition, apiGroup string, resource metav1.APIResource) bool {
 	return slices.ContainsFunc(roleDefinition.Spec.RestrictedResources, func(rule metav1.APIResource) bool {
-		return resource.Name == rule.Name && apiGroup == rule.Group
+		return restrictedAPIResourceMatches(resource.Name, apiGroup, rule, false)
 	})
 }
 

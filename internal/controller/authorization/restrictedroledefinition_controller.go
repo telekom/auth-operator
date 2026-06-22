@@ -479,7 +479,7 @@ func rrdFilterResource(
 	// Check restricted resources.
 	// An empty Group in the restriction matches all API groups.
 	resourceIsRestricted := slices.ContainsFunc(rrd.Spec.RestrictedResources, func(rule metav1.APIResource) bool {
-		return res.Name == rule.Name && (rule.Group == "" || groupVersion.Group == rule.Group)
+		return restrictedAPIResourceMatches(res.Name, groupVersion.Group, rule, true)
 	})
 	if resourceIsRestricted {
 		return
@@ -517,6 +517,14 @@ func rrdFilterResource(
 	}
 }
 
+func restrictedAPIResourceMatches(resourceName, apiGroup string, rule metav1.APIResource, emptyGroupMatchesAll bool) bool {
+	groupMatches := policy.MatchesAPIGroup(rule.Group, apiGroup) || (emptyGroupMatchesAll && rule.Group == "")
+	if !groupMatches {
+		return false
+	}
+	return policy.MatchesResourceName(rule.Name, resourceName)
+}
+
 // rrdCheckAPIRestriction checks whether a given group/version matches any entry
 // in the RestrictedAPIs list. It returns whether the API is restricted and the
 // per-API-group restricted verbs (empty means fully blocked).
@@ -525,7 +533,7 @@ func rrdCheckAPIRestriction(
 	groupVersion schema.GroupVersion,
 ) (restricted bool, verbs []string) {
 	for _, ag := range restrictedAPIs {
-		if ag.Name != groupVersion.Group {
+		if !policy.MatchesAPIGroup(ag.Name, groupVersion.Group) {
 			continue
 		}
 		if len(ag.Versions) > 0 {
