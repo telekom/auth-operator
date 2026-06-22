@@ -5,6 +5,7 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/telekom/auth-operator/test/utils"
+	"sigs.k8s.io/yaml"
 )
 
 const (
@@ -32,6 +34,10 @@ const (
 	// Common status strings
 	crdStatusRunning = "Running"
 )
+
+type fixtureKustomization struct {
+	Resources []string `json:"resources"`
+}
 
 var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 
@@ -642,12 +648,47 @@ func testNamespaceDeleted() (bool, error) {
 	return strings.TrimSpace(string(output)) == "", nil
 }
 
+func crdE2EFixtureResourceFiles() ([]string, error) {
+	projectDir, err := utils.GetProjectDir()
+	if err != nil {
+		return nil, fmt.Errorf("locate project dir: %w", err)
+	}
+	fixtureDir := filepath.Join(projectDir, fixturesPath)
+	kustomizationPath := filepath.Join(fixtureDir, "kustomization.yaml")
+	data, err := os.ReadFile(kustomizationPath)
+	if err != nil {
+		return nil, fmt.Errorf("read fixture kustomization: %w", err)
+	}
+
+	var kustomization fixtureKustomization
+	if err := yaml.Unmarshal(data, &kustomization); err != nil {
+		return nil, fmt.Errorf("parse fixture kustomization: %w", err)
+	}
+
+	resources := make([]string, 0, len(kustomization.Resources))
+	for _, resource := range kustomization.Resources {
+		if resource == "namespace_labeled.yaml" {
+			continue
+		}
+		resources = append(resources, filepath.Join(fixtureDir, resource))
+	}
+	return resources, nil
+}
+
 func cleanupCRDE2ETestState() {
 	const e2eLabelSelector = "app.kubernetes.io/component=e2e-test"
 	const managedByLabelSelector = "app.kubernetes.io/managed-by=auth-operator"
 
-	cmd := utils.CommandContext(context.Background(), "kubectl", "delete", "-k", fixturesPath, "--ignore-not-found=true", "--wait=false", "--timeout=30s")
-	_, _ = utils.Run(cmd)
+	fixtureFiles, err := crdE2EFixtureResourceFiles()
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to read CRD e2e fixture resources")
+
+	for _, fixtureFile := range fixtureFiles {
+		cmd := utils.CommandContext(context.Background(), "kubectl", "delete", "-f", fixtureFile,
+			"--ignore-not-found=true", "--wait=false")
+		if _, err := utils.Run(cmd); err != nil {
+			_, _ = fmt.Fprintf(GinkgoWriter, "warning: failed to delete CRD e2e fixture %s: %v\n", fixtureFile, err)
+		}
+	}
 
 	utils.RemoveFinalizersForAll("roledefinition")
 	utils.RemoveFinalizersForAll("binddefinition")
