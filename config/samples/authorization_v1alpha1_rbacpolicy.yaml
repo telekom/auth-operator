@@ -315,6 +315,12 @@ spec:
     allowedKinds:
       - ServiceAccount
       - Group
+    serviceAccountLimits:
+      creation:
+        allowAutoCreate: true
+        allowedCreationNamespaces:
+          - sample-tenant-a
+          - sample-tenant-b
 
 ---
 # -----------------------------------------------------------------------------
