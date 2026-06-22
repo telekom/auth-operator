@@ -186,7 +186,7 @@ spec:
 ---
 # -----------------------------------------------------------------------------
 # CASE: Partially allowed
-# Existing role refs are applied; missing refs are reflected in status.
+# Missing role refs keep the restricted bind not ready and block RBAC writes.
 # -----------------------------------------------------------------------------
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: RestrictedBindDefinition

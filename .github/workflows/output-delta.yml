@@ -594,8 +594,10 @@ jobs:
           wait_ready roledefinition
           wait_ready binddefinition
           wait_ready rbacpolicy
-          wait_condition restrictedbinddefinition 't-caas.telekom.com/sample-case in (allowed,partial,impersonated-allowed)' Ready True
+          wait_condition restrictedbinddefinition 't-caas.telekom.com/sample-case in (allowed,impersonated-allowed)' Ready True
           wait_condition restrictedbinddefinition 't-caas.telekom.com/sample-case in (allowed,partial,impersonated-allowed)' PolicyCompliant True
+          wait_condition restrictedbinddefinition 't-caas.telekom.com/sample-case=partial' Ready False
+          wait_condition restrictedbinddefinition 't-caas.telekom.com/sample-case=partial' RoleRefsValid False
           wait_missing_role_refs restrictedbinddefinition 't-caas.telekom.com/sample-case=partial' 'Role/sample-tenant-a/sample-missing-role'
           wait_condition restrictedroledefinition 't-caas.telekom.com/sample-case in (allowed,partial,impersonated-allowed)' Ready True
           wait_condition restrictedroledefinition 't-caas.telekom.com/sample-case in (allowed,partial,impersonated-allowed)' PolicyCompliant True
@@ -611,7 +613,9 @@ jobs:
           echo "Waiting 15s for reconciliation to fully settle..."
           sleep 15
           wait_ready binddefinition
-          wait_condition restrictedbinddefinition 't-caas.telekom.com/sample-case in (allowed,partial,impersonated-allowed)' Ready True
+          wait_condition restrictedbinddefinition 't-caas.telekom.com/sample-case in (allowed,impersonated-allowed)' Ready True
+          wait_condition restrictedbinddefinition 't-caas.telekom.com/sample-case=partial' Ready False
+          wait_condition restrictedbinddefinition 't-caas.telekom.com/sample-case=partial' RoleRefsValid False
           wait_condition restrictedroledefinition 't-caas.telekom.com/sample-case in (allowed,partial,impersonated-allowed)' Ready True
           wait_missing_role_refs restrictedbinddefinition 't-caas.telekom.com/sample-case=partial' 'Role/sample-tenant-a/sample-missing-role'
           wait_policy_violation restrictedbinddefinition 't-caas.telekom.com/sample-case=blocked' 'spec.clusterRoleBindings: ClusterRoleBindings are not allowed by policy'
