@@ -135,7 +135,7 @@ func init() {
 
 	rootCmd.PersistentFlags().BoolVar(&metricsSecure, "metrics-secure", false,
 		"Serve metrics over HTTPS/TLS and require authentication/authorization. "+
-			"When enabled, certificates are loaded from "+metricsCertDir+" and /metrics is protected with TokenReview and SubjectAccessReview.")
+			"When enabled, certificates are generated and maintained in "+metricsCertDir+" and /metrics is protected with TokenReview and SubjectAccessReview.")
 
 	// Tracing flags
 	rootCmd.PersistentFlags().BoolVar(&tracingEnabled, "tracing-enabled", false,

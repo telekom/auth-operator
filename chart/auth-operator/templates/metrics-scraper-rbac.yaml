@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-{{- if and .Values.metrics.auth.enabled .Values.metrics.serviceMonitor.enabled .Values.metrics.serviceMonitor.scraperRBAC.create }}
+{{- if and .Values.metrics.auth.enabled .Values.metrics.serviceMonitor.scraperRBAC.create }}
 {{- $serviceAccountName := required "metrics.serviceMonitor.scraperRBAC.serviceAccount.name is required when scraperRBAC.create=true" .Values.metrics.serviceMonitor.scraperRBAC.serviceAccount.name }}
 {{- $serviceAccountNamespace := default .Release.Namespace .Values.metrics.serviceMonitor.scraperRBAC.serviceAccount.namespace }}
 apiVersion: rbac.authorization.k8s.io/v1
