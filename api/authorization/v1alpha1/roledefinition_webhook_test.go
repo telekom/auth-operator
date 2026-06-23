@@ -102,8 +102,8 @@ var _ = Describe("RoleDefinition Webhook", func() {
 			}
 			Expect(k8sClient.Create(ctx, rd1)).To(Succeed())
 
-			// The webhook validator uses the manager's cached client for MatchingFields lookups.
-			// Use DryRun to poll until the informer cache has synced rd1, avoiding side effects.
+			// DryRun verifies duplicate admission behavior without leaving behind
+			// the rejected object.
 			rd2 := &RoleDefinition{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-dup-second",
@@ -137,7 +137,7 @@ var _ = Describe("RoleDefinition Webhook", func() {
 			}
 			Expect(k8sClient.Create(ctx, rd1)).To(Succeed())
 
-			// Wait for the informer cache to sync rd1 before verifying cross-role allowance.
+			// DryRun verifies cross-role allowance before creating the object.
 			rd2 := &RoleDefinition{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-same-name-role",

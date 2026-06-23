@@ -38,6 +38,1077 @@ func Parser() *typed.Parser {
 var parserOnce sync.Once
 var parser *typed.Parser
 var schemaYAML = typed.YAMLObject(`types:
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.BindDefinition
+  map:
+    fields:
+    - name: apiVersion
+      type:
+        scalar: string
+    - name: kind
+      type:
+        scalar: string
+    - name: metadata
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta
+    - name: spec
+      type:
+        namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.BindDefinitionSpec
+    - name: status
+      type:
+        namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.BindDefinitionStatus
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.BindDefinitionSpec
+  map:
+    fields:
+    - name: automountServiceAccountToken
+      type:
+        scalar: boolean
+      default: true
+    - name: clusterRoleBindings
+      type:
+        namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.ClusterBinding
+    - name: roleBindings
+      type:
+        list:
+          elementType:
+            namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.NamespaceBinding
+          elementRelationship: atomic
+    - name: subjects
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.api.rbac.v1.Subject
+          elementRelationship: atomic
+    - name: targetName
+      type:
+        scalar: string
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.BindDefinitionStatus
+  map:
+    fields:
+    - name: bindReconciled
+      type:
+        scalar: boolean
+    - name: conditions
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Condition
+          elementRelationship: atomic
+    - name: externalServiceAccounts
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: generatedServiceAccounts
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.api.rbac.v1.Subject
+          elementRelationship: atomic
+    - name: missingRoleRefs
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: observedGeneration
+      type:
+        scalar: numeric
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.BindingLimits
+  map:
+    fields:
+    - name: allowClusterRoleBindings
+      type:
+        scalar: boolean
+      default: false
+    - name: clusterRoleBindingLimits
+      type:
+        namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.RoleRefLimits
+    - name: roleBindingLimits
+      type:
+        namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.RoleRefLimits
+    - name: targetNamespaceLimits
+      type:
+        namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.NamespaceLimits
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.ClusterBinding
+  map:
+    fields:
+    - name: clusterRoleRefs
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.DefaultPolicyAssignment
+  map:
+    fields:
+    - name: groups
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: serviceAccounts
+      type:
+        list:
+          elementType:
+            namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.SARef
+          elementRelationship: atomic
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.ImpersonationConfig
+  map:
+    fields:
+    - name: enabled
+      type:
+        scalar: boolean
+      default: false
+    - name: serviceAccountRef
+      type:
+        namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.SARef
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.NameMatchLimits
+  map:
+    fields:
+    - name: allowedNames
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: allowedPrefixes
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: allowedSuffixes
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: forbiddenNames
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: forbiddenPrefixes
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: forbiddenSuffixes
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.NamespaceBinding
+  map:
+    fields:
+    - name: clusterRoleRefs
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: namespace
+      type:
+        scalar: string
+    - name: namespaceSelector
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector
+          elementRelationship: atomic
+    - name: roleRefs
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.NamespaceLimits
+  map:
+    fields:
+    - name: allowedNamespaceSelector
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector
+    - name: forbiddenNamespacePrefixes
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: forbiddenNamespaces
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: maxTargetNamespaces
+      type:
+        scalar: numeric
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.PolicyScope
+  map:
+    fields:
+    - name: namespaceSelector
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector
+    - name: namespaces
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.Principal
+  map:
+    fields:
+    - name: groups
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: namespace
+      type:
+        scalar: string
+    - name: user
+      type:
+        scalar: string
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.RBACPolicy
+  map:
+    fields:
+    - name: apiVersion
+      type:
+        scalar: string
+    - name: kind
+      type:
+        scalar: string
+    - name: metadata
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta
+    - name: spec
+      type:
+        namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.RBACPolicySpec
+    - name: status
+      type:
+        namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.RBACPolicyStatus
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.RBACPolicyReference
+  map:
+    fields:
+    - name: name
+      type:
+        scalar: string
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.RBACPolicySpec
+  map:
+    fields:
+    - name: appliesTo
+      type:
+        namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.PolicyScope
+    - name: bindingLimits
+      type:
+        namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.BindingLimits
+    - name: defaultAssignment
+      type:
+        namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.DefaultPolicyAssignment
+    - name: impersonation
+      type:
+        namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.ImpersonationConfig
+    - name: roleLimits
+      type:
+        namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.RoleLimits
+    - name: subjectLimits
+      type:
+        namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.SubjectLimits
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.RBACPolicyStatus
+  map:
+    fields:
+    - name: boundResourceCount
+      type:
+        scalar: numeric
+    - name: conditions
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Condition
+          elementRelationship: atomic
+    - name: observedGeneration
+      type:
+        scalar: numeric
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.ResourceVerbRule
+  map:
+    fields:
+    - name: apiGroup
+      type:
+        scalar: string
+    - name: resource
+      type:
+        scalar: string
+    - name: verbs
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.RestrictedAPIGroup
+  map:
+    fields:
+    - name: name
+      type:
+        scalar: string
+    - name: verbs
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: versions
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.apis.meta.v1.GroupVersionForDiscovery
+          elementRelationship: atomic
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.RestrictedBindDefinition
+  map:
+    fields:
+    - name: apiVersion
+      type:
+        scalar: string
+    - name: kind
+      type:
+        scalar: string
+    - name: metadata
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta
+    - name: spec
+      type:
+        namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.RestrictedBindDefinitionSpec
+    - name: status
+      type:
+        namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.RestrictedBindDefinitionStatus
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.RestrictedBindDefinitionSpec
+  map:
+    fields:
+    - name: automountServiceAccountToken
+      type:
+        scalar: boolean
+      default: true
+    - name: clusterRoleBindings
+      type:
+        namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.ClusterBinding
+    - name: policyRef
+      type:
+        namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.RBACPolicyReference
+    - name: roleBindings
+      type:
+        list:
+          elementType:
+            namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.NamespaceBinding
+          elementRelationship: atomic
+    - name: subjects
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.api.rbac.v1.Subject
+          elementRelationship: atomic
+    - name: targetName
+      type:
+        scalar: string
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.RestrictedBindDefinitionStatus
+  map:
+    fields:
+    - name: bindReconciled
+      type:
+        scalar: boolean
+    - name: conditions
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Condition
+          elementRelationship: atomic
+    - name: externalServiceAccounts
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: generatedServiceAccounts
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.api.rbac.v1.Subject
+          elementRelationship: atomic
+    - name: missingRoleRefs
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: observedGeneration
+      type:
+        scalar: numeric
+    - name: policyViolations
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: skippedServiceAccounts
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.RestrictedRoleDefinition
+  map:
+    fields:
+    - name: apiVersion
+      type:
+        scalar: string
+    - name: kind
+      type:
+        scalar: string
+    - name: metadata
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta
+    - name: spec
+      type:
+        namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.RestrictedRoleDefinitionSpec
+    - name: status
+      type:
+        namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.RestrictedRoleDefinitionStatus
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.RestrictedRoleDefinitionSpec
+  map:
+    fields:
+    - name: policyRef
+      type:
+        namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.RBACPolicyReference
+    - name: restrictedApis
+      type:
+        list:
+          elementType:
+            namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.RestrictedAPIGroup
+          elementRelationship: atomic
+    - name: restrictedResources
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.apis.meta.v1.APIResource
+          elementRelationship: atomic
+    - name: restrictedVerbs
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: scopeNamespaced
+      type:
+        scalar: boolean
+    - name: targetName
+      type:
+        scalar: string
+    - name: targetNamespace
+      type:
+        scalar: string
+    - name: targetRole
+      type:
+        scalar: string
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.RestrictedRoleDefinitionStatus
+  map:
+    fields:
+    - name: conditions
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Condition
+          elementRelationship: atomic
+    - name: observedGeneration
+      type:
+        scalar: numeric
+    - name: policyViolations
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: roleReconciled
+      type:
+        scalar: boolean
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.RoleDefinition
+  map:
+    fields:
+    - name: apiVersion
+      type:
+        scalar: string
+    - name: kind
+      type:
+        scalar: string
+    - name: metadata
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta
+    - name: spec
+      type:
+        namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.RoleDefinitionSpec
+    - name: status
+      type:
+        namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.RoleDefinitionStatus
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.RoleDefinitionSpec
+  map:
+    fields:
+    - name: aggregateFrom
+      type:
+        namedType: io.k8s.api.rbac.v1.AggregationRule
+    - name: aggregationLabels
+      type:
+        map:
+          elementType:
+            scalar: string
+    - name: breakglassAllowed
+      type:
+        scalar: boolean
+      default: false
+    - name: restrictedApis
+      type:
+        list:
+          elementType:
+            namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.RestrictedAPIGroup
+          elementRelationship: atomic
+    - name: restrictedResources
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.apis.meta.v1.APIResource
+          elementRelationship: atomic
+    - name: restrictedVerbs
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: scopeNamespaced
+      type:
+        scalar: boolean
+    - name: targetName
+      type:
+        scalar: string
+    - name: targetNamespace
+      type:
+        scalar: string
+    - name: targetRole
+      type:
+        scalar: string
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.RoleDefinitionStatus
+  map:
+    fields:
+    - name: conditions
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Condition
+          elementRelationship: atomic
+    - name: observedGeneration
+      type:
+        scalar: numeric
+    - name: roleReconciled
+      type:
+        scalar: boolean
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.RoleLimits
+  map:
+    fields:
+    - name: allowClusterRoles
+      type:
+        scalar: boolean
+      default: false
+    - name: forbiddenAPIGroups
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: forbiddenResourceVerbs
+      type:
+        list:
+          elementType:
+            namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.ResourceVerbRule
+          elementRelationship: atomic
+    - name: forbiddenResources
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: forbiddenVerbs
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: maxRulesPerRole
+      type:
+        scalar: numeric
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.RoleRefLimits
+  map:
+    fields:
+    - name: allowedRoleRefSelector
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector
+    - name: allowedRoleRefs
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: forbiddenRoleRefSelector
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector
+    - name: forbiddenRoleRefs
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.SACreationConfig
+  map:
+    fields:
+    - name: allowAutoCreate
+      type:
+        scalar: boolean
+      default: false
+    - name: allowedCreationNamespaceSelector
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector
+    - name: allowedCreationNamespaces
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: automountServiceAccountToken
+      type:
+        scalar: boolean
+    - name: disableAdoption
+      type:
+        scalar: boolean
+      default: false
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.SARef
+  map:
+    fields:
+    - name: name
+      type:
+        scalar: string
+    - name: namespace
+      type:
+        scalar: string
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.ServiceAccountLimits
+  map:
+    fields:
+    - name: allowedNamespaceSelector
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector
+    - name: creation
+      type:
+        namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.SACreationConfig
+    - name: forbiddenNamespacePrefixes
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: forbiddenNamespaces
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.SubjectLimits
+  map:
+    fields:
+    - name: allowedKinds
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: forbiddenKinds
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: groupLimits
+      type:
+        namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.NameMatchLimits
+    - name: serviceAccountLimits
+      type:
+        namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.ServiceAccountLimits
+    - name: userLimits
+      type:
+        namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.NameMatchLimits
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.WebhookAuthorizer
+  map:
+    fields:
+    - name: apiVersion
+      type:
+        scalar: string
+    - name: kind
+      type:
+        scalar: string
+    - name: metadata
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta
+    - name: spec
+      type:
+        namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.WebhookAuthorizerSpec
+    - name: status
+      type:
+        namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.WebhookAuthorizerStatus
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.WebhookAuthorizerSpec
+  map:
+    fields:
+    - name: allowedPrincipals
+      type:
+        list:
+          elementType:
+            namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.Principal
+          elementRelationship: atomic
+    - name: deniedPrincipals
+      type:
+        list:
+          elementType:
+            namedType: com.github.telekom.auth-operator.api.authorization.v1alpha1.Principal
+          elementRelationship: atomic
+    - name: namespaceSelector
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector
+    - name: nonResourceRules
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.api.authorization.v1.NonResourceRule
+          elementRelationship: atomic
+    - name: resourceRules
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.api.authorization.v1.ResourceRule
+          elementRelationship: atomic
+- name: com.github.telekom.auth-operator.api.authorization.v1alpha1.WebhookAuthorizerStatus
+  map:
+    fields:
+    - name: authorizerConfigured
+      type:
+        scalar: boolean
+    - name: conditions
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Condition
+          elementRelationship: atomic
+    - name: observedGeneration
+      type:
+        scalar: numeric
+- name: io.k8s.api.authorization.v1.NonResourceRule
+  map:
+    fields:
+    - name: nonResourceURLs
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: verbs
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+- name: io.k8s.api.authorization.v1.ResourceRule
+  map:
+    fields:
+    - name: apiGroups
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: resourceNames
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: resources
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: verbs
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+- name: io.k8s.api.rbac.v1.AggregationRule
+  map:
+    fields:
+    - name: clusterRoleSelectors
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector
+          elementRelationship: atomic
+- name: io.k8s.api.rbac.v1.Subject
+  map:
+    fields:
+    - name: apiGroup
+      type:
+        scalar: string
+    - name: kind
+      type:
+        scalar: string
+    - name: name
+      type:
+        scalar: string
+    - name: namespace
+      type:
+        scalar: string
+    elementRelationship: atomic
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.APIResource
+  map:
+    fields:
+    - name: categories
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: group
+      type:
+        scalar: string
+    - name: kind
+      type:
+        scalar: string
+    - name: name
+      type:
+        scalar: string
+    - name: namespaced
+      type:
+        scalar: boolean
+    - name: shortNames
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: singularName
+      type:
+        scalar: string
+    - name: storageVersionHash
+      type:
+        scalar: string
+    - name: verbs
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Verbs
+    - name: version
+      type:
+        scalar: string
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.Condition
+  map:
+    fields:
+    - name: lastTransitionTime
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Time
+    - name: message
+      type:
+        scalar: string
+    - name: observedGeneration
+      type:
+        scalar: numeric
+    - name: reason
+      type:
+        scalar: string
+    - name: status
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.ConditionStatus
+    - name: type
+      type:
+        scalar: string
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.ConditionStatus
+  scalar: string
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.FieldsV1
+  map:
+    elementType:
+      scalar: untyped
+      list:
+        elementType:
+          namedType: __untyped_atomic_
+        elementRelationship: atomic
+      map:
+        elementType:
+          namedType: __untyped_deduced_
+        elementRelationship: separable
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.GroupVersionForDiscovery
+  map:
+    fields:
+    - name: groupVersion
+      type:
+        scalar: string
+    - name: version
+      type:
+        scalar: string
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector
+  map:
+    fields:
+    - name: matchExpressions
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelectorRequirement
+          elementRelationship: atomic
+    - name: matchLabels
+      type:
+        map:
+          elementType:
+            scalar: string
+    elementRelationship: atomic
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelectorOperator
+  scalar: string
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelectorRequirement
+  map:
+    fields:
+    - name: key
+      type:
+        scalar: string
+    - name: operator
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelectorOperator
+    - name: values
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.ManagedFieldsEntry
+  map:
+    fields:
+    - name: apiVersion
+      type:
+        scalar: string
+    - name: fieldsType
+      type:
+        scalar: string
+    - name: fieldsV1
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.FieldsV1
+    - name: manager
+      type:
+        scalar: string
+    - name: operation
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.ManagedFieldsOperationType
+    - name: subresource
+      type:
+        scalar: string
+    - name: time
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Time
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.ManagedFieldsOperationType
+  scalar: string
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta
+  map:
+    fields:
+    - name: annotations
+      type:
+        map:
+          elementType:
+            scalar: string
+    - name: creationTimestamp
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Time
+    - name: deletionGracePeriodSeconds
+      type:
+        scalar: numeric
+    - name: deletionTimestamp
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Time
+    - name: finalizers
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: associative
+    - name: generateName
+      type:
+        scalar: string
+    - name: generation
+      type:
+        scalar: numeric
+    - name: labels
+      type:
+        map:
+          elementType:
+            scalar: string
+    - name: managedFields
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.apis.meta.v1.ManagedFieldsEntry
+          elementRelationship: atomic
+    - name: name
+      type:
+        scalar: string
+    - name: namespace
+      type:
+        scalar: string
+    - name: ownerReferences
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.apis.meta.v1.OwnerReference
+          elementRelationship: associative
+          keys:
+          - uid
+    - name: resourceVersion
+      type:
+        scalar: string
+    - name: selfLink
+      type:
+        scalar: string
+    - name: uid
+      type:
+        namedType: io.k8s.apimachinery.pkg.types.UID
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.OwnerReference
+  map:
+    fields:
+    - name: apiVersion
+      type:
+        scalar: string
+    - name: blockOwnerDeletion
+      type:
+        scalar: boolean
+    - name: controller
+      type:
+        scalar: boolean
+    - name: kind
+      type:
+        scalar: string
+    - name: name
+      type:
+        scalar: string
+    - name: uid
+      type:
+        namedType: io.k8s.apimachinery.pkg.types.UID
+    elementRelationship: atomic
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.Time
+  scalar: untyped
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.Verbs
+  list:
+    elementType:
+      scalar: string
+    elementRelationship: atomic
+- name: io.k8s.apimachinery.pkg.types.UID
+  scalar: string
 - name: __untyped_atomic_
   scalar: untyped
   list:

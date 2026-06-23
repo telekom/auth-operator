@@ -105,16 +105,17 @@ var ErrMissingRoleRefs = errors.New("missing role references")
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions/finalizers,verbs=update
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,verbs=get;list;watch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,verbs=get;list;watch;create;patch;delete
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;patch;delete
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch;update
 // +kubebuilder:rbac:groups="events.k8s.io",resources=events,verbs=create;patch;update
-// +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=create;delete;get;list;patch;update;watch
+// +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=create;delete;get;list;patch;watch
 
 // BindDefinitionReconciler defines the reconciler for BindDefinition and reconciles a BindDefinition object.
 type BindDefinitionReconciler struct {
 	client                client.Client
+	reader                client.Reader
 	scheme                *runtime.Scheme
 	RoleBindingTerminator *RoleBindingTerminator
 	recorder              events.EventRecorder
@@ -141,6 +142,7 @@ func NewBindDefinitionReconciler(
 
 	r := &BindDefinitionReconciler{
 		client:                cachedClient,
+		reader:                cachedClient,
 		scheme:                scheme,
 		recorder:              recorder,
 		RoleBindingTerminator: rbTerminator,
@@ -160,6 +162,9 @@ func (r *BindDefinitionReconciler) SetupWithManager(mgr ctrl.Manager, concurrenc
 	}
 	if err := r.RoleBindingTerminator.SetupWithManager(mgr, concurrency); err != nil {
 		return fmt.Errorf("unable to set up RoleBinding terminator: %w", err)
+	}
+	if r.reader == nil || r.reader == r.client {
+		r.reader = mgr.GetAPIReader()
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		// control BindDefinitions
@@ -750,6 +755,12 @@ func (r *BindDefinitionReconciler) ensureClusterRoleBindings(
 
 	for _, clusterRoleRef := range bindDef.Spec.ClusterRoleBindings.ClusterRoleRefs {
 		crbName := helpers.BuildBindingName(bindDef.Spec.TargetName, clusterRoleRef)
+		if err := r.checkBindingOwnership(ctx, bindDef, "ClusterRoleBinding", crbName, ""); err != nil {
+			conditions.MarkFalse(bindDef, authorizationv1alpha1.CreateCondition, bindDef.Generation,
+				authorizationv1alpha1.CreateReason, authorizationv1alpha1.CreateMessage)
+			r.applyStatusNonFatal(ctx, bindDef)
+			return err
+		}
 
 		// Build the ClusterRoleBinding using SSA ApplyConfiguration
 		ac := pkgssa.ClusterRoleBindingWithSubjectsAndRoleRef(
@@ -857,6 +868,12 @@ func (r *BindDefinitionReconciler) ensureSingleRoleBinding(
 		r.applyStatusNonFatal(ctx, bindDef)
 		return err
 	}
+	if err := r.checkBindingOwnership(ctx, bindDef, "RoleBinding", rbName, namespace); err != nil {
+		conditions.MarkFalse(bindDef, authorizationv1alpha1.CreateCondition, bindDef.Generation,
+			authorizationv1alpha1.CreateReason, authorizationv1alpha1.CreateMessage)
+		r.applyStatusNonFatal(ctx, bindDef)
+		return err
+	}
 
 	// Build the RoleBinding using SSA ApplyConfiguration
 	ac := pkgssa.RoleBindingWithSubjectsAndRoleRef(
@@ -890,6 +907,52 @@ func (r *BindDefinitionReconciler) ensureSingleRoleBinding(
 		metrics.RBACResourcesApplied.WithLabelValues(metrics.ResourceRoleBinding).Inc()
 	}
 	return nil
+}
+
+func (r *BindDefinitionReconciler) checkBindingOwnership(
+	ctx context.Context,
+	bindDef *authorizationv1alpha1.BindDefinition,
+	targetKind string,
+	targetName string,
+	targetNamespace string,
+) error {
+	logger := log.FromContext(ctx)
+
+	var existing client.Object
+	key := client.ObjectKey{Name: targetName}
+	switch targetKind {
+	case "ClusterRoleBinding":
+		existing = &rbacv1.ClusterRoleBinding{}
+	case "RoleBinding":
+		existing = &rbacv1.RoleBinding{}
+		key.Namespace = targetNamespace
+	default:
+		return fmt.Errorf("unknown target binding kind %q", targetKind)
+	}
+
+	if err := r.client.Get(ctx, key, existing); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("check existing %s %v: %w", targetKind, key, err)
+	}
+
+	if hasOwnerRef(existing, bindDef) {
+		return nil
+	}
+
+	logger.Info("Target binding already exists without this BindDefinition owner",
+		"bindingKind", targetKind,
+		"bindingName", targetName,
+		"bindingNamespace", targetNamespace,
+		"owner", bindDef.GetName(),
+		"ownerUID", bindDef.GetUID())
+	r.recorder.Eventf(bindDef, nil, corev1.EventTypeWarning,
+		authorizationv1alpha1.EventReasonOwnership, authorizationv1alpha1.EventActionReconcile,
+		"Target %s %s already exists and is not owned by BindDefinition %s (UID: %s)",
+		targetKind, targetName, bindDef.GetName(), bindDef.GetUID())
+	return fmt.Errorf("target %s %s already exists and is not owned by BindDefinition %s (UID: %s)",
+		targetKind, targetName, bindDef.GetName(), bindDef.GetUID())
 }
 
 func (r *BindDefinitionReconciler) deleteOwnedRoleBindingOnRoleRefChange(
@@ -946,6 +1009,8 @@ func (r *BindDefinitionReconciler) validateServiceAccountNamespace(
 // Uses per-BD FieldOwner to ensure multiple BDs can independently manage ownerReferences
 // on shared ServiceAccounts without overwriting each other's entries.
 // The source-names annotation tracks all BDs managing this SA (comma-separated).
+// It is patched separately from SSA so multiple BindDefinitions do not conflict
+// over the same scalar annotation field.
 func (r *BindDefinitionReconciler) applyServiceAccount(
 	ctx context.Context,
 	bindDef *authorizationv1alpha1.BindDefinition,
@@ -954,33 +1019,24 @@ func (r *BindDefinitionReconciler) applyServiceAccount(
 ) error {
 	logger := log.FromContext(ctx)
 
-	// Read existing SA to merge source-names annotation (if SA already exists)
 	existingSA := &corev1.ServiceAccount{}
-	var sourceNames string
 	err := r.client.Get(ctx, types.NamespacedName{Name: subject.Name, Namespace: subject.Namespace}, existingSA)
-	switch {
-	case err == nil:
-		// SA exists - merge our BD name into existing source-names
-		existing := existingSA.Annotations[helpers.SourceNamesAnnotation]
-		sourceNames = helpers.MergeSourceNames(existing, bindDef.Name)
-	case apierrors.IsNotFound(err):
-		// New SA - just our BD name
-		sourceNames = bindDef.Name
-	default:
-		// Unexpected error
+	if err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("get existing ServiceAccount %s/%s: %w", subject.Namespace, subject.Name, err)
 	}
 
 	ac := pkgssa.ServiceAccountWith(subject.Name, subject.Namespace,
 		helpers.BuildResourceLabels(bindDef.Labels), automountToken).
 		WithOwnerReferences(saOwnerRefForBindDefinition(bindDef)).
-		WithAnnotations(helpers.BuildManagedSAAnnotations(sourceNames))
+		WithAnnotations(map[string]string{
+			helpers.SourceKindAnnotation: authorizationv1alpha1.BindDefinitionKind,
+		})
 
 	// Derive the SSA field manager via the shared FieldOwnerFor helper, scoped
-	// by this BindDefinition's name so separate BindDefinitions do not take
+	// by this BindDefinition's kind/name so separate owners do not take
 	// ownership of each other's managed fields when they reconcile the same
 	// ServiceAccount.
-	fieldOwner := pkgssa.FieldOwnerFor(bindDef.Name)
+	fieldOwner := pkgssa.FieldOwnerFor(bindDef.Name, authorizationv1alpha1.BindDefinitionKind)
 	result, patchErr := pkgssa.PatchApplyServiceAccount(ctx, r.client, ac, fieldOwner)
 	if patchErr != nil {
 		logger.Error(patchErr, "Failed to apply ServiceAccount",
@@ -990,13 +1046,19 @@ func (r *BindDefinitionReconciler) applyServiceAccount(
 
 	logger.V(1).Info("Ensured ServiceAccount",
 		"bindDefinitionName", bindDef.Name, "serviceAccount", subject.Name, "namespace", subject.Namespace,
-		"sourceNames", sourceNames, "result", result)
+		"result", result)
 	if result == pkgssa.PatchApplyResultSkipped {
 		metrics.RBACResourcesSkipped.WithLabelValues(metrics.ResourceServiceAccount).Inc()
 	} else {
 		metrics.RBACResourcesApplied.WithLabelValues(metrics.ResourceServiceAccount).Inc()
 		r.recorder.Eventf(bindDef, nil, corev1.EventTypeNormal, authorizationv1alpha1.EventReasonUpdate, authorizationv1alpha1.EventActionReconcile,
 			"Applied resource ServiceAccount/%s in namespace %s", subject.Name, subject.Namespace)
+	}
+
+	if err := r.addManagedSAReference(ctx, subject.Namespace, subject.Name, bindDef.Name); err != nil {
+		logger.Error(err, "Failed to update managed ServiceAccount source names",
+			"bindDefinitionName", bindDef.Name, "serviceAccount", subject.Name, "namespace", subject.Namespace)
+		return err
 	}
 
 	return nil

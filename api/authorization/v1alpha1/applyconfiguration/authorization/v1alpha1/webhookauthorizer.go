@@ -18,8 +18,11 @@ limitations under the License.
 package v1alpha1
 
 import (
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	internal "github.com/telekom/auth-operator/api/authorization/v1alpha1/applyconfiguration/internal"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
+	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	v1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
@@ -36,13 +39,52 @@ type WebhookAuthorizerApplyConfiguration struct {
 
 // WebhookAuthorizer constructs a declarative configuration of the WebhookAuthorizer type for use with
 // apply.
-func WebhookAuthorizer(name, namespace string) *WebhookAuthorizerApplyConfiguration {
+func WebhookAuthorizer(name string) *WebhookAuthorizerApplyConfiguration {
 	b := &WebhookAuthorizerApplyConfiguration{}
 	b.WithName(name)
-	b.WithNamespace(namespace)
 	b.WithKind("WebhookAuthorizer")
 	b.WithAPIVersion("authorization.t-caas.telekom.com/v1alpha1")
 	return b
+}
+
+// ExtractWebhookAuthorizerFrom extracts the applied configuration owned by fieldManager from
+// webhookAuthorizer for the specified subresource. Pass an empty string for subresource to extract
+// the main resource. Common subresources include "status", "scale", etc.
+// webhookAuthorizer must be a unmodified WebhookAuthorizer API object that was retrieved from the Kubernetes API.
+// ExtractWebhookAuthorizerFrom provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractWebhookAuthorizerFrom(webhookAuthorizer *authorizationv1alpha1.WebhookAuthorizer, fieldManager string, subresource string) (*WebhookAuthorizerApplyConfiguration, error) {
+	b := &WebhookAuthorizerApplyConfiguration{}
+	err := managedfields.ExtractInto(webhookAuthorizer, internal.Parser().Type("com.github.telekom.auth-operator.api.authorization.v1alpha1.WebhookAuthorizer"), fieldManager, b, subresource)
+	if err != nil {
+		return nil, err
+	}
+	b.WithName(webhookAuthorizer.Name)
+
+	b.WithKind("WebhookAuthorizer")
+	b.WithAPIVersion("authorization.t-caas.telekom.com/v1alpha1")
+	return b, nil
+}
+
+// ExtractWebhookAuthorizer extracts the applied configuration owned by fieldManager from
+// webhookAuthorizer. If no managedFields are found in webhookAuthorizer for fieldManager, a
+// WebhookAuthorizerApplyConfiguration is returned with only the Name, Namespace (if applicable),
+// APIVersion and Kind populated. It is possible that no managed fields were found for because other
+// field managers have taken ownership of all the fields previously owned by fieldManager, or because
+// the fieldManager never owned fields any fields.
+// webhookAuthorizer must be a unmodified WebhookAuthorizer API object that was retrieved from the Kubernetes API.
+// ExtractWebhookAuthorizer provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractWebhookAuthorizer(webhookAuthorizer *authorizationv1alpha1.WebhookAuthorizer, fieldManager string) (*WebhookAuthorizerApplyConfiguration, error) {
+	return ExtractWebhookAuthorizerFrom(webhookAuthorizer, fieldManager, "")
+}
+
+// ExtractWebhookAuthorizerStatus extracts the applied configuration owned by fieldManager from
+// webhookAuthorizer for the status subresource.
+func ExtractWebhookAuthorizerStatus(webhookAuthorizer *authorizationv1alpha1.WebhookAuthorizer, fieldManager string) (*WebhookAuthorizerApplyConfiguration, error) {
+	return ExtractWebhookAuthorizerFrom(webhookAuthorizer, fieldManager, "status")
 }
 
 func (b WebhookAuthorizerApplyConfiguration) IsApplyConfiguration() {}

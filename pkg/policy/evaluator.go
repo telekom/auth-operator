@@ -18,8 +18,8 @@ import (
 // EvaluateBindDefinition checks a RestrictedBindDefinition against its
 // governing RBACPolicy and returns all violations. An empty slice
 // indicates full compliance.
-// The optional labelGetter enables label-selector-based checks;
-// pass nil to skip selector evaluation.
+// The optional labelGetter enables label-selector-based checks. Selector-based
+// policy constraints fail closed when no label getter is available.
 func EvaluateBindDefinition(
 	ctx context.Context,
 	policy *authorizationv1alpha1.RBACPolicy,
@@ -34,6 +34,14 @@ func EvaluateBindDefinition(
 	}
 
 	violations := []Violation{}
+
+	if len(restrictedBindClusterRoleRefs(rbd.Spec.ClusterRoleBindings)) > 0 &&
+		!scopeAllowsClusterResources(policy.Spec.AppliesTo) {
+		violations = append(violations, Violation{
+			Field:   "spec.clusterRoleBindings",
+			Message: `ClusterRoleBindings require appliesTo.namespaces to include "*"`,
+		})
+	}
 
 	// Enforce appliesTo scope: roleBinding target namespaces must be within the policy's
 	// declared governance scope. Static namespace entries and NamespaceSelector are
@@ -70,6 +78,18 @@ func EvaluateBindDefinition(
 					})
 				}
 			}
+		}
+	}
+
+	for i, subject := range rbd.Spec.Subjects {
+		if subject.Kind != rbacv1.ServiceAccountKind || subject.Namespace == "" {
+			continue
+		}
+		if !namespaceInScope(ctx, policy.Spec.AppliesTo, subject.Namespace, labelGetter) {
+			violations = append(violations, Violation{
+				Field:   fmt.Sprintf("spec.subjects[%d].namespace", i),
+				Message: fmt.Sprintf("ServiceAccount namespace %q is outside the policy's appliesTo scope", subject.Namespace),
+			})
 		}
 	}
 
@@ -335,21 +355,28 @@ func evaluateNamespaceLimits(ctx context.Context, limits *authorizationv1alpha1.
 		}
 
 		// For selector-based bindings, resolve concrete namespaces and check each.
-		if lg != nil {
-			for _, sel := range nb.NamespaceSelector {
-				names, err := lg.ListNamespacesBySelector(ctx, &sel)
-				if err != nil {
-					violations = append(violations, Violation{
-						Field:   fmt.Sprintf("spec.roleBindings[%d].namespaceSelector", i),
-						Message: fmt.Sprintf("failed to resolve namespace selector: %v", err),
-					})
-					continue
-				}
-				for _, ns := range names {
-					resolvedNamespaces[ns] = struct{}{}
-					violations = append(violations, checkNamespace(ctx, limits, ns,
-						fmt.Sprintf("spec.roleBindings[%d].namespaceSelector (resolved: %s)", i, ns), lg)...)
-				}
+		for j, sel := range nb.NamespaceSelector {
+			fieldPath := fmt.Sprintf("spec.roleBindings[%d].namespaceSelector[%d]", i, j)
+			if lg == nil {
+				violations = append(violations, Violation{
+					Field:   fieldPath,
+					Message: "namespace selector cannot be evaluated without a label resolver",
+				})
+				continue
+			}
+
+			names, err := lg.ListNamespacesBySelector(ctx, &sel)
+			if err != nil {
+				violations = append(violations, Violation{
+					Field:   fieldPath,
+					Message: fmt.Sprintf("failed to resolve namespace selector: %v", err),
+				})
+				continue
+			}
+			for _, ns := range names {
+				resolvedNamespaces[ns] = struct{}{}
+				violations = append(violations, checkNamespace(ctx, limits, ns,
+					fmt.Sprintf("%s (resolved: %s)", fieldPath, ns), lg)...)
 			}
 		}
 	}
@@ -387,7 +414,15 @@ func checkNamespace(ctx context.Context, limits *authorizationv1alpha1.Namespace
 	}
 
 	// Check AllowedNamespaceSelector.
-	if limits.AllowedNamespaceSelector != nil && lg != nil {
+	if limits.AllowedNamespaceSelector != nil {
+		if lg == nil {
+			violations = append(violations, Violation{
+				Field:   fieldPath,
+				Message: fmt.Sprintf("namespace %q cannot be checked against the allowed namespace label selector", namespace),
+			})
+			return violations
+		}
+
 		nsLabels, found := lg.GetNamespaceLabels(ctx, namespace)
 		if !found || !matchesSelector(limits.AllowedNamespaceSelector, nsLabels) {
 			violations = append(violations, Violation{
@@ -519,7 +554,15 @@ func checkServiceAccountLimits(ctx context.Context, limits *authorizationv1alpha
 	}
 
 	// Check AllowedNamespaceSelector.
-	if limits.AllowedNamespaceSelector != nil && lg != nil && subject.Namespace != "" {
+	if limits.AllowedNamespaceSelector != nil && subject.Namespace != "" {
+		if lg == nil {
+			violations = append(violations, Violation{
+				Field:   fieldPath + ".namespace",
+				Message: fmt.Sprintf("ServiceAccount namespace %q cannot be checked against the allowed namespace label selector", subject.Namespace),
+			})
+			return violations
+		}
+
 		nsLabels, found := lg.GetNamespaceLabels(ctx, subject.Namespace)
 		if !found || !matchesSelector(limits.AllowedNamespaceSelector, nsLabels) {
 			violations = append(violations, Violation{

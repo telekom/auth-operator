@@ -1,6 +1,6 @@
 version: "2"
 run:
-  go: "1.25"
+  go: "1.26"
   allow-parallel-runners: true
   timeout: 10m
   build-tags:
@@ -177,6 +177,33 @@ linters:
           - gocritic
         path: _test\.go$
       - linters:
+          - goconst
+        path: _test\.go$
+      - linters:
+          - goconst
+        path: test/e2e/
+      - linters:
+          - goconst
+        path: api/authorization/v1alpha1/.*_webhook\.go$
+      - linters:
+          - goconst
+        path: cmd/controller\.go$
+      - linters:
+          - goconst
+        path: cmd/webhook\.go$
+      - linters:
+          - goconst
+        path: hack/verify-rendered-rbac\.go$
+      - linters:
+          - goconst
+        path: internal/controller/authorization/
+      - linters:
+          - goconst
+        path: internal/webhook/authorization/
+      - linters:
+          - goconst
+        path: pkg/policy/
+      - linters:
           - godot
         path: _test\.go$
       - linters:
@@ -186,6 +213,21 @@ linters:
       - linters:
           - gocyclo
         path: api/authorization/v1alpha1/binddefinition_webhook\.go$
+      - linters:
+          - gocyclo
+        path: api/authorization/v1alpha1/rbacpolicy_webhook\.go$
+      - linters:
+          - gocyclo
+        path: internal/controller/authorization/restrictedbinddefinition_controller\.go$
+      - linters:
+          - gocyclo
+        path: internal/controller/authorization/restrictedroledefinition_controller\.go$
+      - linters:
+          - gocyclo
+        path: pkg/policy/evaluator\.go$
+      - linters:
+          - gocyclo
+        path: hack/verify-rendered-rbac\.go$
       - linters:
           - gocyclo
         path: internal/controller/authorization/rolebinding_terminator_controller\.go$

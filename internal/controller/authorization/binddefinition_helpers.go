@@ -10,6 +10,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	metav1ac "k8s.io/client-go/applyconfigurations/meta/v1"
 	"k8s.io/client-go/util/retry"
@@ -53,16 +54,44 @@ func saOwnerRefForBindDefinition(bindDef *authorizationv1alpha1.BindDefinition) 
 	)
 }
 
-// hasOwnerRef checks if the object has an ownerReference pointing to the given owner (by UID).
-// Unlike metav1.IsControlledBy, this matches any ownerRef regardless of the controller flag.
+// hasOwnerRef checks if the object has an ownerReference pointing to the given owner.
+// Unlike metav1.IsControlledBy, this matches any ownerRef regardless of the
+// controller flag, but it still requires the full owner identity. UID-only
+// matching is too weak for privileged cleanup/adoption checks because ownerRefs
+// are user-writable metadata.
 func hasOwnerRef(obj, owner metav1.Object) bool {
 	ownerUID := owner.GetUID()
+	ownerAPIVersion, ownerKind := ownerReferenceIdentity(owner)
+	if ownerUID == "" || ownerAPIVersion == "" || ownerKind == "" || owner.GetName() == "" {
+		return false
+	}
 	for _, ref := range obj.GetOwnerReferences() {
-		if ref.UID == ownerUID {
+		if ref.APIVersion == ownerAPIVersion && ref.Kind == ownerKind && ref.Name == owner.GetName() && ref.UID == ownerUID {
 			return true
 		}
 	}
 	return false
+}
+
+func ownerReferenceIdentity(owner metav1.Object) (apiVersion, kind string) {
+	if runtimeOwner, ok := owner.(runtime.Object); ok {
+		apiVersion, kind = runtimeOwner.GetObjectKind().GroupVersionKind().ToAPIVersionAndKind()
+		if apiVersion != "" && kind != "" {
+			return apiVersion, kind
+		}
+	}
+	apiVersion = authorizationv1alpha1.GroupVersion.String()
+	switch owner.(type) {
+	case *authorizationv1alpha1.BindDefinition:
+		return apiVersion, "BindDefinition"
+	case *authorizationv1alpha1.RoleDefinition:
+		return apiVersion, "RoleDefinition"
+	case *authorizationv1alpha1.RestrictedBindDefinition:
+		return apiVersion, authorizationv1alpha1.RestrictedBindDefinitionKind
+	case *authorizationv1alpha1.RestrictedRoleDefinition:
+		return apiVersion, authorizationv1alpha1.RestrictedRoleDefinitionKind
+	}
+	return "", ""
 }
 
 // logStatusApplyError logs a status apply error without failing the operation.
@@ -452,6 +481,56 @@ func (r *BindDefinitionReconciler) addExternalSAReference(
 		authorizationv1alpha1.EventReasonExternalSATracked, authorizationv1alpha1.EventActionReconcile,
 		"BindDefinition %s now references this ServiceAccount", bdName)
 
+	return nil
+}
+
+// addManagedSAReference merges the BindDefinition name into the managed
+// ServiceAccount source-names annotation without taking SSA ownership of that
+// shared scalar field.
+func (r *BindDefinitionReconciler) addManagedSAReference(
+	ctx context.Context,
+	saNamespace, saName, bdName string,
+) error {
+	logger := log.FromContext(ctx)
+	patched := false
+	reader := r.reader
+	if reader == nil {
+		reader = r.client
+	}
+
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		fresh := &corev1.ServiceAccount{}
+		if getErr := reader.Get(ctx, types.NamespacedName{Name: saName, Namespace: saNamespace}, fresh); getErr != nil {
+			return getErr
+		}
+
+		orig := fresh.DeepCopy()
+		if fresh.Annotations == nil {
+			fresh.Annotations = make(map[string]string)
+		}
+
+		oldSourceNames := fresh.Annotations[helpers.SourceNamesAnnotation]
+		newSourceNames := helpers.MergeSourceNames(oldSourceNames, bdName)
+		if newSourceNames == oldSourceNames &&
+			fresh.Annotations[helpers.SourceKindAnnotation] == authorizationv1alpha1.BindDefinitionKind {
+			return nil
+		}
+
+		fresh.Annotations[helpers.SourceKindAnnotation] = authorizationv1alpha1.BindDefinitionKind
+		fresh.Annotations[helpers.SourceNamesAnnotation] = newSourceNames
+		if patchErr := r.client.Patch(ctx, fresh, sigs_client.MergeFromWithOptions(orig, sigs_client.MergeFromWithOptimisticLock{})); patchErr != nil {
+			return patchErr
+		}
+		patched = true
+		return nil
+	}); err != nil {
+		return fmt.Errorf("patch ServiceAccount %s/%s source-names annotation: %w", saNamespace, saName, err)
+	}
+
+	if patched {
+		logger.V(2).Info("Updated managed ServiceAccount source-names annotation",
+			"serviceAccount", saName, "namespace", saNamespace, "bindDefinition", bdName)
+	}
 	return nil
 }
 

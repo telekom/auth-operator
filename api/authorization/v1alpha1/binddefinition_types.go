@@ -27,6 +27,8 @@ const MissingRolePolicyAnnotation = "authorization.t-caas.telekom.com/missing-ro
 
 // BindDefinition-related constants for finalizers and binding types.
 const (
+	// BindDefinitionKind is the Kubernetes kind name for BindDefinition.
+	BindDefinitionKind = "BindDefinition"
 	// BindDefinitionFinalizer is the finalizer used to prevent orphaned resources.
 	BindDefinitionFinalizer = "binddefinition.authorization.t-caas.telekom.com/finalizer"
 	// RoleBindingFinalizer is the finalizer used on RoleBindings.
@@ -45,6 +47,8 @@ type ClusterBinding struct {
 	// ClusterRoleRefs references an existing ClusterRole
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:items:MaxLength=253
 	ClusterRoleRefs []string `json:"clusterRoleRefs,omitempty"`
 }
 
@@ -54,11 +58,15 @@ type NamespaceBinding struct {
 	// ClusterRoleRefs references an existing ClusterRole
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:items:MaxLength=253
 	ClusterRoleRefs []string `json:"clusterRoleRefs,omitempty"`
 
 	// RoleRefs references a specific Role that has to exist in the target namespaces
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:items:MaxLength=253
 	RoleRefs []string `json:"roleRefs,omitempty"`
 
 	// Namespace of the Role that should be bound to the subjects.

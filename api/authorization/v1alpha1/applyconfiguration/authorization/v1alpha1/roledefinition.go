@@ -18,8 +18,11 @@ limitations under the License.
 package v1alpha1
 
 import (
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	internal "github.com/telekom/auth-operator/api/authorization/v1alpha1/applyconfiguration/internal"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
+	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	v1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
@@ -36,13 +39,52 @@ type RoleDefinitionApplyConfiguration struct {
 
 // RoleDefinition constructs a declarative configuration of the RoleDefinition type for use with
 // apply.
-func RoleDefinition(name, namespace string) *RoleDefinitionApplyConfiguration {
+func RoleDefinition(name string) *RoleDefinitionApplyConfiguration {
 	b := &RoleDefinitionApplyConfiguration{}
 	b.WithName(name)
-	b.WithNamespace(namespace)
 	b.WithKind("RoleDefinition")
 	b.WithAPIVersion("authorization.t-caas.telekom.com/v1alpha1")
 	return b
+}
+
+// ExtractRoleDefinitionFrom extracts the applied configuration owned by fieldManager from
+// roleDefinition for the specified subresource. Pass an empty string for subresource to extract
+// the main resource. Common subresources include "status", "scale", etc.
+// roleDefinition must be a unmodified RoleDefinition API object that was retrieved from the Kubernetes API.
+// ExtractRoleDefinitionFrom provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractRoleDefinitionFrom(roleDefinition *authorizationv1alpha1.RoleDefinition, fieldManager string, subresource string) (*RoleDefinitionApplyConfiguration, error) {
+	b := &RoleDefinitionApplyConfiguration{}
+	err := managedfields.ExtractInto(roleDefinition, internal.Parser().Type("com.github.telekom.auth-operator.api.authorization.v1alpha1.RoleDefinition"), fieldManager, b, subresource)
+	if err != nil {
+		return nil, err
+	}
+	b.WithName(roleDefinition.Name)
+
+	b.WithKind("RoleDefinition")
+	b.WithAPIVersion("authorization.t-caas.telekom.com/v1alpha1")
+	return b, nil
+}
+
+// ExtractRoleDefinition extracts the applied configuration owned by fieldManager from
+// roleDefinition. If no managedFields are found in roleDefinition for fieldManager, a
+// RoleDefinitionApplyConfiguration is returned with only the Name, Namespace (if applicable),
+// APIVersion and Kind populated. It is possible that no managed fields were found for because other
+// field managers have taken ownership of all the fields previously owned by fieldManager, or because
+// the fieldManager never owned fields any fields.
+// roleDefinition must be a unmodified RoleDefinition API object that was retrieved from the Kubernetes API.
+// ExtractRoleDefinition provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractRoleDefinition(roleDefinition *authorizationv1alpha1.RoleDefinition, fieldManager string) (*RoleDefinitionApplyConfiguration, error) {
+	return ExtractRoleDefinitionFrom(roleDefinition, fieldManager, "")
+}
+
+// ExtractRoleDefinitionStatus extracts the applied configuration owned by fieldManager from
+// roleDefinition for the status subresource.
+func ExtractRoleDefinitionStatus(roleDefinition *authorizationv1alpha1.RoleDefinition, fieldManager string) (*RoleDefinitionApplyConfiguration, error) {
+	return ExtractRoleDefinitionFrom(roleDefinition, fieldManager, "status")
 }
 
 func (b RoleDefinitionApplyConfiguration) IsApplyConfiguration() {}

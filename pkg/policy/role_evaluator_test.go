@@ -14,6 +14,9 @@ import (
 )
 
 func policyWithDefaultRoleLimits(policy *authorizationv1alpha1.RBACPolicy) *authorizationv1alpha1.RBACPolicy {
+	if len(policy.Spec.AppliesTo.Namespaces) == 0 && policy.Spec.AppliesTo.NamespaceSelector == nil {
+		policy.Spec.AppliesTo.Namespaces = []string{allNamespacesScope}
+	}
 	if policy.Spec.RoleLimits == nil {
 		policy.Spec.RoleLimits = &authorizationv1alpha1.RoleLimits{AllowClusterRoles: true}
 	}
@@ -22,6 +25,7 @@ func policyWithDefaultRoleLimits(policy *authorizationv1alpha1.RBACPolicy) *auth
 
 func TestEvaluateRoleDefinition_NoLimits(t *testing.T) {
 	policy := &authorizationv1alpha1.RBACPolicy{}
+	policy.Spec.AppliesTo.Namespaces = []string{allNamespacesScope}
 	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
 		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
 			TargetRole: authorizationv1alpha1.DefinitionClusterRole,
@@ -41,6 +45,7 @@ func TestEvaluateRoleDefinition_NoLimits(t *testing.T) {
 func TestEvaluateRoleDefinition_ClusterRoleNotAllowed(t *testing.T) {
 	policy := &authorizationv1alpha1.RBACPolicy{
 		Spec: authorizationv1alpha1.RBACPolicySpec{
+			AppliesTo: authorizationv1alpha1.PolicyScope{Namespaces: []string{allNamespacesScope}},
 			RoleLimits: &authorizationv1alpha1.RoleLimits{
 				AllowClusterRoles: false,
 			},
@@ -53,7 +58,7 @@ func TestEvaluateRoleDefinition_ClusterRoleNotAllowed(t *testing.T) {
 		},
 	}
 
-	violations := EvaluateRoleDefinition(policy, rrd)
+	violations := EvaluateRoleDefinition(policyWithDefaultRoleLimits(policy), rrd)
 	if len(violations) != 1 {
 		t.Fatalf("expected 1 violation, got %d: %v", len(violations), violations)
 	}
@@ -65,6 +70,7 @@ func TestEvaluateRoleDefinition_ClusterRoleNotAllowed(t *testing.T) {
 func TestEvaluateRoleDefinition_RoleAllowedWhenClusterRolesDisabled(t *testing.T) {
 	policy := &authorizationv1alpha1.RBACPolicy{
 		Spec: authorizationv1alpha1.RBACPolicySpec{
+			AppliesTo: authorizationv1alpha1.PolicyScope{Namespaces: []string{"default"}},
 			RoleLimits: &authorizationv1alpha1.RoleLimits{
 				AllowClusterRoles: false,
 			},
@@ -78,7 +84,7 @@ func TestEvaluateRoleDefinition_RoleAllowedWhenClusterRolesDisabled(t *testing.T
 		},
 	}
 
-	violations := EvaluateRoleDefinition(policy, rrd)
+	violations := EvaluateRoleDefinition(policyWithDefaultRoleLimits(policy), rrd)
 	if len(violations) != 0 {
 		t.Errorf("expected no violations for Role when ClusterRoles are disabled, got %v", violations)
 	}
@@ -114,7 +120,7 @@ func TestEvaluateRoleDefinition_ForbiddenVerbs(t *testing.T) {
 					RestrictedVerbs: tt.restrictedVerbs,
 				},
 			}
-			violations := EvaluateRoleDefinition(policy, rrd)
+			violations := EvaluateRoleDefinition(policyWithDefaultRoleLimits(policy), rrd)
 			if len(violations) != tt.wantViolations {
 				t.Errorf("expected %d violations, got %d: %v", tt.wantViolations, len(violations), violations)
 			}
@@ -143,7 +149,7 @@ func TestEvaluateRoleDefinition_ForbiddenAPIGroups(t *testing.T) {
 		},
 	}
 
-	violations := EvaluateRoleDefinition(policy, rrd)
+	violations := EvaluateRoleDefinition(policyWithDefaultRoleLimits(policy), rrd)
 	if len(violations) != 0 {
 		t.Fatalf("expected 0 violations (forbidden API group is already excluded), got %d: %v", len(violations), violations)
 	}
@@ -170,7 +176,7 @@ func TestEvaluateRoleDefinition_ForbiddenAPIGroupsWildcard(t *testing.T) {
 			},
 		}
 
-		violations := EvaluateRoleDefinition(policy, rrd)
+		violations := EvaluateRoleDefinition(policyWithDefaultRoleLimits(policy), rrd)
 		if len(violations) != 0 {
 			t.Fatalf("expected wildcard RestrictedAPIs to satisfy wildcard forbiddenAPIGroups, got %v", violations)
 		}
@@ -188,7 +194,7 @@ func TestEvaluateRoleDefinition_ForbiddenAPIGroupsWildcard(t *testing.T) {
 			},
 		}
 
-		violations := EvaluateRoleDefinition(policy, rrd)
+		violations := EvaluateRoleDefinition(policyWithDefaultRoleLimits(policy), rrd)
 		if len(violations) != 1 {
 			t.Fatalf("expected violation when only one API group is restricted, got %d: %v", len(violations), violations)
 		}
@@ -215,7 +221,7 @@ func TestEvaluateRoleDefinition_ForbiddenAPIGroups_Missing(t *testing.T) {
 		},
 	}
 
-	violations := EvaluateRoleDefinition(policy, rrd)
+	violations := EvaluateRoleDefinition(policyWithDefaultRoleLimits(policy), rrd)
 	if len(violations) != 1 {
 		t.Fatalf("expected 1 violation (forbidden API group not excluded), got %d: %v", len(violations), violations)
 	}
@@ -248,7 +254,7 @@ func TestEvaluateRoleDefinition_ForbiddenAPIGroups_VersionBypass(t *testing.T) {
 		},
 	}
 
-	violations := EvaluateRoleDefinition(policy, rrd)
+	violations := EvaluateRoleDefinition(policyWithDefaultRoleLimits(policy), rrd)
 	if len(violations) != 1 {
 		t.Fatalf("expected 1 violation (version-specific restriction does not fully exclude group), got %d: %v", len(violations), violations)
 	}
@@ -274,7 +280,7 @@ func TestEvaluateRoleDefinition_ForbiddenAPIGroups_VerbScopedBypass(t *testing.T
 		},
 	}
 
-	violations := EvaluateRoleDefinition(policy, rrd)
+	violations := EvaluateRoleDefinition(policyWithDefaultRoleLimits(policy), rrd)
 	if len(violations) != 1 {
 		t.Fatalf("expected 1 violation (verb-scoped restriction does not fully exclude group), got %d: %v", len(violations), violations)
 	}
@@ -301,7 +307,7 @@ func TestEvaluateRoleDefinition_ForbiddenResources(t *testing.T) {
 		},
 	}
 
-	violations := EvaluateRoleDefinition(policy, rrd)
+	violations := EvaluateRoleDefinition(policyWithDefaultRoleLimits(policy), rrd)
 	// "secrets" is in restrictedResources (excluded = compliant).
 	// "configmaps" is NOT in restrictedResources (could appear in role = violation).
 	if len(violations) != 1 {
@@ -332,7 +338,7 @@ func TestEvaluateRoleDefinition_ForbiddenResources_SubresourceAndWildcard(t *tes
 			},
 		}
 
-		violations := EvaluateRoleDefinition(policy, rrd)
+		violations := EvaluateRoleDefinition(policyWithDefaultRoleLimits(policy), rrd)
 		if len(violations) != 0 {
 			t.Fatalf("expected parent restricted resource to satisfy forbidden subresource, got %v", violations)
 		}
@@ -357,9 +363,34 @@ func TestEvaluateRoleDefinition_ForbiddenResources_SubresourceAndWildcard(t *tes
 			},
 		}
 
-		violations := EvaluateRoleDefinition(policy, rrd)
+		violations := EvaluateRoleDefinition(policyWithDefaultRoleLimits(policy), rrd)
 		if len(violations) != 0 {
 			t.Fatalf("expected wildcard RestrictedResources to satisfy wildcard forbiddenResources, got %v", violations)
+		}
+	})
+
+	t.Run("wildcard restricted resource group covers all groups", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				RoleLimits: &authorizationv1alpha1.RoleLimits{
+					ForbiddenResources: []string{"secrets"},
+				},
+			},
+		}
+		rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+			Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+				TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
+				TargetName:      "test-role",
+				TargetNamespace: "default",
+				RestrictedResources: []metav1.APIResource{
+					{Name: "secrets", Group: "*"},
+				},
+			},
+		}
+
+		violations := EvaluateRoleDefinition(policyWithDefaultRoleLimits(policy), rrd)
+		if len(violations) != 0 {
+			t.Fatalf("expected wildcard RestrictedResources group to satisfy forbiddenResources, got %v", violations)
 		}
 	})
 
@@ -382,7 +413,7 @@ func TestEvaluateRoleDefinition_ForbiddenResources_SubresourceAndWildcard(t *tes
 			},
 		}
 
-		violations := EvaluateRoleDefinition(policy, rrd)
+		violations := EvaluateRoleDefinition(policyWithDefaultRoleLimits(policy), rrd)
 		if len(violations) != 1 {
 			t.Fatalf("expected violation when only one resource is restricted, got %d: %v", len(violations), violations)
 		}
@@ -411,7 +442,7 @@ func TestEvaluateRoleDefinition_ForbiddenResources_GroupBypass(t *testing.T) {
 		},
 	}
 
-	violations := EvaluateRoleDefinition(policy, rrd)
+	violations := EvaluateRoleDefinition(policyWithDefaultRoleLimits(policy), rrd)
 	if len(violations) != 1 {
 		t.Fatalf("expected 1 violation (group-specific restriction does not exclude from all groups), got %d: %v", len(violations), violations)
 	}
@@ -420,6 +451,7 @@ func TestEvaluateRoleDefinition_ForbiddenResources_GroupBypass(t *testing.T) {
 func TestEvaluateRoleDefinition_ClusterRoleAllowed(t *testing.T) {
 	policy := &authorizationv1alpha1.RBACPolicy{
 		Spec: authorizationv1alpha1.RBACPolicySpec{
+			AppliesTo: authorizationv1alpha1.PolicyScope{Namespaces: []string{allNamespacesScope}},
 			RoleLimits: &authorizationv1alpha1.RoleLimits{
 				AllowClusterRoles: true,
 			},
@@ -433,7 +465,7 @@ func TestEvaluateRoleDefinition_ClusterRoleAllowed(t *testing.T) {
 		},
 	}
 
-	violations := EvaluateRoleDefinition(policy, rrd)
+	violations := EvaluateRoleDefinition(policyWithDefaultRoleLimits(policy), rrd)
 	if len(violations) != 0 {
 		t.Errorf("expected no violations when ClusterRoles are allowed, got %v", violations)
 	}
@@ -461,7 +493,7 @@ func TestEvaluateRoleDefinition_MultipleLimits(t *testing.T) {
 		},
 	}
 
-	violations := EvaluateRoleDefinition(policy, rrd)
+	violations := EvaluateRoleDefinition(policyWithDefaultRoleLimits(policy), rrd)
 	// ClusterRole not allowed (1). Forbidden verb "delete" and resource "secrets"
 	// are both in the restricted lists (excluded from role), so no violations there.
 	if len(violations) != 1 {
@@ -595,7 +627,7 @@ func TestEvaluateRoleDefinition_ForbiddenResourceVerbs(t *testing.T) {
 					RestrictedResources: tt.restrictedRes,
 				},
 			}
-			violations := EvaluateRoleDefinition(p, rrd)
+			violations := EvaluateRoleDefinition(policyWithDefaultRoleLimits(p), rrd)
 			if len(violations) != tt.wantViolations {
 				t.Errorf("expected %d violations, got %d: %v", tt.wantViolations, len(violations), violations)
 			}
@@ -867,7 +899,7 @@ func TestEvaluateRoleDefinition_AppliesToScope(t *testing.T) {
 		}
 	})
 
-	t.Run("ClusterRole with no targetNamespace is not scope-checked", func(t *testing.T) {
+	t.Run("ClusterRole requires explicit global scope", func(t *testing.T) {
 		policy := &authorizationv1alpha1.RBACPolicy{
 			Spec: authorizationv1alpha1.RBACPolicySpec{
 				AppliesTo: authorizationv1alpha1.PolicyScope{
@@ -882,8 +914,80 @@ func TestEvaluateRoleDefinition_AppliesToScope(t *testing.T) {
 			},
 		}
 		violations := EvaluateRoleDefinition(policyWithDefaultRoleLimits(policy), rrd)
+		if len(violations) != 1 {
+			t.Fatalf("expected 1 cluster scope violation, got %d: %v", len(violations), violations)
+		}
+		if violations[0].Field != "spec.targetRole" {
+			t.Errorf("expected field spec.targetRole, got %q", violations[0].Field)
+		}
+	})
+
+	t.Run("ClusterRole allowed with explicit global scope", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				AppliesTo: authorizationv1alpha1.PolicyScope{
+					Namespaces: []string{allNamespacesScope},
+				},
+			},
+		}
+		rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+			Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+				TargetRole: authorizationv1alpha1.DefinitionClusterRole,
+				TargetName: "test-role",
+			},
+		}
+		violations := EvaluateRoleDefinition(policyWithDefaultRoleLimits(policy), rrd)
 		if len(violations) != 0 {
-			t.Errorf("expected no violations for ClusterRole (no targetNamespace), got %v", violations)
+			t.Errorf("expected no violations for ClusterRole with global scope, got %v", violations)
+		}
+	})
+
+	t.Run("global cluster scope plus selector still restricts namespaced Role targets", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				AppliesTo: authorizationv1alpha1.PolicyScope{
+					Namespaces:        []string{allNamespacesScope},
+					NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "a"}},
+				},
+			},
+		}
+		rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+			Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+				TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
+				TargetName:      "test-role",
+				TargetNamespace: "namespace-b",
+			},
+		}
+		lg := &fakeLabelGetter{namespaces: map[string]map[string]string{
+			"namespace-b": {"team": "b"},
+		}}
+		violations := EvaluateRoleDefinitionWithLabels(context.Background(), policyWithDefaultRoleLimits(policy), rrd, lg)
+		if len(violations) != 1 {
+			t.Fatalf("expected 1 violation for selector-bounded targetNamespace, got %d: %v", len(violations), violations)
+		}
+		if violations[0].Field != "spec.targetNamespace" {
+			t.Errorf("expected field spec.targetNamespace, got %q", violations[0].Field)
+		}
+	})
+
+	t.Run("global cluster scope plus selector still allows ClusterRole targets", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				AppliesTo: authorizationv1alpha1.PolicyScope{
+					Namespaces:        []string{allNamespacesScope},
+					NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "a"}},
+				},
+			},
+		}
+		rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+			Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+				TargetRole: authorizationv1alpha1.DefinitionClusterRole,
+				TargetName: "test-role",
+			},
+		}
+		violations := EvaluateRoleDefinition(policyWithDefaultRoleLimits(policy), rrd)
+		if len(violations) != 0 {
+			t.Errorf("expected no violations for ClusterRole with wildcard cluster scope, got %v", violations)
 		}
 	})
 

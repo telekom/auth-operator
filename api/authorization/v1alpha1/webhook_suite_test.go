@@ -127,8 +127,8 @@ var _ = BeforeSuite(func() {
 	err = (&RestrictedRoleDefinition{}).SetupWebhookWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
 
-	// Register field indexes required by webhook validation (duplicate targetName checks)
-	// Inlined here to avoid import cycle with pkg/indexer
+	// Register field indexes retained by this envtest manager setup.
+	// Inlined here to avoid import cycle with pkg/indexer.
 	err = mgr.GetFieldIndexer().IndexField(ctx, &RoleDefinition{}, TargetNameField,
 		func(obj client.Object) []string {
 			rd, ok := obj.(*RoleDefinition)

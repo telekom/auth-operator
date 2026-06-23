@@ -7,6 +7,7 @@ package ssa
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"strings"
 
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -27,23 +28,30 @@ const maxFieldManagerLength = 128
 // to independently manage ownerReferences on shared ServiceAccounts.
 // Each resource's ownerRef is tracked separately so one resource's apply
 // doesn't remove another's.
+// Optional ownerScope entries, such as an owner kind, are included before the
+// resource name to avoid collisions between different resource kinds that share
+// a name.
 // If the resulting field owner would exceed 128 characters (K8s limit), the
 // name is truncated and suffixed with a short hash to ensure uniqueness.
-func FieldOwnerFor(resourceName string) string {
+func FieldOwnerFor(resourceName string, ownerScope ...string) string {
+	ownerKey := resourceName
+	if len(ownerScope) > 0 {
+		ownerKey = strings.Join(append(ownerScope, resourceName), "/")
+	}
 	prefix := FieldOwner + "/"
-	fullOwner := prefix + resourceName
+	fullOwner := prefix + ownerKey
 
 	if len(fullOwner) <= maxFieldManagerLength {
 		return fullOwner
 	}
 
 	// Hash the full name for uniqueness
-	hash := sha256.Sum256([]byte(resourceName))
+	hash := sha256.Sum256([]byte(ownerKey))
 	hashSuffix := hex.EncodeToString(hash[:4]) // 8 hex chars
 
 	// Truncate name to fit: prefix + truncated + "-" + hash <= 128
 	maxNameLen := maxFieldManagerLength - len(prefix) - 1 - len(hashSuffix)
-	truncatedName := resourceName[:maxNameLen]
+	truncatedName := ownerKey[:maxNameLen]
 
 	return prefix + truncatedName + "-" + hashSuffix
 }

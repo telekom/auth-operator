@@ -108,10 +108,9 @@ and kube-apiserver access, so this helper avoids duplicating the block.
 
 NOTE: When the kube-apiserver runs outside the cluster (e.g. managed Kubernetes
 with an external control plane), the egress rules rely on
-networkPolicy.egress.apiServerCIDR being set explicitly.  Without it, the
-apiserver egress rule has no `to:` selector and defaults to "allow to all
-destinations on ports 443/6443", which is broader than ideal but still
-limits the allowed ports.
+networkPolicy.egress.apiServerCIDR or networkPolicy.egress.additionalRules
+being set explicitly. Without an explicit API-server destination, no built-in
+API-server egress rule is rendered.
 */}}
 {{- define "auth-operator.egressRules" -}}
 # DNS — allow CoreDNS resolution (UDP + TCP 53)
@@ -124,19 +123,18 @@ limits the allowed ports.
     - namespaceSelector:
         matchLabels:
           kubernetes.io/metadata.name: {{ .Values.networkPolicy.egress.dnsNamespace | default "kube-system" | quote }}
+{{- if .Values.networkPolicy.egress.apiServerCIDR }}
 # Kubernetes API server (TCP 443 and 6443)
 - ports:
     - port: 443
       protocol: TCP
     - port: 6443
       protocol: TCP
-  {{- if .Values.networkPolicy.egress.apiServerCIDR }}
   to:
     - ipBlock:
         cidr: {{ .Values.networkPolicy.egress.apiServerCIDR | quote }}
-  {{- end }}
+{{- end }}
 {{- if .Values.networkPolicy.egress.additionalRules }}
 {{- toYaml .Values.networkPolicy.egress.additionalRules | nindent 0 }}
 {{- end }}
 {{- end }}
-

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/go-logr/logr/funcr"
@@ -21,6 +22,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/pkg/indexer"
@@ -127,6 +129,9 @@ func TestServeHTTP_EvaluatesMatchingAuthorizersByName(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: name},
 			Spec: authzv1alpha1.WebhookAuthorizerSpec{
 				DeniedPrincipals: []authzv1alpha1.Principal{{User: "alice"}},
+				ResourceRules: []authzv1.ResourceRule{
+					{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods"}},
+				},
 			},
 		}
 	}
@@ -168,7 +173,7 @@ func TestServeHTTP_EvaluatesMatchingAuthorizersByName(t *testing.T) {
 				Log:    logr.Discard(),
 			}
 
-			req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(marshalSAR(t, sar)))
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(marshalSAR(t, sar)))
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
 			if rec.Code != http.StatusOK {
@@ -198,6 +203,9 @@ func TestAuditLog_DenyDecisionAtV0(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "deny-wa"},
 		Spec: authzv1alpha1.WebhookAuthorizerSpec{
 			DeniedPrincipals: []authzv1alpha1.Principal{{User: "baduser"}},
+			ResourceRules: []authzv1.ResourceRule{
+				{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods"}},
+			},
 		},
 	}
 	cl := newIndexedClient(scheme, &wa)
@@ -211,7 +219,7 @@ func TestAuditLog_DenyDecisionAtV0(t *testing.T) {
 	}
 
 	body := marshalSAR(t, sar)
-	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -265,7 +273,7 @@ func TestAuditLog_AllowDecisionAtV1(t *testing.T) {
 	body := marshalSAR(t, sar)
 
 	handler0 := &Authorizer{Client: cl, Log: logger0}
-	req0 := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	req0 := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
 	rec0 := httptest.NewRecorder()
 	handler0.ServeHTTP(rec0, req0)
 
@@ -282,7 +290,7 @@ func TestAuditLog_AllowDecisionAtV1(t *testing.T) {
 	logger1 := capturingLogger(&buf1, 1)
 	handler1 := &Authorizer{Client: cl, Log: logger1}
 	body = marshalSAR(t, sar)
-	req1 := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	req1 := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
 	rec1 := httptest.NewRecorder()
 	handler1.ServeHTTP(rec1, req1)
 
@@ -322,7 +330,7 @@ func TestAuditLog_NoOpinionDecisionAtV1(t *testing.T) {
 		},
 	}
 	body := marshalSAR(t, sar)
-	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler0.ServeHTTP(rec, req)
 
@@ -339,7 +347,7 @@ func TestAuditLog_NoOpinionDecisionAtV1(t *testing.T) {
 	logger1 := capturingLogger(&buf1, 1)
 	handler1 := &Authorizer{Client: cl, Log: logger1}
 	body = marshalSAR(t, sar)
-	req = httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
 	rec = httptest.NewRecorder()
 	handler1.ServeHTTP(rec, req)
 
@@ -378,7 +386,7 @@ func TestAuditLog_V2TraceLogs(t *testing.T) {
 		},
 	}
 	body := marshalSAR(t, sar)
-	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -403,7 +411,7 @@ func TestAuditLog_DecodeError(t *testing.T) {
 	cl := newIndexedClient(scheme)
 	handler := &Authorizer{Client: cl, Log: logger}
 
-	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader([]byte("not-json")))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader([]byte("not-json")))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -442,7 +450,7 @@ func TestAuditLog_NonResourceAttributes(t *testing.T) {
 		},
 	}
 	body := marshalSAR(t, sar)
-	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -527,6 +535,28 @@ func TestEvaluateSAR_ResultFields(t *testing.T) {
 		}
 	})
 
+	t.Run("denied principal without matching rule is no-opinion", func(t *testing.T) {
+		sar := &authzv1.SubjectAccessReview{
+			Spec: authzv1.SubjectAccessReviewSpec{
+				User:               "bob",
+				ResourceAttributes: &authzv1.ResourceAttributes{Verb: "get", Resource: "configmaps"},
+			},
+		}
+		res, err := handler.evaluateSAR(context.Background(), sar, waList.Items)
+		if err != nil {
+			t.Fatalf("evaluateSAR returned unexpected error: %v", err)
+		}
+		if res.allowed {
+			t.Fatal("expected no-opinion")
+		}
+		if res.decision != pkgmetrics.AuthorizerDecisionNoOpinion {
+			t.Errorf("expected decision=no-opinion, got %s", res.decision)
+		}
+		if res.matchedRule != -1 {
+			t.Errorf("expected matchedRule=-1, got %d", res.matchedRule)
+		}
+	})
+
 	t.Run("no-opinion when no authorizer matches", func(t *testing.T) {
 		sar := &authzv1.SubjectAccessReview{
 			Spec: authzv1.SubjectAccessReviewSpec{
@@ -594,9 +624,10 @@ func TestEvaluateSAR_NamespaceGetError(t *testing.T) {
 	}
 }
 
-// TestServeHTTP_NamespaceGetError_Returns500 verifies that when evaluateSAR
-// returns an error (e.g. namespace Get fails), ServeHTTP responds with 500.
-func TestServeHTTP_NamespaceGetError_Returns500(t *testing.T) {
+// TestServeHTTP_NamespaceGetError_ReturnsDeniedSAR verifies that when
+// evaluateSAR returns an error (e.g. namespace Get fails), ServeHTTP responds
+// with a valid denied SAR so the authorization webhook fails closed.
+func TestServeHTTP_NamespaceGetError_ReturnsDeniedSAR(t *testing.T) {
 	// Build a scheme with Kubernetes built-in types so the fake client
 	// recognises Namespace resources and returns a proper NotFound error.
 	s := newSchemeWithCore(t)
@@ -633,12 +664,22 @@ func TestServeHTTP_NamespaceGetError_Returns500(t *testing.T) {
 	}
 
 	body := marshalSAR(t, sar)
-	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("expected HTTP 500 when namespace Get fails, got %d", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200 denied SAR when namespace Get fails, got %d", rec.Code)
+	}
+	var resp authzv1.SubjectAccessReview
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if !resp.Status.Denied {
+		t.Fatal("expected Denied=true for internal namespace lookup failure")
+	}
+	if resp.Status.Reason != "internal evaluation error" {
+		t.Fatalf("expected generic internal evaluation reason, got %q", resp.Status.Reason)
 	}
 }
 
@@ -656,7 +697,7 @@ func TestServeHTTP_OversizedBody(t *testing.T) {
 		oversizedBody[i] = 'A'
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(oversizedBody))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(oversizedBody))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -671,8 +712,8 @@ func TestServeHTTP_OversizedBody(t *testing.T) {
 	if resp.Status.Allowed {
 		t.Error("expected Allowed=false for oversized body")
 	}
-	if resp.Status.Denied {
-		t.Error("expected Denied=false (no-opinion) for oversized body")
+	if !resp.Status.Denied {
+		t.Error("expected Denied=true for oversized body")
 	}
 	if !strings.Contains(resp.Status.Reason, "invalid request body") {
 		t.Errorf("expected reason to contain 'invalid request body', got %q", resp.Status.Reason)
@@ -687,7 +728,7 @@ func TestServeHTTP_InvalidJSON(t *testing.T) {
 	cl := newIndexedClient(scheme)
 	handler := &Authorizer{Client: cl, Log: logger}
 
-	req := httptest.NewRequest(http.MethodPost, "/authorize", strings.NewReader("{invalid json"))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", strings.NewReader("{invalid json"))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -702,8 +743,8 @@ func TestServeHTTP_InvalidJSON(t *testing.T) {
 	if resp.Status.Allowed {
 		t.Error("expected Allowed=false for invalid JSON")
 	}
-	if resp.Status.Denied {
-		t.Error("expected Denied=false (no-opinion) for invalid JSON")
+	if !resp.Status.Denied {
+		t.Error("expected Denied=true for invalid JSON")
 	}
 	// Verify the reason does NOT leak internal JSON parse details
 	if strings.Contains(resp.Status.Reason, "json") || strings.Contains(resp.Status.Reason, "invalid character") {
@@ -726,6 +767,9 @@ func TestAuditLog_StructuredFieldsComprehensive(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "audit-format-wa"},
 		Spec: authzv1alpha1.WebhookAuthorizerSpec{
 			DeniedPrincipals: []authzv1alpha1.Principal{{User: "audit-user"}},
+			ResourceRules: []authzv1.ResourceRule{
+				{Verbs: []string{"delete"}, APIGroups: []string{"apps"}, Resources: []string{"deployments"}},
+			},
 		},
 	}
 	cl := newIndexedClient(scheme, &deny)
@@ -748,7 +792,7 @@ func TestAuditLog_StructuredFieldsComprehensive(t *testing.T) {
 	handler := &Authorizer{Client: cl, Log: logger}
 
 	body := marshalSAR(t, sar)
-	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -840,7 +884,7 @@ func TestMetrics_RecordedAfterServeHTTP(t *testing.T) {
 		},
 	}
 	body := marshalSAR(t, denySAR)
-	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -874,7 +918,7 @@ func TestMetrics_RecordedAfterServeHTTP(t *testing.T) {
 		},
 	}
 	body = marshalSAR(t, allowSAR)
-	req = httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -904,7 +948,7 @@ func TestMetrics_RecordedAfterServeHTTP(t *testing.T) {
 		},
 	}
 	body = marshalSAR(t, noMatchSAR)
-	req = httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -920,7 +964,7 @@ func TestMetrics_RecordedAfterServeHTTP(t *testing.T) {
 
 	// --- Error decision (decode failure) ---
 	pkgmetrics.AuthorizerRequestsTotal.Reset()
-	req = httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader([]byte("not-json")))
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader([]byte("not-json")))
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -1023,7 +1067,7 @@ func TestServeHTTP_RateLimiting(t *testing.T) {
 	initialCount := testutil.ToFloat64(pkgmetrics.AuthorizerRateLimitedTotal)
 
 	// First request should succeed (uses the burst token).
-	req1 := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	req1 := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
 	rec1 := httptest.NewRecorder()
 	handler.ServeHTTP(rec1, req1)
 
@@ -1034,7 +1078,7 @@ func TestServeHTTP_RateLimiting(t *testing.T) {
 	// Second request should be rate limited (no tokens left, 0 rps).
 	// Per the Kubernetes authorization webhook protocol, the response is HTTP 200
 	// with Allowed=false (non-200 would be treated as a webhook failure).
-	req2 := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	req2 := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
 	rec2 := httptest.NewRecorder()
 	handler.ServeHTTP(rec2, req2)
 
@@ -1088,7 +1132,7 @@ func TestServeHTTP_NoRateLimiter(t *testing.T) {
 
 	// Multiple requests should all succeed when limiter is nil.
 	for i := range 5 {
-		req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
@@ -1114,10 +1158,10 @@ func TestServeHTTP_RejectsEmptyIdentity(t *testing.T) {
 	}
 
 	beforeReqs := testutil.ToFloat64(pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(
-		pkgmetrics.AuthorizerDecisionNoOpinion, pkgmetrics.AuthorizerNameNone))
+		pkgmetrics.AuthorizerDecisionDenied, pkgmetrics.AuthorizerNameNone))
 
 	body := marshalSAR(t, sar)
-	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -1132,8 +1176,8 @@ func TestServeHTTP_RejectsEmptyIdentity(t *testing.T) {
 	if resp.Status.Allowed {
 		t.Error("expected Allowed=false for empty identity")
 	}
-	if resp.Status.Denied {
-		t.Error("expected Denied=false (no-opinion) for empty identity")
+	if !resp.Status.Denied {
+		t.Error("expected Denied=true for empty identity")
 	}
 	if resp.Status.Reason != reasonEmptyIdentity {
 		t.Errorf("unexpected reason: %s", resp.Status.Reason)
@@ -1143,9 +1187,9 @@ func TestServeHTTP_RejectsEmptyIdentity(t *testing.T) {
 	}
 
 	afterReqs := testutil.ToFloat64(pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(
-		pkgmetrics.AuthorizerDecisionNoOpinion, pkgmetrics.AuthorizerNameNone))
+		pkgmetrics.AuthorizerDecisionDenied, pkgmetrics.AuthorizerNameNone))
 	if afterReqs-beforeReqs < 1 {
-		t.Error("expected no-opinion metrics to be recorded for empty identity rejection")
+		t.Error("expected denied metrics to be recorded for empty identity rejection")
 	}
 }
 
@@ -1163,7 +1207,7 @@ func TestServeHTTP_AcceptsEmptyUserWithGroups(t *testing.T) {
 		},
 	}
 	body := marshalSAR(t, sar)
-	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -1197,7 +1241,7 @@ func TestServeHTTP_RejectsNoAttributes(t *testing.T) {
 		},
 	}
 	body := marshalSAR(t, sar)
-	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -1212,8 +1256,8 @@ func TestServeHTTP_RejectsNoAttributes(t *testing.T) {
 	if resp.Status.Allowed {
 		t.Error("expected Allowed=false for SAR with no attributes")
 	}
-	if resp.Status.Denied {
-		t.Error("expected Denied=false (no-opinion) for SAR with no attributes")
+	if !resp.Status.Denied {
+		t.Error("expected Denied=true for SAR with no attributes")
 	}
 	if !strings.Contains(resp.Status.Reason, reasonMissingAttrs) {
 		t.Errorf("expected reason about missing attributes, got: %s", resp.Status.Reason)
@@ -1236,7 +1280,7 @@ func TestServeHTTP_AcceptsNonResourceAttributes(t *testing.T) {
 		},
 	}
 	body := marshalSAR(t, sar)
-	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -1254,6 +1298,82 @@ func TestServeHTTP_AcceptsNonResourceAttributes(t *testing.T) {
 	}
 }
 
+func TestServeHTTP_UsesSingleEvaluationDeadline(t *testing.T) {
+	scheme := newScheme(t)
+	wa := &authzv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{Name: "scoped-wa"},
+		Spec: authzv1alpha1.WebhookAuthorizerSpec{
+			NamespaceSelector: metav1.LabelSelector{MatchLabels: map[string]string{"team": "a"}},
+			AllowedPrincipals: []authzv1alpha1.Principal{
+				{User: "alice"},
+			},
+			ResourceRules: []authzv1.ResourceRule{
+				{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods"}},
+			},
+		},
+	}
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "team-a",
+			Labels: map[string]string{"team": "a"},
+		},
+	}
+	var deadlines []time.Time
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(wa, ns).
+		WithInterceptorFuncs(interceptor.Funcs{
+			List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+				if _, ok := list.(*authzv1alpha1.WebhookAuthorizerList); ok {
+					if deadline, ok := ctx.Deadline(); ok {
+						deadlines = append(deadlines, deadline)
+					}
+					time.Sleep(25 * time.Millisecond)
+				}
+				return c.List(ctx, list, opts...)
+			},
+			Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if _, ok := obj.(*corev1.Namespace); ok && key.Name == "team-a" {
+					if deadline, ok := ctx.Deadline(); ok {
+						deadlines = append(deadlines, deadline)
+					}
+				}
+				return c.Get(ctx, key, obj, opts...)
+			},
+		}).
+		Build()
+	handler := &Authorizer{Client: cl, Log: logr.Discard()}
+
+	sar := authzv1.SubjectAccessReview{
+		Spec: authzv1.SubjectAccessReviewSpec{
+			User: "alice",
+			ResourceAttributes: &authzv1.ResourceAttributes{
+				Verb:      "get",
+				Resource:  "pods",
+				Namespace: "team-a",
+			},
+		},
+	}
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(marshalSAR(t, sar)))
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d", rec.Code)
+	}
+	if len(deadlines) != 2 {
+		t.Fatalf("expected authorizer list and namespace get deadlines, got %d", len(deadlines))
+	}
+	diff := deadlines[1].Sub(deadlines[0])
+	if diff < 0 {
+		diff = -diff
+	}
+	if diff > 10*time.Millisecond {
+		t.Fatalf("expected list and namespace get calls to share an evaluation deadline, got difference %s", diff)
+	}
+}
+
 func TestServeHTTP_DeniedResponseSetsDeniedTrue(t *testing.T) {
 	scheme := newScheme(t)
 
@@ -1261,6 +1381,9 @@ func TestServeHTTP_DeniedResponseSetsDeniedTrue(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "deny-uid-wa"},
 		Spec: authzv1alpha1.WebhookAuthorizerSpec{
 			DeniedPrincipals: []authzv1alpha1.Principal{{User: "blocked-user"}},
+			ResourceRules: []authzv1.ResourceRule{
+				{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods"}},
+			},
 		},
 	}
 	cl := newIndexedClient(scheme, &wa)
@@ -1273,7 +1396,7 @@ func TestServeHTTP_DeniedResponseSetsDeniedTrue(t *testing.T) {
 		},
 	}
 	body := marshalSAR(t, sar)
-	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -1311,7 +1434,7 @@ func TestServeHTTP_NoOpinionResponseDoesNotSetDeniedTrue(t *testing.T) {
 		},
 	}
 	body := marshalSAR(t, sar)
-	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -1349,7 +1472,7 @@ func TestServeHTTP_RateLimitResponseSetsDeniedTrue(t *testing.T) {
 		},
 	}
 	body := marshalSAR(t, sar)
-	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -1366,6 +1489,77 @@ func TestServeHTTP_RateLimitResponseSetsDeniedTrue(t *testing.T) {
 	}
 	if !resp.Status.Denied {
 		t.Error("expected Denied=true for rate-limited request; without it, subsequent authorizers could allow the request")
+	}
+}
+
+func TestPrincipalMatches_ServiceAccountNamespaceScope(t *testing.T) {
+	handler := &Authorizer{Log: logr.Discard()}
+
+	tests := []struct {
+		name       string
+		user       string
+		groups     []string
+		principals []authzv1alpha1.Principal
+		want       bool
+	}{
+		{
+			name:       "namespaced service account matches same namespace and name",
+			user:       "system:serviceaccount:team-a:deployer",
+			principals: []authzv1alpha1.Principal{{User: "deployer", Namespace: "team-a"}},
+			want:       true,
+		},
+		{
+			name:       "namespaced service account matches fully qualified principal",
+			user:       "system:serviceaccount:team-a:deployer",
+			principals: []authzv1alpha1.Principal{{User: "system:serviceaccount:team-a:deployer", Namespace: "team-a"}},
+			want:       true,
+		},
+		{
+			name:       "namespaced service account rejects fully qualified principal from different namespace",
+			user:       "system:serviceaccount:team-a:deployer",
+			principals: []authzv1alpha1.Principal{{User: "system:serviceaccount:team-b:deployer", Namespace: "team-b"}},
+			want:       false,
+		},
+		{
+			name:       "namespaced service account rejects same name in different namespace",
+			user:       "system:serviceaccount:team-b:deployer",
+			principals: []authzv1alpha1.Principal{{User: "deployer", Namespace: "team-a"}},
+			want:       false,
+		},
+		{
+			name:       "namespaced principal does not match plain user",
+			user:       "deployer",
+			principals: []authzv1alpha1.Principal{{User: "deployer", Namespace: "team-a"}},
+			want:       false,
+		},
+		{
+			name:       "namespaced principal does not match groups",
+			user:       "alice",
+			groups:     []string{"deployer"},
+			principals: []authzv1alpha1.Principal{{Groups: []string{"deployer"}, Namespace: "team-a"}},
+			want:       false,
+		},
+		{
+			name:       "plain user still matches without namespace",
+			user:       "deployer",
+			principals: []authzv1alpha1.Principal{{User: "deployer"}},
+			want:       true,
+		},
+		{
+			name:       "plain group still matches without namespace",
+			user:       "alice",
+			groups:     []string{"deployer"},
+			principals: []authzv1alpha1.Principal{{Groups: []string{"deployer"}}},
+			want:       true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := handler.principalMatches(tt.user, tt.groups, tt.principals); got != tt.want {
+				t.Fatalf("principalMatches() = %t, want %t", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -1549,7 +1743,7 @@ func TestEvaluateSAR_NamespaceLabelCache_SingleGetPerNamespace(t *testing.T) {
 	})
 }
 
-func TestServeHTTP_NamespaceLabelCacheError_Returns500(t *testing.T) {
+func TestServeHTTP_NamespaceLabelCacheError_ReturnsDeniedSAR(t *testing.T) {
 	scheme := newScheme(t)
 
 	wa := &authzv1alpha1.WebhookAuthorizer{
@@ -1582,11 +1776,21 @@ func TestServeHTTP_NamespaceLabelCacheError_Returns500(t *testing.T) {
 		t.Fatalf("failed to marshal SAR: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("expected status %d, got %d; body: %s", http.StatusInternalServerError, rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d; body: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+	var resp authzv1.SubjectAccessReview
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if !resp.Status.Denied {
+		t.Fatal("expected Denied=true for namespace label cache error")
+	}
+	if resp.Status.Reason != "internal evaluation error" {
+		t.Fatalf("expected generic internal evaluation reason, got %q", resp.Status.Reason)
 	}
 }

@@ -178,6 +178,17 @@ func hasGroup(groups []string, expected string) bool {
 	return false
 }
 
+// isFieldIndexError returns true when err indicates a missing controller-runtime field index.
+func isFieldIndexError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "index") &&
+		(strings.Contains(msg, "does not exist") || strings.Contains(msg, "no index with name"))
+}
+
 // MatchesSubjects checks if the user (via username, groups, or service account) matches any of the subjects.
 func MatchesSubjects(username string, userGroups []string, saInfo ServiceAccountInfo, subjects []rbacv1.Subject) bool {
 	for _, subject := range subjects {
@@ -215,7 +226,7 @@ func IsRestrictedBindDefinition(name string) bool {
 // Returns an empty map if the SA is not a ServiceAccount, the namespace has no tracked
 // labels, or the label set is incomplete. Returns a non-nil error only for transient
 // API failures (non-NotFound errors) so the caller can return admission.Errored.
-func GetSANamespaceTrackedLabels(ctx context.Context, c client.Client, saInfo ServiceAccountInfo) (map[string]string, error) {
+func GetSANamespaceTrackedLabels(ctx context.Context, c client.Reader, saInfo ServiceAccountInfo) (map[string]string, error) {
 	if !saInfo.IsServiceAccount {
 		return map[string]string{}, nil
 	}

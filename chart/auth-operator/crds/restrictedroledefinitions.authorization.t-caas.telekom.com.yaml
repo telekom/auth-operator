@@ -3,7 +3,7 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     argocd.argoproj.io/sync-options: Delete=false
-    controller-gen.kubebuilder.io/version: v0.20.0
+    controller-gen.kubebuilder.io/version: v0.21.0
     helm.sh/resource-policy: keep
   name: restrictedroledefinitions.authorization.t-caas.telekom.com
 spec:
@@ -356,6 +356,8 @@ spec:
                   been successfully reconciled.
                 type: boolean
             type: object
+        required:
+        - spec
         type: object
     served: true
     storage: true

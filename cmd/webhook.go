@@ -251,7 +251,7 @@ func configureWebhooks(mgr manager.Manager, tp *tracing.Provider) error {
 	// tracing is disabled, allowing its nil-check guard to skip header
 	// parsing and noop span creation entirely — true zero overhead.
 	authorizer := &authorizationwebhook.Authorizer{
-		Client: mgr.GetClient(),
+		Client: mgr.GetAPIReader(),
 		Log:    ctrl.Log.WithName("Authorizer"),
 		Tracer: tp.TracerIfEnabled(),
 	}
@@ -280,6 +280,7 @@ func configureWebhooks(mgr manager.Manager, tp *tracing.Provider) error {
 	decoder := admission.NewDecoder(mgr.GetScheme())
 	namespaceMutator := &authorizationwebhook.NamespaceMutator{
 		Client:       mgr.GetClient(),
+		Reader:       mgr.GetAPIReader(),
 		Decoder:      decoder,
 		TDGMigration: enableTDGMigration,
 	}
@@ -289,6 +290,7 @@ func configureWebhooks(mgr manager.Manager, tp *tracing.Provider) error {
 	log.Info("setting up Namespace validator webhook", "tdgMigration", enableTDGMigration)
 	namespaceValidator := &authorizationwebhook.NamespaceValidator{
 		Client:       mgr.GetClient(),
+		Reader:       mgr.GetAPIReader(),
 		Decoder:      decoder,
 		TDGMigration: enableTDGMigration,
 	}

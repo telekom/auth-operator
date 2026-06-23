@@ -73,6 +73,7 @@ webhooks:
     operations:
     - CREATE
     - UPDATE
+    - DELETE
     resources:
     - restrictedbinddefinitions
   sideEffects: None
@@ -96,6 +97,7 @@ webhooks:
     operations:
     - CREATE
     - UPDATE
+    - DELETE
     resources:
     - restrictedroledefinitions
   sideEffects: None

@@ -43,7 +43,7 @@ git diff --exit-code     # Verify no uncommitted generated changes
 | Lint | `golangci-lint run --timeout 10m` | ci.yml |
 | Vet | `go vet ./...` | ci.yml |
 | go.mod tidy | `go mod tidy && git diff --exit-code go.mod go.sum` | ci.yml |
-| Unit Tests | `make test` (envtest K8s 1.34.1) | ci.yml, e2e.yml |
+| Unit Tests | `make test` (envtest K8s from `KIND_K8S_VERSION`) | ci.yml, e2e.yml |
 | Build | `go build -v -o bin/auth-operator ./main.go` | ci.yml |
 | Docker | `docker build -t auth-operator:test .` | ci.yml |
 | Helm Lint | `helm lint chart/auth-operator --strict` | ci.yml |
@@ -340,7 +340,7 @@ Do not pass raw logger instances across helper boundaries when `ctx` is availabl
 |-------|----------|
 | "go.mod is not tidy" in CI | Run `go mod tidy` before committing |
 | "Generated code out of date" | Run `make manifests generate` and commit |
-| Envtest failures | Run `make envtest && $(LOCALBIN)/setup-envtest use 1.34.1 --bin-dir ./bin` |
+| Envtest failures | Run `make envtest && $(LOCALBIN)/setup-envtest use ${KIND_K8S_VERSION#v} --bin-dir ./bin` |
 | Helm CRD sync | Run `make helm` after modifying CRDs |
 
 ## Kubebuilder CLI Commands (Reference)

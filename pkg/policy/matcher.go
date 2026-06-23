@@ -11,26 +11,41 @@ import (
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 )
 
+const allNamespacesScope = "*"
+
 // namespaceInScope returns true if namespace is within the policy's AppliesTo scope.
 // Static namespace entries and NamespaceSelector are combined with OR semantics.
 // A selector can only match when a LabelGetter is available and the target
-// namespace labels can be resolved. An empty scope is treated as global and
-// always returns true.
+// namespace labels can be resolved. Empty scope fails closed.
+//
+// namespaces: ["*"] by itself is an explicit all-namespaces scope. When "*"
+// is combined with concrete namespaces or a selector, it only enables
+// cluster-scoped resources; concrete namespaces and selectors continue to bound
+// namespaced targets.
 func namespaceInScope(ctx context.Context, scope authorizationv1alpha1.PolicyScope, namespace string, lg LabelGetter) bool {
 	if len(scope.Namespaces) == 0 && scope.NamespaceSelector == nil {
-		return true
+		return false
 	}
+	bareAllNamespaces := containsString(scope.Namespaces, allNamespacesScope) &&
+		len(scope.Namespaces) == 1 && scope.NamespaceSelector == nil
 	if containsString(scope.Namespaces, namespace) {
 		return true
 	}
 	if scope.NamespaceSelector == nil || lg == nil {
-		return false
+		return bareAllNamespaces
 	}
 	nsLabels, found := lg.GetNamespaceLabels(ctx, namespace)
 	if !found {
-		return false
+		return bareAllNamespaces
 	}
-	return matchesSelector(scope.NamespaceSelector, nsLabels)
+	if matchesSelector(scope.NamespaceSelector, nsLabels) {
+		return true
+	}
+	return bareAllNamespaces
+}
+
+func scopeAllowsClusterResources(scope authorizationv1alpha1.PolicyScope) bool {
+	return containsString(scope.Namespaces, allNamespacesScope)
 }
 
 // MatchesWildcard checks if value matches a simple wildcard pattern.

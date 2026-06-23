@@ -25,7 +25,9 @@ type Principal struct {
 	// +kubebuilder:validation:MaxItems=256
 	Groups []string `json:"groups,omitempty"`
 
-	// Namespace is the requesting user namespace in case the requesting user is a ServiceAccount.
+	// Namespace scopes User to a Kubernetes ServiceAccount namespace. When set,
+	// User may be either the short ServiceAccount name or the full
+	// system:serviceaccount:<namespace>:<name> username.
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxLength=253
 	Namespace string `json:"namespace,omitempty"`
@@ -50,7 +52,8 @@ type WebhookAuthorizerSpec struct {
 	// +kubebuilder:validation:MaxItems=256
 	AllowedPrincipals []Principal `json:"allowedPrincipals,omitempty"`
 
-	// DeniedPrincipals is a slice of principals this authorizer should deny.
+	// DeniedPrincipals is a slice of principals this authorizer should deny
+	// when the request also matches ResourceRules or NonResourceRules.
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=256
 	DeniedPrincipals []Principal `json:"deniedPrincipals,omitempty"`

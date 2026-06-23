@@ -8,196 +8,322 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - '.dockerignore'
+      - 'Dockerfile'
+      - 'Makefile'
       - 'api/**'
+      - 'cmd/**'
+      - 'chart/auth-operator/templates/**'
+      - 'chart/auth-operator/values.schema.json'
+      - 'chart/auth-operator/values.yaml'
+      - 'config/**'
+      - 'hack/**'
       - 'internal/**'
       - 'pkg/**'
-      - 'config/samples/**'
-      - 'hack/ci/**'
+      - '.github/actions/**'
       - '.github/workflows/output-delta.yml'
       - 'go.mod'
       - 'go.sum'
+      - 'main.go'
+      - 'versions.env'
   workflow_dispatch:
 
 permissions:
   contents: read
-  pull-requests: write
+
+env:
+  BASELINE_CLUSTER: output-delta-baseline
+  CANDIDATE_CLUSTER: output-delta-pr
 
 jobs:
-  output-delta:
-    name: Generate Output Delta
+  trusted-baseline:
+    name: Trusted Baseline Outputs
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      latest_tag: ${{ steps.latest-tag.outputs.tag }}
+      tag_success: ${{ steps.tag-output.outputs.tag_success }}
     steps:
-      - name: Checkout PR branch
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          path: pr-branch
-          fetch-depth: 0 # Needed to fetch tags
-
-      - name: Load versions from versions.env
-        run: grep -v '^#' pr-branch/versions.env | grep -v '^$' >> "$GITHUB_ENV"
-
       - name: Checkout main branch
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: main
           path: main-branch
+          fetch-depth: 0
+          persist-credentials: false
 
-      - name: Get latest release tag
-        id: latest-tag
+      - name: Load trusted tool versions
         run: |
-          cd pr-branch
-          LATEST_TAG=$(git tag -l 'v*.*.*' 2>/dev/null | sort -V | tail -1 || echo "")
-          if [ -n "$LATEST_TAG" ]; then
-            if git rev-parse "$LATEST_TAG" >/dev/null 2>&1; then
-              echo "tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
-              echo "has_tag=true" >> "$GITHUB_OUTPUT"
-              echo "Latest release tag (by semver): $LATEST_TAG"
-            else
-              echo "::warning::Tag $LATEST_TAG exists but is not reachable, skipping tag comparison"
-              echo "has_tag=false" >> "$GITHUB_OUTPUT"
-            fi
-          else
-            echo "::notice::No release tags found (looking for v*.*.* pattern), skipping tag comparison"
-            echo "has_tag=false" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          yq_version=""
+          yq_linux_amd64_sha256=""
+          while IFS='=' read -r key value; do
+            case "${key}" in
+              KIND_VERSION)
+                if [[ ! "${value}" =~ ^v[0-9A-Za-z._+-]+$ ]]; then
+                  echo "Invalid ${key}: ${value}" >&2
+                  exit 1
+                fi
+                echo "${key}=${value}" >> "$GITHUB_ENV"
+                ;;
+              YQ_VERSION)
+                if [[ ! "${value}" =~ ^v[0-9A-Za-z._+-]+$ ]]; then
+                  echo "Invalid ${key}: ${value}" >&2
+                  exit 1
+                fi
+                yq_version="${value}"
+                ;;
+              YQ_LINUX_AMD64_SHA256)
+                if [[ ! "${value}" =~ ^[0-9a-f]{64}$ ]]; then
+                  echo "Invalid ${key}: ${value}" >&2
+                  exit 1
+                fi
+                yq_linux_amd64_sha256="${value}"
+                ;;
+            esac
+          done < <(grep -Ev '^(#|$)' main-branch/versions.env)
+
+          if [ -z "$yq_version" ] && [ -z "$yq_linux_amd64_sha256" ]; then
+            yq_version="v4.53.3"
+            yq_linux_amd64_sha256="fa52a4e758c63d38299163fbdd1edfb4c4963247918bf9c1c5d31d84789eded4"
+            echo "::notice::main versions.env does not define yq; using pinned bootstrap ${yq_version}"
+          elif [ -z "$yq_version" ] || [ -z "$yq_linux_amd64_sha256" ]; then
+            echo "main versions.env must define both YQ_VERSION and YQ_LINUX_AMD64_SHA256" >&2
+            exit 1
           fi
 
-      - name: Checkout latest tag
-        if: steps.latest-tag.outputs.has_tag == 'true'
-        id: checkout-tag
-        continue-on-error: true
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          ref: ${{ steps.latest-tag.outputs.tag }}
-          path: tag-branch
+          echo "YQ_VERSION=${yq_version}" >> "$GITHUB_ENV"
+          echo "YQ_LINUX_AMD64_SHA256=${yq_linux_amd64_sha256}" >> "$GITHUB_ENV"
 
       - name: Setup Go Environment
-        uses: ./pr-branch/.github/actions/setup-go-env
+        uses: ./main-branch/.github/actions/setup-go-env
         with:
-          go-version-file: pr-branch/go.mod
+          go-version-file: main-branch/go.mod
           install-kind: 'true'
           kind-version: ${{ env.KIND_VERSION }}
-          cache-dependency-path: pr-branch/go.sum
+          cache-dependency-path: main-branch/go.sum
 
       - name: Install yq
         run: |
-          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
+          set -euo pipefail
+          curl -fsSL "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64" -o /tmp/yq
+          echo "${YQ_LINUX_AMD64_SHA256}  /tmp/yq" | sha256sum -c -
+          sudo install -m 0755 /tmp/yq /usr/local/bin/yq
 
       - name: Create kind cluster
         run: |
-          kind create cluster --name output-delta --wait 5m
+          kind create cluster --name "${BASELINE_CLUSTER}" --wait 5m
           kubectl cluster-info
 
       - name: Install popular CRDs
-        run: |
-          KIND_CLUSTER_NAME=output-delta bash pr-branch/hack/ci/setup-kind-crds.sh
+        run: KIND_CLUSTER_NAME="${BASELINE_CLUSTER}" bash main-branch/hack/ci/setup-kind-crds.sh
 
       - name: Create test namespaces
-        run: bash pr-branch/hack/ci/create-test-namespaces.sh
+        run: bash main-branch/hack/ci/create-test-namespaces.sh
 
-      # =====================================================================
-      #  Main branch
-      # =====================================================================
-      - name: Generate outputs from main branch
-        id: main-output
-        continue-on-error: true
+      - name: Create trusted sample apply helper
         run: |
-          cd main-branch
+          set -euo pipefail
+          cat > /tmp/apply-output-delta-samples.sh <<'SCRIPT'
+          #!/usr/bin/env bash
+          set -euo pipefail
 
-          # Build and load the operator image
-          make docker-build IMG=auth-operator:main
-          kind load docker-image auth-operator:main --name output-delta
-
-          # Install CRDs
-          make install
-
-          # Deploy the operator
-          make deploy IMG=auth-operator:main
-          bash ../pr-branch/hack/ci/apply-sample-impersonation-rbac.sh
-          echo "Waiting for operator to be ready..."
-          kubectl rollout status deployment/auth-operator-controller-manager -n auth-operator-system --timeout=180s 2>/dev/null || \
-            echo "::warning::Could not verify controller-manager readiness, continuing anyway"
-
-          # Wait for webhook server if deployed (required for BindDefinition validation)
-          echo "Waiting for webhook server to be ready..."
-          kubectl rollout status deployment/auth-operator-webhook-server -n auth-operator-system --timeout=180s 2>/dev/null || \
-            echo "::notice::Webhook server not found or not ready, continuing anyway"
-          sleep 5
-
-          # Try to apply sample configs with retry -- may fail if main branch samples are incompatible
-          main_samples_applied=false
-          for i in 1 2 3 4 5; do
-            if kubectl apply --server-side --force-conflicts -k config/samples/ 2>&1; then
-              main_samples_applied=true
-              break
-            fi
-            echo "Attempt $i failed, waiting before retry..."
-            sleep 10
-          done
-          echo "main_samples_applied=${main_samples_applied}" >> "$GITHUB_OUTPUT"
-          if [ "$main_samples_applied" = "false" ]; then
-            echo "::warning::Main branch samples failed to apply, will use PR branch samples as baseline"
+          sample_dir="${1:?Usage: apply-output-delta-samples.sh <sample-dir>}"
+          if [ ! -d "$sample_dir" ]; then
+            echo "::error::Sample directory not found: $sample_dir"
+            exit 1
           fi
 
-          # Apply intentionally broken (runtime-failure) samples when available.
-          # These must stay structurally valid and apply successfully.
-          if [ -f config/samples/broken/kustomization.yaml ]; then
-            broken_samples_applied=false
-            for i in 1 2 3 4 5; do
-              if kubectl apply --server-side --force-conflicts -k config/samples/broken/ 2>&1; then
-                broken_samples_applied=true
-                break
-              fi
-              echo "Broken sample apply attempt $i failed, waiting before retry..."
-              sleep 10
-            done
-            if [ "$broken_samples_applied" = "false" ]; then
-              echo "::error::Broken runtime-failure samples must apply successfully"
+          render_samples() {
+            local out="$1"
+            if ! kubectl kustomize "$sample_dir" > "$out"; then
+              echo "::error::Failed to render sample kustomization: $sample_dir"
               exit 1
             fi
+          }
+
+          apply_yaml() {
+            local label="$1"
+            local file="$2"
+            shift 2
+
+            if ! grep -q '^kind:' "$file"; then
+              echo "No $label documents to apply"
+              return 0
+            fi
+
+            for i in 1 2 3 4 5; do
+              if kubectl apply --server-side --force-conflicts "$@" -f "$file"; then
+                echo "Applied $label"
+                return 0
+              fi
+              echo "$label apply attempt $i failed, waiting before retry..."
+              sleep 10
+            done
+
+            echo "::error::$label failed to apply after 5 attempts"
+            return 1
+          }
+
+          ensure_requester_rbac() {
+            kubectl apply -f - <<'EOF'
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRole
+          metadata:
+            name: auth-operator-output-delta-sample-requester
+          rules:
+            - apiGroups: ["authorization.t-caas.telekom.com"]
+              resources:
+                - restrictedbinddefinitions
+                - restrictedroledefinitions
+              verbs: ["get", "list", "watch", "create", "patch", "update", "delete"]
+          ---
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRoleBinding
+          metadata:
+            name: auth-operator-output-delta-sample-requester
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: auth-operator-output-delta-sample-requester
+          subjects:
+            - kind: ServiceAccount
+              name: ci-rbac-applier
+              namespace: ci-runners
+            - kind: ServiceAccount
+              name: team-alpha-rbac-applier
+              namespace: team-alpha
+            - kind: ServiceAccount
+              name: sample-impersonation-denied
+              namespace: sample-authz
+            - kind: User
+              name: output-delta-platform-operator
+            - kind: User
+              name: output-delta-sample-admin
+            - kind: User
+              name: output-delta-unassigned
+          EOF
+          }
+
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+
+          rendered="$tmp/rendered.yaml"
+          render_samples "$rendered"
+
+          yq -o=yaml 'select(.kind != "RestrictedBindDefinition" and .kind != "RestrictedRoleDefinition")' "$rendered" > "$tmp/base.yaml"
+          apply_yaml "non-restricted samples from $sample_dir" "$tmp/base.yaml"
+
+          ensure_requester_rbac
+
+          assert_known_policy_refs() {
+            local policy
+            while IFS= read -r policy; do
+              [ -n "$policy" ] || continue
+              case "$policy" in
+                team-workload-policy|operator-cross-namespace-policy|cicd-pipeline-policy|sample-policy-allow-all-paths|sample-policy-impersonation-authz-failure|sample-policy-block-clusterrolebindings|sample-policy-partially-allowed-bindings)
+                  ;;
+                *)
+                  echo "::error::Restricted sample policyRef $policy has no output-delta requester mapping"
+                  exit 1
+                  ;;
+              esac
+            done < <(yq -r --no-doc 'select(.kind == "RestrictedBindDefinition" or .kind == "RestrictedRoleDefinition") | .spec.policyRef.name // ""' "$rendered" | sort -u)
+          }
+
+          apply_policy_docs() {
+            local policy="$1"
+            shift
+            local out="$tmp/${policy}.yaml"
+            POLICY="$policy" yq -o=yaml 'select((.kind == "RestrictedBindDefinition" or .kind == "RestrictedRoleDefinition") and .spec.policyRef.name == strenv(POLICY))' "$rendered" > "$out"
+            apply_yaml "restricted samples for policy $policy" "$out" "$@"
+          }
+
+          assert_known_policy_refs
+
+          apply_policy_docs team-workload-policy \
+            --as=system:serviceaccount:team-alpha:team-alpha-rbac-applier
+          apply_policy_docs operator-cross-namespace-policy \
+            --as=output-delta-platform-operator \
+            --as-group=oidc:platform-operators
+          apply_policy_docs cicd-pipeline-policy \
+            --as=system:serviceaccount:ci-runners:ci-rbac-applier
+          apply_policy_docs sample-policy-allow-all-paths \
+            --as=output-delta-sample-admin \
+            --as-group=oidc:sample-rbac-admins
+          apply_policy_docs sample-policy-impersonation-authz-failure \
+            --as=system:serviceaccount:sample-authz:sample-impersonation-denied
+          apply_policy_docs sample-policy-block-clusterrolebindings \
+            --as=output-delta-unassigned
+          apply_policy_docs sample-policy-partially-allowed-bindings \
+            --as=output-delta-unassigned
+          SCRIPT
+          chmod +x /tmp/apply-output-delta-samples.sh
+
+      - name: Generate outputs from main branch
+        id: main-output
+        run: |
+          set -euo pipefail
+          cd main-branch
+
+          make docker-build IMG=auth-operator:main
+          kind load docker-image auth-operator:main --name "${BASELINE_CLUSTER}"
+
+          make install
+          make deploy IMG=auth-operator:main
+          bash ../main-branch/hack/ci/apply-sample-impersonation-rbac.sh
+
+          kubectl rollout status deployment/auth-operator-controller-manager -n auth-operator-system --timeout=180s
+          kubectl rollout status deployment/auth-operator-webhook-server -n auth-operator-system --timeout=180s 2>/dev/null || \
+            echo "::notice::Webhook server not found or not ready on main, continuing"
+          sleep 5
+
+          /tmp/apply-output-delta-samples.sh config/samples
+
+          if [ -f config/samples/broken/kustomization.yaml ]; then
+            /tmp/apply-output-delta-samples.sh config/samples/broken
           else
-            echo "::notice::No config/samples/broken set in this branch, skipping broken-sample apply"
+            echo "::notice::No config/samples/broken set on main, skipping broken-sample apply"
           fi
 
-          # Wait for all CRs to be fully reconciled (Ready condition)
-          echo "Waiting for resources to be reconciled..."
-          kubectl wait --for=condition=Ready roledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RoleDefinitions not fully reconciled"
-          kubectl wait --for=condition=Ready binddefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some BindDefinitions not fully reconciled"
-          kubectl wait --for=condition=Ready rbacpolicy --all --timeout=180s 2>/dev/null || echo "::notice::Some RBACPolicies not fully reconciled"
-          kubectl wait --for=condition=Ready restrictedbinddefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RestrictedBindDefinitions not fully reconciled"
-          kubectl wait --for=condition=Ready restrictedroledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RestrictedRoleDefinitions not fully reconciled"
+          wait_ready() {
+            local resource="$1"
+            kubectl wait --for=condition=Ready "$resource" --all --timeout=180s 2>/dev/null || \
+              echo "::notice::Some $resource resources are intentionally not Ready"
+          }
 
-          # Allow extra settle time for cross-resource dependencies (e.g. BDs
-          # re-reconcile after RD-generated ClusterRoles appear).
-          echo "Waiting 15s for reconciliation to fully settle..."
+          wait_ready roledefinition
+          wait_ready binddefinition
+          wait_ready rbacpolicy
+          wait_ready restrictedbinddefinition
+          wait_ready restrictedroledefinition
+
+          echo "Waiting 15s for main reconciliation to settle..."
           sleep 15
           kubectl wait --for=condition=Ready binddefinition --all --timeout=60s 2>/dev/null || true
 
-          # Capture generated resources (yq strips volatile K8s internal fields)
-          bash ../pr-branch/hack/ci/capture-operator-output.sh /tmp/main-output
+          capture_args=(/tmp/main-output)
+          if grep -q -- '--all-rbac)' ../main-branch/hack/ci/capture-operator-output.sh; then
+            capture_args+=(--all-rbac)
+          else
+            echo "::notice::Trusted main capture helper does not support --all-rbac yet; using labelled RBAC capture for bootstrap compatibility"
+          fi
+          bash ../main-branch/hack/ci/capture-operator-output.sh "${capture_args[@]}"
 
-          # Capture controller logs before undeploy (they're lost once pods are deleted)
           mkdir -p /tmp/controller-logs
-          echo "Capturing main branch controller logs (FULL - no truncation)..."
           for ns in auth-operator-system kube-system default; do
-            # Try multiple methods to capture logs (NO --tail limit = capture ALL)
             kubectl logs -n "$ns" -l control-plane=controller-manager >> "/tmp/controller-logs/main-${ns}-controller.log" 2>&1 || true
             kubectl logs -n "$ns" -l app.kubernetes.io/name=auth-operator >> "/tmp/controller-logs/main-${ns}-controller.log" 2>&1 || true
-
-            # Also try getting logs by pod directly
             while IFS= read -r pod; do
               [ -n "$pod" ] || continue
               echo "=== Pod: $pod in $ns (main) ===" >> "/tmp/controller-logs/main-${ns}-controller.log"
               kubectl logs -n "$ns" "$pod" >> "/tmp/controller-logs/main-${ns}-controller.log" 2>&1 || true
             done < <(kubectl get pods -n "$ns" -l control-plane=controller-manager --no-headers -o custom-columns=":metadata.name" 2>/dev/null || true)
-
             kubectl logs -n "$ns" -l control-plane=webhook-server > "/tmp/controller-logs/main-${ns}-webhook.log" 2>/dev/null || true
           done
 
-          # Cleanup samples -- delete CRs and wait for finalizers to be processed before undeploying
           kubectl delete -k config/samples/broken/ --ignore-not-found --timeout=60s 2>/dev/null || true
           kubectl delete -k config/samples/ --ignore-not-found --timeout=60s 2>/dev/null || true
-          echo "Waiting for CRs to be fully deleted..."
           kubectl wait --for=delete roledefinition --all --timeout=60s 2>/dev/null || true
           kubectl wait --for=delete binddefinition --all --timeout=60s 2>/dev/null || true
           kubectl wait --for=delete webhookauthorizer --all --timeout=60s 2>/dev/null || true
@@ -210,267 +336,415 @@ jobs:
           kubectl wait --for=delete pod -l control-plane=controller-manager -n auth-operator-system --timeout=180s 2>/dev/null || true
           kubectl wait --for=delete pod -l control-plane=webhook-server -n auth-operator-system --timeout=180s 2>/dev/null || true
 
-          echo "Main branch outputs captured"
-
-      # =====================================================================
-      #  Fallback baseline (uses PR branch when main fails)
-      # =====================================================================
-      - name: Fallback - use PR samples for main baseline
-        if: steps.main-output.outputs.main_samples_applied == 'false' || steps.main-output.outcome == 'failure'
+      - name: Get latest release tag
+        id: latest-tag
         run: |
-          echo "::notice::Using PR branch samples as baseline since main branch samples failed to apply"
-          cd pr-branch
-
-          make docker-build IMG=auth-operator:pr
-          kind load docker-image auth-operator:pr --name output-delta
-
-          make deploy IMG=auth-operator:pr
-          bash hack/ci/apply-sample-impersonation-rbac.sh
-          kubectl rollout status deployment/auth-operator-controller-manager -n auth-operator-system --timeout=180s 2>/dev/null || \
-            echo "::warning::Controller-manager deployment not Available in time (fallback baseline will continue anyway)"
-
-          echo "Waiting for webhook server to be ready..."
-          kubectl rollout status deployment/auth-operator-webhook-server -n auth-operator-system --timeout=180s 2>/dev/null || \
-            echo "::warning::Webhook server not ready in time, continuing anyway"
-          sleep 5
-
-          # Apply PR samples to generate baseline with retry
-          for i in 1 2 3 4 5; do
-            if kubectl apply --server-side --force-conflicts -k config/samples/ 2>&1; then
-              echo "Samples applied successfully"
-              break
-            fi
-            echo "Attempt $i failed, waiting before retry..."
-            sleep 10
-          done
-
-          # Apply intentionally broken (runtime-failure) samples when available.
-          # These must stay structurally valid and apply successfully.
-          if [ -f config/samples/broken/kustomization.yaml ]; then
-            broken_samples_applied=false
-            for i in 1 2 3 4 5; do
-              if kubectl apply --server-side --force-conflicts -k config/samples/broken/ 2>&1; then
-                broken_samples_applied=true
-                break
-              fi
-              echo "Broken sample apply attempt $i failed, waiting before retry..."
-              sleep 10
-            done
-            if [ "$broken_samples_applied" = "false" ]; then
-              echo "::error::Broken runtime-failure samples must apply successfully"
-              exit 1
-            fi
+          set -euo pipefail
+          cd main-branch
+          latest_tag="$(git tag -l 'v*.*.*' 2>/dev/null | sort -V | tail -1 || true)"
+          if [ -n "$latest_tag" ] && git rev-parse "$latest_tag" >/dev/null 2>&1; then
+            echo "tag=$latest_tag" >> "$GITHUB_OUTPUT"
+            echo "has_tag=true" >> "$GITHUB_OUTPUT"
+            echo "Latest release tag: $latest_tag"
           else
-            echo "::notice::No config/samples/broken set in this branch, skipping broken-sample apply"
+            echo "has_tag=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No reachable v*.*.* release tag found"
           fi
 
-          # Wait for reconciliation
-          kubectl wait --for=condition=Ready roledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RoleDefinitions not fully reconciled"
-          kubectl wait --for=condition=Ready binddefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some BindDefinitions not fully reconciled"
-          kubectl wait --for=condition=Ready rbacpolicy --all --timeout=180s 2>/dev/null || echo "::notice::Some RBACPolicies not fully reconciled"
-          kubectl wait --for=condition=Ready restrictedbinddefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RestrictedBindDefinitions not fully reconciled"
-          kubectl wait --for=condition=Ready restrictedroledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RestrictedRoleDefinitions not fully reconciled"
+      - name: Checkout latest tag
+        if: steps.latest-tag.outputs.has_tag == 'true'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ steps.latest-tag.outputs.tag }}
+          path: tag-branch
+          persist-credentials: false
 
-          echo "Waiting 15s for reconciliation to fully settle..."
-          sleep 15
-          kubectl wait --for=condition=Ready binddefinition --all --timeout=60s 2>/dev/null || true
-
-          bash hack/ci/capture-operator-output.sh /tmp/main-output
-
-          kubectl delete -k config/samples/broken/ --ignore-not-found --timeout=60s 2>/dev/null || true
-          kubectl delete -k config/samples/ --ignore-not-found --timeout=60s 2>/dev/null || true
-          kubectl wait --for=delete roledefinition --all --timeout=60s 2>/dev/null || true
-          kubectl wait --for=delete binddefinition --all --timeout=60s 2>/dev/null || true
-          kubectl wait --for=delete webhookauthorizer --all --timeout=60s 2>/dev/null || true
-          kubectl wait --for=delete rbacpolicy --all --timeout=60s 2>/dev/null || true
-          kubectl wait --for=delete restrictedbinddefinition --all --timeout=60s 2>/dev/null || true
-          kubectl wait --for=delete restrictedroledefinition --all --timeout=60s 2>/dev/null || true
-          make undeploy 2>/dev/null || true
-          kubectl wait --for=delete deployment/auth-operator-controller-manager -n auth-operator-system --timeout=180s 2>/dev/null || true
-          kubectl wait --for=delete deployment/auth-operator-webhook-server -n auth-operator-system --timeout=180s 2>/dev/null || true
-          kubectl wait --for=delete pod -l control-plane=controller-manager -n auth-operator-system --timeout=180s 2>/dev/null || true
-          kubectl wait --for=delete pod -l control-plane=webhook-server -n auth-operator-system --timeout=180s 2>/dev/null || true
-
-          echo "Fallback baseline captured using PR branch samples"
-          echo "MAIN_FALLBACK=true" >> "$GITHUB_ENV"
-
-      # =====================================================================
-      #  Latest release tag
-      # =====================================================================
       - name: Generate outputs from latest tag
+        if: steps.latest-tag.outputs.has_tag == 'true'
         id: tag-output
-        if: steps.latest-tag.outputs.has_tag == 'true' && steps.checkout-tag.outcome == 'success'
         continue-on-error: true
         run: |
-          if [ ! -d "tag-branch" ]; then
-            echo "::warning::Tag checkout failed, skipping tag comparison"
-            echo "tag_success=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
+          set -euo pipefail
           cd tag-branch
 
-          make docker-build IMG=auth-operator:tag 2>/dev/null || {
-            echo "::warning::Failed to build tag version (${{ steps.latest-tag.outputs.tag }}), skipping tag comparison"
-            echo "tag_success=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          }
-          kind load docker-image auth-operator:tag --name output-delta
+          echo "tag_success=false" >> "$GITHUB_OUTPUT"
+          make docker-build IMG=auth-operator:tag
+          kind load docker-image auth-operator:tag --name "${BASELINE_CLUSTER}"
 
           make install 2>/dev/null || true
+          make deploy IMG=auth-operator:tag
+          bash ../main-branch/hack/ci/apply-sample-impersonation-rbac.sh
 
-          make deploy IMG=auth-operator:tag 2>/dev/null || {
-            echo "::warning::Failed to deploy tag version, skipping tag comparison"
-            echo "tag_success=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          }
-          bash ../pr-branch/hack/ci/apply-sample-impersonation-rbac.sh
-          echo "Waiting for operator to be ready..."
           kubectl rollout status deployment/auth-operator-controller-manager -n auth-operator-system --timeout=180s 2>/dev/null || true
-
-          echo "Waiting for webhook server to be ready..."
           kubectl rollout status deployment/auth-operator-webhook-server -n auth-operator-system --timeout=180s 2>/dev/null || \
-            echo "::notice::Webhook server not found or not ready, continuing anyway"
+            echo "::notice::Webhook server not found or not ready for tag, continuing"
           sleep 5
 
-          # Try to apply sample configs with retry
-          tag_success=false
-          for i in 1 2 3 4 5; do
-            if kubectl apply --server-side --force-conflicts -k config/samples/ 2>&1; then
-              tag_success=true
-              break
-            fi
-            echo "Attempt $i failed, waiting before retry..."
-            sleep 10
-          done
-          echo "tag_success=${tag_success}" >> "$GITHUB_OUTPUT"
-          if [ "$tag_success" = "false" ]; then
-            echo "::warning::Tag branch samples failed to apply, skipping tag comparison"
+          if ! /tmp/apply-output-delta-samples.sh config/samples; then
+            echo "::warning::Tag samples failed to apply; skipping tag comparison"
             exit 0
           fi
 
-          # Apply intentionally broken (runtime-failure) samples.
-          # These must stay structurally valid and apply successfully.
-          # Guard: older tags without the broken/ directory skip this step.
           if [ -d config/samples/broken/ ]; then
-            broken_samples_applied=false
-            for i in 1 2 3 4 5; do
-              if kubectl apply --server-side --force-conflicts -k config/samples/broken/ 2>&1; then
-                broken_samples_applied=true
-                break
-              fi
-              echo "Broken sample apply attempt $i failed, waiting before retry..."
-              sleep 10
-            done
-            if [ "$broken_samples_applied" = "false" ]; then
-              echo "::error::Broken runtime-failure samples must apply successfully"
-              exit 1
-            fi
+            /tmp/apply-output-delta-samples.sh config/samples/broken
           else
-            echo "::notice::config/samples/broken/ not present in this tag; skipping broken-sample apply"
+            echo "::notice::No config/samples/broken set on tag, skipping broken-sample apply"
           fi
 
-          kubectl wait --for=condition=Ready roledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RoleDefinitions not fully reconciled"
-          kubectl wait --for=condition=Ready binddefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some BindDefinitions not fully reconciled"
-          kubectl wait --for=condition=Ready rbacpolicy --all --timeout=180s 2>/dev/null || echo "::notice::Some RBACPolicies not fully reconciled"
-          kubectl wait --for=condition=Ready restrictedbinddefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RestrictedBindDefinitions not fully reconciled"
-          kubectl wait --for=condition=Ready restrictedroledefinition --all --timeout=180s 2>/dev/null || echo "::notice::Some RestrictedRoleDefinitions not fully reconciled"
-
-          echo "Waiting 15s for reconciliation to fully settle..."
+          kubectl wait --for=condition=Ready roledefinition --all --timeout=180s 2>/dev/null || true
+          kubectl wait --for=condition=Ready binddefinition --all --timeout=180s 2>/dev/null || true
+          kubectl wait --for=condition=Ready rbacpolicy --all --timeout=180s 2>/dev/null || true
+          kubectl wait --for=condition=Ready restrictedbinddefinition --all --timeout=180s 2>/dev/null || true
+          kubectl wait --for=condition=Ready restrictedroledefinition --all --timeout=180s 2>/dev/null || true
           sleep 15
           kubectl wait --for=condition=Ready binddefinition --all --timeout=60s 2>/dev/null || true
 
-          bash ../pr-branch/hack/ci/capture-operator-output.sh /tmp/tag-output
+          capture_args=(/tmp/tag-output)
+          if grep -q -- '--all-rbac)' ../main-branch/hack/ci/capture-operator-output.sh; then
+            capture_args+=(--all-rbac)
+          else
+            echo "::notice::Trusted main capture helper does not support --all-rbac yet; using labelled RBAC capture for bootstrap compatibility"
+          fi
+          bash ../main-branch/hack/ci/capture-operator-output.sh "${capture_args[@]}"
 
-          # Capture controller logs before undeploy (they're lost once pods are deleted)
-          echo "Capturing tag branch controller logs (FULL - no truncation)..."
+          mkdir -p /tmp/controller-logs
           for ns in auth-operator-system kube-system default; do
             kubectl logs -n "$ns" -l control-plane=controller-manager >> "/tmp/controller-logs/tag-${ns}-controller.log" 2>&1 || true
             kubectl logs -n "$ns" -l app.kubernetes.io/name=auth-operator >> "/tmp/controller-logs/tag-${ns}-controller.log" 2>&1 || true
-
             while IFS= read -r pod; do
               [ -n "$pod" ] || continue
               echo "=== Pod: $pod in $ns (tag) ===" >> "/tmp/controller-logs/tag-${ns}-controller.log"
               kubectl logs -n "$ns" "$pod" >> "/tmp/controller-logs/tag-${ns}-controller.log" 2>&1 || true
             done < <(kubectl get pods -n "$ns" -l control-plane=controller-manager --no-headers -o custom-columns=":metadata.name" 2>/dev/null || true)
-
             kubectl logs -n "$ns" -l control-plane=webhook-server > "/tmp/controller-logs/tag-${ns}-webhook.log" 2>/dev/null || true
           done
 
           kubectl delete -k config/samples/broken/ --ignore-not-found --timeout=60s 2>/dev/null || true
           kubectl delete -k config/samples/ --ignore-not-found --timeout=60s 2>/dev/null || true
-          echo "Waiting for CRs to be fully deleted..."
-          kubectl wait --for=delete roledefinition --all --timeout=60s 2>/dev/null || true
-          kubectl wait --for=delete binddefinition --all --timeout=60s 2>/dev/null || true
-          kubectl wait --for=delete webhookauthorizer --all --timeout=60s 2>/dev/null || true
-          kubectl wait --for=delete rbacpolicy --all --timeout=60s 2>/dev/null || true
-          kubectl wait --for=delete restrictedbinddefinition --all --timeout=60s 2>/dev/null || true
-          kubectl wait --for=delete restrictedroledefinition --all --timeout=60s 2>/dev/null || true
           make undeploy 2>/dev/null || true
           kubectl wait --for=delete deployment/auth-operator-controller-manager -n auth-operator-system --timeout=180s 2>/dev/null || true
           kubectl wait --for=delete deployment/auth-operator-webhook-server -n auth-operator-system --timeout=180s 2>/dev/null || true
-          kubectl wait --for=delete pod -l control-plane=controller-manager -n auth-operator-system --timeout=180s 2>/dev/null || true
-          kubectl wait --for=delete pod -l control-plane=webhook-server -n auth-operator-system --timeout=180s 2>/dev/null || true
 
-          echo "Tag branch (${{ steps.latest-tag.outputs.tag }}) outputs captured"
+          echo "tag_success=true" >> "$GITHUB_OUTPUT"
 
-      # =====================================================================
-      #  PR branch
-      # =====================================================================
-      - name: Generate outputs from PR branch
-        id: pr-output
+      - name: Upload main output
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: output-delta-main-output
+          path: /tmp/main-output/
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload tag output
+        if: steps.tag-output.outputs.tag_success == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: output-delta-tag-output
+          path: /tmp/tag-output/
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload trusted controller logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: output-delta-trusted-controller-logs
+          path: /tmp/controller-logs/
+          retention-days: 7
+          if-no-files-found: warn
+
+      - name: Cleanup baseline cluster
+        if: always()
+        run: kind delete cluster --name "${BASELINE_CLUSTER}"
+
+  candidate-pr:
+    name: Candidate PR Outputs
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      has_errors: ${{ steps.extract-errors.outputs.has_errors }}
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: pr-branch
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout trusted main branch
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: main
+          path: main-branch
+          persist-credentials: false
+
+      - name: Load trusted tool versions
         run: |
-          cd pr-branch
+          set -euo pipefail
+          yq_version=""
+          yq_linux_amd64_sha256=""
+          while IFS='=' read -r key value; do
+            case "${key}" in
+              KIND_VERSION)
+                if [[ ! "${value}" =~ ^v[0-9A-Za-z._+-]+$ ]]; then
+                  echo "Invalid ${key}: ${value}" >&2
+                  exit 1
+                fi
+                echo "${key}=${value}" >> "$GITHUB_ENV"
+                ;;
+              YQ_VERSION)
+                if [[ ! "${value}" =~ ^v[0-9A-Za-z._+-]+$ ]]; then
+                  echo "Invalid ${key}: ${value}" >&2
+                  exit 1
+                fi
+                yq_version="${value}"
+                ;;
+              YQ_LINUX_AMD64_SHA256)
+                if [[ ! "${value}" =~ ^[0-9a-f]{64}$ ]]; then
+                  echo "Invalid ${key}: ${value}" >&2
+                  exit 1
+                fi
+                yq_linux_amd64_sha256="${value}"
+                ;;
+            esac
+          done < <(grep -Ev '^(#|$)' main-branch/versions.env)
 
-          make docker-build IMG=auth-operator:pr
-          kind load docker-image auth-operator:pr --name output-delta
-
-          make install
-
-          make deploy IMG=auth-operator:pr
-          bash hack/ci/apply-sample-impersonation-rbac.sh
-          echo "Waiting for operator to be ready..."
-          kubectl rollout status deployment/auth-operator-controller-manager -n auth-operator-system --timeout=180s
-
-          echo "Waiting for webhook server to be ready..."
-          kubectl rollout status deployment/auth-operator-webhook-server -n auth-operator-system --timeout=180s
-          sleep 5
-
-          # Apply sample configs with retry (webhook may need additional time to be fully ready)
-          pr_samples_applied=false
-          for i in 1 2 3 4 5; do
-            if kubectl apply --server-side --force-conflicts -k config/samples/ 2>&1; then
-              pr_samples_applied=true
-              echo "Samples applied successfully"
-              break
-            fi
-            echo "Attempt $i failed, waiting before retry..."
-            sleep 10
-          done
-          if [ "$pr_samples_applied" = "false" ]; then
-            echo "::error::PR branch samples failed to apply after 5 attempts"
+          if [ -z "$yq_version" ] && [ -z "$yq_linux_amd64_sha256" ]; then
+            yq_version="v4.53.3"
+            yq_linux_amd64_sha256="fa52a4e758c63d38299163fbdd1edfb4c4963247918bf9c1c5d31d84789eded4"
+            echo "::notice::main versions.env does not define yq; using pinned bootstrap ${yq_version}"
+          elif [ -z "$yq_version" ] || [ -z "$yq_linux_amd64_sha256" ]; then
+            echo "main versions.env must define both YQ_VERSION and YQ_LINUX_AMD64_SHA256" >&2
             exit 1
           fi
 
-          # Apply intentionally broken (runtime-failure) samples.
-          # These must stay structurally valid and apply successfully.
-          # Guard: older tags without the broken/ directory skip this step.
-          if [ -d config/samples/broken/ ]; then
-            broken_samples_applied=false
-            for i in 1 2 3 4 5; do
-              if kubectl apply --server-side --force-conflicts -k config/samples/broken/ 2>&1; then
-                broken_samples_applied=true
-                break
-              fi
-              echo "Broken sample apply attempt $i failed, waiting before retry..."
-              sleep 10
-            done
-            if [ "$broken_samples_applied" = "false" ]; then
-              echo "::error::Broken runtime-failure samples must apply successfully"
+          echo "YQ_VERSION=${yq_version}" >> "$GITHUB_ENV"
+          echo "YQ_LINUX_AMD64_SHA256=${yq_linux_amd64_sha256}" >> "$GITHUB_ENV"
+
+      - name: Setup Go Environment
+        uses: ./main-branch/.github/actions/setup-go-env
+        with:
+          go-version-file: main-branch/go.mod
+          install-kind: 'true'
+          kind-version: ${{ env.KIND_VERSION }}
+          cache-dependency-path: main-branch/go.sum
+
+      - name: Install yq
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64" -o /tmp/yq
+          echo "${YQ_LINUX_AMD64_SHA256}  /tmp/yq" | sha256sum -c -
+          sudo install -m 0755 /tmp/yq /usr/local/bin/yq
+
+      - name: Create kind cluster
+        run: |
+          kind create cluster --name "${CANDIDATE_CLUSTER}" --wait 5m
+          kubectl cluster-info
+
+      - name: Install popular CRDs
+        run: KIND_CLUSTER_NAME="${CANDIDATE_CLUSTER}" bash main-branch/hack/ci/setup-kind-crds.sh
+
+      - name: Create test namespaces
+        run: bash main-branch/hack/ci/create-test-namespaces.sh
+
+      - name: Create trusted sample apply helper
+        run: |
+          set -euo pipefail
+          cat > /tmp/apply-output-delta-samples.sh <<'SCRIPT'
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          sample_dir="${1:?Usage: apply-output-delta-samples.sh <sample-dir>}"
+          if [ ! -d "$sample_dir" ]; then
+            echo "::error::Sample directory not found: $sample_dir"
+            exit 1
+          fi
+
+          render_samples() {
+            local out="$1"
+            if ! kubectl kustomize "$sample_dir" > "$out"; then
+              echo "::error::Failed to render sample kustomization: $sample_dir"
               exit 1
             fi
+          }
+
+          apply_yaml() {
+            local label="$1"
+            local file="$2"
+            shift 2
+
+            if ! grep -q '^kind:' "$file"; then
+              echo "No $label documents to apply"
+              return 0
+            fi
+
+            for i in 1 2 3 4 5; do
+              if kubectl apply --server-side --force-conflicts "$@" -f "$file"; then
+                echo "Applied $label"
+                return 0
+              fi
+              echo "$label apply attempt $i failed, waiting before retry..."
+              sleep 10
+            done
+
+            echo "::error::$label failed to apply after 5 attempts"
+            return 1
+          }
+
+          ensure_requester_rbac() {
+            kubectl apply -f - <<'EOF'
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRole
+          metadata:
+            name: auth-operator-output-delta-sample-requester
+          rules:
+            - apiGroups: ["authorization.t-caas.telekom.com"]
+              resources:
+                - restrictedbinddefinitions
+                - restrictedroledefinitions
+              verbs: ["get", "list", "watch", "create", "patch", "update", "delete"]
+          ---
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRoleBinding
+          metadata:
+            name: auth-operator-output-delta-sample-requester
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: auth-operator-output-delta-sample-requester
+          subjects:
+            - kind: ServiceAccount
+              name: ci-rbac-applier
+              namespace: ci-runners
+            - kind: ServiceAccount
+              name: team-alpha-rbac-applier
+              namespace: team-alpha
+            - kind: ServiceAccount
+              name: sample-impersonation-denied
+              namespace: sample-authz
+            - kind: User
+              name: output-delta-platform-operator
+            - kind: User
+              name: output-delta-sample-admin
+            - kind: User
+              name: output-delta-unassigned
+          EOF
+          }
+
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+
+          rendered="$tmp/rendered.yaml"
+          render_samples "$rendered"
+
+          yq -o=yaml 'select(.kind != "RestrictedBindDefinition" and .kind != "RestrictedRoleDefinition")' "$rendered" > "$tmp/base.yaml"
+          apply_yaml "non-restricted samples from $sample_dir" "$tmp/base.yaml"
+
+          ensure_requester_rbac
+
+          assert_known_policy_refs() {
+            local policy
+            while IFS= read -r policy; do
+              [ -n "$policy" ] || continue
+              case "$policy" in
+                team-workload-policy|operator-cross-namespace-policy|cicd-pipeline-policy|sample-policy-allow-all-paths|sample-policy-impersonation-authz-failure|sample-policy-block-clusterrolebindings|sample-policy-partially-allowed-bindings)
+                  ;;
+                *)
+                  echo "::error::Restricted sample policyRef $policy has no output-delta requester mapping"
+                  exit 1
+                  ;;
+              esac
+            done < <(yq -r --no-doc 'select(.kind == "RestrictedBindDefinition" or .kind == "RestrictedRoleDefinition") | .spec.policyRef.name // ""' "$rendered" | sort -u)
+          }
+
+          apply_policy_docs() {
+            local policy="$1"
+            shift
+            local out="$tmp/${policy}.yaml"
+            POLICY="$policy" yq -o=yaml 'select((.kind == "RestrictedBindDefinition" or .kind == "RestrictedRoleDefinition") and .spec.policyRef.name == strenv(POLICY))' "$rendered" > "$out"
+            apply_yaml "restricted samples for policy $policy" "$out" "$@"
+          }
+
+          assert_known_policy_refs
+
+          apply_policy_docs team-workload-policy \
+            --as=system:serviceaccount:team-alpha:team-alpha-rbac-applier
+          apply_policy_docs operator-cross-namespace-policy \
+            --as=output-delta-platform-operator \
+            --as-group=oidc:platform-operators
+          apply_policy_docs cicd-pipeline-policy \
+            --as=system:serviceaccount:ci-runners:ci-rbac-applier
+          apply_policy_docs sample-policy-allow-all-paths \
+            --as=output-delta-sample-admin \
+            --as-group=oidc:sample-rbac-admins
+          apply_policy_docs sample-policy-impersonation-authz-failure \
+            --as=system:serviceaccount:sample-authz:sample-impersonation-denied
+          apply_policy_docs sample-policy-block-clusterrolebindings \
+            --as=output-delta-unassigned
+          apply_policy_docs sample-policy-partially-allowed-bindings \
+            --as=output-delta-unassigned
+          SCRIPT
+          chmod +x /tmp/apply-output-delta-samples.sh
+
+      - name: Generate outputs from PR branch
+        id: pr-output
+        run: |
+          set -euo pipefail
+          workspace="${GITHUB_WORKSPACE:?}"
+          main_dir="$workspace/main-branch"
+          pr_dir="$workspace/pr-branch"
+          trusted_bin="$main_dir/.trusted-bin"
+          mkdir -p "$trusted_bin"
+
+          kustomize_version="$(awk -F= '$1 == "KUSTOMIZE_VERSION" {print $2}' "$main_dir/versions.env")"
+          if [[ ! "$kustomize_version" =~ ^v[0-9]+[A-Za-z0-9._-]*$ ]]; then
+            echo "::error::Invalid KUSTOMIZE_VERSION from trusted main: $kustomize_version"
+            exit 1
+          fi
+          GOBIN="$trusted_bin" go install "sigs.k8s.io/kustomize/kustomize/v5@${kustomize_version}"
+          kustomize="$trusted_bin/kustomize"
+
+          go_version="$(grep -E '^toolchain go' "$pr_dir/go.mod" | sed 's/toolchain go//' || true)"
+          if [ -z "$go_version" ]; then
+            go_version="$(grep -E '^go [0-9]' "$pr_dir/go.mod" | awk '{print $2}')"
+          fi
+          if [[ ! "$go_version" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
+            echo "::error::Invalid Go version from PR go.mod: $go_version"
+            exit 1
+          fi
+
+          docker build \
+            --build-arg GO_VERSION="$go_version" \
+            -f "$main_dir/Dockerfile" \
+            -t auth-operator:pr \
+            "$pr_dir"
+          kind load docker-image auth-operator:pr --name "${CANDIDATE_CLUSTER}"
+
+          "$kustomize" build "$pr_dir/config/crd" | kubectl apply -f -
+
+          render_dir="$(mktemp -d)"
+          cp -R "$pr_dir/config" "$render_dir/config"
+          (
+            cd "$render_dir/config/overlays/dev"
+            "$kustomize" edit set image controller=auth-operator:pr
+          )
+          "$kustomize" build "$render_dir/config/overlays/dev" | kubectl apply -f -
+
+          bash "$main_dir/hack/ci/apply-sample-impersonation-rbac.sh"
+
+          kubectl rollout status deployment/auth-operator-controller-manager -n auth-operator-system --timeout=180s
+          kubectl rollout status deployment/auth-operator-webhook-server -n auth-operator-system --timeout=180s
+          sleep 5
+
+          cd "$pr_dir"
+          /tmp/apply-output-delta-samples.sh config/samples
+
+          if [ -d config/samples/broken/ ]; then
+            /tmp/apply-output-delta-samples.sh config/samples/broken
           else
-            echo "::notice::config/samples/broken/ not present in this tag; skipping broken-sample apply"
+            echo "::notice::config/samples/broken/ not present on PR branch, skipping broken-sample apply"
           fi
 
           wait_condition() {
@@ -540,11 +814,6 @@ jobs:
                 pending="$(yq -r '.items[] | select(((.status.missingRoleRefs // []) | length) == 0) | .metadata.name' <<<"$output")"
               fi
               if [ -z "$pending" ]; then
-                if [ -n "$expected_ref" ]; then
-                  echo "All $count $resource resources matching '$selector' report missingRoleRefs entry '$expected_ref'"
-                else
-                  echo "All $count $resource resources matching '$selector' report missingRoleRefs"
-                fi
                 return 0
               fi
 
@@ -577,7 +846,6 @@ jobs:
 
               pending="$(EXPECTED_VIOLATION="$expected_violation" yq -r '.items[] | select((([.status.conditions[]? | select(.type == "PolicyCompliant" and .status == "False" and .reason == "ViolationsDetected")] | length) == 0) or (([.status.policyViolations[]? | select(. == strenv(EXPECTED_VIOLATION))] | length) == 0)) | .metadata.name' <<<"$output")"
               if [ -z "$pending" ]; then
-                echo "All $count $resource resources matching '$selector' report expected policy violation"
                 return 0
               fi
 
@@ -591,6 +859,123 @@ jobs:
               sleep 5
             done
           }
+
+          wait_absent() {
+            local resource="$1"
+            local name="$2"
+            local namespace="${3:-}"
+            local timeout="${4:-60}"
+            local deadline=$((SECONDS + timeout))
+
+            while true; do
+              if [ -n "$namespace" ]; then
+                if ! kubectl get "$resource" "$name" -n "$namespace" >/dev/null 2>&1; then
+                  return 0
+                fi
+              else
+                if ! kubectl get "$resource" "$name" >/dev/null 2>&1; then
+                  return 0
+                fi
+              fi
+
+              if [ "$SECONDS" -ge "$deadline" ]; then
+                echo "::error::$resource ${namespace:+$namespace/}$name exists but should be absent"
+                if [ -n "$namespace" ]; then
+                  kubectl get "$resource" "$name" -n "$namespace" -o yaml
+                else
+                  kubectl get "$resource" "$name" -o yaml
+                fi
+                return 1
+              fi
+              sleep 5
+            done
+          }
+
+          wait_present() {
+            local resource="$1"
+            local name="$2"
+            local namespace="${3:-}"
+            local timeout="${4:-60}"
+            local deadline=$((SECONDS + timeout))
+
+            while true; do
+              if [ -n "$namespace" ]; then
+                if kubectl get "$resource" "$name" -n "$namespace" >/dev/null 2>&1; then
+                  return 0
+                fi
+              else
+                if kubectl get "$resource" "$name" >/dev/null 2>&1; then
+                  return 0
+                fi
+              fi
+
+              if [ "$SECONDS" -ge "$deadline" ]; then
+                echo "::error::$resource ${namespace:+$namespace/}$name is missing"
+                return 1
+              fi
+              sleep 5
+            done
+          }
+
+          assert_no_rule_match() {
+            local resource="$1"
+            local name="$2"
+            local namespace="$3"
+            local description="$4"
+            local jq_filter="$5"
+            local json
+
+            if [ -n "$namespace" ]; then
+              json="$(kubectl get "$resource" "$name" -n "$namespace" -o json)"
+            else
+              json="$(kubectl get "$resource" "$name" -o json)"
+            fi
+
+            if jq -e "$jq_filter" <<<"$json" >/tmp/output-delta-rule-match.json; then
+              echo "::error::$resource $name has forbidden rule content: $description"
+              cat /tmp/output-delta-rule-match.json
+              return 1
+            fi
+          }
+
+          assert_negative_validation_samples_rejected() {
+            local file="config/samples/broken/authorization_v1alpha1_negative_validation_cases.yaml"
+            if [ ! -f "$file" ]; then
+              echo "::notice::Negative validation sample file not present, skipping admission rejection assertions"
+              return 0
+            fi
+
+            local split_dir
+            split_dir="$(mktemp -d)"
+            csplit -s -f "$split_dir/doc-" -b "%03d.yaml" "$file" '/^---[[:space:]]*$/' '{*}' || true
+
+            local rejected=0
+            shopt -s nullglob
+            for doc in "$split_dir"/doc-*.yaml; do
+              if ! grep -q '^kind:' "$doc"; then
+                continue
+              fi
+              local name output
+              name="$(yq -r '.kind + "/" + .metadata.name' "$doc")"
+              output="$split_dir/output-${rejected}.txt"
+              if kubectl apply --dry-run=server -f "$doc" >"$output" 2>&1; then
+                echo "::error::Negative validation sample $name unexpectedly passed server-side dry-run"
+                cat "$doc"
+                return 1
+              fi
+              echo "Rejected negative validation sample $name"
+              rejected=$((rejected + 1))
+            done
+            shopt -u nullglob
+
+            if [ "$rejected" -eq 0 ]; then
+              echo "::error::No negative validation sample documents were found in $file"
+              return 1
+            fi
+          }
+
+          assert_negative_validation_samples_rejected
+
           wait_ready roledefinition
           wait_ready binddefinition
           wait_ready rbacpolicy
@@ -607,10 +992,22 @@ jobs:
           wait_condition restrictedroledefinition 't-caas.telekom.com/sample-case in (blocked,blocked-forbidden-verb)' Ready False
           wait_policy_violation restrictedroledefinition 't-caas.telekom.com/sample-case=blocked' 'spec.targetRole: ClusterRoles are not allowed by policy'
           wait_policy_violation restrictedroledefinition 't-caas.telekom.com/sample-case=blocked-forbidden-verb' 'spec.restrictedVerbs: forbidden verb "escalate" must be listed in restrictedVerbs'
+          wait_absent clusterrolebinding sample-blocked-crb-sample-existing-cluster-role-binding
+          wait_absent rolebinding sample-blocked-subject-kind-sample-existing-role-binding sample-tenant-a
+          wait_absent clusterrole sample-clusterrole-blocked
+          wait_absent role sample-blocked-forbidden-verb sample-tenant-a
+          wait_present clusterrolebinding sample-allowed-binding-sample-existing-cluster-role-binding
+          wait_present rolebinding sample-allowed-binding-sample-existing-cluster-role-binding sample-tenant-a
+          wait_present rolebinding sample-allowed-binding-sample-existing-role-binding sample-tenant-a
+          wait_present serviceaccount sample-workload-a sample-tenant-a
+          wait_present clusterrole sample-cluster-reader
+          wait_present role sample-partial-role sample-tenant-a
+          assert_no_rule_match clusterrole sample-cluster-reader "" "restricted resources and verbs are filtered" '.rules[]? | select(((.resources // []) | index("secrets")) or ((.verbs // []) | index("delete")) or ((.verbs // []) | index("escalate")) or ((.verbs // []) | index("impersonate")) or ((.verbs // []) | index("bind")))'
+          assert_no_rule_match role sample-partial-role sample-tenant-a "restricted API groups, resources, and verbs are filtered" '.rules[]? | select(((.apiGroups // []) | index("apps")) or ((.resources // []) | index("secrets")) or ((.verbs // []) | index("delete")) or ((.verbs // []) | index("patch")))'
           wait_condition restrictedbinddefinition 't-caas.telekom.com/sample-case=impersonated-failed' Stalled True "authorization denied"
           wait_condition restrictedroledefinition 't-caas.telekom.com/sample-case=impersonated-failed' Stalled True "authorization denied"
 
-          echo "Waiting 15s for reconciliation to fully settle..."
+          echo "Waiting 15s for PR reconciliation to settle..."
           sleep 15
           wait_ready binddefinition
           wait_condition restrictedbinddefinition 't-caas.telekom.com/sample-case in (allowed,impersonated-allowed)' Ready True
@@ -622,453 +1019,344 @@ jobs:
           wait_policy_violation restrictedbinddefinition 't-caas.telekom.com/sample-case=blocked-subject' 'spec.subjects[0].kind: subject kind "User" is not allowed by policy'
           wait_policy_violation restrictedroledefinition 't-caas.telekom.com/sample-case=blocked' 'spec.targetRole: ClusterRoles are not allowed by policy'
           wait_policy_violation restrictedroledefinition 't-caas.telekom.com/sample-case=blocked-forbidden-verb' 'spec.restrictedVerbs: forbidden verb "escalate" must be listed in restrictedVerbs'
+          wait_absent clusterrolebinding sample-blocked-crb-sample-existing-cluster-role-binding
+          wait_absent rolebinding sample-blocked-subject-kind-sample-existing-role-binding sample-tenant-a
+          wait_absent clusterrole sample-clusterrole-blocked
+          wait_absent role sample-blocked-forbidden-verb sample-tenant-a
+          wait_present clusterrolebinding sample-allowed-binding-sample-existing-cluster-role-binding
+          wait_present rolebinding sample-allowed-binding-sample-existing-cluster-role-binding sample-tenant-a
+          wait_present rolebinding sample-allowed-binding-sample-existing-role-binding sample-tenant-a
+          wait_present serviceaccount sample-workload-a sample-tenant-a
+          wait_present clusterrole sample-cluster-reader
+          wait_present role sample-partial-role sample-tenant-a
+          assert_no_rule_match clusterrole sample-cluster-reader "" "restricted resources and verbs are filtered" '.rules[]? | select(((.resources // []) | index("secrets")) or ((.verbs // []) | index("delete")) or ((.verbs // []) | index("escalate")) or ((.verbs // []) | index("impersonate")) or ((.verbs // []) | index("bind")))'
+          assert_no_rule_match role sample-partial-role sample-tenant-a "restricted API groups, resources, and verbs are filtered" '.rules[]? | select(((.apiGroups // []) | index("apps")) or ((.resources // []) | index("secrets")) or ((.verbs // []) | index("delete")) or ((.verbs // []) | index("patch")))'
 
-          bash hack/ci/capture-operator-output.sh /tmp/pr-output
+          capture_args=(/tmp/pr-output)
+          if grep -q -- '--all-rbac)' "$main_dir/hack/ci/capture-operator-output.sh"; then
+            capture_args+=(--all-rbac)
+          else
+            echo "::notice::Trusted main capture helper does not support --all-rbac yet; using labelled RBAC capture for bootstrap compatibility"
+          fi
+          bash "$main_dir/hack/ci/capture-operator-output.sh" "${capture_args[@]}"
 
-          echo "PR branch outputs captured"
-
-      # =====================================================================
-      #  Collect debug artifacts
-      # =====================================================================
-      - name: Collect controller logs
+      - name: Collect PR controller logs
         if: always()
         run: |
           mkdir -p /tmp/controller-logs
-
-          echo "Collecting controller logs (PR branch — FULL capture, no truncation)..."
-
-          # Debug: Show what pods exist
           echo "=== All pods ===" > /tmp/controller-logs/debug-pods.txt
           kubectl get pods -A -o wide >> /tmp/controller-logs/debug-pods.txt 2>&1 || true
 
-          # Try multiple label selectors to find controller pods (NO --tail limit = capture ALL)
           for ns in auth-operator-system kube-system default; do
-            echo "Checking namespace: $ns"
-
-            # Method 1: By control-plane label
             kubectl logs -n "$ns" -l control-plane=controller-manager >> "/tmp/controller-logs/pr-${ns}-controller.log" 2>&1 || true
-
-            # Method 2: By app.kubernetes.io/name label
             kubectl logs -n "$ns" -l app.kubernetes.io/name=auth-operator >> "/tmp/controller-logs/pr-${ns}-controller.log" 2>&1 || true
-
-            # Method 3: By deployment name directly (use -l selector on deployment, then get pods)
             while IFS= read -r pod; do
               [ -n "$pod" ] || continue
               echo "=== Pod: $pod in $ns (PR) ===" >> "/tmp/controller-logs/pr-${ns}-controller.log"
               kubectl logs -n "$ns" "$pod" >> "/tmp/controller-logs/pr-${ns}-controller.log" 2>&1 || true
             done < <(kubectl get pods -n "$ns" -l control-plane=controller-manager --no-headers -o custom-columns=":metadata.name" 2>/dev/null || true)
-          done
-
-          # Get webhook server logs (PR branch - FULL)
-          for ns in auth-operator-system kube-system default; do
             kubectl logs -n "$ns" -l control-plane=webhook-server > "/tmp/controller-logs/pr-${ns}-webhook.log" 2>/dev/null || true
           done
 
-          # Get ALL events (no limit)
-          echo "=== All Events (sorted by time) ===" > /tmp/controller-logs/all-events.txt
-          kubectl get events -A --sort-by='.lastTimestamp' -o wide >> /tmp/controller-logs/all-events.txt 2>/dev/null || true
-          echo "" >> /tmp/controller-logs/all-events.txt
-          echo "=== Events YAML (full detail) ===" >> /tmp/controller-logs/all-events.txt
-          kubectl get events -A -o yaml >> /tmp/controller-logs/all-events.txt 2>/dev/null || true
-
-          # Get pod statuses
+          kubectl get events -A --sort-by='.lastTimestamp' -o wide > /tmp/controller-logs/all-events.txt 2>/dev/null || true
           kubectl get pods -A > /tmp/controller-logs/all-pods.txt 2>/dev/null || true
-
-          # Get CRD statuses (raw, for debugging)
           kubectl get roledefinitions -A -o yaml > /tmp/controller-logs/roledefinitions.yaml 2>/dev/null || true
           kubectl get binddefinitions -A -o yaml > /tmp/controller-logs/binddefinitions.yaml 2>/dev/null || true
           kubectl get rbacpolicies -A -o yaml > /tmp/controller-logs/rbacpolicies.yaml 2>/dev/null || true
           kubectl get restrictedbinddefinitions -A -o yaml > /tmp/controller-logs/restrictedbinddefinitions.yaml 2>/dev/null || true
           kubectl get restrictedroledefinitions -A -o yaml > /tmp/controller-logs/restrictedroledefinitions.yaml 2>/dev/null || true
 
-          echo "Controller logs collected"
-
-      - name: Extract errors from logs
+      - name: Extract PR errors from logs
         if: always()
         id: extract-errors
         run: |
           mkdir -p /tmp/error-summary
-
-          ERROR_LOG="/tmp/error-summary/errors.txt"
+          error_log="/tmp/error-summary/errors.txt"
           {
-            echo "# Error Summary from Controller Logs"
+            echo "# Error Summary from PR Controller Logs"
             echo ""
-          } > "$ERROR_LOG"
+          } > "$error_log"
+          controller_error_count=0
+          expected_error_count=0
+          expected_error_pattern='(rbd-case-impersonated-authz-failure|rrd-case-impersonated-authz-failure)'
 
           for log in /tmp/controller-logs/*.log; do
             if [ -f "$log" ] && [ -s "$log" ]; then
-              log_name=$(basename "$log")
-              errors=$(grep -iE '("level":"error|ERROR|\serror\s|\[error\]|level=error|panic:|PANIC|failed|failure|Failed|Failure)' "$log" 2>/dev/null | head -50 || true)
-              if [ -n "$errors" ]; then
-                {
-                  echo "## $log_name"
-                  echo '```'
-                  echo "$errors"
-                  echo '```'
-                  echo ""
-                } >> "$ERROR_LOG"
+              log_name="$(basename "$log")"
+              error_matches="$(grep -E '(^E[0-9]{4}[[:space:]]|"level":"error"|level=error|panic:|PANIC)' "$log" 2>/dev/null || true)"
+              if [ -n "$error_matches" ]; then
+                expected_errors="$(grep -E "$expected_error_pattern" <<<"$error_matches" || true)"
+                unexpected_errors="$(grep -Ev "$expected_error_pattern" <<<"$error_matches" || true)"
+                if [ -n "$unexpected_errors" ]; then
+                  count="$(wc -l <<<"$unexpected_errors" | tr -d '[:space:]')"
+                  unexpected_preview="$(head -50 <<<"$unexpected_errors")"
+                  controller_error_count=$((controller_error_count + count))
+                  {
+                    echo "## $log_name"
+                    echo '```'
+                    echo "$unexpected_preview"
+                    echo '```'
+                    echo ""
+                  } >> "$error_log"
+                fi
+                if [ -n "$expected_errors" ]; then
+                  count="$(wc -l <<<"$expected_errors" | tr -d '[:space:]')"
+                  expected_preview="$(head -50 <<<"$expected_errors")"
+                  expected_error_count=$((expected_error_count + count))
+                  {
+                    echo "## $log_name (expected broken samples)"
+                    echo '```'
+                    echo "$expected_preview"
+                    echo '```'
+                    echo ""
+                  } >> "$error_log"
+                fi
               fi
             fi
           done
 
           {
-            echo "## Warning/Error Events (ALL)"
-            echo '```'
-          } >> "$ERROR_LOG"
-          grep -iE '(Warning|Error|Failed|BackOff)' /tmp/controller-logs/all-events.txt 2>/dev/null >> "$ERROR_LOG" || echo "No warning events found" >> "$ERROR_LOG"
-          {
-            echo '```'
+            echo "Unexpected controller errors counted: $controller_error_count"
+            echo "Expected broken-sample errors ignored for gate: $expected_error_count"
             echo ""
-          } >> "$ERROR_LOG"
+          } >> "$error_log"
 
           {
-            echo "## CRD Conditions (non-Ready)"
-            echo '```yaml'
-          } >> "$ERROR_LOG"
-          for crd in roledefinitions binddefinitions rbacpolicies restrictedbinddefinitions restrictedroledefinitions; do
-            if [ -f "/tmp/controller-logs/${crd}.yaml" ]; then
-              yq '.items[] | select(.status.conditions != null) | select(.status.conditions[] | select(.status != "True")) | {"name": .metadata.name, "conditions": .status.conditions}' "/tmp/controller-logs/${crd}.yaml" 2>/dev/null >> "$ERROR_LOG" || true
-            fi
-          done
-          echo '```' >> "$ERROR_LOG"
+            echo "## Warning/Error Events"
+            echo '```'
+          } >> "$error_log"
+          grep -iE '(Warning|Error|Failed|BackOff)' /tmp/controller-logs/all-events.txt 2>/dev/null >> "$error_log" || echo "No warning events found" >> "$error_log"
+          echo '```' >> "$error_log"
 
-          error_count=$(grep -cE '(ERROR|error|panic|failed|failure|Warning)' "$ERROR_LOG" 2>/dev/null || echo "0")
-          if [ "$error_count" -gt 5 ]; then
+          if [ "$controller_error_count" -gt 0 ]; then
             echo "has_errors=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_errors=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Upload controller logs
+      - name: Upload PR output
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: output-delta-pr-output
+          path: /tmp/pr-output/
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload PR controller logs
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: controller-logs
+          name: output-delta-pr-controller-logs
           path: /tmp/controller-logs/
           retention-days: 7
+          if-no-files-found: warn
 
-      - name: Upload error summary
+      - name: Upload PR error summary
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: error-summary
+          name: output-delta-pr-error-summary
           path: /tmp/error-summary/
           retention-days: 7
+          if-no-files-found: warn
 
-      - name: Upload output artifacts
+      - name: Cleanup candidate cluster
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        run: kind delete cluster --name "${CANDIDATE_CLUSTER}"
+
+  compare-output:
+    name: Trusted Compare
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs:
+      - trusted-baseline
+      - candidate-pr
+    if: always()
+    steps:
+      - name: Download main output
+        if: needs.trusted-baseline.result == 'success'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: output-delta-artifacts
-          path: |
-            /tmp/main-output/
-            /tmp/pr-output/
-            /tmp/tag-output/
-          retention-days: 7
+          name: output-delta-main-output
+          path: /tmp/main-output
 
-      # =====================================================================
-      #  Generate diff and comment on PR
-      # =====================================================================
-      - name: Generate diff
+      - name: Download tag output
+        if: needs.trusted-baseline.outputs.tag_success == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: output-delta-tag-output
+          path: /tmp/tag-output
+
+      - name: Download PR output
+        if: needs.candidate-pr.result == 'success'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: output-delta-pr-output
+          path: /tmp/pr-output
+
+      - name: Download PR error summary
+        if: always()
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        continue-on-error: true
+        with:
+          name: output-delta-pr-error-summary
+          path: /tmp/pr-error-summary
+
+      - name: Generate trusted diff
         id: diff
+        env:
+          BASELINE_RESULT: ${{ needs.trusted-baseline.result }}
+          CANDIDATE_RESULT: ${{ needs.candidate-pr.result }}
+          TAG_SUCCESS: ${{ needs.trusted-baseline.outputs.tag_success }}
+          PR_HAS_ERRORS: ${{ needs.candidate-pr.outputs.has_errors }}
         run: |
+          set -euo pipefail
           mkdir -p /tmp/diff-output/main /tmp/diff-output/tag
+          github_output() {
+            echo "$1" >> "$GITHUB_OUTPUT"
+          }
 
-          if [ "$MAIN_FALLBACK" = "true" ]; then
-            echo "main_fallback=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "main_fallback=false" >> "$GITHUB_OUTPUT"
+          github_output "has_rbac_diff=false"
+          github_output "has_status_diff=false"
+          github_output "has_errors=${PR_HAS_ERRORS:-false}"
+
+          if [ "$BASELINE_RESULT" != "success" ]; then
+            github_output "has_diff=unknown"
+            github_output "has_tag_diff=false"
+            echo "::error::Trusted baseline job did not succeed; output delta cannot be computed"
+            exit 1
+          fi
+          if [ "$CANDIDATE_RESULT" != "success" ]; then
+            github_output "has_diff=unknown"
+            github_output "has_tag_diff=false"
+            echo "::error::Candidate PR job did not succeed; output delta cannot be computed"
+            exit 1
+          fi
+          if [ ! -d /tmp/main-output ] || [ ! -d /tmp/pr-output ]; then
+            github_output "has_diff=unknown"
+            github_output "has_tag_diff=false"
+            echo "::error::Required output artifacts are missing"
+            exit 1
           fi
 
-          # Generate per-resource diff files (main vs PR) — separate directory
-          for resource in clusterroles roles clusterrolebindings rolebindings serviceaccounts; do
-            diff -u "/tmp/main-output/${resource}.yaml" "/tmp/pr-output/${resource}.yaml" > "/tmp/diff-output/main/${resource}.diff" 2>&1 || true
-          done
+          diff_file() {
+            local left="$1"
+            local right="$2"
+            local out="$3"
+            if [ -f "$left" ] && [ -f "$right" ]; then
+              diff -u "$left" "$right" > "$out" 2>&1 || true
+            elif [ -f "$right" ]; then
+              diff -u /dev/null "$right" > "$out" 2>&1 || true
+            elif [ -f "$left" ]; then
+              diff -u "$left" /dev/null > "$out" 2>&1 || true
+            fi
+          }
 
-          # CRD status diffs (main vs PR)
-          for resource in roledefinitions-status binddefinitions-status rbacpolicies-status restrictedbinddefinitions-status restrictedroledefinitions-status; do
-            if [ -f "/tmp/main-output/$resource.yaml" ] && [ -f "/tmp/pr-output/$resource.yaml" ]; then
-              diff -u "/tmp/main-output/${resource}.yaml" "/tmp/pr-output/${resource}.yaml" > "/tmp/diff-output/main/${resource}.diff" 2>&1 || true
-            elif [ -f "/tmp/pr-output/$resource.yaml" ]; then
-              diff -u /dev/null "/tmp/pr-output/${resource}.yaml" > "/tmp/diff-output/main/${resource}.diff" 2>&1 || true
-            elif [ -f "/tmp/main-output/$resource.yaml" ]; then
-              diff -u "/tmp/main-output/${resource}.yaml" /dev/null > "/tmp/diff-output/main/${resource}.diff" 2>&1 || true
+          for resource in clusterroles roles clusterrolebindings rolebindings serviceaccounts; do
+            diff_file "/tmp/main-output/${resource}.yaml" "/tmp/pr-output/${resource}.yaml" "/tmp/diff-output/main/${resource}.diff"
+          done
+          for resource in roledefinitions-status binddefinitions-status rbacpolicies-status restrictedbinddefinitions-status restrictedroledefinitions-status webhookauthorizers-status; do
+            diff_file "/tmp/main-output/${resource}.yaml" "/tmp/pr-output/${resource}.yaml" "/tmp/diff-output/main/${resource}.diff"
+          done
+          diff_file /tmp/main-output/metrics.txt /tmp/pr-output/metrics.txt /tmp/diff-output/main/metrics.diff
+
+          if [ "$TAG_SUCCESS" = "true" ] && [ -d /tmp/tag-output ]; then
+            for resource in clusterroles roles clusterrolebindings rolebindings serviceaccounts; do
+              diff_file "/tmp/tag-output/${resource}.yaml" "/tmp/pr-output/${resource}.yaml" "/tmp/diff-output/tag/${resource}.diff"
+            done
+            for resource in roledefinitions-status binddefinitions-status rbacpolicies-status restrictedbinddefinitions-status restrictedroledefinitions-status webhookauthorizers-status; do
+              diff_file "/tmp/tag-output/${resource}.yaml" "/tmp/pr-output/${resource}.yaml" "/tmp/diff-output/tag/${resource}.diff"
+            done
+            diff_file /tmp/tag-output/metrics.txt /tmp/pr-output/metrics.txt /tmp/diff-output/tag/metrics.diff
+            github_output "has_tag_diff=true"
+          else
+            github_output "has_tag_diff=false"
+          fi
+
+          cat /tmp/diff-output/main/*.diff /tmp/diff-output/tag/*.diff > /tmp/diff-output/full-diff.txt 2>/dev/null || true
+          if diff -qr /tmp/main-output /tmp/pr-output >/dev/null 2>&1; then
+            github_output "has_diff=false"
+          else
+            github_output "has_diff=true"
+          fi
+
+          has_rbac_diff=false
+          for resource in clusterroles roles clusterrolebindings rolebindings serviceaccounts; do
+            if [ -s "/tmp/diff-output/main/${resource}.diff" ]; then
+              has_rbac_diff=true
             fi
           done
+          github_output "has_rbac_diff=${has_rbac_diff}"
 
-          # Tag diffs (tag vs PR) — separate directory
-          if [ -d "/tmp/tag-output" ] && [ "${{ steps.tag-output.outputs.tag_success }}" = "true" ]; then
-            for resource in clusterroles roles clusterrolebindings rolebindings serviceaccounts; do
-              diff -u "/tmp/tag-output/${resource}.yaml" "/tmp/pr-output/${resource}.yaml" > "/tmp/diff-output/tag/${resource}.diff" 2>&1 || true
-            done
+          has_status_diff=false
+          for resource in roledefinitions-status binddefinitions-status rbacpolicies-status restrictedbinddefinitions-status restrictedroledefinitions-status webhookauthorizers-status; do
+            if [ -s "/tmp/diff-output/main/${resource}.diff" ]; then
+              has_status_diff=true
+            fi
+          done
+          github_output "has_status_diff=${has_status_diff}"
 
-            for resource in roledefinitions-status binddefinitions-status rbacpolicies-status restrictedbinddefinitions-status restrictedroledefinitions-status; do
-              if [ -f "/tmp/tag-output/$resource.yaml" ] && [ -f "/tmp/pr-output/$resource.yaml" ]; then
-                diff -u "/tmp/tag-output/${resource}.yaml" "/tmp/pr-output/${resource}.yaml" > "/tmp/diff-output/tag/${resource}.diff" 2>&1 || true
-              elif [ -f "/tmp/pr-output/$resource.yaml" ]; then
-                diff -u /dev/null "/tmp/pr-output/${resource}.yaml" > "/tmp/diff-output/tag/${resource}.diff" 2>&1 || true
-              elif [ -f "/tmp/tag-output/$resource.yaml" ]; then
-                diff -u "/tmp/tag-output/${resource}.yaml" /dev/null > "/tmp/diff-output/tag/${resource}.diff" 2>&1 || true
-              fi
-            done
-
-            echo "has_tag_diff=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_tag_diff=false" >> "$GITHUB_OUTPUT"
+          if [ "$has_rbac_diff" = "true" ]; then
+            echo "::warning::RBAC output differences detected; inspect output-delta-diff-output before merging"
           fi
-
-          # Combined diff for backward compatibility
-          cat /tmp/diff-output/main/*.diff /tmp/diff-output/tag/*.diff > /tmp/diff-output/full-diff.txt 2>/dev/null || true
-
-          # Determine if there are meaningful differences
-          if [ "$MAIN_FALLBACK" = "true" ]; then
-            echo "has_diff=true" >> "$GITHUB_OUTPUT"
-          elif diff -q /tmp/main-output /tmp/pr-output > /dev/null 2>&1; then
-            echo "has_diff=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_diff=true" >> "$GITHUB_OUTPUT"
+          if [ "$has_status_diff" = "true" ]; then
+            echo "::warning::CRD status output differences detected; inspect output-delta-diff-output before merging"
+          fi
+          if [ "${PR_HAS_ERRORS:-false}" = "true" ]; then
+            echo "::error::PR controller logs contain repeated errors; inspect output-delta-pr-error-summary"
+            exit 1
           fi
 
       - name: Upload diff artifacts
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: diff-output
+          name: output-delta-diff-output
           path: /tmp/diff-output/
           retention-days: 7
+          if-no-files-found: warn
 
-      - name: Comment PR with delta
-        if: (steps.diff.outputs.has_diff == 'true' || steps.extract-errors.outputs.has_errors == 'true') && github.event.pull_request.head.repo.full_name == github.repository
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const fs = require('fs');
-
-            const MAX_COMMENT_LENGTH = 65000; // GitHub limit is 65536, leave margin
-            // Marker prefix used to identify and update/delete our comments
-            const MARKER = '<!-- output-delta:';
-
-            function truncate(text, limit) {
-              if (text.length <= limit) return text;
-              const truncMsg = '\n... (truncated, ' + text.length + ' chars total — see uploaded artifacts for full diff)';
-              return text.substring(0, limit - truncMsg.length) + truncMsg;
-            }
-
-            function readDiff(dir, filename) {
-              try {
-                const content = fs.readFileSync('/tmp/diff-output/' + dir + '/' + filename, 'utf8');
-                if (content.trim() && content.includes('@@')) {
-                  return content;
-                }
-              } catch (e) { /* file doesn't exist */ }
-              return '';
-            }
-
-            function readFile(filepath) {
-              try {
-                const content = fs.readFileSync(filepath, 'utf8');
-                return content.trim() || '';
-              } catch (e) { return ''; }
-            }
-
-            const resources = [
-              ['ClusterRoles', 'clusterroles.diff'],
-              ['Roles', 'roles.diff'],
-              ['ClusterRoleBindings', 'clusterrolebindings.diff'],
-              ['RoleBindings', 'rolebindings.diff'],
-              ['ServiceAccounts', 'serviceaccounts.diff'],
-              ['RoleDefinitions Status', 'roledefinitions-status.diff'],
-              ['BindDefinitions Status', 'binddefinitions-status.diff'],
-              ['RBACPolicies Status', 'rbacpolicies-status.diff'],
-              ['RestrictedBindDefinitions Status', 'restrictedbinddefinitions-status.diff'],
-              ['RestrictedRoleDefinitions Status', 'restrictedroledefinitions-status.diff']
-            ];
-
-            const mainFallback = '${{ steps.diff.outputs.main_fallback }}' === 'true';
-            const hasErrors = '${{ steps.extract-errors.outputs.has_errors }}' === 'true';
-            const hasTagDiff = '${{ steps.diff.outputs.has_tag_diff }}' === 'true';
-            const latestTag = '${{ steps.latest-tag.outputs.tag }}';
-
-            // Fetch all existing bot comments once
-            const { data: allComments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-            const botComments = allComments.filter(c => c.user.type === 'Bot' && c.body.includes(MARKER));
-
-            // Helper: upsert or create a comment identified by a unique marker tag
-            async function upsertComment(tag, body) {
-              const markerTag = MARKER + tag + ' -->';
-              body = markerTag + '\n' + body;
-              if (body.length > MAX_COMMENT_LENGTH) {
-                body = truncate(body, MAX_COMMENT_LENGTH);
-              }
-              const existing = botComments.find(c => c.body.includes(markerTag));
-              if (existing) {
-                await github.rest.issues.updateComment({
-                  owner: context.repo.owner, repo: context.repo.repo,
-                  comment_id: existing.id, body
-                });
-              } else {
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner, repo: context.repo.repo,
-                  issue_number: context.issue.number, body
-                });
-              }
-            }
-
-            // Helper: delete stale comments for tags no longer needed
-            async function deleteComment(tag) {
-              const markerTag = MARKER + tag + ' -->';
-              const existing = botComments.find(c => c.body.includes(markerTag));
-              if (existing) {
-                await github.rest.issues.deleteComment({
-                  owner: context.repo.owner, repo: context.repo.repo,
-                  comment_id: existing.id
-                });
-              }
-            }
-
-            // ── Build sections for each resource type ──
-            const sections = []; // { name, tag, body }
-            for (const [name, file] of resources) {
-              const tag = file.replace('.diff', '');
-              const mainDiff = readDiff('main', file);
-              const tagDiff = (hasTagDiff && latestTag) ? readDiff('tag', file) : '';
-              if (!mainDiff && !tagDiff) continue;
-
-              let section = '### :package: ' + name + '\n\n';
-              if (mainDiff) {
-                section += '<details>\n<summary>Changes from <code>main</code></summary>\n\n```diff\n' + mainDiff + '\n```\n\n</details>\n\n';
-              }
-              if (tagDiff) {
-                section += '<details>\n<summary>Changes from <code>' + latestTag + '</code></summary>\n\n```diff\n' + tagDiff + '\n```\n\n</details>\n\n';
-              }
-              sections.push({ name, tag, body: section });
-            }
-
-            // ── Build header (always included in the first comment) ──
-            let header = '## :bar_chart: Output Delta Report\n\n';
-            if (mainFallback) {
-              header += '> :warning: **Note:** Main branch samples failed to apply (likely due to schema changes).\n' +
-                '> PR branch samples were used as baseline, so no meaningful diff is shown.\n' +
-                '> This typically happens when sample files are updated with new required fields.\n\n';
-            }
-            header += 'Generated RBAC resources from `config/samples/` compared across branches.\n\n';
-
-            if (sections.length === 0) {
-              header += ':white_check_mark: No resource changes detected vs `main`.\n';
-            }
-
-            // Append metrics to header (small payload)
-            const metrics = readFile('/tmp/pr-output/metrics.txt');
-            if (metrics && !metrics.startsWith('# No metrics')) {
-              header += '### Prometheus Metrics (PR branch)\n\n';
-              header += '<details>\n<summary>:chart_with_upwards_trend: auth_operator_* metrics</summary>\n\n```\n' + metrics + '\n```\n\n</details>\n\n';
-            }
-
-            // Append errors to header
-            if (hasErrors) {
-              const errorSummary = readFile('/tmp/error-summary/errors.txt');
-              if (errorSummary) {
-                header += '---\n\n## :warning: Controller Logs\n\n' +
-                  '<details>\n<summary>Errors/Warnings Found in Logs (click to expand)</summary>\n\n' +
-                  errorSummary + '\n\n</details>\n\n';
-              }
-            }
-
-            // ── Pack sections into as few comments as possible (≤65k each) ──
-            // Marker overhead: "<!-- output-delta:partN -->\n" ≈ 35 chars
-            const MARKER_OVERHEAD = 50;
-            const comments = []; // [{ tag, body }]
-            let currentBody = header;
-            let currentPart = 1;
-
-            // If the header alone is too large, flush it before adding sections
-            // so RBAC resource diffs don't get truncated away.
-            if (sections.length > 0 && currentBody.length + MARKER_OVERHEAD > MAX_COMMENT_LENGTH) {
-              comments.push({ tag: 'part' + currentPart, body: currentBody });
-              currentPart++;
-              currentBody = '## :bar_chart: Output Delta Report (cont.)\n\n';
-            }
-
-            for (const section of sections) {
-              if (currentBody.length + section.body.length + MARKER_OVERHEAD > MAX_COMMENT_LENGTH) {
-                // Flush current comment
-                comments.push({ tag: 'part' + currentPart, body: currentBody });
-                currentPart++;
-                currentBody = '## :bar_chart: Output Delta Report (cont.)\n\n';
-              }
-              // If a single section alone exceeds the limit, truncate it
-              if (currentBody.length + section.body.length + MARKER_OVERHEAD > MAX_COMMENT_LENGTH) {
-                const available = MAX_COMMENT_LENGTH - currentBody.length - MARKER_OVERHEAD;
-                currentBody += truncate(section.body, Math.max(available, 500));
-              } else {
-                currentBody += section.body;
-              }
-            }
-            // Flush last comment
-            comments.push({ tag: 'part' + currentPart, body: currentBody });
-
-            // ── Post / update / delete comments ──
-            for (const comment of comments) {
-              await upsertComment(comment.tag, comment.body);
-            }
-
-            // Delete stale part comments from previous runs that are no longer needed
-            for (let i = currentPart + 1; i <= 10; i++) {
-              await deleteComment('part' + i);
-            }
-
-      - name: Comment PR - no changes
-        if: steps.diff.outputs.has_diff == 'false' && steps.diff.outputs.main_fallback != 'true' && github.event.pull_request.head.repo.full_name == github.repository
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const MARKER = '<!-- output-delta:';
-
-            const { data: allComments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-            const botComments = allComments.filter(c => c.user.type === 'Bot' && c.body.includes(MARKER));
-
-            // Delete all previous part comments except part1
-            for (const c of botComments) {
-              if (!c.body.includes(MARKER + 'part1 -->')) {
-                await github.rest.issues.deleteComment({
-                  owner: context.repo.owner, repo: context.repo.repo,
-                  comment_id: c.id
-                });
-              }
-            }
-
-            // Upsert part1 as the no-changes summary
-            const markerTag = MARKER + 'part1 -->';
-            const body = markerTag + '\n## :bar_chart: Output Delta Report\n\n' +
-              ':white_check_mark: No changes detected in generated RBAC resources.\n\n' +
-              'The sample configurations in `config/samples/` produce identical output on both main and this PR.\n';
-
-            const existing = botComments.find(c => c.body.includes(markerTag));
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner, repo: context.repo.repo,
-                comment_id: existing.id, body
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner, repo: context.repo.repo,
-                issue_number: context.issue.number, body
-              });
-            }
-
-      - name: Skip PR comments for forked pull requests
-        if: github.event.pull_request.head.repo.full_name != github.repository
-        run: |
-          echo "::notice::Skipping output-delta PR comments for forked pull requests because GITHUB_TOKEN is read-only. Diff artifacts remain available in the workflow run."
-
-      - name: Cleanup
+      - name: Write output-delta summary
         if: always()
-        run: kind delete cluster --name output-delta
+        env:
+          HAS_DIFF: ${{ steps.diff.outputs.has_diff }}
+          HAS_RBAC_DIFF: ${{ steps.diff.outputs.has_rbac_diff }}
+          HAS_STATUS_DIFF: ${{ steps.diff.outputs.has_status_diff }}
+          HAS_TAG_DIFF: ${{ steps.diff.outputs.has_tag_diff }}
+          PR_HAS_ERRORS: ${{ steps.diff.outputs.has_errors }}
+          BASELINE_RESULT: ${{ needs.trusted-baseline.result }}
+          CANDIDATE_RESULT: ${{ needs.candidate-pr.result }}
+          LATEST_TAG: ${{ needs.trusted-baseline.outputs.latest_tag }}
+        run: |
+          if [ "${HAS_DIFF:-unknown}" = "true" ]; then
+            echo "::warning::Output differences detected; inspect the output-delta-diff-output artifact"
+          fi
+          if [ "${HAS_RBAC_DIFF:-false}" = "true" ]; then
+            echo "::warning::RBAC output differences detected"
+          fi
+          if [ "${HAS_STATUS_DIFF:-false}" = "true" ]; then
+            echo "::warning::CRD status output differences detected"
+          fi
+          if [ "${PR_HAS_ERRORS:-false}" = "true" ]; then
+            echo "::error::PR controller logs contain repeated errors"
+          fi
+          {
+            echo "## Output Delta"
+            echo ""
+            echo "- Trusted baseline job: ${BASELINE_RESULT}"
+            echo "- Candidate PR job: ${CANDIDATE_RESULT}"
+            echo "- Differences detected: ${HAS_DIFF:-unknown}"
+            echo "- RBAC differences detected: ${HAS_RBAC_DIFF:-false}"
+            echo "- CRD status differences detected: ${HAS_STATUS_DIFF:-false}"
+            echo "- Candidate log errors detected: ${PR_HAS_ERRORS:-false}"
+            echo "- Latest tag diff generated: ${HAS_TAG_DIFF:-false}"
+            if [ -n "${LATEST_TAG:-}" ]; then
+              echo "- Latest release tag compared: ${LATEST_TAG}"
+            fi
+            echo "- Diff artifacts: uploaded as \`output-delta-diff-output\`"
+            if [ -f /tmp/pr-error-summary/errors.txt ]; then
+              echo "- PR error summary artifact: uploaded as \`output-delta-pr-error-summary\`"
+            fi
+            echo ""
+            echo "The compare job downloads artifacts only; it does not checkout or execute pull-request code."
+          } >> "$GITHUB_STEP_SUMMARY"

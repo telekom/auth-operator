@@ -37,6 +37,7 @@ spec:
             - --cert-rotation-mutating-webhook=$(MUTATING_WEBHOOK_NAME)
             - --cert-rotation-validating-webhook=$(VALIDATING_WEBHOOK_NS_NAME)
             - --cert-rotation-validating-webhook=$(VALIDATING_WEBHOOK_BINDER_NAME)
+            - --leader-elect=true
             - --tdg-migration=$(TDG_MIGRATION)
           image: controller:latest
           name: webhook
@@ -92,7 +93,7 @@ spec:
             - name: cert
               mountPath: /tmp/k8s-webhook-server/serving-certs
               readOnly: true
-      serviceAccountName: manager
+      serviceAccountName: webhook-server
       terminationGracePeriodSeconds: 35
       volumes:
         - name: cert

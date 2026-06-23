@@ -771,6 +771,139 @@ func TestNamespaceMutatorSANamespaceInheritance(t *testing.T) {
 	}
 }
 
+func TestNamespaceMutatorUsesLiveReaderForSANamespaceInheritance(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(authorizationv1alpha1.AddToScheme(scheme))
+
+	cachedClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	liveReader := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(&corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "tenant-alpha",
+				Labels: map[string]string{
+					"t-caas.telekom.com/owner":  "tenant",
+					"t-caas.telekom.com/tenant": "team-alpha",
+				},
+			},
+		}).
+		Build()
+
+	mutator := &webhooks.NamespaceMutator{
+		Client:  cachedClient,
+		Reader:  liveReader,
+		Decoder: crAdmission.NewDecoder(scheme),
+	}
+	ns := &corev1.Namespace{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Namespace"},
+		ObjectMeta: metav1.ObjectMeta{Name: "new-ns"},
+	}
+	nsRaw, err := json.Marshal(ns)
+	if err != nil {
+		t.Fatalf("failed to marshal namespace: %v", err)
+	}
+	req := crAdmission.Request{AdmissionRequest: admissionv1.AdmissionRequest{
+		Operation: admissionv1.Create,
+		UserInfo: authenticationv1.UserInfo{
+			Username: "system:serviceaccount:tenant-alpha:my-operator",
+		},
+		Kind: metav1.GroupVersionKind{
+			Group:   "",
+			Version: "v1",
+			Kind:    "Namespace",
+		},
+		Name:   ns.Name,
+		Object: runtime.RawExtension{Raw: nsRaw},
+	}}
+
+	resp := mutator.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Fatalf("expected live-reader namespace labels to allow mutation, got denied: %v", resp.Result.Message)
+	}
+	if len(resp.Patches) == 0 {
+		t.Fatal("expected live-reader namespace labels to produce a patch")
+	}
+
+	patchesJSON, err := json.Marshal(resp.Patches)
+	if err != nil {
+		t.Fatalf("failed to marshal response patches: %v", err)
+	}
+	patched, err := admission.ApplyPatch(nsRaw, patchesJSON)
+	if err != nil {
+		t.Fatalf("failed to apply JSON patch: %v", err)
+	}
+	var patchedNamespace corev1.Namespace
+	if err := json.Unmarshal(patched, &patchedNamespace); err != nil {
+		t.Fatalf("failed to unmarshal patched namespace: %v", err)
+	}
+	if got := patchedNamespace.Labels["t-caas.telekom.com/owner"]; got != "tenant" {
+		t.Fatalf("expected owner label from live reader, got %q", got)
+	}
+	if got := patchedNamespace.Labels["t-caas.telekom.com/tenant"]; got != "team-alpha" {
+		t.Fatalf("expected tenant label from live reader, got %q", got)
+	}
+}
+
+func TestNamespaceMutatorIgnoresSelectorsWhenExplicitNamespaceIsSet(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(authorizationv1alpha1.AddToScheme(scheme))
+
+	bd := &authorizationv1alpha1.BindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "explicit-precedence-mutator-bd"},
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
+			TargetName: "explicit-precedence-mutator-target",
+			Subjects: []rbacv1.Subject{
+				{APIGroup: rbacv1.GroupName, Kind: rbacv1.GroupKind, Name: "allowed-group"},
+			},
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{{
+				Namespace:       "explicit-ns",
+				ClusterRoleRefs: []string{"admin"},
+				NamespaceSelector: []metav1.LabelSelector{
+					{MatchLabels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"}},
+				},
+			}},
+		},
+	}
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bd).Build()
+	mutator := &webhooks.NamespaceMutator{
+		Client:  fakeClient,
+		Decoder: crAdmission.NewDecoder(scheme),
+	}
+
+	ns := &corev1.Namespace{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Namespace"},
+		ObjectMeta: metav1.ObjectMeta{Name: "selected-ns"},
+	}
+	nsRaw, err := json.Marshal(ns)
+	if err != nil {
+		t.Fatalf("failed to marshal namespace: %v", err)
+	}
+	req := crAdmission.Request{AdmissionRequest: admissionv1.AdmissionRequest{
+		Operation: admissionv1.Create,
+		UserInfo: authenticationv1.UserInfo{
+			Username: "user1",
+			Groups:   []string{"allowed-group"},
+		},
+		Kind: metav1.GroupVersionKind{
+			Group:   "",
+			Version: "v1",
+			Kind:    "Namespace",
+		},
+		Name:   ns.Name,
+		Object: runtime.RawExtension{Raw: nsRaw},
+	}}
+
+	resp := mutator.Handle(context.Background(), req)
+	if len(resp.Patches) != 0 {
+		t.Fatalf("expected no selector-derived patches when explicit namespace is set, got: %v", resp.Patches)
+	}
+	if resp.Allowed {
+		t.Fatal("expected unrelated namespace request to be denied because explicit namespace takes precedence over selector")
+	}
+}
+
 // Performance test
 func TestNamespaceMutatorPerformance(t *testing.T) {
 	isCI := os.Getenv("CI")

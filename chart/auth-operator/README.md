@@ -144,7 +144,13 @@ is restricted to platform administrators.
 | `metrics.serviceMonitor.scraperRBAC.serviceAccount.namespace` | Prometheus scraper ServiceAccount namespace for chart-managed metrics reader RBAC (defaults to release namespace when empty) | `""` |
 | `metrics.serviceMonitor.tlsConfig.caFile` | CA certificate file for TLS verification of the metrics endpoint | `""` |
 | `metrics.serviceMonitor.tlsConfig.serverName` | Server name override for TLS SNI verification | `""` |
-| `metrics.serviceMonitor.tlsConfig.insecureSkipVerify` | Skip TLS verification (default `true` for controller-runtime self-signed certs; set `false` when `caFile`/`serverName` is provided) | `true` |
+| `metrics.serviceMonitor.tlsConfig.insecureSkipVerify` | Skip TLS verification for authenticated metrics scraping. Keep `false` unless the scrape endpoint intentionally uses an untrusted self-signed certificate. | `false` |
+
+When `metrics.auth.enabled=true` and `metrics.serviceMonitor.enabled=true`,
+the chart requires either `metrics.serviceMonitor.tlsConfig.caFile` or
+`metrics.serviceMonitor.tlsConfig.insecureSkipVerify=true`. The metrics server
+uses a self-signed serving certificate unless you provide trusted cert material,
+so this choice must be explicit.
 
 For the full list of exposed metrics and recommended alert rules, see the
 [Metrics and Alerting documentation](https://github.com/telekom/auth-operator/blob/main/docs/metrics-and-alerting.md).
@@ -159,7 +165,7 @@ For the full list of exposed metrics and recommended alert rules, see the
 | `networkPolicy.controllerManager.ingressFrom` | Custom ingress `from` rules for the metrics port (8080) | `[]` |
 | `networkPolicy.egress.enabled` | Enable egress rules (for default-deny egress environments) | `false` |
 | `networkPolicy.egress.dnsNamespace` | Namespace where CoreDNS runs (for UDP/TCP 53) | `"kube-system"` |
-| `networkPolicy.egress.apiServerCIDR` | API server CIDR for egress restriction (empty = allow any on 443/6443) | `""` |
+| `networkPolicy.egress.apiServerCIDR` | API server CIDR for egress restriction; required when egress is enabled unless `additionalRules` provides equivalent API-server access | `""` |
 | `networkPolicy.egress.additionalRules` | Additional custom egress rules | `[]` |
 
 ## High Availability

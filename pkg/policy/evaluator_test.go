@@ -17,6 +17,9 @@ import (
 func ptrInt32(v int32) *int32 { return &v }
 
 func policyWithDefaultSubjectLimits(policy *authorizationv1alpha1.RBACPolicy) *authorizationv1alpha1.RBACPolicy {
+	if len(policy.Spec.AppliesTo.Namespaces) == 0 && policy.Spec.AppliesTo.NamespaceSelector == nil {
+		policy.Spec.AppliesTo.Namespaces = []string{allNamespacesScope}
+	}
 	if policy.Spec.SubjectLimits == nil {
 		policy.Spec.SubjectLimits = &authorizationv1alpha1.SubjectLimits{
 			AllowedKinds: []string{rbacv1.UserKind, rbacv1.GroupKind, rbacv1.ServiceAccountKind},
@@ -625,6 +628,41 @@ func TestEvaluateBindDefinition_MaxTargetNamespacesDeduplicated(t *testing.T) {
 	}
 }
 
+func TestEvaluateBindDefinition_NamespaceSelectorRequiresLabelGetter(t *testing.T) {
+	policy := &authorizationv1alpha1.RBACPolicy{
+		Spec: authorizationv1alpha1.RBACPolicySpec{
+			BindingLimits: &authorizationv1alpha1.BindingLimits{
+				RoleBindingLimits: &authorizationv1alpha1.RoleRefLimits{
+					AllowedRoleRefs: []string{"editor"},
+				},
+				TargetNamespaceLimits: &authorizationv1alpha1.NamespaceLimits{
+					MaxTargetNamespaces: ptrInt32(1),
+				},
+			},
+		},
+	}
+
+	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+				{
+					NamespaceSelector: []metav1.LabelSelector{{MatchLabels: map[string]string{"team": "a"}}},
+					RoleRefs:          []string{"editor"},
+				},
+			},
+			Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
+		},
+	}
+
+	violations := EvaluateBindDefinition(context.Background(), policyWithDefaultSubjectLimits(policy), rbd, nil)
+	if len(violations) != 2 {
+		t.Fatalf("expected selector resolution violation, got %d: %v", len(violations), violations)
+	}
+	if violations[0].Field != "spec.roleBindings[0].namespaceSelector[0]" {
+		t.Fatalf("expected namespace selector field, got %q", violations[0].Field)
+	}
+}
+
 func TestEvaluateBindDefinition_SubjectKindsDefaultDenyEmpty(t *testing.T) {
 	// When SubjectLimits is set but AllowedKinds is empty (nil), all kinds are denied.
 	policy := &authorizationv1alpha1.RBACPolicy{
@@ -1134,10 +1172,10 @@ func TestEvaluateBindDefinition_AllowedNamespaceSelector(t *testing.T) {
 		}
 	})
 
-	t.Run("nil LabelGetter skips selector", func(t *testing.T) {
+	t.Run("nil LabelGetter fails closed", func(t *testing.T) {
 		violations := EvaluateBindDefinition(context.Background(), policyWithDefaultSubjectLimits(policy), rbd, nil)
-		if len(violations) != 0 {
-			t.Errorf("expected 0 violations (no resolver), got %d: %v", len(violations), violations)
+		if len(violations) != 1 {
+			t.Errorf("expected 1 violation (no resolver), got %d: %v", len(violations), violations)
 		}
 	})
 }
@@ -1185,6 +1223,13 @@ func TestEvaluateBindDefinition_SAAllowedNamespaceSelector(t *testing.T) {
 		violations := EvaluateBindDefinition(context.Background(), policyWithDefaultSubjectLimits(policy), rbd, lg)
 		if len(violations) != 1 {
 			t.Fatalf("expected 1 violation, got %d: %v", len(violations), violations)
+		}
+	})
+
+	t.Run("nil LabelGetter fails closed", func(t *testing.T) {
+		violations := EvaluateBindDefinition(context.Background(), policyWithDefaultSubjectLimits(policy), rbd, nil)
+		if len(violations) != 1 {
+			t.Fatalf("expected 1 violation (no resolver), got %d: %v", len(violations), violations)
 		}
 	})
 }
@@ -1489,10 +1534,13 @@ func TestEvaluateBindDefinition_AppliesToScope(t *testing.T) {
 		}
 	})
 
-	t.Run("empty Namespaces list (global scope) allows any namespace", func(t *testing.T) {
+	t.Run("empty scope fails closed", func(t *testing.T) {
 		policy := &authorizationv1alpha1.RBACPolicy{
 			Spec: authorizationv1alpha1.RBACPolicySpec{
 				AppliesTo: authorizationv1alpha1.PolicyScope{},
+				SubjectLimits: &authorizationv1alpha1.SubjectLimits{
+					AllowedKinds: []string{rbacv1.UserKind},
+				},
 			},
 		}
 		rbd := &authorizationv1alpha1.RestrictedBindDefinition{
@@ -1503,9 +1551,12 @@ func TestEvaluateBindDefinition_AppliesToScope(t *testing.T) {
 				Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
 			},
 		}
-		violations := EvaluateBindDefinition(context.Background(), policyWithDefaultSubjectLimits(policy), rbd, nil)
-		if len(violations) != 0 {
-			t.Errorf("expected no violations for global scope, got %v", violations)
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, nil)
+		if len(violations) != 1 {
+			t.Fatalf("expected 1 violation for empty appliesTo scope, got %d: %v", len(violations), violations)
+		}
+		if violations[0].Field != "spec.roleBindings[0].namespace" {
+			t.Errorf("expected field spec.roleBindings[0].namespace, got %q", violations[0].Field)
 		}
 	})
 
@@ -1556,6 +1607,35 @@ func TestEvaluateBindDefinition_AppliesToScope(t *testing.T) {
 		violations := EvaluateBindDefinition(context.Background(), policyWithDefaultSubjectLimits(policy), rbd, lg)
 		if len(violations) != 1 {
 			t.Fatalf("expected 1 violation for selector-nonmatching namespace, got %d: %v", len(violations), violations)
+		}
+	})
+
+	t.Run("global cluster scope plus selector still restricts roleBinding target namespaces", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				AppliesTo: authorizationv1alpha1.PolicyScope{
+					Namespaces:        []string{allNamespacesScope},
+					NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "a"}},
+				},
+			},
+		}
+		rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+			Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+				RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+					{Namespace: "namespace-b"},
+				},
+				Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
+			},
+		}
+		lg := &fakeLabelGetter{namespaces: map[string]map[string]string{
+			"namespace-b": {"team": "b"},
+		}}
+		violations := EvaluateBindDefinition(context.Background(), policyWithDefaultSubjectLimits(policy), rbd, lg)
+		if len(violations) != 1 {
+			t.Fatalf("expected 1 violation for selector-bounded namespace, got %d: %v", len(violations), violations)
+		}
+		if violations[0].Field != "spec.roleBindings[0].namespace" {
+			t.Errorf("expected field spec.roleBindings[0].namespace, got %q", violations[0].Field)
 		}
 	})
 
@@ -1613,6 +1693,115 @@ func TestEvaluateBindDefinition_AppliesToScope(t *testing.T) {
 		}
 		if violations[0].Field != "spec.roleBindings[0].namespaceSelector[0] (resolved: namespace-b)" {
 			t.Errorf("unexpected field: %q", violations[0].Field)
+		}
+	})
+
+	t.Run("serviceaccount subject outside appliesTo is rejected for clusterrolebindings", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				AppliesTo: authorizationv1alpha1.PolicyScope{
+					Namespaces: []string{"team-a"},
+				},
+				BindingLimits: &authorizationv1alpha1.BindingLimits{
+					AllowClusterRoleBindings: true,
+					ClusterRoleBindingLimits: &authorizationv1alpha1.RoleRefLimits{
+						AllowedRoleRefs: []string{"view"},
+					},
+				},
+				SubjectLimits: &authorizationv1alpha1.SubjectLimits{
+					AllowedKinds: []string{rbacv1.ServiceAccountKind},
+				},
+			},
+		}
+		rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+			Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+				ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
+					ClusterRoleRefs: []string{"view"},
+				},
+				Subjects: []rbacv1.Subject{
+					{Kind: rbacv1.ServiceAccountKind, Name: "runner", Namespace: "team-b"},
+				},
+			},
+		}
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, nil)
+		if len(violations) != 2 {
+			t.Fatalf("expected cluster scope and ServiceAccount namespace violations, got %d: %v", len(violations), violations)
+		}
+		if violations[0].Field != "spec.clusterRoleBindings" {
+			t.Errorf("expected first field spec.clusterRoleBindings, got %q", violations[0].Field)
+		}
+		if violations[1].Field != "spec.subjects[0].namespace" {
+			t.Errorf("expected second field spec.subjects[0].namespace, got %q", violations[1].Field)
+		}
+	})
+
+	t.Run("clusterrolebindings require explicit global appliesTo scope", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				AppliesTo: authorizationv1alpha1.PolicyScope{
+					Namespaces: []string{"team-a"},
+				},
+				BindingLimits: &authorizationv1alpha1.BindingLimits{
+					AllowClusterRoleBindings: true,
+					ClusterRoleBindingLimits: &authorizationv1alpha1.RoleRefLimits{
+						AllowedRoleRefs: []string{"view"},
+					},
+				},
+				SubjectLimits: &authorizationv1alpha1.SubjectLimits{
+					AllowedKinds: []string{rbacv1.UserKind},
+				},
+			},
+		}
+		rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+			Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+				ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
+					ClusterRoleRefs: []string{"view"},
+				},
+				Subjects: []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "alice"}},
+			},
+		}
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, nil)
+		if len(violations) != 1 {
+			t.Fatalf("expected 1 cluster scope violation, got %d: %v", len(violations), violations)
+		}
+		if violations[0].Field != "spec.clusterRoleBindings" {
+			t.Errorf("expected field spec.clusterRoleBindings, got %q", violations[0].Field)
+		}
+	})
+
+	t.Run("serviceaccount subject outside appliesTo is rejected for rolebindings", func(t *testing.T) {
+		policy := &authorizationv1alpha1.RBACPolicy{
+			Spec: authorizationv1alpha1.RBACPolicySpec{
+				AppliesTo: authorizationv1alpha1.PolicyScope{
+					Namespaces: []string{"team-a"},
+				},
+				BindingLimits: &authorizationv1alpha1.BindingLimits{
+					RoleBindingLimits: &authorizationv1alpha1.RoleRefLimits{
+						AllowedRoleRefs: []string{"reader"},
+					},
+				},
+				SubjectLimits: &authorizationv1alpha1.SubjectLimits{
+					AllowedKinds: []string{rbacv1.ServiceAccountKind},
+				},
+			},
+		}
+		rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+			Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+				RoleBindings: []authorizationv1alpha1.NamespaceBinding{{
+					Namespace: "team-a",
+					RoleRefs:  []string{"reader"},
+				}},
+				Subjects: []rbacv1.Subject{
+					{Kind: rbacv1.ServiceAccountKind, Name: "runner", Namespace: "team-b"},
+				},
+			},
+		}
+		violations := EvaluateBindDefinition(context.Background(), policy, rbd, nil)
+		if len(violations) != 1 {
+			t.Fatalf("expected 1 ServiceAccount namespace violation, got %d: %v", len(violations), violations)
+		}
+		if violations[0].Field != "spec.subjects[0].namespace" {
+			t.Errorf("expected field spec.subjects[0].namespace, got %q", violations[0].Field)
 		}
 	})
 }

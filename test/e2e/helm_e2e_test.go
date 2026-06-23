@@ -4,7 +4,10 @@ package e2e
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -140,6 +143,55 @@ var _ = Describe("Helm Chart E2E", Ordered, Label("helm"), func() {
 			saveOutput("helm-template-all-features.yaml", output)
 		})
 
+		It("should template metrics authentication only when explicitly enabled", func() {
+			By("Rendering the default chart")
+			defaultArgs := append([]string{"template", helmReleaseName, helmChartPath,
+				"-n", helmNamespace},
+				imageSetArgs()...,
+			)
+			cmd := utils.CommandContext(context.Background(), "helm", defaultArgs...) // #nosec G204
+			defaultOutput, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "default helm template failed: %s", string(defaultOutput))
+			Expect(string(defaultOutput)).NotTo(ContainSubstring("--metrics-secure"))
+			Expect(string(defaultOutput)).NotTo(ContainSubstring("system:auth-delegator"))
+			Expect(string(defaultOutput)).NotTo(ContainSubstring("auth-operator-e2e-metrics-reader"))
+
+			By("Rendering the chart with metrics authentication enabled")
+			authArgs := append([]string{"template", helmReleaseName, helmChartPath,
+				"-n", helmNamespace},
+				imageSetArgs()...,
+			)
+			authArgs = append(authArgs,
+				"--set", "metrics.auth.enabled=true",
+				"--set", "metrics.serviceMonitor.enabled=true",
+				"--set", "metrics.serviceMonitor.scraperRBAC.create=true",
+				"--set", "metrics.serviceMonitor.scraperRBAC.serviceAccount.name=e2e-metrics-scraper",
+				"--set", fmt.Sprintf("metrics.serviceMonitor.scraperRBAC.serviceAccount.namespace=%s", helmNamespace),
+			)
+			cmd = utils.CommandContext(context.Background(), "helm", authArgs...) // #nosec G204
+			authOutput, err := utils.Run(cmd)
+			Expect(err).To(HaveOccurred(), "authenticated metrics ServiceMonitor without TLS trust choice should fail")
+			Expect(string(authOutput)).To(ContainSubstring("metrics.serviceMonitor.tlsConfig.caFile or metrics.serviceMonitor.tlsConfig.insecureSkipVerify=true is required"))
+
+			By("Rendering the chart with authenticated metrics and explicit self-signed scrape opt-in")
+			authArgs = append(authArgs,
+				"--set", "metrics.serviceMonitor.tlsConfig.insecureSkipVerify=true",
+			)
+			cmd = utils.CommandContext(context.Background(), "helm", authArgs...) // #nosec G204
+			authOutput, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "authenticated metrics helm template failed: %s", string(authOutput))
+			authRendered := string(authOutput)
+			Expect(authRendered).To(ContainSubstring("--metrics-secure"))
+			Expect(authRendered).To(ContainSubstring("system:auth-delegator"))
+			Expect(authRendered).To(ContainSubstring("nonResourceURLs:"))
+			Expect(authRendered).To(ContainSubstring("- /metrics"))
+			Expect(authRendered).To(ContainSubstring("scheme: https"))
+			Expect(authRendered).To(ContainSubstring("bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token"))
+			Expect(authRendered).To(ContainSubstring("insecureSkipVerify: true"))
+			Expect(authRendered).To(ContainSubstring("name: e2e-metrics-scraper"))
+			Expect(authRendered).To(ContainSubstring(fmt.Sprintf("namespace: %s", helmNamespace)))
+		})
+
 		It("should template with scheduling constraints", func() {
 			By("Running helm template with nodeSelector, tolerations, and affinity")
 			templateArgs := append([]string{"template", helmReleaseName, helmChartPath,
@@ -268,6 +320,126 @@ var _ = Describe("Helm Chart E2E", Ordered, Label("helm"), func() {
 			output, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(string(output)).NotTo(BeEmpty())
+		})
+	})
+
+	Context("Metrics Authentication", func() {
+		It("should serve unauthenticated HTTP metrics by default", func() {
+			By("Verifying deployments do not include --metrics-secure")
+			args := helmDeploymentArgs("controller-manager")
+			Expect(args).NotTo(ContainSubstring("--metrics-secure"))
+			args = helmDeploymentArgs("webhook-server")
+			Expect(args).NotTo(ContainSubstring("--metrics-secure"))
+
+			By("Port-forwarding the metrics service")
+			stopForward := startMetricsPortForward(18080)
+			defer stopForward()
+
+			By("Reading metrics without a bearer token")
+			Eventually(func() error {
+				status, body, err := requestMetrics(context.Background(), "http", 18080, "")
+				if err != nil {
+					return err
+				}
+				if status != http.StatusOK {
+					return fmt.Errorf("metrics returned HTTP %d: %s", status, body)
+				}
+				if !strings.Contains(body, "# HELP") {
+					return fmt.Errorf("metrics response did not contain Prometheus HELP text")
+				}
+				return nil
+			}, shortTimeout, pollingInterval).Should(Succeed())
+		})
+
+		It("should require authentication when metrics auth is enabled", func() {
+			By("Creating the metrics scraper ServiceAccount")
+			scraperYAML := fmt.Sprintf(`
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: e2e-metrics-scraper
+  namespace: %s
+`, helmNamespace)
+			cmd := utils.CommandContext(context.Background(), "kubectl", "apply", "-f", "-") // #nosec G204
+			cmd.Stdin = strings.NewReader(scraperYAML)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Enabling authenticated metrics with chart-managed scraper RBAC")
+			upgradeArgs := append([]string{"upgrade", helmReleaseName, helmChartPath,
+				"-n", helmNamespace},
+				imageSetArgs()...,
+			)
+			upgradeArgs = append(upgradeArgs,
+				"--set", "controller.replicas=1",
+				"--set", "webhookServer.replicas=1",
+				"--set", "metrics.auth.enabled=true",
+				"--set", "metrics.serviceMonitor.scraperRBAC.create=true",
+				"--set", "metrics.serviceMonitor.scraperRBAC.serviceAccount.name=e2e-metrics-scraper",
+				"--set", fmt.Sprintf("metrics.serviceMonitor.scraperRBAC.serviceAccount.namespace=%s", helmNamespace),
+				"--wait",
+				"--timeout", "5m",
+			)
+			cmd = utils.CommandContext(context.Background(), "helm", upgradeArgs...) // #nosec G204
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Helm metrics auth upgrade failed: %s", string(output))
+
+			By("Waiting for metrics auth rollout")
+			Eventually(func() error {
+				return utils.WaitForDeploymentAvailable("control-plane=controller-manager", helmNamespace, deployTimeout)
+			}, deployTimeout, pollingInterval).Should(Succeed())
+			Eventually(func() error {
+				return utils.WaitForDeploymentAvailable("control-plane=webhook-server", helmNamespace, deployTimeout)
+			}, deployTimeout, pollingInterval).Should(Succeed())
+			Expect(helmDeploymentArgs("controller-manager")).To(ContainSubstring("--metrics-secure"))
+			Expect(helmDeploymentArgs("webhook-server")).To(ContainSubstring("--metrics-secure"))
+
+			By("Verifying scraper ServiceAccount authorization")
+			cmd = utils.CommandContext(context.Background(), "kubectl", "auth", "can-i", "get", "/metrics", // #nosec G204
+				fmt.Sprintf("--as=system:serviceaccount:%s:e2e-metrics-scraper", helmNamespace))
+			output, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(strings.TrimSpace(string(output))).To(Equal("yes"))
+
+			By("Creating a bounded token for the scraper ServiceAccount")
+			cmd = utils.CommandContext(context.Background(), "kubectl", "create", "token", "e2e-metrics-scraper", // #nosec G204
+				"-n", helmNamespace,
+				"--duration=10m")
+			output, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			token := strings.TrimSpace(string(output))
+			Expect(token).NotTo(BeEmpty())
+
+			By("Port-forwarding the secure metrics service")
+			stopForward := startMetricsPortForward(18081)
+			defer stopForward()
+
+			By("Rejecting unauthenticated metrics requests")
+			Eventually(func() error {
+				status, body, err := requestMetrics(context.Background(), "https", 18081, "")
+				if err != nil {
+					return err
+				}
+				if status != http.StatusUnauthorized {
+					return fmt.Errorf("unauthenticated metrics returned HTTP %d: %s", status, body)
+				}
+				return nil
+			}, shortTimeout, pollingInterval).Should(Succeed())
+
+			By("Allowing the authorized scraper ServiceAccount to read metrics")
+			Eventually(func() error {
+				status, body, err := requestMetrics(context.Background(), "https", 18081, token)
+				if err != nil {
+					return err
+				}
+				if status != http.StatusOK {
+					return fmt.Errorf("authenticated metrics returned HTTP %d: %s", status, body)
+				}
+				if !strings.Contains(body, "# HELP") {
+					return fmt.Errorf("authenticated metrics response did not contain Prometheus HELP text")
+				}
+				return nil
+			}, shortTimeout, pollingInterval).Should(Succeed())
 		})
 	})
 
@@ -763,6 +935,63 @@ func helmFullName() string {
 		return helmReleaseName
 	}
 	return fmt.Sprintf("%s-auth-operator", helmReleaseName)
+}
+
+func helmDeploymentArgs(controlPlane string) string {
+	cmd := utils.CommandContext(context.Background(), "kubectl", "get", "deployment", // #nosec G204
+		"-l", fmt.Sprintf("control-plane=%s", controlPlane),
+		"-n", helmNamespace,
+		"-o", "jsonpath={.items[0].spec.template.spec.containers[0].args}")
+	output, err := utils.Run(cmd)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+	return string(output)
+}
+
+func startMetricsPortForward(localPort int) func() {
+	ctx, cancel := context.WithCancel(context.Background())
+	cmd := utils.CommandContext(ctx, "kubectl", "port-forward", // #nosec G204
+		"-n", helmNamespace,
+		fmt.Sprintf("svc/%s-metrics", helmFullName()),
+		fmt.Sprintf("%d:8080", localPort))
+	cmd.Stdout = GinkgoWriter
+	cmd.Stderr = GinkgoWriter
+	ExpectWithOffset(1, cmd.Start()).To(Succeed())
+
+	return func() {
+		cancel()
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		_ = cmd.Wait()
+	}
+}
+
+func requestMetrics(ctx context.Context, scheme string, localPort int, token string) (int, string, error) {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	if scheme == "https" {
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // #nosec G402 -- e2e local port-forward to self-signed metrics cert.
+	}
+	client := &http.Client{
+		Timeout:   5 * time.Second,
+		Transport: transport,
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s://127.0.0.1:%d/metrics", scheme, localPort), nil)
+	if err != nil {
+		return 0, "", fmt.Errorf("build metrics request: %w", err)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, "", fmt.Errorf("request metrics: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return resp.StatusCode, "", fmt.Errorf("read metrics response: %w", err)
+	}
+	return resp.StatusCode, string(body), nil
 }
 
 func verifyHelmPodRunning(labelSelector, namespace string) error {

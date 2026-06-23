@@ -107,6 +107,69 @@ func TestBuildRoleObject(t *testing.T) {
 	}
 }
 
+func TestCheckRoleOwnership_UnownedExistingRoleRejected(t *testing.T) {
+	g := NewWithT(t)
+
+	s := runtime.NewScheme()
+	g.Expect(authorizationv1alpha1.AddToScheme(s)).To(Succeed())
+	g.Expect(rbacv1.AddToScheme(s)).To(Succeed())
+
+	roleDefinition := &authorizationv1alpha1.RoleDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "owner-rd",
+			UID:  "owner-rd-uid",
+		},
+		Spec: authorizationv1alpha1.RoleDefinitionSpec{
+			TargetRole: authorizationv1alpha1.DefinitionClusterRole,
+			TargetName: "preexisting-role",
+		},
+	}
+	existing := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "preexisting-role"},
+	}
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(roleDefinition, existing).Build()
+	r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	err := r.checkRoleOwnership(context.Background(), roleDefinition)
+
+	g.Expect(err).To(HaveOccurred())
+	g.Expect(err.Error()).To(ContainSubstring("already exists and is not owned by RoleDefinition"))
+}
+
+func TestCheckRoleOwnership_OwnedExistingRoleAllowed(t *testing.T) {
+	g := NewWithT(t)
+
+	s := runtime.NewScheme()
+	g.Expect(authorizationv1alpha1.AddToScheme(s)).To(Succeed())
+	g.Expect(rbacv1.AddToScheme(s)).To(Succeed())
+
+	roleDefinition := &authorizationv1alpha1.RoleDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "owner-rd",
+			UID:  "owner-rd-uid",
+		},
+		Spec: authorizationv1alpha1.RoleDefinitionSpec{
+			TargetRole: authorizationv1alpha1.DefinitionClusterRole,
+			TargetName: "owned-role",
+		},
+	}
+	existing := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "owned-role",
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: authorizationv1alpha1.GroupVersion.String(),
+				Kind:       "RoleDefinition",
+				Name:       roleDefinition.Name,
+				UID:        roleDefinition.UID,
+			}},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(roleDefinition, existing).Build()
+	r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	g.Expect(r.checkRoleOwnership(context.Background(), roleDefinition)).To(Succeed())
+}
+
 var _ = Describe("RoleDefinition Helpers", func() {
 	ctx := context.Background()
 	var r *RoleDefinitionReconciler
@@ -1243,23 +1306,11 @@ func TestEnsureRole_TransitionFromRulesToAggregateFrom(t *testing.T) {
 	_ = rbacv1.AddToScheme(s)
 	_ = authorizationv1alpha1.AddToScheme(s)
 
-	// Start with a rule-based ClusterRole.
-	existingCR := &rbacv1.ClusterRole{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "transition-role",
-			Labels: map[string]string{
-				"app.kubernetes.io/managed-by": "auth-operator",
-			},
-		},
-		Rules: []rbacv1.PolicyRule{
-			{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods"}},
-		},
-	}
-
 	// Now the RoleDefinition switches to aggregateFrom.
 	rd := &authorizationv1alpha1.RoleDefinition{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "transition-role",
+			UID:  "transition-role-uid",
 		},
 		Spec: authorizationv1alpha1.RoleDefinitionSpec{
 			TargetRole:      authorizationv1alpha1.DefinitionClusterRole,
@@ -1270,6 +1321,25 @@ func TestEnsureRole_TransitionFromRulesToAggregateFrom(t *testing.T) {
 					{MatchLabels: map[string]string{"custom/aggregate-to-transition": "true"}},
 				},
 			},
+		},
+	}
+
+	// Start with a rule-based ClusterRole already owned by this RoleDefinition.
+	existingCR := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "transition-role",
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "auth-operator",
+			},
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: authorizationv1alpha1.GroupVersion.String(),
+				Kind:       "RoleDefinition",
+				Name:       rd.Name,
+				UID:        rd.UID,
+			}},
+		},
+		Rules: []rbacv1.PolicyRule{
+			{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods"}},
 		},
 	}
 

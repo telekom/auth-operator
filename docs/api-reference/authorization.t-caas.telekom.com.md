@@ -119,7 +119,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `clusterRoleRefs` _string array_ | ClusterRoleRefs references an existing ClusterRole |  | MaxItems: 64 <br />Optional: \{\} <br /> |
+| `clusterRoleRefs` _string array_ | ClusterRoleRefs references an existing ClusterRole |  | MaxItems: 64 <br />Optional: \{\} <br />items:MaxLength: 253 <br />items:MinLength: 1 <br /> |
 
 
 #### DefaultPolicyAssignment
@@ -199,8 +199,8 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `clusterRoleRefs` _string array_ | ClusterRoleRefs references an existing ClusterRole |  | MaxItems: 64 <br />Optional: \{\} <br /> |
-| `roleRefs` _string array_ | RoleRefs references a specific Role that has to exist in the target namespaces |  | MaxItems: 64 <br />Optional: \{\} <br /> |
+| `clusterRoleRefs` _string array_ | ClusterRoleRefs references an existing ClusterRole |  | MaxItems: 64 <br />Optional: \{\} <br />items:MaxLength: 253 <br />items:MinLength: 1 <br /> |
+| `roleRefs` _string array_ | RoleRefs references a specific Role that has to exist in the target namespaces |  | MaxItems: 64 <br />Optional: \{\} <br />items:MaxLength: 253 <br />items:MinLength: 1 <br /> |
 | `namespace` _string_ | Namespace of the Role that should be bound to the subjects. |  | Optional: \{\} <br /> |
 | `namespaceSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#labelselector-v1-meta) array_ | NamespaceSelector is a label selector which will match namespaces that should have the RoleBinding/s. |  | MaxItems: 16 <br />Optional: \{\} <br /> |
 
@@ -238,7 +238,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `namespaceSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#labelselector-v1-meta)_ | NamespaceSelector selects namespaces by label selector. |  | Optional: \{\} <br /> |
-| `namespaces` _string array_ | Namespaces is an explicit list of namespace names. |  | MaxItems: 256 <br />Optional: \{\} <br />items:MaxLength: 63 <br />items:MinLength: 1 <br /> |
+| `namespaces` _string array_ | Namespaces is an explicit list of namespace names. Use "*" to make the<br />policy explicitly cluster-wide; this is required for cluster-scoped<br />generated resources such as ClusterRoles and ClusterRoleBindings. |  | MaxItems: 256 <br />Optional: \{\} <br />items:MaxLength: 63 <br />items:MinLength: 1 <br /> |
 
 
 #### Principal
@@ -256,7 +256,7 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `user` _string_ | User is the requesting user in SubjectAccessReview request. |  | MaxLength: 253 <br />Optional: \{\} <br /> |
 | `groups` _string array_ | Groups is the requesting user groups in SubjectAccessReview request. |  | MaxItems: 256 <br />Optional: \{\} <br /> |
-| `namespace` _string_ | Namespace is the requesting user namespace in case the requesting user is a ServiceAccount. |  | MaxLength: 253 <br />Optional: \{\} <br /> |
+| `namespace` _string_ | Namespace scopes User to a Kubernetes ServiceAccount namespace. When set,<br />User may be either the short ServiceAccount name or the full<br />system:serviceaccount:<namespace>:<name> username. |  | MaxLength: 253 <br />Optional: \{\} <br /> |
 
 
 #### RBACPolicy
@@ -276,7 +276,7 @@ RestrictedRoleDefinitions must comply with.
 | `apiVersion` _string_ | `authorization.t-caas.telekom.com/v1alpha1` | | |
 | `kind` _string_ | `RBACPolicy` | | |
 | `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
-| `spec` _[RBACPolicySpec](#rbacpolicyspec)_ |  |  |  |
+| `spec` _[RBACPolicySpec](#rbacpolicyspec)_ |  |  | Required: \{\} <br /> |
 | `status` _[RBACPolicyStatus](#rbacpolicystatus)_ |  |  |  |
 
 
@@ -375,7 +375,7 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `name` _string_ | Name is the name of the API group (e.g., "storage.k8s.io", "velero.io"). |  | Required: \{\} <br /> |
 | `versions` _[GroupVersionForDiscovery](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#groupversionfordiscovery-v1-meta) array_ | Versions restricts only the specified API versions within this group.<br />When empty, all versions of the group are affected. |  | Optional: \{\} <br /> |
-| `verbs` _string array_ | Verbs restricts only the specified verbs across all resources in this API group.<br />When empty, the entire API group is fully blocked (existing behavior).<br />When specified, only the listed verbs are removed from the generated role for resources<br />in this group — remaining verbs are still allowed.<br />This enables per-API-group read-only restrictions without enumerating every resource.<br />Note: "*" matches only the literal wildcard verb, not all verbs. |  | MaxItems: 16 <br />Optional: \{\} <br />items:MaxLength: 63 <br />items:MinLength: 1 <br />items:Pattern: ^([a-z]+\|\*)$ <br /> |
+| `verbs` _string array_ | Verbs restricts only the specified verbs across all resources in this API group.<br />When empty, the entire API group is fully blocked (existing behavior).<br />When specified, only the listed verbs are removed from the generated role for resources<br />in this group — remaining verbs are still allowed.<br />This enables per-API-group read-only restrictions without enumerating every resource.<br />Note: "*" matches only the literal wildcard verb, not all verbs. |  | MaxItems: 16 <br />Optional: \{\} <br />items:MaxLength: 63 <br />items:MinLength: 1 <br />items:Pattern: `^([a-z]+\|\*)$` <br /> |
 
 
 #### RestrictedBindDefinition
@@ -395,7 +395,7 @@ RBAC guardrails defined by the referenced RBACPolicy.
 | `apiVersion` _string_ | `authorization.t-caas.telekom.com/v1alpha1` | | |
 | `kind` _string_ | `RestrictedBindDefinition` | | |
 | `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
-| `spec` _[RestrictedBindDefinitionSpec](#restrictedbinddefinitionspec)_ |  |  |  |
+| `spec` _[RestrictedBindDefinitionSpec](#restrictedbinddefinitionspec)_ |  |  | Required: \{\} <br /> |
 | `status` _[RestrictedBindDefinitionStatus](#restrictedbinddefinitionstatus)_ |  |  |  |
 
 
@@ -462,7 +462,7 @@ RBAC guardrails defined by the referenced RBACPolicy.
 | `apiVersion` _string_ | `authorization.t-caas.telekom.com/v1alpha1` | | |
 | `kind` _string_ | `RestrictedRoleDefinition` | | |
 | `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
-| `spec` _[RestrictedRoleDefinitionSpec](#restrictedroledefinitionspec)_ |  |  |  |
+| `spec` _[RestrictedRoleDefinitionSpec](#restrictedroledefinitionspec)_ |  |  | Required: \{\} <br /> |
 | `status` _[RestrictedRoleDefinitionStatus](#restrictedroledefinitionstatus)_ |  |  |  |
 
 
@@ -486,7 +486,7 @@ _Appears in:_
 | `scopeNamespaced` _boolean_ | ScopeNamespaced controls whether the API resource filter includes<br />namespaced or cluster-scoped resources. |  | Required: \{\} <br /> |
 | `restrictedApis` _[RestrictedAPIGroup](#restrictedapigroup) array_ | RestrictedAPIs defines API group-level restrictions for the generated role.<br />Each entry can either fully block an API group or restrict only certain verbs:<br />  - When Verbs is empty or omitted, the entire API group is fully blocked<br />    (no resources from that group appear in the generated role).<br />  - When Verbs is specified, only those verbs are removed for resources in<br />    the group — the remaining verbs are still allowed (partial restriction).<br />Version filtering narrows which API versions are affected:<br />  - When Versions is empty, all versions of the group are affected.<br />  - When Versions is specified, only those API versions are restricted.<br />Note: Kubernetes RBAC PolicyRules are version-agnostic. If the same resource<br />exists in a non-restricted version of the same group, it will still appear<br />in the generated role. |  | MaxItems: 64 <br />Optional: \{\} <br /> |
 | `restrictedResources` _[APIResource](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#apiresource-v1-meta) array_ | RestrictedResources holds resources which will NOT be included in the generated role. |  | MaxItems: 128 <br />Optional: \{\} <br /> |
-| `restrictedVerbs` _string array_ | RestrictedVerbs holds verbs which will NOT be included in the generated role. |  | MaxItems: 16 <br />Optional: \{\} <br />items:MaxLength: 63 <br />items:MinLength: 1 <br />items:Pattern: ^([a-z]+\|\*)$ <br /> |
+| `restrictedVerbs` _string array_ | RestrictedVerbs holds verbs which will NOT be included in the generated role. |  | MaxItems: 16 <br />Optional: \{\} <br />items:MaxLength: 63 <br />items:MinLength: 1 <br />items:Pattern: `^([a-z]+\|\*)$` <br /> |
 
 
 #### RestrictedRoleDefinitionStatus
@@ -548,7 +548,7 @@ _Appears in:_
 | `scopeNamespaced` _boolean_ | ScopeNamespaced controls whether the API resource is namespaced or not. This can also be checked by<br />running `kubectl api-resources --namespaced=true/false`. |  | Required: \{\} <br /> |
 | `restrictedApis` _[RestrictedAPIGroup](#restrictedapigroup) array_ | RestrictedAPIs defines API group-level restrictions for the generated role.<br />Each entry can either fully block an API group or restrict only certain verbs:<br />  - When Verbs is empty or omitted, the entire API group is fully blocked<br />    (no resources from that group appear in the generated role).<br />  - When Verbs is specified, only those verbs are removed for resources in<br />    the group — the remaining verbs are still allowed (partial restriction).<br />Version filtering narrows which API versions are affected:<br />  - When Versions is empty, all versions of the group are affected.<br />  - When Versions is specified, only those API versions are restricted.<br />Note: Kubernetes RBAC PolicyRules are version-agnostic. If the same resource<br />exists in a non-restricted version of the same group, it will still appear<br />in the generated role. |  | MaxItems: 64 <br />Optional: \{\} <br /> |
 | `restrictedResources` _[APIResource](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#apiresource-v1-meta) array_ | RestrictedResources holds all resources which will *NOT* be reconciled into the "TargetRole".<br />The RBAC operator discovers all API resources available and removes those listed here. |  | MaxItems: 128 <br />Optional: \{\} <br /> |
-| `restrictedVerbs` _string array_ | RestrictedVerbs holds all verbs which will *NOT* be reconciled into the "TargetRole".<br />The RBAC operator discovers all resource verbs available and removes those listed here. |  | MaxItems: 16 <br />Optional: \{\} <br />items:MaxLength: 63 <br />items:MinLength: 1 <br />items:Pattern: ^([a-z]+\|\*)$ <br /> |
+| `restrictedVerbs` _string array_ | RestrictedVerbs holds all verbs which will *NOT* be reconciled into the "TargetRole".<br />The RBAC operator discovers all resource verbs available and removes those listed here. |  | MaxItems: 16 <br />Optional: \{\} <br />items:MaxLength: 63 <br />items:MinLength: 1 <br />items:Pattern: `^([a-z]+\|\*)$` <br /> |
 | `breakglassAllowed` _boolean_ | BreakglassAllowed marks generated ClusterRoles as eligible for temporary<br />privilege escalation via k8s-breakglass. The generated ClusterRole always<br />receives the label t-caas.telekom.com/breakglass-compatible set to "true"<br />or "false" based on this field's value.<br />Only applicable when TargetRole is ClusterRole. Defaults to false. | false | Optional: \{\} <br /> |
 | `aggregationLabels` _object (keys:string, values:string)_ | AggregationLabels are additional labels applied to the generated ClusterRole so that<br />it participates in Kubernetes' built-in ClusterRole aggregation mechanism.<br />For example, setting `rbac.authorization.k8s.io/aggregate-to-view: "true"` causes the<br />generated ClusterRole's rules to be aggregated into the default "view" ClusterRole.<br />Only applicable when targetRole is ClusterRole. |  | Optional: \{\} <br /> |
 | `aggregateFrom` _[AggregationRule](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#aggregationrule-v1-rbac)_ | AggregateFrom generates an aggregating ClusterRole that uses label selectors<br />to compose rules from other ClusterRoles, instead of specifying rules directly.<br />When set, the controller skips API discovery and filtering; the generated ClusterRole<br />carries an aggregationRule and its rules[] are managed by the RBAC aggregation controller.<br />Mutually exclusive with RestrictedAPIs, RestrictedResources, and RestrictedVerbs.<br />Only applicable when targetRole is ClusterRole. |  | Optional: \{\} <br /> |
@@ -726,7 +726,7 @@ _Appears in:_
 | `resourceRules` _[ResourceRule](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#resourcerule-v1-authorization) array_ | Resources which will be used to evaluate the SubjectAccessReviewSpec.ResourceAttributes |  | MaxItems: 64 <br />Optional: \{\} <br /> |
 | `nonResourceRules` _[NonResourceRule](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#nonresourcerule-v1-authorization) array_ | Resources which will be used to evaluate the SubjectAccessReviewSpec.NonResourceAttributes |  | MaxItems: 64 <br />Optional: \{\} <br /> |
 | `allowedPrincipals` _[Principal](#principal) array_ | AllowedPrincipals is a slice of principals this authorizer should allow. |  | MaxItems: 256 <br />Optional: \{\} <br /> |
-| `deniedPrincipals` _[Principal](#principal) array_ | DeniedPrincipals is a slice of principals this authorizer should deny. |  | MaxItems: 256 <br />Optional: \{\} <br /> |
+| `deniedPrincipals` _[Principal](#principal) array_ | DeniedPrincipals is a slice of principals this authorizer should deny<br />when the request also matches ResourceRules or NonResourceRules. |  | MaxItems: 256 <br />Optional: \{\} <br /> |
 | `namespaceSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#labelselector-v1-meta)_ | NamespaceSelector is a label selector to match namespaces that should allow the specified API calls. |  | Optional: \{\} <br /> |
 
 

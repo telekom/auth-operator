@@ -14,7 +14,9 @@ type PolicyScope struct {
 	// +kubebuilder:validation:Optional
 	NamespaceSelector *metav1.LabelSelector `json:"namespaceSelector,omitempty"`
 
-	// Namespaces is an explicit list of namespace names.
+	// Namespaces is an explicit list of namespace names. Use "*" to make the
+	// policy explicitly cluster-wide; this is required for cluster-scoped
+	// generated resources such as ClusterRoles and ClusterRoleBindings.
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=256
 	// +kubebuilder:validation:items:MinLength=1
@@ -380,7 +382,8 @@ type RBACPolicy struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   RBACPolicySpec   `json:"spec,omitempty"`
+	// +kubebuilder:validation:Required
+	Spec   RBACPolicySpec   `json:"spec"`
 	Status RBACPolicyStatus `json:"status,omitempty"`
 }
 

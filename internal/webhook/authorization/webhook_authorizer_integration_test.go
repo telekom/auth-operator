@@ -32,7 +32,7 @@ func sendSAR(authorizer *webhooks.Authorizer, sar authzv1.SubjectAccessReview) a
 	body, err := json.Marshal(sar)
 	Expect(err).NotTo(HaveOccurred())
 
-	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/authorize", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 

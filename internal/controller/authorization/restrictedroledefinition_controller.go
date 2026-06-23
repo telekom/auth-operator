@@ -52,8 +52,8 @@ import (
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=restrictedroledefinitions/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=restrictedroledefinitions/finalizers,verbs=update
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=rbacpolicies,verbs=get;list;watch
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,verbs=get;list;watch;create;update;patch;delete;escalate;bind
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch;create;update;patch;delete;escalate;bind
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,verbs=get;list;watch;create;patch;delete;escalate;bind
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch;create;patch;delete;escalate;bind
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch;update
 // +kubebuilder:rbac:groups="events.k8s.io",resources=events,verbs=create;patch;update
 
@@ -128,6 +128,13 @@ func (r *RestrictedRoleDefinitionReconciler) SetupWithManager(mgr ctrl.Manager, 
 		Watches(&authorizationv1alpha1.RBACPolicy{},
 			handler.EnqueueRequestsFromMapFunc(r.policyToRestrictedRoleDefinitions),
 		).
+		// Re-reconcile namespaced Role targets when namespace labels or phase
+		// change. Policy appliesTo namespace selectors are evaluated against
+		// spec.targetNamespace.
+		Watches(&corev1.Namespace{},
+			handler.EnqueueRequestsFromMapFunc(r.namespaceToRestrictedRoleDefinitions),
+			builder.WithPredicates(namespaceLabelOrPhaseChangePredicate()),
+		).
 		WatchesRawSource(trackerChannel).
 		WithOptions(controller.TypedOptions[reconcile.Request]{MaxConcurrentReconciles: concurrency}).
 		Complete(r)
@@ -157,10 +164,15 @@ func (r *RestrictedRoleDefinitionReconciler) rrdEvaluatePolicy(
 	ctx context.Context,
 	rrd *authorizationv1alpha1.RestrictedRoleDefinition,
 	rbacPolicy *authorizationv1alpha1.RBACPolicy,
+	applyClient client.Client,
 ) (result ctrl.Result, handled bool, retErr error) {
-	labelGetter := newLabelGetter(r.client)
+	labelGetter := newLabelGetter(r.ownershipReader())
 	violations := policy.EvaluateRoleDefinitionWithLabels(ctx, rbacPolicy, rrd, labelGetter)
 	if err := labelGetter.Err(); err != nil {
+		if deprovisionErr := r.rrdDeprovision(ctx, rrd, applyClient); deprovisionErr != nil {
+			err = errors.Join(err, fmt.Errorf("deprovision after policy selector evaluation failure: %w", deprovisionErr))
+		}
+		markPolicyEvaluationError(rrd, rrd.Generation, err)
 		r.rrdMarkStalled(ctx, rrd, err)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
@@ -174,7 +186,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdEvaluatePolicy(
 	result, err := handlePolicyViolations(ctx, rrd, rrd.Generation, violations, r.recorder, rrd, ViolationHandlerConfig{
 		ControllerLabel: metrics.ControllerRestrictedRoleDefinition,
 		ResourceKind:    "RestrictedRoleDefinition",
-		Deprovision:     func(ctx context.Context) error { return r.rrdDeprovision(ctx, rrd) },
+		Deprovision:     func(ctx context.Context) error { return r.rrdDeprovision(ctx, rrd, applyClient) },
 		MarkStalled:     func(ctx context.Context, err error) { r.rrdMarkStalled(ctx, rrd, err) },
 		SetReconciled:   func(v bool) { rrd.Status.RoleReconciled = v },
 		ApplyStatus:     func(ctx context.Context) error { return ssa.ApplyRestrictedRoleDefinitionStatus(ctx, r.client, rrd) },
@@ -203,6 +215,8 @@ func (r *RestrictedRoleDefinitionReconciler) queueAll() handler.MapFunc {
 
 // policyToRestrictedRoleDefinitions maps an RBACPolicy event to reconcile requests
 // for all RestrictedRoleDefinitions referencing that policy.
+//
+//nolint:dupl // Restricted bind/role reconcilers keep type-specific event mapping for controller-runtime indexes.
 func (r *RestrictedRoleDefinitionReconciler) policyToRestrictedRoleDefinitions(ctx context.Context, obj client.Object) []reconcile.Request {
 	logger := log.FromContext(ctx)
 	list := &authorizationv1alpha1.RestrictedRoleDefinitionList{}
@@ -210,12 +224,64 @@ func (r *RestrictedRoleDefinitionReconciler) policyToRestrictedRoleDefinitions(c
 	defer cancel()
 	if err := r.client.List(listCtx, list,
 		client.MatchingFields{indexer.RestrictedRoleDefinitionPolicyRefField: obj.GetName()}); err != nil {
+		if helpers.IsMissingFieldIndexError(err) {
+			logger.V(2).Info("policyRef field index unavailable, falling back to full RestrictedRoleDefinition scan", "policy", obj.GetName())
+			if listErr := r.client.List(listCtx, list); listErr != nil {
+				logger.Error(listErr, "failed to list RestrictedRoleDefinitions for policy", "policy", obj.GetName())
+				return nil
+			}
+			requests := make([]reconcile.Request, 0, len(list.Items))
+			for i := range list.Items {
+				if list.Items[i].Spec.PolicyRef.Name == obj.GetName() {
+					requests = append(requests, reconcile.Request{NamespacedName: types.NamespacedName{Name: list.Items[i].Name}})
+				}
+			}
+			return requests
+		}
 		logger.Error(err, "failed to list RestrictedRoleDefinitions for policy", "policy", obj.GetName())
 		return nil
 	}
 	requests := make([]reconcile.Request, len(list.Items))
 	for i, rrd := range list.Items {
 		requests[i] = reconcile.Request{NamespacedName: types.NamespacedName{Name: rrd.Name}}
+	}
+	return requests
+}
+
+// namespaceToRestrictedRoleDefinitions maps a Namespace event to namespaced
+// RestrictedRoleDefinitions that target the changed namespace.
+func (r *RestrictedRoleDefinitionReconciler) namespaceToRestrictedRoleDefinitions(ctx context.Context, obj client.Object) []reconcile.Request {
+	logger := log.FromContext(ctx)
+	namespace, ok := obj.(*corev1.Namespace)
+	if !ok {
+		logger.Error(fmt.Errorf("unexpected type"), "Expected *Namespace", "got", fmt.Sprintf("%T", obj))
+		return nil
+	}
+
+	list := &authorizationv1alpha1.RestrictedRoleDefinitionList{}
+	listCtx, cancel := context.WithTimeout(ctx, queueAllTimeout)
+	defer cancel()
+	if err := r.client.List(listCtx, list,
+		client.MatchingFields{indexer.RestrictedRoleDefinitionTargetNamespaceField: namespace.Name}); err != nil {
+		if !helpers.IsMissingFieldIndexError(err) {
+			logger.Error(err, "failed to list RestrictedRoleDefinitions by target namespace", "namespace", namespace.Name)
+			return nil
+		}
+		logger.V(2).Info("targetNamespace field index unavailable, falling back to full RestrictedRoleDefinition scan", "namespace", namespace.Name)
+		if listErr := r.client.List(listCtx, list); listErr != nil {
+			logger.Error(listErr, "failed to list RestrictedRoleDefinitions for namespace", "namespace", namespace.Name)
+			return nil
+		}
+	}
+
+	requests := make([]reconcile.Request, 0, len(list.Items))
+	for i := range list.Items {
+		rrd := &list.Items[i]
+		if rrd.Spec.TargetRole != authorizationv1alpha1.DefinitionNamespacedRole ||
+			rrd.Spec.TargetNamespace != namespace.Name {
+			continue
+		}
+		requests = append(requests, reconcile.Request{NamespacedName: types.NamespacedName{Name: rrd.Name}})
 	}
 	return requests
 }
@@ -297,7 +363,7 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 
 	// Step 5: Fetch referenced RBACPolicy.
 	rbacPolicy := &authorizationv1alpha1.RBACPolicy{}
-	if err := r.client.Get(ctx, types.NamespacedName{Name: rrd.Spec.PolicyRef.Name}, rbacPolicy); err != nil {
+	if err := r.ownershipReader().Get(ctx, types.NamespacedName{Name: rrd.Spec.PolicyRef.Name}, rbacPolicy); err != nil {
 		if apierrors.IsNotFound(err) {
 			return r.rrdHandleMissingPolicy(ctx, rrd)
 		}
@@ -307,8 +373,17 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 		return ctrl.Result{}, fmt.Errorf("fetch RBACPolicy %s: %w", rrd.Spec.PolicyRef.Name, err)
 	}
 
+	applyClient, impersonatedUser, err := r.rrdResolveApplyClient(rbacPolicy)
+	if err != nil {
+		r.rrdMarkStalled(ctx, rrd, err)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
+		return ctrl.Result{}, fmt.Errorf("resolve apply client for RestrictedRoleDefinition %s: %w", rrd.Name, err)
+	}
+	r.rrdLogApplyIdentity(ctx, rrd.Name, rbacPolicy.Name, impersonatedUser)
+
 	// Step 6: Evaluate policy compliance.
-	if result, handled, err := r.rrdEvaluatePolicy(ctx, rrd, rbacPolicy); handled {
+	if result, handled, err := r.rrdEvaluatePolicy(ctx, rrd, rbacPolicy, applyClient); handled {
 		return result, err
 	}
 
@@ -319,6 +394,10 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 	// Step 7: Discover and filter API resources.
 	finalRules, requeue, err := r.rrdDiscoverAndFilter(ctx, rrd)
 	if err != nil {
+		if deprovisionErr := r.rrdDeprovision(ctx, rrd, applyClient); deprovisionErr != nil {
+			err = errors.Join(err, fmt.Errorf("deprovision after role discovery failure: %w", deprovisionErr))
+		}
+		markPolicyEvaluationError(rrd, rrd.Generation, err)
 		r.rrdMarkStalled(ctx, rrd, err)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
@@ -338,21 +417,13 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 		result, err := handlePolicyViolations(ctx, rrd, rrd.Generation, []policy.Violation{*v}, r.recorder, rrd, ViolationHandlerConfig{
 			ControllerLabel: metrics.ControllerRestrictedRoleDefinition,
 			ResourceKind:    "RestrictedRoleDefinition",
-			Deprovision:     func(ctx context.Context) error { return r.rrdDeprovision(ctx, rrd) },
+			Deprovision:     func(ctx context.Context) error { return r.rrdDeprovision(ctx, rrd, applyClient) },
 			MarkStalled:     func(ctx context.Context, err error) { r.rrdMarkStalled(ctx, rrd, err) },
 			SetReconciled:   func(v bool) { rrd.Status.RoleReconciled = v },
 			ApplyStatus:     func(ctx context.Context) error { return ssa.ApplyRestrictedRoleDefinitionStatus(ctx, r.client, rrd) },
 		})
 		return result, err
 	}
-	applyClient, impersonatedUser, err := r.rrdResolveApplyClient(rbacPolicy)
-	if err != nil {
-		r.rrdMarkStalled(ctx, rrd, err)
-		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
-		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
-		return ctrl.Result{}, fmt.Errorf("resolve apply client for RestrictedRoleDefinition %s: %w", rrd.Name, err)
-	}
-	r.rrdLogApplyIdentity(ctx, rrd.Name, rbacPolicy.Name, impersonatedUser)
 
 	// Step 8: Ensure the target role exists.
 	if err := r.rrdEnsureRole(ctx, rrd, finalRules, applyClient); err != nil {
@@ -391,7 +462,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdHandleMissingPolicy(
 		authorizationv1alpha1.EventReasonPolicyNotFound, authorizationv1alpha1.EventActionReconcile,
 		"Referenced RBACPolicy %q not found", rrd.Spec.PolicyRef.Name)
 
-	if err := r.rrdDeprovision(ctx, rrd); err != nil {
+	if err := r.rrdDeprovision(ctx, rrd, r.client); err != nil {
 		r.rrdMarkStalled(ctx, rrd, err)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
@@ -532,6 +603,7 @@ func rrdCheckAPIRestriction(
 	restrictedAPIs []authorizationv1alpha1.RestrictedAPIGroup,
 	groupVersion schema.GroupVersion,
 ) (restricted bool, verbs []string) {
+	verbSet := make(map[string]struct{})
 	for _, ag := range restrictedAPIs {
 		if !policy.MatchesAPIGroup(ag.Name, groupVersion.Group) {
 			continue
@@ -543,9 +615,23 @@ func rrdCheckAPIRestriction(
 				continue
 			}
 		}
-		return true, ag.Verbs
+		restricted = true
+		if len(ag.Verbs) == 0 {
+			return true, nil
+		}
+		for _, verb := range ag.Verbs {
+			verbSet[verb] = struct{}{}
+		}
 	}
-	return false, nil
+	if !restricted {
+		return false, nil
+	}
+	verbs = make([]string, 0, len(verbSet))
+	for verb := range verbSet {
+		verbs = append(verbs, verb)
+	}
+	slices.Sort(verbs)
+	return true, verbs
 }
 
 // rrdEnsureRole ensures the target role exists with the computed rules.
@@ -567,12 +653,18 @@ func (r *RestrictedRoleDefinitionReconciler) rrdEnsureRole(
 	}
 
 	ownerRef := ownerRefForRestricted(rrd, authorizationv1alpha1.RestrictedRoleDefinitionKind)
-	labelsMap := helpers.BuildResourceLabels(rrd.Labels)
+	// RestrictedRoleDefinition metadata labels are user-controlled. Do not copy
+	// them to generated ClusterRoles/Roles, because ClusterRole aggregation labels
+	// can change effective permissions outside this controller's policy checks.
+	labelsMap := helpers.BuildResourceLabels(nil)
 	annotations := helpers.BuildResourceAnnotations("RestrictedRoleDefinition", rrd.Name)
 
 	switch rrd.Spec.TargetRole {
 	case authorizationv1alpha1.DefinitionClusterRole:
-		if err := r.rrdClearClusterRoleRulesIfEmpty(ctx, applyClient, rrd.Spec.TargetName, finalRules); err != nil {
+		if err := r.rrdNormalizeOwnedClusterRoleMetadata(ctx, applyClient, rrd, rrd.Spec.TargetName, labelsMap); err != nil {
+			return err
+		}
+		if err := r.rrdClearClusterRoleRulesIfEmpty(ctx, applyClient, rrd, rrd.Spec.TargetName, finalRules); err != nil {
 			return err
 		}
 		ac := pkgssa.ClusterRoleWithLabelsAndRules(
@@ -589,7 +681,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdEnsureRole(
 			metrics.RBACResourcesApplied.WithLabelValues(metrics.ResourceClusterRole).Inc()
 		}
 	case authorizationv1alpha1.DefinitionNamespacedRole:
-		if err := r.rrdClearRoleRulesIfEmpty(ctx, applyClient, rrd.Spec.TargetNamespace, rrd.Spec.TargetName, finalRules); err != nil {
+		if err := r.rrdClearRoleRulesIfEmpty(ctx, applyClient, rrd, rrd.Spec.TargetNamespace, rrd.Spec.TargetName, finalRules); err != nil {
 			return err
 		}
 		ac := pkgssa.RoleWithLabelsAndRules(
@@ -616,9 +708,67 @@ func (r *RestrictedRoleDefinitionReconciler) rrdEnsureRole(
 	return nil
 }
 
+func (r *RestrictedRoleDefinitionReconciler) rrdNormalizeOwnedClusterRoleMetadata(
+	ctx context.Context,
+	applyClient client.Client,
+	rrd *authorizationv1alpha1.RestrictedRoleDefinition,
+	name string,
+	desiredLabels map[string]string,
+) error {
+	existing := &rbacv1.ClusterRole{}
+	if err := r.ownershipReader().Get(ctx, client.ObjectKey{Name: name}, existing); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	if !hasOwnerRef(existing, rrd) {
+		return nil
+	}
+
+	patched := existing.DeepCopy()
+	changed := false
+	if !stringMapEqual(patched.Labels, desiredLabels) {
+		patched.Labels = copyStringMap(desiredLabels)
+		changed = true
+	}
+	if patched.AggregationRule != nil {
+		patched.AggregationRule = nil
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	if err := applyClient.Patch(ctx, patched, client.MergeFrom(existing)); err != nil {
+		return fmt.Errorf("normalize owned ClusterRole %s metadata: %w", name, err)
+	}
+	return nil
+}
+
+func stringMapEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for key, value := range a {
+		if b[key] != value {
+			return false
+		}
+	}
+	return true
+}
+
+func copyStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
 func (r *RestrictedRoleDefinitionReconciler) rrdClearClusterRoleRulesIfEmpty(
 	ctx context.Context,
 	applyClient client.Client,
+	rrd *authorizationv1alpha1.RestrictedRoleDefinition,
 	name string,
 	finalRules []rbacv1.PolicyRule,
 ) error {
@@ -628,6 +778,9 @@ func (r *RestrictedRoleDefinitionReconciler) rrdClearClusterRoleRulesIfEmpty(
 	existing := &rbacv1.ClusterRole{}
 	if err := r.ownershipReader().Get(ctx, client.ObjectKey{Name: name}, existing); err != nil {
 		return client.IgnoreNotFound(err)
+	}
+	if !hasOwnerRef(existing, rrd) {
+		return nil
 	}
 	if len(existing.Rules) == 0 {
 		return nil
@@ -639,9 +792,11 @@ func (r *RestrictedRoleDefinitionReconciler) rrdClearClusterRoleRulesIfEmpty(
 	return nil
 }
 
+//nolint:dupl // RoleBinding subjects and Role rules use mirrored empty-state patch flow for distinct RBAC kinds.
 func (r *RestrictedRoleDefinitionReconciler) rrdClearRoleRulesIfEmpty(
 	ctx context.Context,
 	applyClient client.Client,
+	rrd *authorizationv1alpha1.RestrictedRoleDefinition,
 	namespace string,
 	name string,
 	finalRules []rbacv1.PolicyRule,
@@ -652,6 +807,9 @@ func (r *RestrictedRoleDefinitionReconciler) rrdClearRoleRulesIfEmpty(
 	existing := &rbacv1.Role{}
 	if err := r.ownershipReader().Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, existing); err != nil {
 		return client.IgnoreNotFound(err)
+	}
+	if !hasOwnerRef(existing, rrd) {
+		return nil
 	}
 	if len(existing.Rules) == 0 {
 		return nil
@@ -667,9 +825,13 @@ func (r *RestrictedRoleDefinitionReconciler) rrdClearRoleRulesIfEmpty(
 func (r *RestrictedRoleDefinitionReconciler) rrdDeprovision(
 	ctx context.Context,
 	rrd *authorizationv1alpha1.RestrictedRoleDefinition,
+	deleteClient client.Client,
 ) error {
 	logger := log.FromContext(ctx)
 	logger.Info("deprovisioning RestrictedRoleDefinition", "name", rrd.Name)
+	if deleteClient == nil {
+		deleteClient = r.client
+	}
 
 	var role client.Object
 	switch rrd.Spec.TargetRole {
@@ -684,7 +846,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdDeprovision(
 		return fmt.Errorf("%w: got %q", ErrInvalidTargetRole, rrd.Spec.TargetRole)
 	}
 
-	if err := r.client.Get(ctx, client.ObjectKeyFromObject(role), role); err != nil {
+	if err := r.ownershipReader().Get(ctx, client.ObjectKeyFromObject(role), role); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil
 		}
@@ -703,7 +865,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdDeprovision(
 		return nil
 	}
 
-	if err := r.client.Delete(ctx, role); err != nil && !apierrors.IsNotFound(err) {
+	if err := deleteClient.Delete(ctx, role); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("delete %s %s: %w", rrd.Spec.TargetRole, rrd.Spec.TargetName, err)
 	}
 	switch rrd.Spec.TargetRole {
@@ -731,7 +893,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdHandleDeletion(
 	}
 
 	// Delete the managed role.
-	if err := r.rrdDeprovision(ctx, rrd); err != nil {
+	if err := r.rrdDeprovision(ctx, rrd, r.client); err != nil {
 		return fmt.Errorf("delete cleanup for RestrictedRoleDefinition %s: %w", rrd.Name, err)
 	}
 

@@ -33,6 +33,8 @@ metadata:
     t-caas.telekom.com/policy-tier: workload
 spec:
   appliesTo:
+    namespaces:
+      - team-alpha
     namespaceSelector:
       matchLabels:
         t-caas.telekom.com/tenant: "true"
@@ -54,6 +56,9 @@ spec:
       namespace: team-alpha
   bindingLimits:
     allowClusterRoleBindings: false
+    clusterRoleBindingLimits:
+      allowedRoleRefs:
+        - "t-caas-team-*"
     roleBindingLimits:
       allowedRoleRefs:
         - "t-caas-team-*"
@@ -105,6 +110,12 @@ metadata:
     t-caas.telekom.com/policy-tier: operator
 spec:
   appliesTo:
+    namespaces:
+      # Explicit global scope is required for ClusterRoles and ClusterRoleBindings.
+      - "*"
+      - platform-system
+      - team-alpha
+      - team-beta
     namespaceSelector:
       matchExpressions:
         - key: t-caas.telekom.com/managed-by
@@ -140,6 +151,12 @@ spec:
       allowedPrefixes:
         - "platform-"
         - "infra-"
+  roleLimits:
+    allowClusterRoles: true
+    forbiddenVerbs:
+      - "escalate"
+      - "impersonate"
+      - "bind"
 
 ---
 # -----------------------------------------------------------------------------
@@ -172,6 +189,10 @@ spec:
       namespace: ci-runners
   bindingLimits:
     allowClusterRoleBindings: false
+    clusterRoleBindingLimits:
+      allowedRoleRefs:
+        - "t-caas-ci-*"
+        - "t-caas-deploy-*"
     roleBindingLimits:
       allowedRoleRefs:
         - "t-caas-ci-*"
@@ -285,6 +306,8 @@ metadata:
 spec:
   appliesTo:
     namespaces:
+      # Explicit global scope is required for the cluster-scoped sample paths.
+      - "*"
       - sample-tenant-a
       - sample-tenant-b
   defaultAssignment:
@@ -371,6 +394,8 @@ metadata:
 spec:
   appliesTo:
     namespaces:
+      # Explicit global scope is required for this sample's ClusterRole path.
+      - "*"
       - sample-tenant-a
       - sample-tenant-b
   bindingLimits:

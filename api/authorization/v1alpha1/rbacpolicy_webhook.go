@@ -56,10 +56,16 @@ func (r *RBACPolicy) SetupWebhookWithManager(mgr ctrl.Manager) error {
 
 // ValidateCreate implements admission.Validator for RBACPolicy.
 func (v *RBACPolicyValidator) ValidateCreate(ctx context.Context, obj *RBACPolicy) (admission.Warnings, error) {
+	ctx, cancel := context.WithTimeout(ctx, WebhookCacheTimeout)
+	defer cancel()
+
 	logger := log.FromContext(ctx).WithName("rbacpolicy-webhook")
 	logger.V(1).Info("validating create", "name", obj.Name)
 
 	if err := validateRBACPolicySpec(obj); err != nil {
+		return nil, err
+	}
+	if err := v.validateDefaultAssignmentDoesNotOverlap(ctx, obj); err != nil {
 		return nil, err
 	}
 
@@ -68,10 +74,16 @@ func (v *RBACPolicyValidator) ValidateCreate(ctx context.Context, obj *RBACPolic
 
 // ValidateUpdate implements admission.Validator for RBACPolicy.
 func (v *RBACPolicyValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *RBACPolicy) (admission.Warnings, error) {
+	ctx, cancel := context.WithTimeout(ctx, WebhookCacheTimeout)
+	defer cancel()
+
 	logger := log.FromContext(ctx).WithName("rbacpolicy-webhook")
 	logger.V(1).Info("validating update", "name", newObj.Name)
 
 	if err := validateRBACPolicySpec(newObj); err != nil {
+		return nil, err
+	}
+	if err := v.validateDefaultAssignmentDoesNotOverlap(ctx, newObj); err != nil {
 		return nil, err
 	}
 
@@ -90,56 +102,169 @@ func (v *RBACPolicyValidator) ValidateDelete(ctx context.Context, obj *RBACPolic
 	// Use the non-cached API reader for all DELETE checks to avoid false negatives
 	// from a stale informer cache. A stale cache could show zero references when
 	// referencing resources actually exist, incorrectly allowing deletion.
-	reader := v.Reader
-	if reader == nil {
-		reader = v.Client
-	}
+	reader := v.defaultPolicyReader()
 
-	// List all RestrictedBindDefinitions and filter in-memory.
-	// We intentionally avoid using a field-selector here because the Reader is
-	// the non-cached API reader (mgr.GetAPIReader) which does not have the
-	// client-side field index registered; field selectors for CRD sub-fields are
-	// only available through the informer-backed cache.  The in-memory filter is
-	// correct and safe for the DELETE path because the resource count is bounded
-	// by the number of bindings in the cluster.
-	rbdList := &RestrictedBindDefinitionList{}
-	if err := reader.List(ctx, rbdList); err != nil {
+	hasRBDReference, err := policyHasRestrictedBindDefinitionReference(ctx, reader, obj.Name)
+	if err != nil {
 		logger.Error(err, "failed to list RestrictedBindDefinitions")
 		return nil, apierrors.NewInternalError(errors.New("unable to list RestrictedBindDefinitions"))
 	}
-	for i := range rbdList.Items {
-		if rbdList.Items[i].Spec.PolicyRef.Name == obj.Name {
-			return nil, apierrors.NewForbidden(
-				schema.GroupResource{Group: GroupVersion.Group, Resource: "rbacpolicies"},
-				obj.Name,
-				fmt.Errorf("cannot delete: RestrictedBindDefinition(s) still reference this policy"),
-			)
-		}
+	if hasRBDReference {
+		return nil, apierrors.NewForbidden(
+			schema.GroupResource{Group: GroupVersion.Group, Resource: "rbacpolicies"},
+			obj.Name,
+			fmt.Errorf("cannot delete: RestrictedBindDefinition(s) still reference this policy"),
+		)
 	}
 
-	// List all RestrictedRoleDefinitions and filter in-memory (same rationale).
-	rrdList := &RestrictedRoleDefinitionList{}
-	if err := reader.List(ctx, rrdList); err != nil {
+	hasRRDReference, err := policyHasRestrictedRoleDefinitionReference(ctx, reader, obj.Name)
+	if err != nil {
 		logger.Error(err, "failed to list RestrictedRoleDefinitions")
 		return nil, apierrors.NewInternalError(errors.New("unable to list RestrictedRoleDefinitions"))
 	}
-	for i := range rrdList.Items {
-		if rrdList.Items[i].Spec.PolicyRef.Name == obj.Name {
-			return nil, apierrors.NewForbidden(
-				schema.GroupResource{Group: GroupVersion.Group, Resource: "rbacpolicies"},
-				obj.Name,
-				fmt.Errorf("cannot delete: RestrictedRoleDefinition(s) still reference this policy"),
-			)
-		}
+	if hasRRDReference {
+		return nil, apierrors.NewForbidden(
+			schema.GroupResource{Group: GroupVersion.Group, Resource: "rbacpolicies"},
+			obj.Name,
+			fmt.Errorf("cannot delete: RestrictedRoleDefinition(s) still reference this policy"),
+		)
 	}
 
 	return nil, nil
+}
+
+func (v *RBACPolicyValidator) defaultPolicyReader() client.Reader {
+	if v.Reader != nil {
+		return v.Reader
+	}
+	return v.Client
+}
+
+func (v *RBACPolicyValidator) validateDefaultAssignmentDoesNotOverlap(ctx context.Context, obj *RBACPolicy) error {
+	if obj.Spec.DefaultAssignment == nil {
+		return nil
+	}
+
+	var allErrs field.ErrorList
+	reader := v.defaultPolicyReader()
+	continueToken := ""
+	for {
+		policyList := &RBACPolicyList{}
+		nextContinueToken, err := listAdmissionPage(ctx, reader, policyList, continueToken)
+		if err != nil {
+			log.FromContext(ctx).Error(err, "failed to list RBACPolicies for defaultAssignment overlap validation")
+			return apierrors.NewInternalError(errors.New("unable to validate default policy assignments"))
+		}
+		for i := range policyList.Items {
+			existing := &policyList.Items[i]
+			if existing.Name == obj.Name || existing.Spec.DefaultAssignment == nil {
+				continue
+			}
+			allErrs = append(allErrs, defaultAssignmentOverlapErrors(
+				obj.Spec.DefaultAssignment,
+				existing.Name,
+				existing.Spec.DefaultAssignment,
+				field.NewPath("spec", "defaultAssignment"),
+			)...)
+		}
+		if nextContinueToken == "" {
+			break
+		}
+		continueToken = nextContinueToken
+	}
+
+	if len(allErrs) > 0 {
+		return apierrors.NewInvalid(
+			schema.GroupKind{Group: GroupVersion.Group, Kind: "RBACPolicy"},
+			obj.Name, allErrs)
+	}
+	return nil
+}
+
+func defaultAssignmentOverlapErrors(current *DefaultPolicyAssignment, existingPolicy string, existing *DefaultPolicyAssignment, fldPath *field.Path) field.ErrorList {
+	var allErrs field.ErrorList
+
+	existingGroups := make(map[string]struct{}, len(existing.Groups))
+	for _, group := range existing.Groups {
+		existingGroups[group] = struct{}{}
+	}
+	for i, group := range current.Groups {
+		if _, ok := existingGroups[group]; ok {
+			allErrs = append(allErrs, field.Invalid(
+				fldPath.Child("groups").Index(i),
+				group,
+				fmt.Sprintf("group already assigned to default policy %q", existingPolicy),
+			))
+		}
+	}
+
+	existingServiceAccounts := make(map[SARef]struct{}, len(existing.ServiceAccounts))
+	for _, serviceAccount := range existing.ServiceAccounts {
+		existingServiceAccounts[serviceAccount] = struct{}{}
+	}
+	for i, serviceAccount := range current.ServiceAccounts {
+		if _, ok := existingServiceAccounts[serviceAccount]; ok {
+			allErrs = append(allErrs, field.Invalid(
+				fldPath.Child("serviceAccounts").Index(i),
+				serviceAccount,
+				fmt.Sprintf("serviceAccount already assigned to default policy %q", existingPolicy),
+			))
+		}
+	}
+
+	return allErrs
+}
+
+func policyHasRestrictedBindDefinitionReference(ctx context.Context, reader client.Reader, policyName string) (bool, error) {
+	continueToken := ""
+	for {
+		rbdList := &RestrictedBindDefinitionList{}
+		nextContinueToken, err := listAdmissionPage(ctx, reader, rbdList, continueToken)
+		if err != nil {
+			return false, err
+		}
+		for i := range rbdList.Items {
+			if rbdList.Items[i].Spec.PolicyRef.Name == policyName {
+				return true, nil
+			}
+		}
+		if nextContinueToken == "" {
+			return false, nil
+		}
+		continueToken = nextContinueToken
+	}
+}
+
+func policyHasRestrictedRoleDefinitionReference(ctx context.Context, reader client.Reader, policyName string) (bool, error) {
+	continueToken := ""
+	for {
+		rrdList := &RestrictedRoleDefinitionList{}
+		nextContinueToken, err := listAdmissionPage(ctx, reader, rrdList, continueToken)
+		if err != nil {
+			return false, err
+		}
+		for i := range rrdList.Items {
+			if rrdList.Items[i].Spec.PolicyRef.Name == policyName {
+				return true, nil
+			}
+		}
+		if nextContinueToken == "" {
+			return false, nil
+		}
+		continueToken = nextContinueToken
+	}
 }
 
 // validateRBACPolicySpec validates the semantic correctness of the RBACPolicy spec
 // beyond what CEL/kubebuilder markers can express.
 func validateRBACPolicySpec(obj *RBACPolicy) error {
 	var allErrs field.ErrorList
+
+	if obj.Spec.AppliesTo.NamespaceSelector == nil && len(obj.Spec.AppliesTo.Namespaces) == 0 {
+		allErrs = append(allErrs, field.Required(
+			field.NewPath("spec", "appliesTo"),
+			"appliesTo must specify at least namespaceSelector or namespaces"))
+	}
 
 	// Validate appliesTo label selector.
 	if obj.Spec.AppliesTo.NamespaceSelector != nil {

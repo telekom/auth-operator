@@ -3,7 +3,7 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     argocd.argoproj.io/sync-options: Delete=false
-    controller-gen.kubebuilder.io/version: v0.20.0
+    controller-gen.kubebuilder.io/version: v0.21.0
     helm.sh/resource-policy: keep
   name: webhookauthorizers.authorization.t-caas.telekom.com
 spec:
@@ -64,8 +64,10 @@ spec:
                       maxItems: 256
                       type: array
                     namespace:
-                      description: Namespace is the requesting user namespace in case
-                        the requesting user is a ServiceAccount.
+                      description: |-
+                        Namespace scopes User to a Kubernetes ServiceAccount namespace. When set,
+                        User may be either the short ServiceAccount name or the full
+                        system:serviceaccount:<namespace>:<name> username.
                       maxLength: 253
                       type: string
                     user:
@@ -77,8 +79,9 @@ spec:
                 maxItems: 256
                 type: array
               deniedPrincipals:
-                description: DeniedPrincipals is a slice of principals this authorizer
-                  should deny.
+                description: |-
+                  DeniedPrincipals is a slice of principals this authorizer should deny
+                  when the request also matches ResourceRules or NonResourceRules.
                 items:
                   description: Principal represents a requesting user or service account
                     identity.
@@ -91,8 +94,10 @@ spec:
                       maxItems: 256
                       type: array
                     namespace:
-                      description: Namespace is the requesting user namespace in case
-                        the requesting user is a ServiceAccount.
+                      description: |-
+                        Namespace scopes User to a Kubernetes ServiceAccount namespace. When set,
+                        User may be either the short ServiceAccount name or the full
+                        system:serviceaccount:<namespace>:<name> username.
                       maxLength: 253
                       type: string
                     user:

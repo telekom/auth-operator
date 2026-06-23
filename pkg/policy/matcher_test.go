@@ -4,7 +4,14 @@
 
 package policy
 
-import "testing"
+import (
+	"context"
+	"testing"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+)
 
 func TestMatchesWildcard(t *testing.T) {
 	tests := []struct {
@@ -113,6 +120,96 @@ func TestContainsStringOrWildcard(t *testing.T) {
 			got := ContainsStringOrWildcard(tt.slice, tt.value)
 			if got != tt.want {
 				t.Errorf("ContainsStringOrWildcard(%v, %q) = %v, want %v", tt.slice, tt.value, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNamespaceInScope(t *testing.T) {
+	tests := []struct {
+		name      string
+		scope     authorizationv1alpha1.PolicyScope
+		namespace string
+		lg        LabelGetter
+		want      bool
+	}{
+		{
+			name:      "empty scope fails closed",
+			scope:     authorizationv1alpha1.PolicyScope{},
+			namespace: "team-a",
+			want:      false,
+		},
+		{
+			name: "explicit namespace",
+			scope: authorizationv1alpha1.PolicyScope{
+				Namespaces: []string{"team-a"},
+			},
+			namespace: "team-a",
+			want:      true,
+		},
+		{
+			name: "explicit wildcard",
+			scope: authorizationv1alpha1.PolicyScope{
+				Namespaces: []string{allNamespacesScope},
+			},
+			namespace: "any-namespace",
+			want:      true,
+		},
+		{
+			name: "wildcard with explicit namespace does not match every namespace",
+			scope: authorizationv1alpha1.PolicyScope{
+				Namespaces: []string{allNamespacesScope, "team-a"},
+			},
+			namespace: "team-b",
+			want:      false,
+		},
+		{
+			name: "wildcard with explicit namespace still matches explicit namespace",
+			scope: authorizationv1alpha1.PolicyScope{
+				Namespaces: []string{allNamespacesScope, "team-a"},
+			},
+			namespace: "team-a",
+			want:      true,
+		},
+		{
+			name: "wildcard with selector is bounded by selector",
+			scope: authorizationv1alpha1.PolicyScope{
+				Namespaces:        []string{allNamespacesScope},
+				NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "a"}},
+			},
+			namespace: "team-b",
+			lg: &fakeLabelGetter{namespaces: map[string]map[string]string{
+				"team-b": {"team": "b"},
+			}},
+			want: false,
+		},
+		{
+			name: "wildcard with selector matches selector namespace",
+			scope: authorizationv1alpha1.PolicyScope{
+				Namespaces:        []string{allNamespacesScope},
+				NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "a"}},
+			},
+			namespace: "team-a",
+			lg: &fakeLabelGetter{namespaces: map[string]map[string]string{
+				"team-a": {"team": "a"},
+			}},
+			want: true,
+		},
+		{
+			name: "selector without label getter fails closed",
+			scope: authorizationv1alpha1.PolicyScope{
+				NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "a"}},
+			},
+			namespace: "team-a",
+			want:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := namespaceInScope(context.Background(), tt.scope, tt.namespace, tt.lg)
+			if got != tt.want {
+				t.Errorf("namespaceInScope() = %v, want %v", got, tt.want)
 			}
 		})
 	}

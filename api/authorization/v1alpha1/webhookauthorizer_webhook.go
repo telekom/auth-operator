@@ -7,6 +7,7 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -106,6 +107,13 @@ func validateWebhookAuthorizer(wa *WebhookAuthorizer) (admission.Warnings, error
 			"spec.allowedPrincipals is empty; no requests will be allowed by this authorizer")
 	}
 
+	if err := validatePrincipalScopes("allowedPrincipals", wa.Spec.AllowedPrincipals); err != nil {
+		return nil, err
+	}
+	if err := validatePrincipalScopes("deniedPrincipals", wa.Spec.DeniedPrincipals); err != nil {
+		return nil, err
+	}
+
 	// Warn if denied and allowed principals overlap.
 	if overlaps := findPrincipalOverlaps(wa.Spec.AllowedPrincipals, wa.Spec.DeniedPrincipals); len(overlaps) > 0 {
 		for _, overlap := range overlaps {
@@ -120,13 +128,58 @@ func validateWebhookAuthorizer(wa *WebhookAuthorizer) (admission.Warnings, error
 	warnings = append(warnings, findNeverMatchingPrincipals("deniedPrincipals", wa.Spec.DeniedPrincipals)...)
 
 	// Note on spec.allowedPrincipals[].namespace (see Issue #96):
-	// The Namespace field on Principal is used only as a namespace filter for
-	// ServiceAccounts and is not a full ServiceAccount reference. The
-	// system:serviceaccount:<namespace>:<name> pattern applies to the User
-	// field, not to Namespace. For this reason we intentionally do not enforce
-	// any ServiceAccount-style naming pattern on Principal.Namespace here.
+	// The Namespace field scopes a principal to a ServiceAccount identity.
+	// User may be either the short ServiceAccount name or the full
+	// system:serviceaccount:<namespace>:<name> username; when the full username
+	// is used, its namespace must match Principal.Namespace.
 
 	return warnings, nil
+}
+
+func validatePrincipalScopes(fieldName string, principals []Principal) error {
+	for i, p := range principals {
+		if p.Namespace == "" {
+			continue
+		}
+		if len(p.Groups) > 0 {
+			return apierrors.NewBadRequest(
+				fmt.Sprintf("spec.%s[%d].namespace cannot be combined with groups because groups are not namespaced", fieldName, i))
+		}
+		if p.User == "" {
+			return apierrors.NewBadRequest(
+				fmt.Sprintf("spec.%s[%d].namespace requires spec.%s[%d].user because namespace-scoped principals only match ServiceAccounts", fieldName, i, fieldName, i))
+		}
+		if saNamespace, _, ok := parseServiceAccountPrincipalUser(p.User); ok {
+			if saNamespace != p.Namespace {
+				return apierrors.NewBadRequest(
+					fmt.Sprintf("spec.%s[%d].namespace %q must match ServiceAccount user namespace %q", fieldName, i, p.Namespace, saNamespace))
+			}
+			continue
+		}
+		if strings.HasPrefix(p.User, "system:serviceaccount:") {
+			return apierrors.NewBadRequest(
+				fmt.Sprintf("spec.%s[%d].user must be a ServiceAccount name or system:serviceaccount:<namespace>:<name>", fieldName, i))
+		}
+	}
+	return nil
+}
+
+func serviceAccountPrincipalKey(p Principal) (string, bool) {
+	if p.Namespace == "" || p.User == "" || len(p.Groups) > 0 {
+		return "", false
+	}
+	if namespace, name, ok := parseServiceAccountPrincipalUser(p.User); ok {
+		return namespace + "/" + name, true
+	}
+	return p.Namespace + "/" + p.User, true
+}
+
+func parseServiceAccountPrincipalUser(user string) (namespace, name string, ok bool) {
+	parts := strings.Split(user, ":")
+	if len(parts) != 4 || parts[0] != "system" || parts[1] != "serviceaccount" || parts[2] == "" || parts[3] == "" {
+		return "", "", false
+	}
+	return parts[2], parts[3], true
 }
 
 // findNeverMatchingPrincipals returns warnings for principals that specify a
@@ -143,15 +196,20 @@ func findNeverMatchingPrincipals(fieldName string, principals []Principal) admis
 }
 
 // findPrincipalOverlaps returns all overlapping users or groups between
-// allowed and denied principal lists. User overlap keys are NOT
-// namespace-qualified because the runtime matching logic
-// (principalMatches) checks principal.User == SAR.User directly,
-// ignoring the Namespace field on the Principal struct.
+// allowed and denied principal lists. Namespace-scoped principals are treated
+// as ServiceAccount identities and are separate from plain users and groups.
 func findPrincipalOverlaps(allowed, denied []Principal) []string {
 	allowedUsers := make(map[string]struct{})
 	allowedGroups := make(map[string]struct{})
+	allowedServiceAccounts := make(map[string]struct{})
 
 	for _, p := range allowed {
+		if p.Namespace != "" {
+			if key, ok := serviceAccountPrincipalKey(p); ok {
+				allowedServiceAccounts[key] = struct{}{}
+			}
+			continue
+		}
 		if p.User != "" {
 			allowedUsers[p.User] = struct{}{}
 		}
@@ -162,8 +220,20 @@ func findPrincipalOverlaps(allowed, denied []Principal) []string {
 
 	seenUsers := make(map[string]struct{})
 	seenGroups := make(map[string]struct{})
+	seenServiceAccounts := make(map[string]struct{})
 	var overlaps []string
 	for _, p := range denied {
+		if p.Namespace != "" {
+			if key, keyOK := serviceAccountPrincipalKey(p); keyOK {
+				if _, ok := allowedServiceAccounts[key]; ok {
+					if _, dup := seenServiceAccounts[key]; !dup {
+						seenServiceAccounts[key] = struct{}{}
+						overlaps = append(overlaps, "serviceaccount:"+key)
+					}
+				}
+			}
+			continue
+		}
 		if p.User != "" {
 			if _, ok := allowedUsers[p.User]; ok {
 				if _, dup := seenUsers[p.User]; !dup {

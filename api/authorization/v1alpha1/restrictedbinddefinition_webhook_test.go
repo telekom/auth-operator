@@ -172,6 +172,7 @@ var _ = Describe("RestrictedBindDefinition Webhook", func() {
 			err := k8sClient.Create(ctx, rbd)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("namespaceSelector"))
+			Expect(err.Error()).To(ContainSubstring("spec.roleBindings[0].namespaceSelector[0]"))
 		})
 	})
 
@@ -212,6 +213,51 @@ var _ = Describe("RestrictedBindDefinition Webhook", func() {
 			err := k8sClient.Create(ctx, rbd)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("at least one subject must be specified"))
+		})
+
+		It("Should deny a RestrictedBindDefinition with an empty ClusterRole ref name", func() {
+			rbd := &RestrictedBindDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rbd-cel-empty-cr",
+				},
+				Spec: RestrictedBindDefinitionSpec{
+					PolicyRef:  RBACPolicyReference{Name: policy.Name},
+					TargetName: "test-rbd-cel-empty-cr",
+					Subjects: []rbacv1.Subject{
+						{Kind: rbacv1.GroupKind, APIGroup: rbacv1.GroupName, Name: "test-group"},
+					},
+					ClusterRoleBindings: &ClusterBinding{
+						ClusterRoleRefs: []string{""},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, rbd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("clusterRoleRefs[0]"))
+		})
+
+		It("Should deny a RestrictedBindDefinition with an empty Role ref name", func() {
+			rbd := &RestrictedBindDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rbd-cel-empty-role",
+				},
+				Spec: RestrictedBindDefinitionSpec{
+					PolicyRef:  RBACPolicyReference{Name: policy.Name},
+					TargetName: "test-rbd-cel-empty-role",
+					Subjects: []rbacv1.Subject{
+						{Kind: rbacv1.GroupKind, APIGroup: rbacv1.GroupName, Name: "test-group"},
+					},
+					RoleBindings: []NamespaceBinding{
+						{
+							Namespace: "default",
+							RoleRefs:  []string{""},
+						},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, rbd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("roleRefs[0]"))
 		})
 
 		It("Should deny a RestrictedBindDefinition with ServiceAccount subject missing namespace", func() {
@@ -409,7 +455,7 @@ var _ = Describe("RestrictedBindDefinition Webhook", func() {
 
 	Context("When deleting RestrictedBindDefinition under Validating Webhook", func() {
 
-		It("Should always allow delete", func() {
+		It("Should allow delete when the selected policy has no default assignment", func() {
 			rbd := &RestrictedBindDefinition{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-rbd-delete",

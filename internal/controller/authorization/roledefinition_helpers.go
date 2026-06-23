@@ -423,6 +423,10 @@ func (r *RoleDefinitionReconciler) checkRoleOwnership(
 		return fmt.Errorf("check existing %s %s: %w", roleDefinition.Spec.TargetRole, key, err)
 	}
 
+	if hasOwnerRef(existing, roleDefinition) {
+		return nil
+	}
+
 	for _, ref := range existing.GetOwnerReferences() {
 		if ref.Controller != nil && *ref.Controller && ref.UID != roleDefinition.UID {
 			logger.Info("Target role is already controlled by a different owner",
@@ -437,7 +441,17 @@ func (r *RoleDefinitionReconciler) checkRoleOwnership(
 		}
 	}
 
-	return nil
+	logger.Info("Target role already exists without this RoleDefinition owner",
+		"roleName", roleDefinition.Spec.TargetName,
+		"targetRole", roleDefinition.Spec.TargetRole,
+		"owner", roleDefinition.GetName(),
+		"ownerUID", roleDefinition.GetUID())
+	r.recorder.Eventf(roleDefinition, nil, corev1.EventTypeWarning,
+		authorizationv1alpha1.EventReasonOwnership, authorizationv1alpha1.EventActionReconcile,
+		"Target %s %s already exists and is not owned by RoleDefinition %s (UID: %s)",
+		roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetName, roleDefinition.GetName(), roleDefinition.GetUID())
+	return fmt.Errorf("target %s %s already exists and is not owned by RoleDefinition %s (UID: %s)",
+		roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetName, roleDefinition.GetName(), roleDefinition.GetUID())
 }
 
 // clearAggregationRuleIfSet removes the aggregationRule from an existing ClusterRole using a

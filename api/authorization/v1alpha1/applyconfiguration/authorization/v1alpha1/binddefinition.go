@@ -18,8 +18,11 @@ limitations under the License.
 package v1alpha1
 
 import (
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	internal "github.com/telekom/auth-operator/api/authorization/v1alpha1/applyconfiguration/internal"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
+	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	v1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
@@ -36,13 +39,52 @@ type BindDefinitionApplyConfiguration struct {
 
 // BindDefinition constructs a declarative configuration of the BindDefinition type for use with
 // apply.
-func BindDefinition(name, namespace string) *BindDefinitionApplyConfiguration {
+func BindDefinition(name string) *BindDefinitionApplyConfiguration {
 	b := &BindDefinitionApplyConfiguration{}
 	b.WithName(name)
-	b.WithNamespace(namespace)
 	b.WithKind("BindDefinition")
 	b.WithAPIVersion("authorization.t-caas.telekom.com/v1alpha1")
 	return b
+}
+
+// ExtractBindDefinitionFrom extracts the applied configuration owned by fieldManager from
+// bindDefinition for the specified subresource. Pass an empty string for subresource to extract
+// the main resource. Common subresources include "status", "scale", etc.
+// bindDefinition must be a unmodified BindDefinition API object that was retrieved from the Kubernetes API.
+// ExtractBindDefinitionFrom provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractBindDefinitionFrom(bindDefinition *authorizationv1alpha1.BindDefinition, fieldManager string, subresource string) (*BindDefinitionApplyConfiguration, error) {
+	b := &BindDefinitionApplyConfiguration{}
+	err := managedfields.ExtractInto(bindDefinition, internal.Parser().Type("com.github.telekom.auth-operator.api.authorization.v1alpha1.BindDefinition"), fieldManager, b, subresource)
+	if err != nil {
+		return nil, err
+	}
+	b.WithName(bindDefinition.Name)
+
+	b.WithKind("BindDefinition")
+	b.WithAPIVersion("authorization.t-caas.telekom.com/v1alpha1")
+	return b, nil
+}
+
+// ExtractBindDefinition extracts the applied configuration owned by fieldManager from
+// bindDefinition. If no managedFields are found in bindDefinition for fieldManager, a
+// BindDefinitionApplyConfiguration is returned with only the Name, Namespace (if applicable),
+// APIVersion and Kind populated. It is possible that no managed fields were found for because other
+// field managers have taken ownership of all the fields previously owned by fieldManager, or because
+// the fieldManager never owned fields any fields.
+// bindDefinition must be a unmodified BindDefinition API object that was retrieved from the Kubernetes API.
+// ExtractBindDefinition provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractBindDefinition(bindDefinition *authorizationv1alpha1.BindDefinition, fieldManager string) (*BindDefinitionApplyConfiguration, error) {
+	return ExtractBindDefinitionFrom(bindDefinition, fieldManager, "")
+}
+
+// ExtractBindDefinitionStatus extracts the applied configuration owned by fieldManager from
+// bindDefinition for the status subresource.
+func ExtractBindDefinitionStatus(bindDefinition *authorizationv1alpha1.BindDefinition, fieldManager string) (*BindDefinitionApplyConfiguration, error) {
+	return ExtractBindDefinitionFrom(bindDefinition, fieldManager, "status")
 }
 
 func (b BindDefinitionApplyConfiguration) IsApplyConfiguration() {}

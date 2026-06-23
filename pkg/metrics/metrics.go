@@ -17,6 +17,17 @@ import (
 const (
 	// Namespace is the Prometheus metrics namespace for auth-operator.
 	Namespace = "auth_operator"
+
+	labelBindDefinition = "binddefinition"
+	labelAuthorizer     = "authorizer"
+	labelController     = "controller"
+	labelDecision       = "decision"
+	labelErrorType      = "error_type"
+	labelName           = "name"
+	labelOperation      = "operation"
+	labelResourceType   = "resource_type"
+	labelResult         = "result"
+	labelWebhook        = "webhook"
 )
 
 var (
@@ -27,7 +38,7 @@ var (
 			Name:      "reconcile_total",
 			Help:      "Total number of reconciliations per controller",
 		},
-		[]string{"controller", "result"},
+		[]string{labelController, labelResult},
 	)
 
 	// ReconcileDuration measures the duration of reconciliations in seconds.
@@ -38,7 +49,7 @@ var (
 			Help:      "Duration of reconciliations per controller in seconds",
 			Buckets:   prometheus.DefBuckets,
 		},
-		[]string{"controller"},
+		[]string{labelController},
 	)
 
 	// ReconcileErrors counts the total number of reconciliation errors per controller.
@@ -48,7 +59,7 @@ var (
 			Name:      "reconcile_errors_total",
 			Help:      "Total number of reconciliation errors per controller",
 		},
-		[]string{"controller", "error_type"},
+		[]string{labelController, labelErrorType},
 	)
 
 	// APIDiscoveryDuration measures the duration of API discovery operations in seconds.
@@ -77,7 +88,7 @@ var (
 			Name:      "rbac_resources_deleted_total",
 			Help:      "Total number of RBAC resources deleted",
 		},
-		[]string{"resource_type"},
+		[]string{labelResourceType},
 	)
 
 	// RBACResourcesApplied counts the total number of RBAC resources applied (created or updated)
@@ -89,7 +100,7 @@ var (
 			Name:      "rbac_resources_applied_total",
 			Help:      "Total number of RBAC resources applied (created or updated via SSA)",
 		},
-		[]string{"resource_type"},
+		[]string{labelResourceType},
 	)
 
 	// RBACResourcesSkipped counts the total number of RBAC resources where SSA
@@ -101,7 +112,7 @@ var (
 			Name:      "rbac_resources_skipped_total",
 			Help:      "Total number of RBAC resources skipped (already up-to-date, no SSA patch sent)",
 		},
-		[]string{"resource_type"},
+		[]string{labelResourceType},
 	)
 
 	// StatusResourcesSkipped counts the total number of status subresource
@@ -114,7 +125,7 @@ var (
 			Name:      "status_resources_skipped_total",
 			Help:      "Total number of status updates skipped (already up-to-date, no SSA patch sent)",
 		},
-		[]string{"resource_type"},
+		[]string{labelResourceType},
 	)
 
 	// RoleRefsMissing tracks the number of BindDefinition or RestrictedBindDefinition
@@ -128,7 +139,7 @@ var (
 			Name:      "role_refs_missing",
 			Help:      "Number of missing role references per binding source resource (0 = all refs valid)",
 		},
-		[]string{"binddefinition"},
+		[]string{labelBindDefinition},
 	)
 
 	// NamespacesActive tracks the number of active (non-terminating) namespaces
@@ -141,7 +152,7 @@ var (
 			Name:      "namespaces_active",
 			Help:      "Number of active namespaces matching selectors per BindDefinition",
 		},
-		[]string{"binddefinition"},
+		[]string{labelBindDefinition},
 	)
 
 	// ManagedResources tracks the desired/applied count of RBAC resources per
@@ -155,7 +166,7 @@ var (
 			Name:      "managed_resources",
 			Help:      "Desired/applied count of RBAC resources from last reconciliation, by controller, type, and source resource name",
 		},
-		[]string{"controller", "resource_type", "name"},
+		[]string{labelController, labelResourceType, labelName},
 	)
 
 	// WebhookRequestsTotal counts the total number of webhook admission requests.
@@ -165,7 +176,7 @@ var (
 			Name:      "webhook_requests_total",
 			Help:      "Total number of webhook admission requests",
 		},
-		[]string{"webhook", "operation", "result"},
+		[]string{labelWebhook, labelOperation, labelResult},
 	)
 
 	// ServiceAccountSkippedPreExisting counts ServiceAccounts that were
@@ -177,7 +188,7 @@ var (
 			Name:      "serviceaccount_skipped_preexisting_total",
 			Help:      "Total number of pre-existing ServiceAccounts skipped (not adopted) per BindDefinition",
 		},
-		[]string{"binddefinition"},
+		[]string{labelBindDefinition},
 	)
 
 	// ExternalSAsReferenced tracks the number of external (pre-existing) ServiceAccounts
@@ -188,7 +199,7 @@ var (
 			Name:      "external_serviceaccounts_referenced",
 			Help:      "Number of external ServiceAccounts referenced per BindDefinition",
 		},
-		[]string{"binddefinition"},
+		[]string{labelBindDefinition},
 	)
 
 	// AuthorizerRequestsTotal counts the total number of SubjectAccessReview
@@ -200,7 +211,7 @@ var (
 			Name:      "authorizer_requests_total",
 			Help:      "Total SubjectAccessReview requests processed by the WebhookAuthorizer",
 		},
-		[]string{"decision", "authorizer"},
+		[]string{labelDecision, labelAuthorizer},
 	)
 
 	// AuthorizerRequestDuration measures the end-to-end latency of
@@ -213,7 +224,7 @@ var (
 			// Tuned for sub-ms in-memory evaluations (informer cache, not apiserver round-trips).
 			Buckets: []float64{0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 5},
 		},
-		[]string{"decision"},
+		[]string{labelDecision},
 	)
 
 	// AuthorizerActiveRules is a gauge tracking the total number of active
@@ -242,7 +253,7 @@ var (
 			Name:      "authorizer_denied_principal_hits_total",
 			Help:      "Total requests denied due to DeniedPrincipals match",
 		},
-		[]string{"authorizer"},
+		[]string{labelAuthorizer},
 	)
 
 	// AuthorizerRateLimitedTotal counts the number of SubjectAccessReview
@@ -290,7 +301,7 @@ var (
 			Name:      "policy_violations_active",
 			Help:      "Total number of active policy violations across restricted resources, per controller (0 = compliant)",
 		},
-		[]string{"controller"},
+		[]string{labelController},
 	)
 
 	policyViolationsMu sync.Mutex

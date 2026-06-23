@@ -58,6 +58,11 @@ func (r PatchApplyResult) String() string {
 	}
 }
 
+func applyOptionsForceOwnership(opts []client.ApplyOption) bool {
+	applyOpts := (&client.ApplyOptions{}).ApplyOptions(opts)
+	return applyOpts.Force != nil && *applyOpts.Force
+}
+
 // PatchApplyClusterRole reads the current ClusterRole from cache, compares it to
 // the desired ApplyConfiguration, and only sends an SSA Patch if there is a diff.
 // Returns the result (skipped/created/patched) and any error.
@@ -94,7 +99,7 @@ func PatchApplyClusterRole(
 	}
 
 	// Compare managed fields: labels, annotations, rules.
-	if clusterRoleMatches(existing, ac) {
+	if clusterRoleMatches(existing, ac) && !applyOptionsForceOwnership(applyOpts) {
 		logger.V(3).Info("ClusterRole unchanged, skipping SSA apply",
 			"clusterRole", *ac.Name)
 		return PatchApplyResultSkipped, nil
@@ -141,7 +146,7 @@ func PatchApplyRole(
 		return 0, fmt.Errorf("get Role %s/%s: %w", *ac.Namespace, *ac.Name, err)
 	}
 
-	if roleMatches(existing, ac) {
+	if roleMatches(existing, ac) && !applyOptionsForceOwnership(applyOpts) {
 		logger.V(3).Info("Role unchanged, skipping SSA apply",
 			"role", *ac.Name, "namespace", *ac.Namespace)
 		return PatchApplyResultSkipped, nil
@@ -185,7 +190,7 @@ func PatchApplyClusterRoleBinding(
 		return 0, fmt.Errorf("get ClusterRoleBinding %s: %w", *ac.Name, err)
 	}
 
-	if clusterRoleBindingMatches(existing, ac) {
+	if clusterRoleBindingMatches(existing, ac) && !applyOptionsForceOwnership(applyOpts) {
 		logger.V(3).Info("ClusterRoleBinding unchanged, skipping SSA apply",
 			"clusterRoleBinding", *ac.Name)
 		return PatchApplyResultSkipped, nil
@@ -232,7 +237,7 @@ func PatchApplyRoleBinding(
 		return 0, fmt.Errorf("get RoleBinding %s/%s: %w", *ac.Namespace, *ac.Name, err)
 	}
 
-	if roleBindingMatches(existing, ac) {
+	if roleBindingMatches(existing, ac) && !applyOptionsForceOwnership(applyOpts) {
 		logger.V(3).Info("RoleBinding unchanged, skipping SSA apply",
 			"roleBinding", *ac.Name, "namespace", *ac.Namespace)
 		return PatchApplyResultSkipped, nil
@@ -246,12 +251,9 @@ func PatchApplyRoleBinding(
 
 // PatchApplyServiceAccount reads the current SA from cache, compares it to the
 // desired ApplyConfiguration, and only sends an SSA Patch if there is a diff.
-// ForceOwnership is intentionally used on the patch path and create-conflict
-// retry because multiple BindDefinitions may co-manage the same ServiceAccount
-// through distinct field managers. The ApplyConfiguration is limited to the
-// fields this operator manages, so conflicts are resolved only for that explicit
-// ServiceAccount contract instead of making all patch helpers force ownership by
-// default.
+// Existing ServiceAccounts are patched without ForceOwnership so two
+// BindDefinitions that share an SA cannot silently take over sensitive fields
+// such as automountServiceAccountToken from each other.
 func PatchApplyServiceAccount(
 	ctx context.Context,
 	c client.Client,
@@ -273,21 +275,17 @@ func PatchApplyServiceAccount(
 
 	logger := log.FromContext(ctx)
 
-	applyOptsForCreate := []client.ApplyOption{client.FieldOwner(fieldOwner)}
-	applyOptsForPatch := append(applyOptsForCreate, client.ForceOwnership)
+	applyOpts := []client.ApplyOption{client.FieldOwner(fieldOwner)}
 
 	existing := &corev1.ServiceAccount{}
 	err := c.Get(ctx, types.NamespacedName{Name: *ac.Name, Namespace: *ac.Namespace}, existing)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			if applyErr := c.Apply(ctx, ac, applyOptsForCreate...); applyErr != nil {
+			if applyErr := c.Apply(ctx, ac, applyOpts...); applyErr != nil {
 				if apierrors.IsConflict(applyErr) {
-					logger.V(2).Info("ServiceAccount appeared during create apply, retrying forced patch",
+					logger.V(2).Info("ServiceAccount appeared during create apply; requeue required for fresh ownership classification",
 						"serviceAccount", *ac.Name, "namespace", *ac.Namespace)
-					if retryErr := c.Apply(ctx, ac, applyOptsForPatch...); retryErr != nil {
-						return 0, fmt.Errorf("patch ServiceAccount %s/%s after create conflict: %w", *ac.Namespace, *ac.Name, retryErr)
-					}
-					return PatchApplyResultPatched, nil
+					return 0, fmt.Errorf("create ServiceAccount %s/%s conflicted after preflight: %w", *ac.Namespace, *ac.Name, applyErr)
 				}
 				return 0, fmt.Errorf("create ServiceAccount %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 			}
@@ -302,7 +300,7 @@ func PatchApplyServiceAccount(
 		return PatchApplyResultSkipped, nil
 	}
 
-	if applyErr := c.Apply(ctx, ac, applyOptsForPatch...); applyErr != nil {
+	if applyErr := c.Apply(ctx, ac, applyOpts...); applyErr != nil {
 		return 0, fmt.Errorf("patch ServiceAccount %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 	}
 	return PatchApplyResultPatched, nil

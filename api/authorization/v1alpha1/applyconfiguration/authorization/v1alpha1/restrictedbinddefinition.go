@@ -18,8 +18,11 @@ limitations under the License.
 package v1alpha1
 
 import (
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	internal "github.com/telekom/auth-operator/api/authorization/v1alpha1/applyconfiguration/internal"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
+	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	v1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
@@ -38,13 +41,52 @@ type RestrictedBindDefinitionApplyConfiguration struct {
 
 // RestrictedBindDefinition constructs a declarative configuration of the RestrictedBindDefinition type for use with
 // apply.
-func RestrictedBindDefinition(name, namespace string) *RestrictedBindDefinitionApplyConfiguration {
+func RestrictedBindDefinition(name string) *RestrictedBindDefinitionApplyConfiguration {
 	b := &RestrictedBindDefinitionApplyConfiguration{}
 	b.WithName(name)
-	b.WithNamespace(namespace)
 	b.WithKind("RestrictedBindDefinition")
 	b.WithAPIVersion("authorization.t-caas.telekom.com/v1alpha1")
 	return b
+}
+
+// ExtractRestrictedBindDefinitionFrom extracts the applied configuration owned by fieldManager from
+// restrictedBindDefinition for the specified subresource. Pass an empty string for subresource to extract
+// the main resource. Common subresources include "status", "scale", etc.
+// restrictedBindDefinition must be a unmodified RestrictedBindDefinition API object that was retrieved from the Kubernetes API.
+// ExtractRestrictedBindDefinitionFrom provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractRestrictedBindDefinitionFrom(restrictedBindDefinition *authorizationv1alpha1.RestrictedBindDefinition, fieldManager string, subresource string) (*RestrictedBindDefinitionApplyConfiguration, error) {
+	b := &RestrictedBindDefinitionApplyConfiguration{}
+	err := managedfields.ExtractInto(restrictedBindDefinition, internal.Parser().Type("com.github.telekom.auth-operator.api.authorization.v1alpha1.RestrictedBindDefinition"), fieldManager, b, subresource)
+	if err != nil {
+		return nil, err
+	}
+	b.WithName(restrictedBindDefinition.Name)
+
+	b.WithKind("RestrictedBindDefinition")
+	b.WithAPIVersion("authorization.t-caas.telekom.com/v1alpha1")
+	return b, nil
+}
+
+// ExtractRestrictedBindDefinition extracts the applied configuration owned by fieldManager from
+// restrictedBindDefinition. If no managedFields are found in restrictedBindDefinition for fieldManager, a
+// RestrictedBindDefinitionApplyConfiguration is returned with only the Name, Namespace (if applicable),
+// APIVersion and Kind populated. It is possible that no managed fields were found for because other
+// field managers have taken ownership of all the fields previously owned by fieldManager, or because
+// the fieldManager never owned fields any fields.
+// restrictedBindDefinition must be a unmodified RestrictedBindDefinition API object that was retrieved from the Kubernetes API.
+// ExtractRestrictedBindDefinition provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractRestrictedBindDefinition(restrictedBindDefinition *authorizationv1alpha1.RestrictedBindDefinition, fieldManager string) (*RestrictedBindDefinitionApplyConfiguration, error) {
+	return ExtractRestrictedBindDefinitionFrom(restrictedBindDefinition, fieldManager, "")
+}
+
+// ExtractRestrictedBindDefinitionStatus extracts the applied configuration owned by fieldManager from
+// restrictedBindDefinition for the status subresource.
+func ExtractRestrictedBindDefinitionStatus(restrictedBindDefinition *authorizationv1alpha1.RestrictedBindDefinition, fieldManager string) (*RestrictedBindDefinitionApplyConfiguration, error) {
+	return ExtractRestrictedBindDefinitionFrom(restrictedBindDefinition, fieldManager, "status")
 }
 
 func (b RestrictedBindDefinitionApplyConfiguration) IsApplyConfiguration() {}

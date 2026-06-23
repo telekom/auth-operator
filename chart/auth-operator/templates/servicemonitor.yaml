@@ -1,4 +1,7 @@
 {{- if .Values.metrics.serviceMonitor.enabled }}
+{{- if and .Values.metrics.auth.enabled (not .Values.metrics.serviceMonitor.tlsConfig.insecureSkipVerify) (empty .Values.metrics.serviceMonitor.tlsConfig.caFile) }}
+{{- fail "metrics.serviceMonitor.tlsConfig.caFile or metrics.serviceMonitor.tlsConfig.insecureSkipVerify=true is required when metrics.auth.enabled=true and metrics.serviceMonitor.enabled=true" }}
+{{- end }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:

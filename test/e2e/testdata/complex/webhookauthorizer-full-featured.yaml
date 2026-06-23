@@ -74,7 +74,6 @@ spec:
         - platform-operators
     - groups:
         - developers
-      namespace: dev-team
   # Deny these principals (takes precedence over allow)
   deniedPrincipals:
     - user: blocked-user@example.com

@@ -6,6 +6,7 @@ package authorization
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -50,10 +51,10 @@ import (
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=rbacpolicies,verbs=get;list;watch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,verbs=get;list;watch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,verbs=get;list;watch;create;patch;delete
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;patch;delete
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=create;delete;get;list;patch;update;watch
+// +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=create;delete;get;list;patch;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch;update
 // +kubebuilder:rbac:groups="events.k8s.io",resources=events,verbs=create;patch;update
 
@@ -108,6 +109,13 @@ func (r *RestrictedBindDefinitionReconciler) SetupWithManager(mgr ctrl.Manager, 
 			builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Owns(&rbacv1.ClusterRoleBinding{}).
 		Owns(&corev1.ServiceAccount{}).
+		// Re-reconcile when external ServiceAccount subjects are created,
+		// deleted, or change ownership. Owned ServiceAccounts are already
+		// covered by Owns(), but externally referenced subjects also affect the
+		// effective subjects written to RoleBindings and ClusterRoleBindings.
+		Watches(&corev1.ServiceAccount{},
+			handler.EnqueueRequestsFromMapFunc(r.serviceAccountToRestrictedBindDefinitions),
+		).
 		Watches(
 			&rbacv1.RoleBinding{},
 			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(),
@@ -158,10 +166,17 @@ func (r *RestrictedBindDefinitionReconciler) rbdEvaluatePolicy(
 	ctx context.Context,
 	rbd *authorizationv1alpha1.RestrictedBindDefinition,
 	rbacPolicy *authorizationv1alpha1.RBACPolicy,
+	applyClient client.Client,
 ) (result ctrl.Result, handled bool, retErr error) {
-	labelGetter := newLabelGetter(r.client)
+	labelGetter := newLabelGetter(r.ownershipReader())
 	violations := policy.EvaluateBindDefinition(ctx, rbacPolicy, rbd, labelGetter)
 	if err := labelGetter.Err(); err != nil {
+		if deprovisionErr := r.rbdDeprovision(ctx, rbd, applyClient); deprovisionErr != nil {
+			err = errors.Join(err, fmt.Errorf("deprovision after policy selector evaluation failure: %w", deprovisionErr))
+		} else {
+			rbdClearDeprovisionedStatus(rbd)
+		}
+		markPolicyEvaluationError(rbd, rbd.Generation, err)
 		r.rbdMarkStalled(ctx, rbd, err)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
@@ -176,7 +191,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdEvaluatePolicy(
 		ControllerLabel: metrics.ControllerRestrictedBindDefinition,
 		ResourceKind:    "RestrictedBindDefinition",
 		Deprovision: func(ctx context.Context) error {
-			if err := r.rbdDeprovision(ctx, rbd); err != nil {
+			if err := r.rbdDeprovision(ctx, rbd, applyClient); err != nil {
 				return err
 			}
 			rbdClearDeprovisionedStatus(rbd)
@@ -191,6 +206,8 @@ func (r *RestrictedBindDefinitionReconciler) rbdEvaluatePolicy(
 
 // policyToRestrictedBindDefinitions maps an RBACPolicy event to reconcile requests
 // for all RestrictedBindDefinitions referencing that policy.
+//
+//nolint:dupl // Restricted bind/role reconcilers keep type-specific event mapping for controller-runtime indexes.
 func (r *RestrictedBindDefinitionReconciler) policyToRestrictedBindDefinitions(ctx context.Context, obj client.Object) []reconcile.Request {
 	logger := log.FromContext(ctx)
 	rbdList := &authorizationv1alpha1.RestrictedBindDefinitionList{}
@@ -198,6 +215,20 @@ func (r *RestrictedBindDefinitionReconciler) policyToRestrictedBindDefinitions(c
 	defer cancel()
 	if err := r.client.List(listCtx, rbdList,
 		client.MatchingFields{indexer.RestrictedBindDefinitionPolicyRefField: obj.GetName()}); err != nil {
+		if helpers.IsMissingFieldIndexError(err) {
+			logger.V(2).Info("policyRef field index unavailable, falling back to full RestrictedBindDefinition scan", "policy", obj.GetName())
+			if listErr := r.client.List(listCtx, rbdList); listErr != nil {
+				logger.Error(listErr, "failed to list RestrictedBindDefinitions for policy", "policy", obj.GetName())
+				return nil
+			}
+			requests := make([]reconcile.Request, 0, len(rbdList.Items))
+			for i := range rbdList.Items {
+				if rbdList.Items[i].Spec.PolicyRef.Name == obj.GetName() {
+					requests = append(requests, reconcile.Request{NamespacedName: types.NamespacedName{Name: rbdList.Items[i].Name}})
+				}
+			}
+			return requests
+		}
 		logger.Error(err, "failed to list RestrictedBindDefinitions for policy", "policy", obj.GetName())
 		return nil
 	}
@@ -299,8 +330,7 @@ func (r *RestrictedBindDefinitionReconciler) namespaceToRestrictedBindDefinition
 		client.MatchingFields{indexer.RestrictedBindDefinitionHasNamespaceSelectorField: "true"})
 
 	optimizedIndexPathAvailable := explicitErr == nil && selectorErr == nil
-	if !optimizedIndexPathAvailable &&
-		(!helpers.IsMissingFieldIndexError(explicitErr) || !helpers.IsMissingFieldIndexError(selectorErr)) {
+	if !optimizedIndexPathAvailable && (!missingFieldIndexOrNil(explicitErr) || !missingFieldIndexOrNil(selectorErr)) {
 		if explicitErr != nil {
 			logger.Error(explicitErr, "failed to list RestrictedBindDefinitions by explicit namespace index", "namespace", namespace.Name)
 		}
@@ -355,6 +385,10 @@ func (r *RestrictedBindDefinitionReconciler) namespaceToRestrictedBindDefinition
 	return requests
 }
 
+func missingFieldIndexOrNil(err error) bool {
+	return err == nil || helpers.IsMissingFieldIndexError(err)
+}
+
 // restrictedBindDefinitionNeedsNamespaceReconcile returns true if a namespace
 // event can change the RBD's desired RoleBindings. Selector-based bindings must
 // reconcile on every namespace event because label removals need immediate stale
@@ -375,6 +409,69 @@ func restrictedBindDefinitionNeedsNamespaceReconcile(rbd *authorizationv1alpha1.
 		}
 	}
 	return false
+}
+
+func (r *RestrictedBindDefinitionReconciler) serviceAccountToRestrictedBindDefinitions(ctx context.Context, obj client.Object) []reconcile.Request {
+	logger := log.FromContext(ctx)
+
+	sa, ok := obj.(*corev1.ServiceAccount)
+	if !ok {
+		logger.Error(fmt.Errorf("unexpected type"), "Expected *ServiceAccount", "got", fmt.Sprintf("%T", obj))
+		return nil
+	}
+
+	listCtx, cancel := context.WithTimeout(ctx, queueAllTimeout)
+	defer cancel()
+
+	key := sa.Namespace + "/" + sa.Name
+	indexedList := &authorizationv1alpha1.RestrictedBindDefinitionList{}
+	err := r.client.List(listCtx, indexedList,
+		client.MatchingFields{indexer.RestrictedBindDefinitionServiceAccountSubjectField: key})
+	if err == nil {
+		return restrictedBindDefinitionRequests(indexedList.Items)
+	}
+	if !helpers.IsMissingFieldIndexError(err) {
+		logger.Error(err, "failed to list RestrictedBindDefinitions by ServiceAccount subject index", "serviceAccount", key)
+		return nil
+	}
+
+	logger.V(2).Info("field index not available, falling back to full RestrictedBindDefinition scan", "serviceAccount", key)
+	fullList := &authorizationv1alpha1.RestrictedBindDefinitionList{}
+	if err := r.client.List(listCtx, fullList); err != nil {
+		logger.Error(err, "failed to list RestrictedBindDefinitions")
+		return nil
+	}
+
+	matches := make([]authorizationv1alpha1.RestrictedBindDefinition, 0, len(fullList.Items))
+	for i := range fullList.Items {
+		if restrictedBindDefinitionReferencesServiceAccount(&fullList.Items[i], sa.Namespace, sa.Name) {
+			matches = append(matches, fullList.Items[i])
+		}
+	}
+	return restrictedBindDefinitionRequests(matches)
+}
+
+func restrictedBindDefinitionReferencesServiceAccount(rbd *authorizationv1alpha1.RestrictedBindDefinition, namespace, name string) bool {
+	for _, subject := range rbd.Spec.Subjects {
+		if subject.Kind == rbacv1.ServiceAccountKind && subject.Namespace == namespace && subject.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func restrictedBindDefinitionRequests(items []authorizationv1alpha1.RestrictedBindDefinition) []reconcile.Request {
+	queued := make(map[string]struct{}, len(items))
+	requests := make([]reconcile.Request, 0, len(items))
+	for i := range items {
+		name := items[i].Name
+		if _, exists := queued[name]; exists {
+			continue
+		}
+		queued[name] = struct{}{}
+		requests = append(requests, reconcile.Request{NamespacedName: types.NamespacedName{Name: name}})
+	}
+	return requests
 }
 
 // Reconcile handles the reconciliation loop for RestrictedBindDefinition resources.
@@ -464,14 +561,6 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 		return ctrl.Result{}, err
 	}
 
-	// Step 6: Evaluate policy compliance.
-	if result, handled, err := r.rbdEvaluatePolicy(ctx, rbd, rbacPolicy); handled {
-		return result, err
-	}
-
-	// Policy compliant.
-	markPolicyCompliant(rbd, rbd.Generation, r.recorder, rbd, rbacPolicy.Name, metrics.ControllerRestrictedBindDefinition)
-	rbd.Status.PolicyViolations = nil
 	applyClient, impersonatedUser, err := r.rbdResolveApplyClient(rbacPolicy)
 	if err != nil {
 		r.rbdMarkStalled(ctx, rbd, err)
@@ -484,16 +573,18 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 		logger.V(2).Info("using impersonated apply identity", "name", rbd.Name, "impersonatedUser", impersonatedUser, "policy", rbacPolicy.Name)
 	}
 
-	// Step 7: Reconcile RBAC resources.
-	saCreationConfig := rbdSACreationConfig(rbacPolicy)
-	if err := r.rbdReconcileResources(ctx, rbd, applyClient, saCreationConfig); err != nil {
-		r.rbdMarkStalled(ctx, rbd, err)
-		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
-		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
-		return ctrl.Result{}, err
+	// Step 6: Evaluate policy compliance.
+	if result, handled, err := r.rbdEvaluatePolicy(ctx, rbd, rbacPolicy, applyClient); handled {
+		return result, err
 	}
 
-	// Step 7.5: Validate role references.
+	// Policy compliant.
+	markPolicyCompliant(rbd, rbd.Generation, r.recorder, rbd, rbacPolicy.Name, metrics.ControllerRestrictedBindDefinition)
+	rbd.Status.PolicyViolations = nil
+
+	// Step 7: Validate role references before applying RBAC resources. A
+	// restricted binding must not pre-create bindings to roles that may be
+	// created later with broader permissions.
 	missingRoles, err := r.rbdValidateRoleReferences(ctx, rbd)
 	if err != nil {
 		r.rbdMarkStalled(ctx, rbd, err)
@@ -503,10 +594,30 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 	}
 	rbd.Status.MissingRoleRefs = missingRoles
 	metrics.RoleRefsMissing.WithLabelValues(rbd.Name).Set(float64(len(missingRoles)))
-
-	// Step 8: Mark Ready.
 	if len(missingRoles) > 0 {
-		return r.rbdHandleMissingRoleRefs(ctx, rbd, missingRoles)
+		return r.rbdHandleMissingRoleRefs(ctx, rbd, missingRoles, applyClient)
+	}
+
+	missingTargetNamespaces, err := r.rbdFindMissingTargetNamespaces(ctx, rbd)
+	if err != nil {
+		r.rbdMarkStalled(ctx, rbd, err)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
+		return ctrl.Result{}, err
+	}
+
+	// Step 8: Reconcile RBAC resources.
+	saCreationConfig := rbdSACreationConfig(rbacPolicy)
+	if err := r.rbdReconcileResources(ctx, rbd, applyClient, saCreationConfig); err != nil {
+		r.rbdMarkStalled(ctx, rbd, err)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
+		return ctrl.Result{}, err
+	}
+
+	// Step 9: Mark Ready.
+	if len(missingTargetNamespaces) > 0 {
+		return r.rbdHandleMissingTargetNamespaces(ctx, rbd, missingTargetNamespaces)
 	}
 	if len(rbd.Status.SkippedServiceAccounts) > 0 {
 		return r.rbdHandleSkippedServiceAccounts(ctx, rbd)
@@ -536,7 +647,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdFetchPolicy(
 	rbd *authorizationv1alpha1.RestrictedBindDefinition,
 ) (rbacPolicy *authorizationv1alpha1.RBACPolicy, result ctrl.Result, handled bool, retErr error) {
 	rbacPolicy = &authorizationv1alpha1.RBACPolicy{}
-	if err := r.client.Get(ctx, types.NamespacedName{Name: rbd.Spec.PolicyRef.Name}, rbacPolicy); err != nil {
+	if err := r.ownershipReader().Get(ctx, types.NamespacedName{Name: rbd.Spec.PolicyRef.Name}, rbacPolicy); err != nil {
 		if apierrors.IsNotFound(err) {
 			result, retErr := r.rbdHandleMissingPolicy(ctx, rbd)
 			return nil, result, true, retErr
@@ -571,7 +682,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdHandleMissingPolicy(
 		authorizationv1alpha1.EventReasonPolicyNotFound, authorizationv1alpha1.EventActionReconcile,
 		"Referenced RBACPolicy %q not found", rbd.Spec.PolicyRef.Name)
 	rbd.Status.PolicyViolations = []string{fmt.Sprintf("policy %q not found", rbd.Spec.PolicyRef.Name)}
-	if err := r.rbdDeprovision(ctx, rbd); err != nil {
+	if err := r.rbdDeprovision(ctx, rbd, r.client); err != nil {
 		r.rbdMarkStalled(ctx, rbd, err)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
@@ -610,8 +721,15 @@ func (r *RestrictedBindDefinitionReconciler) rbdHandleMissingRoleRefs(
 	ctx context.Context,
 	rbd *authorizationv1alpha1.RestrictedBindDefinition,
 	missingRoles []string,
+	applyClient client.Client,
 ) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
+	if err := r.rbdDeprovision(ctx, rbd, applyClient); err != nil {
+		r.rbdMarkStalled(ctx, rbd, err)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
+		return ctrl.Result{}, fmt.Errorf("deprovision RestrictedBindDefinition %s after missing role refs: %w", rbd.Name, err)
+	}
 	conditions.MarkFalse(rbd, authorizationv1alpha1.RoleRefValidCondition, rbd.Generation,
 		authorizationv1alpha1.RoleRefInvalidReason, authorizationv1alpha1.RoleRefInvalidMessage, missingRoles)
 	if len(rbd.Status.SkippedServiceAccounts) > 0 {
@@ -624,7 +742,39 @@ func (r *RestrictedBindDefinitionReconciler) rbdHandleMissingRoleRefs(
 		authorizationv1alpha1.RoleRefInvalidReason, authorizationv1alpha1.RoleRefInvalidMessage, missingRoles)
 	r.recorder.Eventf(rbd, nil, corev1.EventTypeWarning,
 		authorizationv1alpha1.EventReasonRoleRefNotFound, authorizationv1alpha1.EventActionValidate,
-		"Referenced roles not found: %v. Bindings were created but are ineffective until roles exist.", missingRoles)
+		"Referenced roles not found: %v. Owned bindings were removed and new bindings will not be created until all roles exist.", missingRoles)
+	rbd.Status.BindReconciled = false
+	if err := ssa.ApplyRestrictedBindDefinitionStatus(ctx, r.client, rbd); err != nil {
+		logger.Error(err, "failed to apply RestrictedBindDefinition status", "name", rbd.Name)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
+		return ctrl.Result{}, fmt.Errorf("apply RestrictedBindDefinition %s status: %w", rbd.Name, err)
+	}
+	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultDegraded).Inc()
+	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
+}
+
+func (r *RestrictedBindDefinitionReconciler) rbdHandleMissingTargetNamespaces(
+	ctx context.Context,
+	rbd *authorizationv1alpha1.RestrictedBindDefinition,
+	missingNamespaces []string,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	conditions.MarkFalse(rbd, authorizationv1alpha1.RoleRefValidCondition, rbd.Generation,
+		authorizationv1alpha1.TargetNamespaceNotFoundReason,
+		authorizationv1alpha1.TargetNamespaceNotFoundMessage, missingNamespaces)
+	if len(rbd.Status.SkippedServiceAccounts) > 0 {
+		r.rbdMarkSkippedServiceAccounts(rbd)
+	} else {
+		conditions.MarkTrue(rbd, authorizationv1alpha1.ServiceAccountRefsReadyCondition, rbd.Generation,
+			authorizationv1alpha1.ServiceAccountRefsReadyReason, authorizationv1alpha1.ServiceAccountRefsReadyMessage)
+	}
+	conditions.MarkNotReady(rbd, rbd.Generation,
+		authorizationv1alpha1.TargetNamespaceNotFoundReason,
+		authorizationv1alpha1.TargetNamespaceNotFoundMessage, missingNamespaces)
+	r.recorder.Eventf(rbd, nil, corev1.EventTypeWarning,
+		authorizationv1alpha1.EventReasonTargetNamespaceNotFound, authorizationv1alpha1.EventActionValidate,
+		"Explicit target namespaces not found: %v. RoleBindings were not created for missing namespaces.", missingNamespaces)
 	rbd.Status.BindReconciled = false
 	if err := ssa.ApplyRestrictedBindDefinitionStatus(ctx, r.client, rbd); err != nil {
 		logger.Error(err, "failed to apply RestrictedBindDefinition status", "name", rbd.Name)
@@ -642,29 +792,40 @@ func (r *RestrictedBindDefinitionReconciler) rbdReconcileResources(
 	rbd *authorizationv1alpha1.RestrictedBindDefinition,
 	applyClient client.Client,
 	saCreationConfig *authorizationv1alpha1.SACreationConfig,
-) error {
+) (retErr error) {
 	// Ensure ServiceAccounts and derive the subjects that are currently safe to bind.
 	effectiveSubjects, err := r.rbdEnsureServiceAccounts(ctx, rbd, applyClient, saCreationConfig)
 	if err != nil {
 		return err
 	}
 	desiredSAs := rbdDesiredServiceAccounts(rbd.Status.GeneratedServiceAccounts)
-	if err := r.rbdPruneStaleServiceAccounts(ctx, rbd, desiredSAs); err != nil {
+	if err := r.rbdPruneStaleServiceAccounts(ctx, rbd, desiredSAs, applyClient); err != nil {
 		return err
 	}
+
+	desiredCRBs, desiredRBs, activeNamespaces, err := r.rbdDesiredBindingKeys(ctx, rbd)
+	if err != nil {
+		return err
+	}
+	pruneAttempted := false
+	defer func() {
+		if retErr == nil || pruneAttempted {
+			return
+		}
+		if pruneErr := r.rbdPruneStaleResources(ctx, rbd, desiredCRBs, desiredRBs, applyClient); pruneErr != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("prune stale RBAC resources after reconcile error: %w", pruneErr))
+		}
+	}()
 	if err := r.rbdValidateRoleBindingNameCollisions(ctx, rbd); err != nil {
 		return err
 	}
 
-	// Ensure ClusterRoleBindings.
-	desiredCRBs := make(map[string]struct{})
 	for _, clusterRoleRef := range restrictedClusterRoleRefs(rbd.Spec.ClusterRoleBindings) {
 		crbName := helpers.BuildBindingName(rbd.Spec.TargetName, clusterRoleRef)
-		desiredCRBs[crbName] = struct{}{}
 		if err := checkRestrictedBindingOwnership(ctx, r.ownershipReader(), r.recorder, rbd, "ClusterRoleBinding", crbName, ""); err != nil {
 			return err
 		}
-		if err := r.rbdClearClusterRoleBindingSubjectsIfEmpty(ctx, applyClient, crbName, effectiveSubjects); err != nil {
+		if err := r.rbdClearClusterRoleBindingSubjectsIfEmpty(ctx, applyClient, rbd, crbName, effectiveSubjects); err != nil {
 			return err
 		}
 		ac := pkgssa.ClusterRoleBindingWithSubjectsAndRoleRef(
@@ -684,8 +845,6 @@ func (r *RestrictedBindDefinitionReconciler) rbdReconcileResources(
 	}
 
 	// Ensure RoleBindings.
-	desiredRBs := make(map[string]struct{})
-	activeNamespaces := make(map[string]struct{})
 	for _, roleBinding := range rbd.Spec.RoleBindings {
 		targetNamespaces, err := r.rbdResolveNamespaces(ctx, roleBinding)
 		if err != nil {
@@ -700,13 +859,11 @@ func (r *RestrictedBindDefinitionReconciler) rbdReconcileResources(
 				if err := r.rbdEnsureRoleBinding(ctx, rbd, ns.Name, clusterRoleRef, "ClusterRole", effectiveSubjects, applyClient); err != nil {
 					return err
 				}
-				desiredRBs[ns.Name+"/"+helpers.BuildBindingName(rbd.Spec.TargetName, clusterRoleRef)] = struct{}{}
 			}
 			for _, roleRef := range roleBinding.RoleRefs {
 				if err := r.rbdEnsureRoleBinding(ctx, rbd, ns.Name, roleRef, "Role", effectiveSubjects, applyClient); err != nil {
 					return err
 				}
-				desiredRBs[ns.Name+"/"+helpers.BuildBindingName(rbd.Spec.TargetName, roleRef)] = struct{}{}
 			}
 		}
 	}
@@ -714,7 +871,40 @@ func (r *RestrictedBindDefinitionReconciler) rbdReconcileResources(
 	metrics.NamespacesActive.WithLabelValues(rbd.Name).Set(float64(len(activeNamespaces)))
 
 	// Prune stale owned resources that are no longer in the desired set.
-	return r.rbdPruneStaleResources(ctx, rbd, desiredCRBs, desiredRBs)
+	pruneAttempted = true
+	return r.rbdPruneStaleResources(ctx, rbd, desiredCRBs, desiredRBs, applyClient)
+}
+
+func (r *RestrictedBindDefinitionReconciler) rbdDesiredBindingKeys(
+	ctx context.Context,
+	rbd *authorizationv1alpha1.RestrictedBindDefinition,
+) (desiredCRBs, desiredRBs, activeNamespaces map[string]struct{}, err error) {
+	desiredCRBs = make(map[string]struct{})
+	for _, clusterRoleRef := range restrictedClusterRoleRefs(rbd.Spec.ClusterRoleBindings) {
+		desiredCRBs[helpers.BuildBindingName(rbd.Spec.TargetName, clusterRoleRef)] = struct{}{}
+	}
+
+	desiredRBs = make(map[string]struct{})
+	activeNamespaces = make(map[string]struct{})
+	for _, roleBinding := range rbd.Spec.RoleBindings {
+		targetNamespaces, err := r.rbdResolveNamespaces(ctx, roleBinding)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("resolve namespaces for desired RoleBindings: %w", err)
+		}
+		for _, ns := range targetNamespaces {
+			if conditions.IsNamespaceTerminating(&ns) {
+				continue
+			}
+			activeNamespaces[ns.Name] = struct{}{}
+			for _, clusterRoleRef := range roleBinding.ClusterRoleRefs {
+				desiredRBs[ns.Name+"/"+helpers.BuildBindingName(rbd.Spec.TargetName, clusterRoleRef)] = struct{}{}
+			}
+			for _, roleRef := range roleBinding.RoleRefs {
+				desiredRBs[ns.Name+"/"+helpers.BuildBindingName(rbd.Spec.TargetName, roleRef)] = struct{}{}
+			}
+		}
+	}
+	return desiredCRBs, desiredRBs, activeNamespaces, nil
 }
 
 type rbdRoleBindingNameClaim struct {
@@ -769,6 +959,32 @@ func rbdRecordRoleBindingNameClaim(
 	return nil
 }
 
+func (r *RestrictedBindDefinitionReconciler) rbdFindMissingTargetNamespaces(
+	ctx context.Context,
+	rbd *authorizationv1alpha1.RestrictedBindDefinition,
+) ([]string, error) {
+	missing := make(map[string]struct{})
+	for _, roleBinding := range rbd.Spec.RoleBindings {
+		if roleBinding.Namespace == "" {
+			continue
+		}
+		ns := &corev1.Namespace{}
+		if err := r.ownershipReader().Get(ctx, types.NamespacedName{Name: roleBinding.Namespace}, ns); err != nil {
+			if apierrors.IsNotFound(err) {
+				missing[roleBinding.Namespace] = struct{}{}
+				continue
+			}
+			return nil, fmt.Errorf("get target namespace %s: %w", roleBinding.Namespace, err)
+		}
+	}
+	result := make([]string, 0, len(missing))
+	for namespace := range missing {
+		result = append(result, namespace)
+	}
+	slices.Sort(result)
+	return result, nil
+}
+
 func rbdClearDeprovisionedStatus(rbd *authorizationv1alpha1.RestrictedBindDefinition) {
 	rbd.Status.GeneratedServiceAccounts = nil
 	rbd.Status.ExternalServiceAccounts = nil
@@ -792,6 +1008,57 @@ func rbdDesiredServiceAccounts(subjects []rbacv1.Subject) map[string]struct{} {
 	return desiredSAs
 }
 
+func (r *RestrictedBindDefinitionReconciler) rbdListOwnedClusterRoleBindings(
+	ctx context.Context,
+	rbd *authorizationv1alpha1.RestrictedBindDefinition,
+) ([]rbacv1.ClusterRoleBinding, error) {
+	crbList := &rbacv1.ClusterRoleBindingList{}
+	if err := r.ownershipReader().List(ctx, crbList); err != nil {
+		return nil, fmt.Errorf("list ClusterRoleBindings for ownerRef cleanup: %w", err)
+	}
+	owned := make([]rbacv1.ClusterRoleBinding, 0, len(crbList.Items))
+	for i := range crbList.Items {
+		if hasOwnerRef(&crbList.Items[i], rbd) {
+			owned = append(owned, crbList.Items[i])
+		}
+	}
+	return owned, nil
+}
+
+func (r *RestrictedBindDefinitionReconciler) rbdListOwnedRoleBindings(
+	ctx context.Context,
+	rbd *authorizationv1alpha1.RestrictedBindDefinition,
+) ([]rbacv1.RoleBinding, error) {
+	rbList := &rbacv1.RoleBindingList{}
+	if err := r.ownershipReader().List(ctx, rbList); err != nil {
+		return nil, fmt.Errorf("list RoleBindings for ownerRef cleanup: %w", err)
+	}
+	owned := make([]rbacv1.RoleBinding, 0, len(rbList.Items))
+	for i := range rbList.Items {
+		if hasOwnerRef(&rbList.Items[i], rbd) {
+			owned = append(owned, rbList.Items[i])
+		}
+	}
+	return owned, nil
+}
+
+func (r *RestrictedBindDefinitionReconciler) rbdListOwnedServiceAccounts(
+	ctx context.Context,
+	rbd *authorizationv1alpha1.RestrictedBindDefinition,
+) ([]corev1.ServiceAccount, error) {
+	saList := &corev1.ServiceAccountList{}
+	if err := r.ownershipReader().List(ctx, saList); err != nil {
+		return nil, fmt.Errorf("list ServiceAccounts for ownerRef cleanup: %w", err)
+	}
+	owned := make([]corev1.ServiceAccount, 0, len(saList.Items))
+	for i := range saList.Items {
+		if hasOwnerRef(&saList.Items[i], rbd) {
+			owned = append(owned, saList.Items[i])
+		}
+	}
+	return owned, nil
+}
+
 // rbdPruneStaleResources deletes owned ClusterRoleBindings and RoleBindings
 // that are no longer in the desired set after a spec change.
 func (r *RestrictedBindDefinitionReconciler) rbdPruneStaleResources(
@@ -799,30 +1066,23 @@ func (r *RestrictedBindDefinitionReconciler) rbdPruneStaleResources(
 	rbd *authorizationv1alpha1.RestrictedBindDefinition,
 	desiredCRBs map[string]struct{},
 	desiredRBs map[string]struct{},
+	deleteClient client.Client,
 ) error {
 	logger := log.FromContext(ctx)
+	if deleteClient == nil {
+		deleteClient = r.client
+	}
 
 	// Prune stale ClusterRoleBindings.
-	crbList := &rbacv1.ClusterRoleBindingList{}
-	if err := r.client.List(ctx, crbList,
-		client.MatchingFields{indexer.RestrictedBindDefinitionOwnerRefField: rbd.Name}); err != nil {
-		if !helpers.IsMissingFieldIndexError(err) {
-			return fmt.Errorf("list owned ClusterRoleBindings for pruning: %w", err)
-		}
-		// Index unavailable — fall back to label scan.
-		if listErr := r.client.List(ctx, crbList,
-			client.MatchingLabels{helpers.ManagedByLabelStandard: helpers.ManagedByValue}); listErr != nil {
-			return fmt.Errorf("list ClusterRoleBindings for pruning (fallback): %w", listErr)
-		}
+	crbs, err := r.rbdListOwnedClusterRoleBindings(ctx, rbd)
+	if err != nil {
+		return fmt.Errorf("list owned ClusterRoleBindings for pruning: %w", err)
 	}
-	for i := range crbList.Items {
-		crb := &crbList.Items[i]
-		if !hasOwnerRef(crb, rbd) {
-			continue
-		}
+	for i := range crbs {
+		crb := &crbs[i]
 		if _, ok := desiredCRBs[crb.Name]; !ok {
 			logger.Info("pruning stale ClusterRoleBinding", "name", crb.Name, "rbd", rbd.Name)
-			if err := r.client.Delete(ctx, crb); err != nil && !apierrors.IsNotFound(err) {
+			if err := deleteClient.Delete(ctx, crb); err != nil && !apierrors.IsNotFound(err) {
 				return fmt.Errorf("delete stale ClusterRoleBinding %s: %w", crb.Name, err)
 			}
 			metrics.RBACResourcesDeleted.WithLabelValues(metrics.ResourceClusterRoleBinding).Inc()
@@ -830,26 +1090,16 @@ func (r *RestrictedBindDefinitionReconciler) rbdPruneStaleResources(
 	}
 
 	// Prune stale RoleBindings.
-	rbList := &rbacv1.RoleBindingList{}
-	if err := r.client.List(ctx, rbList,
-		client.MatchingFields{indexer.RestrictedBindDefinitionOwnerRefField: rbd.Name}); err != nil {
-		if !helpers.IsMissingFieldIndexError(err) {
-			return fmt.Errorf("list owned RoleBindings for pruning: %w", err)
-		}
-		if listErr := r.client.List(ctx, rbList,
-			client.MatchingLabels{helpers.ManagedByLabelStandard: helpers.ManagedByValue}); listErr != nil {
-			return fmt.Errorf("list RoleBindings for pruning (fallback): %w", listErr)
-		}
+	rbs, err := r.rbdListOwnedRoleBindings(ctx, rbd)
+	if err != nil {
+		return fmt.Errorf("list owned RoleBindings for pruning: %w", err)
 	}
-	for i := range rbList.Items {
-		rb := &rbList.Items[i]
-		if !hasOwnerRef(rb, rbd) {
-			continue
-		}
+	for i := range rbs {
+		rb := &rbs[i]
 		key := rb.Namespace + "/" + rb.Name
 		if _, ok := desiredRBs[key]; !ok {
 			logger.Info("pruning stale RoleBinding", "namespace", rb.Namespace, "name", rb.Name, "rbd", rbd.Name)
-			if err := r.client.Delete(ctx, rb); err != nil && !apierrors.IsNotFound(err) {
+			if err := deleteClient.Delete(ctx, rb); err != nil && !apierrors.IsNotFound(err) {
 				return fmt.Errorf("delete stale RoleBinding %s/%s: %w", rb.Namespace, rb.Name, err)
 			}
 			metrics.RBACResourcesDeleted.WithLabelValues(metrics.ResourceRoleBinding).Inc()
@@ -863,31 +1113,25 @@ func (r *RestrictedBindDefinitionReconciler) rbdPruneStaleServiceAccounts(
 	ctx context.Context,
 	rbd *authorizationv1alpha1.RestrictedBindDefinition,
 	desiredSAs map[string]struct{},
+	deleteClient client.Client,
 ) error {
 	logger := log.FromContext(ctx)
-
-	saList := &corev1.ServiceAccountList{}
-	if err := r.client.List(ctx, saList,
-		client.MatchingFields{indexer.RestrictedBindDefinitionOwnerRefField: rbd.Name}); err != nil {
-		if !helpers.IsMissingFieldIndexError(err) {
-			return fmt.Errorf("list owned ServiceAccounts for pruning: %w", err)
-		}
-		if listErr := r.client.List(ctx, saList,
-			client.MatchingLabels{helpers.ManagedByLabelStandard: helpers.ManagedByValue}); listErr != nil {
-			return fmt.Errorf("list ServiceAccounts for pruning (fallback): %w", listErr)
-		}
+	if deleteClient == nil {
+		deleteClient = r.client
 	}
-	for i := range saList.Items {
-		sa := &saList.Items[i]
-		if !hasOwnerRef(sa, rbd) {
-			continue
-		}
+
+	serviceAccounts, err := r.rbdListOwnedServiceAccounts(ctx, rbd)
+	if err != nil {
+		return fmt.Errorf("list owned ServiceAccounts for pruning: %w", err)
+	}
+	for i := range serviceAccounts {
+		sa := &serviceAccounts[i]
 		key := sa.Namespace + "/" + sa.Name
 		if _, ok := desiredSAs[key]; ok {
 			continue
 		}
 		logger.Info("pruning stale ServiceAccount", "namespace", sa.Namespace, "name", sa.Name, "rbd", rbd.Name)
-		if err := r.client.Delete(ctx, sa); err != nil && !apierrors.IsNotFound(err) {
+		if err := deleteClient.Delete(ctx, sa); err != nil && !apierrors.IsNotFound(err) {
 			return fmt.Errorf("delete stale ServiceAccount %s: %w", key, err)
 		}
 	}
@@ -917,7 +1161,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdEnsureServiceAccounts(
 			continue
 		}
 		ns := &corev1.Namespace{}
-		if err := r.client.Get(ctx, types.NamespacedName{Name: subject.Namespace}, ns); err != nil {
+		if err := r.ownershipReader().Get(ctx, types.NamespacedName{Name: subject.Namespace}, ns); err != nil {
 			if apierrors.IsNotFound(err) {
 				logger.V(2).Info("SA namespace not found, skipping", "namespace", subject.Namespace)
 				skippedSAs = append(skippedSAs, rbdSkippedServiceAccount(subject, "namespace not found"))
@@ -963,7 +1207,8 @@ func (r *RestrictedBindDefinitionReconciler) rbdEnsureServiceAccounts(
 			helpers.BuildResourceLabels(rbd.Labels), automountToken).
 			WithOwnerReferences(ownerRefForRestricted(rbd, authorizationv1alpha1.RestrictedBindDefinitionKind)).
 			WithAnnotations(helpers.BuildResourceAnnotations("RestrictedBindDefinition", rbd.Name))
-		if _, err := pkgssa.PatchApplyServiceAccount(ctx, applyClient, ac, pkgssa.FieldOwnerFor(rbd.Name)); err != nil {
+		fieldOwner := pkgssa.FieldOwnerFor(rbd.Name, authorizationv1alpha1.RestrictedBindDefinitionKind)
+		if _, err := pkgssa.PatchApplyServiceAccount(ctx, applyClient, ac, fieldOwner); err != nil {
 			return nil, fmt.Errorf("apply ServiceAccount %s/%s: %w", subject.Namespace, subject.Name, err)
 		}
 		if !helpers.SubjectExists(generatedSAs, subject) {
@@ -994,19 +1239,20 @@ func (r *RestrictedBindDefinitionReconciler) rbdClassifyExistingServiceAccount(
 		return true, false, key
 	}
 
-	if ownerRBD := findOwningRBDRef(existing.OwnerReferences); ownerRBD != nil && ownerRBD.UID != rbd.UID {
-		logger.Info("ServiceAccount owned by a different RestrictedBindDefinition, skipping adoption",
-			"serviceAccount", subject.Name, "namespace", subject.Namespace,
-			"ownerUID", ownerRBD.UID, "currentUID", rbd.UID)
-		r.recorder.Eventf(rbd, nil, corev1.EventTypeWarning,
-			authorizationv1alpha1.EventReasonOwnership, authorizationv1alpha1.EventActionReconcile,
-			"ServiceAccount %s/%s is already owned by a different RestrictedBindDefinition (UID: %s)",
-			subject.Namespace, subject.Name, ownerRBD.UID)
-		return true, false, key
-	}
-
 	if hasOwnerRef(existing, rbd) {
 		return false, true, ""
+	}
+
+	if ownerRBD := findOwningRBDRef(existing.OwnerReferences); ownerRBD != nil {
+		logger.Info("ServiceAccount owner reference does not match current RestrictedBindDefinition, skipping management",
+			"serviceAccount", subject.Name, "namespace", subject.Namespace,
+			"ownerName", ownerRBD.Name, "ownerUID", ownerRBD.UID,
+			"currentName", rbd.Name, "currentUID", rbd.UID)
+		r.recorder.Eventf(rbd, nil, corev1.EventTypeWarning,
+			authorizationv1alpha1.EventReasonOwnership, authorizationv1alpha1.EventActionReconcile,
+			"ServiceAccount %s/%s owner reference does not match RestrictedBindDefinition %s (owner: %s/%s)",
+			subject.Namespace, subject.Name, rbd.Name, ownerRBD.Name, ownerRBD.UID)
+		return true, false, key
 	}
 
 	if saCreationConfig != nil && saCreationConfig.DisableAdoption {
@@ -1063,10 +1309,10 @@ func (r *RestrictedBindDefinitionReconciler) rbdEnsureRoleBinding(
 		return err
 	}
 	desiredRoleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: roleKind, Name: roleRef}
-	if err := r.rbdDeleteOwnedRoleBindingOnRoleRefChange(ctx, rbd, namespace, rbName, desiredRoleRef); err != nil {
+	if err := r.rbdDeleteOwnedRoleBindingOnRoleRefChange(ctx, rbd, namespace, rbName, desiredRoleRef, applyClient); err != nil {
 		return err
 	}
-	if err := r.rbdClearRoleBindingSubjectsIfEmpty(ctx, applyClient, namespace, rbName, subjects); err != nil {
+	if err := r.rbdClearRoleBindingSubjectsIfEmpty(ctx, applyClient, rbd, namespace, rbName, subjects); err != nil {
 		return err
 	}
 	ac := pkgssa.RoleBindingWithSubjectsAndRoleRef(
@@ -1091,7 +1337,11 @@ func (r *RestrictedBindDefinitionReconciler) rbdDeleteOwnedRoleBindingOnRoleRefC
 	namespace string,
 	name string,
 	desiredRoleRef rbacv1.RoleRef,
+	deleteClient client.Client,
 ) error {
+	if deleteClient == nil {
+		deleteClient = r.client
+	}
 	existing := &rbacv1.RoleBinding{}
 	if err := r.ownershipReader().Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, existing); err != nil {
 		return client.IgnoreNotFound(err)
@@ -1099,7 +1349,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdDeleteOwnedRoleBindingOnRoleRefC
 	if !hasOwnerRef(existing, rbd) || existing.RoleRef == desiredRoleRef {
 		return nil
 	}
-	if err := r.client.Delete(ctx, existing); err != nil && !apierrors.IsNotFound(err) {
+	if err := deleteClient.Delete(ctx, existing); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("delete RoleBinding %s/%s before roleRef change: %w", namespace, name, err)
 	}
 	metrics.RBACResourcesDeleted.WithLabelValues(metrics.ResourceRoleBinding).Inc()
@@ -1109,6 +1359,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdDeleteOwnedRoleBindingOnRoleRefC
 func (r *RestrictedBindDefinitionReconciler) rbdClearClusterRoleBindingSubjectsIfEmpty(
 	ctx context.Context,
 	applyClient client.Client,
+	rbd *authorizationv1alpha1.RestrictedBindDefinition,
 	name string,
 	subjects []rbacv1.Subject,
 ) error {
@@ -1118,6 +1369,9 @@ func (r *RestrictedBindDefinitionReconciler) rbdClearClusterRoleBindingSubjectsI
 	existing := &rbacv1.ClusterRoleBinding{}
 	if err := r.ownershipReader().Get(ctx, types.NamespacedName{Name: name}, existing); err != nil {
 		return client.IgnoreNotFound(err)
+	}
+	if !hasOwnerRef(existing, rbd) {
+		return nil
 	}
 	if len(existing.Subjects) == 0 {
 		return nil
@@ -1129,9 +1383,11 @@ func (r *RestrictedBindDefinitionReconciler) rbdClearClusterRoleBindingSubjectsI
 	return nil
 }
 
+//nolint:dupl // RoleBinding subjects and Role rules use mirrored empty-state patch flow for distinct RBAC kinds.
 func (r *RestrictedBindDefinitionReconciler) rbdClearRoleBindingSubjectsIfEmpty(
 	ctx context.Context,
 	applyClient client.Client,
+	rbd *authorizationv1alpha1.RestrictedBindDefinition,
 	namespace string,
 	name string,
 	subjects []rbacv1.Subject,
@@ -1142,6 +1398,9 @@ func (r *RestrictedBindDefinitionReconciler) rbdClearRoleBindingSubjectsIfEmpty(
 	existing := &rbacv1.RoleBinding{}
 	if err := r.ownershipReader().Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, existing); err != nil {
 		return client.IgnoreNotFound(err)
+	}
+	if !hasOwnerRef(existing, rbd) {
+		return nil
 	}
 	if len(existing.Subjects) == 0 {
 		return nil
@@ -1158,9 +1417,10 @@ func (r *RestrictedBindDefinitionReconciler) rbdResolveNamespaces(
 	ctx context.Context,
 	binding authorizationv1alpha1.NamespaceBinding,
 ) ([]corev1.Namespace, error) {
+	reader := r.ownershipReader()
 	if binding.Namespace != "" {
 		ns := &corev1.Namespace{}
-		if err := r.client.Get(ctx, types.NamespacedName{Name: binding.Namespace}, ns); err != nil {
+		if err := reader.Get(ctx, types.NamespacedName{Name: binding.Namespace}, ns); err != nil {
 			if apierrors.IsNotFound(err) {
 				return nil, nil
 			}
@@ -1177,7 +1437,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdResolveNamespaces(
 			return nil, fmt.Errorf("parse namespace selector: %w", err)
 		}
 		nsList := &corev1.NamespaceList{}
-		if err := r.client.List(ctx, nsList, client.MatchingLabelsSelector{Selector: selector}); err != nil {
+		if err := reader.List(ctx, nsList, client.MatchingLabelsSelector{Selector: selector}); err != nil {
 			return nil, fmt.Errorf("list namespaces: %w", err)
 		}
 		for _, ns := range nsList.Items {
@@ -1192,59 +1452,44 @@ func (r *RestrictedBindDefinitionReconciler) rbdResolveNamespaces(
 }
 
 // rbdDeprovision deletes all RBAC resources owned by the RestrictedBindDefinition.
-// TODO: Use label selectors to narrow the list scope in large clusters.
 func (r *RestrictedBindDefinitionReconciler) rbdDeprovision(
 	ctx context.Context,
 	rbd *authorizationv1alpha1.RestrictedBindDefinition,
+	deleteClient client.Client,
 ) error {
 	logger := log.FromContext(ctx)
 	logger.Info("deprovisioning RestrictedBindDefinition", "name", rbd.Name)
+	if deleteClient == nil {
+		deleteClient = r.client
+	}
 
 	// Delete owned ClusterRoleBindings.
-	crbList := &rbacv1.ClusterRoleBindingList{}
-	if err := r.client.List(ctx, crbList,
-		client.MatchingFields{indexer.RestrictedBindDefinitionOwnerRefField: rbd.Name}); err != nil {
-		if !helpers.IsMissingFieldIndexError(err) {
-			return fmt.Errorf("list ClusterRoleBindings by owner index: %w", err)
-		}
-		logger.V(2).Info("owner-reference index unavailable for ClusterRoleBinding cleanup, falling back to label scan")
-		if listErr := r.client.List(ctx, crbList,
-			client.MatchingLabels{helpers.ManagedByLabelStandard: helpers.ManagedByValue}); listErr != nil {
-			return fmt.Errorf("list ClusterRoleBindings: %w", listErr)
-		}
+	crbs, err := r.rbdListOwnedClusterRoleBindings(ctx, rbd)
+	if err != nil {
+		return fmt.Errorf("list owned ClusterRoleBindings: %w", err)
 	}
-	for i := range crbList.Items {
-		if hasOwnerRef(&crbList.Items[i], rbd) {
-			if err := r.client.Delete(ctx, &crbList.Items[i]); err != nil && !apierrors.IsNotFound(err) {
-				return fmt.Errorf("delete ClusterRoleBinding %s: %w", crbList.Items[i].Name, err)
-			}
-			metrics.RBACResourcesDeleted.WithLabelValues(metrics.ResourceClusterRoleBinding).Inc()
+	for i := range crbs {
+		crb := &crbs[i]
+		if err := deleteClient.Delete(ctx, crb); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("delete ClusterRoleBinding %s: %w", crb.Name, err)
 		}
+		metrics.RBACResourcesDeleted.WithLabelValues(metrics.ResourceClusterRoleBinding).Inc()
 	}
 
 	// Delete owned RoleBindings.
-	rbList := &rbacv1.RoleBindingList{}
-	if err := r.client.List(ctx, rbList,
-		client.MatchingFields{indexer.RestrictedBindDefinitionOwnerRefField: rbd.Name}); err != nil {
-		if !helpers.IsMissingFieldIndexError(err) {
-			return fmt.Errorf("list RoleBindings by owner index: %w", err)
-		}
-		logger.V(2).Info("owner-reference index unavailable for RoleBinding cleanup, falling back to label scan")
-		if listErr := r.client.List(ctx, rbList,
-			client.MatchingLabels{helpers.ManagedByLabelStandard: helpers.ManagedByValue}); listErr != nil {
-			return fmt.Errorf("list RoleBindings: %w", listErr)
-		}
+	rbs, err := r.rbdListOwnedRoleBindings(ctx, rbd)
+	if err != nil {
+		return fmt.Errorf("list owned RoleBindings: %w", err)
 	}
-	for i := range rbList.Items {
-		if hasOwnerRef(&rbList.Items[i], rbd) {
-			if err := r.client.Delete(ctx, &rbList.Items[i]); err != nil && !apierrors.IsNotFound(err) {
-				return fmt.Errorf("delete RoleBinding %s/%s: %w", rbList.Items[i].Namespace, rbList.Items[i].Name, err)
-			}
-			metrics.RBACResourcesDeleted.WithLabelValues(metrics.ResourceRoleBinding).Inc()
+	for i := range rbs {
+		rb := &rbs[i]
+		if err := deleteClient.Delete(ctx, rb); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("delete RoleBinding %s/%s: %w", rb.Namespace, rb.Name, err)
 		}
+		metrics.RBACResourcesDeleted.WithLabelValues(metrics.ResourceRoleBinding).Inc()
 	}
 
-	if err := r.rbdPruneStaleServiceAccounts(ctx, rbd, nil); err != nil {
+	if err := r.rbdPruneStaleServiceAccounts(ctx, rbd, nil, deleteClient); err != nil {
 		return err
 	}
 
@@ -1267,7 +1512,7 @@ func (r *RestrictedBindDefinitionReconciler) reconcileDelete(
 	}
 
 	// Clean up owned resources.
-	if err := r.rbdDeprovision(ctx, rbd); err != nil {
+	if err := r.rbdDeprovision(ctx, rbd, r.client); err != nil {
 		logger.Error(err, "failed to deprovision during deletion", "name", rbd.Name)
 		return fmt.Errorf("delete cleanup for RestrictedBindDefinition %s: %w", rbd.Name, err)
 	}
@@ -1416,7 +1661,7 @@ func (r *RestrictedBindDefinitionReconciler) clusterRoleExists(
 	}
 
 	cr := &rbacv1.ClusterRole{}
-	if err := r.client.Get(ctx, types.NamespacedName{Name: clusterRoleRef}, cr); err != nil {
+	if err := r.ownershipReader().Get(ctx, types.NamespacedName{Name: clusterRoleRef}, cr); err != nil {
 		if apierrors.IsNotFound(err) {
 			cache[clusterRoleRef] = false
 			return false, nil
@@ -1439,7 +1684,7 @@ func (r *RestrictedBindDefinitionReconciler) roleExists(
 	}
 
 	role := &rbacv1.Role{}
-	if err := r.client.Get(ctx, types.NamespacedName{Name: roleRef, Namespace: namespace}, role); err != nil {
+	if err := r.ownershipReader().Get(ctx, types.NamespacedName{Name: roleRef, Namespace: namespace}, role); err != nil {
 		if apierrors.IsNotFound(err) {
 			cache[cacheKey] = false
 			return false, nil

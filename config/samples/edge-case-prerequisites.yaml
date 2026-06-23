@@ -53,6 +53,35 @@ metadata:
 apiVersion: v1
 kind: Namespace
 metadata:
+  name: team-alpha
+  labels:
+    t-caas.telekom.com/tenant: "true"
+    t-caas.telekom.com/environment: development
+    t-caas.telekom.com/owner: tenant
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: team-beta
+  labels:
+    t-caas.telekom.com/tenant: "true"
+    t-caas.telekom.com/environment: staging
+    t-caas.telekom.com/owner: tenant
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: platform-system
+  labels:
+    t-caas.telekom.com/managed-by: platform-team
+    t-caas.telekom.com/owner: platform
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
   name: sample-authz
   labels:
     t-caas.telekom.com/purpose: sample-scenarios

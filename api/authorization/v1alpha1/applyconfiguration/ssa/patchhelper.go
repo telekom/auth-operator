@@ -49,7 +49,7 @@ func PatchApplyRoleDefinitionStatus(ctx context.Context, c client.Client, rd *au
 		return pkgssa.PatchApplyResultSkipped, nil
 	}
 
-	applyConfig := ac.RoleDefinition(rd.Name, rd.Namespace).
+	applyConfig := ac.RoleDefinition(rd.Name).
 		WithStatus(RoleDefinitionStatusFrom(&rd.Status))
 
 	if err := applyStatus(ctx, c, applyConfig); err != nil {
@@ -83,7 +83,7 @@ func PatchApplyBindDefinitionStatus(ctx context.Context, c client.Client, bd *au
 		return pkgssa.PatchApplyResultSkipped, nil
 	}
 
-	applyConfig := ac.BindDefinition(bd.Name, bd.Namespace).
+	applyConfig := ac.BindDefinition(bd.Name).
 		WithStatus(BindDefinitionStatusFrom(&bd.Status))
 
 	if err := applyStatus(ctx, c, applyConfig); err != nil {
@@ -117,7 +117,7 @@ func PatchApplyWebhookAuthorizerStatus(ctx context.Context, c client.Client, wa 
 		return pkgssa.PatchApplyResultSkipped, nil
 	}
 
-	applyConfig := ac.WebhookAuthorizer(wa.Name, wa.Namespace).
+	applyConfig := ac.WebhookAuthorizer(wa.Name).
 		WithStatus(WebhookAuthorizerStatusFrom(&wa.Status))
 
 	if err := applyStatus(ctx, c, applyConfig); err != nil {
@@ -225,7 +225,7 @@ func PatchApplyRBACPolicyStatus(ctx context.Context, c client.Client, rp *author
 		return pkgssa.PatchApplyResultSkipped, nil
 	}
 
-	applyConfig := ac.RBACPolicy(rp.Name, rp.Namespace).
+	applyConfig := ac.RBACPolicy(rp.Name).
 		WithStatus(RBACPolicyStatusFrom(&rp.Status))
 
 	if err := applyStatus(ctx, c, applyConfig); err != nil {
@@ -258,7 +258,7 @@ func PatchApplyRestrictedBindDefinitionStatus(ctx context.Context, c client.Clie
 		return pkgssa.PatchApplyResultSkipped, nil
 	}
 
-	applyConfig := ac.RestrictedBindDefinition(rbd.Name, rbd.Namespace).
+	applyConfig := ac.RestrictedBindDefinition(rbd.Name).
 		WithStatus(RestrictedBindDefinitionStatusFrom(&rbd.Status))
 
 	if err := applyStatus(ctx, c, applyConfig); err != nil {
@@ -291,7 +291,7 @@ func PatchApplyRestrictedRoleDefinitionStatus(ctx context.Context, c client.Clie
 		return pkgssa.PatchApplyResultSkipped, nil
 	}
 
-	applyConfig := ac.RestrictedRoleDefinition(rrd.Name, rrd.Namespace).
+	applyConfig := ac.RestrictedRoleDefinition(rrd.Name).
 		WithStatus(RestrictedRoleDefinitionStatusFrom(&rrd.Status))
 
 	if err := applyStatus(ctx, c, applyConfig); err != nil {
