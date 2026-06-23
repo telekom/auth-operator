@@ -197,6 +197,10 @@ jobs:
               name: sample-impersonation-denied
               namespace: sample-authz
             - kind: User
+              name: output-delta-platform-operator
+            - kind: User
+              name: output-delta-sample-admin
+            - kind: User
               name: output-delta-unassigned
           EOF
           }
@@ -240,13 +244,12 @@ jobs:
           apply_policy_docs team-workload-policy \
             --as=system:serviceaccount:team-alpha:team-alpha-rbac-applier
           apply_policy_docs operator-cross-namespace-policy \
-            --as=system:serviceaccount:ci-runners:ci-rbac-applier \
-            --as-group=oidc:platform-operators \
-            --as-group=oidc:infra-operators
+            --as=output-delta-platform-operator \
+            --as-group=oidc:platform-operators
           apply_policy_docs cicd-pipeline-policy \
             --as=system:serviceaccount:ci-runners:ci-rbac-applier
           apply_policy_docs sample-policy-allow-all-paths \
-            --as=system:serviceaccount:ci-runners:ci-rbac-applier \
+            --as=output-delta-sample-admin \
             --as-group=oidc:sample-rbac-admins
           apply_policy_docs sample-policy-impersonation-authz-failure \
             --as=system:serviceaccount:sample-authz:sample-impersonation-denied
@@ -610,6 +613,10 @@ jobs:
               name: sample-impersonation-denied
               namespace: sample-authz
             - kind: User
+              name: output-delta-platform-operator
+            - kind: User
+              name: output-delta-sample-admin
+            - kind: User
               name: output-delta-unassigned
           EOF
           }
@@ -653,13 +660,12 @@ jobs:
           apply_policy_docs team-workload-policy \
             --as=system:serviceaccount:team-alpha:team-alpha-rbac-applier
           apply_policy_docs operator-cross-namespace-policy \
-            --as=system:serviceaccount:ci-runners:ci-rbac-applier \
-            --as-group=oidc:platform-operators \
-            --as-group=oidc:infra-operators
+            --as=output-delta-platform-operator \
+            --as-group=oidc:platform-operators
           apply_policy_docs cicd-pipeline-policy \
             --as=system:serviceaccount:ci-runners:ci-rbac-applier
           apply_policy_docs sample-policy-allow-all-paths \
-            --as=system:serviceaccount:ci-runners:ci-rbac-applier \
+            --as=output-delta-sample-admin \
             --as-group=oidc:sample-rbac-admins
           apply_policy_docs sample-policy-impersonation-authz-failure \
             --as=system:serviceaccount:sample-authz:sample-impersonation-denied
