@@ -1360,3 +1360,37 @@ jobs:
             echo ""
             echo "The compare job downloads artifacts only; it does not checkout or execute pull-request code."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Write output-delta comment data
+        if: always()
+        env:
+          HAS_DIFF: ${{ steps.diff.outputs.has_diff }}
+          HAS_RBAC_DIFF: ${{ steps.diff.outputs.has_rbac_diff }}
+          HAS_STATUS_DIFF: ${{ steps.diff.outputs.has_status_diff }}
+          HAS_TAG_DIFF: ${{ steps.diff.outputs.has_tag_diff }}
+          PR_HAS_ERRORS: ${{ steps.diff.outputs.has_errors }}
+          BASELINE_RESULT: ${{ needs.trusted-baseline.result }}
+          CANDIDATE_RESULT: ${{ needs.candidate-pr.result }}
+          LATEST_TAG: ${{ needs.trusted-baseline.outputs.latest_tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/comment-output
+          {
+            echo "has_diff=${HAS_DIFF:-unknown}"
+            echo "has_rbac_diff=${HAS_RBAC_DIFF:-false}"
+            echo "has_status_diff=${HAS_STATUS_DIFF:-false}"
+            echo "has_tag_diff=${HAS_TAG_DIFF:-false}"
+            echo "pr_has_errors=${PR_HAS_ERRORS:-false}"
+            echo "baseline_result=${BASELINE_RESULT}"
+            echo "candidate_result=${CANDIDATE_RESULT}"
+            echo "latest_tag=${LATEST_TAG:-}"
+          } > /tmp/comment-output/status.env
+
+      - name: Upload output-delta comment data
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: output-delta-comment-data
+          path: /tmp/comment-output/
+          retention-days: 7
+          if-no-files-found: error
