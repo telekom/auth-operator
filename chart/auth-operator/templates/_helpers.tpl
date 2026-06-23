@@ -108,11 +108,14 @@ and kube-apiserver access, so this helper avoids duplicating the block.
 
 NOTE: When the kube-apiserver runs outside the cluster (e.g. managed Kubernetes
 with an external control plane), the egress rules rely on
-networkPolicy.egress.apiServerCIDR or networkPolicy.egress.additionalRules
-being set explicitly. Without an explicit API-server destination, no built-in
-API-server egress rule is rendered.
+networkPolicy.egress.apiServerCIDR, networkPolicy.egress.additionalRules, or
+the explicit allowBroadAPIServerEgress opt-in. Without one of those choices,
+template rendering fails instead of silently allowing broad API-server egress.
 */}}
 {{- define "auth-operator.egressRules" -}}
+{{- if and .Values.networkPolicy.egress.enabled (not .Values.networkPolicy.egress.apiServerCIDR) (not .Values.networkPolicy.egress.additionalRules) (not .Values.networkPolicy.egress.allowBroadAPIServerEgress) -}}
+{{- fail "networkPolicy.egress.apiServerCIDR, networkPolicy.egress.additionalRules, or networkPolicy.egress.allowBroadAPIServerEgress is required when networkPolicy.egress.enabled=true" -}}
+{{- end -}}
 # DNS — allow CoreDNS resolution (UDP + TCP 53)
 - ports:
     - port: 53

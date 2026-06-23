@@ -339,7 +339,15 @@ func TestValidateLabelImmutability(t *testing.T) {
 			expectDeny: false,
 		},
 		{
-			name:       "initial adoption - allowed",
+			name:       "initial adoption - denied without bypass",
+			oldLabels:  map[string]string{},
+			newLabels:  map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"},
+			expectDeny: true,
+			denySubstr: authorizationv1alpha1.LabelKeyOwner,
+		},
+		{
+			name:       "initial adoption - allowed for bypass user",
+			bypass:     BypassCheckResult{ShouldBypass: true},
 			oldLabels:  map[string]string{},
 			newLabels:  map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"},
 			expectDeny: false,
@@ -767,8 +775,11 @@ func TestAuthorizeViaBindDefinitionsUsesLiveReader(t *testing.T) {
 	v := &NamespaceValidator{Client: cachedClient, Reader: liveReader}
 	logger := logf.FromContext(context.Background())
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
-		Name:   "test-ns",
-		Labels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"},
+		Name: "test-ns",
+		Labels: map[string]string{
+			authorizationv1alpha1.LabelKeyOwner:  "tenant",
+			authorizationv1alpha1.LabelKeyTenant: "tenant-a",
+		},
 	}}
 	req := admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{
 		Name:      "test-ns",

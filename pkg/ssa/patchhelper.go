@@ -28,6 +28,7 @@ import (
 	corev1ac "k8s.io/client-go/applyconfigurations/core/v1"
 	metav1ac "k8s.io/client-go/applyconfigurations/meta/v1"
 	rbacv1ac "k8s.io/client-go/applyconfigurations/rbac/v1"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -73,6 +74,55 @@ func PatchApplyClusterRole(
 	ac *rbacv1ac.ClusterRoleApplyConfiguration,
 	opts ...client.ApplyOption,
 ) (PatchApplyResult, error) {
+	return patchApplyClusterRole(ctx, c, ac, nil, false, opts...)
+}
+
+// PatchApplyClusterRoleAlways behaves like PatchApplyClusterRole but sends the
+// SSA apply even when the live object already matches. Use this when the apply
+// identity is itself an authorization boundary and must be rechecked.
+func PatchApplyClusterRoleAlways(
+	ctx context.Context,
+	c client.Client,
+	ac *rbacv1ac.ClusterRoleApplyConfiguration,
+	opts ...client.ApplyOption,
+) (PatchApplyResult, error) {
+	return patchApplyClusterRole(ctx, c, ac, nil, true, opts...)
+}
+
+// PatchApplyClusterRolePruningLabels behaves like PatchApplyClusterRole, but it
+// forces an apply when the live ClusterRole still has a label that should be
+// pruned from the desired state. This covers upgrade cleanup for labels that an
+// older auth-operator version owned via SSA and no longer declares.
+func PatchApplyClusterRolePruningLabels(
+	ctx context.Context,
+	c client.Client,
+	ac *rbacv1ac.ClusterRoleApplyConfiguration,
+	shouldPruneLabel func(string) bool,
+	opts ...client.ApplyOption,
+) (PatchApplyResult, error) {
+	return patchApplyClusterRole(ctx, c, ac, shouldPruneLabel, false, opts...)
+}
+
+// PatchApplyClusterRolePruningLabelsAlways combines protected-label pruning
+// with an unconditional SSA apply for continuous authorization checks.
+func PatchApplyClusterRolePruningLabelsAlways(
+	ctx context.Context,
+	c client.Client,
+	ac *rbacv1ac.ClusterRoleApplyConfiguration,
+	shouldPruneLabel func(string) bool,
+	opts ...client.ApplyOption,
+) (PatchApplyResult, error) {
+	return patchApplyClusterRole(ctx, c, ac, shouldPruneLabel, true, opts...)
+}
+
+func patchApplyClusterRole(
+	ctx context.Context,
+	c client.Client,
+	ac *rbacv1ac.ClusterRoleApplyConfiguration,
+	shouldPruneLabel func(string) bool,
+	alwaysApply bool,
+	opts ...client.ApplyOption,
+) (PatchApplyResult, error) {
 	if ac == nil || ac.Name == nil {
 		return 0, fmt.Errorf("clusterRole ApplyConfiguration must have a name")
 	}
@@ -84,31 +134,85 @@ func PatchApplyClusterRole(
 
 	applyOpts := append([]client.ApplyOption{client.FieldOwner(FieldOwner)}, opts...)
 
-	// Read via client (cache-backed in controllers).
-	existing := &rbacv1.ClusterRole{}
-	err := c.Get(ctx, types.NamespacedName{Name: *ac.Name}, existing)
+	existing, created, err := getOrCreateClusterRole(ctx, c, ac, applyOpts)
 	if err != nil {
-		if apierrors.IsNotFound(err) {
-			// Resource does not exist — must apply.
-			if applyErr := c.Apply(ctx, ac, applyOpts...); applyErr != nil {
-				return 0, fmt.Errorf("create ClusterRole %s: %w", *ac.Name, applyErr)
-			}
-			return PatchApplyResultCreated, nil
-		}
-		return 0, fmt.Errorf("get ClusterRole %s: %w", *ac.Name, err)
+		return 0, err
+	}
+	if created {
+		return PatchApplyResultCreated, nil
+	}
+
+	prunedLabels, err := pruneClusterRoleLabels(ctx, c, existing, ac.Labels, shouldPruneLabel)
+	if err != nil {
+		return 0, err
 	}
 
 	// Compare managed fields: labels, annotations, rules.
-	if clusterRoleMatches(existing, ac) && !applyOptionsForceOwnership(applyOpts) {
+	forceOwnership := applyOptionsForceOwnership(applyOpts)
+	if clusterRoleMatches(existing, ac) && !prunedLabels && !alwaysApply && !forceOwnership {
 		logger.V(3).Info("ClusterRole unchanged, skipping SSA apply",
 			"clusterRole", *ac.Name)
 		return PatchApplyResultSkipped, nil
 	}
+	if clusterRoleMatches(existing, ac) && prunedLabels && !alwaysApply && !forceOwnership {
+		return PatchApplyResultPatched, nil
+	}
 
 	if applyErr := c.Apply(ctx, ac, applyOpts...); applyErr != nil {
+		if prunedLabels && apierrors.IsConflict(applyErr) {
+			patched, retryErr := patchApplyClusterRoleAfterPruneConflict(ctx, c, ac, applyOpts, shouldPruneLabel)
+			if patched {
+				return PatchApplyResultPatched, nil
+			}
+			if retryErr != nil {
+				applyErr = retryErr
+			}
+		}
 		return 0, fmt.Errorf("patch ClusterRole %s: %w", *ac.Name, applyErr)
 	}
 	return PatchApplyResultPatched, nil
+}
+
+func getOrCreateClusterRole(
+	ctx context.Context,
+	c client.Client,
+	ac *rbacv1ac.ClusterRoleApplyConfiguration,
+	applyOpts []client.ApplyOption,
+) (*rbacv1.ClusterRole, bool, error) {
+	existing := &rbacv1.ClusterRole{}
+	err := c.Get(ctx, types.NamespacedName{Name: *ac.Name}, existing)
+	if err == nil {
+		return existing, false, nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return nil, false, fmt.Errorf("get ClusterRole %s: %w", *ac.Name, err)
+	}
+	if applyErr := c.Apply(ctx, ac, applyOpts...); applyErr != nil {
+		return nil, false, fmt.Errorf("create ClusterRole %s: %w", *ac.Name, applyErr)
+	}
+	return nil, true, nil
+}
+
+func patchApplyClusterRoleAfterPruneConflict(
+	ctx context.Context,
+	c client.Client,
+	ac *rbacv1ac.ClusterRoleApplyConfiguration,
+	applyOpts []client.ApplyOption,
+	shouldPruneLabel func(string) bool,
+) (bool, error) {
+	applyErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		return c.Apply(ctx, ac, applyOpts...)
+	})
+	if applyErr == nil {
+		return true, nil
+	}
+	latest := &rbacv1.ClusterRole{}
+	if getErr := c.Get(ctx, types.NamespacedName{Name: *ac.Name}, latest); getErr == nil &&
+		clusterRoleMatches(latest, ac) &&
+		!hasPrunableClusterRoleLabel(latest.Labels, ac.Labels, shouldPruneLabel) {
+		return true, nil
+	}
+	return false, applyErr
 }
 
 // PatchApplyRole reads the current Role from cache, compares it to the desired
@@ -118,6 +222,27 @@ func PatchApplyRole(
 	ctx context.Context,
 	c client.Client,
 	ac *rbacv1ac.RoleApplyConfiguration,
+	opts ...client.ApplyOption,
+) (PatchApplyResult, error) {
+	return patchApplyRole(ctx, c, ac, false, opts...)
+}
+
+// PatchApplyRoleAlways behaves like PatchApplyRole but sends the SSA apply
+// even when the live object already matches.
+func PatchApplyRoleAlways(
+	ctx context.Context,
+	c client.Client,
+	ac *rbacv1ac.RoleApplyConfiguration,
+	opts ...client.ApplyOption,
+) (PatchApplyResult, error) {
+	return patchApplyRole(ctx, c, ac, true, opts...)
+}
+
+func patchApplyRole(
+	ctx context.Context,
+	c client.Client,
+	ac *rbacv1ac.RoleApplyConfiguration,
+	alwaysApply bool,
 	opts ...client.ApplyOption,
 ) (PatchApplyResult, error) {
 	if ac == nil || ac.Name == nil {
@@ -146,7 +271,7 @@ func PatchApplyRole(
 		return 0, fmt.Errorf("get Role %s/%s: %w", *ac.Namespace, *ac.Name, err)
 	}
 
-	if roleMatches(existing, ac) && !applyOptionsForceOwnership(applyOpts) {
+	if roleMatches(existing, ac) && !alwaysApply && !applyOptionsForceOwnership(applyOpts) {
 		logger.V(3).Info("Role unchanged, skipping SSA apply",
 			"role", *ac.Name, "namespace", *ac.Namespace)
 		return PatchApplyResultSkipped, nil
@@ -165,6 +290,27 @@ func PatchApplyClusterRoleBinding(
 	ctx context.Context,
 	c client.Client,
 	ac *rbacv1ac.ClusterRoleBindingApplyConfiguration,
+	opts ...client.ApplyOption,
+) (PatchApplyResult, error) {
+	return patchApplyClusterRoleBinding(ctx, c, ac, false, opts...)
+}
+
+// PatchApplyClusterRoleBindingAlways behaves like PatchApplyClusterRoleBinding
+// but sends the SSA apply even when the live object already matches.
+func PatchApplyClusterRoleBindingAlways(
+	ctx context.Context,
+	c client.Client,
+	ac *rbacv1ac.ClusterRoleBindingApplyConfiguration,
+	opts ...client.ApplyOption,
+) (PatchApplyResult, error) {
+	return patchApplyClusterRoleBinding(ctx, c, ac, true, opts...)
+}
+
+func patchApplyClusterRoleBinding(
+	ctx context.Context,
+	c client.Client,
+	ac *rbacv1ac.ClusterRoleBindingApplyConfiguration,
+	alwaysApply bool,
 	opts ...client.ApplyOption,
 ) (PatchApplyResult, error) {
 	if ac == nil || ac.Name == nil {
@@ -190,7 +336,7 @@ func PatchApplyClusterRoleBinding(
 		return 0, fmt.Errorf("get ClusterRoleBinding %s: %w", *ac.Name, err)
 	}
 
-	if clusterRoleBindingMatches(existing, ac) && !applyOptionsForceOwnership(applyOpts) {
+	if clusterRoleBindingMatches(existing, ac) && !alwaysApply && !applyOptionsForceOwnership(applyOpts) {
 		logger.V(3).Info("ClusterRoleBinding unchanged, skipping SSA apply",
 			"clusterRoleBinding", *ac.Name)
 		return PatchApplyResultSkipped, nil
@@ -209,6 +355,27 @@ func PatchApplyRoleBinding(
 	ctx context.Context,
 	c client.Client,
 	ac *rbacv1ac.RoleBindingApplyConfiguration,
+	opts ...client.ApplyOption,
+) (PatchApplyResult, error) {
+	return patchApplyRoleBinding(ctx, c, ac, false, opts...)
+}
+
+// PatchApplyRoleBindingAlways behaves like PatchApplyRoleBinding but sends the
+// SSA apply even when the live object already matches.
+func PatchApplyRoleBindingAlways(
+	ctx context.Context,
+	c client.Client,
+	ac *rbacv1ac.RoleBindingApplyConfiguration,
+	opts ...client.ApplyOption,
+) (PatchApplyResult, error) {
+	return patchApplyRoleBinding(ctx, c, ac, true, opts...)
+}
+
+func patchApplyRoleBinding(
+	ctx context.Context,
+	c client.Client,
+	ac *rbacv1ac.RoleBindingApplyConfiguration,
+	alwaysApply bool,
 	opts ...client.ApplyOption,
 ) (PatchApplyResult, error) {
 	if ac == nil || ac.Name == nil {
@@ -237,7 +404,7 @@ func PatchApplyRoleBinding(
 		return 0, fmt.Errorf("get RoleBinding %s/%s: %w", *ac.Namespace, *ac.Name, err)
 	}
 
-	if roleBindingMatches(existing, ac) && !applyOptionsForceOwnership(applyOpts) {
+	if roleBindingMatches(existing, ac) && !alwaysApply && !applyOptionsForceOwnership(applyOpts) {
 		logger.V(3).Info("RoleBinding unchanged, skipping SSA apply",
 			"roleBinding", *ac.Name, "namespace", *ac.Namespace)
 		return PatchApplyResultSkipped, nil
@@ -259,6 +426,27 @@ func PatchApplyServiceAccount(
 	c client.Client,
 	ac *corev1ac.ServiceAccountApplyConfiguration,
 	fieldOwner string,
+) (PatchApplyResult, error) {
+	return patchApplyServiceAccount(ctx, c, ac, fieldOwner, false)
+}
+
+// PatchApplyServiceAccountAlways behaves like PatchApplyServiceAccount but
+// sends the SSA apply even when the live object already matches.
+func PatchApplyServiceAccountAlways(
+	ctx context.Context,
+	c client.Client,
+	ac *corev1ac.ServiceAccountApplyConfiguration,
+	fieldOwner string,
+) (PatchApplyResult, error) {
+	return patchApplyServiceAccount(ctx, c, ac, fieldOwner, true)
+}
+
+func patchApplyServiceAccount(
+	ctx context.Context,
+	c client.Client,
+	ac *corev1ac.ServiceAccountApplyConfiguration,
+	fieldOwner string,
+	alwaysApply bool,
 ) (PatchApplyResult, error) {
 	if ac == nil || ac.Name == nil {
 		return 0, fmt.Errorf("serviceAccount ApplyConfiguration must have a name")
@@ -294,7 +482,7 @@ func PatchApplyServiceAccount(
 		return 0, fmt.Errorf("get ServiceAccount %s/%s: %w", *ac.Namespace, *ac.Name, err)
 	}
 
-	if serviceAccountMatches(existing, ac) {
+	if serviceAccountMatches(existing, ac) && !alwaysApply {
 		logger.V(3).Info("ServiceAccount unchanged, skipping SSA apply",
 			"serviceAccount", *ac.Name, "namespace", *ac.Namespace)
 		return PatchApplyResultSkipped, nil
@@ -396,6 +584,58 @@ func mapContains(existing, desired map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func pruneClusterRoleLabels(
+	ctx context.Context,
+	c client.Client,
+	existing *rbacv1.ClusterRole,
+	desired map[string]string,
+	shouldPrune func(string) bool,
+) (bool, error) {
+	if shouldPrune == nil {
+		return false, nil
+	}
+	if len(existing.Labels) == 0 {
+		return false, nil
+	}
+
+	orig := existing.DeepCopy()
+	pruned := false
+	for key := range existing.Labels {
+		if _, stillDesired := desired[key]; stillDesired {
+			continue
+		}
+		if shouldPrune(key) {
+			delete(existing.Labels, key)
+			pruned = true
+		}
+	}
+	if !pruned {
+		return false, nil
+	}
+	if len(existing.Labels) == 0 {
+		existing.Labels = nil
+	}
+	if err := c.Patch(ctx, existing, client.MergeFrom(orig)); err != nil {
+		return false, fmt.Errorf("prune ClusterRole %s labels: %w", existing.Name, err)
+	}
+	return true, nil
+}
+
+func hasPrunableClusterRoleLabel(labels, desired map[string]string, shouldPrune func(string) bool) bool {
+	if shouldPrune == nil {
+		return false
+	}
+	for key := range labels {
+		if _, stillDesired := desired[key]; stillDesired {
+			continue
+		}
+		if shouldPrune(key) {
+			return true
+		}
+	}
+	return false
 }
 
 // ownerRefsMatch checks that all desired OwnerReferences are present in the

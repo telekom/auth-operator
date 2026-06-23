@@ -69,7 +69,42 @@ jobs:
 
       - name: Validate default values
         run: |
-          helm template auth-operator ./chart/auth-operator --debug
+          helm template auth-operator ./chart/auth-operator --debug > /tmp/auth-operator-default.yaml
+          if grep -Eq '^# Source: auth-operator/templates/namespace-(mutating|validating)-webhook-configuration.yaml$' /tmp/auth-operator-default.yaml; then
+            echo "namespace admission webhooks must be disabled by default" >&2
+            exit 1
+          fi
+
+      - name: Validate namespace admission opt-in
+        run: |
+          helm template auth-operator ./chart/auth-operator \
+            --set namespaceAdmission.enabled=true \
+            --debug > /tmp/auth-operator-namespace-admission.yaml
+          grep -Eq '^# Source: auth-operator/templates/namespace-mutating-webhook-configuration.yaml$' /tmp/auth-operator-namespace-admission.yaml
+          grep -Eq '^# Source: auth-operator/templates/namespace-validating-webhook-configuration.yaml$' /tmp/auth-operator-namespace-admission.yaml
+
+      - name: Validate network policy egress guard
+        run: |
+          if helm template auth-operator ./chart/auth-operator \
+            --set networkPolicy.enabled=true \
+            --set networkPolicy.egress.enabled=true \
+            --debug >/tmp/auth-operator-networkpolicy-invalid.yaml 2>/tmp/auth-operator-networkpolicy-invalid.err; then
+            echo "egress NetworkPolicy without apiServerCIDR should require an explicit broad-egress override" >&2
+            exit 1
+          fi
+          grep -q 'networkPolicy.egress.apiServerCIDR, networkPolicy.egress.additionalRules, or networkPolicy.egress.allowBroadAPIServerEgress is required' /tmp/auth-operator-networkpolicy-invalid.err
+
+          helm template auth-operator ./chart/auth-operator \
+            --set networkPolicy.enabled=true \
+            --set networkPolicy.egress.enabled=true \
+            --set networkPolicy.egress.apiServerCIDR=10.96.0.1/32 \
+            --debug >/tmp/auth-operator-networkpolicy-cidr.yaml
+
+          helm template auth-operator ./chart/auth-operator \
+            --set networkPolicy.enabled=true \
+            --set networkPolicy.egress.enabled=true \
+            --set networkPolicy.egress.allowBroadAPIServerEgress=true \
+            --debug >/tmp/auth-operator-networkpolicy-broad.yaml
 
       - name: Verify rendered RBAC permissions
         run: make verify-helm-rbac

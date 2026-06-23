@@ -112,9 +112,12 @@ var _ = Describe("Helm Chart E2E", Ordered, Label("helm"), func() {
 			cmd := utils.CommandContext(context.Background(), "helm", templateArgs...) // #nosec G204
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Helm template failed")
-			Expect(string(output)).To(ContainSubstring("Deployment"))
-			Expect(string(output)).To(ContainSubstring("ServiceAccount"))
-			Expect(string(output)).To(ContainSubstring("ClusterRole"))
+			rendered := string(output)
+			Expect(rendered).To(ContainSubstring("Deployment"))
+			Expect(rendered).To(ContainSubstring("ServiceAccount"))
+			Expect(rendered).To(ContainSubstring("ClusterRole"))
+			Expect(rendered).NotTo(ContainSubstring("# Source: auth-operator/templates/namespace-mutating-webhook-configuration.yaml"))
+			Expect(rendered).NotTo(ContainSubstring("# Source: auth-operator/templates/namespace-validating-webhook-configuration.yaml"))
 
 			// Save templated output
 			saveOutput("helm-template-default.yaml", output)
@@ -132,12 +135,17 @@ var _ = Describe("Helm Chart E2E", Ordered, Label("helm"), func() {
 				"--set", "webhookServer.replicas=2",
 				"--set", "webhookServer.podDisruptionBudget.enabled=true",
 				"--set", "metrics.serviceMonitor.enabled=true",
+				"--set", "namespaceAdmission.enabled=true",
 			)
 			cmd := utils.CommandContext(context.Background(), "helm", templateArgs...) // #nosec G204
 			output, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Helm template with all features failed: %s", string(output))
-			Expect(string(output)).To(ContainSubstring("PodDisruptionBudget"))
-			Expect(string(output)).To(ContainSubstring("ServiceMonitor"))
+			rendered := string(output)
+			Expect(rendered).To(ContainSubstring("PodDisruptionBudget"))
+			Expect(rendered).To(ContainSubstring("ServiceMonitor"))
+			Expect(rendered).To(ContainSubstring("# Source: auth-operator/templates/namespace-mutating-webhook-configuration.yaml"))
+			Expect(rendered).To(ContainSubstring("# Source: auth-operator/templates/namespace-validating-webhook-configuration.yaml"))
+			Expect(rendered).To(ContainSubstring("--cert-rotation-mutating-webhook="))
 
 			// Save templated output
 			saveOutput("helm-template-all-features.yaml", output)

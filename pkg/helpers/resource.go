@@ -11,9 +11,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -45,6 +47,11 @@ const (
 	// BindingSuffix is the suffix appended to binding resource names.
 	BindingSuffix = "binding"
 )
+
+var protectedRestrictedLabelPatterns = []*regexp.Regexp{
+	regexp.MustCompile("^" + regexp.QuoteMeta(rbacv1.GroupName) + `/aggregate-to-.+`),
+	regexp.MustCompile(`^t-caas\.telekom\.com/(breakglass|security|policy|rbac)(-.+)?$`),
+}
 
 // BuildBindingName constructs a binding name from target name and role ref.
 // Format: {targetName}-{roleRef}-binding.
@@ -78,6 +85,33 @@ func BuildResourceLabels(sourceLabels map[string]string) map[string]string {
 	labels[ManagedByLabelStandard] = ManagedByValue
 	labels[AppNameLabel] = ManagedByValue
 	return labels
+}
+
+// BuildRestrictedResourceLabels creates labels for policy-governed generated
+// resources. Tenant-provided protected labels are not propagated because labels
+// such as Kubernetes RBAC aggregation selectors can grant into other roles.
+func BuildRestrictedResourceLabels(sourceLabels map[string]string) map[string]string {
+	labels := make(map[string]string)
+	for k, v := range sourceLabels {
+		if IsProtectedRestrictedLabel(k) {
+			continue
+		}
+		labels[k] = v
+	}
+	labels[ManagedByLabelStandard] = ManagedByValue
+	labels[AppNameLabel] = ManagedByValue
+	return labels
+}
+
+// IsProtectedRestrictedLabel reports whether a tenant-controlled label must not
+// be copied to resources generated from restricted CRDs.
+func IsProtectedRestrictedLabel(key string) bool {
+	for _, pattern := range protectedRestrictedLabelPatterns {
+		if pattern.MatchString(key) {
+			return true
+		}
+	}
+	return false
 }
 
 // BuildResourceAnnotations creates annotations for tracing resources back to their source CRD.

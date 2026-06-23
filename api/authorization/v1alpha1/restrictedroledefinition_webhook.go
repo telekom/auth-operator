@@ -11,7 +11,7 @@ import (
 	"reflect"
 	"strings"
 
-	rbacv1 "k8s.io/api/rbac/v1"
+	"github.com/telekom/auth-operator/pkg/helpers"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -85,8 +85,22 @@ func (v *RestrictedRoleDefinitionValidator) ValidateUpdate(ctx context.Context, 
 	logger := log.FromContext(ctx).WithName("restrictedroledefinition-webhook")
 	logger.V(1).Info("validating update", "name", newObj.Name)
 
+	if newObj.Spec.TargetRole == DefinitionClusterRole {
+		if err := rejectProtectedRestrictedRoleLabels(newObj); err != nil {
+			return nil, err
+		}
+	}
+
 	if reflect.DeepEqual(oldObj.Spec, newObj.Spec) {
-		return nil, nil
+		return nil, validateDefaultPolicyForMetadataUpdate(
+			ctx,
+			v.defaultPolicyReader(),
+			schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedRoleDefinitionKind},
+			newObj.Name,
+			newObj.Spec.PolicyRef.Name,
+			oldObj,
+			newObj,
+		)
 	}
 
 	// Enforce immutability of targetRole, targetName, targetNamespace, and policyRef.
@@ -110,13 +124,21 @@ func (v *RestrictedRoleDefinitionValidator) ValidateUpdate(ctx context.Context, 
 	}
 
 	if newObj.Spec.TargetRole == DefinitionClusterRole {
-		if err := validateNoRestrictedAggregationLabels(newObj); err != nil {
+		if err := rejectProtectedRestrictedRoleLabels(newObj); err != nil {
 			return nil, err
 		}
 	}
 
 	if equality.Semantic.DeepEqual(oldObj.Spec, newObj.Spec) {
-		return nil, nil
+		return nil, validateDefaultPolicyForMetadataUpdate(
+			ctx,
+			v.defaultPolicyReader(),
+			schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedRoleDefinitionKind},
+			newObj.Name,
+			newObj.Spec.PolicyRef.Name,
+			oldObj,
+			newObj,
+		)
 	}
 
 	if err := v.validateRestrictedRoleDefinitionSpec(ctx, newObj); err != nil {
@@ -200,7 +222,7 @@ func (v *RestrictedRoleDefinitionValidator) validateRestrictedRoleDefinitionSpec
 	}
 
 	if obj.Spec.TargetRole == DefinitionClusterRole {
-		if err := validateNoRestrictedAggregationLabels(obj); err != nil {
+		if err := rejectProtectedRestrictedRoleLabels(obj); err != nil {
 			return err
 		}
 	}
@@ -291,18 +313,21 @@ func validateNoDuplicateRestrictedRRDAPIs(obj *RestrictedRoleDefinition) error {
 	return nil
 }
 
-func validateNoRestrictedAggregationLabels(obj *RestrictedRoleDefinition) error {
+func rejectProtectedRestrictedRoleLabels(obj *RestrictedRoleDefinition) error {
 	for key := range obj.Labels {
-		if strings.HasPrefix(key, rbacv1.GroupName+"/aggregate-to-") {
-			return apierrors.NewInvalid(
-				schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedRoleDefinitionKind},
-				obj.Name,
-				field.ErrorList{field.Forbidden(
-					field.NewPath("metadata", "labels").Key(key),
-					"Kubernetes ClusterRole aggregation labels are not allowed on RestrictedRoleDefinition metadata",
-				)},
-			)
+		if !helpers.IsProtectedRestrictedLabel(key) {
+			continue
 		}
+		return apierrors.NewInvalid(
+			schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedRoleDefinitionKind},
+			obj.Name,
+			field.ErrorList{
+				field.Forbidden(
+					field.NewPath("metadata", "labels").Key(key),
+					"label is reserved and must not be propagated to generated ClusterRoles",
+				),
+			},
+		)
 	}
 	return nil
 }

@@ -301,8 +301,8 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 			))
 		defer func() {
 			if retErr != nil {
-				span.RecordError(retErr)
-				span.SetStatus(codes.Error, retErr.Error())
+				span.RecordError(errors.New("restricted role definition reconciliation failed"))
+				span.SetStatus(codes.Error, "restricted role definition reconciliation failed")
 			}
 			span.End()
 		}()
@@ -689,14 +689,11 @@ func (r *RestrictedRoleDefinitionReconciler) rrdEnsureRole(
 	}
 
 	ownerRef := ownerRefForRestricted(rrd, authorizationv1alpha1.RestrictedRoleDefinitionKind)
-	// RestrictedRoleDefinition metadata labels are user-controlled. Do not copy
-	// them to generated ClusterRoles/Roles, because ClusterRole aggregation labels
-	// can change effective permissions outside this controller's policy checks.
-	labelsMap := helpers.BuildResourceLabels(nil)
 	annotations := helpers.BuildResourceAnnotations("RestrictedRoleDefinition", rrd.Name)
 
 	switch rrd.Spec.TargetRole {
 	case authorizationv1alpha1.DefinitionClusterRole:
+		labelsMap := helpers.BuildRestrictedResourceLabels(nil)
 		if err := r.rrdNormalizeOwnedClusterRoleMetadata(ctx, applyClient, rrd, rrd.Spec.TargetName, labelsMap); err != nil {
 			return err
 		}
@@ -707,7 +704,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdEnsureRole(
 			rrd.Spec.TargetName, labelsMap, finalRules,
 		).WithOwnerReferences(ownerRef).WithAnnotations(annotations)
 
-		result, err := pkgssa.PatchApplyClusterRole(ctx, applyClient, ac)
+		result, err := pkgssa.PatchApplyClusterRolePruningLabelsAlways(ctx, applyClient, ac, helpers.IsProtectedRestrictedLabel, client.ForceOwnership)
 		if err != nil {
 			return fmt.Errorf("apply ClusterRole %s: %w", rrd.Spec.TargetName, err)
 		}
@@ -720,11 +717,12 @@ func (r *RestrictedRoleDefinitionReconciler) rrdEnsureRole(
 		if err := r.rrdClearRoleRulesIfEmpty(ctx, applyClient, rrd, rrd.Spec.TargetNamespace, rrd.Spec.TargetName, finalRules); err != nil {
 			return err
 		}
+		labelsMap := helpers.BuildRestrictedResourceLabels(rrd.Labels)
 		ac := pkgssa.RoleWithLabelsAndRules(
 			rrd.Spec.TargetName, rrd.Spec.TargetNamespace, labelsMap, finalRules,
 		).WithOwnerReferences(ownerRef).WithAnnotations(annotations)
 
-		result, err := pkgssa.PatchApplyRole(ctx, applyClient, ac)
+		result, err := pkgssa.PatchApplyRoleAlways(ctx, applyClient, ac, client.ForceOwnership)
 		if err != nil {
 			return fmt.Errorf("apply Role %s/%s: %w", rrd.Spec.TargetNamespace, rrd.Spec.TargetName, err)
 		}

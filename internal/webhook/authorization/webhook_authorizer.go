@@ -195,6 +195,7 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// authorizer was not evaluated for this SAR, it still contributes to the
 	// total rule count.
 	allRules := countTotalRules(globalItems) + countTotalRules(scopedItems)
+	publicReason := publicAuthorizerReason(result)
 
 	response := authzv1.SubjectAccessReview{
 		TypeMeta: metav1.TypeMeta{
@@ -208,7 +209,7 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// authorizers can still allow the request. Only explicit deny (not
 			// no-opinion) sets Denied=true.
 			Denied: result.decision == pkgmetrics.AuthorizerDecisionDenied,
-			Reason: result.reason,
+			Reason: publicReason,
 		},
 	}
 
@@ -238,7 +239,7 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if span := trace.SpanFromContext(ctx); span.IsRecording() {
 		span.SetAttributes(
 			tracing.AttrDecision.String(result.decision),
-			tracing.AttrReason.String(result.reason),
+			tracing.AttrReason.String(publicReason),
 			tracing.AttrRuleCount.Int(allRules),
 		)
 	}
@@ -247,6 +248,17 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if _, err := w.Write(respBytes); err != nil {
 		wa.Log.Error(err, "failed to write SubjectAccessReview response",
 			"latency", time.Since(start).String())
+	}
+}
+
+func publicAuthorizerReason(result evaluationResult) string {
+	switch result.decision {
+	case pkgmetrics.AuthorizerDecisionAllowed:
+		return "Access granted by WebhookAuthorizer"
+	case pkgmetrics.AuthorizerDecisionDenied:
+		return "Access denied by WebhookAuthorizer"
+	default:
+		return result.reason
 	}
 }
 

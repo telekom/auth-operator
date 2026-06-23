@@ -458,6 +458,18 @@
         }
       }
     },
+    "namespaceAdmission": {
+      "type": "object",
+      "description": "Cluster-wide Namespace admission webhook configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Install namespace create/update/delete admission webhooks.",
+          "default": false
+        }
+      }
+    },
     "metrics": {
       "type": "object",
       "description": "Metrics and monitoring configuration.",
@@ -638,7 +650,12 @@
             },
             "apiServerCIDR": {
               "type": "string",
-              "description": "API server CIDR for egress restriction. Required when egress is enabled unless additionalRules provides equivalent API-server access."
+              "description": "API server CIDR for egress restriction. Required when egress is enabled unless allowBroadAPIServerEgress is true or additionalRules provides equivalent API-server access."
+            },
+            "allowBroadAPIServerEgress": {
+              "type": "boolean",
+              "description": "Allow any destination on TCP 443/6443 when apiServerCIDR is empty.",
+              "default": false
             },
             "additionalRules": {
               "type": "array",

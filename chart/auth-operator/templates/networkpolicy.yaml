@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 {{- if .Values.networkPolicy.enabled }}
-{{- if and .Values.networkPolicy.egress.enabled (not .Values.networkPolicy.egress.apiServerCIDR) (not .Values.networkPolicy.egress.additionalRules) }}
-{{- fail "networkPolicy.egress.apiServerCIDR or networkPolicy.egress.additionalRules is required when networkPolicy.egress.enabled=true" }}
+{{- if and .Values.networkPolicy.egress.enabled (not .Values.networkPolicy.egress.apiServerCIDR) (not .Values.networkPolicy.egress.additionalRules) (not .Values.networkPolicy.egress.allowBroadAPIServerEgress) }}
+{{- fail "networkPolicy.egress.apiServerCIDR, networkPolicy.egress.additionalRules, or networkPolicy.egress.allowBroadAPIServerEgress is required when networkPolicy.egress.enabled=true" }}
 {{- end }}
 ---
 # NetworkPolicy for webhook-server pods.

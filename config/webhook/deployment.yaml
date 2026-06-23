@@ -34,8 +34,6 @@ spec:
             - --certs-dir=/tmp/k8s-webhook-server/serving-certs
             - --cert-rotation-dns-name=$(WEBHOOK_SERVICE_NAME).$(POD_NAMESPACE).svc
             - --cert-rotation-secret-name=$(WEBHOOK_SECRET_NAME)
-            - --cert-rotation-mutating-webhook=$(MUTATING_WEBHOOK_NAME)
-            - --cert-rotation-validating-webhook=$(VALIDATING_WEBHOOK_NS_NAME)
             - --cert-rotation-validating-webhook=$(VALIDATING_WEBHOOK_BINDER_NAME)
             - --leader-elect=true
             - --tdg-migration=$(TDG_MIGRATION)
@@ -52,10 +50,6 @@ spec:
               value: "webhook-service"
             - name: WEBHOOK_SECRET_NAME
               value: "webhook-certs"
-            - name: MUTATING_WEBHOOK_NAME
-              value: "namespace-mutating-webhook-configuration"
-            - name: VALIDATING_WEBHOOK_NS_NAME
-              value: "namespace-validating-webhook-configuration"
             - name: VALIDATING_WEBHOOK_BINDER_NAME
               value: "validating-webhook-configuration"
           securityContext:

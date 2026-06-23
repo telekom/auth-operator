@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -230,4 +231,23 @@ func requestFromAdmissionContext(ctx context.Context) (admission.Request, bool) 
 	}
 
 	return req, true
+}
+
+func metadataUpdateRequiresDefaultPolicy(oldObj, newObj client.Object) bool {
+	return !reflect.DeepEqual(oldObj.GetLabels(), newObj.GetLabels()) ||
+		!reflect.DeepEqual(oldObj.GetAnnotations(), newObj.GetAnnotations()) ||
+		!reflect.DeepEqual(oldObj.GetOwnerReferences(), newObj.GetOwnerReferences())
+}
+
+func validateDefaultPolicyForMetadataUpdate(
+	ctx context.Context,
+	c client.Reader,
+	groupKind schema.GroupKind,
+	objName, selectedPolicy string,
+	oldObj, newObj client.Object,
+) error {
+	if !metadataUpdateRequiresDefaultPolicy(oldObj, newObj) {
+		return nil
+	}
+	return validateDefaultPolicyForRequester(ctx, c, groupKind, objName, selectedPolicy)
 }

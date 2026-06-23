@@ -6,6 +6,7 @@ package ssa_test
 
 import (
 	"context"
+	"errors"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -77,6 +78,24 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
 		})
 
+		It("should apply when ClusterRole already matches and Always is requested", func() {
+			rules := []rbacv1.PolicyRule{
+				{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}},
+			}
+			ac := ssa.ClusterRoleWithLabelsAndRules("ph-always-cr",
+				map[string]string{"app": "test"}, rules)
+
+			result, err := ssa.PatchApplyClusterRole(testCtx, k8sClient, ac)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultCreated))
+
+			countingClient := &applyCountingClient{Client: k8sClient}
+			result, err = ssa.PatchApplyClusterRoleAlways(testCtx, countingClient, ac)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+			Expect(countingClient.applyCalls).To(Equal(1))
+		})
+
 		It("should patch when ClusterRole rules change", func() {
 			rules := []rbacv1.PolicyRule{
 				{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}},
@@ -120,6 +139,91 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			result, err := ssa.PatchApplyClusterRole(testCtx, k8sClient, ac2)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+		})
+
+		It("should patch when a prunable label remains outside desired labels", func() {
+			rules := []rbacv1.PolicyRule{
+				{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}},
+			}
+			ac := ssa.ClusterRoleWithLabelsAndRules("ph-prune-label-cr",
+				map[string]string{"safe": "true", "unsafe": "true"}, rules)
+
+			_, err := ssa.PatchApplyClusterRole(testCtx, k8sClient, ac)
+			Expect(err).NotTo(HaveOccurred())
+
+			ac2 := ssa.ClusterRoleWithLabelsAndRules("ph-prune-label-cr",
+				map[string]string{"safe": "true"}, rules)
+			result, err := ssa.PatchApplyClusterRolePruningLabels(testCtx, k8sClient, ac2, func(key string) bool {
+				return key == "unsafe"
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+
+			var cr rbacv1.ClusterRole
+			Expect(k8sClient.Get(testCtx, types.NamespacedName{Name: "ph-prune-label-cr"}, &cr)).To(Succeed())
+			Expect(cr.Labels).NotTo(HaveKey("unsafe"))
+
+			result, err = ssa.PatchApplyClusterRolePruningLabels(testCtx, k8sClient, ac2, func(key string) bool {
+				return key == "unsafe"
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultSkipped))
+		})
+
+		It("should prune a protected label owned by another field manager", func() {
+			rules := []rbacv1.PolicyRule{
+				{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}},
+			}
+			ac := ssa.ClusterRoleWithLabelsAndRules("ph-prune-foreign-label-cr",
+				map[string]string{"safe": "true"}, rules)
+
+			_, err := ssa.PatchApplyClusterRole(testCtx, k8sClient, ac)
+			Expect(err).NotTo(HaveOccurred())
+
+			externalAC := ssa.ClusterRoleWithLabelsAndRules("ph-prune-foreign-label-cr",
+				map[string]string{"safe": "true", "unsafe": "true"}, rules)
+			err = k8sClient.Apply(testCtx, externalAC, client.FieldOwner("external-agent"), client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+
+			result, err := ssa.PatchApplyClusterRolePruningLabels(testCtx, k8sClient, ac, func(key string) bool {
+				return key == "unsafe"
+			}, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+
+			var cr rbacv1.ClusterRole
+			Expect(k8sClient.Get(testCtx, types.NamespacedName{Name: "ph-prune-foreign-label-cr"}, &cr)).To(Succeed())
+			Expect(cr.Labels).NotTo(HaveKey("unsafe"))
+		})
+
+		It("should retry apply after a prune conflict even if a stale get still matches desired fields", func() {
+			rules := []rbacv1.PolicyRule{
+				{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}},
+			}
+			ac := ssa.ClusterRoleWithLabelsAndRules("ph-prune-conflict-cr",
+				map[string]string{"safe": "true", "unsafe": "true"}, rules)
+
+			_, err := ssa.PatchApplyClusterRole(testCtx, k8sClient, ac)
+			Expect(err).NotTo(HaveOccurred())
+
+			desiredAC := ssa.ClusterRoleWithLabelsAndRules("ph-prune-conflict-cr",
+				map[string]string{"safe": "true"}, rules)
+			conflictClient := &clusterRolePruneConflictClient{
+				Client:      k8sClient,
+				name:        "ph-prune-conflict-cr",
+				staleLabels: map[string]string{"safe": "true", "unsafe": "true"},
+				staleRules:  rules,
+			}
+			result, err := ssa.PatchApplyClusterRolePruningLabels(testCtx, conflictClient, desiredAC, func(key string) bool {
+				return key == "unsafe"
+			}, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+			Expect(conflictClient.applyCalls).To(Equal(2))
+
+			var cr rbacv1.ClusterRole
+			Expect(k8sClient.Get(testCtx, types.NamespacedName{Name: "ph-prune-conflict-cr"}, &cr)).To(Succeed())
+			Expect(cr.Labels).NotTo(HaveKey("unsafe"))
 		})
 
 		It("should reject nil ApplyConfiguration", func() {
@@ -185,6 +289,22 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			result, err := ssa.PatchApplyRole(testCtx, k8sClient, ac)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal(ssa.PatchApplyResultSkipped))
+		})
+
+		It("should apply when Role already matches and Always is requested", func() {
+			rules := []rbacv1.PolicyRule{
+				{APIGroups: []string{""}, Resources: []string{"configmaps"}, Verbs: []string{"get"}},
+			}
+			ac := ssa.RoleWithLabelsAndRules("ph-always-role", "default", nil, rules)
+
+			_, err := ssa.PatchApplyRole(testCtx, k8sClient, ac)
+			Expect(err).NotTo(HaveOccurred())
+
+			countingClient := &applyCountingClient{Client: k8sClient}
+			result, err := ssa.PatchApplyRoleAlways(testCtx, countingClient, ac)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+			Expect(countingClient.applyCalls).To(Equal(1))
 		})
 
 		It("should patch when Role rules change", func() {
@@ -267,6 +387,21 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			result, err := ssa.PatchApplyClusterRoleBinding(testCtx, k8sClient, ac)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal(ssa.PatchApplyResultSkipped))
+		})
+
+		It("should apply when CRB already matches and Always is requested", func() {
+			subjects := []rbacv1.Subject{{Kind: "User", Name: "bob", APIGroup: rbacv1.GroupName}}
+			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "ph-binding-target"}
+			ac := ssa.ClusterRoleBindingWithSubjectsAndRoleRef("ph-always-crb", nil, subjects, roleRef)
+
+			_, err := ssa.PatchApplyClusterRoleBinding(testCtx, k8sClient, ac)
+			Expect(err).NotTo(HaveOccurred())
+
+			countingClient := &applyCountingClient{Client: k8sClient}
+			result, err := ssa.PatchApplyClusterRoleBindingAlways(testCtx, countingClient, ac)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+			Expect(countingClient.applyCalls).To(Equal(1))
 		})
 
 		It("should patch when subjects change", func() {
@@ -352,6 +487,21 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			Expect(result).To(Equal(ssa.PatchApplyResultSkipped))
 		})
 
+		It("should apply when RoleBinding already matches and Always is requested", func() {
+			subjects := []rbacv1.Subject{{Kind: "ServiceAccount", Name: "sa-always", Namespace: "default"}}
+			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: "ph-rb-target"}
+			ac := ssa.RoleBindingWithSubjectsAndRoleRef("ph-always-rb", "default", nil, subjects, roleRef)
+
+			_, err := ssa.PatchApplyRoleBinding(testCtx, k8sClient, ac)
+			Expect(err).NotTo(HaveOccurred())
+
+			countingClient := &applyCountingClient{Client: k8sClient}
+			result, err := ssa.PatchApplyRoleBindingAlways(testCtx, countingClient, ac)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+			Expect(countingClient.applyCalls).To(Equal(1))
+		})
+
 		It("should patch when annotations change", func() {
 			subjects := []rbacv1.Subject{{Kind: "ServiceAccount", Name: "sa-ann", Namespace: "default"}}
 			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: "ph-rb-target"}
@@ -399,6 +549,21 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 	// ServiceAccount
 	// -----------------------------------------------------------------------
 	Context("PatchApplyServiceAccount", func() {
+		It("should apply when ServiceAccount already matches and Always is requested", func() {
+			ac := ssa.ServiceAccountWith("ph-always-sa", "default",
+				map[string]string{"shared": "desired"}, true).
+				WithAnnotations(map[string]string{"source": "desired"})
+
+			_, err := ssa.PatchApplyServiceAccount(testCtx, k8sClient, ac, ssa.FieldOwnerFor("ph-always-bd"))
+			Expect(err).NotTo(HaveOccurred())
+
+			countingClient := &applyCountingClient{Client: k8sClient}
+			result, err := ssa.PatchApplyServiceAccountAlways(testCtx, countingClient, ac, ssa.FieldOwnerFor("ph-always-bd"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+			Expect(countingClient.applyCalls).To(Equal(1))
+		})
+
 		It("should return conflict when another manager owns ServiceAccount fields", func() {
 			externalAC := ssa.ServiceAccountWith("ph-conflict-sa", "default",
 				map[string]string{"shared": "external"}, false).
@@ -470,6 +635,69 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 		})
 	})
 })
+
+type applyCountingClient struct {
+	client.Client
+	applyCalls int
+}
+
+func (c *applyCountingClient) Apply(
+	ctx context.Context,
+	obj runtime.ApplyConfiguration,
+	opts ...client.ApplyOption,
+) error {
+	c.applyCalls++
+	return c.Client.Apply(ctx, obj, opts...)
+}
+
+type clusterRolePruneConflictClient struct {
+	client.Client
+	name        string
+	staleLabels map[string]string
+	staleRules  []rbacv1.PolicyRule
+	applyCalls  int
+	conflicted  bool
+	returnStale bool
+}
+
+func (c *clusterRolePruneConflictClient) Get(
+	ctx context.Context,
+	key client.ObjectKey,
+	obj client.Object,
+	opts ...client.GetOption,
+) error {
+	if c.returnStale && key.Name == c.name {
+		if cr, ok := obj.(*rbacv1.ClusterRole); ok {
+			cr.ObjectMeta = metav1.ObjectMeta{
+				Name:   c.name,
+				Labels: c.staleLabels,
+			}
+			cr.Rules = c.staleRules
+			return nil
+		}
+	}
+
+	return c.Client.Get(ctx, key, obj, opts...)
+}
+
+func (c *clusterRolePruneConflictClient) Apply(
+	ctx context.Context,
+	obj runtime.ApplyConfiguration,
+	opts ...client.ApplyOption,
+) error {
+	c.applyCalls++
+	if !c.conflicted {
+		c.conflicted = true
+		c.returnStale = true
+		return apierrors.NewConflict(
+			schema.GroupResource{Group: rbacv1.GroupName, Resource: "clusterroles"},
+			c.name,
+			errors.New("injected conflict"),
+		)
+	}
+
+	return c.Client.Apply(ctx, obj, opts...)
+}
 
 type serviceAccountCreateRaceClient struct {
 	client.Client
