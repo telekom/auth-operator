@@ -18,7 +18,7 @@ inputs:
   k8s-version:
     description: 'Kubernetes version for the cluster'
     required: false
-    default: 'v1.32.5'
+    default: 'v1.36.1'
   wait-timeout:
     description: 'Timeout for cluster to be ready'
     required: false
