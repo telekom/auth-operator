@@ -341,5 +341,13 @@ func (v *RestrictedRoleDefinitionValidator) validatePolicyRefExists(ctx context.
 		return apierrors.NewInternalError(errors.New("unable to validate policy reference"))
 	}
 
+	if rbacPolicy.GetDeletionTimestamp() != nil {
+		return invalidDeletingPolicyRef(
+			schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedRoleDefinitionKind},
+			obj.Name,
+			obj.Spec.PolicyRef.Name,
+		)
+	}
+
 	return nil
 }

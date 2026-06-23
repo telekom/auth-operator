@@ -115,6 +115,140 @@ func TestRRD_Reconcile_PolicyNotFound(t *testing.T) {
 	g.Expect(c.Get(rrdCtx(), types.NamespacedName{Name: ownedRole.Name}, &deletedRole)).NotTo(Succeed())
 }
 
+func TestRRD_Reconcile_PolicyNotFoundReturnsStatusApplyError(t *testing.T) {
+	g := NewWithT(t)
+
+	s := newTestScheme()
+	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "status-error-rrd", UID: "status-error-rrd-uid", Generation: 1},
+		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+			PolicyRef:       authorizationv1alpha1.RBACPolicyReference{Name: "missing-policy"},
+			TargetName:      "status-error-role",
+			TargetRole:      authorizationv1alpha1.DefinitionClusterRole,
+			ScopeNamespaced: false,
+		},
+	}
+	c := fake.NewClientBuilder().
+		WithScheme(s).
+		WithObjects(rrd).
+		WithStatusSubresource(&authorizationv1alpha1.RestrictedRoleDefinition{}).
+		WithInterceptorFuncs(interceptor.Funcs{
+			SubResourceApply: func(_ context.Context, _ client.Client, _ string, _ runtime.ApplyConfiguration, _ ...client.SubResourceApplyOption) error {
+				return fmt.Errorf("status apply failed")
+			},
+		}).
+		Build()
+	r := &RestrictedRoleDefinitionReconciler{
+		client:   c,
+		reader:   c,
+		scheme:   s,
+		recorder: events.NewFakeRecorder(10),
+	}
+
+	_, err := r.Reconcile(rrdCtx(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: rrd.Name},
+	})
+	g.Expect(err).To(HaveOccurred())
+	g.Expect(err.Error()).To(ContainSubstring("stalled status"))
+	g.Expect(err.Error()).To(ContainSubstring("status apply failed"))
+}
+
+func TestRRD_Reconcile_UsesReaderForPolicyEvaluation(t *testing.T) {
+	g := NewWithT(t)
+
+	stalePolicy := &authorizationv1alpha1.RBACPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "policy", Generation: 1},
+		Spec: authorizationv1alpha1.RBACPolicySpec{
+			AppliesTo: authorizationv1alpha1.PolicyScope{Namespaces: []string{"default"}},
+			RoleLimits: &authorizationv1alpha1.RoleLimits{
+				AllowClusterRoles: true,
+			},
+		},
+	}
+	freshPolicy := &authorizationv1alpha1.RBACPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "policy", Generation: 2},
+		Spec: authorizationv1alpha1.RBACPolicySpec{
+			AppliesTo: authorizationv1alpha1.PolicyScope{Namespaces: []string{"default"}},
+			RoleLimits: &authorizationv1alpha1.RoleLimits{
+				AllowClusterRoles: false,
+			},
+		},
+	}
+	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "reader-policy-rrd", UID: "reader-policy-rrd-uid", Generation: 1},
+		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+			PolicyRef:       authorizationv1alpha1.RBACPolicyReference{Name: stalePolicy.Name},
+			TargetName:      "reader-policy-role",
+			TargetRole:      authorizationv1alpha1.DefinitionClusterRole,
+			ScopeNamespaced: false,
+		},
+	}
+
+	r, c := newRRDTestReconcilerFake(stalePolicy, rrd)
+	r.reader = fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		WithObjects(freshPolicy).
+		Build()
+
+	result, err := r.Reconcile(rrdCtx(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: rrd.Name},
+	})
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(result.RequeueAfter).To(Equal(DefaultRequeueInterval))
+
+	var cr rbacv1.ClusterRole
+	g.Expect(c.Get(rrdCtx(), types.NamespacedName{Name: "reader-policy-role"}, &cr)).NotTo(Succeed())
+
+	var updated authorizationv1alpha1.RestrictedRoleDefinition
+	g.Expect(c.Get(rrdCtx(), types.NamespacedName{Name: rrd.Name}, &updated)).To(Succeed())
+	g.Expect(updated.Status.PolicyViolations).NotTo(BeEmpty())
+	g.Expect(conditions.IsReady(&updated)).To(BeFalse())
+}
+
+func TestRRD_Reconcile_DeletingPolicyIsUnavailable(t *testing.T) {
+	g := NewWithT(t)
+	now := metav1.Now()
+
+	pol := &authorizationv1alpha1.RBACPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "deleting-policy",
+			Generation:        1,
+			DeletionTimestamp: &now,
+			Finalizers:        []string{"test.finalizer"},
+		},
+		Spec: authorizationv1alpha1.RBACPolicySpec{
+			AppliesTo: authorizationv1alpha1.PolicyScope{Namespaces: []string{"default"}},
+			RoleLimits: &authorizationv1alpha1.RoleLimits{
+				AllowClusterRoles: true,
+			},
+		},
+	}
+	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "deleting-policy-rrd", UID: "deleting-policy-rrd-uid", Generation: 1},
+		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+			PolicyRef:       authorizationv1alpha1.RBACPolicyReference{Name: pol.Name},
+			TargetName:      "deleting-policy-role",
+			TargetRole:      authorizationv1alpha1.DefinitionClusterRole,
+			ScopeNamespaced: false,
+		},
+	}
+
+	r, c := newRRDTestReconcilerFake(pol, rrd)
+	result, err := r.Reconcile(rrdCtx(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: rrd.Name},
+	})
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(result.RequeueAfter).To(Equal(DefaultRequeueInterval))
+
+	var cr rbacv1.ClusterRole
+	g.Expect(c.Get(rrdCtx(), types.NamespacedName{Name: "deleting-policy-role"}, &cr)).NotTo(Succeed())
+
+	var updated authorizationv1alpha1.RestrictedRoleDefinition
+	g.Expect(c.Get(rrdCtx(), types.NamespacedName{Name: rrd.Name}, &updated)).To(Succeed())
+	g.Expect(updated.Status.PolicyViolations).To(ConsistOf("policy \"deleting-policy\" is being deleted"))
+	g.Expect(conditions.IsStalled(&updated)).To(BeTrue())
+}
+
 func TestRRD_Reconcile_PolicyViolation(t *testing.T) {
 	g := NewWithT(t)
 

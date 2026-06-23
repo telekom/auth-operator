@@ -85,33 +85,45 @@ func resolveDefaultPoliciesForRequester(ctx context.Context, c client.Reader, us
 	return matchedPolicies, nil
 }
 
-func selectedPolicyAssignmentForRequester(
-	ctx context.Context,
-	c client.Reader,
-	selectedPolicy, username string,
-	groups []string,
-) (hasAssignment, matches bool, err error) {
+func selectedPolicyAssignment(ctx context.Context, c client.Reader, selectedPolicy, username string, groups []string) (matchesRequester, hasDefaultAssignment, deleting bool, retErr error) {
 	if selectedPolicy == "" {
-		return false, false, nil
+		return false, false, false, nil
 	}
 
 	selected := &RBACPolicy{}
 	if err := c.Get(ctx, client.ObjectKey{Name: selectedPolicy}, selected); err != nil {
 		if apierrors.IsNotFound(err) {
-			return false, false, err
+			return false, false, false, err
 		}
-		return false, false, fmt.Errorf("get selected RBACPolicy %q: %w", selectedPolicy, err)
+		return false, false, false, fmt.Errorf("get selected RBACPolicy %q: %w", selectedPolicy, err)
+	}
+
+	if selected.GetDeletionTimestamp() != nil {
+		return false, false, true, nil
 	}
 
 	if selected.Spec.DefaultAssignment == nil {
-		return false, false, nil
+		return false, false, false, nil
 	}
-	return true, requesterMatchesDefaultAssignment(selected.Spec.DefaultAssignment, username, groups), nil
+	return requesterMatchesDefaultAssignment(selected.Spec.DefaultAssignment, username, groups), true, false, nil
 }
 
 func selectedPolicyMatchesRequester(ctx context.Context, c client.Reader, selectedPolicy, username string, groups []string) (bool, error) {
-	_, matches, err := selectedPolicyAssignmentForRequester(ctx, c, selectedPolicy, username, groups)
+	matches, _, _, err := selectedPolicyAssignment(ctx, c, selectedPolicy, username, groups)
 	return matches, err
+}
+
+func invalidDeletingPolicyRef(groupKind schema.GroupKind, objName, policyName string) error {
+	return apierrors.NewInvalid(
+		groupKind,
+		objName,
+		field.ErrorList{
+			field.Forbidden(
+				field.NewPath("spec", "policyRef", "name"),
+				fmt.Sprintf("referenced RBACPolicy %q is being deleted", policyName),
+			),
+		},
+	)
 }
 
 func validateDefaultPolicyForRequester(
@@ -127,7 +139,7 @@ func validateDefaultPolicyForRequester(
 		return nil
 	}
 
-	selectedHasAssignment, selectedMatches, err := selectedPolicyAssignmentForRequester(
+	selectedMatches, selectedHasDefaultAssignment, selectedDeleting, err := selectedPolicyAssignment(
 		ctx, c, selectedPolicy, req.UserInfo.Username, req.UserInfo.Groups)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
@@ -142,30 +154,22 @@ func validateDefaultPolicyForRequester(
 		log.FromContext(ctx).Error(err, "failed to evaluate selected policy assignment", "selectedPolicy", selectedPolicy)
 		return apierrors.NewInternalError(errors.New("unable to resolve default policy assignments"))
 	}
-	if selectedMatches {
-		matchedPolicies, err := resolveDefaultPoliciesForRequester(ctx, c, req.UserInfo.Username, req.UserInfo.Groups)
-		if err != nil {
-			log.FromContext(ctx).Error(err, "failed to resolve default policy assignments")
-			return apierrors.NewInternalError(errors.New("unable to resolve default policy assignments"))
-		}
-		if len(matchedPolicies) > 1 {
-			detail := fmt.Sprintf(
-				"requester %q matches multiple default policies: %s",
-				req.UserInfo.Username,
-				strings.Join(matchedPolicies, ", "),
-			)
-			return apierrors.NewInvalid(
-				groupKind,
-				objName,
-				field.ErrorList{
-					field.Invalid(field.NewPath("spec", "policyRef", "name"), selectedPolicy, detail),
-				},
-			)
-		}
-		return nil
+	if selectedDeleting {
+		return invalidDeletingPolicyRef(groupKind, objName, selectedPolicy)
 	}
-	if selectedHasAssignment {
-		detail := fmt.Sprintf("requester %q is not assigned to selected default policy %q", req.UserInfo.Username, selectedPolicy)
+
+	matchedPolicies, err := resolveDefaultPoliciesForRequester(ctx, c, req.UserInfo.Username, req.UserInfo.Groups)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to resolve default policy assignments")
+		return apierrors.NewInternalError(errors.New("unable to resolve default policy assignments"))
+	}
+
+	if len(matchedPolicies) > 1 {
+		detail := fmt.Sprintf(
+			"requester %q matches multiple default policies: %s",
+			req.UserInfo.Username,
+			strings.Join(matchedPolicies, ", "),
+		)
 		return apierrors.NewInvalid(
 			groupKind,
 			objName,
@@ -175,10 +179,23 @@ func validateDefaultPolicyForRequester(
 		)
 	}
 
-	matchedPolicies, err := resolveDefaultPoliciesForRequester(ctx, c, req.UserInfo.Username, req.UserInfo.Groups)
-	if err != nil {
-		log.FromContext(ctx).Error(err, "failed to resolve default policy assignments")
-		return apierrors.NewInternalError(errors.New("unable to resolve default policy assignments"))
+	if selectedMatches {
+		return nil
+	}
+
+	if selectedHasDefaultAssignment {
+		detail := fmt.Sprintf(
+			"requester %q is not assigned to selected default policy %q",
+			req.UserInfo.Username,
+			selectedPolicy,
+		)
+		return apierrors.NewInvalid(
+			groupKind,
+			objName,
+			field.ErrorList{
+				field.Invalid(field.NewPath("spec", "policyRef", "name"), selectedPolicy, detail),
+			},
+		)
 	}
 
 	if len(matchedPolicies) == 0 {

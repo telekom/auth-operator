@@ -365,7 +365,10 @@ func formatBlockingResourcesMessage(blockingResources []namespaceDeletionResourc
 // helpers) so it remains package-private here rather than exported to pkg/helpers.
 func isOwnedByBindDefinition(ownerReferences []metav1.OwnerReference) bool {
 	for _, ownerRef := range ownerReferences {
-		if ownerRef.Kind == "BindDefinition" && ownerRef.APIVersion == authorizationv1alpha1.GroupVersion.String() {
+		if ownerRef.Kind == "BindDefinition" &&
+			ownerRef.APIVersion == authorizationv1alpha1.GroupVersion.String() &&
+			ownerRef.Name != "" &&
+			ownerRef.UID != "" {
 			return true
 		}
 	}
@@ -381,6 +384,9 @@ func (r *RoleBindingTerminator) getOwningBindDefinition(ctx context.Context, own
 		err := r.client.Get(ctx, types.NamespacedName{Name: ownerRef.Name}, bindDefinition)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get BindDefinition %s: %w", ownerRef.Name, err)
+		}
+		if bindDefinition.UID != ownerRef.UID {
+			return nil, fmt.Errorf("BindDefinition owner reference %s UID mismatch", ownerRef.Name)
 		}
 		return bindDefinition, nil
 	}

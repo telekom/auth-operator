@@ -314,6 +314,10 @@ const (
 	PolicyCompliantReasonPolicyNotFound AuthZConditionReason = "PolicyNotFound"
 	// PolicyCompliantMessagePolicyNotFound is the format message when the referenced policy is missing.
 	PolicyCompliantMessagePolicyNotFound AuthZConditionMessage = "Referenced RBACPolicy %q not found"
+	// PolicyCompliantReasonPolicyDeleting is the reason when the referenced policy is deleting.
+	PolicyCompliantReasonPolicyDeleting AuthZConditionReason = "PolicyDeleting"
+	// PolicyCompliantMessagePolicyDeleting is the format message when the referenced policy is deleting.
+	PolicyCompliantMessagePolicyDeleting AuthZConditionMessage = "Referenced RBACPolicy %q is being deleted"
 
 	// PolicyCompliantReasonPolicyScopeNotMatched is the reason when the policy scope does not match.
 	PolicyCompliantReasonPolicyScopeNotMatched AuthZConditionReason = "PolicyScopeNotMatched"

@@ -569,7 +569,10 @@ func TestAuthorizeViaBindDefinitions(t *testing.T) {
 			bindDefs: []authorizationv1alpha1.BindDefinition{bd},
 			username: "user1",
 			groups:   []string{"allowed-group"},
-			nsLabels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"},
+			nsLabels: map[string]string{
+				authorizationv1alpha1.LabelKeyOwner:  "tenant",
+				authorizationv1alpha1.LabelKeyTenant: "tenant-a",
+			},
 			expectOK: true,
 		},
 		{
@@ -577,7 +580,10 @@ func TestAuthorizeViaBindDefinitions(t *testing.T) {
 			bindDefs: []authorizationv1alpha1.BindDefinition{bd},
 			username: "user2",
 			groups:   []string{"other-group"},
-			nsLabels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"},
+			nsLabels: map[string]string{
+				authorizationv1alpha1.LabelKeyOwner:  "tenant",
+				authorizationv1alpha1.LabelKeyTenant: "tenant-a",
+			},
 			expectOK: false,
 		},
 		{
@@ -593,7 +599,10 @@ func TestAuthorizeViaBindDefinitions(t *testing.T) {
 			bindDefs: []authorizationv1alpha1.BindDefinition{},
 			username: "user1",
 			groups:   []string{"allowed-group"},
-			nsLabels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"},
+			nsLabels: map[string]string{
+				authorizationv1alpha1.LabelKeyOwner:  "tenant",
+				authorizationv1alpha1.LabelKeyTenant: "tenant-a",
+			},
 			expectOK: false,
 		},
 		{
@@ -615,7 +624,10 @@ func TestAuthorizeViaBindDefinitions(t *testing.T) {
 			}},
 			username: "system:serviceaccount:my-ns:my-sa",
 			groups:   []string{},
-			nsLabels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"},
+			nsLabels: map[string]string{
+				authorizationv1alpha1.LabelKeyOwner:  "tenant",
+				authorizationv1alpha1.LabelKeyTenant: "tenant-a",
+			},
 			expectOK: true,
 		},
 	}
@@ -802,8 +814,11 @@ func TestAuthorizeViaBindDefinitions_SkipsRestricted(t *testing.T) {
 	v := &NamespaceValidator{Client: fakeClient}
 	logger := logf.FromContext(context.Background())
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
-		Name:   "test-ns",
-		Labels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"},
+		Name: "test-ns",
+		Labels: map[string]string{
+			authorizationv1alpha1.LabelKeyOwner:  "tenant",
+			authorizationv1alpha1.LabelKeyTenant: "tenant-a",
+		},
 	}}
 
 	req := admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{

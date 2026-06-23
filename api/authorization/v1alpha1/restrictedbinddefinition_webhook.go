@@ -424,6 +424,14 @@ func (v *RestrictedBindDefinitionValidator) validatePolicyRefExists(ctx context.
 		return nil, apierrors.NewInternalError(errors.New("unable to validate policy reference"))
 	}
 
+	if rbacPolicy.GetDeletionTimestamp() != nil {
+		return nil, invalidDeletingPolicyRef(
+			schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedBindDefinitionKind},
+			obj.Name,
+			obj.Spec.PolicyRef.Name,
+		)
+	}
+
 	// AllowedNamespaceSelector constraints cannot be evaluated at admission time because
 	// no LabelGetter is available in the webhook. The constraint will be enforced during
 	// reconciliation by the controller. Emit an admission warning so the requester is aware.

@@ -35,4 +35,8 @@ const (
 	// when the target namespace has a tracked label not present on the SA source namespace.
 	// Parameters: target namespace, extra key, SA namespace name.
 	DenialExtraTrackedKeyFmt = "Namespace %s has tracked label %s not present on SA source namespace %s"
+
+	// DenialInvalidTrackedLabelsFmt is a format string returned when a namespace
+	// uses tracked ownership labels in an incoherent combination.
+	DenialInvalidTrackedLabelsFmt = "Namespace %s has invalid tracked ownership labels"
 )

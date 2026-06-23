@@ -286,6 +286,14 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 		"username", req.UserInfo.Username, "isServiceAccount", saInfo.IsServiceAccount,
 		"groupCount", len(userGroups))
 
+	if !ValidTrackedOwnershipLabels(ns.Labels) {
+		denialMsg := fmt.Sprintf(DenialInvalidTrackedLabelsFmt, ns.Name)
+		logger.V(1).Info("namespace operation denied - invalid tracked ownership labels",
+			"namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username)
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultDenied).Inc()
+		return admission.Denied(denialMsg)
+	}
+
 	listCtx, cancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
 	defer cancel()
 	bindDefinitions, err := freshBindDefinitionsWithRoleBindings(listCtx, v.Client, v.admissionReader())

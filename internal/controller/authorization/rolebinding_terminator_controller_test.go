@@ -73,6 +73,7 @@ func TestIsOwnedByBindDefinition(t *testing.T) {
 				APIVersion: authorizationv1alpha1.GroupVersion.String(),
 				Kind:       "BindDefinition",
 				Name:       "test-bd",
+				UID:        "test-bd-uid",
 			},
 		}
 		g.Expect(isOwnedByBindDefinition(refs)).To(BeTrue())
@@ -82,9 +83,17 @@ func TestIsOwnedByBindDefinition(t *testing.T) {
 		g := NewWithT(t)
 		refs := []metav1.OwnerReference{
 			{APIVersion: "apps/v1", Kind: "Deployment", Name: "dep"},
-			{APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: "BindDefinition", Name: "bd"},
+			{APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: "BindDefinition", Name: "bd", UID: "bd-uid"},
 		}
 		g.Expect(isOwnedByBindDefinition(refs)).To(BeTrue())
+	})
+
+	t.Run("incomplete BindDefinition owner returns false", func(t *testing.T) {
+		g := NewWithT(t)
+		refs := []metav1.OwnerReference{
+			{APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: "BindDefinition", Name: "bd"},
+		}
+		g.Expect(isOwnedByBindDefinition(refs)).To(BeFalse())
 	})
 }
 

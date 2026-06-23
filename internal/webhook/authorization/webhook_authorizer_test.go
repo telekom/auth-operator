@@ -194,6 +194,58 @@ func TestServeHTTP_EvaluatesMatchingAuthorizersByName(t *testing.T) {
 	}
 }
 
+func TestServeHTTP_AuthorizerRulesUseReaderWhenProvided(t *testing.T) {
+	scheme := newScheme(t)
+	cachedAllow := &authzv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{Name: "cached-allow"},
+		Spec: authzv1alpha1.WebhookAuthorizerSpec{
+			AllowedPrincipals: []authzv1alpha1.Principal{{User: "alice"}},
+			ResourceRules: []authzv1.ResourceRule{
+				{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods"}},
+			},
+		},
+	}
+	freshDeny := &authzv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{Name: "fresh-deny"},
+		Spec: authzv1alpha1.WebhookAuthorizerSpec{
+			DeniedPrincipals: []authzv1alpha1.Principal{{User: "alice"}},
+		},
+	}
+	handler := &Authorizer{
+		Client: newIndexedClient(scheme, cachedAllow),
+		Reader: newIndexedClient(scheme, freshDeny),
+		Log:    logr.Discard(),
+	}
+	sar := authzv1.SubjectAccessReview{
+		Spec: authzv1.SubjectAccessReviewSpec{
+			User: "alice",
+			ResourceAttributes: &authzv1.ResourceAttributes{
+				Verb:     "get",
+				Group:    "",
+				Resource: "pods",
+			},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(marshalSAR(t, sar)))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var resp authzv1.SubjectAccessReview
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Status.Allowed {
+		t.Fatalf("expected fresh reader denial, got %+v", resp.Status)
+	}
+	if !strings.Contains(resp.Status.Reason, "fresh-deny") {
+		t.Fatalf("expected reason to mention fresh reader authorizer, got %q", resp.Status.Reason)
+	}
+}
+
 func TestAuditLog_DenyDecisionAtV0(t *testing.T) {
 	var buf strings.Builder
 	logger := capturingLogger(&buf, 0)

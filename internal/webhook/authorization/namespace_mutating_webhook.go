@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
@@ -125,6 +126,19 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 
 	// If there are labels to add, mutate the namespace
 	if len(labelsToAdd) > 0 {
+		candidateLabels := maps.Clone(ns.Labels)
+		if candidateLabels == nil {
+			candidateLabels = make(map[string]string, len(labelsToAdd))
+		}
+		for key, value := range labelsToAdd {
+			candidateLabels[key] = value
+		}
+		if !ValidTrackedOwnershipLabels(candidateLabels) {
+			logger.V(1).Info("namespace mutation denied - invalid tracked ownership labels",
+				"namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username)
+			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultDenied).Inc()
+			return admission.Denied(fmt.Sprintf(DenialInvalidTrackedLabelsFmt, ns.Name))
+		}
 		return m.applyLabelPatch(ctx, req, ns, labelsToAdd)
 	}
 

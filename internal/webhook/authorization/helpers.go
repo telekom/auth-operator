@@ -246,10 +246,30 @@ func GetSANamespaceTrackedLabels(ctx context.Context, c client.Reader, saInfo Se
 		}
 	}
 
+	if !ValidTrackedOwnershipLabels(result) {
+		return map[string]string{}, nil
+	}
+
+	return result, nil
+}
+
+// ValidTrackedOwnershipLabels reports whether tracked ownership labels are
+// absent or form a coherent owner classification.
+func ValidTrackedOwnershipLabels(namespaceLabels map[string]string) bool {
+	result := map[string]string{}
+	for _, key := range trackedOwnershipKeys {
+		if val, ok := namespaceLabels[key]; ok {
+			result[key] = val
+		}
+	}
+	if len(result) == 0 {
+		return true
+	}
+
 	// Require at minimum the owner label with a non-empty value.
 	ownerVal, hasOwner := result[authorizationv1alpha1.LabelKeyOwner]
 	if !hasOwner || ownerVal == "" {
-		return map[string]string{}, nil
+		return false
 	}
 
 	// Enforce a valid and non-ambiguous ownership combination:
@@ -260,33 +280,33 @@ func GetSANamespaceTrackedLabels(ctx context.Context, c client.Reader, saInfo Se
 	switch ownerVal {
 	case authorizationv1alpha1.OwnerPlatform:
 		if _, ok := result[authorizationv1alpha1.LabelKeyTenant]; ok {
-			return map[string]string{}, nil
+			return false
 		}
 		if _, ok := result[authorizationv1alpha1.LabelKeyThirdParty]; ok {
-			return map[string]string{}, nil
+			return false
 		}
 	case authorizationv1alpha1.OwnerTenant:
 		tenantVal, hasTenant := result[authorizationv1alpha1.LabelKeyTenant]
 		if !hasTenant || tenantVal == "" {
-			return map[string]string{}, nil
+			return false
 		}
 		if _, ok := result[authorizationv1alpha1.LabelKeyThirdParty]; ok {
-			return map[string]string{}, nil
+			return false
 		}
 	case authorizationv1alpha1.OwnerThirdParty:
 		tpVal, hasTP := result[authorizationv1alpha1.LabelKeyThirdParty]
 		if !hasTP || tpVal == "" {
-			return map[string]string{}, nil
+			return false
 		}
 		if _, ok := result[authorizationv1alpha1.LabelKeyTenant]; ok {
-			return map[string]string{}, nil
+			return false
 		}
 	default:
 		// Unknown owner values are not considered valid tracked ownership.
-		return map[string]string{}, nil
+		return false
 	}
 
-	return result, nil
+	return true
 }
 
 // FindExtraTrackedKey returns the first tracked ownership label key that exists

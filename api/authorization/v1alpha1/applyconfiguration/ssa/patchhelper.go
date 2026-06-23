@@ -280,15 +280,25 @@ func PatchApplyRestrictedRoleDefinitionStatus(ctx context.Context, c client.Clie
 	logger := log.FromContext(ctx)
 
 	var cached authorizationv1alpha1.RestrictedRoleDefinition
+	cachedFound := false
 	if err := c.Get(ctx, types.NamespacedName{Name: rrd.Name}, &cached); err != nil {
 		if apierrors.IsNotFound(err) {
 			logger.V(2).Info("RestrictedRoleDefinition not in cache, applying status unconditionally", "name", rrd.Name)
 		} else {
 			return pkgssa.PatchApplyResultPatched, fmt.Errorf("get cached RestrictedRoleDefinition %s: %w", rrd.Name, err)
 		}
-	} else if restrictedRoleDefinitionStatusEqual(&cached.Status, &rrd.Status) {
-		logger.V(2).Info("RestrictedRoleDefinition status unchanged, skipping apply", "name", rrd.Name)
-		return pkgssa.PatchApplyResultSkipped, nil
+	} else {
+		cachedFound = true
+		if restrictedRoleDefinitionStatusEqual(&cached.Status, &rrd.Status) {
+			logger.V(2).Info("RestrictedRoleDefinition status unchanged, skipping apply", "name", rrd.Name)
+			return pkgssa.PatchApplyResultSkipped, nil
+		}
+	}
+
+	if cachedFound {
+		if err := clearRestrictedRoleDefinitionEmptyStatusSlices(ctx, c, &cached, rrd); err != nil {
+			return pkgssa.PatchApplyResultPatched, err
+		}
 	}
 
 	applyConfig := ac.RestrictedRoleDefinition(rrd.Name).
@@ -298,6 +308,37 @@ func PatchApplyRestrictedRoleDefinitionStatus(ctx context.Context, c client.Clie
 		return pkgssa.PatchApplyResultPatched, fmt.Errorf("apply RestrictedRoleDefinition %s status: %w", rrd.Name, err)
 	}
 	return pkgssa.PatchApplyResultPatched, nil
+}
+
+func clearRestrictedRoleDefinitionEmptyStatusSlices(
+	ctx context.Context,
+	c client.Client,
+	cached *authorizationv1alpha1.RestrictedRoleDefinition,
+	desired *authorizationv1alpha1.RestrictedRoleDefinition,
+) error {
+	statusPatch := map[string]any{}
+	addClear := func(field string, desiredLen, cachedLen int) {
+		if desiredLen == 0 && cachedLen > 0 {
+			statusPatch[field] = []any{}
+		}
+	}
+	addClear("policyViolations", len(desired.Status.PolicyViolations), len(cached.Status.PolicyViolations))
+	addClear("conditions", len(desired.Status.Conditions), len(cached.Status.Conditions))
+	if len(statusPatch) == 0 {
+		return nil
+	}
+
+	patch, err := json.Marshal(map[string]any{"status": statusPatch})
+	if err != nil {
+		return fmt.Errorf("marshal RestrictedRoleDefinition status clear patch: %w", err)
+	}
+	target := &authorizationv1alpha1.RestrictedRoleDefinition{}
+	target.Name = desired.Name
+	target.Namespace = desired.Namespace
+	if err := c.Status().Patch(ctx, target, client.RawPatch(types.MergePatchType, patch)); err != nil {
+		return fmt.Errorf("clear RestrictedRoleDefinition %s empty status slices: %w", desired.Name, err)
+	}
+	return nil
 }
 
 // rbacPolicyStatusEqual compares two RBACPolicyStatus values for equality.
