@@ -1,0 +1,250 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: Output Delta Comment
+
+on:
+  workflow_run:
+    workflows: ['Output Delta']
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  comment:
+    name: Post Output Delta Comment
+    if: github.event.workflow_run.event == 'pull_request' || github.event.workflow_run.event == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+      pull-requests: read
+    steps:
+      - name: Resolve pull request
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+        run: |
+          set -euo pipefail
+          if [ -n "${PR_NUMBER:-}" ]; then
+            echo "number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          pr_number="$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "repos/${GH_REPO}/commits/${HEAD_SHA}/pulls" \
+            --jq '.[0].number // ""')"
+          if [ -z "$pr_number" ]; then
+            echo "::notice::No pull request found for workflow run ${HEAD_SHA}; skipping output-delta comment."
+            echo "number=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "number=${pr_number}" >> "$GITHUB_OUTPUT"
+
+      - name: Check current PR head
+        id: current
+        if: steps.pr.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          set -euo pipefail
+          current_head="$(gh pr view "$PR_NUMBER" \
+            --repo "$GH_REPO" \
+            --json headRefOid \
+            --jq '.headRefOid')"
+          if [ "$current_head" != "$HEAD_SHA" ]; then
+            echo "::notice::Skipping stale output-delta run for ${HEAD_SHA}; current PR head is ${current_head}."
+            echo "is_current=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "is_current=true" >> "$GITHUB_OUTPUT"
+
+      - name: Download comment data
+        if: steps.current.outputs.is_current == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          WORKFLOW_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/output-delta-comment
+
+          has_diff=unknown
+          has_rbac_diff=false
+          has_status_diff=false
+          has_tag_diff=false
+          pr_has_errors=false
+          baseline_result=unknown
+          candidate_result=unknown
+          latest_tag=
+
+          valid_bool() {
+            case "$1" in
+              true|false)
+                return 0
+                ;;
+              *)
+                return 1
+                ;;
+            esac
+          }
+
+          valid_result() {
+            case "$1" in
+              success|failure|cancelled|skipped)
+                return 0
+                ;;
+              *)
+                return 1
+                ;;
+            esac
+          }
+
+          read_status_data() {
+            local status_file=/tmp/output-delta-comment/status.env
+            if [ ! -s "$status_file" ]; then
+              return 1
+            fi
+
+            while IFS='=' read -r key value; do
+              case "$key" in
+                has_diff)
+                  case "$value" in
+                    true|false|unknown)
+                      has_diff="$value"
+                      ;;
+                  esac
+                  ;;
+                has_rbac_diff)
+                  if valid_bool "$value"; then
+                    has_rbac_diff="$value"
+                  fi
+                  ;;
+                has_status_diff)
+                  if valid_bool "$value"; then
+                    has_status_diff="$value"
+                  fi
+                  ;;
+                has_tag_diff)
+                  if valid_bool "$value"; then
+                    has_tag_diff="$value"
+                  fi
+                  ;;
+                pr_has_errors)
+                  if valid_bool "$value"; then
+                    pr_has_errors="$value"
+                  fi
+                  ;;
+                baseline_result)
+                  if valid_result "$value"; then
+                    baseline_result="$value"
+                  fi
+                  ;;
+                candidate_result)
+                  if valid_result "$value"; then
+                    candidate_result="$value"
+                  fi
+                  ;;
+                latest_tag)
+                  if [[ "$value" =~ ^v[0-9A-Za-z._+-]+$ ]]; then
+                    latest_tag="$value"
+                  fi
+                  ;;
+              esac
+            done < "$status_file"
+          }
+
+          write_comment_body() {
+            {
+              echo "<!-- auth-operator-output-delta-comment -->"
+              echo "## Output Delta"
+              echo ""
+              case "$has_diff" in
+                true)
+                  echo "Output differences were detected. Inspect the \`output-delta-diff-output\` artifact before merging."
+                  ;;
+                false)
+                  echo "No output differences were detected between trusted main baseline and this PR."
+                  ;;
+                *)
+                  echo "Output differences could not be computed. Inspect the workflow run and uploaded artifacts before merging."
+                  ;;
+              esac
+              echo ""
+              echo "- Trusted baseline job: ${baseline_result}"
+              echo "- Candidate PR job: ${candidate_result}"
+              echo "- Differences detected: ${has_diff}"
+              echo "- RBAC differences detected: ${has_rbac_diff}"
+              echo "- CRD status differences detected: ${has_status_diff}"
+              echo "- Candidate log errors detected: ${pr_has_errors}"
+              echo "- Latest tag diff generated: ${has_tag_diff}"
+              if [ -n "$latest_tag" ]; then
+                echo "- Latest release tag compared: ${latest_tag}"
+              fi
+              echo "- Workflow conclusion: ${WORKFLOW_CONCLUSION:-unknown}"
+              echo "- Workflow run: ${RUN_URL}"
+              echo ""
+              echo "The compare job downloads artifacts only; it does not checkout or execute pull-request code."
+            } > /tmp/output-delta-comment/body.md
+          }
+
+          if ! gh run download "$RUN_ID" \
+            --repo "$GH_REPO" \
+            --name output-delta-comment-data \
+            --dir /tmp/output-delta-comment; then
+            echo "::warning::Output-delta comment artifact is missing; posting unknown-status comment."
+          fi
+
+          if ! read_status_data; then
+            echo "::warning::Output-delta comment artifact did not contain status.env; posting unknown-status comment."
+          fi
+
+          write_comment_body
+
+      - name: Create or update PR comment
+        if: steps.current.outputs.is_current == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          set -euo pipefail
+          body_file=/tmp/output-delta-comment/body.md
+          marker="<!-- auth-operator-output-delta-comment -->"
+          if ! grep -Fq "$marker" "$body_file"; then
+            echo "::error::Output-delta comment body is missing the update marker."
+            exit 1
+          fi
+
+          jq -n --rawfile body "$body_file" '{body: $body}' > /tmp/output-delta-comment/comment.json
+          comment_id="$(gh api --paginate "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
+            --jq '.[] | select(.body | contains("<!-- auth-operator-output-delta-comment -->")) | .id' \
+            | tail -n 1)"
+
+          if [ -n "$comment_id" ]; then
+            gh api \
+              --method PATCH \
+              "repos/${GH_REPO}/issues/comments/${comment_id}" \
+              --input /tmp/output-delta-comment/comment.json >/dev/null
+            echo "Updated output-delta comment on PR #${PR_NUMBER}."
+          else
+            gh api \
+              --method POST \
+              "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
+              --input /tmp/output-delta-comment/comment.json >/dev/null
+            echo "Created output-delta comment on PR #${PR_NUMBER}."
+          fi
