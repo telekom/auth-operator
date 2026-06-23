@@ -141,16 +141,8 @@ func (v *RestrictedBindDefinitionValidator) ValidateDelete(ctx context.Context, 
 	logger := log.FromContext(ctx).WithName("restrictedbinddefinition-webhook")
 	logger.V(1).Info("validating delete", "name", obj.Name)
 
-	if err := validateDefaultPolicyForRequester(
-		ctx,
-		v.defaultPolicyReader(),
-		schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedBindDefinitionKind},
-		obj.Name,
-		obj.Spec.PolicyRef.Name,
-	); err != nil {
-		return nil, err
-	}
-
+	// Deletes remove granted access and must remain available for cleanup even
+	// when the requester is not assigned to the object's default policy.
 	return nil, nil
 }
 

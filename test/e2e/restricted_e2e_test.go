@@ -120,6 +120,9 @@ spec:
     maxRulesPerRole: 200
   bindingLimits:
     allowClusterRoleBindings: false
+    clusterRoleBindingLimits:
+      allowedRoleRefs:
+        - e2e-default-policy-role
     roleBindingLimits:
       allowedRoleRefs:
         - e2e-default-policy-role
@@ -151,6 +154,9 @@ spec:
     maxRulesPerRole: 200
   bindingLimits:
     allowClusterRoleBindings: false
+    clusterRoleBindingLimits:
+      allowedRoleRefs:
+        - e2e-default-policy-role
     roleBindingLimits:
       allowedRoleRefs:
         - e2e-default-policy-role
@@ -186,6 +192,9 @@ spec:
     maxRulesPerRole: 200
   bindingLimits:
     allowClusterRoleBindings: false
+    clusterRoleBindingLimits:
+      allowedRoleRefs:
+        - e2e-default-policy-role
     roleBindingLimits:
       allowedRoleRefs:
         - e2e-default-policy-role

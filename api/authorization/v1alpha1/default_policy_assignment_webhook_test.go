@@ -587,7 +587,7 @@ func TestRequesterMatchesDefaultAssignment(t *testing.T) {
 	}
 }
 
-func TestRestrictedValidatorsEnforceDefaultPolicyAssignmentOnDelete(t *testing.T) {
+func TestRestrictedValidatorsAllowDeleteRegardlessOfDefaultPolicyAssignment(t *testing.T) {
 	scheme := runtime.NewScheme()
 	if err := AddToScheme(scheme); err != nil {
 		t.Fatalf("add scheme: %v", err)
@@ -625,7 +625,7 @@ func TestRestrictedValidatorsEnforceDefaultPolicyAssignmentOnDelete(t *testing.T
 		WithObjects(assignedPolicy.DeepCopy(), otherAssignedPolicy.DeepCopy()).
 		Build()
 
-	t.Run("RestrictedBindDefinition rejects delete for unassigned selected policy", func(t *testing.T) {
+	t.Run("RestrictedBindDefinition allows delete for unassigned selected policy", func(t *testing.T) {
 		validator := &RestrictedBindDefinitionValidator{Client: reader, Reader: reader}
 		rbd := &RestrictedBindDefinition{
 			ObjectMeta: metav1.ObjectMeta{Name: "delete-rbd-reject"},
@@ -638,10 +638,8 @@ func TestRestrictedValidatorsEnforceDefaultPolicyAssignmentOnDelete(t *testing.T
 				ClusterRoleBindings: &ClusterBinding{ClusterRoleRefs: []string{"view"}},
 			},
 		}
-		if _, err := validator.ValidateDelete(ctxGroup, rbd); err == nil {
-			t.Fatal("expected delete using unassigned selected policy to be rejected")
-		} else if !strings.Contains(err.Error(), "is not assigned to selected default policy") {
-			t.Fatalf("unexpected error: %v", err)
+		if _, err := validator.ValidateDelete(ctxGroup, rbd); err != nil {
+			t.Fatalf("expected delete using unassigned selected policy to be allowed, got: %v", err)
 		}
 	})
 
@@ -663,7 +661,7 @@ func TestRestrictedValidatorsEnforceDefaultPolicyAssignmentOnDelete(t *testing.T
 		}
 	})
 
-	t.Run("RestrictedRoleDefinition rejects delete for unassigned selected policy", func(t *testing.T) {
+	t.Run("RestrictedRoleDefinition allows delete for unassigned selected policy", func(t *testing.T) {
 		validator := &RestrictedRoleDefinitionValidator{Client: reader, Reader: reader}
 		rrd := &RestrictedRoleDefinition{
 			ObjectMeta: metav1.ObjectMeta{Name: "delete-rrd-reject"},
@@ -674,10 +672,8 @@ func TestRestrictedValidatorsEnforceDefaultPolicyAssignmentOnDelete(t *testing.T
 				ScopeNamespaced: false,
 			},
 		}
-		if _, err := validator.ValidateDelete(ctxGroup, rrd); err == nil {
-			t.Fatal("expected delete using unassigned selected policy to be rejected")
-		} else if !strings.Contains(err.Error(), "is not assigned to selected default policy") {
-			t.Fatalf("unexpected error: %v", err)
+		if _, err := validator.ValidateDelete(ctxGroup, rrd); err != nil {
+			t.Fatalf("expected delete using unassigned selected policy to be allowed, got: %v", err)
 		}
 	})
 

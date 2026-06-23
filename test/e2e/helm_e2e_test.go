@@ -395,7 +395,7 @@ metadata:
 			Expect(helmDeploymentArgs("webhook-server")).To(ContainSubstring("--metrics-secure"))
 
 			By("Verifying scraper ServiceAccount authorization")
-			cmd = utils.CommandContext(context.Background(), "kubectl", "auth", "can-i", "get", "--raw", "/metrics", // #nosec G204
+			cmd = utils.CommandContext(context.Background(), "kubectl", "auth", "can-i", "get", "/metrics", // #nosec G204
 				fmt.Sprintf("--as=system:serviceaccount:%s:e2e-metrics-scraper", helmNamespace))
 			output, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
