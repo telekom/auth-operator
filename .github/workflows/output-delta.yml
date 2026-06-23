@@ -22,6 +22,7 @@ on:
       - 'pkg/**'
       - '.github/actions/**'
       - '.github/workflows/output-delta.yml'
+      - '.github/workflows/output-delta-comment.yml'
       - 'go.mod'
       - 'go.sum'
       - 'main.go'
