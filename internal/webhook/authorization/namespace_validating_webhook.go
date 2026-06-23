@@ -300,7 +300,7 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 	if err != nil {
 		logger.Error(err, "failed to list BindDefinitions", "namespace", req.Name)
 		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()
-		return admission.Errored(http.StatusInternalServerError, errors.New("unable to validate namespace request"))
+		return admission.Errored(http.StatusInternalServerError, ErrNamespaceWebhookInternal)
 	}
 
 	logger.V(2).Info("checking authorization against BindDefinitions",
@@ -343,7 +343,7 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 					logger.Error(err, "failed to match namespace selector",
 						"namespace", req.Name, "bindDefinition", bindDef.Name)
 					metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()
-					return admission.Errored(http.StatusInternalServerError, errors.New("unable to validate namespace request"))
+					return admission.Errored(http.StatusInternalServerError, ErrNamespaceWebhookInternal)
 				}
 				if matches {
 					namespaceMatchFound = true
@@ -382,7 +382,7 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 		if saErr != nil {
 			logger.Error(saErr, "failed to lookup SA namespace labels", "saNamespace", saInfo.Namespace, "targetNamespace", req.Name)
 			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()
-			return admission.Errored(http.StatusInternalServerError, errors.New("unable to validate namespace request"))
+			return admission.Errored(http.StatusInternalServerError, ErrNamespaceWebhookInternal)
 		}
 		if len(inheritedLabels) > 0 {
 			// Symmetric comparison: all inherited labels must match AND the target

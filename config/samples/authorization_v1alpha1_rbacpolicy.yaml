@@ -127,6 +127,8 @@ spec:
     groups:
       - "oidc:platform-operators"
       - "oidc:infra-operators"
+  roleLimits:
+    allowClusterRoles: true
   bindingLimits:
     allowClusterRoleBindings: true
     clusterRoleBindingLimits:

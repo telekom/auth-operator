@@ -58,6 +58,21 @@ func newRRDTestReconcilerFake(objs ...client.Object) (*RestrictedRoleDefinitionR
 	}, c
 }
 
+type staleRRDRoleGetClient struct {
+	client.Client
+}
+
+func (c staleRRDRoleGetClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	switch obj.(type) {
+	case *rbacv1.ClusterRole:
+		return apierrors.NewNotFound(schema.GroupResource{Group: rbacv1.GroupName, Resource: "clusterroles"}, key.Name)
+	case *rbacv1.Role:
+		return apierrors.NewNotFound(schema.GroupResource{Group: rbacv1.GroupName, Resource: "roles"}, key.Name)
+	default:
+		return c.Client.Get(ctx, key, obj, opts...)
+	}
+}
+
 func rrdCtx() context.Context {
 	return ctrllog.IntoContext(context.Background(), logr.Discard())
 }
@@ -596,6 +611,44 @@ func TestRRD_Deprovision_ClusterRole(t *testing.T) {
 	g.Expect(emitted).NotTo(BeEmpty())
 	g.Expect(emitted[len(emitted)-1]).To(ContainSubstring(authorizationv1alpha1.EventReasonDeprovisioned))
 	g.Expect(emitted[len(emitted)-1]).NotTo(ContainSubstring("policy violations"))
+}
+
+func TestRRD_DeprovisionUsesReaderForTargetRole(t *testing.T) {
+	g := NewWithT(t)
+
+	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "fresh-deprov-rrd", UID: "fresh-deprov-rrd-uid"},
+		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+			TargetName: "fresh-deprov-role",
+			TargetRole: authorizationv1alpha1.DefinitionClusterRole,
+		},
+	}
+	cr := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "fresh-deprov-role",
+			OwnerReferences: []metav1.OwnerReference{
+				restrictedTestOwnerRef(authorizationv1alpha1.RestrictedRoleDefinitionKind, rrd.Name, rrd.UID),
+			},
+		},
+	}
+
+	scheme := newTestScheme()
+	apiStore := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(cr).
+		Build()
+	r := &RestrictedRoleDefinitionReconciler{
+		client:   staleRRDRoleGetClient{Client: apiStore},
+		reader:   apiStore,
+		scheme:   scheme,
+		recorder: events.NewFakeRecorder(10),
+	}
+
+	err := r.rrdDeprovision(rrdCtx(), rrd, nil)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	var deleted rbacv1.ClusterRole
+	g.Expect(apiStore.Get(rrdCtx(), types.NamespacedName{Name: cr.Name}, &deleted)).NotTo(Succeed())
 }
 
 func TestRRD_Deprovision_UnownedClusterRoleIsPreserved(t *testing.T) {

@@ -155,6 +155,19 @@ func newRBDTestReconciler(objs ...client.Object) (*RestrictedBindDefinitionRecon
 	return NewRestrictedBindDefinitionReconciler(c, scheme, recorder), c
 }
 
+type staleRBDCleanupListClient struct {
+	client.Client
+}
+
+func (c staleRBDCleanupListClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	switch list.(type) {
+	case *rbacv1.ClusterRoleBindingList, *rbacv1.RoleBindingList, *corev1.ServiceAccountList:
+		return nil
+	default:
+		return c.Client.List(ctx, list, opts...)
+	}
+}
+
 func rbdCtx() context.Context {
 	return ctrllog.IntoContext(context.Background(), logr.Discard())
 }
@@ -1872,6 +1885,78 @@ func TestRBD_PruneStaleServiceAccounts_UsesLiveOwnerRefWithoutManagedLabel(t *te
 
 	var deletedSA corev1.ServiceAccount
 	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Namespace: "default", Name: "indexed-stale-sa"}, &deletedSA)).To(gomega.HaveOccurred())
+}
+
+func TestRBD_PruneStaleResources_UsesReaderForCleanupDiscovery(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "fresh-prune-rbd", UID: "fresh-prune-rbd-uid"},
+	}
+	ownerRef := restrictedTestOwnerRef(authorizationv1alpha1.RestrictedBindDefinitionKind, rbd.Name, rbd.UID)
+	crb := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "fresh-prune-crb",
+			Labels:          map[string]string{helpers.ManagedByLabelStandard: helpers.ManagedByValue},
+			OwnerReferences: []metav1.OwnerReference{ownerRef},
+		},
+	}
+	rb := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "fresh-prune-rb",
+			Namespace:       "default",
+			Labels:          map[string]string{helpers.ManagedByLabelStandard: helpers.ManagedByValue},
+			OwnerReferences: []metav1.OwnerReference{ownerRef},
+		},
+	}
+
+	scheme := newTestScheme()
+	apiStore := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(crb, rb).
+		Build()
+	r := NewRestrictedBindDefinitionReconciler(staleRBDCleanupListClient{Client: apiStore}, scheme, events.NewFakeRecorder(10))
+	r.reader = apiStore
+
+	err := r.rbdPruneStaleResources(rbdCtx(), rbd, nil, nil, nil)
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+
+	var deletedCrb rbacv1.ClusterRoleBinding
+	g.Expect(apiStore.Get(rbdCtx(), types.NamespacedName{Name: "fresh-prune-crb"}, &deletedCrb)).To(gomega.HaveOccurred())
+	var deletedRb rbacv1.RoleBinding
+	g.Expect(apiStore.Get(rbdCtx(), types.NamespacedName{Namespace: "default", Name: "fresh-prune-rb"}, &deletedRb)).To(gomega.HaveOccurred())
+}
+
+func TestRBD_PruneStaleServiceAccounts_UsesReaderForCleanupDiscovery(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "fresh-prune-sa-rbd", UID: "fresh-prune-sa-rbd-uid"},
+	}
+	staleSA := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "fresh-prune-stale-sa",
+			Namespace: "default",
+			Labels:    map[string]string{helpers.ManagedByLabelStandard: helpers.ManagedByValue},
+			OwnerReferences: []metav1.OwnerReference{
+				restrictedTestOwnerRef(authorizationv1alpha1.RestrictedBindDefinitionKind, rbd.Name, rbd.UID),
+			},
+		},
+	}
+
+	scheme := newTestScheme()
+	apiStore := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(staleSA).
+		Build()
+	r := NewRestrictedBindDefinitionReconciler(staleRBDCleanupListClient{Client: apiStore}, scheme, events.NewFakeRecorder(10))
+	r.reader = apiStore
+
+	err := r.rbdPruneStaleServiceAccounts(rbdCtx(), rbd, nil, nil)
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+
+	var deletedSA corev1.ServiceAccount
+	g.Expect(apiStore.Get(rbdCtx(), types.NamespacedName{Namespace: "default", Name: "fresh-prune-stale-sa"}, &deletedSA)).To(gomega.HaveOccurred())
 }
 
 func TestRBD_PruneStaleResources_IgnoresIndexedOwnerNameWithDifferentUID(t *testing.T) {

@@ -3,7 +3,10 @@ package webhooks_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -21,7 +24,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	crAdmission "sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -35,6 +40,25 @@ var admission = struct {
 		}
 		return patch.Apply(original)
 	},
+}
+
+func assertGenericNamespaceAdmissionError(t *testing.T, resp crAdmission.Response, leaked string) {
+	t.Helper()
+	if resp.Allowed {
+		t.Fatal("expected denied internal error response, got allowed")
+	}
+	if resp.Result == nil {
+		t.Fatal("expected admission result")
+	}
+	if resp.Result.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status %d, got %d", http.StatusInternalServerError, resp.Result.Code)
+	}
+	if resp.Result.Message != webhooks.NamespaceWebhookInternalError {
+		t.Fatalf("expected sanitized message %q, got %q", webhooks.NamespaceWebhookInternalError, resp.Result.Message)
+	}
+	if strings.Contains(resp.Result.Message, leaked) {
+		t.Fatalf("expected message not to leak %q, got %q", leaked, resp.Result.Message)
+	}
 }
 
 // General functionality table test
@@ -902,6 +926,72 @@ func TestNamespaceMutatorIgnoresSelectorsWhenExplicitNamespaceIsSet(t *testing.T
 	if resp.Allowed {
 		t.Fatal("expected unrelated namespace request to be denied because explicit namespace takes precedence over selector")
 	}
+}
+
+func TestNamespaceMutatorSanitizesInternalErrors(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(authorizationv1alpha1.AddToScheme(scheme))
+
+	targetNS := &corev1.Namespace{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Namespace"},
+		ObjectMeta: metav1.ObjectMeta{Name: "tenant-ns"},
+	}
+	nsRaw, err := json.Marshal(targetNS)
+	if err != nil {
+		t.Fatalf("failed to marshal namespace: %v", err)
+	}
+	req := crAdmission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Kind:      metav1.GroupVersionKind{Group: "", Version: "v1", Kind: "Namespace"},
+			Name:      targetNS.Name,
+			Operation: admissionv1.Create,
+			UserInfo: authenticationv1.UserInfo{
+				Username: "system:serviceaccount:tenant-alpha:my-operator",
+			},
+			Object: runtime.RawExtension{Raw: nsRaw},
+		},
+	}
+
+	t.Run("BindDefinition list error", func(t *testing.T) {
+		leaked := "secret binddefinition backend details"
+		c := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithInterceptorFuncs(interceptor.Funcs{
+				List: func(_ context.Context, _ client.WithWatch, _ client.ObjectList, _ ...client.ListOption) error {
+					return fmt.Errorf("%s", leaked)
+				},
+			}).
+			Build()
+		mutator := &webhooks.NamespaceMutator{
+			Client:  c,
+			Reader:  c,
+			Decoder: crAdmission.NewDecoder(scheme),
+		}
+
+		resp := mutator.Handle(context.Background(), req)
+		assertGenericNamespaceAdmissionError(t, resp, leaked)
+	})
+
+	t.Run("service account namespace lookup error", func(t *testing.T) {
+		leaked := "secret namespace lookup details"
+		c := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(_ context.Context, _ client.WithWatch, _ client.ObjectKey, _ client.Object, _ ...client.GetOption) error {
+					return fmt.Errorf("%s", leaked)
+				},
+			}).
+			Build()
+		mutator := &webhooks.NamespaceMutator{
+			Client:  c,
+			Reader:  c,
+			Decoder: crAdmission.NewDecoder(scheme),
+		}
+
+		resp := mutator.Handle(context.Background(), req)
+		assertGenericNamespaceAdmissionError(t, resp, leaked)
+	})
 }
 
 // Performance test

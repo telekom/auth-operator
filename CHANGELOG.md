@@ -11,10 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - RestrictedRoleDefinition enforces immutable `spec.policyRef`, `spec.targetRole`, `spec.targetName`, and `spec.targetNamespace` after creation. RestrictedBindDefinition enforces immutable `spec.policyRef` and `spec.targetName` after creation. RoleDefinition now also enforces immutable `spec.targetNamespace`. To change these fields, recreate the resource with the desired values.
 - BindDefinition and RestrictedBindDefinition now reject a single `roleBindings[]` entry that references the same name through both `roleRefs` and `clusterRoleRefs`, because both would target the same generated RoleBinding name with different immutable `roleRef.kind` values.
+- RestrictedRoleDefinition now requires explicit `RBACPolicy.spec.roleLimits`: set `allowRoles: true` for namespaced `Role` targets and `allowClusterRoles: true` for `ClusterRole` targets. Existing policies that omit `roleLimits` must be updated before creating or reconciling restricted role resources.
+- RBACPolicy `defaultAssignment` matches are exclusive per requester. Users, groups, or ServiceAccounts that match more than one default policy are rejected until assignments are made non-overlapping.
+- RBACPolicy ServiceAccount auto-create now requires a bounded creation scope. When `subjectLimits.serviceAccountLimits.creation.allowAutoCreate=true`, set either `allowedCreationNamespaces` or `allowedCreationNamespaceSelector`.
 
 ### Fixed
 
 - RestrictedBindDefinition and RestrictedRoleDefinition now deprovision owned RBAC resources when their referenced RBACPolicy is missing, preventing stale access after policy deletion or drift.
+- RestrictedBindDefinition and RestrictedRoleDefinition cleanup now discovers owned resources from fresh API state instead of relying on potentially stale controller cache indexes.
+- Namespace webhooks now return a generic internal admission error to clients while logging detailed API and selector failures server-side.
 - RestrictedBindDefinition now prunes generated ServiceAccounts that are no longer desired, preserves same-owner generated ServiceAccounts when adoption is disabled, cleans ServiceAccounts by owner reference, and clears stale generated/external ServiceAccount and missing-role status when deprovisioned.
 - RestrictedBindDefinition now immediately reconciles selector-based RoleBindings on namespace label changes so label removals prune stale RoleBindings without waiting for the periodic resync.
 - Restricted owner references no longer request `blockOwnerDeletion`, avoiding unnecessary finalizer-update permissions for impersonated apply identities.

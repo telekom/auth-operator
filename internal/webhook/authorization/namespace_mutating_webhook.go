@@ -79,7 +79,7 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 	if listErr != nil {
 		logger.Error(listErr, "failed to collect BindDefinition labels", "namespace", req.Name)
 		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultErrored).Inc()
-		return admission.Errored(http.StatusInternalServerError, errors.New("unable to validate namespace request"))
+		return admission.Errored(http.StatusInternalServerError, ErrNamespaceWebhookInternal)
 	}
 
 	// Last resort: if no BindDefinition matched and the user is a ServiceAccount,
@@ -94,7 +94,7 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 			logger.Error(saErr, "failed to lookup SA namespace labels",
 				"saNamespace", saInfo.Namespace, "targetNamespace", req.Name)
 			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultErrored).Inc()
-			return admission.Errored(http.StatusInternalServerError, errors.New("unable to validate namespace request"))
+			return admission.Errored(http.StatusInternalServerError, ErrNamespaceWebhookInternal)
 		}
 		if len(inherited) > 0 {
 			if ns.Labels != nil {

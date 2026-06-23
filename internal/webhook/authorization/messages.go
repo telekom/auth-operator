@@ -1,5 +1,7 @@
 package webhooks
 
+import "errors"
+
 // Denial message constants used across namespace mutating and validating webhooks.
 // Centralizing these messages ensures consistency and makes them easier to maintain
 // and reference in tests and documentation.
@@ -39,4 +41,12 @@ const (
 	// DenialInvalidTrackedLabelsFmt is a format string returned when a namespace
 	// uses tracked ownership labels in an incoherent combination.
 	DenialInvalidTrackedLabelsFmt = "Namespace %s has invalid tracked ownership labels"
+
+	// NamespaceWebhookInternalError is returned to admission clients when the
+	// namespace webhook hits an internal API, selector, or serialization error.
+	NamespaceWebhookInternalError = "internal namespace admission error"
 )
+
+// ErrNamespaceWebhookInternal hides internal API and selector details from
+// admission clients while detailed errors are still logged server-side.
+var ErrNamespaceWebhookInternal = errors.New(NamespaceWebhookInternalError)

@@ -194,26 +194,19 @@ func TestServeHTTP_EvaluatesMatchingAuthorizersByName(t *testing.T) {
 	}
 }
 
-func TestServeHTTP_AuthorizerRulesUseReaderWhenProvided(t *testing.T) {
+func TestServeHTTP_AuthorizerRulesUseLiveClient(t *testing.T) {
 	scheme := newScheme(t)
-	cachedAllow := &authzv1alpha1.WebhookAuthorizer{
-		ObjectMeta: metav1.ObjectMeta{Name: "cached-allow"},
+	freshDeny := &authzv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{Name: "fresh-deny"},
 		Spec: authzv1alpha1.WebhookAuthorizerSpec{
-			AllowedPrincipals: []authzv1alpha1.Principal{{User: "alice"}},
+			DeniedPrincipals: []authzv1alpha1.Principal{{User: "alice"}},
 			ResourceRules: []authzv1.ResourceRule{
 				{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods"}},
 			},
 		},
 	}
-	freshDeny := &authzv1alpha1.WebhookAuthorizer{
-		ObjectMeta: metav1.ObjectMeta{Name: "fresh-deny"},
-		Spec: authzv1alpha1.WebhookAuthorizerSpec{
-			DeniedPrincipals: []authzv1alpha1.Principal{{User: "alice"}},
-		},
-	}
 	handler := &Authorizer{
-		Client: newIndexedClient(scheme, cachedAllow),
-		Reader: newIndexedClient(scheme, freshDeny),
+		Client: newIndexedClient(scheme, freshDeny),
 		Log:    logr.Discard(),
 	}
 	sar := authzv1.SubjectAccessReview{

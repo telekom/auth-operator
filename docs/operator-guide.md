@@ -132,6 +132,10 @@ Restricted workflow:
 4. Controller enforces policy on every reconciliation and deprovisions managed RBAC resources on violations.
 
 Note: `spec.policyRef` on restricted resources is immutable after creation.
+`RestrictedRoleDefinition` requires an explicit policy `spec.roleLimits` block:
+set `roleLimits.allowRoles: true` for namespaced `Role` targets and
+`roleLimits.allowClusterRoles: true` for `ClusterRole` targets. Missing
+`roleLimits` denies role generation by default.
 
 ### RBACPolicy Trust Boundaries
 
@@ -164,12 +168,20 @@ For Kustomize deployments, the generated manager ClusterRole also omits
 RBACPolicy impersonation.
 
 When `subjectLimits.serviceAccountLimits.creation.allowAutoCreate` is enabled,
-the controller can create missing ServiceAccounts in allowed namespaces. Existing
-unowned ServiceAccounts and ServiceAccounts owned by another
-RestrictedBindDefinition are treated as external subjects and are not adopted or
-modified, regardless of `disableAdoption`. Setting `disableAdoption: true` makes
-that conservative intent explicit; ServiceAccounts already owned by the same
-RestrictedBindDefinition continue to be reconciled.
+the policy must also set `allowedCreationNamespaces` or
+`allowedCreationNamespaceSelector`; an unbounded auto-create setting is rejected
+by admission. Existing unowned ServiceAccounts and ServiceAccounts owned by
+another RestrictedBindDefinition are treated as external subjects and are not
+adopted or modified, regardless of `disableAdoption`. Setting
+`disableAdoption: true` makes that conservative intent explicit;
+ServiceAccounts already owned by the same RestrictedBindDefinition continue to be
+reconciled.
+
+`spec.defaultAssignment` is exclusive per requester. If a user, group, or
+ServiceAccount matches multiple default policies, restricted resource admission
+fails closed until the policy assignments are made non-overlapping. Requesters
+covered by a default assignment must use that policy unless they no longer match
+the assignment.
 
 ### BindDefinition Annotations
 
@@ -617,6 +629,9 @@ kubectl apply -f https://raw.githubusercontent.com/telekom/auth-operator/main/co
 kubectl apply -f https://raw.githubusercontent.com/telekom/auth-operator/main/config/crd/bases/authorization.t-caas.telekom.com_restrictedroledefinitions.yaml
 kubectl apply -f https://raw.githubusercontent.com/telekom/auth-operator/main/config/crd/bases/authorization.t-caas.telekom.com_restrictedbinddefinitions.yaml
 kubectl apply -f https://raw.githubusercontent.com/telekom/auth-operator/main/config/crd/bases/authorization.t-caas.telekom.com_webhookauthorizers.yaml
+kubectl apply -f https://raw.githubusercontent.com/telekom/auth-operator/main/config/crd/bases/authorization.t-caas.telekom.com_rbacpolicies.yaml
+kubectl apply -f https://raw.githubusercontent.com/telekom/auth-operator/main/config/crd/bases/authorization.t-caas.telekom.com_restrictedroledefinitions.yaml
+kubectl apply -f https://raw.githubusercontent.com/telekom/auth-operator/main/config/crd/bases/authorization.t-caas.telekom.com_restrictedbinddefinitions.yaml
 ```
 
 ### Rollback
