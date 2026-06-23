@@ -85,6 +85,27 @@ jobs:
             fi
           }
 
+          check_github_release_matching() {
+            local repo=$1
+            local current=$2
+            local name=$3
+            local pattern=$4
+            local latest
+
+            latest=$(
+              gh api --paginate "repos/${repo}/releases?per_page=100" \
+                --jq '.[].tag_name' 2>/dev/null |
+                grep -E "$pattern" |
+                sort -V |
+                tail -1 || true
+            )
+            latest="${latest:-unknown}"
+            if [ "$latest" != "unknown" ] && [ "$latest" != "$current" ]; then
+              echo "  - **${name}**: ${current} → ${latest} ([releases](https://github.com/${repo}/releases))" >> updates.md
+              echo "found=true" >> "$GITHUB_OUTPUT"
+            fi
+          }
+
           check_go_module() {
             local module=$1
             local current=$2
@@ -157,7 +178,7 @@ jobs:
           check_github_release "kubernetes-sigs/gateway-api" "${{ steps.versions.outputs.e2e_gateway_api }}" "e2e Gateway API CRDs"
           check_github_release "prometheus-operator/prometheus-operator" "${{ steps.versions.outputs.e2e_prometheus_operator }}" "e2e Prometheus Operator CRDs"
           check_github_release "projectcalico/calico" "${{ steps.versions.outputs.e2e_calico }}" "e2e Calico CRDs"
-          check_github_release "external-secrets/external-secrets" "${{ steps.versions.outputs.e2e_external_secrets }}" "e2e External Secrets CRDs"
+          check_github_release_matching "external-secrets/external-secrets" "${{ steps.versions.outputs.e2e_external_secrets }}" "e2e External Secrets CRDs" "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
           check_github_release "vmware-tanzu/velero" "${{ steps.versions.outputs.e2e_velero }}" "e2e Velero CRDs"
           check_github_release "cert-manager/cert-manager" "${{ steps.versions.outputs.e2e_utils_cert_manager }}" "e2e utility cert-manager install"
           check_github_release "prometheus-operator/prometheus-operator" "${{ steps.versions.outputs.e2e_utils_prometheus_operator }}" "e2e utility Prometheus Operator install"
