@@ -8,32 +8,12 @@ on:
   pull_request_target:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - '.dockerignore'
-      - 'Dockerfile'
-      - 'Makefile'
-      - 'api/**'
-      - 'cmd/**'
-      - 'chart/auth-operator/templates/**'
-      - 'chart/auth-operator/values.schema.json'
-      - 'chart/auth-operator/values.yaml'
-      - 'config/**'
-      - 'hack/**'
-      - 'internal/**'
-      - 'pkg/**'
-      - '.github/actions/**'
-      - '.github/workflows/output-delta.yml'
-      - '.github/workflows/output-delta-comment.yml'
-      - 'go.mod'
-      - 'go.sum'
-      - 'main.go'
-      - 'versions.env'
 
 permissions:
   actions: read
   contents: read
   issues: write
-  pull-requests: read
+  pull-requests: write
 
 concurrency:
   group: output-delta-comment-${{ github.event.pull_request.number }}
@@ -46,20 +26,80 @@ jobs:
     steps:
       # This pull_request_target workflow has write permissions so it can
       # comment on fork PRs. Do not checkout or execute pull-request code here.
+      - name: Check output-delta applicability
+        id: applicability
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          api_error="$(mktemp)"
+          trap 'rm -f "$api_error"' EXIT
+
+          if ! changed_files="$(gh api --paginate \
+            -H "Accept: application/vnd.github+json" \
+            "repos/${GH_REPO}/pulls/${PR_NUMBER}/files" \
+            --jq '.[].filename' 2>"$api_error")"; then
+            cat "$api_error" >&2
+            echo "::warning::Could not list PR files; assuming Output Delta is applicable so a fallback comment can still be posted."
+            echo "is_applicable=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          is_output_delta_file() {
+            case "$1" in
+              .dockerignore|Dockerfile|Makefile|go.mod|go.sum|main.go|versions.env)
+                return 0
+                ;;
+              api/*|cmd/*|config/*|hack/*|internal/*|pkg/*)
+                return 0
+                ;;
+              chart/auth-operator/templates/*|chart/auth-operator/values.schema.json|chart/auth-operator/values.yaml)
+                return 0
+                ;;
+              .github/actions/*|.github/workflows/output-delta.yml|.github/workflows/output-delta-comment.yml)
+                return 0
+                ;;
+            esac
+            return 1
+          }
+
+          is_applicable=false
+          while IFS= read -r file; do
+            if is_output_delta_file "$file"; then
+              is_applicable=true
+              break
+            fi
+          done <<< "$changed_files"
+
+          echo "is_applicable=${is_applicable}" >> "$GITHUB_OUTPUT"
+
       - name: Wait for matching Output Delta run
         id: output-delta
+        if: steps.applicability.outputs.is_applicable == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
         run: |
           set -euo pipefail
           deadline=$((SECONDS + 5400))
+          workflow_query_url="${GITHUB_SERVER_URL}/${GH_REPO}/actions/workflows/output-delta.yml?query=event%3Apull_request+head_sha%3A${HEAD_SHA}"
+          api_error="$(mktemp)"
+          trap 'rm -f "$api_error"' EXIT
+
           while true; do
-            run_json="$(gh api \
+            if ! run_json="$(gh api \
               -H "Accept: application/vnd.github+json" \
               "repos/${GH_REPO}/actions/workflows/output-delta.yml/runs?event=pull_request&head_sha=${HEAD_SHA}&per_page=1" \
-              --jq '.workflow_runs[0] // empty')"
+              --jq '.workflow_runs[0] // empty' 2>"$api_error")"; then
+              cat "$api_error" >&2
+              echo "::warning::Could not query Output Delta runs for ${HEAD_SHA}; retrying until timeout."
+              run_json=
+            fi
+            : > "$api_error"
 
             if [ -n "$run_json" ]; then
               status="$(jq -r '.status // ""' <<< "$run_json")"
@@ -69,6 +109,7 @@ jobs:
 
               if [ "$status" = "completed" ]; then
                 {
+                  echo "run_found=true"
                   echo "run_id=${run_id}"
                   echo "run_url=${run_url}"
                   echo "conclusion=${conclusion}"
@@ -82,8 +123,14 @@ jobs:
             fi
 
             if [ "$SECONDS" -ge "$deadline" ]; then
-              echo "::error::Timed out waiting for Output Delta run for ${HEAD_SHA}."
-              exit 1
+              echo "::warning::Timed out waiting for Output Delta run for ${HEAD_SHA}; posting unknown-status comment."
+              {
+                echo "run_found=false"
+                echo "run_id="
+                echo "run_url=${workflow_query_url}"
+                echo "conclusion=timed_out"
+              } >> "$GITHUB_OUTPUT"
+              exit 0
             fi
 
             sleep 30
@@ -115,6 +162,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          IS_APPLICABLE: ${{ steps.applicability.outputs.is_applicable }}
+          RUN_FOUND: ${{ steps.output-delta.outputs.run_found }}
           RUN_ID: ${{ steps.output-delta.outputs.run_id }}
           RUN_URL: ${{ steps.output-delta.outputs.run_url }}
           WORKFLOW_CONCLUSION: ${{ steps.output-delta.outputs.conclusion }}
@@ -208,47 +257,79 @@ jobs:
           }
 
           write_comment_body() {
+            local workflow_conclusion="${WORKFLOW_CONCLUSION:-unknown}"
+            local workflow_run="${RUN_URL:-}"
+            local baseline_display="${baseline_result}"
+            local candidate_display="${candidate_result}"
+            local diff_display="${has_diff}"
+            local rbac_diff_display="${has_rbac_diff}"
+            local status_diff_display="${has_status_diff}"
+            local pr_errors_display="${pr_has_errors}"
+            local tag_diff_display="${has_tag_diff}"
+            if [ "$IS_APPLICABLE" != "true" ]; then
+              workflow_conclusion=not_applicable
+              workflow_run=not_applicable
+              baseline_display=skipped
+              candidate_display=skipped
+              diff_display=not_applicable
+              rbac_diff_display=not_applicable
+              status_diff_display=not_applicable
+              pr_errors_display=not_applicable
+              tag_diff_display=not_applicable
+            fi
+
             {
               echo "<!-- auth-operator-output-delta-comment -->"
               echo "## Output Delta"
               echo ""
-              case "$has_diff" in
-                true)
-                  echo "Output differences were detected. Inspect the \`output-delta-diff-output\` artifact before merging."
-                  ;;
-                false)
-                  echo "No output differences were detected between trusted main baseline and this PR. There is no diff to inspect for this run."
-                  ;;
-                *)
-                  echo "Output differences could not be computed. Inspect the workflow run and uploaded artifacts before merging."
-                  ;;
-              esac
+              if [ "$IS_APPLICABLE" != "true" ]; then
+                echo "No output-delta comparison was required for this PR. There is no diff to inspect for this run."
+              else
+                case "$has_diff" in
+                  true)
+                    echo "Output differences were detected. Inspect the \`output-delta-diff-output\` artifact before merging."
+                    ;;
+                  false)
+                    echo "No output differences were detected between trusted main baseline and this PR. There is no diff to inspect for this run."
+                    ;;
+                  *)
+                    echo "Output differences could not be computed. No diff is available for this run; inspect the workflow run and uploaded artifacts before merging."
+                    ;;
+                esac
+              fi
               echo ""
-              echo "- Trusted baseline job: ${baseline_result}"
-              echo "- Candidate PR job: ${candidate_result}"
-              echo "- Differences detected: ${has_diff}"
-              echo "- RBAC differences detected: ${has_rbac_diff}"
-              echo "- CRD status differences detected: ${has_status_diff}"
-              echo "- Candidate log errors detected: ${pr_has_errors}"
-              echo "- Latest tag diff generated: ${has_tag_diff}"
+              echo "- Trusted baseline job: ${baseline_display}"
+              echo "- Candidate PR job: ${candidate_display}"
+              echo "- Differences detected: ${diff_display}"
+              echo "- RBAC differences detected: ${rbac_diff_display}"
+              echo "- CRD status differences detected: ${status_diff_display}"
+              echo "- Candidate log errors detected: ${pr_errors_display}"
+              echo "- Latest tag diff generated: ${tag_diff_display}"
               if [ -n "$latest_tag" ]; then
                 echo "- Latest release tag compared: ${latest_tag}"
               fi
-              echo "- Workflow conclusion: ${WORKFLOW_CONCLUSION:-unknown}"
-              echo "- Workflow run: ${RUN_URL}"
+              echo "- Workflow conclusion: ${workflow_conclusion}"
+              echo "- Workflow run: ${workflow_run:-unknown}"
               echo ""
               echo "The compare job downloads artifacts only; it does not checkout or execute pull-request code."
             } > /tmp/output-delta-comment/body.md
           }
 
-          if ! gh run download "$RUN_ID" \
-            --repo "$GH_REPO" \
-            --name output-delta-comment-data \
-            --dir /tmp/output-delta-comment; then
-            echo "::warning::Output-delta comment artifact is missing; posting unknown-status comment."
+          if [ "$IS_APPLICABLE" != "true" ]; then
+            has_diff=unknown
+            echo "::notice::No output-delta-relevant files changed; posting not-applicable comment."
+          elif [ "$RUN_FOUND" = "true" ] && [ -n "$RUN_ID" ]; then
+            if ! gh run download "$RUN_ID" \
+              --repo "$GH_REPO" \
+              --name output-delta-comment-data \
+              --dir /tmp/output-delta-comment; then
+              echo "::warning::Output-delta comment artifact is missing; posting unknown-status comment."
+            fi
+          else
+            echo "::warning::No completed Output Delta run was found; posting unknown-status comment."
           fi
 
-          if ! read_status_data; then
+          if [ "$IS_APPLICABLE" = "true" ] && ! read_status_data; then
             echo "::warning::Output-delta comment artifact did not contain status.env; posting unknown-status comment."
           fi
 
