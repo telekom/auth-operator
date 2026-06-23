@@ -302,7 +302,13 @@ jobs:
           sleep 15
           kubectl wait --for=condition=Ready binddefinition --all --timeout=60s 2>/dev/null || true
 
-          bash ../main-branch/hack/ci/capture-operator-output.sh /tmp/main-output --all-rbac
+          capture_args=(/tmp/main-output)
+          if grep -q -- '--all-rbac)' ../main-branch/hack/ci/capture-operator-output.sh; then
+            capture_args+=(--all-rbac)
+          else
+            echo "::notice::Trusted main capture helper does not support --all-rbac yet; using labelled RBAC capture for bootstrap compatibility"
+          fi
+          bash ../main-branch/hack/ci/capture-operator-output.sh "${capture_args[@]}"
 
           mkdir -p /tmp/controller-logs
           for ns in auth-operator-system kube-system default; do
@@ -393,7 +399,13 @@ jobs:
           sleep 15
           kubectl wait --for=condition=Ready binddefinition --all --timeout=60s 2>/dev/null || true
 
-          bash ../main-branch/hack/ci/capture-operator-output.sh /tmp/tag-output --all-rbac
+          capture_args=(/tmp/tag-output)
+          if grep -q -- '--all-rbac)' ../main-branch/hack/ci/capture-operator-output.sh; then
+            capture_args+=(--all-rbac)
+          else
+            echo "::notice::Trusted main capture helper does not support --all-rbac yet; using labelled RBAC capture for bootstrap compatibility"
+          fi
+          bash ../main-branch/hack/ci/capture-operator-output.sh "${capture_args[@]}"
 
           mkdir -p /tmp/controller-logs
           for ns in auth-operator-system kube-system default; do
@@ -1020,7 +1032,13 @@ jobs:
           assert_no_rule_match clusterrole sample-cluster-reader "" "restricted resources and verbs are filtered" '.rules[]? | select(((.resources // []) | index("secrets")) or ((.verbs // []) | index("delete")) or ((.verbs // []) | index("escalate")) or ((.verbs // []) | index("impersonate")) or ((.verbs // []) | index("bind")))'
           assert_no_rule_match role sample-partial-role sample-tenant-a "restricted API groups, resources, and verbs are filtered" '.rules[]? | select(((.apiGroups // []) | index("apps")) or ((.resources // []) | index("secrets")) or ((.verbs // []) | index("delete")) or ((.verbs // []) | index("patch")))'
 
-          bash "$main_dir/hack/ci/capture-operator-output.sh" /tmp/pr-output --all-rbac
+          capture_args=(/tmp/pr-output)
+          if grep -q -- '--all-rbac)' "$main_dir/hack/ci/capture-operator-output.sh"; then
+            capture_args+=(--all-rbac)
+          else
+            echo "::notice::Trusted main capture helper does not support --all-rbac yet; using labelled RBAC capture for bootstrap compatibility"
+          fi
+          bash "$main_dir/hack/ci/capture-operator-output.sh" "${capture_args[@]}"
 
       - name: Collect PR controller logs
         if: always()
