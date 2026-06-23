@@ -191,6 +191,9 @@ jobs:
               name: ci-rbac-applier
               namespace: ci-runners
             - kind: ServiceAccount
+              name: team-alpha-rbac-applier
+              namespace: team-alpha
+            - kind: ServiceAccount
               name: sample-impersonation-denied
               namespace: sample-authz
             - kind: User
@@ -235,8 +238,7 @@ jobs:
           assert_known_policy_refs
 
           apply_policy_docs team-workload-policy \
-            --as=system:serviceaccount:ci-runners:ci-rbac-applier \
-            --as-group=oidc:team-alpha-rbac-admins
+            --as=system:serviceaccount:team-alpha:team-alpha-rbac-applier
           apply_policy_docs operator-cross-namespace-policy \
             --as=system:serviceaccount:ci-runners:ci-rbac-applier \
             --as-group=oidc:platform-operators \
@@ -602,6 +604,9 @@ jobs:
               name: ci-rbac-applier
               namespace: ci-runners
             - kind: ServiceAccount
+              name: team-alpha-rbac-applier
+              namespace: team-alpha
+            - kind: ServiceAccount
               name: sample-impersonation-denied
               namespace: sample-authz
             - kind: User
@@ -646,8 +651,7 @@ jobs:
           assert_known_policy_refs
 
           apply_policy_docs team-workload-policy \
-            --as=system:serviceaccount:ci-runners:ci-rbac-applier \
-            --as-group=oidc:team-alpha-rbac-admins
+            --as=system:serviceaccount:team-alpha:team-alpha-rbac-applier
           apply_policy_docs operator-cross-namespace-policy \
             --as=system:serviceaccount:ci-runners:ci-rbac-applier \
             --as-group=oidc:platform-operators \

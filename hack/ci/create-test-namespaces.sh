@@ -38,6 +38,12 @@ kubectl label namespace tenant-alpha-prod --overwrite \
   t-caas.telekom.com/environment=production \
   t-caas.telekom.com/owner=tenant
 
+kubectl create namespace team-alpha --dry-run=client -o yaml | kubectl apply -f -
+kubectl label namespace team-alpha --overwrite \
+  t-caas.telekom.com/tenant=true \
+  t-caas.telekom.com/environment=development \
+  t-caas.telekom.com/owner=tenant
+
 # --- Tenant Beta ---
 kubectl create namespace tenant-beta --dry-run=client -o yaml | kubectl apply -f -
 kubectl label namespace tenant-beta --overwrite \
