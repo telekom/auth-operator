@@ -5,13 +5,36 @@
 
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+load_version_default() {
+  local key=$1
+  local value
+
+  if [ -n "${!key:-}" ] || [ ! -f "${ROOT_DIR}/versions.env" ]; then
+    return
+  fi
+
+  value="$(awk -F= -v key="${key}" '$1 == key {print $2}' "${ROOT_DIR}/versions.env")"
+  if [ -n "${value}" ]; then
+    printf -v "${key}" '%s' "${value}"
+  fi
+}
+
+load_version_default E2E_CERT_MANAGER_VERSION
+load_version_default E2E_GATEWAY_API_VERSION
+load_version_default E2E_PROMETHEUS_OPERATOR_VERSION
+load_version_default E2E_CALICO_VERSION
+load_version_default E2E_EXTERNAL_SECRETS_VERSION
+load_version_default E2E_VELERO_VERSION
+
 KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-auth-operator-e2e}
-CERT_MANAGER_VERSION=${CERT_MANAGER_VERSION:-v1.15.3}
-GATEWAY_API_VERSION=${GATEWAY_API_VERSION:-v1.2.0}
-PROMETHEUS_OPERATOR_VERSION=${PROMETHEUS_OPERATOR_VERSION:-v0.78.2}
-CALICO_VERSION=${CALICO_VERSION:-v3.29.0}
-EXTERNAL_SECRETS_VERSION=${EXTERNAL_SECRETS_VERSION:-v0.10.7}
-VELERO_VERSION=${VELERO_VERSION:-v1.15.0}
+CERT_MANAGER_VERSION=${CERT_MANAGER_VERSION:-${E2E_CERT_MANAGER_VERSION:-v1.15.3}}
+GATEWAY_API_VERSION=${GATEWAY_API_VERSION:-${E2E_GATEWAY_API_VERSION:-v1.2.0}}
+PROMETHEUS_OPERATOR_VERSION=${PROMETHEUS_OPERATOR_VERSION:-${E2E_PROMETHEUS_OPERATOR_VERSION:-v0.78.2}}
+CALICO_VERSION=${CALICO_VERSION:-${E2E_CALICO_VERSION:-v3.29.0}}
+EXTERNAL_SECRETS_VERSION=${EXTERNAL_SECRETS_VERSION:-${E2E_EXTERNAL_SECRETS_VERSION:-v0.10.7}}
+VELERO_VERSION=${VELERO_VERSION:-${E2E_VELERO_VERSION:-v1.15.0}}
 
 # Use --context to avoid mutating global kubeconfig state
 KUBECTL="kubectl --context kind-${KIND_CLUSTER_NAME}"

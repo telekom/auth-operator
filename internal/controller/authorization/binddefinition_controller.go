@@ -936,8 +936,7 @@ func (r *BindDefinitionReconciler) checkBindingOwnership(
 		}
 		return fmt.Errorf("check existing %s %v: %w", targetKind, key, err)
 	}
-
-	if hasOwnerRef(existing, bindDef) {
+	if hasControllerOwnerRef(existing, bindDef) {
 		return nil
 	}
 
@@ -966,7 +965,7 @@ func (r *BindDefinitionReconciler) deleteOwnedRoleBindingOnRoleRefChange(
 	if err := r.client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, existing); err != nil {
 		return client.IgnoreNotFound(err)
 	}
-	if !hasOwnerRef(existing, bindDef) || existing.RoleRef == desiredRoleRef {
+	if !hasControllerOwnerRef(existing, bindDef) || existing.RoleRef == desiredRoleRef {
 		return nil
 	}
 	if err := r.client.Delete(ctx, existing); err != nil && !apierrors.IsNotFound(err) {

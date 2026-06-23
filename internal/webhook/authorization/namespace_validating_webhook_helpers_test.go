@@ -339,7 +339,15 @@ func TestValidateLabelImmutability(t *testing.T) {
 			expectDeny: false,
 		},
 		{
-			name:       "initial adoption - allowed",
+			name:       "initial adoption - denied without bypass",
+			oldLabels:  map[string]string{},
+			newLabels:  map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"},
+			expectDeny: true,
+			denySubstr: authorizationv1alpha1.LabelKeyOwner,
+		},
+		{
+			name:       "initial adoption - allowed for bypass user",
+			bypass:     BypassCheckResult{ShouldBypass: true},
 			oldLabels:  map[string]string{},
 			newLabels:  map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"},
 			expectDeny: false,
@@ -550,7 +558,7 @@ func TestAuthorizeViaBindDefinitions(t *testing.T) {
 			RoleBindings: []authorizationv1alpha1.NamespaceBinding{{
 				ClusterRoleRefs: []string{"admin"},
 				NamespaceSelector: []metav1.LabelSelector{
-					{MatchLabels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"}},
+					{MatchLabels: map[string]string{authorizationv1alpha1.LabelKeyTenant: "tenant-a"}},
 				},
 			}},
 		},
@@ -569,7 +577,10 @@ func TestAuthorizeViaBindDefinitions(t *testing.T) {
 			bindDefs: []authorizationv1alpha1.BindDefinition{bd},
 			username: "user1",
 			groups:   []string{"allowed-group"},
-			nsLabels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"},
+			nsLabels: map[string]string{
+				authorizationv1alpha1.LabelKeyOwner:  "tenant",
+				authorizationv1alpha1.LabelKeyTenant: "tenant-a",
+			},
 			expectOK: true,
 		},
 		{
@@ -577,7 +588,10 @@ func TestAuthorizeViaBindDefinitions(t *testing.T) {
 			bindDefs: []authorizationv1alpha1.BindDefinition{bd},
 			username: "user2",
 			groups:   []string{"other-group"},
-			nsLabels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"},
+			nsLabels: map[string]string{
+				authorizationv1alpha1.LabelKeyOwner:  "tenant",
+				authorizationv1alpha1.LabelKeyTenant: "tenant-a",
+			},
 			expectOK: false,
 		},
 		{
@@ -593,7 +607,10 @@ func TestAuthorizeViaBindDefinitions(t *testing.T) {
 			bindDefs: []authorizationv1alpha1.BindDefinition{},
 			username: "user1",
 			groups:   []string{"allowed-group"},
-			nsLabels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"},
+			nsLabels: map[string]string{
+				authorizationv1alpha1.LabelKeyOwner:  "tenant",
+				authorizationv1alpha1.LabelKeyTenant: "tenant-a",
+			},
 			expectOK: false,
 		},
 		{
@@ -608,15 +625,46 @@ func TestAuthorizeViaBindDefinitions(t *testing.T) {
 					RoleBindings: []authorizationv1alpha1.NamespaceBinding{{
 						ClusterRoleRefs: []string{"admin"},
 						NamespaceSelector: []metav1.LabelSelector{
-							{MatchLabels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"}},
+							{MatchLabels: map[string]string{authorizationv1alpha1.LabelKeyTenant: "tenant-a"}},
 						},
 					}},
 				},
 			}},
 			username: "system:serviceaccount:my-ns:my-sa",
 			groups:   []string{},
-			nsLabels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"},
+			nsLabels: map[string]string{
+				authorizationv1alpha1.LabelKeyOwner:  "tenant",
+				authorizationv1alpha1.LabelKeyTenant: "tenant-a",
+			},
 			expectOK: true,
+		},
+		{
+			name: "create denies broad selector matched only by requester supplied labels",
+			bindDefs: []authorizationv1alpha1.BindDefinition{{
+				ObjectMeta: metav1.ObjectMeta{Name: "broad-selector-bd"},
+				Spec: authorizationv1alpha1.BindDefinitionSpec{
+					TargetName: "broad-selector-target",
+					Subjects: []rbacv1.Subject{
+						{APIGroup: rbacv1.GroupName, Kind: "Group", Name: "allowed-group"},
+					},
+					RoleBindings: []authorizationv1alpha1.NamespaceBinding{{
+						ClusterRoleRefs: []string{"admin"},
+						NamespaceSelector: []metav1.LabelSelector{{
+							MatchExpressions: []metav1.LabelSelectorRequirement{{
+								Key:      authorizationv1alpha1.LabelKeyTenant,
+								Operator: metav1.LabelSelectorOpExists,
+							}},
+						}},
+					}},
+				},
+			}},
+			username: "user1",
+			groups:   []string{"allowed-group"},
+			nsLabels: map[string]string{
+				authorizationv1alpha1.LabelKeyOwner:  "tenant",
+				authorizationv1alpha1.LabelKeyTenant: "tenant-a",
+			},
+			expectOK: false,
 		},
 	}
 
@@ -740,7 +788,7 @@ func TestAuthorizeViaBindDefinitionsUsesLiveReader(t *testing.T) {
 			RoleBindings: []authorizationv1alpha1.NamespaceBinding{{
 				ClusterRoleRefs: []string{"admin"},
 				NamespaceSelector: []metav1.LabelSelector{
-					{MatchLabels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"}},
+					{MatchLabels: map[string]string{authorizationv1alpha1.LabelKeyTenant: "tenant-a"}},
 				},
 			}},
 		},
@@ -755,8 +803,11 @@ func TestAuthorizeViaBindDefinitionsUsesLiveReader(t *testing.T) {
 	v := &NamespaceValidator{Client: cachedClient, Reader: liveReader}
 	logger := logf.FromContext(context.Background())
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
-		Name:   "test-ns",
-		Labels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"},
+		Name: "test-ns",
+		Labels: map[string]string{
+			authorizationv1alpha1.LabelKeyOwner:  "tenant",
+			authorizationv1alpha1.LabelKeyTenant: "tenant-a",
+		},
 	}}
 	req := admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{
 		Name:      "test-ns",
@@ -802,8 +853,11 @@ func TestAuthorizeViaBindDefinitions_SkipsRestricted(t *testing.T) {
 	v := &NamespaceValidator{Client: fakeClient}
 	logger := logf.FromContext(context.Background())
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
-		Name:   "test-ns",
-		Labels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"},
+		Name: "test-ns",
+		Labels: map[string]string{
+			authorizationv1alpha1.LabelKeyOwner:  "tenant",
+			authorizationv1alpha1.LabelKeyTenant: "tenant-a",
+		},
 	}}
 
 	req := admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{

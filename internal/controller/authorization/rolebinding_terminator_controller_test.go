@@ -35,6 +35,29 @@ func newTestScheme() *runtime.Scheme {
 	return s
 }
 
+func testBindDefinitionControllerOwnerRef(name string, uid types.UID) metav1.OwnerReference {
+	controller := true
+	return metav1.OwnerReference{
+		APIVersion: authorizationv1alpha1.GroupVersion.String(),
+		Kind:       "BindDefinition",
+		Name:       name,
+		UID:        uid,
+		Controller: &controller,
+	}
+}
+
+func testBindDefinition() *authorizationv1alpha1.BindDefinition {
+	return &authorizationv1alpha1.BindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-bd", UID: types.UID("bd-uid")},
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
+			TargetName: "test-target",
+			Subjects: []rbacv1.Subject{
+				{Kind: rbacv1.UserKind, Name: "test-user", APIGroup: rbacv1.GroupName},
+			},
+		},
+	}
+}
+
 func TestIsOwnedByBindDefinition(t *testing.T) {
 	t.Run("empty owner references returns false", func(t *testing.T) {
 		g := NewWithT(t)
@@ -73,6 +96,7 @@ func TestIsOwnedByBindDefinition(t *testing.T) {
 				APIVersion: authorizationv1alpha1.GroupVersion.String(),
 				Kind:       "BindDefinition",
 				Name:       "test-bd",
+				UID:        "test-bd-uid",
 			},
 		}
 		g.Expect(isOwnedByBindDefinition(refs)).To(BeTrue())
@@ -82,9 +106,17 @@ func TestIsOwnedByBindDefinition(t *testing.T) {
 		g := NewWithT(t)
 		refs := []metav1.OwnerReference{
 			{APIVersion: "apps/v1", Kind: "Deployment", Name: "dep"},
-			{APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: "BindDefinition", Name: "bd"},
+			{APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: "BindDefinition", Name: "bd", UID: "bd-uid"},
 		}
 		g.Expect(isOwnedByBindDefinition(refs)).To(BeTrue())
+	})
+
+	t.Run("incomplete BindDefinition owner returns false", func(t *testing.T) {
+		g := NewWithT(t)
+		refs := []metav1.OwnerReference{
+			{APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: "BindDefinition", Name: "bd"},
+		}
+		g.Expect(isOwnedByBindDefinition(refs)).To(BeFalse())
 	})
 }
 
@@ -169,7 +201,7 @@ func TestGetOwningBindDefinition(t *testing.T) {
 		g := NewWithT(t)
 
 		bd := &authorizationv1alpha1.BindDefinition{
-			ObjectMeta: metav1.ObjectMeta{Name: "test-bd"},
+			ObjectMeta: metav1.ObjectMeta{Name: "test-bd", UID: "test-bd-uid"},
 			Spec: authorizationv1alpha1.BindDefinitionSpec{
 				TargetName: "test-target",
 				Subjects:   []rbacv1.Subject{{Kind: "Group", Name: "grp", APIGroup: rbacv1.GroupName}},
@@ -178,13 +210,7 @@ func TestGetOwningBindDefinition(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bd).Build()
 		r := &RoleBindingTerminator{client: c, scheme: scheme}
 
-		refs := []metav1.OwnerReference{
-			{
-				APIVersion: authorizationv1alpha1.GroupVersion.String(),
-				Kind:       "BindDefinition",
-				Name:       "test-bd",
-			},
-		}
+		refs := []metav1.OwnerReference{testBindDefinitionControllerOwnerRef("test-bd", "test-bd-uid")}
 		result, err := r.getOwningBindDefinition(ctx, refs)
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(result.Name).To(Equal("test-bd"))
@@ -201,7 +227,7 @@ func TestGetOwningBindDefinition(t *testing.T) {
 		}
 		_, err := r.getOwningBindDefinition(ctx, refs)
 		g.Expect(err).To(HaveOccurred())
-		g.Expect(err.Error()).To(ContainSubstring("no BindDefinition owner reference found"))
+		g.Expect(err.Error()).To(ContainSubstring("no controlling BindDefinition owner reference found"))
 	})
 
 	t.Run("returns error when BindDefinition not found in cluster", func(t *testing.T) {
@@ -210,13 +236,7 @@ func TestGetOwningBindDefinition(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(scheme).Build()
 		r := &RoleBindingTerminator{client: c, scheme: scheme}
 
-		refs := []metav1.OwnerReference{
-			{
-				APIVersion: authorizationv1alpha1.GroupVersion.String(),
-				Kind:       "BindDefinition",
-				Name:       "nonexistent",
-			},
-		}
+		refs := []metav1.OwnerReference{testBindDefinitionControllerOwnerRef("nonexistent", "nonexistent-uid")}
 		_, err := r.getOwningBindDefinition(ctx, refs)
 		g.Expect(err).To(HaveOccurred())
 		g.Expect(err.Error()).To(ContainSubstring("failed to get BindDefinition nonexistent"))
@@ -227,12 +247,7 @@ func TestRoleBindingTerminatorReconcile(t *testing.T) {
 	ctx := context.Background()
 	scheme := newTestScheme()
 
-	bdOwnerRef := metav1.OwnerReference{
-		APIVersion: authorizationv1alpha1.GroupVersion.String(),
-		Kind:       "BindDefinition",
-		Name:       "test-bd",
-		UID:        "bd-uid",
-	}
+	bdOwnerRef := testBindDefinitionControllerOwnerRef("test-bd", "bd-uid")
 
 	t.Run("RoleBinding not found returns empty result", func(t *testing.T) {
 		g := NewWithT(t)
@@ -257,7 +272,7 @@ func TestRoleBindingTerminatorReconcile(t *testing.T) {
 			},
 			RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "view"},
 		}
-		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rb).Build()
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rb, testBindDefinition()).Build()
 		r := &RoleBindingTerminator{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
 		result, err := r.Reconcile(ctx, reconcile.Request{
@@ -265,6 +280,59 @@ func TestRoleBindingTerminatorReconcile(t *testing.T) {
 		})
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(result).To(Equal(reconcile.Result{}))
+	})
+
+	t.Run("RoleBinding with non-controller BindDefinition ownerRef is ignored", func(t *testing.T) {
+		g := NewWithT(t)
+
+		ownerRef := testBindDefinitionControllerOwnerRef("test-bd", "bd-uid")
+		controller := false
+		ownerRef.Controller = &controller
+		rb := &rbacv1.RoleBinding{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:            "non-controller-rb",
+				Namespace:       "default",
+				OwnerReferences: []metav1.OwnerReference{ownerRef},
+			},
+			RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "view"},
+		}
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rb, testBindDefinition()).Build()
+		r := &RoleBindingTerminator{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
+
+		result, err := r.Reconcile(ctx, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: "non-controller-rb", Namespace: "default"},
+		})
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(result).To(Equal(reconcile.Result{}))
+
+		updated := &rbacv1.RoleBinding{}
+		g.Expect(c.Get(ctx, types.NamespacedName{Name: "non-controller-rb", Namespace: "default"}, updated)).To(Succeed())
+		g.Expect(updated.Finalizers).NotTo(ContainElement(authorizationv1alpha1.RoleBindingFinalizer))
+	})
+
+	t.Run("RoleBinding with nonexistent BindDefinition ownerRef does not get finalizer", func(t *testing.T) {
+		g := NewWithT(t)
+
+		rb := &rbacv1.RoleBinding{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:            "missing-owner-rb",
+				Namespace:       "default",
+				OwnerReferences: []metav1.OwnerReference{testBindDefinitionControllerOwnerRef("missing-bd", "missing-uid")},
+			},
+			RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "view"},
+		}
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rb).Build()
+		r := &RoleBindingTerminator{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
+
+		result, err := r.Reconcile(ctx, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: "missing-owner-rb", Namespace: "default"},
+		})
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(result).To(Equal(reconcile.Result{}))
+
+		updated := &rbacv1.RoleBinding{}
+		g.Expect(c.Get(ctx, types.NamespacedName{Name: "missing-owner-rb", Namespace: "default"}, updated)).To(Succeed())
+		g.Expect(updated.Finalizers).NotTo(ContainElement(authorizationv1alpha1.RoleBindingFinalizer))
 	})
 
 	t.Run("RoleBinding not being deleted gets finalizer added", func(t *testing.T) {
@@ -278,7 +346,7 @@ func TestRoleBindingTerminatorReconcile(t *testing.T) {
 			},
 			RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "view"},
 		}
-		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rb).Build()
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rb, testBindDefinition()).Build()
 		r := &RoleBindingTerminator{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
 		result, err := r.Reconcile(ctx, reconcile.Request{
@@ -311,7 +379,7 @@ func TestRoleBindingTerminatorReconcile(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "active-ns"},
 			Status:     corev1.NamespaceStatus{Phase: corev1.NamespaceActive},
 		}
-		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rb, ns).Build()
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rb, ns, testBindDefinition()).Build()
 		r := &RoleBindingTerminator{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
 		result, err := r.Reconcile(ctx, reconcile.Request{
@@ -341,7 +409,7 @@ func TestRoleBindingTerminatorReconcile(t *testing.T) {
 			RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "view"},
 		}
 		// No namespace created - simulating namespace already deleted
-		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rb).Build()
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rb, testBindDefinition()).Build()
 		r := &RoleBindingTerminator{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
 		result, err := r.Reconcile(ctx, reconcile.Request{
@@ -376,12 +444,7 @@ func TestRBTerminatorReconcileTerminatingNamespaceWithBlockingResources(t *testi
 	scheme := newTestScheme()
 
 	now := metav1.Now()
-	bdOwnerRef := metav1.OwnerReference{
-		APIVersion: authorizationv1alpha1.GroupVersion.String(),
-		Kind:       "BindDefinition",
-		Name:       "test-bd",
-		UID:        "bd-uid",
-	}
+	bdOwnerRef := testBindDefinitionControllerOwnerRef("test-bd", "bd-uid")
 	rb := &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "term-rb",
@@ -402,7 +465,7 @@ func TestRBTerminatorReconcileTerminatingNamespaceWithBlockingResources(t *testi
 	}
 
 	c := fake.NewClientBuilder().WithScheme(scheme).
-		WithObjects(rb, ns).
+		WithObjects(rb, ns, testBindDefinition()).
 		WithStatusSubresource(ns).
 		Build()
 	r := &RoleBindingTerminator{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
@@ -445,12 +508,7 @@ func TestRBTerminatorReconcileTerminatingNamespaceNoBlockingResources(t *testing
 			},
 		},
 	}
-	bdOwnerRef := metav1.OwnerReference{
-		APIVersion: authorizationv1alpha1.GroupVersion.String(),
-		Kind:       "BindDefinition",
-		Name:       "test-bd",
-		UID:        "bd-uid",
-	}
+	bdOwnerRef := testBindDefinitionControllerOwnerRef("test-bd", "bd-uid")
 	rb := &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "term-rb-clean",
@@ -509,12 +567,7 @@ func TestRBTerminatorCacheEvictionOnNonTerminatingNamespace(t *testing.T) {
 	scheme := newTestScheme()
 
 	now := metav1.Now()
-	bdOwnerRef := metav1.OwnerReference{
-		APIVersion: authorizationv1alpha1.GroupVersion.String(),
-		Kind:       "BindDefinition",
-		Name:       "test-bd",
-		UID:        "bd-uid",
-	}
+	bdOwnerRef := testBindDefinitionControllerOwnerRef("test-bd", "bd-uid")
 	rb := &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "evict-rb",
@@ -530,7 +583,7 @@ func TestRBTerminatorCacheEvictionOnNonTerminatingNamespace(t *testing.T) {
 		Status:     corev1.NamespaceStatus{Phase: corev1.NamespaceActive},
 	}
 
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rb, ns).Build()
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rb, ns, testBindDefinition()).Build()
 	r := &RoleBindingTerminator{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
 	// Pre-populate the cache (simulates a previous termination check)
@@ -552,12 +605,7 @@ func TestRBTerminatorReconcileErrorAddingFinalizer(t *testing.T) {
 	ctx := context.Background()
 	scheme := newTestScheme()
 
-	bdOwnerRef := metav1.OwnerReference{
-		APIVersion: authorizationv1alpha1.GroupVersion.String(),
-		Kind:       "BindDefinition",
-		Name:       "test-bd",
-		UID:        "bd-uid",
-	}
+	bdOwnerRef := testBindDefinitionControllerOwnerRef("test-bd", "bd-uid")
 	rb := &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            "err-rb",
@@ -567,7 +615,7 @@ func TestRBTerminatorReconcileErrorAddingFinalizer(t *testing.T) {
 		RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "view"},
 	}
 
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rb).
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rb, testBindDefinition()).
 		WithInterceptorFuncs(interceptor.Funcs{
 			Patch: func(_ context.Context, _ client.WithWatch, obj client.Object, _ client.Patch, _ ...client.PatchOption) error {
 				if _, ok := obj.(*rbacv1.RoleBinding); ok {
@@ -591,12 +639,7 @@ func TestRBTerminatorReconcileNamespaceGetError(t *testing.T) {
 	scheme := newTestScheme()
 
 	now := metav1.Now()
-	bdOwnerRef := metav1.OwnerReference{
-		APIVersion: authorizationv1alpha1.GroupVersion.String(),
-		Kind:       "BindDefinition",
-		Name:       "test-bd",
-		UID:        "bd-uid",
-	}
+	bdOwnerRef := testBindDefinitionControllerOwnerRef("test-bd", "bd-uid")
 	rb := &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "ns-err-rb",
@@ -608,7 +651,7 @@ func TestRBTerminatorReconcileNamespaceGetError(t *testing.T) {
 		RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "view"},
 	}
 
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rb).
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rb, testBindDefinition()).
 		WithInterceptorFuncs(interceptor.Funcs{
 			Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
 				if _, ok := obj.(*corev1.Namespace); ok {
@@ -632,12 +675,7 @@ func TestRBTerminatorReconcileBlockingResourcesError(t *testing.T) {
 	scheme := newTestScheme()
 
 	now := metav1.Now()
-	bdOwnerRef := metav1.OwnerReference{
-		APIVersion: authorizationv1alpha1.GroupVersion.String(),
-		Kind:       "BindDefinition",
-		Name:       "test-bd",
-		UID:        "bd-uid",
-	}
+	bdOwnerRef := testBindDefinitionControllerOwnerRef("test-bd", "bd-uid")
 	rb := &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "block-err-rb",
@@ -657,7 +695,7 @@ func TestRBTerminatorReconcileBlockingResourcesError(t *testing.T) {
 		Status: corev1.NamespaceStatus{Phase: corev1.NamespaceTerminating},
 	}
 
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rb, ns).Build()
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rb, ns, testBindDefinition()).Build()
 	r := &RoleBindingTerminator{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
 	// Pre-populate the cache with an error
@@ -681,12 +719,7 @@ func TestRBTerminatorReconcileErrorRemovingFinalizerNonTerminating(t *testing.T)
 	scheme := newTestScheme()
 
 	now := metav1.Now()
-	bdOwnerRef := metav1.OwnerReference{
-		APIVersion: authorizationv1alpha1.GroupVersion.String(),
-		Kind:       "BindDefinition",
-		Name:       "test-bd",
-		UID:        "bd-uid",
-	}
+	bdOwnerRef := testBindDefinitionControllerOwnerRef("test-bd", "bd-uid")
 	rb := &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "rm-err-rb",
@@ -702,7 +735,7 @@ func TestRBTerminatorReconcileErrorRemovingFinalizerNonTerminating(t *testing.T)
 		Status:     corev1.NamespaceStatus{Phase: corev1.NamespaceActive},
 	}
 
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rb, ns).
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rb, ns, testBindDefinition()).
 		WithInterceptorFuncs(interceptor.Funcs{
 			Patch: func(_ context.Context, _ client.WithWatch, _ client.Object, _ client.Patch, _ ...client.PatchOption) error {
 				return fmt.Errorf("injected patch error")
@@ -722,12 +755,7 @@ func TestRBTerminatorReconcileFinalizerAlreadyPresent(t *testing.T) {
 	ctx := context.Background()
 	scheme := newTestScheme()
 
-	bdOwnerRef := metav1.OwnerReference{
-		APIVersion: authorizationv1alpha1.GroupVersion.String(),
-		Kind:       "BindDefinition",
-		Name:       "test-bd",
-		UID:        "bd-uid",
-	}
+	bdOwnerRef := testBindDefinitionControllerOwnerRef("test-bd", "bd-uid")
 	rb := &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            "has-finalizer-rb",
@@ -738,7 +766,7 @@ func TestRBTerminatorReconcileFinalizerAlreadyPresent(t *testing.T) {
 		RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "view"},
 	}
 
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rb).Build()
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rb, testBindDefinition()).Build()
 	r := &RoleBindingTerminator{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
 	result, err := r.Reconcile(ctx, reconcile.Request{
@@ -748,18 +776,13 @@ func TestRBTerminatorReconcileFinalizerAlreadyPresent(t *testing.T) {
 	g.Expect(result).To(Equal(reconcile.Result{}))
 }
 
-func TestRBTerminatorReconcileGetOwnerBDError(t *testing.T) {
+func TestRBTerminatorReconcileInvalidOwnerRemovesFinalizer(t *testing.T) {
 	g := NewWithT(t)
 	ctx := context.Background()
 	scheme := newTestScheme()
 
 	now := metav1.Now()
-	bdOwnerRef := metav1.OwnerReference{
-		APIVersion: authorizationv1alpha1.GroupVersion.String(),
-		Kind:       "BindDefinition",
-		Name:       "nonexistent-bd",
-		UID:        "bd-uid",
-	}
+	bdOwnerRef := testBindDefinitionControllerOwnerRef("nonexistent-bd", "bd-uid")
 	rb := &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "owner-err-rb",
@@ -779,7 +802,7 @@ func TestRBTerminatorReconcileGetOwnerBDError(t *testing.T) {
 		Status: corev1.NamespaceStatus{Phase: corev1.NamespaceTerminating},
 	}
 
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rb, ns).
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rb, ns, testBindDefinition()).
 		WithStatusSubresource(ns).Build()
 	r := &RoleBindingTerminator{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
@@ -791,9 +814,131 @@ func TestRBTerminatorReconcileGetOwnerBDError(t *testing.T) {
 	cacheEntry.rateLimiter.Do(func() {}) // burn first call
 	r.namespaceTerminationResourcesCache.Store("clean-ns", cacheEntry)
 
-	_, err := r.Reconcile(ctx, reconcile.Request{
+	result, err := r.Reconcile(ctx, reconcile.Request{
 		NamespacedName: types.NamespacedName{Name: "owner-err-rb", Namespace: "clean-ns"},
 	})
-	g.Expect(err).To(HaveOccurred())
-	g.Expect(err.Error()).To(ContainSubstring("failed to get BindDefinition nonexistent-bd"))
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(result).To(Equal(reconcile.Result{}))
+
+	updated := &rbacv1.RoleBinding{}
+	err = c.Get(ctx, types.NamespacedName{Name: "owner-err-rb", Namespace: "clean-ns"}, updated)
+	g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "RoleBinding should be gone after invalid finalizer removal")
+}
+
+func TestRBTerminatorReconcileUsesLiveReaderForStaleOwnerCache(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+	scheme := newTestScheme()
+
+	now := metav1.Now()
+	bdOwnerRef := testBindDefinitionControllerOwnerRef("test-bd", "bd-uid")
+	rb := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "stale-owner-rb",
+			Namespace:         "blocked-ns",
+			OwnerReferences:   []metav1.OwnerReference{bdOwnerRef},
+			DeletionTimestamp: &now,
+			Finalizers:        []string{authorizationv1alpha1.RoleBindingFinalizer},
+		},
+		RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "view"},
+	}
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "blocked-ns",
+			DeletionTimestamp: &now,
+			Finalizers:        []string{"kubernetes"},
+		},
+		Status: corev1.NamespaceStatus{Phase: corev1.NamespaceTerminating},
+	}
+
+	staleCache := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(rb.DeepCopy(), ns.DeepCopy()).
+		WithStatusSubresource(ns).
+		Build()
+	liveReader := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(testBindDefinition()).
+		Build()
+	r := &RoleBindingTerminator{client: staleCache, reader: liveReader, scheme: scheme, recorder: events.NewFakeRecorder(10)}
+
+	cacheEntry := &namespaceTerminationStatus{
+		blockingResources: []namespaceDeletionResourceBlocking{
+			{ResourceType: "pods", Count: 1, Names: []string{"still-running"}},
+		},
+		rateLimiter: rate.Sometimes{},
+	}
+	cacheEntry.rateLimiter.Do(func() {})
+	r.namespaceTerminationResourcesCache.Store("blocked-ns", cacheEntry)
+
+	result, err := r.Reconcile(ctx, reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: "stale-owner-rb", Namespace: "blocked-ns"},
+	})
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(result.RequeueAfter).To(Equal(terminatingNamespaceRequeueInterval))
+
+	updated := &rbacv1.RoleBinding{}
+	err = staleCache.Get(ctx, types.NamespacedName{Name: "stale-owner-rb", Namespace: "blocked-ns"}, updated)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(updated.Finalizers).To(ContainElement(authorizationv1alpha1.RoleBindingFinalizer))
+}
+
+func TestRBTerminatorReconcileUsesLiveReaderForStaleOwnerUID(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+	scheme := newTestScheme()
+
+	now := metav1.Now()
+	bdOwnerRef := testBindDefinitionControllerOwnerRef("test-bd", "bd-uid")
+	rb := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "stale-owner-uid-rb",
+			Namespace:         "blocked-ns",
+			OwnerReferences:   []metav1.OwnerReference{bdOwnerRef},
+			DeletionTimestamp: &now,
+			Finalizers:        []string{authorizationv1alpha1.RoleBindingFinalizer},
+		},
+		RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "view"},
+	}
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "blocked-ns",
+			DeletionTimestamp: &now,
+			Finalizers:        []string{"kubernetes"},
+		},
+		Status: corev1.NamespaceStatus{Phase: corev1.NamespaceTerminating},
+	}
+	staleBD := testBindDefinition()
+	staleBD.UID = types.UID("old-bd-uid")
+
+	staleCache := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(rb.DeepCopy(), ns.DeepCopy(), staleBD).
+		WithStatusSubresource(ns).
+		Build()
+	liveReader := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(testBindDefinition()).
+		Build()
+	r := &RoleBindingTerminator{client: staleCache, reader: liveReader, scheme: scheme, recorder: events.NewFakeRecorder(10)}
+
+	cacheEntry := &namespaceTerminationStatus{
+		blockingResources: []namespaceDeletionResourceBlocking{
+			{ResourceType: "pods", Count: 1, Names: []string{"still-running"}},
+		},
+		rateLimiter: rate.Sometimes{},
+	}
+	cacheEntry.rateLimiter.Do(func() {})
+	r.namespaceTerminationResourcesCache.Store("blocked-ns", cacheEntry)
+
+	result, err := r.Reconcile(ctx, reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: "stale-owner-uid-rb", Namespace: "blocked-ns"},
+	})
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(result.RequeueAfter).To(Equal(terminatingNamespaceRequeueInterval))
+
+	updated := &rbacv1.RoleBinding{}
+	err = staleCache.Get(ctx, types.NamespacedName{Name: "stale-owner-uid-rb", Namespace: "blocked-ns"}, updated)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(updated.Finalizers).To(ContainElement(authorizationv1alpha1.RoleBindingFinalizer))
 }

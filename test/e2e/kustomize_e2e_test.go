@@ -26,6 +26,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/telekom/auth-operator/test/utils"
+	"sigs.k8s.io/yaml"
 )
 
 var _ = Describe("Kustomize Overlay Validation", Label("kustomize"), func() {
@@ -44,6 +45,12 @@ var _ = Describe("Kustomize Overlay Validation", Label("kustomize"), func() {
 			Expect(outputStr).To(ContainSubstring("kind: ServiceAccount"), "Missing ServiceAccount")
 			Expect(outputStr).To(ContainSubstring("kind: ClusterRole"), "Missing ClusterRole")
 			Expect(outputStr).To(ContainSubstring("kind: ClusterRoleBinding"), "Missing ClusterRoleBinding")
+			Expect(outputStr).To(ContainSubstring("serviceAccountName: auth-operator-webhook-server"),
+				"Webhook server must use its dedicated ServiceAccount")
+			Expect(kustomizeOutputContainsObject(outputStr, "MutatingWebhookConfiguration", "namespace-mutating-webhook-configuration")).To(BeFalse(),
+				"Namespace admission webhooks must stay out of the default overlay")
+			Expect(kustomizeOutputContainsObject(outputStr, "ValidatingWebhookConfiguration", "namespace-validating-webhook-configuration")).To(BeFalse(),
+				"Namespace admission webhooks must stay out of the default overlay")
 		})
 
 		It("should have valid YAML syntax", func() {
@@ -129,6 +136,10 @@ var _ = Describe("Kustomize Overlay Validation", Label("kustomize"), func() {
 			By("Verifying webhook resources are present")
 			outputStr := string(output)
 			Expect(outputStr).To(ContainSubstring("kind: Service"), "Missing Service")
+			Expect(outputStr).To(ContainSubstring("serviceAccountName: webhook-server"),
+				"Webhook server must use its dedicated ServiceAccount")
+			Expect(outputStr).To(ContainSubstring("name: webhook-server"),
+				"Missing dedicated webhook ServiceAccount/RBAC resources")
 		})
 	})
 
@@ -183,3 +194,27 @@ var _ = Describe("Kustomize Overlay Validation", Label("kustomize"), func() {
 		})
 	})
 })
+
+func kustomizeOutputContainsObject(output, kind, name string) bool {
+	type renderedObject struct {
+		Kind     string `yaml:"kind"`
+		Metadata struct {
+			Name string `yaml:"name"`
+		} `yaml:"metadata"`
+	}
+
+	for _, doc := range strings.Split(output, "---") {
+		trimmed := strings.TrimSpace(doc)
+		if trimmed == "" {
+			continue
+		}
+		var obj renderedObject
+		if err := yaml.Unmarshal([]byte(trimmed), &obj); err != nil {
+			continue
+		}
+		if obj.Kind == kind && (obj.Metadata.Name == name || strings.HasSuffix(obj.Metadata.Name, "-"+name)) {
+			return true
+		}
+	}
+	return false
+}

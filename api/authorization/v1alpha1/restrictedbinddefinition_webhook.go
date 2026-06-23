@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 
 	"github.com/telekom/auth-operator/pkg/helpers"
@@ -89,6 +90,18 @@ func (v *RestrictedBindDefinitionValidator) ValidateUpdate(ctx context.Context, 
 	logger := log.FromContext(ctx).WithName("restrictedbinddefinition-webhook")
 	logger.V(1).Info("validating update", "name", newObj.Name)
 
+	if reflect.DeepEqual(oldObj.Spec, newObj.Spec) {
+		return nil, validateDefaultPolicyForMetadataUpdate(
+			ctx,
+			v.defaultPolicyReader(),
+			schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedBindDefinitionKind},
+			newObj.Name,
+			newObj.Spec.PolicyRef.Name,
+			oldObj,
+			newObj,
+		)
+	}
+
 	// Enforce immutability of targetName and policyRef.
 	var allErrs field.ErrorList
 	if oldObj.Spec.TargetName != newObj.Spec.TargetName {
@@ -104,7 +117,15 @@ func (v *RestrictedBindDefinitionValidator) ValidateUpdate(ctx context.Context, 
 	}
 
 	if equality.Semantic.DeepEqual(oldObj.Spec, newObj.Spec) {
-		return nil, nil
+		return nil, validateDefaultPolicyForMetadataUpdate(
+			ctx,
+			v.defaultPolicyReader(),
+			schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedBindDefinitionKind},
+			newObj.Name,
+			newObj.Spec.PolicyRef.Name,
+			oldObj,
+			newObj,
+		)
 	}
 
 	if err := v.validateRestrictedBindDefinitionSpec(ctx, newObj); err != nil {
@@ -422,6 +443,14 @@ func (v *RestrictedBindDefinitionValidator) validatePolicyRefExists(ctx context.
 		}
 		logger.Error(err, "failed to get RBACPolicy", "policyRef", obj.Spec.PolicyRef.Name)
 		return nil, apierrors.NewInternalError(errors.New("unable to validate policy reference"))
+	}
+
+	if rbacPolicy.GetDeletionTimestamp() != nil {
+		return nil, invalidDeletingPolicyRef(
+			schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedBindDefinitionKind},
+			obj.Name,
+			obj.Spec.PolicyRef.Name,
+		)
 	}
 
 	// AllowedNamespaceSelector constraints cannot be evaluated at admission time because

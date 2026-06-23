@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -137,10 +138,10 @@ func TestServeHTTP_EvaluatesMatchingAuthorizersByName(t *testing.T) {
 	}
 
 	tests := []struct {
-		name       string
-		authorizer []authzv1alpha1.WebhookAuthorizer
-		wantAllow  bool
-		wantReason string
+		name             string
+		authorizer       []authzv1alpha1.WebhookAuthorizer
+		wantAllow        bool
+		wantPublicReason string
 	}{
 		{
 			name: "first authorizer allows before later deny",
@@ -148,8 +149,8 @@ func TestServeHTTP_EvaluatesMatchingAuthorizersByName(t *testing.T) {
 				newDenyAuthorizer("zzz-deny"),
 				newAllowAuthorizer("aaa-allow"),
 			},
-			wantAllow:  true,
-			wantReason: "aaa-allow",
+			wantAllow:        true,
+			wantPublicReason: "Access granted by WebhookAuthorizer",
 		},
 		{
 			name: "first authorizer denies before later allow",
@@ -157,8 +158,8 @@ func TestServeHTTP_EvaluatesMatchingAuthorizersByName(t *testing.T) {
 				newAllowAuthorizer("zzz-allow"),
 				newDenyAuthorizer("aaa-deny"),
 			},
-			wantAllow:  false,
-			wantReason: "aaa-deny",
+			wantAllow:        false,
+			wantPublicReason: "Access denied by WebhookAuthorizer",
 		},
 	}
 
@@ -187,10 +188,63 @@ func TestServeHTTP_EvaluatesMatchingAuthorizersByName(t *testing.T) {
 			if resp.Status.Allowed != tt.wantAllow {
 				t.Fatalf("expected allowed=%t, got %+v", tt.wantAllow, resp.Status)
 			}
-			if !strings.Contains(resp.Status.Reason, tt.wantReason) {
-				t.Fatalf("expected reason to mention %q, got %q", tt.wantReason, resp.Status.Reason)
+			if resp.Status.Reason != tt.wantPublicReason {
+				t.Fatalf("expected public reason %q, got %q", tt.wantPublicReason, resp.Status.Reason)
+			}
+			for _, authorizer := range tt.authorizer {
+				if strings.Contains(resp.Status.Reason, authorizer.Name) {
+					t.Fatalf("public reason leaks authorizer name %q: %q", authorizer.Name, resp.Status.Reason)
+				}
 			}
 		})
+	}
+}
+
+func TestServeHTTP_AuthorizerRulesUseLiveClient(t *testing.T) {
+	scheme := newScheme(t)
+	freshDeny := &authzv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{Name: "fresh-deny"},
+		Spec: authzv1alpha1.WebhookAuthorizerSpec{
+			DeniedPrincipals: []authzv1alpha1.Principal{{User: "alice"}},
+			ResourceRules: []authzv1.ResourceRule{
+				{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods"}},
+			},
+		},
+	}
+	handler := &Authorizer{
+		Client: newIndexedClient(scheme, freshDeny),
+		Log:    logr.Discard(),
+	}
+	sar := authzv1.SubjectAccessReview{
+		Spec: authzv1.SubjectAccessReviewSpec{
+			User: "alice",
+			ResourceAttributes: &authzv1.ResourceAttributes{
+				Verb:     "get",
+				Group:    "",
+				Resource: "pods",
+			},
+		},
+	}
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/authorize", bytes.NewReader(marshalSAR(t, sar)))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var resp authzv1.SubjectAccessReview
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Status.Allowed {
+		t.Fatalf("expected fresh reader denial, got %+v", resp.Status)
+	}
+	if resp.Status.Reason != "Access denied by WebhookAuthorizer" {
+		t.Fatalf("expected generic denial reason, got %q", resp.Status.Reason)
+	}
+	if strings.Contains(resp.Status.Reason, "fresh-deny") {
+		t.Fatalf("public reason leaks authorizer name: %q", resp.Status.Reason)
 	}
 }
 
@@ -1003,6 +1057,63 @@ func TestCappedGroups(t *testing.T) {
 	}
 }
 
+func TestMetrics_ActiveRulesCountsMixedGlobalAndScopedAuthorizers(t *testing.T) {
+	scheme := newScheme(t)
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "team-a",
+			Labels: map[string]string{"team": "alpha"},
+		},
+	}
+	global := authzv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{Name: "z-global"},
+		Spec: authzv1alpha1.WebhookAuthorizerSpec{
+			AllowedPrincipals: []authzv1alpha1.Principal{{User: "alice"}},
+			ResourceRules: []authzv1.ResourceRule{
+				{Verbs: []string{"list"}, APIGroups: []string{""}, Resources: []string{"pods"}},
+			},
+		},
+	}
+	scoped := authzv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{Name: "a-scoped"},
+		Spec: authzv1alpha1.WebhookAuthorizerSpec{
+			NamespaceSelector: metav1.LabelSelector{MatchLabels: map[string]string{"team": "alpha"}},
+			AllowedPrincipals: []authzv1alpha1.Principal{{User: "alice"}},
+			ResourceRules: []authzv1.ResourceRule{
+				{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods"}},
+				{Verbs: []string{"watch"}, APIGroups: []string{""}, Resources: []string{"pods"}},
+			},
+		},
+	}
+	handler := &Authorizer{
+		Client: newIndexedClient(scheme, ns, &global, &scoped),
+		Log:    logr.Discard(),
+	}
+
+	pkgmetrics.AuthorizerActiveRules.Set(0)
+	sar := authzv1.SubjectAccessReview{
+		Spec: authzv1.SubjectAccessReviewSpec{
+			User: "alice",
+			ResourceAttributes: &authzv1.ResourceAttributes{
+				Namespace: "team-a",
+				Verb:      "get",
+				Resource:  "pods",
+			},
+		},
+	}
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(marshalSAR(t, sar)))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+	activeRules := testutil.ToFloat64(pkgmetrics.AuthorizerActiveRules)
+	if activeRules != 3 {
+		t.Fatalf("expected AuthorizerActiveRules=3, got %v", activeRules)
+	}
+}
+
 func TestCountTotalRules(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -1102,6 +1213,86 @@ func TestServeHTTP_RateLimiting(t *testing.T) {
 	afterCount := testutil.ToFloat64(pkgmetrics.AuthorizerRateLimitedTotal)
 	if afterCount-initialCount < 1 {
 		t.Errorf("AuthorizerRateLimitedTotal did not increment: before=%v, after=%v", initialCount, afterCount)
+	}
+}
+
+func TestServeHTTP_RateLimitingIsPerSubject(t *testing.T) {
+	scheme := newScheme(t)
+	cl := newIndexedClient(scheme)
+	handler := &Authorizer{
+		Client:  cl,
+		Log:     logr.Discard(),
+		Limiter: rate.NewLimiter(rate.Limit(0), 1),
+	}
+
+	sarFor := func(user string, groups ...string) []byte {
+		return marshalSAR(t, authzv1.SubjectAccessReview{
+			Spec: authzv1.SubjectAccessReviewSpec{
+				User:   user,
+				Groups: groups,
+				ResourceAttributes: &authzv1.ResourceAttributes{
+					Verb:     "get",
+					Resource: "pods",
+				},
+			},
+		})
+	}
+	request := func(body []byte) authzv1.SubjectAccessReview {
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+		}
+		var resp authzv1.SubjectAccessReview
+		if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		return resp
+	}
+
+	request(sarFor("alice", "team-a", "system:authenticated"))
+	reorderedGroupResponse := request(sarFor("alice", "system:authenticated", "team-a"))
+	if reorderedGroupResponse.Status.Reason != "rate limit exceeded" {
+		t.Fatalf("expected same user with reordered groups to share a rate-limit bucket, got reason %q", reorderedGroupResponse.Status.Reason)
+	}
+	duplicateGroupResponse := request(sarFor("alice", "team-a", "team-a", "system:authenticated"))
+	if duplicateGroupResponse.Status.Reason != "rate limit exceeded" {
+		t.Fatalf("expected duplicate groups to share a rate-limit bucket, got reason %q", duplicateGroupResponse.Status.Reason)
+	}
+	differentGroupResponse := request(sarFor("alice", "team-b", "system:authenticated"))
+	if differentGroupResponse.Status.Reason == "rate limit exceeded" {
+		t.Fatal("expected same user with different groups to use an independent rate-limit bucket")
+	}
+	bobResponse := request(sarFor("bob", "team-a", "system:authenticated"))
+	if bobResponse.Status.Reason == "rate limit exceeded" {
+		t.Fatal("expected bob to use an independent rate-limit bucket")
+	}
+}
+
+func TestSubjectLimiterCacheIsBounded(t *testing.T) {
+	handler := &Authorizer{
+		Log:                     logr.Discard(),
+		Limiter:                 rate.NewLimiter(rate.Limit(1), 1),
+		subjectLimiters:         make(map[string]*subjectLimiterEntry, maxSubjectLimiters),
+		subjectLimiterCleanupAt: time.Now().Add(time.Hour),
+	}
+	for i := range maxSubjectLimiters {
+		handler.subjectLimiters[rateLimitSubjectKey(&authzv1.SubjectAccessReview{Spec: authzv1.SubjectAccessReviewSpec{User: "user-" + strconv.Itoa(i)}})] = &subjectLimiterEntry{
+			limiter:  rate.NewLimiter(rate.Limit(1), 1),
+			lastSeen: time.Unix(int64(i), 0),
+		}
+	}
+
+	handler.subjectLimiter("new-user")
+	if len(handler.subjectLimiters) != maxSubjectLimiters {
+		t.Fatalf("expected limiter cache size %d, got %d", maxSubjectLimiters, len(handler.subjectLimiters))
+	}
+	if _, exists := handler.subjectLimiters[rateLimitSubjectKey(&authzv1.SubjectAccessReview{Spec: authzv1.SubjectAccessReviewSpec{User: "user-0"}})]; exists {
+		t.Fatal("expected oldest limiter entry to be evicted")
+	}
+	if _, exists := handler.subjectLimiters["new-user"]; !exists {
+		t.Fatal("expected new limiter entry to be present")
 	}
 }
 
@@ -1644,6 +1835,32 @@ func TestResourceRuleIndex_ResourceNamesMatching(t *testing.T) {
 		idx := handler.resourceRuleIndex(wildcardRules, attr)
 		if idx != 0 {
 			t.Errorf("expected rule index 0 for wildcard ResourceNames, got %d", idx)
+		}
+	})
+}
+
+func TestNonResourceRuleIndex_SuffixWildcardMatching(t *testing.T) {
+	scheme := newScheme(t)
+	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+	handler := &Authorizer{Client: cl, Log: logr.Discard()}
+
+	rules := []authzv1.NonResourceRule{
+		{Verbs: []string{"get"}, NonResourceURLs: []string{"/api/*"}},
+	}
+
+	t.Run("suffix wildcard matches child path", func(t *testing.T) {
+		attr := &authzv1.NonResourceAttributes{Verb: "get", Path: "/api/v1"}
+		idx := handler.nonResourceRuleIndex(rules, attr)
+		if idx != 0 {
+			t.Errorf("expected rule index 0 for /api/*, got %d", idx)
+		}
+	})
+
+	t.Run("suffix wildcard does not match unrelated path", func(t *testing.T) {
+		attr := &authzv1.NonResourceAttributes{Verb: "get", Path: "/apis/v1"}
+		idx := handler.nonResourceRuleIndex(rules, attr)
+		if idx >= 0 {
+			t.Errorf("expected no match for unrelated path, got rule index %d", idx)
 		}
 	})
 }

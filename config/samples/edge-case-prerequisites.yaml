@@ -92,7 +92,8 @@ kind: Namespace
 metadata:
   name: sample-tenant-a
   labels:
-    t-caas.telekom.com/tenant: "true"
+    t-caas.telekom.com/owner: tenant
+    t-caas.telekom.com/tenant: sample-tenant-a
     t-caas.telekom.com/purpose: sample-scenarios
 
 ---
@@ -101,7 +102,8 @@ kind: Namespace
 metadata:
   name: sample-tenant-b
   labels:
-    t-caas.telekom.com/tenant: "true"
+    t-caas.telekom.com/owner: tenant
+    t-caas.telekom.com/tenant: sample-tenant-b
     t-caas.telekom.com/purpose: sample-scenarios
 
 ---

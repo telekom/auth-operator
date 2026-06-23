@@ -122,6 +122,7 @@ jobs:
           install-kind: 'true'
           kind-version: ${{ env.KIND_VERSION }}
           install-helm: 'true'
+          helm-version: ${{ env.HELM_VERSION }}
 
       - name: Run Helm E2E tests
         run: make test-e2e-helm-full
@@ -168,6 +169,7 @@ jobs:
           install-kind: 'true'
           kind-version: ${{ env.KIND_VERSION }}
           install-helm: 'true'
+          helm-version: ${{ env.HELM_VERSION }}
 
       - name: Run Complex E2E tests
         run: make test-e2e-complex

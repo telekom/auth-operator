@@ -60,15 +60,32 @@ func saOwnerRefForBindDefinition(bindDef *authorizationv1alpha1.BindDefinition) 
 // matching is too weak for privileged cleanup/adoption checks because ownerRefs
 // are user-writable metadata.
 func hasOwnerRef(obj, owner metav1.Object) bool {
+	return hasOwnerRefMatching(obj, owner, false)
+}
+
+func hasControllerOwnerRef(obj, owner metav1.Object) bool {
+	return hasOwnerRefMatching(obj, owner, true)
+}
+
+func hasOwnerRefMatching(obj, owner metav1.Object, requireController bool) bool {
 	ownerUID := owner.GetUID()
 	ownerAPIVersion, ownerKind := ownerReferenceIdentity(owner)
 	if ownerUID == "" || ownerAPIVersion == "" || ownerKind == "" || owner.GetName() == "" {
 		return false
 	}
 	for _, ref := range obj.GetOwnerReferences() {
-		if ref.APIVersion == ownerAPIVersion && ref.Kind == ownerKind && ref.Name == owner.GetName() && ref.UID == ownerUID {
-			return true
+		if ref.APIVersion != ownerAPIVersion ||
+			ref.Kind != ownerKind ||
+			ref.Name != owner.GetName() ||
+			ref.UID != ownerUID {
+			continue
 		}
+		if requireController {
+			if ref.Controller == nil || !*ref.Controller {
+				continue
+			}
+		}
+		return true
 	}
 	return false
 }

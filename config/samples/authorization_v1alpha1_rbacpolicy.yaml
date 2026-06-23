@@ -37,7 +37,8 @@ spec:
       - team-alpha
     namespaceSelector:
       matchLabels:
-        t-caas.telekom.com/tenant: "true"
+        t-caas.telekom.com/owner: tenant
+        t-caas.telekom.com/tenant: team-alpha
   # Default policy assignment for identities that submit restricted resources.
   # This is useful when restricted resources are applied via impersonated SAs.
   defaultAssignment:
@@ -92,7 +93,8 @@ spec:
         allowAutoCreate: true
         allowedCreationNamespaceSelector:
           matchLabels:
-            t-caas.telekom.com/tenant: "true"
+            t-caas.telekom.com/owner: tenant
+            t-caas.telekom.com/tenant: team-alpha
 
 ---
 # -----------------------------------------------------------------------------

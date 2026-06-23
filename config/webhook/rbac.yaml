@@ -30,22 +30,13 @@ rules:
       - list
       - watch
   # Admission webhook configuration updates for cert rotation CA bundles.
-  - apiGroups:
-      - admissionregistration.k8s.io
-    resources:
-      - mutatingwebhookconfigurations
-    resourceNames:
-      - namespace-mutating-webhook-configuration
-    verbs:
-      - get
-      - patch
-      - update
+  # Namespace admission is not installed by default; opt-in overlays that add
+  # namespace webhooks must also add matching cert-rotation RBAC.
   - apiGroups:
       - admissionregistration.k8s.io
     resources:
       - validatingwebhookconfigurations
     resourceNames:
-      - namespace-validating-webhook-configuration
       - validating-webhook-configuration
     verbs:
       - get

@@ -49,6 +49,15 @@ jobs:
               KIND_VERSION) echo "kind=${value}" >> "$GITHUB_OUTPUT" ;;
               KIND_K8S_VERSION) echo "kind_k8s=${value}" >> "$GITHUB_OUTPUT" ;;
               HELM_VERSION) echo "helm=${value}" >> "$GITHUB_OUTPUT" ;;
+              HELM_TEST_CERT_MANAGER_VERSION) echo "helm_test_cert_manager=${value}" >> "$GITHUB_OUTPUT" ;;
+              E2E_CERT_MANAGER_VERSION) echo "e2e_cert_manager=${value}" >> "$GITHUB_OUTPUT" ;;
+              E2E_GATEWAY_API_VERSION) echo "e2e_gateway_api=${value}" >> "$GITHUB_OUTPUT" ;;
+              E2E_PROMETHEUS_OPERATOR_VERSION) echo "e2e_prometheus_operator=${value}" >> "$GITHUB_OUTPUT" ;;
+              E2E_CALICO_VERSION) echo "e2e_calico=${value}" >> "$GITHUB_OUTPUT" ;;
+              E2E_EXTERNAL_SECRETS_VERSION) echo "e2e_external_secrets=${value}" >> "$GITHUB_OUTPUT" ;;
+              E2E_VELERO_VERSION) echo "e2e_velero=${value}" >> "$GITHUB_OUTPUT" ;;
+              E2E_UTILS_CERT_MANAGER_VERSION) echo "e2e_utils_cert_manager=${value}" >> "$GITHUB_OUTPUT" ;;
+              E2E_UTILS_PROMETHEUS_OPERATOR_VERSION) echo "e2e_utils_prometheus_operator=${value}" >> "$GITHUB_OUTPUT" ;;
               *) ;;
             esac
           done < <(grep -Ev '^(#|$)' versions.env)
@@ -143,6 +152,15 @@ jobs:
           check_github_release "kubernetes-sigs/kind" "${{ steps.versions.outputs.kind }}" "kind"
           check_kind_node_image "${{ steps.versions.outputs.kind_k8s }}" "kind node Kubernetes"
           check_github_release "helm/helm" "${{ steps.versions.outputs.helm }}" "helm"
+          check_github_release "cert-manager/cert-manager" "${{ steps.versions.outputs.helm_test_cert_manager }}" "Helm install test cert-manager"
+          check_github_release "cert-manager/cert-manager" "${{ steps.versions.outputs.e2e_cert_manager }}" "e2e cert-manager CRDs"
+          check_github_release "kubernetes-sigs/gateway-api" "${{ steps.versions.outputs.e2e_gateway_api }}" "e2e Gateway API CRDs"
+          check_github_release "prometheus-operator/prometheus-operator" "${{ steps.versions.outputs.e2e_prometheus_operator }}" "e2e Prometheus Operator CRDs"
+          check_github_release "projectcalico/calico" "${{ steps.versions.outputs.e2e_calico }}" "e2e Calico CRDs"
+          check_github_release "external-secrets/external-secrets" "${{ steps.versions.outputs.e2e_external_secrets }}" "e2e External Secrets CRDs"
+          check_github_release "vmware-tanzu/velero" "${{ steps.versions.outputs.e2e_velero }}" "e2e Velero CRDs"
+          check_github_release "cert-manager/cert-manager" "${{ steps.versions.outputs.e2e_utils_cert_manager }}" "e2e utility cert-manager install"
+          check_github_release "prometheus-operator/prometheus-operator" "${{ steps.versions.outputs.e2e_utils_prometheus_operator }}" "e2e utility Prometheus Operator install"
           check_go_module "golang.org/x/vuln" "${{ steps.versions.outputs.govulncheck }}" "govulncheck"
           check_go_module "github.com/securego/gosec/v2" "${{ steps.versions.outputs.gosec }}" "gosec"
 

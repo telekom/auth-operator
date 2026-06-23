@@ -18,6 +18,14 @@ E2E_TEARDOWN ?= false
 export RUN_ID
 export KIND_CLUSTER_NAME
 export E2E_TEARDOWN
+export E2E_CERT_MANAGER_VERSION
+export E2E_GATEWAY_API_VERSION
+export E2E_PROMETHEUS_OPERATOR_VERSION
+export E2E_CALICO_VERSION
+export E2E_EXTERNAL_SECRETS_VERSION
+export E2E_VELERO_VERSION
+export E2E_UTILS_CERT_MANAGER_VERSION
+export E2E_UTILS_PROMETHEUS_OPERATOR_VERSION
 KIND_K8S_VERSION ?= v1.36.1
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 # Pin it separately because setup-envtest and kindest/node publish patch releases independently.
@@ -316,6 +324,7 @@ lint-strict: golangci-lint ## Run golangci-lint with strict settings (as in CI).
 .PHONY: vulncheck
 vulncheck: govulncheck ## Run govulncheck to check for known vulnerabilities.
 	$(GOVULNCHECK) ./...
+	$(GOVULNCHECK) -tags=e2e ./test/e2e ./test/utils
 
 .PHONY: verify
 verify: lint-strict vet test vulncheck ## Run all verification checks (lint, vet, test, vulncheck).

@@ -132,6 +132,10 @@ Restricted workflow:
 4. Controller enforces policy on every reconciliation and deprovisions managed RBAC resources on violations.
 
 Note: `spec.policyRef` on restricted resources is immutable after creation.
+`RestrictedRoleDefinition` requires an explicit policy `spec.roleLimits` block:
+set `roleLimits.allowRoles: true` for namespaced `Role` targets and
+`roleLimits.allowClusterRoles: true` for `ClusterRole` targets. Missing
+`roleLimits` denies role generation by default.
 
 ### RBACPolicy Trust Boundaries
 
@@ -164,12 +168,20 @@ For Kustomize deployments, the generated manager ClusterRole also omits
 RBACPolicy impersonation.
 
 When `subjectLimits.serviceAccountLimits.creation.allowAutoCreate` is enabled,
-the controller can create missing ServiceAccounts in allowed namespaces. Existing
-unowned ServiceAccounts and ServiceAccounts owned by another
-RestrictedBindDefinition are treated as external subjects and are not adopted or
-modified, regardless of `disableAdoption`. Setting `disableAdoption: true` makes
-that conservative intent explicit; ServiceAccounts already owned by the same
-RestrictedBindDefinition continue to be reconciled.
+the policy must also set `allowedCreationNamespaces` or
+`allowedCreationNamespaceSelector`; an unbounded auto-create setting is rejected
+by admission. Existing unowned ServiceAccounts and ServiceAccounts owned by
+another RestrictedBindDefinition are treated as external subjects and are not
+adopted or modified, regardless of `disableAdoption`. Setting
+`disableAdoption: true` makes that conservative intent explicit;
+ServiceAccounts already owned by the same RestrictedBindDefinition continue to be
+reconciled.
+
+`spec.defaultAssignment` is exclusive per requester. If a user, group, or
+ServiceAccount matches multiple default policies, restricted resource admission
+fails closed until the policy assignments are made non-overlapping. Requesters
+covered by a default assignment must use that policy unless they no longer match
+the assignment.
 
 ### BindDefinition Annotations
 
@@ -467,7 +479,15 @@ kubectl get clusterrole auth-operator-manager-role -o yaml
 
 - Webhooks use TLS certificates auto-rotated by cert-controller
 - Certificates are stored in a Secret in the operator namespace
-- FailurePolicy is set to `Fail` to prevent unauthorized namespace changes
+- Namespace admission webhooks are disabled by default in Helm; when enabled,
+  their `failurePolicy` is `Fail` to prevent unauthorized namespace changes
+
+`WebhookAuthorizer` resources affect live Kubernetes authorization only after
+the API server authorization chain calls the auth-operator `/authorize`
+endpoint through an `AuthorizationConfiguration` webhook entry. Matching
+authorizers are evaluated by name order. Explicit deny decisions and rate-limit
+responses deny the request; no matching authorizer returns no opinion so later
+API server authorizers may still allow the request.
 
 ### Network Policies
 
@@ -871,6 +891,11 @@ tracing:
 | RoleDefinition Reconciler | `reconcile.RoleDefinition` | Full reconciliation cycle |
 | WebhookAuthorizer | `webhook.SubjectAccessReview` | SAR evaluation including rule matching |
 | WebhookAuthorizer | `webhook.NamespaceMatch` | Namespace selector evaluation |
+
+Trace exports include authorization metadata such as the requesting user,
+groups count, verb, API group, resource, namespace, non-resource path, decision,
+and sanitized public decision reason. Treat OTLP collectors and downstream trace
+stores as authorization-sensitive systems.
 
 When tracing is disabled, the Tracer is set to `nil` and all tracing code
 paths are skipped entirely — header parsing and span creation have zero

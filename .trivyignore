@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: CC0-1.0
 #
 # These Kubernetes RBAC findings are expected for this operator and are documented
-# inline in the rendered ClusterRoles. The Helm security job still fails on any
-# unignored HIGH/CRITICAL finding.
+# inline in the rendered manifests. The Helm security job still fails on any
+# unignored MEDIUM/HIGH/CRITICAL finding.
 
 # RoleDefinition discovery must list API resources across groups so generated
 # Role/ClusterRole output stays accurate.
@@ -17,3 +17,12 @@ KSV-0050
 # The webhook server certificate controller must patch admission webhook
 # configurations with its CA bundle.
 KSV-0114
+
+# The webhook certificate controller needs namespace-scoped Secret list/watch
+# for its informer/cache; get/patch/update remain resourceName-scoped to the
+# operator TLS Secret.
+KSV-0113
+
+# The chart defaults to GHCR, which is the project's release registry. Trivy's
+# generic trusted-registry rule does not know project-specific registry policy.
+KSV-0125

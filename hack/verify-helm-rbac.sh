@@ -12,14 +12,21 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
 default_render="${TMP_DIR}/default.yaml"
+namespace_admission_render="${TMP_DIR}/namespace-admission.yaml"
 clusterwide_render="${TMP_DIR}/clusterwide.yaml"
 scoped_render="${TMP_DIR}/scoped.yaml"
 production_render="${TMP_DIR}/production.yaml"
 metrics_auth_render="${TMP_DIR}/metrics-auth.yaml"
 egress_render="${TMP_DIR}/egress.yaml"
+broad_egress_render="${TMP_DIR}/broad-egress.yaml"
 
 helm template auth-operator "${CHART_DIR}" --set image.tag=test >"${default_render}"
 go run "${ROOT_DIR}/hack/verify-rendered-rbac.go" --impersonation=none "${default_render}"
+
+helm template auth-operator "${CHART_DIR}" \
+	--set image.tag=test \
+	--set namespaceAdmission.enabled=true >"${namespace_admission_render}"
+go run "${ROOT_DIR}/hack/verify-rendered-rbac.go" --impersonation=none "${namespace_admission_render}"
 
 "${KUSTOMIZE}" build "${ROOT_DIR}/config/overlays/production" >"${production_render}"
 go run "${ROOT_DIR}/hack/verify-rendered-rbac.go" --impersonation=none "${production_render}"
@@ -66,6 +73,13 @@ if ! grep -Eq '^[[:space:]]*cidr:[[:space:]]*"10\.96\.0\.1/32"[[:space:]]*$' "${
 	echo "networkPolicy egress with apiServerCIDR did not render the API server CIDR" >&2
 	exit 1
 fi
+
+helm template auth-operator "${CHART_DIR}" \
+	--set image.tag=test \
+	--set networkPolicy.enabled=true \
+	--set networkPolicy.egress.enabled=true \
+	--set networkPolicy.egress.allowBroadAPIServerEgress=true >"${broad_egress_render}"
+go run "${ROOT_DIR}/hack/verify-rendered-rbac.go" --impersonation=none --require-broad-apiserver-egress "${broad_egress_render}"
 
 if helm template auth-operator "${CHART_DIR}" \
 	--set image.tag=test \

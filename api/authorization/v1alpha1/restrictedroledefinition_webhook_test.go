@@ -10,6 +10,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -449,6 +450,35 @@ var _ = Describe("RestrictedRoleDefinition Webhook", func() {
 				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(rrd), latest)).To(Succeed())
 				latest.Spec.RestrictedVerbs = []string{"delete"}
 				g.Expect(k8sClient.Update(ctx, latest)).To(Succeed())
+			}).WithTimeout(testTimeoutSeconds * time.Second).WithPolling(250 * time.Millisecond).Should(Succeed())
+
+			Expect(k8sClient.Delete(ctx, rrd)).To(Succeed())
+		})
+
+		It("Should deny metadata-only protected label updates", func() {
+			rrd := &RestrictedRoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rrd-metadata-protected-label",
+				},
+				Spec: RestrictedRoleDefinitionSpec{
+					PolicyRef:       RBACPolicyReference{Name: policy.Name},
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-rrd-metadata-protected-label",
+					ScopeNamespaced: false,
+				},
+			}
+			Expect(k8sClient.Create(ctx, rrd)).To(Succeed())
+
+			Eventually(func(g Gomega) {
+				latest := &RestrictedRoleDefinition{}
+				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(rrd), latest)).To(Succeed())
+				latest.Labels = map[string]string{
+					"rbac.authorization.k8s.io/aggregate-to-admin": "true",
+				}
+				err := k8sClient.Update(ctx, latest)
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(apierrors.IsInvalid(err)).To(BeTrue())
+				g.Expect(err.Error()).To(ContainSubstring("metadata.labels"))
 			}).WithTimeout(testTimeoutSeconds * time.Second).WithPolling(250 * time.Millisecond).Should(Succeed())
 
 			Expect(k8sClient.Delete(ctx, rrd)).To(Succeed())

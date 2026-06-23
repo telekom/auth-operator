@@ -153,6 +153,12 @@ webhookServer:
     port: 443
     protocol: TCP
 
+namespaceAdmission:
+  # Install cluster-wide Namespace mutating/validating webhooks.
+  # Disabled by default so auth-operator installation does not immediately
+  # enforce T-CaaS namespace ownership before bootstrap policies exist.
+  enabled: false
+
 metrics:
   # Require authentication and authorization for the /metrics endpoint.
   # Disabled by default for backwards compatibility. When enabled, TokenReview
@@ -234,10 +240,14 @@ networkPolicy:
     # dnsNamespace is the namespace where CoreDNS runs (for UDP/TCP 53).
     dnsNamespace: kube-system
     # apiServerCIDR restricts egress to the API server by IP range.
-    # Required when egress.enabled=true unless additionalRules provides an
-    # equivalent API-server egress rule.
+    # Required when egress.enabled=true unless allowBroadAPIServerEgress=true
+    # or additionalRules provides an equivalent API-server egress rule.
     # Example: "10.96.0.1/32" for the default Kubernetes service IP.
     apiServerCIDR: ""
+    # allowBroadAPIServerEgress permits any destination on TCP 443/6443 when
+    # apiServerCIDR is empty. Keep this false unless your API server cannot be
+    # expressed as a stable CIDR and you accept broad TLS egress.
+    allowBroadAPIServerEgress: false
     # additionalRules allows injecting custom egress rules (e.g., webhook callbacks).
     # Each entry follows the standard NetworkPolicy egress rule schema.
     # Example:

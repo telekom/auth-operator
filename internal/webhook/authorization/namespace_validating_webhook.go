@@ -79,6 +79,14 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 				return *resp
 			}
 
+			if !ValidTrackedOwnershipLabels(ns.Labels) {
+				denialMsg := fmt.Sprintf(DenialInvalidTrackedLabelsFmt, ns.Name)
+				logger.V(1).Info("namespace update denied - invalid tracked ownership labels",
+					"namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username)
+				metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultDenied).Inc()
+				return admission.Denied(denialMsg)
+			}
+
 			logger.V(3).Info("namespace labels validated", "namespace", req.Name)
 		} else {
 			logger.V(1).Info("AUDIT: privileged bypass skipped update label checks",
@@ -147,7 +155,8 @@ func (v *NamespaceValidator) decodeNamespaces(logger logr.Logger, req admission.
 }
 
 // validateLabelImmutability checks that controlled labels are not modified or removed
-// during namespace updates. Initial adoption (adding a label for the first time) is allowed.
+// during namespace updates. Initial adoption (adding a label for the first time) is allowed
+// only for trusted bypass users.
 // Returns a denial response if a violation is found, or nil if validation passes.
 func (v *NamespaceValidator) validateLabelImmutability(logger logr.Logger, req admission.Request, ns, oldNs *corev1.Namespace, bypassResult BypassCheckResult) *admission.Response {
 	// Ensure Labels maps are not nil to prevent nil pointer dereference
@@ -176,8 +185,16 @@ func (v *NamespaceValidator) validateLabelImmutability(logger logr.Logger, req a
 		oldValue, oldExists := oldNs.Labels[key]
 		newValue, newExists := ns.Labels[key]
 
-		// Allow initial label adoption: label didn't exist before, now being added.
+		// Allow initial label adoption for bypass users: label didn't exist
+		// before, now being added.
 		if !oldExists && newExists {
+			if !bypassResult.ShouldBypass {
+				logger.V(2).Info("label adoption denied for non-bypass user",
+					"namespace", req.Name, "label", key, "newValue", newValue)
+				metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultDenied).Inc()
+				resp := admission.Denied(fmt.Sprintf(DenialLabelModificationFmt, key))
+				return &resp
+			}
 			logger.V(2).Info("label adoption allowed",
 				"namespace", req.Name, "label", key, "newValue", newValue)
 			continue
@@ -286,13 +303,21 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 		"username", req.UserInfo.Username, "isServiceAccount", saInfo.IsServiceAccount,
 		"groupCount", len(userGroups))
 
+	if !ValidTrackedOwnershipLabels(ns.Labels) {
+		denialMsg := fmt.Sprintf(DenialInvalidTrackedLabelsFmt, ns.Name)
+		logger.V(1).Info("namespace operation denied - invalid tracked ownership labels",
+			"namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username)
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultDenied).Inc()
+		return admission.Denied(denialMsg)
+	}
+
 	listCtx, cancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
 	defer cancel()
 	bindDefinitions, err := freshBindDefinitionsWithRoleBindings(listCtx, v.Client, v.admissionReader())
 	if err != nil {
 		logger.Error(err, "failed to list BindDefinitions", "namespace", req.Name)
 		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()
-		return admission.Errored(http.StatusInternalServerError, errors.New("unable to validate namespace request"))
+		return admission.Errored(http.StatusInternalServerError, ErrNamespaceWebhookInternal)
 	}
 
 	logger.V(2).Info("checking authorization against BindDefinitions",
@@ -330,12 +355,12 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 			}
 			namespaceMatchFound := false
 			for nsIdx, namespaceSelector := range roleBinding.NamespaceSelector {
-				matches, err := namespaceMatchesSelector(ns, &namespaceSelector)
+				matches, err := namespaceMatchesSelectorForAdmissionOperation(req.Operation, ns, &namespaceSelector)
 				if err != nil {
 					logger.Error(err, "failed to match namespace selector",
 						"namespace", req.Name, "bindDefinition", bindDef.Name)
 					metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()
-					return admission.Errored(http.StatusInternalServerError, errors.New("unable to validate namespace request"))
+					return admission.Errored(http.StatusInternalServerError, ErrNamespaceWebhookInternal)
 				}
 				if matches {
 					namespaceMatchFound = true
@@ -374,7 +399,7 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 		if saErr != nil {
 			logger.Error(saErr, "failed to lookup SA namespace labels", "saNamespace", saInfo.Namespace, "targetNamespace", req.Name)
 			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()
-			return admission.Errored(http.StatusInternalServerError, errors.New("unable to validate namespace request"))
+			return admission.Errored(http.StatusInternalServerError, ErrNamespaceWebhookInternal)
 		}
 		if len(inheritedLabels) > 0 {
 			// Symmetric comparison: all inherited labels must match AND the target
@@ -407,6 +432,39 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 		"operation", req.Operation, "username", req.UserInfo.Username, "reason", denialMsg)
 	metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultDenied).Inc()
 	return admission.Denied(denialMsg)
+}
+
+func namespaceMatchesSelectorForAdmissionOperation(
+	operation admissionv1.Operation,
+	ns *corev1.Namespace,
+	selector *metav1.LabelSelector,
+) (bool, error) {
+	if operation != admissionv1.Create {
+		return namespaceMatchesSelector(ns, selector)
+	}
+	labelSelector, err := metav1.LabelSelectorAsSelector(selector)
+	if err != nil {
+		return false, err
+	}
+	expectedLabels := getCompleteTrackedLabelsFromNamespaceSelector(*selector)
+	if len(expectedLabels) == 0 || !hasExactTrackedLabels(ns.Labels, expectedLabels) {
+		return false, nil
+	}
+	return labelSelector.Matches(labels.Set(expectedLabels)), nil
+}
+
+func hasExactTrackedLabels(namespaceLabels, expected map[string]string) bool {
+	for _, key := range trackedOwnershipKeys {
+		actualValue, actualExists := namespaceLabels[key]
+		expectedValue, expectedExists := expected[key]
+		if actualExists != expectedExists {
+			return false
+		}
+		if actualExists && actualValue != expectedValue {
+			return false
+		}
+	}
+	return true
 }
 
 func (v *NamespaceValidator) admissionReader() client.Reader {

@@ -230,7 +230,7 @@ func checkRestrictedRoleOwnership(
 		return fmt.Errorf("check existing %s %v: %w", targetRole, key, err)
 	}
 
-	if hasOwnerRef(existing, owner) {
+	if hasControllerOwnerRef(existing, owner) {
 		return nil
 	}
 
@@ -291,7 +291,7 @@ func checkRestrictedBindingOwnership(
 		return fmt.Errorf("check existing %s %v: %w", targetKind, key, err)
 	}
 
-	if hasOwnerRef(existing, owner) {
+	if hasControllerOwnerRef(existing, owner) {
 		return nil
 	}
 

@@ -33,7 +33,7 @@ annotations:
   artifacthub.io/operator: "true"
   artifacthub.io/operatorCapabilities: Seamless Upgrades
   artifacthub.io/license: Apache-2.0
-  artifacthub.io/containsSecurityUpdates: "false"  # Set to "true" in releases with security fixes
+  artifacthub.io/containsSecurityUpdates: "true"  # This release contains security hardening fixes
   artifacthub.io/prerelease: "false"  # Updated by CI for pre-release versions
   artifacthub.io/maintainers: |
     - name: Maximilian Rink (DTAG)

@@ -86,6 +86,10 @@ const (
 	// RestrictedBindDefinition resources by ServiceAccount subject namespace/name.
 	RestrictedBindDefinitionServiceAccountSubjectField = ".spec.subjects.serviceAccount"
 
+	// RestrictedBindDefinitionServiceAccountSubjectNamespaceField indexes
+	// RestrictedBindDefinition resources by ServiceAccount subject namespace.
+	RestrictedBindDefinitionServiceAccountSubjectNamespaceField = ".spec.subjects.serviceAccountNamespace"
+
 	// RestrictedBindDefinitionOwnerRefField indexes RoleBinding,
 	// ClusterRoleBinding, and ServiceAccount resources by RestrictedBindDefinition
 	// owner name for efficient deprovision cleanup.
@@ -242,6 +246,16 @@ func SetupRestrictedIndexes(ctx context.Context, mgr manager.Manager) error {
 		RestrictedBindDefinitionServiceAccountSubjectFunc,
 	); err != nil {
 		return fmt.Errorf("failed to create index for RestrictedBindDefinition.Spec.Subjects.ServiceAccount: %w", err)
+	}
+
+	// Index RestrictedBindDefinition by referenced ServiceAccount subject namespace.
+	if err := mgr.GetFieldIndexer().IndexField(
+		ctx,
+		&authorizationv1alpha1.RestrictedBindDefinition{},
+		RestrictedBindDefinitionServiceAccountSubjectNamespaceField,
+		RestrictedBindDefinitionServiceAccountSubjectNamespaceFunc,
+	); err != nil {
+		return fmt.Errorf("failed to create index for RestrictedBindDefinition.Spec.Subjects.ServiceAccountNamespace: %w", err)
 	}
 
 	// Index RestrictedRoleDefinition by PolicyRef.Name for reverse lookups from RBACPolicy.
@@ -479,6 +493,33 @@ func RestrictedBindDefinitionServiceAccountSubjectFunc(obj client.Object) []stri
 		}
 		seen[key] = struct{}{}
 		values = append(values, key)
+	}
+	if len(values) == 0 {
+		return nil
+	}
+	slices.Sort(values)
+	return values
+}
+
+// RestrictedBindDefinitionServiceAccountSubjectNamespaceFunc extracts
+// ServiceAccount subject namespaces.
+func RestrictedBindDefinitionServiceAccountSubjectNamespaceFunc(obj client.Object) []string {
+	rbd, ok := obj.(*authorizationv1alpha1.RestrictedBindDefinition)
+	if !ok {
+		return nil
+	}
+
+	seen := make(map[string]struct{})
+	values := make([]string, 0, len(rbd.Spec.Subjects))
+	for _, subject := range rbd.Spec.Subjects {
+		if subject.Kind != rbacv1.ServiceAccountKind || subject.Namespace == "" {
+			continue
+		}
+		if _, exists := seen[subject.Namespace]; exists {
+			continue
+		}
+		seen[subject.Namespace] = struct{}{}
+		values = append(values, subject.Namespace)
 	}
 	if len(values) == 0 {
 		return nil

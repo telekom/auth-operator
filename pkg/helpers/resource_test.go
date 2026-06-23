@@ -210,6 +210,53 @@ func TestBuildResourceLabelsDoesNotMutateInput(t *testing.T) {
 	}
 }
 
+func TestProtectedRestrictedLabels(t *testing.T) {
+	tests := []struct {
+		name      string
+		key       string
+		protected bool
+	}{
+		{
+			name:      "kubernetes aggregation label",
+			key:       "rbac.authorization.k8s.io/aggregate-to-admin",
+			protected: true,
+		},
+		{
+			name:      "exact security label",
+			key:       "t-caas.telekom.com/security",
+			protected: true,
+		},
+		{
+			name:      "prefixed security label",
+			key:       "t-caas.telekom.com/security-breakglass",
+			protected: true,
+		},
+		{
+			name:      "exact rbac label",
+			key:       "t-caas.telekom.com/rbac",
+			protected: true,
+		},
+		{
+			name:      "unreserved tcaas label",
+			key:       "t-caas.telekom.com/team",
+			protected: false,
+		},
+		{
+			name:      "partial reserved word",
+			key:       "t-caas.telekom.com/securitylevel",
+			protected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsProtectedRestrictedLabel(tt.key); got != tt.protected {
+				t.Fatalf("IsProtectedRestrictedLabel(%q) = %v, want %v", tt.key, got, tt.protected)
+			}
+		})
+	}
+}
+
 func TestBuildResourceAnnotations(t *testing.T) {
 	got := BuildResourceAnnotations("RoleDefinition", "my-role")
 	want := map[string]string{

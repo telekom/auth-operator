@@ -2,6 +2,7 @@ package webhooks_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
@@ -16,7 +17,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	crAdmission "sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -373,6 +376,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 							ObjectMeta: metav1.ObjectMeta{
 								Name: "tenant-ns",
 								Labels: map[string]string{
+									"t-caas.telekom.com/owner":  "tenant",
 									"t-caas.telekom.com/tenant": "tenant-a",
 								},
 							},
@@ -747,6 +751,43 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 			},
 			expectedAllow: true,
 		},
+		{
+			name:         "deny TDG migration bypass update with incoherent tenant labels",
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefPlatform},
+			tdgMigration: true,
+			request: crAdmission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
+					Name:      "invalid-tdg-ns",
+					Operation: admissionv1.Update,
+					UserInfo: authenticationv1.UserInfo{
+						Username: "system:serviceaccount:flux-system:helm-controller",
+					},
+					Object: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "invalid-tdg-ns",
+								Labels: map[string]string{
+									"kubernetes.io/metadata.name": "invalid-tdg-ns",
+									"t-caas.telekom.com/owner":    "tenant",
+								},
+							},
+						}),
+					},
+					OldObject: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "invalid-tdg-ns",
+								Labels: map[string]string{
+									"kubernetes.io/metadata.name": "invalid-tdg-ns",
+								},
+							},
+						}),
+					},
+				},
+			},
+			expectedAllow: false,
+		},
 		// === Adoption scenarios: old namespaces without t-caas labels ===
 		// These test the scenario where an existing namespace (created before
 		// auth-operator was deployed) needs to be adopted into the auth-operator
@@ -793,7 +834,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 			expectedAllow: false,
 		},
 		{
-			name:     "allow adoption: authorized SA adding tenant label to namespace without t-caas labels",
+			name:     "deny adoption: authorized SA cannot claim unlabeled existing namespace",
 			bindDefs: []authorizationv1alpha1.BindDefinition{bindDefTenant},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -826,7 +867,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 					},
 				},
 			},
-			expectedAllow: true,
+			expectedAllow: false,
 		},
 		{
 			name:     "deny adoption: adding thirdparty label to namespace without any t-caas labels",
@@ -1691,8 +1732,9 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 							ObjectMeta: metav1.ObjectMeta{
 								Name: "tenant-app-ns",
 								Labels: map[string]string{
-									"schiff.telekom.de/owner":  "cas",
-									"t-caas.telekom.com/owner": "tenant",
+									"schiff.telekom.de/owner":   "cas",
+									"t-caas.telekom.com/owner":  "tenant",
+									"t-caas.telekom.com/tenant": "cas",
 								},
 							},
 						}),
@@ -2444,6 +2486,232 @@ func TestNamespaceValidatorFallsBackWhenBindDefinitionIndexUnavailable(t *testin
 	if !resp.Allowed {
 		t.Fatalf("expected indexed-list fallback to allow request, got denied: %s", resp.Result.Message)
 	}
+}
+
+func TestNamespaceValidatorUsesReaderForBindDefinitions(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(authorizationv1alpha1.AddToScheme(scheme))
+
+	staleBindDef := &authorizationv1alpha1.BindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "stale-platform-binddefinition"},
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
+			Subjects: []rbacv1.Subject{{
+				APIGroup: rbacv1.GroupName,
+				Kind:     rbacv1.GroupKind,
+				Name:     "oidc:platform-admins",
+			}},
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{{
+				ClusterRoleRefs: []string{"platform-admin"},
+				NamespaceSelector: []metav1.LabelSelector{{
+					MatchLabels: map[string]string{
+						authorizationv1alpha1.LabelKeyOwner: authorizationv1alpha1.OwnerPlatform,
+					},
+				}},
+			}},
+		},
+	}
+	cachedClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(staleBindDef).
+		WithIndex(&authorizationv1alpha1.BindDefinition{}, indexer.BindDefinitionHasRoleBindingsField, indexer.BindDefinitionHasRoleBindingsFunc).
+		Build()
+	freshReader := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithIndex(&authorizationv1alpha1.BindDefinition{}, indexer.BindDefinitionHasRoleBindingsField, indexer.BindDefinitionHasRoleBindingsFunc).
+		Build()
+
+	validator := &webhooks.NamespaceValidator{
+		Client:  cachedClient,
+		Reader:  freshReader,
+		Decoder: crAdmission.NewDecoder(scheme),
+	}
+	targetNS := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "platform-ns",
+			Labels: map[string]string{
+				authorizationv1alpha1.LabelKeyOwner: authorizationv1alpha1.OwnerPlatform,
+			},
+		},
+	}
+	req := crAdmission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Kind:      metav1.GroupVersionKind{Group: "", Version: "v1", Kind: "Namespace"},
+			Name:      targetNS.Name,
+			Operation: admissionv1.Create,
+			UserInfo: authenticationv1.UserInfo{
+				Username: "platform-user",
+				Groups:   []string{"oidc:platform-admins"},
+			},
+			Object: runtime.RawExtension{Raw: mustMarshalJSON(t, targetNS)},
+		},
+	}
+
+	resp := validator.Handle(context.Background(), req)
+	if resp.Allowed {
+		t.Fatal("expected stale cached BindDefinition not to authorize namespace create")
+	}
+}
+
+func TestNamespaceValidatorUsesReaderForServiceAccountNamespaceLabels(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(authorizationv1alpha1.AddToScheme(scheme))
+
+	staleSANamespace := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "tenant-alpha",
+			Labels: map[string]string{
+				authorizationv1alpha1.LabelKeyOwner:  authorizationv1alpha1.OwnerTenant,
+				authorizationv1alpha1.LabelKeyTenant: "team-alpha",
+			},
+		},
+	}
+	cachedClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(staleSANamespace).
+		WithIndex(&authorizationv1alpha1.BindDefinition{}, indexer.BindDefinitionHasRoleBindingsField, indexer.BindDefinitionHasRoleBindingsFunc).
+		Build()
+	freshReader := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithIndex(&authorizationv1alpha1.BindDefinition{}, indexer.BindDefinitionHasRoleBindingsField, indexer.BindDefinitionHasRoleBindingsFunc).
+		Build()
+
+	validator := &webhooks.NamespaceValidator{
+		Client:  cachedClient,
+		Reader:  freshReader,
+		Decoder: crAdmission.NewDecoder(scheme),
+	}
+	targetNS := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "tenant-ns",
+			Labels: map[string]string{
+				authorizationv1alpha1.LabelKeyOwner:  authorizationv1alpha1.OwnerTenant,
+				authorizationv1alpha1.LabelKeyTenant: "team-alpha",
+			},
+		},
+	}
+	req := crAdmission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Kind:      metav1.GroupVersionKind{Group: "", Version: "v1", Kind: "Namespace"},
+			Name:      targetNS.Name,
+			Operation: admissionv1.Create,
+			UserInfo: authenticationv1.UserInfo{
+				Username: "system:serviceaccount:tenant-alpha:my-operator",
+			},
+			Object: runtime.RawExtension{Raw: mustMarshalJSON(t, targetNS)},
+		},
+	}
+
+	resp := validator.Handle(context.Background(), req)
+	if resp.Allowed {
+		t.Fatal("expected stale cached service account namespace labels not to authorize namespace create")
+	}
+}
+
+func TestNamespaceValidatorSanitizesInternalErrors(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(authorizationv1alpha1.AddToScheme(scheme))
+
+	targetNS := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "tenant-ns",
+			Labels: map[string]string{
+				authorizationv1alpha1.LabelKeyOwner:  authorizationv1alpha1.OwnerTenant,
+				authorizationv1alpha1.LabelKeyTenant: "team-alpha",
+			},
+		},
+	}
+	req := crAdmission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Kind:      metav1.GroupVersionKind{Group: "", Version: "v1", Kind: "Namespace"},
+			Name:      targetNS.Name,
+			Operation: admissionv1.Create,
+			UserInfo: authenticationv1.UserInfo{
+				Username: "system:serviceaccount:tenant-alpha:my-operator",
+			},
+			Object: runtime.RawExtension{Raw: mustMarshalJSON(t, targetNS)},
+		},
+	}
+
+	t.Run("BindDefinition list error", func(t *testing.T) {
+		leaked := "secret validator list details"
+		c := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithInterceptorFuncs(interceptor.Funcs{
+				List: func(_ context.Context, _ client.WithWatch, _ client.ObjectList, _ ...client.ListOption) error {
+					return fmt.Errorf("%s", leaked)
+				},
+			}).
+			Build()
+		validator := &webhooks.NamespaceValidator{
+			Client:  c,
+			Reader:  c,
+			Decoder: crAdmission.NewDecoder(scheme),
+		}
+
+		resp := validator.Handle(context.Background(), req)
+		assertGenericNamespaceAdmissionError(t, resp, leaked)
+	})
+
+	t.Run("selector parse error", func(t *testing.T) {
+		leaked := "invalid selector operator"
+		bindDef := &authorizationv1alpha1.BindDefinition{
+			ObjectMeta: metav1.ObjectMeta{Name: "invalid-selector-binddefinition"},
+			Spec: authorizationv1alpha1.BindDefinitionSpec{
+				Subjects: []rbacv1.Subject{{
+					Kind:      rbacv1.ServiceAccountKind,
+					Name:      "my-operator",
+					Namespace: "tenant-alpha",
+				}},
+				RoleBindings: []authorizationv1alpha1.NamespaceBinding{{
+					ClusterRoleRefs: []string{"tenant-admin"},
+					NamespaceSelector: []metav1.LabelSelector{{
+						MatchExpressions: []metav1.LabelSelectorRequirement{{
+							Key:      authorizationv1alpha1.LabelKeyOwner,
+							Operator: metav1.LabelSelectorOperator("DefinitelyInvalid"),
+							Values:   []string{authorizationv1alpha1.OwnerTenant},
+						}},
+					}},
+				}},
+			},
+		}
+		c := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(bindDef).
+			WithIndex(&authorizationv1alpha1.BindDefinition{}, indexer.BindDefinitionHasRoleBindingsField, indexer.BindDefinitionHasRoleBindingsFunc).
+			Build()
+		validator := &webhooks.NamespaceValidator{
+			Client:  c,
+			Reader:  c,
+			Decoder: crAdmission.NewDecoder(scheme),
+		}
+
+		resp := validator.Handle(context.Background(), req)
+		assertGenericNamespaceAdmissionError(t, resp, leaked)
+	})
+
+	t.Run("service account namespace lookup error", func(t *testing.T) {
+		leaked := "secret validator namespace lookup details"
+		c := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithIndex(&authorizationv1alpha1.BindDefinition{}, indexer.BindDefinitionHasRoleBindingsField, indexer.BindDefinitionHasRoleBindingsFunc).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(_ context.Context, _ client.WithWatch, _ client.ObjectKey, _ client.Object, _ ...client.GetOption) error {
+					return fmt.Errorf("%s", leaked)
+				},
+			}).
+			Build()
+		validator := &webhooks.NamespaceValidator{
+			Client:  c,
+			Reader:  c,
+			Decoder: crAdmission.NewDecoder(scheme),
+		}
+
+		resp := validator.Handle(context.Background(), req)
+		assertGenericNamespaceAdmissionError(t, resp, leaked)
+	})
 }
 
 func mustMarshalJSON(t *testing.T, obj interface{}) []byte {

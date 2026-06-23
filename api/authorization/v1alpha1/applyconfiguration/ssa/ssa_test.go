@@ -684,6 +684,50 @@ var _ = Describe("SSA Status Conversion Functions", func() {
 		})
 	})
 
+	Context("ApplyRestrictedRoleDefinitionStatus", func() {
+		It("should clear empty policy violations from live status", func() {
+			scheme := newTestScheme()
+			rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-restricted-roledefinition"},
+				Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+					PolicyRef:       authorizationv1alpha1.RBACPolicyReference{Name: "policy"},
+					TargetRole:      authorizationv1alpha1.DefinitionClusterRole,
+					TargetName:      "target-role",
+					ScopeNamespaced: false,
+				},
+				Status: authorizationv1alpha1.RestrictedRoleDefinitionStatus{
+					RoleReconciled:   false,
+					PolicyViolations: []string{"cluster roles are not allowed"},
+					Conditions: []metav1.Condition{{
+						Type:               "PolicyCompliant",
+						Status:             metav1.ConditionFalse,
+						Reason:             "ViolationsDetected",
+						Message:            "Policy violations detected",
+						LastTransitionTime: metav1.Now(),
+					}},
+				},
+			}
+			c := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(rrd).
+				WithStatusSubresource(&authorizationv1alpha1.RestrictedRoleDefinition{}).
+				Build()
+
+			desired := rrd.DeepCopy()
+			desired.Status = authorizationv1alpha1.RestrictedRoleDefinitionStatus{
+				RoleReconciled: true,
+			}
+
+			err := ssa.ApplyRestrictedRoleDefinitionStatus(context.Background(), c, desired)
+			Expect(err).NotTo(HaveOccurred())
+
+			var updated authorizationv1alpha1.RestrictedRoleDefinition
+			Expect(c.Get(context.Background(), client.ObjectKeyFromObject(rrd), &updated)).To(Succeed())
+			Expect(updated.Status.PolicyViolations).To(BeEmpty())
+			Expect(updated.Status.RoleReconciled).To(BeTrue())
+		})
+	})
+
 	Context("ConditionFrom", func() {
 		It("should return nil for nil condition", func() {
 			result := ssa.ConditionFrom(nil)

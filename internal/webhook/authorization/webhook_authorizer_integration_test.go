@@ -455,6 +455,18 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 			})
 			Expect(resp.Status.Allowed).To(BeFalse())
 		})
+
+		It("denies bare user with same name as namespace-scoped service account", func() {
+			resp := sendSAR(authorizer, authzv1.SubjectAccessReview{
+				Spec: authzv1.SubjectAccessReviewSpec{
+					User: "my-sa",
+					ResourceAttributes: &authzv1.ResourceAttributes{
+						Verb: "get", Resource: "secrets", Group: "",
+					},
+				},
+			})
+			Expect(resp.Status.Allowed).To(BeFalse())
+		})
 	})
 
 	Describe("Live Update", func() {

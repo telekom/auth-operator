@@ -329,13 +329,26 @@ func (r *RestrictedBindDefinitionReconciler) namespaceToRestrictedBindDefinition
 	selectorErr := r.client.List(listCtx, selectorList,
 		client.MatchingFields{indexer.RestrictedBindDefinitionHasNamespaceSelectorField: "true"})
 
-	optimizedIndexPathAvailable := explicitErr == nil && selectorErr == nil
-	if !optimizedIndexPathAvailable && (!missingFieldIndexOrNil(explicitErr) || !missingFieldIndexOrNil(selectorErr)) {
+	serviceAccountNamespaceList := &authorizationv1alpha1.RestrictedBindDefinitionList{}
+	serviceAccountNamespaceErr := r.client.List(listCtx, serviceAccountNamespaceList,
+		client.MatchingFields{indexer.RestrictedBindDefinitionServiceAccountSubjectNamespaceField: namespace.Name})
+
+	optimizedIndexPathAvailable := explicitErr == nil && selectorErr == nil && serviceAccountNamespaceErr == nil
+	explicitIndexMissing := explicitErr != nil && helpers.IsMissingFieldIndexError(explicitErr)
+	selectorIndexMissing := selectorErr != nil && helpers.IsMissingFieldIndexError(selectorErr)
+	serviceAccountNamespaceIndexMissing := serviceAccountNamespaceErr != nil && helpers.IsMissingFieldIndexError(serviceAccountNamespaceErr)
+	if !optimizedIndexPathAvailable &&
+		((explicitErr != nil && !explicitIndexMissing) ||
+			(selectorErr != nil && !selectorIndexMissing) ||
+			(serviceAccountNamespaceErr != nil && !serviceAccountNamespaceIndexMissing)) {
 		if explicitErr != nil {
 			logger.Error(explicitErr, "failed to list RestrictedBindDefinitions by explicit namespace index", "namespace", namespace.Name)
 		}
 		if selectorErr != nil {
 			logger.Error(selectorErr, "failed to list RestrictedBindDefinitions by selector index")
+		}
+		if serviceAccountNamespaceErr != nil {
+			logger.Error(serviceAccountNamespaceErr, "failed to list RestrictedBindDefinitions by ServiceAccount namespace index", "namespace", namespace.Name)
 		}
 		return nil
 	}
@@ -363,8 +376,8 @@ func (r *RestrictedBindDefinitionReconciler) namespaceToRestrictedBindDefinition
 		return requests
 	}
 
-	queued := make(map[string]struct{}, len(explicitNamespaceList.Items)+len(selectorList.Items))
-	requests := make([]reconcile.Request, 0, len(explicitNamespaceList.Items)+len(selectorList.Items))
+	queued := make(map[string]struct{}, len(explicitNamespaceList.Items)+len(selectorList.Items)+len(serviceAccountNamespaceList.Items))
+	requests := make([]reconcile.Request, 0, len(explicitNamespaceList.Items)+len(selectorList.Items)+len(serviceAccountNamespaceList.Items))
 	queueRequest := func(name string) {
 		if _, exists := queued[name]; exists {
 			return
@@ -382,11 +395,11 @@ func (r *RestrictedBindDefinitionReconciler) namespaceToRestrictedBindDefinition
 		queueRequest(selectorList.Items[i].Name)
 	}
 
-	return requests
-}
+	for i := range serviceAccountNamespaceList.Items {
+		queueRequest(serviceAccountNamespaceList.Items[i].Name)
+	}
 
-func missingFieldIndexOrNil(err error) bool {
-	return err == nil || helpers.IsMissingFieldIndexError(err)
+	return requests
 }
 
 // restrictedBindDefinitionNeedsNamespaceReconcile returns true if a namespace
@@ -394,6 +407,9 @@ func missingFieldIndexOrNil(err error) bool {
 // reconcile on every namespace event because label removals need immediate stale
 // RoleBinding cleanup even though the current labels no longer match.
 func restrictedBindDefinitionNeedsNamespaceReconcile(rbd *authorizationv1alpha1.RestrictedBindDefinition, ns *corev1.Namespace) bool {
+	if restrictedBindDefinitionReferencesServiceAccountNamespace(rbd, ns.Name) {
+		return true
+	}
 	if len(rbd.Spec.RoleBindings) == 0 {
 		return false
 	}
@@ -405,6 +421,15 @@ func restrictedBindDefinitionNeedsNamespaceReconcile(rbd *authorizationv1alpha1.
 			return true
 		}
 		if len(rb.NamespaceSelector) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func restrictedBindDefinitionReferencesServiceAccountNamespace(rbd *authorizationv1alpha1.RestrictedBindDefinition, namespace string) bool {
+	for _, subject := range rbd.Spec.Subjects {
+		if subject.Kind == rbacv1.ServiceAccountKind && subject.Namespace == namespace {
 			return true
 		}
 	}
@@ -489,8 +514,8 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 			))
 		defer func() {
 			if retErr != nil {
-				span.RecordError(retErr)
-				span.SetStatus(codes.Error, retErr.Error())
+				span.RecordError(errors.New("restricted bind definition reconciliation failed"))
+				span.SetStatus(codes.Error, "restricted bind definition reconciliation failed")
 			}
 			span.End()
 		}()
@@ -560,6 +585,18 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+	if rbacPolicy.GetDeletionTimestamp() != nil {
+		applyClient, impersonatedUser, err := r.rbdResolveApplyClient(rbacPolicy)
+		if err != nil {
+			r.rbdMarkStalled(ctx, rbd, err)
+			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
+			metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
+			return ctrl.Result{}, fmt.Errorf("resolve apply client for deleting RBACPolicy %s referenced by RestrictedBindDefinition %s: %w",
+				rbacPolicy.Name, rbd.Name, err)
+		}
+		r.rbdLogApplyIdentity(ctx, rbd.Name, rbacPolicy.Name, impersonatedUser)
+		return r.rbdHandleDeletingPolicy(ctx, rbd, rbacPolicy, applyClient)
+	}
 
 	applyClient, impersonatedUser, err := r.rbdResolveApplyClient(rbacPolicy)
 	if err != nil {
@@ -568,10 +605,7 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, fmt.Errorf("resolve apply client for RestrictedBindDefinition %s: %w", rbd.Name, err)
 	}
-	if impersonatedUser != "" {
-		trace.SpanFromContext(ctx).SetAttributes(tracing.AttrUser.String(impersonatedUser))
-		logger.V(2).Info("using impersonated apply identity", "name", rbd.Name, "impersonatedUser", impersonatedUser, "policy", rbacPolicy.Name)
-	}
+	r.rbdLogApplyIdentity(ctx, rbd.Name, rbacPolicy.Name, impersonatedUser)
 
 	// Step 6: Evaluate policy compliance.
 	if result, handled, err := r.rbdEvaluatePolicy(ctx, rbd, rbacPolicy, applyClient); handled {
@@ -695,6 +729,33 @@ func (r *RestrictedBindDefinitionReconciler) rbdHandleMissingPolicy(
 	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
 }
 
+func (r *RestrictedBindDefinitionReconciler) rbdHandleDeletingPolicy(
+	ctx context.Context,
+	rbd *authorizationv1alpha1.RestrictedBindDefinition,
+	rbacPolicy *authorizationv1alpha1.RBACPolicy,
+	deleteClient client.Client,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	logger.Info("referenced RBACPolicy is deleting", "name", rbd.Name, "policyRef", rbacPolicy.Name)
+	conditions.MarkFalse(rbd, authorizationv1alpha1.PolicyCompliantCondition, rbd.Generation,
+		authorizationv1alpha1.PolicyCompliantReasonPolicyDeleting, authorizationv1alpha1.PolicyCompliantMessagePolicyDeleting, rbacPolicy.Name)
+	r.recorder.Eventf(rbd, nil, corev1.EventTypeWarning,
+		authorizationv1alpha1.EventReasonPolicyViolation, authorizationv1alpha1.EventActionReconcile,
+		"Referenced RBACPolicy %q is being deleted", rbacPolicy.Name)
+	rbd.Status.PolicyViolations = []string{fmt.Sprintf("policy %q is being deleted", rbacPolicy.Name)}
+	if err := r.rbdDeprovision(ctx, rbd, deleteClient); err != nil {
+		r.rbdMarkStalled(ctx, rbd, err)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
+		return ctrl.Result{}, fmt.Errorf("deprovision RestrictedBindDefinition %s after deleting policy %s: %w",
+			rbd.Name, rbacPolicy.Name, err)
+	}
+	rbdClearDeprovisionedStatus(rbd)
+	r.rbdApplyStatusAndMarkStalled(ctx, rbd, "policy deleting")
+	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultDegraded).Inc()
+	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
+}
+
 func (r *RestrictedBindDefinitionReconciler) rbdHandleSkippedServiceAccounts(
 	ctx context.Context,
 	rbd *authorizationv1alpha1.RestrictedBindDefinition,
@@ -793,16 +854,37 @@ func (r *RestrictedBindDefinitionReconciler) rbdReconcileResources(
 	applyClient client.Client,
 	saCreationConfig *authorizationv1alpha1.SACreationConfig,
 ) (retErr error) {
-	// Ensure ServiceAccounts and derive the subjects that are currently safe to bind.
-	effectiveSubjects, err := r.rbdEnsureServiceAccounts(ctx, rbd, applyClient, saCreationConfig)
+	effectiveSubjects, err := r.rbdReconcileServiceAccounts(ctx, rbd, applyClient, saCreationConfig)
 	if err != nil {
 		return err
 	}
-	desiredSAs := rbdDesiredServiceAccounts(rbd.Status.GeneratedServiceAccounts)
-	if err := r.rbdPruneStaleServiceAccounts(ctx, rbd, desiredSAs, applyClient); err != nil {
-		return err
-	}
+	return r.rbdReconcileBindings(ctx, rbd, effectiveSubjects, applyClient)
+}
 
+func (r *RestrictedBindDefinitionReconciler) rbdReconcileServiceAccounts(
+	ctx context.Context,
+	rbd *authorizationv1alpha1.RestrictedBindDefinition,
+	applyClient client.Client,
+	saCreationConfig *authorizationv1alpha1.SACreationConfig,
+) ([]rbacv1.Subject, error) {
+	previousGeneratedSAs := rbdDesiredServiceAccounts(rbd.Status.GeneratedServiceAccounts)
+	effectiveSubjects, err := r.rbdEnsureServiceAccounts(ctx, rbd, applyClient, saCreationConfig)
+	if err != nil {
+		return nil, err
+	}
+	desiredSAs := rbdDesiredServiceAccounts(rbd.Status.GeneratedServiceAccounts)
+	if err := r.rbdPruneStaleServiceAccounts(ctx, rbd, desiredSAs, previousGeneratedSAs, applyClient); err != nil {
+		return nil, err
+	}
+	return effectiveSubjects, nil
+}
+
+func (r *RestrictedBindDefinitionReconciler) rbdReconcileBindings(
+	ctx context.Context,
+	rbd *authorizationv1alpha1.RestrictedBindDefinition,
+	effectiveSubjects []rbacv1.Subject,
+	applyClient client.Client,
+) (retErr error) {
 	desiredCRBs, desiredRBs, activeNamespaces, err := r.rbdDesiredBindingKeys(ctx, rbd)
 	if err != nil {
 		return err
@@ -835,7 +917,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdReconcileResources(
 		ac.WithOwnerReferences(ownerRefForRestricted(rbd, authorizationv1alpha1.RestrictedBindDefinitionKind)).
 			WithAnnotations(helpers.BuildResourceAnnotations("RestrictedBindDefinition", rbd.Name))
 
-		if result, err := pkgssa.PatchApplyClusterRoleBinding(ctx, applyClient, ac, client.FieldOwner(pkgssa.FieldOwnerFor(rbd.Name))); err != nil {
+		if result, err := pkgssa.PatchApplyClusterRoleBindingAlways(ctx, applyClient, ac, client.FieldOwner(pkgssa.FieldOwnerFor(rbd.Name)), client.ForceOwnership); err != nil {
 			return fmt.Errorf("ensure ClusterRoleBinding %s: %w", crbName, err)
 		} else if result == pkgssa.PatchApplyResultSkipped {
 			metrics.RBACResourcesSkipped.WithLabelValues(metrics.ResourceClusterRoleBinding).Inc()
@@ -1018,7 +1100,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdListOwnedClusterRoleBindings(
 	}
 	owned := make([]rbacv1.ClusterRoleBinding, 0, len(crbList.Items))
 	for i := range crbList.Items {
-		if hasOwnerRef(&crbList.Items[i], rbd) {
+		if hasControllerOwnerRef(&crbList.Items[i], rbd) {
 			owned = append(owned, crbList.Items[i])
 		}
 	}
@@ -1035,7 +1117,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdListOwnedRoleBindings(
 	}
 	owned := make([]rbacv1.RoleBinding, 0, len(rbList.Items))
 	for i := range rbList.Items {
-		if hasOwnerRef(&rbList.Items[i], rbd) {
+		if hasControllerOwnerRef(&rbList.Items[i], rbd) {
 			owned = append(owned, rbList.Items[i])
 		}
 	}
@@ -1052,7 +1134,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdListOwnedServiceAccounts(
 	}
 	owned := make([]corev1.ServiceAccount, 0, len(saList.Items))
 	for i := range saList.Items {
-		if hasOwnerRef(&saList.Items[i], rbd) {
+		if hasControllerOwnerRef(&saList.Items[i], rbd) {
 			owned = append(owned, saList.Items[i])
 		}
 	}
@@ -1113,6 +1195,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdPruneStaleServiceAccounts(
 	ctx context.Context,
 	rbd *authorizationv1alpha1.RestrictedBindDefinition,
 	desiredSAs map[string]struct{},
+	trustedGeneratedSAs map[string]struct{},
 	deleteClient client.Client,
 ) error {
 	logger := log.FromContext(ctx)
@@ -1128,6 +1211,11 @@ func (r *RestrictedBindDefinitionReconciler) rbdPruneStaleServiceAccounts(
 		sa := &serviceAccounts[i]
 		key := sa.Namespace + "/" + sa.Name
 		if _, ok := desiredSAs[key]; ok {
+			continue
+		}
+		if _, ok := trustedGeneratedSAs[key]; !ok {
+			logger.V(1).Info("skipping ServiceAccount with spoofable ownerRef but no generated status record",
+				"namespace", sa.Namespace, "name", sa.Name, "rbd", rbd.Name)
 			continue
 		}
 		logger.Info("pruning stale ServiceAccount", "namespace", sa.Namespace, "name", sa.Name, "rbd", rbd.Name)
@@ -1192,6 +1280,14 @@ func (r *RestrictedBindDefinitionReconciler) rbdEnsureServiceAccounts(
 			if !manageSA {
 				continue
 			}
+			canManage, skipReason, err := r.rbdCanManageGeneratedServiceAccount(ctx, subject, ns, saCreationConfig)
+			if err != nil {
+				return nil, err
+			}
+			if !canManage {
+				skippedSAs = append(skippedSAs, rbdSkippedServiceAccount(subject, skipReason))
+				continue
+			}
 		} else {
 			createSA, skipReason, err := r.rbdCanCreateMissingServiceAccount(ctx, subject, ns, saCreationConfig)
 			if err != nil {
@@ -1208,8 +1304,14 @@ func (r *RestrictedBindDefinitionReconciler) rbdEnsureServiceAccounts(
 			WithOwnerReferences(ownerRefForRestricted(rbd, authorizationv1alpha1.RestrictedBindDefinitionKind)).
 			WithAnnotations(helpers.BuildResourceAnnotations("RestrictedBindDefinition", rbd.Name))
 		fieldOwner := pkgssa.FieldOwnerFor(rbd.Name, authorizationv1alpha1.RestrictedBindDefinitionKind)
-		if _, err := pkgssa.PatchApplyServiceAccount(ctx, applyClient, ac, fieldOwner); err != nil {
+		result, err := pkgssa.PatchApplyServiceAccountAlways(ctx, applyClient, ac, fieldOwner)
+		if err != nil {
 			return nil, fmt.Errorf("apply ServiceAccount %s/%s: %w", subject.Namespace, subject.Name, err)
+		}
+		if result == pkgssa.PatchApplyResultSkipped {
+			metrics.RBACResourcesSkipped.WithLabelValues(metrics.ResourceServiceAccount).Inc()
+		} else {
+			metrics.RBACResourcesApplied.WithLabelValues(metrics.ResourceServiceAccount).Inc()
 		}
 		if !helpers.SubjectExists(generatedSAs, subject) {
 			generatedSAs = append(generatedSAs, subject)
@@ -1239,11 +1341,35 @@ func (r *RestrictedBindDefinitionReconciler) rbdClassifyExistingServiceAccount(
 		return true, false, key
 	}
 
-	if hasOwnerRef(existing, rbd) {
+	if ownerRBD := findOwningRBDRef(existing.OwnerReferences); ownerRBD != nil && ownerRBD.UID != rbd.UID {
+		logger.Info("ServiceAccount owned by a different RestrictedBindDefinition, skipping adoption",
+			"serviceAccount", subject.Name, "namespace", subject.Namespace,
+			"ownerUID", ownerRBD.UID, "currentUID", rbd.UID)
+		r.recorder.Eventf(rbd, nil, corev1.EventTypeWarning,
+			authorizationv1alpha1.EventReasonOwnership, authorizationv1alpha1.EventActionReconcile,
+			"ServiceAccount %s/%s is already owned by a different RestrictedBindDefinition (UID: %s)",
+			subject.Namespace, subject.Name, ownerRBD.UID)
+		return true, false, key
+	}
+
+	if hasControllerOwnerRef(existing, rbd) && rbdHasGeneratedServiceAccountStatus(rbd, subject) {
 		return false, true, ""
 	}
 
 	if ownerRBD := findOwningRBDRef(existing.OwnerReferences); ownerRBD != nil {
+		if hasControllerOwnerRef(existing, rbd) {
+			if r.rbdHasLiveGeneratedServiceAccountStatus(ctx, rbd, subject) {
+				return false, true, ""
+			}
+			logger.Info("ServiceAccount has this RestrictedBindDefinition controller ownerRef but no generated status record, skipping management",
+				"serviceAccount", subject.Name, "namespace", subject.Namespace,
+				"ownerName", ownerRBD.Name, "ownerUID", ownerRBD.UID)
+			r.recorder.Eventf(rbd, nil, corev1.EventTypeWarning,
+				authorizationv1alpha1.EventReasonOwnership, authorizationv1alpha1.EventActionReconcile,
+				"ServiceAccount %s/%s has RestrictedBindDefinition owner reference but is not recorded as generated in status",
+				subject.Namespace, subject.Name)
+			return false, false, ""
+		}
 		logger.Info("ServiceAccount owner reference does not match current RestrictedBindDefinition, skipping management",
 			"serviceAccount", subject.Name, "namespace", subject.Namespace,
 			"ownerName", ownerRBD.Name, "ownerUID", ownerRBD.UID,
@@ -1264,15 +1390,54 @@ func (r *RestrictedBindDefinitionReconciler) rbdClassifyExistingServiceAccount(
 	return false, true, ""
 }
 
+func (r *RestrictedBindDefinitionReconciler) rbdHasLiveGeneratedServiceAccountStatus(
+	ctx context.Context,
+	rbd *authorizationv1alpha1.RestrictedBindDefinition,
+	subject rbacv1.Subject,
+) bool {
+	latest := &authorizationv1alpha1.RestrictedBindDefinition{}
+	if err := r.ownershipReader().Get(ctx, types.NamespacedName{Name: rbd.Name, Namespace: rbd.Namespace}, latest); err != nil {
+		log.FromContext(ctx).V(1).Info("failed to verify live RestrictedBindDefinition generated ServiceAccount status",
+			"name", rbd.Name, "serviceAccount", subject.Name, "namespace", subject.Namespace, "error", err)
+		return false
+	}
+	return rbdHasGeneratedServiceAccountStatus(latest, subject)
+}
+
+func rbdHasGeneratedServiceAccountStatus(rbd *authorizationv1alpha1.RestrictedBindDefinition, subject rbacv1.Subject) bool {
+	if subject.Kind != rbacv1.ServiceAccountKind {
+		return false
+	}
+	key := subject.Namespace + "/" + subject.Name
+	_, ok := rbdDesiredServiceAccounts(rbd.Status.GeneratedServiceAccounts)[key]
+	return ok
+}
+
 func (r *RestrictedBindDefinitionReconciler) rbdCanCreateMissingServiceAccount(
 	ctx context.Context,
 	subject rbacv1.Subject,
 	namespace *corev1.Namespace,
 	saCreationConfig *authorizationv1alpha1.SACreationConfig,
 ) (create bool, skipReason string, retErr error) {
+	canManage, skipReason, err := r.rbdCanManageGeneratedServiceAccount(ctx, subject, namespace, saCreationConfig)
+	if err != nil {
+		return false, "", err
+	}
+	if !canManage {
+		return false, skipReason, nil
+	}
+	return true, "", nil
+}
+
+func (r *RestrictedBindDefinitionReconciler) rbdCanManageGeneratedServiceAccount(
+	ctx context.Context,
+	subject rbacv1.Subject,
+	namespace *corev1.Namespace,
+	saCreationConfig *authorizationv1alpha1.SACreationConfig,
+) (manage bool, skipReason string, retErr error) {
 	logger := log.FromContext(ctx)
 	if saCreationConfig == nil || !saCreationConfig.AllowAutoCreate {
-		logger.V(1).Info("skipping ServiceAccount creation: AllowAutoCreate is false",
+		logger.V(1).Info("skipping generated ServiceAccount: AllowAutoCreate is false",
 			"serviceAccount", subject.Name, "namespace", subject.Namespace)
 		return false, "auto-create disabled", nil
 	}
@@ -1282,7 +1447,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdCanCreateMissingServiceAccount(
 		return false, "", err
 	}
 	if !allowed {
-		logger.V(1).Info("skipping ServiceAccount creation: namespace is not allowed by policy",
+		logger.V(1).Info("skipping generated ServiceAccount: namespace is not allowed by policy",
 			"serviceAccount", subject.Name, "namespace", subject.Namespace)
 		return false, "namespace not allowed by policy", nil
 	}
@@ -1321,7 +1486,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdEnsureRoleBinding(
 	ac.WithOwnerReferences(ownerRefForRestricted(rbd, authorizationv1alpha1.RestrictedBindDefinitionKind)).
 		WithAnnotations(helpers.BuildResourceAnnotations("RestrictedBindDefinition", rbd.Name))
 
-	if result, err := pkgssa.PatchApplyRoleBinding(ctx, applyClient, ac, client.FieldOwner(pkgssa.FieldOwnerFor(rbd.Name))); err != nil {
+	if result, err := pkgssa.PatchApplyRoleBindingAlways(ctx, applyClient, ac, client.FieldOwner(pkgssa.FieldOwnerFor(rbd.Name)), client.ForceOwnership); err != nil {
 		return fmt.Errorf("ensure RoleBinding %s/%s: %w", namespace, rbName, err)
 	} else if result == pkgssa.PatchApplyResultSkipped {
 		metrics.RBACResourcesSkipped.WithLabelValues(metrics.ResourceRoleBinding).Inc()
@@ -1346,7 +1511,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdDeleteOwnedRoleBindingOnRoleRefC
 	if err := r.ownershipReader().Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, existing); err != nil {
 		return client.IgnoreNotFound(err)
 	}
-	if !hasOwnerRef(existing, rbd) || existing.RoleRef == desiredRoleRef {
+	if !hasControllerOwnerRef(existing, rbd) || existing.RoleRef == desiredRoleRef {
 		return nil
 	}
 	if err := deleteClient.Delete(ctx, existing); err != nil && !apierrors.IsNotFound(err) {
@@ -1370,7 +1535,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdClearClusterRoleBindingSubjectsI
 	if err := r.ownershipReader().Get(ctx, types.NamespacedName{Name: name}, existing); err != nil {
 		return client.IgnoreNotFound(err)
 	}
-	if !hasOwnerRef(existing, rbd) {
+	if !hasControllerOwnerRef(existing, rbd) {
 		return nil
 	}
 	if len(existing.Subjects) == 0 {
@@ -1399,7 +1564,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdClearRoleBindingSubjectsIfEmpty(
 	if err := r.ownershipReader().Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, existing); err != nil {
 		return client.IgnoreNotFound(err)
 	}
-	if !hasOwnerRef(existing, rbd) {
+	if !hasControllerOwnerRef(existing, rbd) {
 		return nil
 	}
 	if len(existing.Subjects) == 0 {
@@ -1489,7 +1654,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdDeprovision(
 		metrics.RBACResourcesDeleted.WithLabelValues(metrics.ResourceRoleBinding).Inc()
 	}
 
-	if err := r.rbdPruneStaleServiceAccounts(ctx, rbd, nil, deleteClient); err != nil {
+	if err := r.rbdPruneStaleServiceAccounts(ctx, rbd, nil, rbdDesiredServiceAccounts(rbd.Status.GeneratedServiceAccounts), deleteClient); err != nil {
 		return err
 	}
 
@@ -1565,6 +1730,19 @@ func (r *RestrictedBindDefinitionReconciler) rbdApplyStatusAndMarkStalled(
 	if err := ssa.ApplyRestrictedBindDefinitionStatus(ctx, r.client, rbd); err != nil {
 		logger.Error(err, "failed to apply status via SSA", "name", rbd.Name)
 	}
+}
+
+func (r *RestrictedBindDefinitionReconciler) rbdLogApplyIdentity(
+	ctx context.Context,
+	resourceName, policyName, impersonatedUser string,
+) {
+	if impersonatedUser == "" {
+		return
+	}
+
+	logger := log.FromContext(ctx)
+	trace.SpanFromContext(ctx).SetAttributes(tracing.AttrUser.String(impersonatedUser))
+	logger.V(2).Info("using impersonated apply identity", "name", resourceName, "impersonatedUser", impersonatedUser, "policy", policyName)
 }
 
 // rbdValidateRoleReferences checks that all referenced ClusterRoles and Roles exist.

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -37,6 +38,12 @@ import (
 const (
 	systemPrefix       = "system"
 	serviceAccountKind = "serviceaccount"
+)
+
+const (
+	maxSubjectLimiters         = 4096
+	minSubjectLimiterIdleTTL   = 5 * time.Minute
+	subjectLimiterCleanupEvery = time.Minute
 )
 
 // maxRequestBodySize is the maximum allowed request body size (1MB).
@@ -72,10 +79,22 @@ type evaluationResult struct {
 // because authorization decisions must not allow requests from stale informer
 // state after rules or namespace labels change.
 type Authorizer struct {
-	Client  client.Reader
-	Log     logr.Logger
-	Tracer  trace.Tracer
+	Client client.Reader
+	Log    logr.Logger
+	Tracer trace.Tracer
+	// Limiter is used as a per-subject limiter template. Each SAR subject gets
+	// an independent token bucket with this limit and burst, preventing one
+	// identity from consuming another identity's authorization budget.
 	Limiter *rate.Limiter
+
+	subjectLimitersMu       sync.Mutex
+	subjectLimiters         map[string]*subjectLimiterEntry
+	subjectLimiterCleanupAt time.Time
+}
+
+type subjectLimiterEntry struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
 }
 
 func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -93,17 +112,6 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			wa.Log.Error(err, "failed to close request body")
 		}
 	}()
-
-	// Rate-limit incoming requests to prevent overloading the authorizer.
-	// When the limiter is configured and the token bucket is exhausted,
-	// record the rate-limit event and send a rate-limited SubjectAccessReview response.
-	if wa.Limiter != nil && !wa.Limiter.Allow() {
-		pkgmetrics.AuthorizerRateLimitedTotal.Inc()
-		wa.Log.V(1).Info("rate limit exceeded, rejecting request",
-			"latency", time.Since(start).String())
-		wa.writeRateLimitResponse(w)
-		return
-	}
 
 	// Extract trace context and start a tracing span only when tracing is
 	// enabled (non-nil Tracer). When disabled, this avoids header parsing and
@@ -140,6 +148,15 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	wa.annotateSARSpan(ctx, &sar)
+	if wa.Limiter != nil && !wa.allowSubjectRequest(&sar) {
+		pkgmetrics.AuthorizerRateLimitedTotal.Inc()
+		wa.Log.V(1).Info("rate limit exceeded, rejecting request",
+			"user", sar.Spec.User,
+			"groups", cappedGroups(sar.Spec.Groups),
+			"latency", time.Since(start).String())
+		wa.writeRateLimitResponse(w)
+		return
+	}
 	wa.logReceivedSAR(&sar)
 
 	evalCtx, evalCancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
@@ -159,8 +176,9 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	globalItems, scopedItems := splitAuthorizers(allItems)
+	allRules := countTotalRules(globalItems) + countTotalRules(scopedItems)
 
-	items := globalItems
+	items := append([]authorizationv1alpha1.WebhookAuthorizer(nil), globalItems...)
 
 	// Always keep scoped authorizers loaded so the active-rules gauge reflects the
 	// full set regardless of request type. Scoped authorizers are only used
@@ -190,11 +208,7 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Count total rules across ALL WebhookAuthorizer resources (global + scoped)
-	// for the gauge. This is request-independent: even if a namespace-scoped
-	// authorizer was not evaluated for this SAR, it still contributes to the
-	// total rule count.
-	allRules := countTotalRules(globalItems) + countTotalRules(scopedItems)
+	publicReason := publicAuthorizerReason(result)
 
 	response := authzv1.SubjectAccessReview{
 		TypeMeta: metav1.TypeMeta{
@@ -208,7 +222,7 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// authorizers can still allow the request. Only explicit deny (not
 			// no-opinion) sets Denied=true.
 			Denied: result.decision == pkgmetrics.AuthorizerDecisionDenied,
-			Reason: result.reason,
+			Reason: publicReason,
 		},
 	}
 
@@ -238,7 +252,7 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if span := trace.SpanFromContext(ctx); span.IsRecording() {
 		span.SetAttributes(
 			tracing.AttrDecision.String(result.decision),
-			tracing.AttrReason.String(result.reason),
+			tracing.AttrReason.String(publicReason),
 			tracing.AttrRuleCount.Int(allRules),
 		)
 	}
@@ -248,6 +262,87 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		wa.Log.Error(err, "failed to write SubjectAccessReview response",
 			"latency", time.Since(start).String())
 	}
+}
+
+func publicAuthorizerReason(result evaluationResult) string {
+	switch result.decision {
+	case pkgmetrics.AuthorizerDecisionAllowed:
+		return "Access granted by WebhookAuthorizer"
+	case pkgmetrics.AuthorizerDecisionDenied:
+		return "Access denied by WebhookAuthorizer"
+	default:
+		return result.reason
+	}
+}
+
+func (wa *Authorizer) allowSubjectRequest(sar *authzv1.SubjectAccessReview) bool {
+	limiter := wa.subjectLimiter(rateLimitSubjectKey(sar))
+	return limiter.Allow()
+}
+
+func (wa *Authorizer) subjectLimiter(subjectKey string) *rate.Limiter {
+	wa.subjectLimitersMu.Lock()
+	defer wa.subjectLimitersMu.Unlock()
+
+	if wa.subjectLimiters == nil {
+		wa.subjectLimiters = make(map[string]*subjectLimiterEntry)
+	}
+	now := time.Now()
+	if now.After(wa.subjectLimiterCleanupAt) {
+		wa.pruneSubjectLimitersLocked(now)
+		wa.subjectLimiterCleanupAt = now.Add(subjectLimiterCleanupEvery)
+	}
+	if entry, exists := wa.subjectLimiters[subjectKey]; exists {
+		entry.lastSeen = now
+		return entry.limiter
+	}
+	if len(wa.subjectLimiters) >= maxSubjectLimiters {
+		wa.evictOldestSubjectLimiterLocked()
+	}
+	limiter := rate.NewLimiter(wa.Limiter.Limit(), wa.Limiter.Burst())
+	wa.subjectLimiters[subjectKey] = &subjectLimiterEntry{limiter: limiter, lastSeen: now}
+	return limiter
+}
+
+func (wa *Authorizer) pruneSubjectLimitersLocked(now time.Time) {
+	idleTTL := subjectLimiterIdleTTL(wa.Limiter)
+	for key, entry := range wa.subjectLimiters {
+		if now.Sub(entry.lastSeen) > idleTTL {
+			delete(wa.subjectLimiters, key)
+		}
+	}
+}
+
+func subjectLimiterIdleTTL(limiter *rate.Limiter) time.Duration {
+	if limiter == nil || limiter.Limit() <= 0 || limiter.Burst() <= 0 {
+		return minSubjectLimiterIdleTTL
+	}
+	refill := time.Duration(float64(time.Second) * float64(limiter.Burst()) / float64(limiter.Limit()))
+	if refill < minSubjectLimiterIdleTTL {
+		return minSubjectLimiterIdleTTL
+	}
+	return refill
+}
+
+func (wa *Authorizer) evictOldestSubjectLimiterLocked() {
+	oldestKey := ""
+	var oldest time.Time
+	for key, entry := range wa.subjectLimiters {
+		if oldestKey == "" || entry.lastSeen.Before(oldest) {
+			oldestKey = key
+			oldest = entry.lastSeen
+		}
+	}
+	if oldestKey != "" {
+		delete(wa.subjectLimiters, oldestKey)
+	}
+}
+
+func rateLimitSubjectKey(sar *authzv1.SubjectAccessReview) string {
+	groups := append([]string(nil), sar.Spec.Groups...)
+	slices.Sort(groups)
+	groups = slices.Compact(groups)
+	return sar.Spec.User + "\x00" + strings.Join(groups, "\x00")
 }
 
 // annotateSARSpan adds SAR attributes to the active tracing span.
@@ -751,6 +846,9 @@ func (wa *Authorizer) recordRejectedMetrics(start time.Time) {
 func matchesRule(patterns []string, value string) bool {
 	for _, pattern := range patterns {
 		if pattern == "*" || pattern == value {
+			return true
+		}
+		if strings.HasSuffix(pattern, "*") && strings.HasPrefix(value, strings.TrimSuffix(pattern, "*")) {
 			return true
 		}
 	}

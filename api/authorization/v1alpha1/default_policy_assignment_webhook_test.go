@@ -6,12 +6,14 @@ package v1alpha1
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 
 	admissionv1 "k8s.io/api/admission/v1"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -164,6 +166,25 @@ func TestRestrictedValidatorsUseReaderForDefaultPolicyAssignment(t *testing.T) {
 			t.Fatal("expected stale cached client not to hide default-policy assignment")
 		} else if !strings.Contains(err.Error(), "assigned-policy") {
 			t.Fatalf("expected error to mention API-reader assignment, got: %v", err)
+		}
+
+		oldRBD := rbd.DeepCopy()
+		newRBD := rbd.DeepCopy()
+		newRBD.Spec.Subjects = []rbacv1.Subject{
+			{Kind: rbacv1.UserKind, APIGroup: rbacv1.GroupName, Name: "bob"},
+		}
+		if _, err := validator.ValidateUpdate(ctxGroup, oldRBD, newRBD); err == nil {
+			t.Fatal("expected update to enforce API-reader default-policy assignment")
+		} else if !strings.Contains(err.Error(), "assigned-policy") {
+			t.Fatalf("expected update error to mention API-reader assignment, got: %v", err)
+		}
+
+		metaRBD := rbd.DeepCopy()
+		metaRBD.Labels = map[string]string{"team": "alpha"}
+		if _, err := validator.ValidateUpdate(ctxGroup, rbd, metaRBD); err == nil {
+			t.Fatal("expected metadata update to enforce API-reader default-policy assignment")
+		} else if !strings.Contains(err.Error(), "assigned-policy") {
+			t.Fatalf("expected metadata update error to mention API-reader assignment, got: %v", err)
 		}
 	})
 
@@ -363,8 +384,8 @@ func TestRestrictedValidatorsUseReaderForAdmissionCriticalLookups(t *testing.T) 
 		}
 		if _, err := validator.ValidateCreate(context.Background(), rrd); err == nil {
 			t.Fatal("expected ClusterRole aggregation label to be rejected")
-		} else if !strings.Contains(err.Error(), "aggregation labels") {
-			t.Fatalf("expected aggregation label error, got: %v", err)
+		} else if !strings.Contains(err.Error(), "reserved") {
+			t.Fatalf("expected reserved label error, got: %v", err)
 		}
 	})
 
@@ -388,8 +409,8 @@ func TestRestrictedValidatorsUseReaderForAdmissionCriticalLookups(t *testing.T) 
 		}
 		if _, err := validator.ValidateUpdate(context.Background(), oldRRD, newRRD); err == nil {
 			t.Fatal("expected metadata-only ClusterRole aggregation label update to be rejected")
-		} else if !strings.Contains(err.Error(), "aggregation labels") {
-			t.Fatalf("expected aggregation label error, got: %v", err)
+		} else if !strings.Contains(err.Error(), "reserved") {
+			t.Fatalf("expected reserved label error, got: %v", err)
 		}
 	})
 }
@@ -481,7 +502,7 @@ func TestRestrictedValidatorsEnforceDefaultPolicyAssignmentOnUpdate(t *testing.T
 		}
 	})
 
-	t.Run("RestrictedBindDefinition allows unchanged spec update for unassigned selected policy", func(t *testing.T) {
+	t.Run("RestrictedBindDefinition rejects metadata update for unassigned selected policy", func(t *testing.T) {
 		oldRBD := &RestrictedBindDefinition{
 			ObjectMeta: metav1.ObjectMeta{Name: "default-policy-update-rbd-unchanged"},
 			Spec: RestrictedBindDefinitionSpec{
@@ -498,8 +519,41 @@ func TestRestrictedValidatorsEnforceDefaultPolicyAssignmentOnUpdate(t *testing.T
 		reader := newClient(assignedPolicy.DeepCopy(), otherAssignedPolicy.DeepCopy(), oldRBD.DeepCopy())
 		validator := &RestrictedBindDefinitionValidator{Client: reader, Reader: reader}
 
-		if _, err := validator.ValidateUpdate(ctxGroup, oldRBD, newRBD); err != nil {
-			t.Fatalf("expected unchanged spec update to skip requester assignment, got: %v", err)
+		if _, err := validator.ValidateUpdate(ctxGroup, oldRBD, newRBD); err == nil {
+			t.Fatal("expected metadata update using unassigned selected policy to be rejected")
+		} else if !strings.Contains(err.Error(), "is not assigned to selected default policy") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("RestrictedBindDefinition rejects semantic no-op spec and metadata update for unassigned selected policy", func(t *testing.T) {
+		oldRBD := &RestrictedBindDefinition{
+			ObjectMeta: metav1.ObjectMeta{Name: "default-policy-update-rbd-semantic"},
+			Spec: RestrictedBindDefinitionSpec{
+				PolicyRef:  RBACPolicyReference{Name: otherAssignedPolicy.Name},
+				TargetName: "default-policy-update-rbd-semantic",
+				Subjects: []rbacv1.Subject{
+					{Kind: rbacv1.GroupKind, APIGroup: rbacv1.GroupName, Name: "team-b"},
+				},
+				ClusterRoleBindings: &ClusterBinding{ClusterRoleRefs: []string{"view"}},
+			},
+		}
+		newRBD := oldRBD.DeepCopy()
+		newRBD.Labels = map[string]string{"controller": "touched"}
+		newRBD.Spec.RoleBindings = []NamespaceBinding{}
+		if reflect.DeepEqual(oldRBD.Spec, newRBD.Spec) {
+			t.Fatal("test setup requires reflect-visible spec drift")
+		}
+		if !equality.Semantic.DeepEqual(oldRBD.Spec, newRBD.Spec) {
+			t.Fatal("test setup requires semantically equal spec drift")
+		}
+		reader := newClient(assignedPolicy.DeepCopy(), otherAssignedPolicy.DeepCopy(), oldRBD.DeepCopy())
+		validator := &RestrictedBindDefinitionValidator{Client: reader, Reader: reader}
+
+		if _, err := validator.ValidateUpdate(ctxGroup, oldRBD, newRBD); err == nil {
+			t.Fatal("expected semantic no-op metadata update using unassigned selected policy to be rejected")
+		} else if !strings.Contains(err.Error(), "is not assigned to selected default policy") {
+			t.Fatalf("unexpected error: %v", err)
 		}
 	})
 
@@ -545,7 +599,7 @@ func TestRestrictedValidatorsEnforceDefaultPolicyAssignmentOnUpdate(t *testing.T
 		}
 	})
 
-	t.Run("RestrictedRoleDefinition allows unchanged spec update for unassigned selected policy", func(t *testing.T) {
+	t.Run("RestrictedRoleDefinition rejects metadata update for unassigned selected policy", func(t *testing.T) {
 		oldRRD := &RestrictedRoleDefinition{
 			ObjectMeta: metav1.ObjectMeta{Name: "default-policy-update-rrd-unchanged"},
 			Spec: RestrictedRoleDefinitionSpec{
@@ -560,8 +614,159 @@ func TestRestrictedValidatorsEnforceDefaultPolicyAssignmentOnUpdate(t *testing.T
 		reader := newClient(assignedPolicy.DeepCopy(), otherAssignedPolicy.DeepCopy(), oldRRD.DeepCopy())
 		validator := &RestrictedRoleDefinitionValidator{Client: reader, Reader: reader}
 
-		if _, err := validator.ValidateUpdate(ctxGroup, oldRRD, newRRD); err != nil {
-			t.Fatalf("expected unchanged spec update to skip requester assignment, got: %v", err)
+		if _, err := validator.ValidateUpdate(ctxGroup, oldRRD, newRRD); err == nil {
+			t.Fatal("expected metadata update using unassigned selected policy to be rejected")
+		} else if !strings.Contains(err.Error(), "is not assigned to selected default policy") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("RestrictedRoleDefinition rejects semantic no-op spec and metadata update for unassigned selected policy", func(t *testing.T) {
+		oldRRD := &RestrictedRoleDefinition{
+			ObjectMeta: metav1.ObjectMeta{Name: "default-policy-update-rrd-semantic"},
+			Spec: RestrictedRoleDefinitionSpec{
+				PolicyRef:       RBACPolicyReference{Name: otherAssignedPolicy.Name},
+				TargetRole:      DefinitionClusterRole,
+				TargetName:      "default-policy-update-rrd-semantic",
+				ScopeNamespaced: false,
+			},
+		}
+		newRRD := oldRRD.DeepCopy()
+		newRRD.Labels = map[string]string{"controller": "touched"}
+		newRRD.Spec.RestrictedVerbs = []string{}
+		if reflect.DeepEqual(oldRRD.Spec, newRRD.Spec) {
+			t.Fatal("test setup requires reflect-visible spec drift")
+		}
+		if !equality.Semantic.DeepEqual(oldRRD.Spec, newRRD.Spec) {
+			t.Fatal("test setup requires semantically equal spec drift")
+		}
+		reader := newClient(assignedPolicy.DeepCopy(), otherAssignedPolicy.DeepCopy(), oldRRD.DeepCopy())
+		validator := &RestrictedRoleDefinitionValidator{Client: reader, Reader: reader}
+
+		if _, err := validator.ValidateUpdate(ctxGroup, oldRRD, newRRD); err == nil {
+			t.Fatal("expected semantic no-op metadata update using unassigned selected policy to be rejected")
+		} else if !strings.Contains(err.Error(), "is not assigned to selected default policy") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
+func TestRestrictedValidatorsSkipDefaultPolicyAssignmentForSpecUnchangedUpdates(t *testing.T) {
+	ctxOperator := admission.NewContextWithRequest(context.Background(), admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			UserInfo: authenticationv1.UserInfo{
+				Username: "system:serviceaccount:auth-operator-system:auth-operator-manager",
+			},
+		},
+	})
+
+	t.Run("RestrictedBindDefinition finalizer update", func(t *testing.T) {
+		validator := &RestrictedBindDefinitionValidator{}
+		oldRBD := &RestrictedBindDefinition{
+			ObjectMeta: metav1.ObjectMeta{Name: "metadata-rbd"},
+			Spec: RestrictedBindDefinitionSpec{
+				PolicyRef:  RBACPolicyReference{Name: "default-policy"},
+				TargetName: "metadata-rbd",
+				Subjects: []rbacv1.Subject{
+					{Kind: rbacv1.UserKind, APIGroup: rbacv1.GroupName, Name: "alice"},
+				},
+				ClusterRoleBindings: &ClusterBinding{ClusterRoleRefs: []string{"view"}},
+			},
+		}
+		newRBD := oldRBD.DeepCopy()
+		newRBD.Finalizers = []string{RestrictedBindDefinitionFinalizer}
+
+		if _, err := validator.ValidateUpdate(ctxOperator, oldRBD, newRBD); err != nil {
+			t.Fatalf("expected spec-unchanged finalizer update to bypass requester default-policy checks, got: %v", err)
+		}
+	})
+
+	t.Run("RestrictedRoleDefinition finalizer update", func(t *testing.T) {
+		validator := &RestrictedRoleDefinitionValidator{}
+		oldRRD := &RestrictedRoleDefinition{
+			ObjectMeta: metav1.ObjectMeta{Name: "metadata-rrd"},
+			Spec: RestrictedRoleDefinitionSpec{
+				PolicyRef:  RBACPolicyReference{Name: "default-policy"},
+				TargetRole: DefinitionClusterRole,
+				TargetName: "metadata-rrd",
+			},
+		}
+		newRRD := oldRRD.DeepCopy()
+		newRRD.Finalizers = []string{RestrictedRoleDefinitionFinalizer}
+
+		if _, err := validator.ValidateUpdate(ctxOperator, oldRRD, newRRD); err != nil {
+			t.Fatalf("expected spec-unchanged finalizer update to bypass requester default-policy checks, got: %v", err)
+		}
+	})
+}
+
+func TestRestrictedValidatorsEnforceDefaultPolicyAssignmentForUserFinalizerUpdates(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := AddToScheme(scheme); err != nil {
+		t.Fatalf("add scheme: %v", err)
+	}
+
+	defaultPolicy := &RBACPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "default-policy"},
+		Spec: RBACPolicySpec{
+			DefaultAssignment: &DefaultPolicyAssignment{
+				Groups: []string{"oidc:platform-admins"},
+			},
+		},
+	}
+	reader := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(defaultPolicy.DeepCopy()).
+		Build()
+	ctxUnassigned := admission.NewContextWithRequest(context.Background(), admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			UserInfo: authenticationv1.UserInfo{
+				Username: "alice",
+				Groups:   []string{"oidc:tenant-admins"},
+			},
+		},
+	})
+
+	t.Run("RestrictedBindDefinition finalizer update", func(t *testing.T) {
+		oldRBD := &RestrictedBindDefinition{
+			ObjectMeta: metav1.ObjectMeta{Name: "metadata-rbd-user"},
+			Spec: RestrictedBindDefinitionSpec{
+				PolicyRef:  RBACPolicyReference{Name: defaultPolicy.Name},
+				TargetName: "metadata-rbd-user",
+				Subjects: []rbacv1.Subject{
+					{Kind: rbacv1.UserKind, APIGroup: rbacv1.GroupName, Name: "alice"},
+				},
+				ClusterRoleBindings: &ClusterBinding{ClusterRoleRefs: []string{"view"}},
+			},
+		}
+		newRBD := oldRBD.DeepCopy()
+		newRBD.Finalizers = []string{RestrictedBindDefinitionFinalizer}
+		validator := &RestrictedBindDefinitionValidator{Client: reader, Reader: reader}
+
+		if _, err := validator.ValidateUpdate(ctxUnassigned, oldRBD, newRBD); err == nil {
+			t.Fatal("expected user finalizer update using unassigned selected policy to be rejected")
+		} else if !strings.Contains(err.Error(), "is not assigned to selected default policy") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("RestrictedRoleDefinition finalizer update", func(t *testing.T) {
+		oldRRD := &RestrictedRoleDefinition{
+			ObjectMeta: metav1.ObjectMeta{Name: "metadata-rrd-user"},
+			Spec: RestrictedRoleDefinitionSpec{
+				PolicyRef:  RBACPolicyReference{Name: defaultPolicy.Name},
+				TargetRole: DefinitionClusterRole,
+				TargetName: "metadata-rrd-user",
+			},
+		}
+		newRRD := oldRRD.DeepCopy()
+		newRRD.Finalizers = []string{RestrictedRoleDefinitionFinalizer}
+		validator := &RestrictedRoleDefinitionValidator{Client: reader, Reader: reader}
+
+		if _, err := validator.ValidateUpdate(ctxUnassigned, oldRRD, newRRD); err == nil {
+			t.Fatal("expected user finalizer update using unassigned selected policy to be rejected")
+		} else if !strings.Contains(err.Error(), "is not assigned to selected default policy") {
+			t.Fatalf("unexpected error: %v", err)
 		}
 	})
 }
@@ -747,8 +952,8 @@ func TestValidateDefaultPolicyForRequester(t *testing.T) {
 	}
 
 	if err := validateDefaultPolicyForRequester(ctxGroup, client, gk, "rrd-a", "policy-b"); err == nil {
-		t.Fatal("expected mismatch error for group-based default policy")
-	} else if !strings.Contains(err.Error(), "is not assigned to selected default policy") {
+		t.Fatal("expected ambiguous overlapping default policies to be rejected")
+	} else if !strings.Contains(err.Error(), "matches multiple default policies") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
