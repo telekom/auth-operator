@@ -1839,6 +1839,56 @@ func TestResourceRuleIndex_ResourceNamesMatching(t *testing.T) {
 	})
 }
 
+func TestResourceRuleIndex_KubernetesWildcardSemantics(t *testing.T) {
+	scheme := newScheme(t)
+	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+	handler := &Authorizer{Client: cl, Log: logr.Discard()}
+
+	tests := []struct {
+		name string
+		rule authzv1.ResourceRule
+		attr authzv1.ResourceAttributes
+		want bool
+	}{
+		{
+			name: "resource prefix wildcard is not supported",
+			rule: authzv1.ResourceRule{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pod*"}},
+			attr: authzv1.ResourceAttributes{Verb: "get", Group: "", Resource: "pods"},
+		},
+		{
+			name: "all resources subresource wildcard matches requested subresource",
+			rule: authzv1.ResourceRule{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"*/log"}},
+			attr: authzv1.ResourceAttributes{Verb: "get", Group: "", Resource: "pods", Subresource: "log"},
+			want: true,
+		},
+		{
+			name: "api group prefix wildcard is not supported",
+			rule: authzv1.ResourceRule{Verbs: []string{"get"}, APIGroups: []string{"apps*"}, Resources: []string{"deployments"}},
+			attr: authzv1.ResourceAttributes{Verb: "get", Group: "apps.example.com", Resource: "deployments"},
+		},
+		{
+			name: "resource name prefix wildcard is not supported",
+			rule: authzv1.ResourceRule{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"secrets"}, ResourceNames: []string{"prod-*"}},
+			attr: authzv1.ResourceAttributes{Verb: "get", Group: "", Resource: "secrets", Name: "prod-secret"},
+		},
+		{
+			name: "verb prefix wildcard is not supported",
+			rule: authzv1.ResourceRule{Verbs: []string{"get*"}, APIGroups: []string{""}, Resources: []string{"pods"}},
+			attr: authzv1.ResourceAttributes{Verb: "get", Group: "", Resource: "pods"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			idx := handler.resourceRuleIndex([]authzv1.ResourceRule{tt.rule}, &tt.attr)
+			got := idx >= 0
+			if got != tt.want {
+				t.Fatalf("resourceRuleIndex() matched = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestNonResourceRuleIndex_SuffixWildcardMatching(t *testing.T) {
 	scheme := newScheme(t)
 	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
@@ -1861,6 +1911,28 @@ func TestNonResourceRuleIndex_SuffixWildcardMatching(t *testing.T) {
 		idx := handler.nonResourceRuleIndex(rules, attr)
 		if idx >= 0 {
 			t.Errorf("expected no match for unrelated path, got rule index %d", idx)
+		}
+	})
+
+	t.Run("non-terminal wildcard does not match child path", func(t *testing.T) {
+		prefixRules := []authzv1.NonResourceRule{
+			{Verbs: []string{"get"}, NonResourceURLs: []string{"/api*"}},
+		}
+		attr := &authzv1.NonResourceAttributes{Verb: "get", Path: "/api/v1"}
+		idx := handler.nonResourceRuleIndex(prefixRules, attr)
+		if idx >= 0 {
+			t.Errorf("expected no match for unsupported /api* wildcard, got rule index %d", idx)
+		}
+	})
+
+	t.Run("non-terminal wildcard does not match sibling path", func(t *testing.T) {
+		prefixRules := []authzv1.NonResourceRule{
+			{Verbs: []string{"get"}, NonResourceURLs: []string{"/api*"}},
+		}
+		attr := &authzv1.NonResourceAttributes{Verb: "get", Path: "/apis"}
+		idx := handler.nonResourceRuleIndex(prefixRules, attr)
+		if idx >= 0 {
+			t.Errorf("expected no match for unsupported /api* wildcard, got rule index %d", idx)
 		}
 	})
 }

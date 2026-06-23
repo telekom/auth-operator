@@ -721,17 +721,17 @@ func (wa *Authorizer) resourceRuleIndex(rules []authzv1.ResourceRule, attr *auth
 		resourceKey = attr.Resource + "/" + attr.Subresource
 	}
 	for i, rule := range rules {
-		if !matchesRule(rule.Verbs, attr.Verb) {
+		if !matchesExactOrAll(rule.Verbs, attr.Verb) {
 			continue
 		}
-		if !matchesRule(rule.APIGroups, attr.Group) {
+		if !matchesExactOrAll(rule.APIGroups, attr.Group) {
 			continue
 		}
-		if !matchesRule(rule.Resources, resourceKey) {
+		if !matchesResourceRule(rule.Resources, resourceKey, attr.Subresource) {
 			continue
 		}
 		// ResourceNames: non-empty list restricts which resource names are allowed.
-		if len(rule.ResourceNames) > 0 && !matchesRule(rule.ResourceNames, attr.Name) {
+		if len(rule.ResourceNames) > 0 && !matchesExactOrAll(rule.ResourceNames, attr.Name) {
 			continue
 		}
 		return i
@@ -742,8 +742,8 @@ func (wa *Authorizer) resourceRuleIndex(rules []authzv1.ResourceRule, attr *auth
 // nonResourceRuleIndex returns the index of the first matching non-resource rule, or -1.
 func (wa *Authorizer) nonResourceRuleIndex(rules []authzv1.NonResourceRule, attr *authzv1.NonResourceAttributes) int {
 	for i, rule := range rules {
-		if matchesRule(rule.Verbs, attr.Verb) &&
-			matchesRule(rule.NonResourceURLs, attr.Path) {
+		if matchesExactOrAll(rule.Verbs, attr.Verb) &&
+			matchesNonResourceURLRule(rule.NonResourceURLs, attr.Path) {
 			return i
 		}
 	}
@@ -842,13 +842,35 @@ func (wa *Authorizer) recordRejectedMetrics(start time.Time) {
 	pkgmetrics.AuthorizerRequestDuration.WithLabelValues(pkgmetrics.AuthorizerDecisionDenied).Observe(duration)
 }
 
-// matchesRule checks if a value matches any pattern in the list.
-func matchesRule(patterns []string, value string) bool {
+// matchesExactOrAll matches Kubernetes ResourceRule fields where only exact
+// values or the full "*" wildcard are supported.
+func matchesExactOrAll(patterns []string, value string) bool {
 	for _, pattern := range patterns {
 		if pattern == "*" || pattern == value {
 			return true
 		}
-		if strings.HasSuffix(pattern, "*") && strings.HasPrefix(value, strings.TrimSuffix(pattern, "*")) {
+	}
+	return false
+}
+
+func matchesResourceRule(patterns []string, resourceKey, subresource string) bool {
+	for _, pattern := range patterns {
+		if pattern == "*" || pattern == resourceKey {
+			return true
+		}
+		if subresource != "" && pattern == "*/"+subresource {
+			return true
+		}
+	}
+	return false
+}
+
+func matchesNonResourceURLRule(patterns []string, path string) bool {
+	for _, pattern := range patterns {
+		if pattern == "*" || pattern == path {
+			return true
+		}
+		if strings.HasSuffix(pattern, "/*") && strings.HasPrefix(path, strings.TrimSuffix(pattern, "*")) {
 			return true
 		}
 	}
