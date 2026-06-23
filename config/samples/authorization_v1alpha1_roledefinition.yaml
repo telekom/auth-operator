@@ -5,6 +5,11 @@
 # =============================================================================
 # RoleDefinition Samples - Comprehensive Feature Coverage
 # =============================================================================
+# Trust boundary:
+# - Plain RoleDefinition writes are intended for platform-admin or trusted-admin
+#   authors because generated roles affect real Kubernetes RBAC.
+# - Use RBACPolicy with RestrictedRoleDefinition for delegated tenant workflows.
+#
 # These samples demonstrate all features of the RoleDefinition CRD:
 # - ClusterRole and Role targets
 # - API group restrictions (velero, calico, cert-manager)

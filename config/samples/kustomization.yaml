@@ -7,6 +7,8 @@ kind: Kustomization
 resources:
   # Prerequisites first — pre-existing RBAC resources the edge-case BDs reference
   - edge-case-prerequisites.yaml
+  # Plain RoleDefinition/BindDefinition samples are platform-admin/trusted-admin
+  # authored examples. Use the restricted samples below for delegated workflows.
   - authorization_v1alpha1_roledefinition.yaml
   - authorization_v1alpha1_binddefinition.yaml
   - authorization_v1alpha1_webhookauthorizer.yaml

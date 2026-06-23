@@ -19,6 +19,10 @@ Namespace: {{ .Release.Namespace }}
 
 ## Creating Your First RoleDefinition
 
+Plain RoleDefinition and BindDefinition resources are intended for
+platform-admin or trusted-admin authors. For delegated tenant workflows, use
+RBACPolicy with RestrictedRoleDefinition and RestrictedBindDefinition.
+
 Create a RoleDefinition to generate a ClusterRole:
 
 ```yaml

@@ -151,6 +151,9 @@ type RoleDefinitionStatus struct {
 }
 
 // RoleDefinition is the Schema for the roledefinitions API.
+// Write access is intended for platform-admin or trusted-admin workflows
+// because generated Roles and ClusterRoles affect real Kubernetes RBAC.
+// Use RestrictedRoleDefinition under an RBACPolicy for delegated workflows.
 //
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:path=roledefinitions,scope=Cluster,shortName=roledef

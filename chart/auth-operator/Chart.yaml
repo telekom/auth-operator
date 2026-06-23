@@ -51,12 +51,12 @@ annotations:
       version: v1alpha1
       name: roledefinitions.authorization.t-caas.telekom.com
       displayName: RoleDefinition
-      description: Dynamically generates ClusterRoles/Roles based on API discovery
+      description: Trusted-admin API that dynamically generates ClusterRoles/Roles based on API discovery
     - kind: BindDefinition
       version: v1alpha1
       name: binddefinitions.authorization.t-caas.telekom.com
       displayName: BindDefinition
-      description: Creates ClusterRoleBindings/RoleBindings for subjects
+      description: Trusted-admin API that creates ClusterRoleBindings/RoleBindings for subjects
     - kind: WebhookAuthorizer
       version: v1alpha1
       name: webhookauthorizers.authorization.t-caas.telekom.com
@@ -78,6 +78,9 @@ annotations:
       displayName: RestrictedBindDefinition
       description: Creates bounded RoleBindings or ClusterRoleBindings under an RBACPolicy
   artifacthub.io/crdsExamples: |
+    # Plain RoleDefinition and BindDefinition examples are for platform-admin
+    # or trusted-admin authors. Use RBACPolicy with restricted CRDs for
+    # delegated tenant workflows.
     - apiVersion: authorization.t-caas.telekom.com/v1alpha1
       kind: RoleDefinition
       metadata:

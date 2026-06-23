@@ -32,7 +32,11 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: BindDefinition is the Schema for the binddefinitions API.
+        description: |-
+          BindDefinition is the Schema for the binddefinitions API.
+          Write access is intended for platform-admin or trusted-admin workflows
+          because generated bindings affect real Kubernetes RBAC.
+          Use RestrictedBindDefinition under an RBACPolicy for delegated workflows.
         properties:
           apiVersion:
             description: |-

@@ -29,6 +29,9 @@ Package v1alpha1 contains API Schema definitions for the authorization v1alpha1 
 
 
 BindDefinition is the Schema for the binddefinitions API.
+Write access is intended for platform-admin or trusted-admin workflows
+because generated bindings affect real Kubernetes RBAC.
+Use RestrictedBindDefinition under an RBACPolicy for delegated workflows.
 
 
 
@@ -515,6 +518,9 @@ _Appears in:_
 
 
 RoleDefinition is the Schema for the roledefinitions API.
+Write access is intended for platform-admin or trusted-admin workflows
+because generated Roles and ClusterRoles affect real Kubernetes RBAC.
+Use RestrictedRoleDefinition under an RBACPolicy for delegated workflows.
 
 
 

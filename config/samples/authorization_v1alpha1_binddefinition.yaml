@@ -5,6 +5,11 @@
 # =============================================================================
 # BindDefinition Samples - Comprehensive Feature Coverage
 # =============================================================================
+# Trust boundary:
+# - Plain BindDefinition writes are intended for platform-admin or trusted-admin
+#   authors because generated bindings affect real Kubernetes RBAC.
+# - Use RBACPolicy with RestrictedBindDefinition for delegated tenant workflows.
+#
 # These samples demonstrate all features of the BindDefinition CRD:
 # - Multiple subject types: User, Group, ServiceAccount
 # - ClusterRoleBindings (cluster-wide access)
