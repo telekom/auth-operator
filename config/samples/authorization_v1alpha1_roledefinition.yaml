@@ -518,8 +518,8 @@ spec:
 
 ---
 # -----------------------------------------------------------------------------
-# ClusterRole: Breakglass + AggregationLabels permutation
-# Tests breakglassAllowed label propagation and Kubernetes role aggregation labels
+# ClusterRole: Breakglass + custom AggregationLabels permutation
+# Tests breakglassAllowed label propagation and non-RBAC aggregation labels
 # in a single valid ClusterRoleDefinition.
 # -----------------------------------------------------------------------------
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
@@ -537,7 +537,7 @@ spec:
   scopeNamespaced: false
   breakglassAllowed: true
   aggregationLabels:
-    rbac.authorization.k8s.io/aggregate-to-view: "true"
+    custom.example.com/aggregate-to-monitoring: "true"
   restrictedApis: []
   restrictedResources: []
   restrictedVerbs: []

@@ -1397,7 +1397,7 @@ func TestEnsureRoleWithAggregationLabels(t *testing.T) {
 			TargetName:      "custom-viewer",
 			ScopeNamespaced: false,
 			AggregationLabels: map[string]string{
-				"rbac.authorization.k8s.io/aggregate-to-view": "true",
+				"custom.example.com/aggregate-to-monitoring": "true",
 			},
 		},
 	}
@@ -1414,9 +1414,106 @@ func TestEnsureRoleWithAggregationLabels(t *testing.T) {
 	// Verify the ClusterRole was created with aggregation labels merged in
 	cr := &rbacv1.ClusterRole{}
 	g.Expect(c.Get(ctx, client.ObjectKeyFromObject(&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "custom-viewer"}}), cr)).To(Succeed())
-	g.Expect(cr.Labels).To(HaveKeyWithValue("rbac.authorization.k8s.io/aggregate-to-view", "true"))
+	g.Expect(cr.Labels).To(HaveKeyWithValue("custom.example.com/aggregate-to-monitoring", "true"))
 	g.Expect(cr.Rules).To(HaveLen(1))
 	g.Expect(cr.AggregationRule).To(BeNil())
+}
+
+func TestEnsureRoleFiltersKubernetesRBACAggregationLabels(t *testing.T) {
+	ctx := context.Background()
+	g := NewWithT(t)
+
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+
+	rd := &authorizationv1alpha1.RoleDefinition{
+		TypeMeta: metav1.TypeMeta{APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: "RoleDefinition"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "unsafe-agg-labels-rd",
+			UID:  "unsafe-agg-labels-uid",
+			Labels: map[string]string{
+				"rbac.authorization.k8s.io/aggregate-to-admin": "true",
+				"custom.example.com/source-label":              "kept",
+			},
+		},
+		Spec: authorizationv1alpha1.RoleDefinitionSpec{
+			TargetRole:      authorizationv1alpha1.DefinitionClusterRole,
+			TargetName:      "unsafe-custom-viewer",
+			ScopeNamespaced: false,
+			AggregationLabels: map[string]string{
+				"rbac.authorization.k8s.io/aggregate-to-view": "true",
+				"custom.example.com/aggregate-to-monitoring":  "true",
+			},
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(rd).Build()
+	r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	rules := []rbacv1.PolicyRule{
+		{APIGroups: []string{""}, Resources: []string{"configmaps"}, Verbs: []string{"get", "list"}},
+	}
+	g.Expect(r.ensureRole(ctx, rd, rules)).To(Succeed())
+
+	cr := &rbacv1.ClusterRole{}
+	g.Expect(c.Get(ctx, client.ObjectKeyFromObject(&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "unsafe-custom-viewer"}}), cr)).To(Succeed())
+	g.Expect(cr.Labels).NotTo(HaveKey("rbac.authorization.k8s.io/aggregate-to-admin"))
+	g.Expect(cr.Labels).NotTo(HaveKey("rbac.authorization.k8s.io/aggregate-to-view"))
+	g.Expect(cr.Labels).To(HaveKeyWithValue("custom.example.com/source-label", "kept"))
+	g.Expect(cr.Labels).To(HaveKeyWithValue("custom.example.com/aggregate-to-monitoring", "true"))
+}
+
+func TestEnsureRolePrunesExistingKubernetesRBACAggregationLabels(t *testing.T) {
+	ctx := context.Background()
+	g := NewWithT(t)
+
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+
+	rd := &authorizationv1alpha1.RoleDefinition{
+		TypeMeta: metav1.TypeMeta{APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: "RoleDefinition"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "prune-unsafe-agg-labels-rd",
+			UID:  "prune-unsafe-agg-labels-uid",
+		},
+		Spec: authorizationv1alpha1.RoleDefinitionSpec{
+			TargetRole:      authorizationv1alpha1.DefinitionClusterRole,
+			TargetName:      "prune-unsafe-custom-viewer",
+			ScopeNamespaced: false,
+		},
+	}
+	controller := true
+	existing := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: rd.Spec.TargetName,
+			Labels: map[string]string{
+				"rbac.authorization.k8s.io/aggregate-to-admin": "true",
+				"custom.example.com/external":                  "kept",
+			},
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: authorizationv1alpha1.GroupVersion.String(),
+				Kind:       "RoleDefinition",
+				Name:       rd.Name,
+				UID:        rd.UID,
+				Controller: &controller,
+			}},
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(rd, existing).Build()
+	r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	rules := []rbacv1.PolicyRule{
+		{APIGroups: []string{""}, Resources: []string{"configmaps"}, Verbs: []string{"get", "list"}},
+	}
+	g.Expect(r.ensureRole(ctx, rd, rules)).To(Succeed())
+
+	cr := &rbacv1.ClusterRole{}
+	g.Expect(c.Get(ctx, client.ObjectKeyFromObject(&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: rd.Spec.TargetName}}), cr)).To(Succeed())
+	g.Expect(cr.Labels).NotTo(HaveKey("rbac.authorization.k8s.io/aggregate-to-admin"))
+	g.Expect(cr.Labels).To(HaveKeyWithValue("custom.example.com/external", "kept"))
 }
 
 func TestEnsureRoleWithAggregateFrom(t *testing.T) {
@@ -1436,7 +1533,10 @@ func TestEnsureRoleWithAggregateFrom(t *testing.T) {
 			ScopeNamespaced: false,
 			AggregateFrom: &rbacv1.AggregationRule{
 				ClusterRoleSelectors: []metav1.LabelSelector{
-					{MatchLabels: map[string]string{"t-caas.telekom.com/aggregate-to-tenant-admin": "true"}},
+					{MatchLabels: map[string]string{
+						"t-caas.telekom.com/rbac-fragment":   "true",
+						"t-caas.telekom.com/aggregate-scope": "tenant-admin",
+					}},
 				},
 			},
 		},
@@ -1456,7 +1556,10 @@ func TestEnsureRoleWithAggregateFrom(t *testing.T) {
 	g.Expect(cr.AggregationRule).NotTo(BeNil())
 	g.Expect(cr.AggregationRule.ClusterRoleSelectors).To(HaveLen(1))
 	g.Expect(cr.AggregationRule.ClusterRoleSelectors[0].MatchLabels).To(
-		HaveKeyWithValue("t-caas.telekom.com/aggregate-to-tenant-admin", "true"),
+		HaveKeyWithValue("t-caas.telekom.com/rbac-fragment", "true"),
+	)
+	g.Expect(cr.AggregationRule.ClusterRoleSelectors[0].MatchLabels).To(
+		HaveKeyWithValue("t-caas.telekom.com/aggregate-scope", "tenant-admin"),
 	)
 }
 
@@ -1483,7 +1586,10 @@ func TestEnsureRole_TransitionFromRulesToAggregateFrom(t *testing.T) {
 			ScopeNamespaced: false,
 			AggregateFrom: &rbacv1.AggregationRule{
 				ClusterRoleSelectors: []metav1.LabelSelector{
-					{MatchLabels: map[string]string{"custom/aggregate-to-transition": "true"}},
+					{MatchLabels: map[string]string{
+						"t-caas.telekom.com/rbac-fragment":   "true",
+						"t-caas.telekom.com/aggregate-scope": "transition",
+					}},
 				},
 			},
 		},

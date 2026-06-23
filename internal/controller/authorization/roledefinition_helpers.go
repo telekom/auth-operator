@@ -45,9 +45,14 @@ func ownerRefForRoleDefinition(roleDefinition *authorizationv1alpha1.RoleDefinit
 }
 
 func buildRoleDefinitionResourceLabels(roleDefinition *authorizationv1alpha1.RoleDefinition) map[string]string {
-	labels := helpers.BuildResourceLabels(roleDefinition.Labels)
-	delete(labels, authorizationv1alpha1.BreakglassCompatibleLabel)
-	return labels
+	sourceLabels := make(map[string]string, len(roleDefinition.Labels))
+	for k, v := range roleDefinition.Labels {
+		if k == authorizationv1alpha1.BreakglassCompatibleLabel || isForbiddenRoleDefinitionAggregationLabel(k) {
+			continue
+		}
+		sourceLabels[k] = v
+	}
+	return helpers.BuildResourceLabels(sourceLabels)
 }
 
 // markStalled marks the RoleDefinition as stalled with the given error (kstatus pattern).
@@ -288,6 +293,9 @@ func (r *RoleDefinitionReconciler) ensureRole(
 	mergedLabels := buildRoleDefinitionResourceLabels(roleDefinition)
 	if roleDefinition.Spec.TargetRole == authorizationv1alpha1.DefinitionClusterRole {
 		for k, v := range roleDefinition.Spec.AggregationLabels {
+			if isForbiddenRoleDefinitionAggregationLabel(k) {
+				continue
+			}
 			mergedLabels[k] = v
 		}
 	}
@@ -345,7 +353,7 @@ func (r *RoleDefinitionReconciler) ensureRole(
 		// RoleDefinitions own their generated RBAC resources end-to-end. Force
 		// ownership here so drift correction can reclaim fields modified by
 		// external managers while shared SSA helpers remain non-forcing by default.
-		result, err := pkgssa.PatchApplyClusterRole(ctx, r.client, ac, client.ForceOwnership)
+		result, err := pkgssa.PatchApplyClusterRolePruningLabels(ctx, r.client, ac, isForbiddenRoleDefinitionAggregationLabel, client.ForceOwnership)
 		if err != nil {
 			logger.Error(err, "Failed to apply ClusterRole via SSA",
 				"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
@@ -399,6 +407,10 @@ func (r *RoleDefinitionReconciler) ensureRole(
 		"Ensured target resource %s %s", roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetName)
 
 	return nil
+}
+
+func isForbiddenRoleDefinitionAggregationLabel(key string) bool {
+	return strings.HasPrefix(key, rbacv1.GroupName+"/aggregate-to-")
 }
 
 // checkRoleOwnership verifies that the target role (if it already exists) is not controlled
