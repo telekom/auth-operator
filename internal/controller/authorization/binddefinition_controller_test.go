@@ -2123,9 +2123,8 @@ func TestIsSAReferencedByOtherBindDefs(t *testing.T) {
 	})
 }
 
-// TestSANotOwnedByThisBindDef verifies that SSA applies even when another owner
-// reference already exists. With SSA + ForceOwnership, the operator's fields
-// are set regardless of existing ownership.
+// TestSANotOwnedByThisBindDef verifies that SSA applies even when another
+// BindDefinition owner reference already exists.
 func TestSANotOwnedByThisBindDef(t *testing.T) {
 	ctx := context.Background()
 
@@ -2183,6 +2182,61 @@ func TestSANotOwnedByThisBindDef(t *testing.T) {
 		err = c.Get(ctx, types.NamespacedName{Name: "contested-sa", Namespace: "test-ns"}, sa)
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(sa.Labels).To(HaveKeyWithValue(helpers.ManagedByLabelStandard, helpers.ManagedByValue))
+	})
+
+	t.Run("merges source names when another BindDefinition owns the annotation field", func(t *testing.T) {
+		g := NewWithT(t)
+
+		ns := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-ns"},
+			Status:     corev1.NamespaceStatus{Phase: corev1.NamespaceActive},
+		}
+
+		bindDef := &authorizationv1alpha1.BindDefinition{
+			TypeMeta: metav1.TypeMeta{
+				APIVersion: authorizationv1alpha1.GroupVersion.String(),
+				Kind:       authorizationv1alpha1.BindDefinitionKind,
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "my-bd",
+				UID:  "my-uid-67890",
+			},
+			Spec: authorizationv1alpha1.BindDefinitionSpec{
+				TargetName: "test",
+				Subjects: []rbacv1.Subject{
+					{Kind: "ServiceAccount", Name: "shared-sa", Namespace: "test-ns"},
+				},
+				AutomountServiceAccountToken: boolPtr(false),
+			},
+		}
+
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ns, bindDef).Build()
+		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
+
+		otherBDOwnerRef := pkgssa.OwnerReference(
+			authorizationv1alpha1.GroupVersion.String(), authorizationv1alpha1.BindDefinitionKind,
+			"other-bd", "other-uid-12345", false, false,
+		)
+		otherBDSAAC := pkgssa.ServiceAccountWith("shared-sa", "test-ns",
+			map[string]string{helpers.ManagedByLabelStandard: helpers.ManagedByValue}, false).
+			WithOwnerReferences(otherBDOwnerRef).
+			WithAnnotations(helpers.BuildManagedSAAnnotations("other-bd"))
+		_, seedErr := pkgssa.PatchApplyServiceAccount(ctx, c, otherBDSAAC, pkgssa.FieldOwnerFor("other-bd", authorizationv1alpha1.BindDefinitionKind))
+		g.Expect(seedErr).NotTo(HaveOccurred())
+
+		err := r.applyServiceAccount(ctx, bindDef, bindDef.Spec.Subjects[0], false)
+		g.Expect(err).NotTo(HaveOccurred())
+
+		sa := &corev1.ServiceAccount{}
+		err = c.Get(ctx, types.NamespacedName{Name: "shared-sa", Namespace: "test-ns"}, sa)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(sa.Annotations).To(HaveKeyWithValue(helpers.SourceNamesAnnotation, "my-bd,other-bd"))
+		g.Expect(sa.OwnerReferences).To(ContainElement(WithTransform(func(ref metav1.OwnerReference) string {
+			return ref.Name
+		}, Equal("other-bd"))))
+		g.Expect(sa.OwnerReferences).To(ContainElement(WithTransform(func(ref metav1.OwnerReference) string {
+			return ref.Name
+		}, Equal("my-bd"))))
 	})
 }
 

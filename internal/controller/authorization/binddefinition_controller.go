@@ -1004,6 +1004,8 @@ func (r *BindDefinitionReconciler) validateServiceAccountNamespace(
 // Uses per-BD FieldOwner to ensure multiple BDs can independently manage ownerReferences
 // on shared ServiceAccounts without overwriting each other's entries.
 // The source-names annotation tracks all BDs managing this SA (comma-separated).
+// It is patched separately from SSA so multiple BindDefinitions do not conflict
+// over the same scalar annotation field.
 func (r *BindDefinitionReconciler) applyServiceAccount(
 	ctx context.Context,
 	bindDef *authorizationv1alpha1.BindDefinition,
@@ -1012,27 +1014,18 @@ func (r *BindDefinitionReconciler) applyServiceAccount(
 ) error {
 	logger := log.FromContext(ctx)
 
-	// Read existing SA to merge source-names annotation (if SA already exists)
 	existingSA := &corev1.ServiceAccount{}
-	var sourceNames string
 	err := r.client.Get(ctx, types.NamespacedName{Name: subject.Name, Namespace: subject.Namespace}, existingSA)
-	switch {
-	case err == nil:
-		// SA exists - merge our BD name into existing source-names
-		existing := existingSA.Annotations[helpers.SourceNamesAnnotation]
-		sourceNames = helpers.MergeSourceNames(existing, bindDef.Name)
-	case apierrors.IsNotFound(err):
-		// New SA - just our BD name
-		sourceNames = bindDef.Name
-	default:
-		// Unexpected error
+	if err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("get existing ServiceAccount %s/%s: %w", subject.Namespace, subject.Name, err)
 	}
 
 	ac := pkgssa.ServiceAccountWith(subject.Name, subject.Namespace,
 		helpers.BuildResourceLabels(bindDef.Labels), automountToken).
 		WithOwnerReferences(saOwnerRefForBindDefinition(bindDef)).
-		WithAnnotations(helpers.BuildManagedSAAnnotations(sourceNames))
+		WithAnnotations(map[string]string{
+			helpers.SourceKindAnnotation: authorizationv1alpha1.BindDefinitionKind,
+		})
 
 	// Derive the SSA field manager via the shared FieldOwnerFor helper, scoped
 	// by this BindDefinition's kind/name so separate owners do not take
@@ -1048,13 +1041,19 @@ func (r *BindDefinitionReconciler) applyServiceAccount(
 
 	logger.V(1).Info("Ensured ServiceAccount",
 		"bindDefinitionName", bindDef.Name, "serviceAccount", subject.Name, "namespace", subject.Namespace,
-		"sourceNames", sourceNames, "result", result)
+		"result", result)
 	if result == pkgssa.PatchApplyResultSkipped {
 		metrics.RBACResourcesSkipped.WithLabelValues(metrics.ResourceServiceAccount).Inc()
 	} else {
 		metrics.RBACResourcesApplied.WithLabelValues(metrics.ResourceServiceAccount).Inc()
 		r.recorder.Eventf(bindDef, nil, corev1.EventTypeNormal, authorizationv1alpha1.EventReasonUpdate, authorizationv1alpha1.EventActionReconcile,
 			"Applied resource ServiceAccount/%s in namespace %s", subject.Name, subject.Namespace)
+	}
+
+	if err := r.addManagedSAReference(ctx, subject.Namespace, subject.Name, bindDef.Name); err != nil {
+		logger.Error(err, "Failed to update managed ServiceAccount source names",
+			"bindDefinitionName", bindDef.Name, "serviceAccount", subject.Name, "namespace", subject.Namespace)
+		return err
 	}
 
 	return nil

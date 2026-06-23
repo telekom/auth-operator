@@ -484,6 +484,52 @@ func (r *BindDefinitionReconciler) addExternalSAReference(
 	return nil
 }
 
+// addManagedSAReference merges the BindDefinition name into the managed
+// ServiceAccount source-names annotation without taking SSA ownership of that
+// shared scalar field.
+func (r *BindDefinitionReconciler) addManagedSAReference(
+	ctx context.Context,
+	saNamespace, saName, bdName string,
+) error {
+	logger := log.FromContext(ctx)
+	patched := false
+
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		fresh := &corev1.ServiceAccount{}
+		if getErr := r.client.Get(ctx, types.NamespacedName{Name: saName, Namespace: saNamespace}, fresh); getErr != nil {
+			return getErr
+		}
+
+		orig := fresh.DeepCopy()
+		if fresh.Annotations == nil {
+			fresh.Annotations = make(map[string]string)
+		}
+
+		oldSourceNames := fresh.Annotations[helpers.SourceNamesAnnotation]
+		newSourceNames := helpers.MergeSourceNames(oldSourceNames, bdName)
+		if newSourceNames == oldSourceNames &&
+			fresh.Annotations[helpers.SourceKindAnnotation] == authorizationv1alpha1.BindDefinitionKind {
+			return nil
+		}
+
+		fresh.Annotations[helpers.SourceKindAnnotation] = authorizationv1alpha1.BindDefinitionKind
+		fresh.Annotations[helpers.SourceNamesAnnotation] = newSourceNames
+		if patchErr := r.client.Patch(ctx, fresh, sigs_client.MergeFromWithOptions(orig, sigs_client.MergeFromWithOptimisticLock{})); patchErr != nil {
+			return patchErr
+		}
+		patched = true
+		return nil
+	}); err != nil {
+		return fmt.Errorf("patch ServiceAccount %s/%s source-names annotation: %w", saNamespace, saName, err)
+	}
+
+	if patched {
+		logger.V(2).Info("Updated managed ServiceAccount source-names annotation",
+			"serviceAccount", saName, "namespace", saNamespace, "bindDefinition", bdName)
+	}
+	return nil
+}
+
 // removeExternalSAReference removes the BindDefinition name from the referenced-by annotation
 // on an external ServiceAccount. If no references remain, the annotation is removed entirely.
 func (r *BindDefinitionReconciler) removeExternalSAReference(
