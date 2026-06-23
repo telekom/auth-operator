@@ -637,9 +637,6 @@ kubectl apply -f https://raw.githubusercontent.com/telekom/auth-operator/main/co
 kubectl apply -f https://raw.githubusercontent.com/telekom/auth-operator/main/config/crd/bases/authorization.t-caas.telekom.com_restrictedroledefinitions.yaml
 kubectl apply -f https://raw.githubusercontent.com/telekom/auth-operator/main/config/crd/bases/authorization.t-caas.telekom.com_restrictedbinddefinitions.yaml
 kubectl apply -f https://raw.githubusercontent.com/telekom/auth-operator/main/config/crd/bases/authorization.t-caas.telekom.com_webhookauthorizers.yaml
-kubectl apply -f https://raw.githubusercontent.com/telekom/auth-operator/main/config/crd/bases/authorization.t-caas.telekom.com_rbacpolicies.yaml
-kubectl apply -f https://raw.githubusercontent.com/telekom/auth-operator/main/config/crd/bases/authorization.t-caas.telekom.com_restrictedroledefinitions.yaml
-kubectl apply -f https://raw.githubusercontent.com/telekom/auth-operator/main/config/crd/bases/authorization.t-caas.telekom.com_restrictedbinddefinitions.yaml
 ```
 
 ### Rollback
