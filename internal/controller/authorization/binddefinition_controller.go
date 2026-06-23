@@ -115,6 +115,7 @@ var ErrMissingRoleRefs = errors.New("missing role references")
 // BindDefinitionReconciler defines the reconciler for BindDefinition and reconciles a BindDefinition object.
 type BindDefinitionReconciler struct {
 	client                client.Client
+	reader                client.Reader
 	scheme                *runtime.Scheme
 	RoleBindingTerminator *RoleBindingTerminator
 	recorder              events.EventRecorder
@@ -141,6 +142,7 @@ func NewBindDefinitionReconciler(
 
 	r := &BindDefinitionReconciler{
 		client:                cachedClient,
+		reader:                cachedClient,
 		scheme:                scheme,
 		recorder:              recorder,
 		RoleBindingTerminator: rbTerminator,
@@ -160,6 +162,9 @@ func (r *BindDefinitionReconciler) SetupWithManager(mgr ctrl.Manager, concurrenc
 	}
 	if err := r.RoleBindingTerminator.SetupWithManager(mgr, concurrency); err != nil {
 		return fmt.Errorf("unable to set up RoleBinding terminator: %w", err)
+	}
+	if r.reader == nil || r.reader == r.client {
+		r.reader = mgr.GetAPIReader()
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		// control BindDefinitions

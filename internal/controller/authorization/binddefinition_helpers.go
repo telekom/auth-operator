@@ -493,10 +493,14 @@ func (r *BindDefinitionReconciler) addManagedSAReference(
 ) error {
 	logger := log.FromContext(ctx)
 	patched := false
+	reader := r.reader
+	if reader == nil {
+		reader = r.client
+	}
 
 	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		fresh := &corev1.ServiceAccount{}
-		if getErr := r.client.Get(ctx, types.NamespacedName{Name: saName, Namespace: saNamespace}, fresh); getErr != nil {
+		if getErr := reader.Get(ctx, types.NamespacedName{Name: saName, Namespace: saNamespace}, fresh); getErr != nil {
 			return getErr
 		}
 
