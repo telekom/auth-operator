@@ -487,6 +487,7 @@ func TestRBD_HasOwnerRef(t *testing.T) {
 			},
 		},
 	}
+	owned.OwnerReferences[0].Controller = nil
 
 	forgedUIDOnly := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
@@ -496,6 +497,14 @@ func TestRBD_HasOwnerRef(t *testing.T) {
 			},
 		},
 	}
+	controllerOwned := owned.DeepCopy()
+	controllerOwned.Name = "controller-owned"
+	controller := true
+	controllerOwned.OwnerReferences[0].Controller = &controller
+	sharedOwned := owned.DeepCopy()
+	sharedOwned.Name = "shared-owned"
+	shared := false
+	sharedOwned.OwnerReferences[0].Controller = &shared
 
 	notOwned := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
@@ -503,6 +512,28 @@ func TestRBD_HasOwnerRef(t *testing.T) {
 			OwnerReferences: []metav1.OwnerReference{
 				restrictedTestOwnerRef(authorizationv1alpha1.RestrictedBindDefinitionKind, "other-owner", "uid-other"),
 			},
+		},
+	}
+	wrongKind := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "wrong-kind",
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: authorizationv1alpha1.GroupVersion.String(),
+				Kind:       authorizationv1alpha1.RestrictedRoleDefinitionKind,
+				Name:       "owner",
+				UID:        "uid-123",
+			}},
+		},
+	}
+	wrongName := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "wrong-name",
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: authorizationv1alpha1.GroupVersion.String(),
+				Kind:       authorizationv1alpha1.RestrictedBindDefinitionKind,
+				Name:       "other-owner",
+				UID:        "uid-123",
+			}},
 		},
 	}
 
@@ -514,7 +545,14 @@ func TestRBD_HasOwnerRef(t *testing.T) {
 
 	g.Expect(hasOwnerRef(owned, owner)).To(gomega.BeTrue())
 	g.Expect(hasOwnerRef(forgedUIDOnly, owner)).To(gomega.BeFalse())
+	g.Expect(hasControllerOwnerRef(owned, owner)).To(gomega.BeFalse())
+	g.Expect(hasControllerOwnerRef(controllerOwned, owner)).To(gomega.BeTrue())
+	g.Expect(hasOwnerRef(sharedOwned, owner)).To(gomega.BeTrue())
+	g.Expect(hasControllerOwnerRef(sharedOwned, owner)).To(gomega.BeFalse())
 	g.Expect(hasOwnerRef(notOwned, owner)).To(gomega.BeFalse())
+	g.Expect(hasControllerOwnerRef(notOwned, owner)).To(gomega.BeFalse())
+	g.Expect(hasOwnerRef(wrongKind, owner)).To(gomega.BeFalse())
+	g.Expect(hasOwnerRef(wrongName, owner)).To(gomega.BeFalse())
 	g.Expect(hasOwnerRef(noRefs, owner)).To(gomega.BeFalse())
 }
 
@@ -2625,16 +2663,9 @@ func TestRBD_Reconcile_DeleteWithDeprovisionError(t *testing.T) {
 	// CRB that will fail to delete.
 	crb := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:   "delete-err-target-view-binding",
-			Labels: map[string]string{helpers.ManagedByLabelStandard: helpers.ManagedByValue},
-			OwnerReferences: []metav1.OwnerReference{
-				{
-					APIVersion: authorizationv1alpha1.GroupVersion.String(),
-					Kind:       "RestrictedBindDefinition",
-					Name:       "delete-err-rbd",
-					UID:        rbd.UID,
-				},
-			},
+			Name:            "delete-err-target-view-binding",
+			Labels:          map[string]string{helpers.ManagedByLabelStandard: helpers.ManagedByValue},
+			OwnerReferences: []metav1.OwnerReference{restrictedTestOwnerRef(authorizationv1alpha1.RestrictedBindDefinitionKind, rbd.Name, rbd.UID)},
 		},
 	}
 

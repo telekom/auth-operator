@@ -1018,7 +1018,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdListOwnedClusterRoleBindings(
 	}
 	owned := make([]rbacv1.ClusterRoleBinding, 0, len(crbList.Items))
 	for i := range crbList.Items {
-		if hasOwnerRef(&crbList.Items[i], rbd) {
+		if hasControllerOwnerRef(&crbList.Items[i], rbd) {
 			owned = append(owned, crbList.Items[i])
 		}
 	}
@@ -1035,7 +1035,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdListOwnedRoleBindings(
 	}
 	owned := make([]rbacv1.RoleBinding, 0, len(rbList.Items))
 	for i := range rbList.Items {
-		if hasOwnerRef(&rbList.Items[i], rbd) {
+		if hasControllerOwnerRef(&rbList.Items[i], rbd) {
 			owned = append(owned, rbList.Items[i])
 		}
 	}
@@ -1052,7 +1052,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdListOwnedServiceAccounts(
 	}
 	owned := make([]corev1.ServiceAccount, 0, len(saList.Items))
 	for i := range saList.Items {
-		if hasOwnerRef(&saList.Items[i], rbd) {
+		if hasControllerOwnerRef(&saList.Items[i], rbd) {
 			owned = append(owned, saList.Items[i])
 		}
 	}
@@ -1239,7 +1239,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdClassifyExistingServiceAccount(
 		return true, false, key
 	}
 
-	if hasOwnerRef(existing, rbd) {
+	if hasControllerOwnerRef(existing, rbd) {
 		return false, true, ""
 	}
 
@@ -1346,7 +1346,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdDeleteOwnedRoleBindingOnRoleRefC
 	if err := r.ownershipReader().Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, existing); err != nil {
 		return client.IgnoreNotFound(err)
 	}
-	if !hasOwnerRef(existing, rbd) || existing.RoleRef == desiredRoleRef {
+	if !hasControllerOwnerRef(existing, rbd) || existing.RoleRef == desiredRoleRef {
 		return nil
 	}
 	if err := deleteClient.Delete(ctx, existing); err != nil && !apierrors.IsNotFound(err) {
@@ -1370,7 +1370,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdClearClusterRoleBindingSubjectsI
 	if err := r.ownershipReader().Get(ctx, types.NamespacedName{Name: name}, existing); err != nil {
 		return client.IgnoreNotFound(err)
 	}
-	if !hasOwnerRef(existing, rbd) {
+	if !hasControllerOwnerRef(existing, rbd) {
 		return nil
 	}
 	if len(existing.Subjects) == 0 {
@@ -1399,7 +1399,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdClearRoleBindingSubjectsIfEmpty(
 	if err := r.ownershipReader().Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, existing); err != nil {
 		return client.IgnoreNotFound(err)
 	}
-	if !hasOwnerRef(existing, rbd) {
+	if !hasControllerOwnerRef(existing, rbd) {
 		return nil
 	}
 	if len(existing.Subjects) == 0 {

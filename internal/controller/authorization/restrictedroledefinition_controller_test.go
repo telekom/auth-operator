@@ -232,7 +232,7 @@ func TestRRD_Reconcile_DeletingPolicyIsUnavailable(t *testing.T) {
 			Finalizers:        []string{"test.finalizer"},
 		},
 		Spec: authorizationv1alpha1.RBACPolicySpec{
-			AppliesTo: authorizationv1alpha1.PolicyScope{Namespaces: []string{"default"}},
+			AppliesTo: authorizationv1alpha1.PolicyScope{Namespaces: []string{"*"}},
 			RoleLimits: &authorizationv1alpha1.RoleLimits{
 				AllowClusterRoles: true,
 			},
@@ -685,13 +685,8 @@ func TestRRD_Deprovision_UsesProvidedDeleteClient(t *testing.T) {
 
 	cr := &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "delete-client-role",
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: authorizationv1alpha1.GroupVersion.String(),
-				Kind:       authorizationv1alpha1.RestrictedRoleDefinitionKind,
-				Name:       "delete-client-rrd",
-				UID:        "delete-client-rrd-uid",
-			}},
+			Name:            "delete-client-role",
+			OwnerReferences: []metav1.OwnerReference{restrictedTestOwnerRef(authorizationv1alpha1.RestrictedRoleDefinitionKind, "delete-client-rrd", "delete-client-rrd-uid")},
 		},
 	}
 	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
@@ -1058,13 +1053,8 @@ func TestRRD_EnsureRole_ClusterRoleClearsStaleRulesWhenDesiredRulesEmpty(t *test
 	}
 	existing := &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "clear-cluster-role",
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: authorizationv1alpha1.GroupVersion.String(),
-				Kind:       authorizationv1alpha1.RestrictedRoleDefinitionKind,
-				Name:       rrd.Name,
-				UID:        rrd.UID,
-			}},
+			Name:            "clear-cluster-role",
+			OwnerReferences: []metav1.OwnerReference{restrictedTestOwnerRef(authorizationv1alpha1.RestrictedRoleDefinitionKind, rrd.Name, rrd.UID)},
 		},
 		Rules: []rbacv1.PolicyRule{
 			{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"get"}},
@@ -1137,14 +1127,9 @@ func TestRRD_EnsureRole_NamespacedRoleClearsStaleRulesWhenDesiredRulesEmpty(t *t
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "clear-ns"}}
 	existing := &rbacv1.Role{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "clear-role",
-			Namespace: "clear-ns",
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: authorizationv1alpha1.GroupVersion.String(),
-				Kind:       authorizationv1alpha1.RestrictedRoleDefinitionKind,
-				Name:       rrd.Name,
-				UID:        rrd.UID,
-			}},
+			Name:            "clear-role",
+			Namespace:       "clear-ns",
+			OwnerReferences: []metav1.OwnerReference{restrictedTestOwnerRef(authorizationv1alpha1.RestrictedRoleDefinitionKind, rrd.Name, rrd.UID)},
 		},
 		Rules: []rbacv1.PolicyRule{
 			{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"get"}},

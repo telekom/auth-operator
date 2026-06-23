@@ -372,6 +372,9 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, fmt.Errorf("fetch RBACPolicy %s: %w", rrd.Spec.PolicyRef.Name, err)
 	}
+	if rbacPolicy.GetDeletionTimestamp() != nil {
+		return r.rrdHandleDeletingPolicy(ctx, rrd, rbacPolicy)
+	}
 
 	applyClient, impersonatedUser, err := r.rrdResolveApplyClient(rbacPolicy)
 	if err != nil {
@@ -469,7 +472,40 @@ func (r *RestrictedRoleDefinitionReconciler) rrdHandleMissingPolicy(
 		return ctrl.Result{}, fmt.Errorf("deprovision RestrictedRoleDefinition %s after missing policy %s: %w", rrd.Name, rrd.Spec.PolicyRef.Name, err)
 	}
 
-	r.rrdApplyStatusAndMarkStalled(ctx, rrd, "policy not found")
+	if err := r.rrdApplyStatusAndMarkStalled(ctx, rrd, "policy not found"); err != nil {
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
+		return ctrl.Result{}, fmt.Errorf("apply stalled status for RestrictedRoleDefinition %s after missing policy %s: %w", rrd.Name, rrd.Spec.PolicyRef.Name, err)
+	}
+	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultDegraded).Inc()
+	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
+}
+
+func (r *RestrictedRoleDefinitionReconciler) rrdHandleDeletingPolicy(
+	ctx context.Context,
+	rrd *authorizationv1alpha1.RestrictedRoleDefinition,
+	rbacPolicy *authorizationv1alpha1.RBACPolicy,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	logger.Info("referenced RBACPolicy is deleting", "name", rrd.Name, "policyRef", rbacPolicy.Name)
+	conditions.MarkFalse(rrd, authorizationv1alpha1.PolicyCompliantCondition, rrd.Generation,
+		authorizationv1alpha1.PolicyCompliantReasonPolicyDeleting, authorizationv1alpha1.PolicyCompliantMessagePolicyDeleting, rbacPolicy.Name)
+	rrd.Status.PolicyViolations = []string{fmt.Sprintf("policy %q is being deleted", rbacPolicy.Name)}
+	r.recorder.Eventf(rrd, nil, corev1.EventTypeWarning,
+		authorizationv1alpha1.EventReasonPolicyViolation, authorizationv1alpha1.EventActionReconcile,
+		"Referenced RBACPolicy %q is being deleted", rbacPolicy.Name)
+
+	if err := r.rrdDeprovision(ctx, rrd, r.client); err != nil {
+		r.rrdMarkStalled(ctx, rrd, err)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
+		return ctrl.Result{}, fmt.Errorf("deprovision RestrictedRoleDefinition %s after deleting policy %s: %w", rrd.Name, rbacPolicy.Name, err)
+	}
+	if err := r.rrdApplyStatusAndMarkStalled(ctx, rrd, "policy deleting"); err != nil {
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
+		return ctrl.Result{}, fmt.Errorf("apply stalled status for RestrictedRoleDefinition %s after deleting policy %s: %w", rrd.Name, rbacPolicy.Name, err)
+	}
 	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultDegraded).Inc()
 	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
 }
@@ -719,7 +755,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdNormalizeOwnedClusterRoleMetadat
 	if err := r.ownershipReader().Get(ctx, client.ObjectKey{Name: name}, existing); err != nil {
 		return client.IgnoreNotFound(err)
 	}
-	if !hasOwnerRef(existing, rrd) {
+	if !hasControllerOwnerRef(existing, rrd) {
 		return nil
 	}
 
@@ -779,7 +815,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdClearClusterRoleRulesIfEmpty(
 	if err := r.ownershipReader().Get(ctx, client.ObjectKey{Name: name}, existing); err != nil {
 		return client.IgnoreNotFound(err)
 	}
-	if !hasOwnerRef(existing, rrd) {
+	if !hasControllerOwnerRef(existing, rrd) {
 		return nil
 	}
 	if len(existing.Rules) == 0 {
@@ -808,7 +844,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdClearRoleRulesIfEmpty(
 	if err := r.ownershipReader().Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, existing); err != nil {
 		return client.IgnoreNotFound(err)
 	}
-	if !hasOwnerRef(existing, rrd) {
+	if !hasControllerOwnerRef(existing, rrd) {
 		return nil
 	}
 	if len(existing.Rules) == 0 {
@@ -852,7 +888,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdDeprovision(
 		}
 		return fmt.Errorf("get %s %s before deprovision: %w", rrd.Spec.TargetRole, rrd.Spec.TargetName, err)
 	}
-	if !hasOwnerRef(role, rrd) {
+	if !hasControllerOwnerRef(role, rrd) {
 		logger.Info("skipping deprovision of target role because it is not owned by this RestrictedRoleDefinition",
 			"targetRole", rrd.Spec.TargetRole,
 			"targetName", rrd.Spec.TargetName,
@@ -934,7 +970,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdApplyStatusAndMarkStalled(
 	ctx context.Context,
 	rrd *authorizationv1alpha1.RestrictedRoleDefinition,
 	msg string,
-) {
+) error {
 	logger := log.FromContext(ctx)
 	conditions.MarkStalled(rrd, rrd.Generation,
 		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, msg)
@@ -942,7 +978,9 @@ func (r *RestrictedRoleDefinitionReconciler) rrdApplyStatusAndMarkStalled(
 	rrd.Status.ObservedGeneration = rrd.Generation
 	if err := ssa.ApplyRestrictedRoleDefinitionStatus(ctx, r.client, rrd); err != nil {
 		logger.Error(err, "failed to apply status via SSA", "name", rrd.Name)
+		return fmt.Errorf("apply stalled status: %w", err)
 	}
+	return nil
 }
 
 func (r *RestrictedRoleDefinitionReconciler) rrdLogApplyIdentity(
