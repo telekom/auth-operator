@@ -233,10 +233,91 @@ func requestFromAdmissionContext(ctx context.Context) (admission.Request, bool) 
 	return req, true
 }
 
-func metadataUpdateRequiresDefaultPolicy(oldObj, newObj client.Object) bool {
-	return !reflect.DeepEqual(oldObj.GetLabels(), newObj.GetLabels()) ||
+func metadataUpdateRequiresDefaultPolicy(ctx context.Context, oldObj, newObj client.Object) bool {
+	if !reflect.DeepEqual(oldObj.GetLabels(), newObj.GetLabels()) ||
 		!reflect.DeepEqual(oldObj.GetAnnotations(), newObj.GetAnnotations()) ||
-		!reflect.DeepEqual(oldObj.GetOwnerReferences(), newObj.GetOwnerReferences())
+		!reflect.DeepEqual(oldObj.GetOwnerReferences(), newObj.GetOwnerReferences()) {
+		return true
+	}
+
+	if reflect.DeepEqual(oldObj.GetFinalizers(), newObj.GetFinalizers()) {
+		return false
+	}
+	return !operatorFinalizerUpdateAllowed(ctx, oldObj, newObj)
+}
+
+func operatorFinalizerUpdateAllowed(ctx context.Context, oldObj, newObj client.Object) bool {
+	finalizer, ok := managedFinalizerForObject(newObj)
+	if !ok {
+		return false
+	}
+	if !finalizerSetOnlyToggles(oldObj.GetFinalizers(), newObj.GetFinalizers(), finalizer) {
+		return false
+	}
+
+	req, reqFound := requestFromAdmissionContext(ctx)
+	if !reqFound {
+		return false
+	}
+	return isAuthOperatorControllerServiceAccount(req.UserInfo.Username)
+}
+
+func managedFinalizerForObject(obj client.Object) (string, bool) {
+	switch obj.(type) {
+	case *RestrictedBindDefinition:
+		return RestrictedBindDefinitionFinalizer, true
+	case *RestrictedRoleDefinition:
+		return RestrictedRoleDefinitionFinalizer, true
+	default:
+		return "", false
+	}
+}
+
+func finalizerSetOnlyToggles(oldFinalizers, newFinalizers []string, target string) bool {
+	oldSet := stringSet(oldFinalizers)
+	newSet := stringSet(newFinalizers)
+	changedTarget := false
+
+	for finalizer := range oldSet {
+		if _, exists := newSet[finalizer]; exists {
+			continue
+		}
+		if finalizer != target {
+			return false
+		}
+		changedTarget = true
+	}
+	for finalizer := range newSet {
+		if _, exists := oldSet[finalizer]; exists {
+			continue
+		}
+		if finalizer != target {
+			return false
+		}
+		changedTarget = true
+	}
+
+	return changedTarget
+}
+
+func stringSet(values []string) map[string]struct{} {
+	result := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		result[value] = struct{}{}
+	}
+	return result
+}
+
+func isAuthOperatorControllerServiceAccount(username string) bool {
+	sa := parseRequesterServiceAccount(username)
+	if !sa.IsServiceAccount {
+		return false
+	}
+	if sa.Namespace == "auth-operator-system" && sa.Name == "manager" {
+		return true
+	}
+	return strings.HasSuffix(sa.Name, "-controller-manager") ||
+		(strings.Contains(sa.Name, "auth-operator") && strings.HasSuffix(sa.Name, "-manager"))
 }
 
 func validateDefaultPolicyForMetadataUpdate(
@@ -246,7 +327,7 @@ func validateDefaultPolicyForMetadataUpdate(
 	objName, selectedPolicy string,
 	oldObj, newObj client.Object,
 ) error {
-	if !metadataUpdateRequiresDefaultPolicy(oldObj, newObj) {
+	if !metadataUpdateRequiresDefaultPolicy(ctx, oldObj, newObj) {
 		return nil
 	}
 	return validateDefaultPolicyForRequester(ctx, c, groupKind, objName, selectedPolicy)

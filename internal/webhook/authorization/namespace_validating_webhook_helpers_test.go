@@ -558,7 +558,7 @@ func TestAuthorizeViaBindDefinitions(t *testing.T) {
 			RoleBindings: []authorizationv1alpha1.NamespaceBinding{{
 				ClusterRoleRefs: []string{"admin"},
 				NamespaceSelector: []metav1.LabelSelector{
-					{MatchLabels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"}},
+					{MatchLabels: map[string]string{authorizationv1alpha1.LabelKeyTenant: "tenant-a"}},
 				},
 			}},
 		},
@@ -625,7 +625,7 @@ func TestAuthorizeViaBindDefinitions(t *testing.T) {
 					RoleBindings: []authorizationv1alpha1.NamespaceBinding{{
 						ClusterRoleRefs: []string{"admin"},
 						NamespaceSelector: []metav1.LabelSelector{
-							{MatchLabels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"}},
+							{MatchLabels: map[string]string{authorizationv1alpha1.LabelKeyTenant: "tenant-a"}},
 						},
 					}},
 				},
@@ -637,6 +637,34 @@ func TestAuthorizeViaBindDefinitions(t *testing.T) {
 				authorizationv1alpha1.LabelKeyTenant: "tenant-a",
 			},
 			expectOK: true,
+		},
+		{
+			name: "create denies broad selector matched only by requester supplied labels",
+			bindDefs: []authorizationv1alpha1.BindDefinition{{
+				ObjectMeta: metav1.ObjectMeta{Name: "broad-selector-bd"},
+				Spec: authorizationv1alpha1.BindDefinitionSpec{
+					TargetName: "broad-selector-target",
+					Subjects: []rbacv1.Subject{
+						{APIGroup: rbacv1.GroupName, Kind: "Group", Name: "allowed-group"},
+					},
+					RoleBindings: []authorizationv1alpha1.NamespaceBinding{{
+						ClusterRoleRefs: []string{"admin"},
+						NamespaceSelector: []metav1.LabelSelector{{
+							MatchExpressions: []metav1.LabelSelectorRequirement{{
+								Key:      authorizationv1alpha1.LabelKeyTenant,
+								Operator: metav1.LabelSelectorOpExists,
+							}},
+						}},
+					}},
+				},
+			}},
+			username: "user1",
+			groups:   []string{"allowed-group"},
+			nsLabels: map[string]string{
+				authorizationv1alpha1.LabelKeyOwner:  "tenant",
+				authorizationv1alpha1.LabelKeyTenant: "tenant-a",
+			},
+			expectOK: false,
 		},
 	}
 
@@ -760,7 +788,7 @@ func TestAuthorizeViaBindDefinitionsUsesLiveReader(t *testing.T) {
 			RoleBindings: []authorizationv1alpha1.NamespaceBinding{{
 				ClusterRoleRefs: []string{"admin"},
 				NamespaceSelector: []metav1.LabelSelector{
-					{MatchLabels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"}},
+					{MatchLabels: map[string]string{authorizationv1alpha1.LabelKeyTenant: "tenant-a"}},
 				},
 			}},
 		},

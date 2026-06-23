@@ -212,7 +212,7 @@ func kustomizeOutputContainsObject(output, kind, name string) bool {
 		if err := yaml.Unmarshal([]byte(trimmed), &obj); err != nil {
 			continue
 		}
-		if obj.Kind == kind && obj.Metadata.Name == name {
+		if obj.Kind == kind && (obj.Metadata.Name == name || strings.HasSuffix(obj.Metadata.Name, "-"+name)) {
 			return true
 		}
 	}

@@ -447,6 +447,119 @@ func TestRBD_Reconcile_Deletion(t *testing.T) {
 	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: "deleting-rbd"}, &updated)).NotTo(gomega.Succeed())
 }
 
+func TestRBD_Reconcile_DeletingPolicyDeprovisions(t *testing.T) {
+	g := gomega.NewWithT(t)
+	now := metav1.Now()
+
+	pol := &authorizationv1alpha1.RBACPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "deleting-policy",
+			Generation:        1,
+			DeletionTimestamp: &now,
+			Finalizers:        []string{"test.finalizer"},
+		},
+		Spec: authorizationv1alpha1.RBACPolicySpec{
+			AppliesTo: authorizationv1alpha1.PolicyScope{Namespaces: []string{"*"}},
+			BindingLimits: &authorizationv1alpha1.BindingLimits{
+				AllowClusterRoleBindings: true,
+			},
+		},
+	}
+	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "deleting-policy-rbd", UID: "deleting-policy-rbd-uid", Generation: 1},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			PolicyRef:  authorizationv1alpha1.RBACPolicyReference{Name: pol.Name},
+			TargetName: "deleting-policy-target",
+			Subjects: []rbacv1.Subject{
+				{Kind: rbacv1.UserKind, Name: "alice", APIGroup: rbacv1.GroupName},
+			},
+			ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{ClusterRoleRefs: []string{"view"}},
+		},
+		Status: authorizationv1alpha1.RestrictedBindDefinitionStatus{BindReconciled: true},
+	}
+	crb := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "deleting-policy-target-view-binding",
+			OwnerReferences: []metav1.OwnerReference{restrictedTestOwnerRef(authorizationv1alpha1.RestrictedBindDefinitionKind, rbd.Name, rbd.UID)},
+		},
+	}
+
+	r, c := newRBDTestReconciler(pol, rbd, crb)
+	result, err := r.Reconcile(rbdCtx(), ctrl.Request{NamespacedName: types.NamespacedName{Name: rbd.Name}})
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	g.Expect(result.RequeueAfter).To(gomega.Equal(DefaultRequeueInterval))
+
+	var deleted rbacv1.ClusterRoleBinding
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: crb.Name}, &deleted)).NotTo(gomega.Succeed())
+
+	var updated authorizationv1alpha1.RestrictedBindDefinition
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: rbd.Name}, &updated)).To(gomega.Succeed())
+	g.Expect(updated.Status.PolicyViolations).To(gomega.ConsistOf("policy \"deleting-policy\" is being deleted"))
+	g.Expect(conditions.IsStalled(&updated)).To(gomega.BeTrue())
+}
+
+func TestRBD_Reconcile_DeletingPolicyUsesImpersonatedDeleteClient(t *testing.T) {
+	g := gomega.NewWithT(t)
+	now := metav1.Now()
+
+	pol := &authorizationv1alpha1.RBACPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "deleting-impersonation-policy",
+			Generation:        1,
+			DeletionTimestamp: &now,
+			Finalizers:        []string{"test.finalizer"},
+		},
+		Spec: authorizationv1alpha1.RBACPolicySpec{
+			AppliesTo: authorizationv1alpha1.PolicyScope{Namespaces: []string{"*"}},
+			BindingLimits: &authorizationv1alpha1.BindingLimits{
+				AllowClusterRoleBindings: true,
+			},
+			Impersonation: &authorizationv1alpha1.ImpersonationConfig{
+				Enabled: true,
+				ServiceAccountRef: &authorizationv1alpha1.SARef{
+					Name:      "rbac-applier",
+					Namespace: "team-a",
+				},
+			},
+		},
+	}
+	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "deleting-impersonation-rbd", UID: "deleting-impersonation-rbd-uid", Generation: 1},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			PolicyRef:  authorizationv1alpha1.RBACPolicyReference{Name: pol.Name},
+			TargetName: "deleting-impersonation-target",
+			Subjects: []rbacv1.Subject{
+				{Kind: rbacv1.UserKind, Name: "alice", APIGroup: rbacv1.GroupName},
+			},
+			ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{ClusterRoleRefs: []string{"view"}},
+		},
+	}
+	crb := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "deleting-impersonation-target-view-binding",
+			OwnerReferences: []metav1.OwnerReference{restrictedTestOwnerRef(authorizationv1alpha1.RestrictedBindDefinitionKind, rbd.Name, rbd.UID)},
+		},
+	}
+
+	r, c := newRBDTestReconciler(pol, rbd, crb)
+	r.restConfig = &rest.Config{Host: "https://cluster.local"}
+	deleteClient := &deleteForbiddenClient{Client: c}
+	var capturedUsername string
+	r.impersonatedClientFactory = func(_ *rest.Config, _ *runtime.Scheme, username string) (client.Client, error) {
+		capturedUsername = username
+		return deleteClient, nil
+	}
+
+	_, err := r.Reconcile(rbdCtx(), ctrl.Request{NamespacedName: types.NamespacedName{Name: rbd.Name}})
+	g.Expect(err).To(gomega.HaveOccurred())
+	g.Expect(err.Error()).To(gomega.ContainSubstring("delete denied"))
+	g.Expect(capturedUsername).To(gomega.Equal("system:serviceaccount:team-a:rbac-applier"))
+	g.Expect(deleteClient.deleteCalls).To(gomega.Equal(1))
+
+	var kept rbacv1.ClusterRoleBinding
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: crb.Name}, &kept)).To(gomega.Succeed())
+}
+
 func TestRBD_Reconcile_GetError(t *testing.T) {
 	g := gomega.NewWithT(t)
 
@@ -2602,11 +2715,22 @@ func TestRBD_NamespaceToRestrictedBindDefinitions(t *testing.T) {
 	rbd3 := &authorizationv1alpha1.RestrictedBindDefinition{
 		ObjectMeta: metav1.ObjectMeta{Name: "ns-rbd-3"},
 	}
+	// rbd4 has a ServiceAccount subject in the changed namespace. Namespace
+	// events can affect subject validation and auto-created ServiceAccounts
+	// even when the RBD has no RoleBindings.
+	rbd4 := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "ns-rbd-4"},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			Subjects: []rbacv1.Subject{
+				{Kind: rbacv1.ServiceAccountKind, Namespace: "some-namespace", Name: "runner"},
+			},
+		},
+	}
 
 	scheme := newTestScheme()
 	c := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(rbd1, rbd2, rbd3).
+		WithObjects(rbd1, rbd2, rbd3, rbd4).
 		Build()
 	r := NewRestrictedBindDefinitionReconciler(c, scheme, events.NewFakeRecorder(10))
 
@@ -2617,6 +2741,7 @@ func TestRBD_NamespaceToRestrictedBindDefinitions(t *testing.T) {
 	g.Expect(requests).To(gomega.ConsistOf(
 		ctrl.Request{NamespacedName: types.NamespacedName{Name: "ns-rbd-1"}},
 		ctrl.Request{NamespacedName: types.NamespacedName{Name: "ns-rbd-2"}},
+		ctrl.Request{NamespacedName: types.NamespacedName{Name: "ns-rbd-4"}},
 	))
 }
 
@@ -2644,11 +2769,19 @@ func TestRBD_NamespaceToRestrictedBindDefinitions_IndexedSelectorEnqueuesOnLabel
 			},
 		},
 	}
+	serviceAccountRBD := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "indexed-sa-rbd"},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			Subjects: []rbacv1.Subject{
+				{Kind: rbacv1.ServiceAccountKind, Namespace: "some-namespace", Name: "runner"},
+			},
+		},
+	}
 
 	scheme := newTestScheme()
 	c := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(explicitRBD, selectorRBD).
+		WithObjects(explicitRBD, selectorRBD, serviceAccountRBD).
 		WithIndex(
 			&authorizationv1alpha1.RestrictedBindDefinition{},
 			indexer.RestrictedBindDefinitionRoleBindingNamespaceField,
@@ -2659,6 +2792,11 @@ func TestRBD_NamespaceToRestrictedBindDefinitions_IndexedSelectorEnqueuesOnLabel
 			indexer.RestrictedBindDefinitionHasNamespaceSelectorField,
 			indexer.RestrictedBindDefinitionHasNamespaceSelectorFunc,
 		).
+		WithIndex(
+			&authorizationv1alpha1.RestrictedBindDefinition{},
+			indexer.RestrictedBindDefinitionServiceAccountSubjectNamespaceField,
+			indexer.RestrictedBindDefinitionServiceAccountSubjectNamespaceFunc,
+		).
 		Build()
 	r := NewRestrictedBindDefinitionReconciler(c, scheme, events.NewFakeRecorder(10))
 
@@ -2667,6 +2805,7 @@ func TestRBD_NamespaceToRestrictedBindDefinitions_IndexedSelectorEnqueuesOnLabel
 	g.Expect(requests).To(gomega.ConsistOf(
 		ctrl.Request{NamespacedName: types.NamespacedName{Name: "indexed-explicit-rbd"}},
 		ctrl.Request{NamespacedName: types.NamespacedName{Name: "indexed-selector-rbd"}},
+		ctrl.Request{NamespacedName: types.NamespacedName{Name: "indexed-sa-rbd"}},
 	))
 }
 

@@ -700,6 +700,77 @@ func TestRestrictedValidatorsSkipDefaultPolicyAssignmentForSpecUnchangedUpdates(
 	})
 }
 
+func TestRestrictedValidatorsEnforceDefaultPolicyAssignmentForUserFinalizerUpdates(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := AddToScheme(scheme); err != nil {
+		t.Fatalf("add scheme: %v", err)
+	}
+
+	defaultPolicy := &RBACPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "default-policy"},
+		Spec: RBACPolicySpec{
+			DefaultAssignment: &DefaultPolicyAssignment{
+				Groups: []string{"oidc:platform-admins"},
+			},
+		},
+	}
+	reader := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(defaultPolicy.DeepCopy()).
+		Build()
+	ctxUnassigned := admission.NewContextWithRequest(context.Background(), admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			UserInfo: authenticationv1.UserInfo{
+				Username: "alice",
+				Groups:   []string{"oidc:tenant-admins"},
+			},
+		},
+	})
+
+	t.Run("RestrictedBindDefinition finalizer update", func(t *testing.T) {
+		oldRBD := &RestrictedBindDefinition{
+			ObjectMeta: metav1.ObjectMeta{Name: "metadata-rbd-user"},
+			Spec: RestrictedBindDefinitionSpec{
+				PolicyRef:  RBACPolicyReference{Name: defaultPolicy.Name},
+				TargetName: "metadata-rbd-user",
+				Subjects: []rbacv1.Subject{
+					{Kind: rbacv1.UserKind, APIGroup: rbacv1.GroupName, Name: "alice"},
+				},
+				ClusterRoleBindings: &ClusterBinding{ClusterRoleRefs: []string{"view"}},
+			},
+		}
+		newRBD := oldRBD.DeepCopy()
+		newRBD.Finalizers = []string{RestrictedBindDefinitionFinalizer}
+		validator := &RestrictedBindDefinitionValidator{Client: reader, Reader: reader}
+
+		if _, err := validator.ValidateUpdate(ctxUnassigned, oldRBD, newRBD); err == nil {
+			t.Fatal("expected user finalizer update using unassigned selected policy to be rejected")
+		} else if !strings.Contains(err.Error(), "is not assigned to selected default policy") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("RestrictedRoleDefinition finalizer update", func(t *testing.T) {
+		oldRRD := &RestrictedRoleDefinition{
+			ObjectMeta: metav1.ObjectMeta{Name: "metadata-rrd-user"},
+			Spec: RestrictedRoleDefinitionSpec{
+				PolicyRef:  RBACPolicyReference{Name: defaultPolicy.Name},
+				TargetRole: DefinitionClusterRole,
+				TargetName: "metadata-rrd-user",
+			},
+		}
+		newRRD := oldRRD.DeepCopy()
+		newRRD.Finalizers = []string{RestrictedRoleDefinitionFinalizer}
+		validator := &RestrictedRoleDefinitionValidator{Client: reader, Reader: reader}
+
+		if _, err := validator.ValidateUpdate(ctxUnassigned, oldRRD, newRRD); err == nil {
+			t.Fatal("expected user finalizer update using unassigned selected policy to be rejected")
+		} else if !strings.Contains(err.Error(), "is not assigned to selected default policy") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
 func TestRequesterMatchesDefaultAssignment(t *testing.T) {
 	da := &DefaultPolicyAssignment{
 		Groups: []string{"oidc:platform-operators"},

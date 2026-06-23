@@ -329,16 +329,26 @@ func (r *RestrictedBindDefinitionReconciler) namespaceToRestrictedBindDefinition
 	selectorErr := r.client.List(listCtx, selectorList,
 		client.MatchingFields{indexer.RestrictedBindDefinitionHasNamespaceSelectorField: "true"})
 
-	optimizedIndexPathAvailable := explicitErr == nil && selectorErr == nil
+	serviceAccountNamespaceList := &authorizationv1alpha1.RestrictedBindDefinitionList{}
+	serviceAccountNamespaceErr := r.client.List(listCtx, serviceAccountNamespaceList,
+		client.MatchingFields{indexer.RestrictedBindDefinitionServiceAccountSubjectNamespaceField: namespace.Name})
+
+	optimizedIndexPathAvailable := explicitErr == nil && selectorErr == nil && serviceAccountNamespaceErr == nil
 	explicitIndexMissing := explicitErr != nil && helpers.IsMissingFieldIndexError(explicitErr)
 	selectorIndexMissing := selectorErr != nil && helpers.IsMissingFieldIndexError(selectorErr)
+	serviceAccountNamespaceIndexMissing := serviceAccountNamespaceErr != nil && helpers.IsMissingFieldIndexError(serviceAccountNamespaceErr)
 	if !optimizedIndexPathAvailable &&
-		((explicitErr != nil && !explicitIndexMissing) || (selectorErr != nil && !selectorIndexMissing)) {
+		((explicitErr != nil && !explicitIndexMissing) ||
+			(selectorErr != nil && !selectorIndexMissing) ||
+			(serviceAccountNamespaceErr != nil && !serviceAccountNamespaceIndexMissing)) {
 		if explicitErr != nil {
 			logger.Error(explicitErr, "failed to list RestrictedBindDefinitions by explicit namespace index", "namespace", namespace.Name)
 		}
 		if selectorErr != nil {
 			logger.Error(selectorErr, "failed to list RestrictedBindDefinitions by selector index")
+		}
+		if serviceAccountNamespaceErr != nil {
+			logger.Error(serviceAccountNamespaceErr, "failed to list RestrictedBindDefinitions by ServiceAccount namespace index", "namespace", namespace.Name)
 		}
 		return nil
 	}
@@ -366,8 +376,8 @@ func (r *RestrictedBindDefinitionReconciler) namespaceToRestrictedBindDefinition
 		return requests
 	}
 
-	queued := make(map[string]struct{}, len(explicitNamespaceList.Items)+len(selectorList.Items))
-	requests := make([]reconcile.Request, 0, len(explicitNamespaceList.Items)+len(selectorList.Items))
+	queued := make(map[string]struct{}, len(explicitNamespaceList.Items)+len(selectorList.Items)+len(serviceAccountNamespaceList.Items))
+	requests := make([]reconcile.Request, 0, len(explicitNamespaceList.Items)+len(selectorList.Items)+len(serviceAccountNamespaceList.Items))
 	queueRequest := func(name string) {
 		if _, exists := queued[name]; exists {
 			return
@@ -385,6 +395,10 @@ func (r *RestrictedBindDefinitionReconciler) namespaceToRestrictedBindDefinition
 		queueRequest(selectorList.Items[i].Name)
 	}
 
+	for i := range serviceAccountNamespaceList.Items {
+		queueRequest(serviceAccountNamespaceList.Items[i].Name)
+	}
+
 	return requests
 }
 
@@ -393,6 +407,9 @@ func (r *RestrictedBindDefinitionReconciler) namespaceToRestrictedBindDefinition
 // reconcile on every namespace event because label removals need immediate stale
 // RoleBinding cleanup even though the current labels no longer match.
 func restrictedBindDefinitionNeedsNamespaceReconcile(rbd *authorizationv1alpha1.RestrictedBindDefinition, ns *corev1.Namespace) bool {
+	if restrictedBindDefinitionReferencesServiceAccountNamespace(rbd, ns.Name) {
+		return true
+	}
 	if len(rbd.Spec.RoleBindings) == 0 {
 		return false
 	}
@@ -404,6 +421,15 @@ func restrictedBindDefinitionNeedsNamespaceReconcile(rbd *authorizationv1alpha1.
 			return true
 		}
 		if len(rb.NamespaceSelector) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func restrictedBindDefinitionReferencesServiceAccountNamespace(rbd *authorizationv1alpha1.RestrictedBindDefinition, namespace string) bool {
+	for _, subject := range rbd.Spec.Subjects {
+		if subject.Kind == rbacv1.ServiceAccountKind && subject.Namespace == namespace {
 			return true
 		}
 	}
@@ -559,6 +585,18 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+	if rbacPolicy.GetDeletionTimestamp() != nil {
+		applyClient, impersonatedUser, err := r.rbdResolveApplyClient(rbacPolicy)
+		if err != nil {
+			r.rbdMarkStalled(ctx, rbd, err)
+			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
+			metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
+			return ctrl.Result{}, fmt.Errorf("resolve apply client for deleting RBACPolicy %s referenced by RestrictedBindDefinition %s: %w",
+				rbacPolicy.Name, rbd.Name, err)
+		}
+		r.rbdLogApplyIdentity(ctx, rbd.Name, rbacPolicy.Name, impersonatedUser)
+		return r.rbdHandleDeletingPolicy(ctx, rbd, rbacPolicy, applyClient)
+	}
 
 	applyClient, impersonatedUser, err := r.rbdResolveApplyClient(rbacPolicy)
 	if err != nil {
@@ -567,10 +605,7 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, fmt.Errorf("resolve apply client for RestrictedBindDefinition %s: %w", rbd.Name, err)
 	}
-	if impersonatedUser != "" {
-		trace.SpanFromContext(ctx).SetAttributes(tracing.AttrUser.String(impersonatedUser))
-		logger.V(2).Info("using impersonated apply identity", "name", rbd.Name, "impersonatedUser", impersonatedUser, "policy", rbacPolicy.Name)
-	}
+	r.rbdLogApplyIdentity(ctx, rbd.Name, rbacPolicy.Name, impersonatedUser)
 
 	// Step 6: Evaluate policy compliance.
 	if result, handled, err := r.rbdEvaluatePolicy(ctx, rbd, rbacPolicy, applyClient); handled {
@@ -690,6 +725,33 @@ func (r *RestrictedBindDefinitionReconciler) rbdHandleMissingPolicy(
 	}
 	rbdClearDeprovisionedStatus(rbd)
 	r.rbdApplyStatusAndMarkStalled(ctx, rbd, "policy not found")
+	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultDegraded).Inc()
+	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
+}
+
+func (r *RestrictedBindDefinitionReconciler) rbdHandleDeletingPolicy(
+	ctx context.Context,
+	rbd *authorizationv1alpha1.RestrictedBindDefinition,
+	rbacPolicy *authorizationv1alpha1.RBACPolicy,
+	deleteClient client.Client,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	logger.Info("referenced RBACPolicy is deleting", "name", rbd.Name, "policyRef", rbacPolicy.Name)
+	conditions.MarkFalse(rbd, authorizationv1alpha1.PolicyCompliantCondition, rbd.Generation,
+		authorizationv1alpha1.PolicyCompliantReasonPolicyDeleting, authorizationv1alpha1.PolicyCompliantMessagePolicyDeleting, rbacPolicy.Name)
+	r.recorder.Eventf(rbd, nil, corev1.EventTypeWarning,
+		authorizationv1alpha1.EventReasonPolicyViolation, authorizationv1alpha1.EventActionReconcile,
+		"Referenced RBACPolicy %q is being deleted", rbacPolicy.Name)
+	rbd.Status.PolicyViolations = []string{fmt.Sprintf("policy %q is being deleted", rbacPolicy.Name)}
+	if err := r.rbdDeprovision(ctx, rbd, deleteClient); err != nil {
+		r.rbdMarkStalled(ctx, rbd, err)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
+		return ctrl.Result{}, fmt.Errorf("deprovision RestrictedBindDefinition %s after deleting policy %s: %w",
+			rbd.Name, rbacPolicy.Name, err)
+	}
+	rbdClearDeprovisionedStatus(rbd)
+	r.rbdApplyStatusAndMarkStalled(ctx, rbd, "policy deleting")
 	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultDegraded).Inc()
 	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
 }
@@ -1668,6 +1730,19 @@ func (r *RestrictedBindDefinitionReconciler) rbdApplyStatusAndMarkStalled(
 	if err := ssa.ApplyRestrictedBindDefinitionStatus(ctx, r.client, rbd); err != nil {
 		logger.Error(err, "failed to apply status via SSA", "name", rbd.Name)
 	}
+}
+
+func (r *RestrictedBindDefinitionReconciler) rbdLogApplyIdentity(
+	ctx context.Context,
+	resourceName, policyName, impersonatedUser string,
+) {
+	if impersonatedUser == "" {
+		return
+	}
+
+	logger := log.FromContext(ctx)
+	trace.SpanFromContext(ctx).SetAttributes(tracing.AttrUser.String(impersonatedUser))
+	logger.V(2).Info("using impersonated apply identity", "name", resourceName, "impersonatedUser", impersonatedUser, "policy", policyName)
 }
 
 // rbdValidateRoleReferences checks that all referenced ClusterRoles and Roles exist.

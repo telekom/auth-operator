@@ -9,11 +9,23 @@ on:
     branches: [main]
     paths:
       - 'chart/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Makefile'
+      - 'versions.env'
+      - 'hack/verify-helm-rbac.sh'
+      - 'hack/verify-rendered-rbac.go'
       - '.github/workflows/helm-chart-test.yml'
   pull_request:
     branches: [main]
     paths:
       - 'chart/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Makefile'
+      - 'versions.env'
+      - 'hack/verify-helm-rbac.sh'
+      - 'hack/verify-rendered-rbac.go'
       - '.github/workflows/helm-chart-test.yml'
   workflow_dispatch:
 
@@ -105,6 +117,7 @@ jobs:
             --set networkPolicy.egress.enabled=true \
             --set networkPolicy.egress.allowBroadAPIServerEgress=true \
             --debug >/tmp/auth-operator-networkpolicy-broad.yaml
+          go run ./hack/verify-rendered-rbac.go --impersonation=none --require-broad-apiserver-egress /tmp/auth-operator-networkpolicy-broad.yaml
 
       - name: Verify rendered RBAC permissions
         run: make verify-helm-rbac
@@ -177,7 +190,7 @@ jobs:
 
       - name: Install cert-manager
         run: |
-          kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.20.2/cert-manager.yaml
+          kubectl apply -f "https://github.com/cert-manager/cert-manager/releases/download/${HELM_TEST_CERT_MANAGER_VERSION}/cert-manager.yaml"
           kubectl wait --for=condition=Available --timeout=300s deployment/cert-manager -n cert-manager
           kubectl wait --for=condition=Available --timeout=300s deployment/cert-manager-webhook -n cert-manager
           kubectl wait --for=condition=Available --timeout=300s deployment/cert-manager-cainjector -n cert-manager

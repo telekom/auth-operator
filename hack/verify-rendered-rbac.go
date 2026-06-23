@@ -10,8 +10,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/util/yaml"
 )
 
@@ -31,6 +34,16 @@ type roleObject struct {
 	Rules []policyRule `json:"rules"`
 }
 
+type renderedObject struct {
+	Kind     string `json:"kind"`
+	Metadata struct {
+		Name      string `json:"name"`
+		Namespace string `json:"namespace"`
+	} `json:"metadata"`
+	Rules []policyRule                   `json:"rules"`
+	Spec  networkingv1.NetworkPolicySpec `json:"spec"`
+}
+
 type policyRule struct {
 	APIGroups     []string `json:"apiGroups"`
 	Resources     []string `json:"resources"`
@@ -38,9 +51,26 @@ type policyRule struct {
 	Verbs         []string `json:"verbs"`
 }
 
+type renderedRBAC struct {
+	roles                  []roleObject
+	mutatingWebhookNames   map[string]struct{}
+	validatingWebhookNames map[string]struct{}
+	networkPolicies        []renderedObject
+}
+
+func newRenderedRBAC() renderedRBAC {
+	return renderedRBAC{
+		roles:                  make([]roleObject, 0),
+		mutatingWebhookNames:   make(map[string]struct{}),
+		validatingWebhookNames: make(map[string]struct{}),
+		networkPolicies:        make([]renderedObject, 0),
+	}
+}
+
 func main() {
 	impersonationMode := flag.String("impersonation", "generic", "impersonation mode to verify: generic, none, scoped, clusterwide")
 	expectedServiceAccount := flag.String("serviceaccount", "", "expected ServiceAccount resourceName for scoped impersonation mode")
+	requireBroadAPIServerEgress := flag.Bool("require-broad-apiserver-egress", false, "require every rendered NetworkPolicy to contain broad TCP 443/6443 egress")
 	flag.Parse()
 
 	if flag.NArg() < 1 {
@@ -48,13 +78,13 @@ func main() {
 	}
 
 	for _, path := range flag.Args() {
-		if err := verifyFile(path, *impersonationMode, *expectedServiceAccount); err != nil {
+		if err := verifyFile(path, *impersonationMode, *expectedServiceAccount, *requireBroadAPIServerEgress); err != nil {
 			exitf("%s: %v", path, err)
 		}
 	}
 }
 
-func verifyFile(path, impersonationMode, expectedServiceAccount string) (err error) {
+func verifyFile(path, impersonationMode, expectedServiceAccount string, requireBroadAPIServerEgress bool) (err error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("open: %w", err)
@@ -65,27 +95,48 @@ func verifyFile(path, impersonationMode, expectedServiceAccount string) (err err
 		}
 	}()
 
-	roles := make([]roleObject, 0)
+	rendered := newRenderedRBAC()
 	decoder := yaml.NewYAMLOrJSONDecoder(f, 4096)
 	for {
-		var role roleObject
-		if err := decoder.Decode(&role); err != nil {
+		var object renderedObject
+		if err := decoder.Decode(&object); err != nil {
 			if errors.Is(err, io.EOF) {
-				return verifyImpersonationMode(roles, impersonationMode, expectedServiceAccount)
+				return verifyRenderedRBAC(rendered, impersonationMode, expectedServiceAccount, requireBroadAPIServerEgress)
 			}
 			return fmt.Errorf("decode YAML document: %w", err)
 		}
-		if role.Kind != "ClusterRole" && role.Kind != "Role" {
-			continue
-		}
-		roles = append(roles, role)
-		if err := verifyRole(role); err != nil {
-			return err
+		switch object.Kind {
+		case "ClusterRole", "Role":
+			rendered.roles = append(rendered.roles, roleObject{
+				Kind:     object.Kind,
+				Metadata: object.Metadata,
+				Rules:    object.Rules,
+			})
+		case "MutatingWebhookConfiguration":
+			rendered.mutatingWebhookNames[object.Metadata.Name] = struct{}{}
+		case "ValidatingWebhookConfiguration":
+			rendered.validatingWebhookNames[object.Metadata.Name] = struct{}{}
+		case "NetworkPolicy":
+			rendered.networkPolicies = append(rendered.networkPolicies, object)
 		}
 	}
 }
 
-func verifyRole(role roleObject) error {
+func verifyRenderedRBAC(rendered renderedRBAC, impersonationMode, expectedServiceAccount string, requireBroadAPIServerEgress bool) error {
+	for _, role := range rendered.roles {
+		if err := verifyRole(role, rendered); err != nil {
+			return err
+		}
+	}
+	if requireBroadAPIServerEgress {
+		if err := verifyBroadAPIServerEgress(rendered.networkPolicies); err != nil {
+			return err
+		}
+	}
+	return verifyImpersonationMode(rendered.roles, impersonationMode, expectedServiceAccount)
+}
+
+func verifyRole(role roleObject, rendered renderedRBAC) error {
 	for _, rule := range role.Rules {
 		if isAdmissionregistrationWrite(rule) && len(rule.ResourceNames) == 0 {
 			return fmt.Errorf("%s %q grants admissionregistration write verbs without resourceNames", role.Kind, role.Metadata.Name)
@@ -113,43 +164,109 @@ func verifyRole(role roleObject) error {
 	}
 
 	if strings.HasSuffix(role.Metadata.Name, "webhook-server") {
-		return verifyWebhookServerRole(role)
+		return verifyWebhookServerRole(role, rendered)
 	}
 	return nil
 }
 
-func verifyWebhookServerRole(role roleObject) error {
-	var mutatingWrite, validatingWrite bool
+func verifyWebhookServerRole(role roleObject, rendered renderedRBAC) error {
+	missingMutating := copyStringSet(rendered.mutatingWebhookNames)
+	missingValidating := copyStringSet(rendered.validatingWebhookNames)
 
 	for _, rule := range role.Rules {
 		if !hasAny(rule.APIGroups, "admissionregistration.k8s.io") || !hasAny(rule.Verbs, "patch", "update") {
 			continue
 		}
 		if hasAny(rule.Resources, "mutatingwebhookconfigurations") {
-			mutatingWrite = true
-			if !hasNameContaining(rule.ResourceNames, "namespace-mutating-webhook-configuration") {
-				return fmt.Errorf("clusterRole %q mutating webhook write rule is not scoped to the operator webhook", role.Metadata.Name)
+			if err := verifyWebhookWriteResourceNames(role, "mutating", rule.ResourceNames, rendered.mutatingWebhookNames, missingMutating); err != nil {
+				return err
 			}
 		}
 		if hasAny(rule.Resources, "validatingwebhookconfigurations") {
-			validatingWrite = true
-			if !hasNameContaining(rule.ResourceNames, "namespace-validating-webhook-configuration") {
-				return fmt.Errorf("clusterRole %q validating webhook write rule is missing namespace webhook resourceName", role.Metadata.Name)
-			}
-			if !hasNameContaining(rule.ResourceNames, "binder-validating-webhook-configuration") &&
-				!hasNameContaining(rule.ResourceNames, "validating-webhook-configuration") {
-				return fmt.Errorf("clusterRole %q validating webhook write rule is missing binder webhook resourceName", role.Metadata.Name)
+			if err := verifyWebhookWriteResourceNames(role, "validating", rule.ResourceNames, rendered.validatingWebhookNames, missingValidating); err != nil {
+				return err
 			}
 		}
 	}
 
-	if !mutatingWrite {
-		return fmt.Errorf("clusterRole %q has no name-scoped mutating webhook write rule", role.Metadata.Name)
+	if len(missingMutating) > 0 {
+		return fmt.Errorf("clusterRole %q has no name-scoped write rule for mutating webhook configurations: %s",
+			role.Metadata.Name, strings.Join(sortedKeys(missingMutating), ", "))
 	}
-	if !validatingWrite {
-		return fmt.Errorf("clusterRole %q has no name-scoped validating webhook write rule", role.Metadata.Name)
+	if len(missingValidating) > 0 {
+		return fmt.Errorf("clusterRole %q has no name-scoped write rule for validating webhook configurations: %s",
+			role.Metadata.Name, strings.Join(sortedKeys(missingValidating), ", "))
 	}
 	return nil
+}
+
+func verifyWebhookWriteResourceNames(role roleObject, webhookKind string, resourceNames []string, rendered, missing map[string]struct{}) error {
+	for _, resourceName := range resourceNames {
+		if _, exists := rendered[resourceName]; !exists {
+			return fmt.Errorf("clusterRole %q grants %s webhook write for unrendered webhook configuration %q",
+				role.Metadata.Name, webhookKind, resourceName)
+		}
+		delete(missing, resourceName)
+	}
+	return nil
+}
+
+func copyStringSet(values map[string]struct{}) map[string]struct{} {
+	result := make(map[string]struct{}, len(values))
+	for value := range values {
+		result[value] = struct{}{}
+	}
+	return result
+}
+
+func sortedKeys(values map[string]struct{}) []string {
+	keys := make([]string, 0, len(values))
+	for value := range values {
+		keys = append(keys, value)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func verifyBroadAPIServerEgress(networkPolicies []renderedObject) error {
+	if len(networkPolicies) == 0 {
+		return fmt.Errorf("render contains no NetworkPolicy objects")
+	}
+	for _, policy := range networkPolicies {
+		if !hasBroadAPIServerEgressRule(policy.Spec.Egress) {
+			return fmt.Errorf("NetworkPolicy %q has no broad TCP 443/6443 API-server egress rule", policy.Metadata.Name)
+		}
+	}
+	return nil
+}
+
+func hasBroadAPIServerEgressRule(rules []networkingv1.NetworkPolicyEgressRule) bool {
+	for _, rule := range rules {
+		if len(rule.To) != 0 {
+			continue
+		}
+		if hasTCPPorts(rule.Ports, 443, 6443) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasTCPPorts(ports []networkingv1.NetworkPolicyPort, expectedPorts ...int32) bool {
+	missing := make(map[int32]struct{}, len(expectedPorts))
+	for _, port := range expectedPorts {
+		missing[port] = struct{}{}
+	}
+	for _, port := range ports {
+		if port.Protocol != nil && *port.Protocol != corev1.ProtocolTCP {
+			continue
+		}
+		if port.Port == nil || port.Port.Type != 0 {
+			continue
+		}
+		delete(missing, port.Port.IntVal)
+	}
+	return len(missing) == 0
 }
 
 func verifyImpersonationMode(roles []roleObject, mode, expectedServiceAccount string) error {
@@ -234,15 +351,6 @@ func hasAny(values []string, needles ...string) bool {
 			if value == needle {
 				return true
 			}
-		}
-	}
-	return false
-}
-
-func hasNameContaining(names []string, part string) bool {
-	for _, name := range names {
-		if strings.Contains(name, part) {
-			return true
 		}
 	}
 	return false

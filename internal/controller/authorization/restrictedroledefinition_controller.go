@@ -373,7 +373,16 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 		return ctrl.Result{}, fmt.Errorf("fetch RBACPolicy %s: %w", rrd.Spec.PolicyRef.Name, err)
 	}
 	if rbacPolicy.GetDeletionTimestamp() != nil {
-		return r.rrdHandleDeletingPolicy(ctx, rrd, rbacPolicy)
+		applyClient, impersonatedUser, err := r.rrdResolveApplyClient(rbacPolicy)
+		if err != nil {
+			r.rrdMarkStalled(ctx, rrd, err)
+			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
+			metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
+			return ctrl.Result{}, fmt.Errorf("resolve apply client for deleting RBACPolicy %s referenced by RestrictedRoleDefinition %s: %w",
+				rbacPolicy.Name, rrd.Name, err)
+		}
+		r.rrdLogApplyIdentity(ctx, rrd.Name, rbacPolicy.Name, impersonatedUser)
+		return r.rrdHandleDeletingPolicy(ctx, rrd, rbacPolicy, applyClient)
 	}
 
 	applyClient, impersonatedUser, err := r.rrdResolveApplyClient(rbacPolicy)
@@ -485,6 +494,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdHandleDeletingPolicy(
 	ctx context.Context,
 	rrd *authorizationv1alpha1.RestrictedRoleDefinition,
 	rbacPolicy *authorizationv1alpha1.RBACPolicy,
+	deleteClient client.Client,
 ) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("referenced RBACPolicy is deleting", "name", rrd.Name, "policyRef", rbacPolicy.Name)
@@ -495,7 +505,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdHandleDeletingPolicy(
 		authorizationv1alpha1.EventReasonPolicyViolation, authorizationv1alpha1.EventActionReconcile,
 		"Referenced RBACPolicy %q is being deleted", rbacPolicy.Name)
 
-	if err := r.rrdDeprovision(ctx, rrd, r.client); err != nil {
+	if err := r.rrdDeprovision(ctx, rrd, deleteClient); err != nil {
 		r.rrdMarkStalled(ctx, rrd, err)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()

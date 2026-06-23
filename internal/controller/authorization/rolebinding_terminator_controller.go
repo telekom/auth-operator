@@ -90,6 +90,7 @@ func newNamespaceTerminationStatus() *namespaceTerminationStatus {
 // During deletion, if the namespace is terminating it checks for remaining resources before removing finalizers; otherwise it removes them directly.
 type RoleBindingTerminator struct {
 	client                             client.Client
+	reader                             client.Reader
 	scheme                             *runtime.Scheme
 	dynamicClient                      dynamic.Interface
 	resourceTracker                    *discovery.ResourceTracker
@@ -113,6 +114,7 @@ func NewRoleBindingTerminator(
 
 	return &RoleBindingTerminator{
 		client:                             cachedClient,
+		reader:                             cachedClient,
 		dynamicClient:                      dynamicClient,
 		scheme:                             scheme,
 		recorder:                           recorder,
@@ -124,6 +126,9 @@ func NewRoleBindingTerminator(
 // SetupWithManager sets up the controller with the Manager.
 // Used to watch for role bindings and handle their finalizers if they are managed by a BindDefinition.
 func (r *RoleBindingTerminator) SetupWithManager(mgr ctrl.Manager, concurrency int) error {
+	if r.reader == nil || r.reader == r.client {
+		r.reader = mgr.GetAPIReader()
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&rbacv1.RoleBinding{}).
 		WithOptions(controller.TypedOptions[reconcile.Request]{
@@ -388,17 +393,34 @@ func (r *RoleBindingTerminator) getOwningBindDefinition(ctx context.Context, own
 		if ownerRef.Controller == nil || !*ownerRef.Controller {
 			continue
 		}
+		return r.getBindDefinitionOwner(ctx, ownerRef)
+	}
+	return nil, errNoControllingBindDefinitionOwner
+}
+
+func (r *RoleBindingTerminator) getBindDefinitionOwner(ctx context.Context, ownerRef metav1.OwnerReference) (*authorizationv1alpha1.BindDefinition, error) {
+	readers := []client.Reader{r.client}
+	if r.reader != nil {
+		readers = append(readers, r.reader)
+	}
+
+	var lastErr error
+	for _, reader := range readers {
 		bindDefinition := &authorizationv1alpha1.BindDefinition{}
-		err := r.client.Get(ctx, types.NamespacedName{Name: ownerRef.Name}, bindDefinition)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get BindDefinition %s: %w", ownerRef.Name, err)
+		if err := reader.Get(ctx, types.NamespacedName{Name: ownerRef.Name}, bindDefinition); err != nil {
+			lastErr = fmt.Errorf("failed to get BindDefinition %s: %w", ownerRef.Name, err)
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			return nil, lastErr
 		}
 		if bindDefinition.UID != ownerRef.UID {
-			return nil, fmt.Errorf("%w: %s", errBindDefinitionOwnerUIDMismatch, ownerRef.Name)
+			lastErr = fmt.Errorf("%w: %s", errBindDefinitionOwnerUIDMismatch, ownerRef.Name)
+			continue
 		}
 		return bindDefinition, nil
 	}
-	return nil, errNoControllingBindDefinitionOwner
+	return nil, lastErr
 }
 
 func isInvalidBindDefinitionOwnerError(err error) bool {

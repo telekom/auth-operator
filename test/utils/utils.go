@@ -14,16 +14,29 @@ import (
 )
 
 const (
-	prometheusOperatorVersion = "v0.72.0"
-	prometheusOperatorURL     = "https://github.com/prometheus-operator/prometheus-operator/" +
+	prometheusOperatorURL = "https://github.com/prometheus-operator/prometheus-operator/" +
 		"releases/download/%s/bundle.yaml"
 
-	certmanagerVersion = "v1.14.4"
 	certmanagerURLTmpl = "https://github.com/jetstack/cert-manager/releases/download/%s/cert-manager.yaml"
 )
 
 // DebugLevel controls verbosity of debug output (0=minimal, 1=normal, 2=verbose, 3=trace).
 var DebugLevel = getDebugLevel()
+
+func envOrDefault(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func prometheusOperatorVersion() string {
+	return envOrDefault("E2E_UTILS_PROMETHEUS_OPERATOR_VERSION", "v0.72.0")
+}
+
+func certmanagerVersion() string {
+	return envOrDefault("E2E_UTILS_CERT_MANAGER_VERSION", "v1.14.4")
+}
 
 // GetE2EOutputDir returns the base output directory for e2e artifacts.
 // Can be overridden via E2E_OUTPUT_DIR; otherwise uses RUN_ID-based folder.
@@ -167,7 +180,7 @@ func DebugTable(headers []string, rows [][]string) {
 
 // InstallPrometheusOperator installs the prometheus Operator to be used to export the enabled metrics.
 func InstallPrometheusOperator() error {
-	url := fmt.Sprintf(prometheusOperatorURL, prometheusOperatorVersion)
+	url := fmt.Sprintf(prometheusOperatorURL, prometheusOperatorVersion())
 	cmd := CommandContext(context.Background(), "kubectl", "create", "-f", url) // #nosec G204 -- test helper with hardcoded binary and controlled args
 	_, err := Run(cmd)
 	return err
@@ -234,7 +247,7 @@ func RunWithTimeout(cmd *exec.Cmd, timeout time.Duration) ([]byte, error) {
 
 // UninstallPrometheusOperator uninstalls the prometheus.
 func UninstallPrometheusOperator() {
-	url := fmt.Sprintf(prometheusOperatorURL, prometheusOperatorVersion)
+	url := fmt.Sprintf(prometheusOperatorURL, prometheusOperatorVersion())
 	cmd := CommandContext(context.Background(), "kubectl", "delete", "-f", url) // #nosec G204 -- test helper with hardcoded binary and controlled args
 	if _, err := Run(cmd); err != nil {
 		warnError(err)
@@ -243,7 +256,7 @@ func UninstallPrometheusOperator() {
 
 // UninstallCertManager uninstalls the cert manager.
 func UninstallCertManager() {
-	url := fmt.Sprintf(certmanagerURLTmpl, certmanagerVersion)
+	url := fmt.Sprintf(certmanagerURLTmpl, certmanagerVersion())
 	cmd := CommandContext(context.Background(), "kubectl", "delete", "-f", url) // #nosec G204
 	if _, err := Run(cmd); err != nil {
 		warnError(err)
@@ -273,7 +286,7 @@ func InstallCertManager() error {
 		return err
 	}
 
-	url := fmt.Sprintf(certmanagerURLTmpl, certmanagerVersion)
+	url := fmt.Sprintf(certmanagerURLTmpl, certmanagerVersion())
 
 	// Retry installation up to 3 times with exponential backoff
 	var lastErr error

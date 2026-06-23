@@ -63,6 +63,16 @@ type staleRRDRoleGetClient struct {
 	client.Client
 }
 
+type deleteForbiddenClient struct {
+	client.Client
+	deleteCalls int
+}
+
+func (c *deleteForbiddenClient) Delete(_ context.Context, obj client.Object, _ ...client.DeleteOption) error {
+	c.deleteCalls++
+	return apierrors.NewForbidden(schema.GroupResource{Group: rbacv1.GroupName, Resource: "rbacresources"}, obj.GetName(), fmt.Errorf("delete denied"))
+}
+
 func (c staleRRDRoleGetClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
 	switch obj.(type) {
 	case *rbacv1.ClusterRole:
@@ -248,8 +258,14 @@ func TestRRD_Reconcile_DeletingPolicyIsUnavailable(t *testing.T) {
 			ScopeNamespaced: false,
 		},
 	}
+	ownedClusterRole := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            rrd.Spec.TargetName,
+			OwnerReferences: []metav1.OwnerReference{restrictedTestOwnerRef(authorizationv1alpha1.RestrictedRoleDefinitionKind, rrd.Name, rrd.UID)},
+		},
+	}
 
-	r, c := newRRDTestReconcilerFake(pol, rrd)
+	r, c := newRRDTestReconcilerFake(pol, rrd, ownedClusterRole)
 	result, err := r.Reconcile(rrdCtx(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: rrd.Name},
 	})
@@ -263,6 +279,66 @@ func TestRRD_Reconcile_DeletingPolicyIsUnavailable(t *testing.T) {
 	g.Expect(c.Get(rrdCtx(), types.NamespacedName{Name: rrd.Name}, &updated)).To(Succeed())
 	g.Expect(updated.Status.PolicyViolations).To(ConsistOf("policy \"deleting-policy\" is being deleted"))
 	g.Expect(conditions.IsStalled(&updated)).To(BeTrue())
+}
+
+func TestRRD_Reconcile_DeletingPolicyUsesImpersonatedDeleteClient(t *testing.T) {
+	g := NewWithT(t)
+	now := metav1.Now()
+
+	pol := &authorizationv1alpha1.RBACPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "deleting-impersonation-policy",
+			Generation:        1,
+			DeletionTimestamp: &now,
+			Finalizers:        []string{"test.finalizer"},
+		},
+		Spec: authorizationv1alpha1.RBACPolicySpec{
+			AppliesTo: authorizationv1alpha1.PolicyScope{Namespaces: []string{"*"}},
+			RoleLimits: &authorizationv1alpha1.RoleLimits{
+				AllowClusterRoles: true,
+			},
+			Impersonation: &authorizationv1alpha1.ImpersonationConfig{
+				Enabled: true,
+				ServiceAccountRef: &authorizationv1alpha1.SARef{
+					Name:      "rbac-applier",
+					Namespace: "team-a",
+				},
+			},
+		},
+	}
+	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "deleting-impersonation-rrd", UID: "deleting-impersonation-rrd-uid", Generation: 1},
+		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+			PolicyRef:       authorizationv1alpha1.RBACPolicyReference{Name: pol.Name},
+			TargetName:      "deleting-impersonation-role",
+			TargetRole:      authorizationv1alpha1.DefinitionClusterRole,
+			ScopeNamespaced: false,
+		},
+	}
+	cr := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            rrd.Spec.TargetName,
+			OwnerReferences: []metav1.OwnerReference{restrictedTestOwnerRef(authorizationv1alpha1.RestrictedRoleDefinitionKind, rrd.Name, rrd.UID)},
+		},
+	}
+
+	r, c := newRRDTestReconcilerFake(pol, rrd, cr)
+	r.restConfig = &rest.Config{Host: "https://cluster.local"}
+	deleteClient := &deleteForbiddenClient{Client: c}
+	var capturedUsername string
+	r.impersonatedClientFactory = func(_ *rest.Config, _ *runtime.Scheme, username string) (client.Client, error) {
+		capturedUsername = username
+		return deleteClient, nil
+	}
+
+	_, err := r.Reconcile(rrdCtx(), ctrl.Request{NamespacedName: types.NamespacedName{Name: rrd.Name}})
+	g.Expect(err).To(HaveOccurred())
+	g.Expect(err.Error()).To(ContainSubstring("delete denied"))
+	g.Expect(capturedUsername).To(Equal("system:serviceaccount:team-a:rbac-applier"))
+	g.Expect(deleteClient.deleteCalls).To(Equal(1))
+
+	var kept rbacv1.ClusterRole
+	g.Expect(c.Get(rrdCtx(), types.NamespacedName{Name: cr.Name}, &kept)).To(Succeed())
 }
 
 func TestRRD_Reconcile_PolicyViolation(t *testing.T) {

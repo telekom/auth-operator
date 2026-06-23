@@ -824,3 +824,121 @@ func TestRBTerminatorReconcileInvalidOwnerRemovesFinalizer(t *testing.T) {
 	err = c.Get(ctx, types.NamespacedName{Name: "owner-err-rb", Namespace: "clean-ns"}, updated)
 	g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "RoleBinding should be gone after invalid finalizer removal")
 }
+
+func TestRBTerminatorReconcileUsesLiveReaderForStaleOwnerCache(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+	scheme := newTestScheme()
+
+	now := metav1.Now()
+	bdOwnerRef := testBindDefinitionControllerOwnerRef("test-bd", "bd-uid")
+	rb := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "stale-owner-rb",
+			Namespace:         "blocked-ns",
+			OwnerReferences:   []metav1.OwnerReference{bdOwnerRef},
+			DeletionTimestamp: &now,
+			Finalizers:        []string{authorizationv1alpha1.RoleBindingFinalizer},
+		},
+		RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "view"},
+	}
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "blocked-ns",
+			DeletionTimestamp: &now,
+			Finalizers:        []string{"kubernetes"},
+		},
+		Status: corev1.NamespaceStatus{Phase: corev1.NamespaceTerminating},
+	}
+
+	staleCache := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(rb.DeepCopy(), ns.DeepCopy()).
+		WithStatusSubresource(ns).
+		Build()
+	liveReader := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(testBindDefinition()).
+		Build()
+	r := &RoleBindingTerminator{client: staleCache, reader: liveReader, scheme: scheme, recorder: events.NewFakeRecorder(10)}
+
+	cacheEntry := &namespaceTerminationStatus{
+		blockingResources: []namespaceDeletionResourceBlocking{
+			{ResourceType: "pods", Count: 1, Names: []string{"still-running"}},
+		},
+		rateLimiter: rate.Sometimes{},
+	}
+	cacheEntry.rateLimiter.Do(func() {})
+	r.namespaceTerminationResourcesCache.Store("blocked-ns", cacheEntry)
+
+	result, err := r.Reconcile(ctx, reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: "stale-owner-rb", Namespace: "blocked-ns"},
+	})
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(result.RequeueAfter).To(Equal(terminatingNamespaceRequeueInterval))
+
+	updated := &rbacv1.RoleBinding{}
+	err = staleCache.Get(ctx, types.NamespacedName{Name: "stale-owner-rb", Namespace: "blocked-ns"}, updated)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(updated.Finalizers).To(ContainElement(authorizationv1alpha1.RoleBindingFinalizer))
+}
+
+func TestRBTerminatorReconcileUsesLiveReaderForStaleOwnerUID(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+	scheme := newTestScheme()
+
+	now := metav1.Now()
+	bdOwnerRef := testBindDefinitionControllerOwnerRef("test-bd", "bd-uid")
+	rb := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "stale-owner-uid-rb",
+			Namespace:         "blocked-ns",
+			OwnerReferences:   []metav1.OwnerReference{bdOwnerRef},
+			DeletionTimestamp: &now,
+			Finalizers:        []string{authorizationv1alpha1.RoleBindingFinalizer},
+		},
+		RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "view"},
+	}
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "blocked-ns",
+			DeletionTimestamp: &now,
+			Finalizers:        []string{"kubernetes"},
+		},
+		Status: corev1.NamespaceStatus{Phase: corev1.NamespaceTerminating},
+	}
+	staleBD := testBindDefinition()
+	staleBD.UID = types.UID("old-bd-uid")
+
+	staleCache := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(rb.DeepCopy(), ns.DeepCopy(), staleBD).
+		WithStatusSubresource(ns).
+		Build()
+	liveReader := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(testBindDefinition()).
+		Build()
+	r := &RoleBindingTerminator{client: staleCache, reader: liveReader, scheme: scheme, recorder: events.NewFakeRecorder(10)}
+
+	cacheEntry := &namespaceTerminationStatus{
+		blockingResources: []namespaceDeletionResourceBlocking{
+			{ResourceType: "pods", Count: 1, Names: []string{"still-running"}},
+		},
+		rateLimiter: rate.Sometimes{},
+	}
+	cacheEntry.rateLimiter.Do(func() {})
+	r.namespaceTerminationResourcesCache.Store("blocked-ns", cacheEntry)
+
+	result, err := r.Reconcile(ctx, reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: "stale-owner-uid-rb", Namespace: "blocked-ns"},
+	})
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(result.RequeueAfter).To(Equal(terminatingNamespaceRequeueInterval))
+
+	updated := &rbacv1.RoleBinding{}
+	err = staleCache.Get(ctx, types.NamespacedName{Name: "stale-owner-uid-rb", Namespace: "blocked-ns"}, updated)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(updated.Finalizers).To(ContainElement(authorizationv1alpha1.RoleBindingFinalizer))
+}

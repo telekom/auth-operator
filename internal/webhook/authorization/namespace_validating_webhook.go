@@ -355,7 +355,7 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 			}
 			namespaceMatchFound := false
 			for nsIdx, namespaceSelector := range roleBinding.NamespaceSelector {
-				matches, err := namespaceMatchesSelector(ns, &namespaceSelector)
+				matches, err := namespaceMatchesSelectorForAdmissionOperation(req.Operation, ns, &namespaceSelector)
 				if err != nil {
 					logger.Error(err, "failed to match namespace selector",
 						"namespace", req.Name, "bindDefinition", bindDef.Name)
@@ -432,6 +432,39 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 		"operation", req.Operation, "username", req.UserInfo.Username, "reason", denialMsg)
 	metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultDenied).Inc()
 	return admission.Denied(denialMsg)
+}
+
+func namespaceMatchesSelectorForAdmissionOperation(
+	operation admissionv1.Operation,
+	ns *corev1.Namespace,
+	selector *metav1.LabelSelector,
+) (bool, error) {
+	if operation != admissionv1.Create {
+		return namespaceMatchesSelector(ns, selector)
+	}
+	labelSelector, err := metav1.LabelSelectorAsSelector(selector)
+	if err != nil {
+		return false, err
+	}
+	expectedLabels := getCompleteTrackedLabelsFromNamespaceSelector(*selector)
+	if len(expectedLabels) == 0 || !hasExactTrackedLabels(ns.Labels, expectedLabels) {
+		return false, nil
+	}
+	return labelSelector.Matches(labels.Set(expectedLabels)), nil
+}
+
+func hasExactTrackedLabels(namespaceLabels, expected map[string]string) bool {
+	for _, key := range trackedOwnershipKeys {
+		actualValue, actualExists := namespaceLabels[key]
+		expectedValue, expectedExists := expected[key]
+		if actualExists != expectedExists {
+			return false
+		}
+		if actualExists && actualValue != expectedValue {
+			return false
+		}
+	}
+	return true
 }
 
 func (v *NamespaceValidator) admissionReader() client.Reader {

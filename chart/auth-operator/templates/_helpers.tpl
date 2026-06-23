@@ -126,16 +126,18 @@ template rendering fails instead of silently allowing broad API-server egress.
     - namespaceSelector:
         matchLabels:
           kubernetes.io/metadata.name: {{ .Values.networkPolicy.egress.dnsNamespace | default "kube-system" | quote }}
-{{- if .Values.networkPolicy.egress.apiServerCIDR }}
+{{- if or .Values.networkPolicy.egress.apiServerCIDR .Values.networkPolicy.egress.allowBroadAPIServerEgress }}
 # Kubernetes API server (TCP 443 and 6443)
 - ports:
     - port: 443
       protocol: TCP
     - port: 6443
       protocol: TCP
+{{- if .Values.networkPolicy.egress.apiServerCIDR }}
   to:
     - ipBlock:
         cidr: {{ .Values.networkPolicy.egress.apiServerCIDR | quote }}
+{{- end }}
 {{- end }}
 {{- if .Values.networkPolicy.egress.additionalRules }}
 {{- toYaml .Values.networkPolicy.egress.additionalRules | nindent 0 }}

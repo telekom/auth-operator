@@ -219,7 +219,7 @@ func (m *NamespaceMutator) collectBindDefinitionLabels(ctx context.Context, nsNa
 						"selectorCount", len(roleBinding.NamespaceSelector))
 
 					for nsIdx, nsSelector := range roleBinding.NamespaceSelector {
-						labels := getLabelsFromNamespaceSelector(nsSelector)
+						labels := getCompleteTrackedLabelsFromNamespaceSelector(nsSelector)
 						logger.V(3).Info("extracted labels from selector",
 							"namespace", nsName, "rbIndex", rbIdx,
 							"selectorIndex", nsIdx, "labelCount", len(labels))
@@ -302,6 +302,31 @@ func getLabelsFromNamespaceSelector(selector metav1.LabelSelector) map[string]st
 		if trackedLabelKeys[expr.Key] && expr.Operator == metav1.LabelSelectorOpIn && len(expr.Values) == 1 {
 			labels[expr.Key] = expr.Values[0]
 		}
+	}
+	return labels
+}
+
+func getCompleteTrackedLabelsFromNamespaceSelector(selector metav1.LabelSelector) map[string]string {
+	labels := getLabelsFromNamespaceSelector(selector)
+	if len(labels) == 0 {
+		return map[string]string{}
+	}
+
+	labels = maps.Clone(labels)
+	if tenant, ok := labels[authorizationv1alpha1.LabelKeyTenant]; ok && tenant != "" {
+		if owner, hasOwner := labels[authorizationv1alpha1.LabelKeyOwner]; hasOwner && owner != authorizationv1alpha1.OwnerTenant {
+			return map[string]string{}
+		}
+		labels[authorizationv1alpha1.LabelKeyOwner] = authorizationv1alpha1.OwnerTenant
+	}
+	if thirdParty, ok := labels[authorizationv1alpha1.LabelKeyThirdParty]; ok && thirdParty != "" {
+		if owner, hasOwner := labels[authorizationv1alpha1.LabelKeyOwner]; hasOwner && owner != authorizationv1alpha1.OwnerThirdParty {
+			return map[string]string{}
+		}
+		labels[authorizationv1alpha1.LabelKeyOwner] = authorizationv1alpha1.OwnerThirdParty
+	}
+	if !ValidTrackedOwnershipLabels(labels) {
+		return map[string]string{}
 	}
 	return labels
 }
