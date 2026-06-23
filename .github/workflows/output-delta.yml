@@ -1077,24 +1077,49 @@ jobs:
             echo ""
           } > "$error_log"
           controller_error_count=0
+          expected_error_count=0
+          expected_error_pattern='(rbd-case-impersonated-authz-failure|rrd-case-impersonated-authz-failure)'
 
           for log in /tmp/controller-logs/*.log; do
             if [ -f "$log" ] && [ -s "$log" ]; then
               log_name="$(basename "$log")"
-              errors="$(grep -E '(^E[0-9]{4}[[:space:]]|"level":"error"|level=error|panic:|PANIC)' "$log" 2>/dev/null | head -50 || true)"
-              if [ -n "$errors" ]; then
-                count="$(wc -l <<<"$errors" | tr -d '[:space:]')"
-                controller_error_count=$((controller_error_count + count))
-                {
-                  echo "## $log_name"
-                  echo '```'
-                  echo "$errors"
-                  echo '```'
-                  echo ""
-                } >> "$error_log"
+              error_matches="$(grep -E '(^E[0-9]{4}[[:space:]]|"level":"error"|level=error|panic:|PANIC)' "$log" 2>/dev/null || true)"
+              if [ -n "$error_matches" ]; then
+                expected_errors="$(grep -E "$expected_error_pattern" <<<"$error_matches" || true)"
+                unexpected_errors="$(grep -Ev "$expected_error_pattern" <<<"$error_matches" || true)"
+                if [ -n "$unexpected_errors" ]; then
+                  count="$(wc -l <<<"$unexpected_errors" | tr -d '[:space:]')"
+                  unexpected_preview="$(head -50 <<<"$unexpected_errors")"
+                  controller_error_count=$((controller_error_count + count))
+                  {
+                    echo "## $log_name"
+                    echo '```'
+                    echo "$unexpected_preview"
+                    echo '```'
+                    echo ""
+                  } >> "$error_log"
+                fi
+                if [ -n "$expected_errors" ]; then
+                  count="$(wc -l <<<"$expected_errors" | tr -d '[:space:]')"
+                  expected_preview="$(head -50 <<<"$expected_errors")"
+                  expected_error_count=$((expected_error_count + count))
+                  {
+                    echo "## $log_name (expected broken samples)"
+                    echo '```'
+                    echo "$expected_preview"
+                    echo '```'
+                    echo ""
+                  } >> "$error_log"
+                fi
               fi
             fi
           done
+
+          {
+            echo "Unexpected controller errors counted: $controller_error_count"
+            echo "Expected broken-sample errors ignored for gate: $expected_error_count"
+            echo ""
+          } >> "$error_log"
 
           {
             echo "## Warning/Error Events"
