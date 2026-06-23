@@ -394,6 +394,8 @@ spec:
 			Expect(err).To(HaveOccurred())
 			Expect(string(output)).To(ContainSubstring("e2e-default-assigned-policy"))
 
+			serviceAccountWrongPolicyBinding := strings.ReplaceAll(wrongPolicyBinding, "e2e-default-policy-wrong-binding", "e2e-default-policy-sa-wrong-binding")
+
 			serviceAccountBinding := strings.ReplaceAll(wrongPolicyBinding, "e2e-default-policy-wrong-binding", "e2e-default-policy-sa-binding")
 			serviceAccountBinding = strings.ReplaceAll(serviceAccountBinding, "e2e-default-policy-wrong-sa", "e2e-default-policy-sa-created")
 			serviceAccountBinding = strings.ReplaceAll(serviceAccountBinding, "e2e-default-other-policy", "e2e-default-sa-policy")
@@ -402,7 +404,7 @@ spec:
 			cmd = utils.CommandContext(context.Background(), "kubectl", "apply", // #nosec G204
 				"--as=system:serviceaccount:e2e-test-ns:e2e-default-policy-requester",
 				"-f", "-")
-			cmd.Stdin = strings.NewReader(wrongPolicyBinding)
+			cmd.Stdin = strings.NewReader(serviceAccountWrongPolicyBinding)
 			output, err = utils.Run(cmd)
 			Expect(err).To(HaveOccurred())
 			Expect(string(output)).To(ContainSubstring("e2e-default-sa-policy"))
