@@ -28,6 +28,7 @@ metadata:
 spec:
   appliesTo:
     namespaces:
+      - "*"
       - sample-tenant-a
   defaultAssignment:
     serviceAccounts:
