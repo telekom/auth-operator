@@ -107,12 +107,21 @@ webhookServer:
   replicas: 2
   tdgMigration: "false"
   # Maximum sustained requests per second for the /authorize endpoint.
+  # Disabled by default because rate limiting must only be enabled when
+  # authorizeAuth.tokenSecretName is configured for trusted callers.
   # Note: this limit is per pod. In HA deployments with multiple replicas,
   # the effective cluster-wide rate limit is (replicas × authorizeRateLimit).
-  authorizeRateLimit: 100
+  authorizeRateLimit: 0
   # Maximum burst size for the /authorize rate limiter.
   # Must be >= 1 when rate limiting is enabled.
   authorizeRateBurst: 200
+  authorizeAuth:
+    # Optional existing Secret containing the bearer token required for
+    # /authorize requests. Keep empty to leave caller authentication disabled.
+    # When authorizeRateLimit is > 0, this Secret must be configured and the
+    # API server authorization webhook kubeconfig must use the same token.
+    tokenSecretName: ""
+    tokenSecretKey: token
   podDisruptionBudget:
     # Enable PodDisruptionBudget for high availability
     enabled: true

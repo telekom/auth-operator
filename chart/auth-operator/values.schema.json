@@ -317,6 +317,34 @@
       "type": "object",
       "description": "Webhook server configuration.",
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "authorizeRateLimit": {
+                "exclusiveMinimum": 0
+              }
+            },
+            "required": ["authorizeRateLimit"]
+          },
+          "then": {
+            "properties": {
+              "authorizeRateBurst": {
+                "minimum": 1
+              },
+              "authorizeAuth": {
+                "properties": {
+                  "tokenSecretName": {
+                    "minLength": 1
+                  }
+                },
+                "required": ["tokenSecretName"]
+              }
+            },
+            "required": ["authorizeAuth"]
+          }
+        }
+      ],
       "properties": {
         "replicas": {
           "type": "integer",
@@ -332,15 +360,33 @@
         },
         "authorizeRateLimit": {
           "type": "number",
-          "description": "Maximum sustained requests per second for the /authorize endpoint. Set to 0 to disable rate limiting. Per-pod limit.",
+          "description": "Maximum sustained requests per second for the /authorize endpoint. Set to 0 to disable rate limiting. Per-pod limit. Requires webhookServer.authorizeAuth.tokenSecretName when > 0.",
           "minimum": 0,
-          "default": 100
+          "default": 0
         },
         "authorizeRateBurst": {
           "type": "integer",
           "description": "Maximum burst size for the /authorize rate limiter. Must be >= 1 when rate limiting is enabled.",
           "minimum": 0,
           "default": 200
+        },
+        "authorizeAuth": {
+          "type": "object",
+          "description": "Optional bearer-token authentication for /authorize callers.",
+          "additionalProperties": false,
+          "properties": {
+            "tokenSecretName": {
+              "type": "string",
+              "description": "Existing Secret name containing the bearer token required for /authorize requests. Leave empty to disable caller authentication.",
+              "default": ""
+            },
+            "tokenSecretKey": {
+              "type": "string",
+              "description": "Key in tokenSecretName that contains the bearer token.",
+              "minLength": 1,
+              "default": "token"
+            }
+          }
         },
         "podDisruptionBudget": {
           "type": "object",

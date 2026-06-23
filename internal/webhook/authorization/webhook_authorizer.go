@@ -2,6 +2,8 @@ package webhooks
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -55,6 +57,7 @@ const (
 	reasonEmptyIdentity           = "empty user identity and no groups"
 	reasonMissingAttrs            = "missing resource and non-resource attributes"
 	reasonInternalEvaluationError = "internal evaluation error"
+	reasonUnauthorized            = "unauthorized"
 )
 
 // Decision values used in structured audit log entries are defined in
@@ -82,6 +85,9 @@ type Authorizer struct {
 	Client client.Reader
 	Log    logr.Logger
 	Tracer trace.Tracer
+	// BearerToken is optional. When set, /authorize requests must include
+	// Authorization: Bearer <token> before the request body is trusted.
+	BearerToken string
 	// Limiter is used as a per-subject limiter template. Each SAR subject gets
 	// an independent token bucket with this limit and burst, preventing one
 	// identity from consuming another identity's authorization budget.
@@ -112,6 +118,11 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			wa.Log.Error(err, "failed to close request body")
 		}
 	}()
+
+	if !wa.authenticateRequest(w, r) {
+		wa.recordRejectedMetrics(start)
+		return
+	}
 
 	// Extract trace context and start a tracing span only when tracing is
 	// enabled (non-nil Tracer). When disabled, this avoids header parsing and
@@ -823,6 +834,25 @@ func (wa *Authorizer) writeDeniedResponse(w http.ResponseWriter, reason string) 
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		wa.Log.Error(err, "failed to encode denied response")
 	}
+}
+
+func (wa *Authorizer) authenticateRequest(w http.ResponseWriter, r *http.Request) bool {
+	if wa.BearerToken == "" {
+		return true
+	}
+	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !ok || token == "" || !constantTimeTokenEqual(token, wa.BearerToken) {
+		wa.Log.V(1).Info("rejecting unauthorized SubjectAccessReview request")
+		wa.writeDeniedResponse(w, reasonUnauthorized)
+		return false
+	}
+	return true
+}
+
+func constantTimeTokenEqual(a, b string) bool {
+	aHash := sha256.Sum256([]byte(a))
+	bHash := sha256.Sum256([]byte(b))
+	return subtle.ConstantTimeCompare(aHash[:], bHash[:]) == 1
 }
 
 // recordErrorMetrics records Prometheus request counter and duration histogram

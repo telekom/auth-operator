@@ -92,8 +92,10 @@ Image reference precedence: `digest` > `tag` > `Chart.AppVersion`
 |-----------|-------------|---------|
 | `webhookServer.replicas` | Number of webhook server replicas | `2` |
 | `webhookServer.tdgMigration` | Enable TDG migration mode | `"false"` |
-| `webhookServer.authorizeRateLimit` | Max sustained requests/sec for /authorize endpoint (per pod, 0 to disable) | `100` |
+| `webhookServer.authorizeRateLimit` | Max sustained requests/sec for /authorize endpoint (per pod, 0 to disable; requires caller auth when >0) | `0` |
 | `webhookServer.authorizeRateBurst` | Max burst size for /authorize rate limiter | `200` |
+| `webhookServer.authorizeAuth.tokenSecretName` | Existing Secret with bearer token for /authorize caller authentication | `""` |
+| `webhookServer.authorizeAuth.tokenSecretKey` | Secret key containing the /authorize bearer token | `token` |
 | `webhookServer.resources.limits.cpu` | CPU limit | `150m` |
 | `webhookServer.resources.limits.memory` | Memory limit | `256Mi` |
 | `webhookServer.resources.requests.cpu` | CPU request | `50m` |

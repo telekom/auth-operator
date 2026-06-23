@@ -240,8 +240,9 @@ the assignment.
 | `--cert-rotation-mutating-webhook` | Mutating webhook names to patch with CA bundle | `[]` |
 | `--cert-rotation-validating-webhook` | Validating webhook names to patch with CA bundle | `[]` |
 | `--tdg-migration` | Enable T-DDI to T-CaaS migration mode | `false` |
-| `--authorize-rate-limit` | Per-pod sustained requests/second for authorize endpoint | `100` |
+| `--authorize-rate-limit` | Per-pod sustained requests/second for authorize endpoint | `0` |
 | `--authorize-rate-burst` | Burst size for authorize endpoint rate limiter | `200` |
+| `--authorize-auth-token-file` | Bearer-token file required by `/authorize` callers | `""` |
 
 ### Helm Values
 
@@ -270,8 +271,11 @@ controller:
 webhookServer:
   replicas: 2
   tdgMigration: "false"  # Enable for T-DDI to T-CaaS migration
-  authorizeRateLimit: 100   # Per-pod sustained requests/second
+  authorizeRateLimit: 0     # Per-pod sustained requests/second; 0 disables
   authorizeRateBurst: 200   # Burst size for rate limiter
+  authorizeAuth:
+    tokenSecretName: ""     # Existing Secret with the /authorize bearer token
+    tokenSecretKey: token
   resources:
     limits:
       cpu: 150m
@@ -502,15 +506,30 @@ Helm values to create them.
 
 ### Rate Limiting
 
-The `/authorize` webhook endpoint supports token-bucket rate limiting to
-protect the API server from excessive authorization requests. Configure it
-via Helm values:
+The `/authorize` webhook endpoint supports optional bearer-token caller
+authentication and token-bucket rate limiting. Caller authentication is
+disabled by default. Rate limiting is also disabled by default because it must
+only be enabled for trusted callers; otherwise, any pod that can reach the
+Service could spoof a SubjectAccessReview for another user and consume that
+user's limiter bucket.
+
+Create a shared token Secret in the release namespace and configure the API
+server authorization webhook kubeconfig to send the same bearer token. Then set
+the Helm values:
 
 ```yaml
 webhookServer:
+  authorizeAuth:
+    tokenSecretName: auth-operator-authorize-token
+    tokenSecretKey: token
   authorizeRateLimit: 100   # sustained requests per second per pod
   authorizeRateBurst: 200   # burst capacity
 ```
+
+When `authorizeAuth.tokenSecretName` is set, requests to `/authorize` must
+include `Authorization: Bearer <token>` before the request body is decoded.
+Setting `authorizeRateLimit` above zero without `authorizeAuth.tokenSecretName`
+causes the webhook server to fail startup.
 
 When rate limiting is active and the token bucket is exhausted, the webhook
 returns a valid `SubjectAccessReview` response with `Allowed: false` and
@@ -521,11 +540,6 @@ metric tracks how often this occurs.
 > replicas, the effective cluster-wide limit is `replicas × authorizeRateLimit`.
 
 Set `authorizeRateLimit: 0` to disable rate limiting entirely.
-
-> **Upgrade Note:** Rate limiting is **enabled by default** at 100 req/s
-> (burst 200). Existing clusters upgrading to this version will start
-> enforcing the limit automatically. Set `authorizeRateLimit: 0` to
-> restore the previous unlimited behaviour.
 
 **Webhook server** — Only allows ingress on port 9443 (webhook) from all
 namespaces (required for kube-apiserver on host network) and port 8081
