@@ -52,9 +52,10 @@ jobs:
                 --method GET \
                 -H "Accept: application/vnd.github+json" \
                 "repos/${GH_REPO}/pulls" \
-                -f state=open \
+                -f state=all \
+                -f per_page=100 \
                 -f head="${head_owner}:${HEAD_BRANCH}" \
-                | jq -r --arg sha "$HEAD_SHA" 'map(select(.head.sha == $sha)) | .[0].number // .[0].number // ""')"
+                | jq -r --arg sha "$HEAD_SHA" 'map(select(.head.sha == $sha)) | .[0].number // ""')"
             fi
           fi
 
