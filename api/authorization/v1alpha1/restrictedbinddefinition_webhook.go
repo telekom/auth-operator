@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 
 	"github.com/telekom/auth-operator/pkg/helpers"
@@ -88,6 +89,10 @@ func (v *RestrictedBindDefinitionValidator) ValidateUpdate(ctx context.Context, 
 
 	logger := log.FromContext(ctx).WithName("restrictedbinddefinition-webhook")
 	logger.V(1).Info("validating update", "name", newObj.Name)
+
+	if reflect.DeepEqual(oldObj.Spec, newObj.Spec) {
+		return nil, nil
+	}
 
 	// Enforce immutability of targetName and policyRef.
 	var allErrs field.ErrorList

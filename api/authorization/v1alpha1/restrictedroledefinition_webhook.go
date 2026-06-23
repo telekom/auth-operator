@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -83,6 +84,10 @@ func (v *RestrictedRoleDefinitionValidator) ValidateUpdate(ctx context.Context, 
 
 	logger := log.FromContext(ctx).WithName("restrictedroledefinition-webhook")
 	logger.V(1).Info("validating update", "name", newObj.Name)
+
+	if reflect.DeepEqual(oldObj.Spec, newObj.Spec) {
+		return nil, nil
+	}
 
 	// Enforce immutability of targetRole, targetName, targetNamespace, and policyRef.
 	var allErrs field.ErrorList

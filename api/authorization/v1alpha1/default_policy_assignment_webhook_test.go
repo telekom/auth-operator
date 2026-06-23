@@ -566,6 +566,55 @@ func TestRestrictedValidatorsEnforceDefaultPolicyAssignmentOnUpdate(t *testing.T
 	})
 }
 
+func TestRestrictedValidatorsSkipDefaultPolicyAssignmentForSpecUnchangedUpdates(t *testing.T) {
+	ctxOperator := admission.NewContextWithRequest(context.Background(), admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			UserInfo: authenticationv1.UserInfo{
+				Username: "system:serviceaccount:auth-operator-system:auth-operator-manager",
+			},
+		},
+	})
+
+	t.Run("RestrictedBindDefinition finalizer update", func(t *testing.T) {
+		validator := &RestrictedBindDefinitionValidator{}
+		oldRBD := &RestrictedBindDefinition{
+			ObjectMeta: metav1.ObjectMeta{Name: "metadata-rbd"},
+			Spec: RestrictedBindDefinitionSpec{
+				PolicyRef:  RBACPolicyReference{Name: "default-policy"},
+				TargetName: "metadata-rbd",
+				Subjects: []rbacv1.Subject{
+					{Kind: rbacv1.UserKind, APIGroup: rbacv1.GroupName, Name: "alice"},
+				},
+				ClusterRoleBindings: &ClusterBinding{ClusterRoleRefs: []string{"view"}},
+			},
+		}
+		newRBD := oldRBD.DeepCopy()
+		newRBD.Finalizers = []string{RestrictedBindDefinitionFinalizer}
+
+		if _, err := validator.ValidateUpdate(ctxOperator, oldRBD, newRBD); err != nil {
+			t.Fatalf("expected spec-unchanged finalizer update to bypass requester default-policy checks, got: %v", err)
+		}
+	})
+
+	t.Run("RestrictedRoleDefinition finalizer update", func(t *testing.T) {
+		validator := &RestrictedRoleDefinitionValidator{}
+		oldRRD := &RestrictedRoleDefinition{
+			ObjectMeta: metav1.ObjectMeta{Name: "metadata-rrd"},
+			Spec: RestrictedRoleDefinitionSpec{
+				PolicyRef:  RBACPolicyReference{Name: "default-policy"},
+				TargetRole: DefinitionClusterRole,
+				TargetName: "metadata-rrd",
+			},
+		}
+		newRRD := oldRRD.DeepCopy()
+		newRRD.Finalizers = []string{RestrictedRoleDefinitionFinalizer}
+
+		if _, err := validator.ValidateUpdate(ctxOperator, oldRRD, newRRD); err != nil {
+			t.Fatalf("expected spec-unchanged finalizer update to bypass requester default-policy checks, got: %v", err)
+		}
+	})
+}
+
 func TestRequesterMatchesDefaultAssignment(t *testing.T) {
 	da := &DefaultPolicyAssignment{
 		Groups: []string{"oidc:platform-operators"},
