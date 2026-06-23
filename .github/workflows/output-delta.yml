@@ -221,7 +221,7 @@ jobs:
                   exit 1
                   ;;
               esac
-            done < <(yq -r 'select(.kind == "RestrictedBindDefinition" or .kind == "RestrictedRoleDefinition") | .spec.policyRef.name // ""' "$rendered" | sort -u)
+            done < <(yq -r --no-doc 'select(.kind == "RestrictedBindDefinition" or .kind == "RestrictedRoleDefinition") | .spec.policyRef.name // ""' "$rendered" | sort -u)
           }
 
           apply_policy_docs() {
@@ -632,7 +632,7 @@ jobs:
                   exit 1
                   ;;
               esac
-            done < <(yq -r 'select(.kind == "RestrictedBindDefinition" or .kind == "RestrictedRoleDefinition") | .spec.policyRef.name // ""' "$rendered" | sort -u)
+            done < <(yq -r --no-doc 'select(.kind == "RestrictedBindDefinition" or .kind == "RestrictedRoleDefinition") | .spec.policyRef.name // ""' "$rendered" | sort -u)
           }
 
           apply_policy_docs() {
