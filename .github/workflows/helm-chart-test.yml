@@ -39,7 +39,7 @@ jobs:
           version: ${{ env.HELM_VERSION }}
 
       - name: Setup chart-testing
-        uses: helm/chart-testing-action@6ec842c01de15ebb84c8627d2744a0c2f2755c9f # v2.7.0
+        uses: helm/chart-testing-action@6ec842c01de15ebb84c8627d2744a0c2f2755c9f # v2.8.0
 
       - name: List changed charts
         id: list-changed
@@ -130,7 +130,7 @@ jobs:
           version: ${{ env.HELM_VERSION }}
 
       - name: Setup chart-testing
-        uses: helm/chart-testing-action@6ec842c01de15ebb84c8627d2744a0c2f2755c9f # v2.7.0
+        uses: helm/chart-testing-action@6ec842c01de15ebb84c8627d2744a0c2f2755c9f # v2.8.0
 
       - name: Install kind
         run: |
@@ -142,7 +142,7 @@ jobs:
 
       - name: Install cert-manager
         run: |
-          kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.17.2/cert-manager.yaml
+          kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.20.2/cert-manager.yaml
           kubectl wait --for=condition=Available --timeout=300s deployment/cert-manager -n cert-manager
           kubectl wait --for=condition=Available --timeout=300s deployment/cert-manager-webhook -n cert-manager
           kubectl wait --for=condition=Available --timeout=300s deployment/cert-manager-cainjector -n cert-manager
