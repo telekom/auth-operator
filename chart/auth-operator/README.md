@@ -217,12 +217,16 @@ helm uninstall auth-operator --namespace auth-operator-system
 
 This chart installs six Custom Resource Definitions:
 
-- **RoleDefinition** - Dynamically generates ClusterRoles/Roles based on API discovery
-- **BindDefinition** - Creates ClusterRoleBindings/RoleBindings for subjects (Users, Groups, ServiceAccounts)
+- **RoleDefinition** - Trusted-admin API that dynamically generates ClusterRoles/Roles based on API discovery
+- **BindDefinition** - Trusted-admin API that creates ClusterRoleBindings/RoleBindings for subjects (Users, Groups, ServiceAccounts)
 - **WebhookAuthorizer** - Configures webhook-based authorization decisions
 - **RBACPolicy** - Defines policy constraints for restricted RBAC resources
 - **RestrictedRoleDefinition** - Policy-governed RoleDefinition with automatic deprovisioning on violations
 - **RestrictedBindDefinition** - Policy-governed BindDefinition with automatic deprovisioning on violations
+
+Plain `RoleDefinition` and `BindDefinition` write access is platform-admin
+equivalent. Use `RBACPolicy` with restricted CRDs for tenant delegation and
+self-service workflows.
 
 For detailed API documentation, see the [API Reference](https://github.com/telekom/auth-operator/blob/main/docs/api-reference/authorization.t-caas.telekom.com.md).
 
@@ -242,6 +246,11 @@ When disabled (default), tracing has zero overhead — no headers are parsed
 and no spans are created.
 
 ## Examples
+
+The plain `RoleDefinition` and `BindDefinition` examples below are intended for
+platform-owned RBAC. Do not delegate write access to these APIs to tenants; use
+`RestrictedRoleDefinition` and `RestrictedBindDefinition` under an `RBACPolicy`
+for delegated workflows.
 
 ### RoleDefinition
 

@@ -217,6 +217,9 @@ type BindDefinitionStatus struct {
 }
 
 // BindDefinition is the Schema for the binddefinitions API.
+// Write access is intended for platform-admin or trusted-admin workflows
+// because generated bindings affect real Kubernetes RBAC.
+// Use RestrictedBindDefinition under an RBACPolicy for delegated workflows.
 //
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:path=binddefinitions,scope=Cluster,shortName=binddef

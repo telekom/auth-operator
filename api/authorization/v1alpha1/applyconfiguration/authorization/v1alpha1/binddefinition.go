@@ -30,6 +30,9 @@ import (
 // with apply.
 //
 // BindDefinition is the Schema for the binddefinitions API.
+// Write access is intended for platform-admin or trusted-admin workflows
+// because generated bindings affect real Kubernetes RBAC.
+// Use RestrictedBindDefinition under an RBACPolicy for delegated workflows.
 type BindDefinitionApplyConfiguration struct {
 	v1.TypeMetaApplyConfiguration    `json:",inline"`
 	*v1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`

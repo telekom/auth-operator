@@ -82,6 +82,12 @@ Auth Operator provides six CRDs for managing RBAC:
 | **RestrictedRoleDefinition** | Policy-governed variant of RoleDefinition |
 | **RestrictedBindDefinition** | Policy-governed variant of BindDefinition |
 
+> **Trust boundary:** Plain `RoleDefinition` and `BindDefinition` write access is
+> for platform-admin or trusted-admin workflows. Writers can cause the operator
+> to create or bind real Kubernetes RBAC. For delegated or self-service RBAC,
+> use `RBACPolicy` with `RestrictedRoleDefinition` and
+> `RestrictedBindDefinition`.
+
 ### 1. Create a RoleDefinition
 
 Generate a ClusterRole that includes all resources *except* those in the deny list:

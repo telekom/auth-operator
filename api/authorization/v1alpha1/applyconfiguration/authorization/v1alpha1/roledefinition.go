@@ -30,6 +30,9 @@ import (
 // with apply.
 //
 // RoleDefinition is the Schema for the roledefinitions API.
+// Write access is intended for platform-admin or trusted-admin workflows
+// because generated Roles and ClusterRoles affect real Kubernetes RBAC.
+// Use RestrictedRoleDefinition under an RBACPolicy for delegated workflows.
 type RoleDefinitionApplyConfiguration struct {
 	v1.TypeMetaApplyConfiguration    `json:",inline"`
 	*v1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`

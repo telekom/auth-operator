@@ -230,6 +230,10 @@ Both systems support HA deployment:
 
 auth-operator generates the base roles:
 
+The plain `RoleDefinition` and `BindDefinition` examples in this section are
+platform-managed base RBAC. Tenant-delegated changes should use `RBACPolicy`
+with restricted CRDs.
+
 ```yaml
 # RoleDefinition for tenant base access
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
