@@ -3,7 +3,7 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     argocd.argoproj.io/sync-options: Delete=false
-    controller-gen.kubebuilder.io/version: v0.20.0
+    controller-gen.kubebuilder.io/version: v0.21.0
     helm.sh/resource-policy: keep
   name: restrictedbinddefinitions.authorization.t-caas.telekom.com
 spec:
@@ -79,6 +79,8 @@ spec:
                   clusterRoleRefs:
                     description: ClusterRoleRefs references an existing ClusterRole
                     items:
+                      maxLength: 253
+                      minLength: 1
                       type: string
                     maxItems: 64
                     type: array
@@ -104,6 +106,8 @@ spec:
                     clusterRoleRefs:
                       description: ClusterRoleRefs references an existing ClusterRole
                       items:
+                        maxLength: 253
+                        minLength: 1
                         type: string
                       maxItems: 64
                       type: array
@@ -169,6 +173,8 @@ spec:
                       description: RoleRefs references a specific Role that has to
                         exist in the target namespaces
                       items:
+                        maxLength: 253
+                        minLength: 1
                         type: string
                       maxItems: 64
                       type: array
@@ -381,6 +387,8 @@ spec:
                   type: string
                 type: array
             type: object
+        required:
+        - spec
         type: object
     served: true
     storage: true

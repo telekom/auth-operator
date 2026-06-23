@@ -18,8 +18,11 @@ limitations under the License.
 package v1alpha1
 
 import (
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	internal "github.com/telekom/auth-operator/api/authorization/v1alpha1/applyconfiguration/internal"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
+	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	v1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
@@ -38,13 +41,52 @@ type RestrictedRoleDefinitionApplyConfiguration struct {
 
 // RestrictedRoleDefinition constructs a declarative configuration of the RestrictedRoleDefinition type for use with
 // apply.
-func RestrictedRoleDefinition(name, namespace string) *RestrictedRoleDefinitionApplyConfiguration {
+func RestrictedRoleDefinition(name string) *RestrictedRoleDefinitionApplyConfiguration {
 	b := &RestrictedRoleDefinitionApplyConfiguration{}
 	b.WithName(name)
-	b.WithNamespace(namespace)
 	b.WithKind("RestrictedRoleDefinition")
 	b.WithAPIVersion("authorization.t-caas.telekom.com/v1alpha1")
 	return b
+}
+
+// ExtractRestrictedRoleDefinitionFrom extracts the applied configuration owned by fieldManager from
+// restrictedRoleDefinition for the specified subresource. Pass an empty string for subresource to extract
+// the main resource. Common subresources include "status", "scale", etc.
+// restrictedRoleDefinition must be a unmodified RestrictedRoleDefinition API object that was retrieved from the Kubernetes API.
+// ExtractRestrictedRoleDefinitionFrom provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractRestrictedRoleDefinitionFrom(restrictedRoleDefinition *authorizationv1alpha1.RestrictedRoleDefinition, fieldManager string, subresource string) (*RestrictedRoleDefinitionApplyConfiguration, error) {
+	b := &RestrictedRoleDefinitionApplyConfiguration{}
+	err := managedfields.ExtractInto(restrictedRoleDefinition, internal.Parser().Type("com.github.telekom.auth-operator.api.authorization.v1alpha1.RestrictedRoleDefinition"), fieldManager, b, subresource)
+	if err != nil {
+		return nil, err
+	}
+	b.WithName(restrictedRoleDefinition.Name)
+
+	b.WithKind("RestrictedRoleDefinition")
+	b.WithAPIVersion("authorization.t-caas.telekom.com/v1alpha1")
+	return b, nil
+}
+
+// ExtractRestrictedRoleDefinition extracts the applied configuration owned by fieldManager from
+// restrictedRoleDefinition. If no managedFields are found in restrictedRoleDefinition for fieldManager, a
+// RestrictedRoleDefinitionApplyConfiguration is returned with only the Name, Namespace (if applicable),
+// APIVersion and Kind populated. It is possible that no managed fields were found for because other
+// field managers have taken ownership of all the fields previously owned by fieldManager, or because
+// the fieldManager never owned fields any fields.
+// restrictedRoleDefinition must be a unmodified RestrictedRoleDefinition API object that was retrieved from the Kubernetes API.
+// ExtractRestrictedRoleDefinition provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractRestrictedRoleDefinition(restrictedRoleDefinition *authorizationv1alpha1.RestrictedRoleDefinition, fieldManager string) (*RestrictedRoleDefinitionApplyConfiguration, error) {
+	return ExtractRestrictedRoleDefinitionFrom(restrictedRoleDefinition, fieldManager, "")
+}
+
+// ExtractRestrictedRoleDefinitionStatus extracts the applied configuration owned by fieldManager from
+// restrictedRoleDefinition for the status subresource.
+func ExtractRestrictedRoleDefinitionStatus(restrictedRoleDefinition *authorizationv1alpha1.RestrictedRoleDefinition, fieldManager string) (*RestrictedRoleDefinitionApplyConfiguration, error) {
+	return ExtractRestrictedRoleDefinitionFrom(restrictedRoleDefinition, fieldManager, "status")
 }
 
 func (b RestrictedRoleDefinitionApplyConfiguration) IsApplyConfiguration() {}

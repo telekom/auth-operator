@@ -28,6 +28,8 @@ metrics:
     interval: ""     # Uses Prometheus global scrape_interval if empty
     scrapeTimeout: ""
     additionalLabels: {}
+    tlsConfig:
+      insecureSkipVerify: false
 ```
 
 Enable the ServiceMonitor:
@@ -36,6 +38,13 @@ Enable the ServiceMonitor:
 helm upgrade auth-operator chart/auth-operator \
   --set metrics.serviceMonitor.enabled=true
 ```
+
+When `metrics.auth.enabled=true`, the ServiceMonitor scrapes over HTTPS and TLS
+verification stays enabled by default. Helm rendering fails unless you set
+`metrics.serviceMonitor.tlsConfig.caFile` for the metrics serving certificate,
+or explicitly opt into `insecureSkipVerify=true` only for an accepted
+self-signed endpoint. Set `metrics.serviceMonitor.tlsConfig.serverName` when
+Prometheus needs an SNI or verification name override.
 
 ### Kustomize
 

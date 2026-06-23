@@ -6,6 +6,7 @@ package v1alpha1
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -13,6 +14,15 @@ import (
 	authzv1 "k8s.io/api/authorization/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+func containsAll(s string, parts ...string) bool {
+	for _, part := range parts {
+		if !strings.Contains(s, part) {
+			return false
+		}
+	}
+	return true
+}
 
 var _ = Describe("WebhookAuthorizer CEL Validation", func() {
 
@@ -268,6 +278,82 @@ func TestValidateCreate_WarnsOverlappingGroups(t *testing.T) {
 	}
 }
 
+func TestValidateCreate_AllowsNamespacedServiceAccountPrincipal(t *testing.T) {
+	v := &WebhookAuthorizerValidator{}
+	wa := newTestWebhookAuthorizer(func(wa *WebhookAuthorizer) {
+		wa.Spec.AllowedPrincipals = []Principal{{User: "deployer", Namespace: "team-a"}}
+	})
+	warnings, err := v.ValidateCreate(context.Background(), wa)
+	if err != nil {
+		t.Fatalf("expected no error for namespaced ServiceAccount principal, got: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Errorf("expected no warnings, got: %v", warnings)
+	}
+}
+
+func TestValidateCreate_AllowsQualifiedNamespacedServiceAccountPrincipal(t *testing.T) {
+	v := &WebhookAuthorizerValidator{}
+	wa := newTestWebhookAuthorizer(func(wa *WebhookAuthorizer) {
+		wa.Spec.AllowedPrincipals = []Principal{{
+			User:      "system:serviceaccount:team-a:deployer",
+			Namespace: "team-a",
+		}}
+	})
+	warnings, err := v.ValidateCreate(context.Background(), wa)
+	if err != nil {
+		t.Fatalf("expected no error for qualified namespaced ServiceAccount principal, got: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Errorf("expected no warnings, got: %v", warnings)
+	}
+}
+
+func TestValidateCreate_RejectsQualifiedServiceAccountNamespaceMismatch(t *testing.T) {
+	v := &WebhookAuthorizerValidator{}
+	wa := newTestWebhookAuthorizer(func(wa *WebhookAuthorizer) {
+		wa.Spec.AllowedPrincipals = []Principal{{
+			User:      "system:serviceaccount:team-b:deployer",
+			Namespace: "team-a",
+		}}
+	})
+	_, err := v.ValidateCreate(context.Background(), wa)
+	if err == nil {
+		t.Fatal("expected error for mismatched qualified ServiceAccount namespace")
+	}
+	if got := err.Error(); !containsAll(got, "allowedPrincipals[0]", "team-a", "team-b") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateCreate_RejectsNamespaceOnlyPrincipal(t *testing.T) {
+	v := &WebhookAuthorizerValidator{}
+	wa := newTestWebhookAuthorizer(func(wa *WebhookAuthorizer) {
+		wa.Spec.AllowedPrincipals = []Principal{{Namespace: "team-a"}}
+	})
+	_, err := v.ValidateCreate(context.Background(), wa)
+	if err == nil {
+		t.Fatal("expected error for namespace-only principal")
+	}
+	if got := err.Error(); !containsAll(got, "allowedPrincipals[0]", "requires", "user") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateCreate_RejectsNamespacedGroupPrincipal(t *testing.T) {
+	v := &WebhookAuthorizerValidator{}
+	wa := newTestWebhookAuthorizer(func(wa *WebhookAuthorizer) {
+		wa.Spec.DeniedPrincipals = []Principal{{Groups: []string{"admins"}, Namespace: "team-a"}}
+	})
+	_, err := v.ValidateCreate(context.Background(), wa)
+	if err == nil {
+		t.Fatal("expected error for namespaced group principal")
+	}
+	if got := err.Error(); !containsAll(got, "deniedPrincipals[0]", "cannot be combined", "groups") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidateUpdate_AlwaysValidates(t *testing.T) {
 	// Kubernetes increments Generation after admission webhooks run, so
 	// old and new generations are always equal during the admission call.
@@ -443,15 +529,34 @@ func TestFindNeverMatchingPrincipals(t *testing.T) {
 }
 
 func TestFindPrincipalOverlaps_CrossNamespace(t *testing.T) {
-	// Regression: overlap must be detected when the same User appears in
-	// allowed and denied with different Namespaces, because the runtime
-	// principalMatches checks principal.User == user without namespace.
+	// Namespace-scoped principals represent ServiceAccounts, so the same
+	// ServiceAccount name in different namespaces is not the same identity.
 	overlaps := findPrincipalOverlaps(
 		[]Principal{{User: "alice", Namespace: "ns-a"}},
 		[]Principal{{User: "alice", Namespace: "ns-b"}},
 	)
-	if len(overlaps) != 1 || overlaps[0] != "user:alice" {
-		t.Errorf("expected overlap [user:alice], got: %v", overlaps)
+	if len(overlaps) != 0 {
+		t.Errorf("expected no overlap, got: %v", overlaps)
+	}
+}
+
+func TestFindPrincipalOverlaps_ServiceAccountSameNamespace(t *testing.T) {
+	overlaps := findPrincipalOverlaps(
+		[]Principal{{User: "deployer", Namespace: "team-a"}},
+		[]Principal{{User: "deployer", Namespace: "team-a"}},
+	)
+	if len(overlaps) != 1 || overlaps[0] != "serviceaccount:team-a/deployer" {
+		t.Errorf("expected overlap [serviceaccount:team-a/deployer], got: %v", overlaps)
+	}
+}
+
+func TestFindPrincipalOverlaps_ServiceAccountShortAndQualified(t *testing.T) {
+	overlaps := findPrincipalOverlaps(
+		[]Principal{{User: "deployer", Namespace: "team-a"}},
+		[]Principal{{User: "system:serviceaccount:team-a:deployer", Namespace: "team-a"}},
+	)
+	if len(overlaps) != 1 || overlaps[0] != "serviceaccount:team-a/deployer" {
+		t.Errorf("expected overlap [serviceaccount:team-a/deployer], got: %v", overlaps)
 	}
 }
 

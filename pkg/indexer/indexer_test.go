@@ -33,6 +33,10 @@ func TestIndexerConstants(t *testing.T) {
 		t.Errorf("WebhookAuthorizerHasNamespaceSelectorField = %q, want %q",
 			WebhookAuthorizerHasNamespaceSelectorField, ".spec.hasNamespaceSelector")
 	}
+	if RestrictedBindDefinitionServiceAccountSubjectField != ".spec.subjects.serviceAccount" {
+		t.Errorf("RestrictedBindDefinitionServiceAccountSubjectField = %q, want %q",
+			RestrictedBindDefinitionServiceAccountSubjectField, ".spec.subjects.serviceAccount")
+	}
 }
 
 // indexExtractorTest represents a test case for index extractor functions
@@ -613,6 +617,48 @@ func TestRestrictedRoleDefinitionPolicyRefFunc(t *testing.T) {
 			name:       "wrong object type returns nil",
 			object:     &authorizationv1alpha1.BindDefinition{ObjectMeta: metav1.ObjectMeta{Name: "bd"}},
 			indexFunc:  RestrictedRoleDefinitionPolicyRefFunc,
+			wantValues: nil,
+		},
+	}
+
+	runIndexExtractorTests(t, tests)
+}
+
+func TestRestrictedBindDefinitionServiceAccountSubjectFunc(t *testing.T) {
+	tests := []indexExtractorTest{
+		{
+			name: "serviceaccount subjects return namespace name keys",
+			object: &authorizationv1alpha1.RestrictedBindDefinition{
+				ObjectMeta: metav1.ObjectMeta{Name: "rbd-sa"},
+				Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+					Subjects: []rbacv1.Subject{
+						{Kind: rbacv1.ServiceAccountKind, Namespace: "team-b", Name: "runner"},
+						{Kind: rbacv1.GroupKind, APIGroup: rbacv1.GroupName, Name: "devs"},
+						{Kind: rbacv1.ServiceAccountKind, Namespace: "team-a", Name: "runner"},
+						{Kind: rbacv1.ServiceAccountKind, Namespace: "team-b", Name: "runner"},
+					},
+				},
+			},
+			indexFunc:  RestrictedBindDefinitionServiceAccountSubjectFunc,
+			wantValues: []string{"team-a/runner", "team-b/runner"},
+		},
+		{
+			name: "serviceaccount subject without namespace is ignored",
+			object: &authorizationv1alpha1.RestrictedBindDefinition{
+				ObjectMeta: metav1.ObjectMeta{Name: "rbd-sa-empty-ns"},
+				Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+					Subjects: []rbacv1.Subject{
+						{Kind: rbacv1.ServiceAccountKind, Name: "runner"},
+					},
+				},
+			},
+			indexFunc:  RestrictedBindDefinitionServiceAccountSubjectFunc,
+			wantValues: nil,
+		},
+		{
+			name:       "wrong object type returns nil",
+			object:     &authorizationv1alpha1.BindDefinition{ObjectMeta: metav1.ObjectMeta{Name: "bd"}},
+			indexFunc:  RestrictedBindDefinitionServiceAccountSubjectFunc,
 			wantValues: nil,
 		},
 	}

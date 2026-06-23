@@ -33,7 +33,8 @@ type WebhookAuthorizerSpecApplyConfiguration struct {
 	NonResourceRules []v1.NonResourceRule `json:"nonResourceRules,omitempty"`
 	// AllowedPrincipals is a slice of principals this authorizer should allow.
 	AllowedPrincipals []PrincipalApplyConfiguration `json:"allowedPrincipals,omitempty"`
-	// DeniedPrincipals is a slice of principals this authorizer should deny.
+	// DeniedPrincipals is a slice of principals this authorizer should deny
+	// when the request also matches ResourceRules or NonResourceRules.
 	DeniedPrincipals []PrincipalApplyConfiguration `json:"deniedPrincipals,omitempty"`
 	// NamespaceSelector is a label selector to match namespaces that should allow the specified API calls.
 	NamespaceSelector *metav1.LabelSelectorApplyConfiguration `json:"namespaceSelector,omitempty"`

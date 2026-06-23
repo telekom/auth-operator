@@ -6,6 +6,7 @@ package indexer
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -80,6 +81,10 @@ const (
 	// RestrictedBindDefinition resources by whether any roleBinding includes a
 	// namespaceSelector entry.
 	RestrictedBindDefinitionHasNamespaceSelectorField = ".spec.hasNamespaceSelector"
+
+	// RestrictedBindDefinitionServiceAccountSubjectField indexes
+	// RestrictedBindDefinition resources by ServiceAccount subject namespace/name.
+	RestrictedBindDefinitionServiceAccountSubjectField = ".spec.subjects.serviceAccount"
 
 	// RestrictedBindDefinitionOwnerRefField indexes RoleBinding,
 	// ClusterRoleBinding, and ServiceAccount resources by RestrictedBindDefinition
@@ -227,6 +232,16 @@ func SetupRestrictedIndexes(ctx context.Context, mgr manager.Manager) error {
 		RestrictedBindDefinitionHasNamespaceSelectorFunc,
 	); err != nil {
 		return fmt.Errorf("failed to create index for RestrictedBindDefinition.Spec.HasNamespaceSelector: %w", err)
+	}
+
+	// Index RestrictedBindDefinition by referenced ServiceAccount subjects.
+	if err := mgr.GetFieldIndexer().IndexField(
+		ctx,
+		&authorizationv1alpha1.RestrictedBindDefinition{},
+		RestrictedBindDefinitionServiceAccountSubjectField,
+		RestrictedBindDefinitionServiceAccountSubjectFunc,
+	); err != nil {
+		return fmt.Errorf("failed to create index for RestrictedBindDefinition.Spec.Subjects.ServiceAccount: %w", err)
 	}
 
 	// Index RestrictedRoleDefinition by PolicyRef.Name for reverse lookups from RBACPolicy.
@@ -442,6 +457,34 @@ func RestrictedBindDefinitionHasNamespaceSelectorFunc(obj client.Object) []strin
 	}
 
 	return []string{"false"}
+}
+
+// RestrictedBindDefinitionServiceAccountSubjectFunc extracts ServiceAccount
+// subject keys in namespace/name form.
+func RestrictedBindDefinitionServiceAccountSubjectFunc(obj client.Object) []string {
+	rbd, ok := obj.(*authorizationv1alpha1.RestrictedBindDefinition)
+	if !ok {
+		return nil
+	}
+
+	seen := make(map[string]struct{})
+	values := make([]string, 0, len(rbd.Spec.Subjects))
+	for _, subject := range rbd.Spec.Subjects {
+		if subject.Kind != rbacv1.ServiceAccountKind || subject.Namespace == "" || subject.Name == "" {
+			continue
+		}
+		key := subject.Namespace + "/" + subject.Name
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		values = append(values, key)
+	}
+	if len(values) == 0 {
+		return nil
+	}
+	slices.Sort(values)
+	return values
 }
 
 // RestrictedBindDefinitionOwnerRefFunc extracts RestrictedBindDefinition owner

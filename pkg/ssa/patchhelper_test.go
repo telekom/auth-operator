@@ -61,6 +61,22 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			Expect(result).To(Equal(ssa.PatchApplyResultSkipped))
 		})
 
+		It("should not skip matching ClusterRole when ForceOwnership is explicit", func() {
+			rules := []rbacv1.PolicyRule{
+				{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}},
+			}
+			ac := ssa.ClusterRoleWithLabelsAndRules("ph-force-matching-cr",
+				map[string]string{"app": "test"}, rules)
+
+			result, err := ssa.PatchApplyClusterRole(testCtx, k8sClient, ac)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultCreated))
+
+			result, err = ssa.PatchApplyClusterRole(testCtx, k8sClient, ac, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+		})
+
 		It("should patch when ClusterRole rules change", func() {
 			rules := []rbacv1.PolicyRule{
 				{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}},
@@ -383,7 +399,7 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 	// ServiceAccount
 	// -----------------------------------------------------------------------
 	Context("PatchApplyServiceAccount", func() {
-		It("should force patch co-managed ServiceAccounts when owned fields conflict", func() {
+		It("should return conflict when another manager owns ServiceAccount fields", func() {
 			externalAC := ssa.ServiceAccountWith("ph-conflict-sa", "default",
 				map[string]string{"shared": "external"}, false).
 				WithAnnotations(map[string]string{"source": "external"})
@@ -394,18 +410,34 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 				map[string]string{"shared": "desired"}, true).
 				WithAnnotations(map[string]string{"source": "desired"})
 			result, err := ssa.PatchApplyServiceAccount(testCtx, k8sClient, ac, ssa.FieldOwnerFor("ph-conflict-bd"))
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsConflict(err)).To(BeTrue())
+			Expect(result).To(Equal(ssa.PatchApplyResult(0)))
 
 			var sa corev1.ServiceAccount
 			Expect(k8sClient.Get(testCtx, types.NamespacedName{Name: "ph-conflict-sa", Namespace: "default"}, &sa)).To(Succeed())
-			Expect(sa.Labels).To(HaveKeyWithValue("shared", "desired"))
-			Expect(sa.Annotations).To(HaveKeyWithValue("source", "desired"))
+			Expect(sa.Labels).To(HaveKeyWithValue("shared", "external"))
+			Expect(sa.Annotations).To(HaveKeyWithValue("source", "external"))
 			Expect(sa.AutomountServiceAccountToken).NotTo(BeNil())
-			Expect(*sa.AutomountServiceAccountToken).To(BeTrue())
+			Expect(*sa.AutomountServiceAccountToken).To(BeFalse())
 		})
 
-		It("should retry as a patch when a ServiceAccount appears during create apply", func() {
+		It("should skip matching ServiceAccounts owned by another manager", func() {
+			externalAC := ssa.ServiceAccountWith("ph-force-matching-sa", "default",
+				map[string]string{"shared": "desired"}, true).
+				WithAnnotations(map[string]string{"source": "desired"})
+			err := k8sClient.Apply(testCtx, externalAC, client.FieldOwner("external-agent"), client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+
+			ac := ssa.ServiceAccountWith("ph-force-matching-sa", "default",
+				map[string]string{"shared": "desired"}, true).
+				WithAnnotations(map[string]string{"source": "desired"})
+			result, err := ssa.PatchApplyServiceAccount(testCtx, k8sClient, ac, ssa.FieldOwnerFor("ph-force-matching-bd"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultSkipped))
+		})
+
+		It("should return conflict when a ServiceAccount appears during create apply", func() {
 			name := types.NamespacedName{Name: "ph-create-race-sa", Namespace: "default"}
 			racingClient := &serviceAccountCreateRaceClient{Client: k8sClient, namespacedName: name}
 
@@ -413,15 +445,16 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 				map[string]string{"shared": "desired"}, true).
 				WithAnnotations(map[string]string{"source": "desired"})
 			result, err := ssa.PatchApplyServiceAccount(testCtx, racingClient, ac, ssa.FieldOwnerFor("ph-race-bd"))
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsConflict(err)).To(BeTrue())
+			Expect(result).To(Equal(ssa.PatchApplyResult(0)))
 
 			var sa corev1.ServiceAccount
 			Expect(k8sClient.Get(testCtx, name, &sa)).To(Succeed())
-			Expect(sa.Labels).To(HaveKeyWithValue("shared", "desired"))
-			Expect(sa.Annotations).To(HaveKeyWithValue("source", "desired"))
+			Expect(sa.Labels).To(HaveKeyWithValue("shared", "external"))
+			Expect(sa.Annotations).To(HaveKeyWithValue("source", "external"))
 			Expect(sa.AutomountServiceAccountToken).NotTo(BeNil())
-			Expect(*sa.AutomountServiceAccountToken).To(BeTrue())
+			Expect(*sa.AutomountServiceAccountToken).To(BeFalse())
 		})
 	})
 

@@ -52,11 +52,11 @@ runs:
   using: 'composite'
   steps:
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
     - name: Log in to Container Registry
       if: inputs.push-to-registry == 'true'
-      uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+      uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
       with:
         registry: ${{ inputs.registry }}
         username: ${{ inputs.registry-username }}
@@ -66,8 +66,18 @@ runs:
       id: build
       shell: bash
       working-directory: ${{ inputs.working-directory }}
+      env:
+        IMAGE_NAME: ${{ inputs.image-name }}
+        IMAGE_TAG: ${{ inputs.image-tag }}
+        PUSH_TO_REGISTRY: ${{ inputs.push-to-registry }}
+        LOAD_TO_KIND: ${{ inputs.load-to-kind }}
       run: |
-        IMAGE="${{ inputs.image-name }}:${{ inputs.image-tag }}"
+        set -euo pipefail
+        [[ "$IMAGE_NAME" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "invalid image name"; exit 1; }
+        [[ "$IMAGE_TAG" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "invalid image tag"; exit 1; }
+        [[ "$PUSH_TO_REGISTRY" =~ ^(true|false)$ ]] || { echo "invalid push-to-registry value"; exit 1; }
+        [[ "$LOAD_TO_KIND" =~ ^(true|false)$ ]] || { echo "invalid load-to-kind value"; exit 1; }
+        IMAGE="${IMAGE_NAME}:${IMAGE_TAG}"
         echo "Building image: $IMAGE"
 
         # Extract Go version from go.mod (single source of truth)
@@ -78,18 +88,16 @@ runs:
         echo "Using Go version from go.mod: $GO_VERSION"
 
         # Validate: cannot push to registry when loading to kind
-        if [ "${{ inputs.push-to-registry }}" = "true" ] && [ "${{ inputs.load-to-kind }}" = "true" ]; then
+        if [ "$PUSH_TO_REGISTRY" = "true" ] && [ "$LOAD_TO_KIND" = "true" ]; then
           echo "ERROR: Cannot use push-to-registry and load-to-kind simultaneously"
           echo "load-to-kind requires the image to be available locally (--load), but push-to-registry uses --push"
           exit 1
         fi
 
         # Determine build flags based on push/load requirements
-        BUILD_FLAGS=""
-        if [ "${{ inputs.push-to-registry }}" = "true" ]; then
-          BUILD_FLAGS="--push"
-        else
-          BUILD_FLAGS="--load"
+        BUILD_FLAGS=(--load)
+        if [ "$PUSH_TO_REGISTRY" = "true" ]; then
+          BUILD_FLAGS=(--push)
         fi
 
         # Build with cache using buildx
@@ -97,14 +105,22 @@ runs:
           --build-arg GO_VERSION="${GO_VERSION}" \
           --cache-from type=gha \
           --cache-to type=gha,mode=max \
-          $BUILD_FLAGS \
+          "${BUILD_FLAGS[@]}" \
           -t "$IMAGE" \
           .
 
-        echo "image=$IMAGE" >> $GITHUB_OUTPUT
+        echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
 
     - name: Load image into kind
       if: inputs.load-to-kind == 'true'
       shell: bash
+      env:
+        IMAGE_NAME: ${{ inputs.image-name }}
+        IMAGE_TAG: ${{ inputs.image-tag }}
+        KIND_CLUSTER_NAME: ${{ inputs.kind-cluster-name }}
       run: |
-        kind load docker-image "${{ inputs.image-name }}:${{ inputs.image-tag }}" --name ${{ inputs.kind-cluster-name }}
+        set -euo pipefail
+        [[ "$IMAGE_NAME" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "invalid image name"; exit 1; }
+        [[ "$IMAGE_TAG" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "invalid image tag"; exit 1; }
+        [[ "$KIND_CLUSTER_NAME" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "invalid kind cluster name"; exit 1; }
+        kind load docker-image "${IMAGE_NAME}:${IMAGE_TAG}" --name "$KIND_CLUSTER_NAME"

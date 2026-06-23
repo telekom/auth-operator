@@ -116,7 +116,8 @@ type RestrictedRoleDefinition struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   RestrictedRoleDefinitionSpec   `json:"spec,omitempty"`
+	// +kubebuilder:validation:Required
+	Spec   RestrictedRoleDefinitionSpec   `json:"spec"`
 	Status RestrictedRoleDefinitionStatus `json:"status,omitempty"`
 }
 

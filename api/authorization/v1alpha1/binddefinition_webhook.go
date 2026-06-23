@@ -2,6 +2,7 @@ package v1alpha1
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -20,16 +21,25 @@ import (
 )
 
 // BindDefinitionValidator implements admission.Validator for BindDefinition.
-// It holds a client reference for listing existing resources during validation.
+// It uses Reader for admission-critical live reads and falls back to Client in
+// unit tests that construct the validator directly.
 // +kubebuilder:object:generate=false
 type BindDefinitionValidator struct {
 	Client client.Client
+	Reader client.Reader
 }
 
 // supportedSubjectKinds lists the RBAC-supported subject types for BindDefinition subjects.
 var supportedSubjectKinds = []string{rbacv1.UserKind, rbacv1.GroupKind, rbacv1.ServiceAccountKind}
 
 var _ admission.Validator[*BindDefinition] = &BindDefinitionValidator{}
+
+func (v *BindDefinitionValidator) reader() client.Reader {
+	if v.Reader != nil {
+		return v.Reader
+	}
+	return v.Client
+}
 
 // checkRoleExists checks whether a Role exists in the given namespace, using
 // roleCache to avoid redundant lookups. It returns an error on API failures;
@@ -54,7 +64,7 @@ func (v *BindDefinitionValidator) checkRoleExists(
 	}
 	role := &rbacv1.Role{}
 	key := client.ObjectKey{Namespace: namespace, Name: roleRef}
-	if err := v.Client.Get(ctx, key, role); err != nil {
+	if err := v.reader().Get(ctx, key, role); err != nil {
 		if apierrors.IsNotFound(err) {
 			roleCache[roleKey] = false
 			logger.Info("role not found",
@@ -75,7 +85,7 @@ func (v *BindDefinitionValidator) checkRoleExists(
 // SetupWebhookWithManager will setup the manager to manage the webhooks.
 func (r *BindDefinition) SetupWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr, r).
-		WithValidator(&BindDefinitionValidator{Client: mgr.GetClient()}).
+		WithValidator(&BindDefinitionValidator{Client: mgr.GetClient(), Reader: mgr.GetAPIReader()}).
 		Complete()
 }
 
@@ -93,38 +103,26 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 	logger := log.FromContext(ctx).WithName("binddefinition-webhook")
 	var warnings admission.Warnings
 
-	// Use field index for efficient lookup by TargetName. The field index constrains
-	// results to the small set matching this targetName; the context timeout provides
-	// the hard latency bound.
-	bindDefinitionList := &BindDefinitionList{}
-	if err := v.Client.List(ctx, bindDefinitionList, client.MatchingFields{
-		TargetNameField: r.Spec.TargetName,
-	}); err != nil {
+	existingBD, err := v.findBindDefinitionTargetNameConflict(ctx, r)
+	if err != nil {
 		logger.Error(err, "failed to list BindDefinitions", "targetName", r.Spec.TargetName)
-		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list BindDefinitions: %w", err))
+		return nil, apierrors.NewInternalError(errors.New("unable to list BindDefinitions"))
 	}
-
-	for _, bindDefinition := range bindDefinitionList.Items {
-		// The field index already filters by TargetName, so we only need to check
-		// that this isn't the same BindDefinition being validated (by name)
-		if bindDefinition.Name != r.Name {
-			logger.Info("validation failed: duplicate targetName",
-				"name", r.Name, "targetName", r.Spec.TargetName, "conflictsWith", bindDefinition.Name)
-			return nil, apierrors.NewBadRequest(fmt.Sprintf("targetName %s is already in use by BindDefinition %q", r.Spec.TargetName, bindDefinition.Name))
-		}
+	if existingBD != nil {
+		logger.Info("validation failed: duplicate targetName",
+			"name", r.Name, "targetName", r.Spec.TargetName, "conflictsWith", existingBD.Name)
+		return nil, apierrors.NewBadRequest(fmt.Sprintf("targetName %s is already in use by BindDefinition %q", r.Spec.TargetName, existingBD.Name))
 	}
 
 	// Check for cross-type targetName collision with RestrictedBindDefinitions (only need first match).
-	rbdList := &RestrictedBindDefinitionList{}
-	if err := v.Client.List(ctx, rbdList, client.MatchingFields{
-		TargetNameField: r.Spec.TargetName,
-	}, client.Limit(1)); err != nil {
+	existingRBD, err := v.findRestrictedBindDefinitionTargetNameConflict(ctx, r)
+	if err != nil {
 		logger.Error(err, "failed to list RestrictedBindDefinitions", "targetName", r.Spec.TargetName)
-		return nil, apierrors.NewInternalError(fmt.Errorf("unable to list RestrictedBindDefinitions: %w", err))
+		return nil, apierrors.NewInternalError(errors.New("unable to list RestrictedBindDefinitions"))
 	}
-	for _, existing := range rbdList.Items {
+	if existingRBD != nil {
 		return nil, apierrors.NewBadRequest(
-			fmt.Sprintf("targetName %s is already in use by RestrictedBindDefinition %q", r.Spec.TargetName, existing.Name))
+			fmt.Sprintf("targetName %s is already in use by RestrictedBindDefinition %q", r.Spec.TargetName, existingRBD.Name))
 	}
 
 	// Validate subject Kinds are one of the RBAC-supported types.
@@ -171,7 +169,7 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 			continue
 		}
 		clusterRole := &rbacv1.ClusterRole{}
-		if err := v.Client.Get(ctx, client.ObjectKey{Name: clusterRoleRef}, clusterRole); err != nil {
+		if err := v.reader().Get(ctx, client.ObjectKey{Name: clusterRoleRef}, clusterRole); err != nil {
 			if apierrors.IsNotFound(err) {
 				clusterRoleExists[clusterRoleRef] = false
 				logger.Info("clusterrole not found",
@@ -182,7 +180,7 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 				}
 			} else {
 				logger.Error(err, "failed to fetch clusterrole", "clusterRoleName", clusterRoleRef)
-				return warnings, apierrors.NewInternalError(fmt.Errorf("unable to fetch ClusterRole: %w", err))
+				return warnings, apierrors.NewInternalError(errors.New("unable to fetch ClusterRole"))
 			}
 		} else {
 			clusterRoleExists[clusterRoleRef] = true
@@ -202,7 +200,7 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 				continue
 			}
 			clusterRole := &rbacv1.ClusterRole{}
-			if err := v.Client.Get(ctx, client.ObjectKey{Name: clusterRoleRef}, clusterRole); err != nil {
+			if err := v.reader().Get(ctx, client.ObjectKey{Name: clusterRoleRef}, clusterRole); err != nil {
 				if apierrors.IsNotFound(err) {
 					clusterRoleExists[clusterRoleRef] = false
 					logger.Info("clusterrole not found",
@@ -213,7 +211,7 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 					}
 				} else {
 					logger.Error(err, "failed to fetch clusterrole", "clusterRoleName", clusterRoleRef)
-					return warnings, apierrors.NewInternalError(fmt.Errorf("unable to fetch ClusterRole: %w", err))
+					return warnings, apierrors.NewInternalError(errors.New("unable to fetch ClusterRole"))
 				}
 			} else {
 				clusterRoleExists[clusterRoleRef] = true
@@ -237,9 +235,9 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 				listOptions := &client.ListOptions{
 					LabelSelector: selector,
 				}
-				if err := v.Client.List(ctx, namespaceList, listOptions); err != nil {
+				if err := v.reader().List(ctx, namespaceList, listOptions); err != nil {
 					logger.Error(err, "failed to list namespaces", "selector", selector.String())
-					return warnings, apierrors.NewInternalError(fmt.Errorf("unable to list namespaces: %w", err))
+					return warnings, apierrors.NewInternalError(errors.New("unable to list namespaces"))
 				}
 				for _, ns := range namespaceList.Items {
 					namespaceSet[ns.Name] = ns
@@ -263,7 +261,7 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 					if err := v.checkRoleExists(ctx, ns.Name, roleRef, r.Name, policy, roleExists, &missingRoles); err != nil {
 						logger.Error(err, "failed to validate role reference",
 							"name", r.Name, "namespace", ns.Name, "roleName", roleRef)
-						return warnings, apierrors.NewInternalError(fmt.Errorf("unable to validate role reference: %w", err))
+						return warnings, apierrors.NewInternalError(errors.New("unable to validate role reference"))
 					}
 				}
 			}
@@ -271,7 +269,7 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 			// Validate RoleRefs in the explicitly specified namespace.
 			// First verify the namespace exists and is not terminating.
 			ns := &corev1.Namespace{}
-			if err := v.Client.Get(ctx, client.ObjectKey{Name: roleBinding.Namespace}, ns); err != nil {
+			if err := v.reader().Get(ctx, client.ObjectKey{Name: roleBinding.Namespace}, ns); err != nil {
 				if apierrors.IsNotFound(err) {
 					logger.Info("namespace not found, skipping role checks",
 						"name", r.Name, "namespace", roleBinding.Namespace)
@@ -279,7 +277,7 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 					continue
 				}
 				logger.Error(err, "failed to get namespace", "namespace", roleBinding.Namespace)
-				return warnings, apierrors.NewInternalError(fmt.Errorf("unable to get namespace: %w", err))
+				return warnings, apierrors.NewInternalError(errors.New("unable to get namespace"))
 			}
 			if ns.Status.Phase == corev1.NamespaceTerminating {
 				continue
@@ -288,7 +286,7 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 				if err := v.checkRoleExists(ctx, roleBinding.Namespace, roleRef, r.Name, policy, roleExists, &missingRoles); err != nil {
 					logger.Error(err, "failed to validate role reference",
 						"name", r.Name, "namespace", roleBinding.Namespace, "roleName", roleRef)
-					return warnings, apierrors.NewInternalError(fmt.Errorf("unable to validate role reference: %w", err))
+					return warnings, apierrors.NewInternalError(errors.New("unable to validate role reference"))
 				}
 			}
 		}
@@ -308,6 +306,58 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 	}
 
 	return warnings, nil
+}
+
+//nolint:nilnil // A nil object with nil error means no conflicting targetName was found.
+func (v *BindDefinitionValidator) findBindDefinitionTargetNameConflict(
+	ctx context.Context,
+	obj *BindDefinition,
+) (*BindDefinition, error) {
+	reader := v.reader()
+	continueToken := ""
+	for {
+		bdList := &BindDefinitionList{}
+		nextContinueToken, err := listAdmissionPage(ctx, reader, bdList, continueToken)
+		if err != nil {
+			return nil, err
+		}
+		for i := range bdList.Items {
+			existing := &bdList.Items[i]
+			if existing.Spec.TargetName == obj.Spec.TargetName && existing.Name != obj.Name {
+				return existing, nil
+			}
+		}
+		if nextContinueToken == "" {
+			return nil, nil
+		}
+		continueToken = nextContinueToken
+	}
+}
+
+//nolint:nilnil // A nil object with nil error means no conflicting targetName was found.
+func (v *BindDefinitionValidator) findRestrictedBindDefinitionTargetNameConflict(
+	ctx context.Context,
+	obj *BindDefinition,
+) (*RestrictedBindDefinition, error) {
+	reader := v.reader()
+	continueToken := ""
+	for {
+		rbdList := &RestrictedBindDefinitionList{}
+		nextContinueToken, err := listAdmissionPage(ctx, reader, rbdList, continueToken)
+		if err != nil {
+			return nil, err
+		}
+		for i := range rbdList.Items {
+			existing := &rbdList.Items[i]
+			if existing.Spec.TargetName == obj.Spec.TargetName {
+				return existing, nil
+			}
+		}
+		if nextContinueToken == "" {
+			return nil, nil
+		}
+		continueToken = nextContinueToken
+	}
 }
 
 // ValidateCreate implements admission.Validator for BindDefinition.

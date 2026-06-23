@@ -1,4 +1,4 @@
-package utils //nolint:revive // e2e test utilities package
+package utils
 
 import (
 	"context"

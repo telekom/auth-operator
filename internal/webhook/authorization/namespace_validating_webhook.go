@@ -2,12 +2,12 @@ package webhooks
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 
 	"github.com/go-logr/logr"
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
-	"github.com/telekom/auth-operator/pkg/indexer"
 	"github.com/telekom/auth-operator/pkg/metrics"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -28,6 +28,7 @@ const legacyOwnerLabel = "schiff.telekom.de/owner"
 // NamespaceValidator is a validating webhook that validates namespace operations based on BindDefinitions.
 type NamespaceValidator struct {
 	Client       client.Client
+	Reader       client.Reader
 	Decoder      admission.Decoder
 	TDGMigration bool
 }
@@ -132,13 +133,13 @@ func (v *NamespaceValidator) decodeNamespaces(logger logr.Logger, req admission.
 	if err != nil {
 		logger.Error(err, "failed to decode namespace object", "namespace", req.Name, "operation", req.Operation)
 		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()
-		resp := admission.Errored(http.StatusBadRequest, err)
+		resp := admission.Errored(http.StatusBadRequest, errors.New("unable to decode namespace request"))
 		return ns, oldNs, &resp
 	}
 	if oldErr != nil {
 		logger.Error(oldErr, "failed to decode old namespace object", "namespace", req.Name, "operation", req.Operation)
 		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()
-		resp := admission.Errored(http.StatusBadRequest, oldErr)
+		resp := admission.Errored(http.StatusBadRequest, errors.New("unable to decode namespace request"))
 		return ns, oldNs, &resp
 	}
 
@@ -285,41 +286,20 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 		"username", req.UserInfo.Username, "isServiceAccount", saInfo.IsServiceAccount,
 		"groupCount", len(userGroups))
 
-	bindDefinitions := &authorizationv1alpha1.BindDefinitionList{}
 	listCtx, cancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
 	defer cancel()
-	if err := v.Client.List(listCtx, bindDefinitions,
-		client.MatchingFields{indexer.BindDefinitionHasRoleBindingsField: indexer.BindDefinitionHasRoleBindingsTrue},
-	); err != nil {
-		if !isFieldIndexError(err) {
-			logger.Error(err, "failed to list BindDefinitions", "namespace", req.Name)
-			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()
-			return admission.Errored(http.StatusInternalServerError, err)
-		}
-
-		logger.V(1).Info("field index unavailable for BindDefinitions, falling back to unindexed list",
-			"field", indexer.BindDefinitionHasRoleBindingsField, "error", err)
-		allBindDefinitions := &authorizationv1alpha1.BindDefinitionList{}
-		fallbackCtx, fallbackCancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
-		defer fallbackCancel()
-		if err := v.Client.List(fallbackCtx, allBindDefinitions); err != nil {
-			logger.Error(err, "failed to list BindDefinitions", "namespace", req.Name)
-			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()
-			return admission.Errored(http.StatusInternalServerError, err)
-		}
-		bindDefinitions.Items = make([]authorizationv1alpha1.BindDefinition, 0, len(allBindDefinitions.Items))
-		for _, bindDefinition := range allBindDefinitions.Items {
-			if len(bindDefinition.Spec.RoleBindings) > 0 {
-				bindDefinitions.Items = append(bindDefinitions.Items, bindDefinition)
-			}
-		}
+	bindDefinitions, err := freshBindDefinitionsWithRoleBindings(listCtx, v.Client, v.admissionReader())
+	if err != nil {
+		logger.Error(err, "failed to list BindDefinitions", "namespace", req.Name)
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()
+		return admission.Errored(http.StatusInternalServerError, errors.New("unable to validate namespace request"))
 	}
 
 	logger.V(2).Info("checking authorization against BindDefinitions",
-		"namespace", req.Name, "bindDefinitionCount", len(bindDefinitions.Items))
+		"namespace", req.Name, "bindDefinitionCount", len(bindDefinitions))
 
 	isAllowed := false
-	for bdIdx, bindDef := range bindDefinitions.Items {
+	for bdIdx, bindDef := range bindDefinitions {
 		if IsRestrictedBindDefinition(bindDef.Name) {
 			logger.V(4).Info("skipping restricted BindDefinition", "bindDefinitionName", bindDef.Name)
 			continue
@@ -336,6 +316,18 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 		logger.V(3).Info("user matched in BindDefinition", "namespace", req.Name, "bindDefinition", bindDef.Name)
 
 		for rbIdx, roleBinding := range bindDef.Spec.RoleBindings {
+			if roleBinding.Namespace != "" {
+				if roleBinding.Namespace == req.Name {
+					isAllowed = true
+					logger.V(2).Info("user authorized for explicit namespace operation", "namespace", req.Name,
+						"bindDefinition", bindDef.Name, "roleBindingIndex", rbIdx, "username", req.UserInfo.Username)
+					break
+				}
+				logger.V(4).Info("explicit namespace did not match request namespace, skipping selectors",
+					"namespace", req.Name, "bindDefinition", bindDef.Name,
+					"roleBindingIndex", rbIdx, "explicitNamespace", roleBinding.Namespace)
+				continue
+			}
 			namespaceMatchFound := false
 			for nsIdx, namespaceSelector := range roleBinding.NamespaceSelector {
 				matches, err := namespaceMatchesSelector(ns, &namespaceSelector)
@@ -343,7 +335,7 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 					logger.Error(err, "failed to match namespace selector",
 						"namespace", req.Name, "bindDefinition", bindDef.Name)
 					metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()
-					return admission.Errored(http.StatusInternalServerError, err)
+					return admission.Errored(http.StatusInternalServerError, errors.New("unable to validate namespace request"))
 				}
 				if matches {
 					namespaceMatchFound = true
@@ -371,19 +363,6 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 		return admission.Allowed("")
 	}
 
-	// Allow orphan cleanup only when the namespace has a non-empty owner label
-	// and does not match any BindDefinition selector. This keeps delete
-	// authorization conservative for namespaces that are still targeted.
-	if req.Operation == admissionv1.Delete {
-		ownerValue, hasOwner := ns.Labels[authorizationv1alpha1.LabelKeyOwner]
-		if hasOwner && ownerValue != "" && !namespaceMatchedByAnyBindDefinition(logger, ns, bindDefinitions.Items) {
-			logger.V(1).Info("namespace delete allowed - owner label is unclaimed by any BindDefinition",
-				"namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username)
-			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
-			return admission.Allowed("")
-		}
-	}
-
 	// Last resort: if the user is a ServiceAccount performing CREATE/UPDATE, check if
 	// its source namespace has the same tracked ownership labels as the target namespace (issue #202).
 	// This is restricted to CREATE/UPDATE — DELETE is intentionally excluded.
@@ -391,11 +370,11 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 		(req.Operation == admissionv1.Create || req.Operation == admissionv1.Update) {
 		saCtx, saCancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
 		defer saCancel()
-		inheritedLabels, saErr := GetSANamespaceTrackedLabels(saCtx, v.Client, saInfo)
+		inheritedLabels, saErr := GetSANamespaceTrackedLabels(saCtx, v.admissionReader(), saInfo)
 		if saErr != nil {
 			logger.Error(saErr, "failed to lookup SA namespace labels", "saNamespace", saInfo.Namespace, "targetNamespace", req.Name)
 			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()
-			return admission.Errored(http.StatusInternalServerError, saErr)
+			return admission.Errored(http.StatusInternalServerError, errors.New("unable to validate namespace request"))
 		}
 		if len(inheritedLabels) > 0 {
 			// Symmetric comparison: all inherited labels must match AND the target
@@ -430,6 +409,13 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 	return admission.Denied(denialMsg)
 }
 
+func (v *NamespaceValidator) admissionReader() client.Reader {
+	if v.Reader != nil {
+		return v.Reader
+	}
+	return v.Client
+}
+
 func namespaceMatchesSelector(ns *corev1.Namespace, selector *metav1.LabelSelector) (bool, error) {
 	// Convert the LabelSelector into a labels.Selector
 	labelSelector, err := metav1.LabelSelectorAsSelector(selector)
@@ -439,31 +425,4 @@ func namespaceMatchesSelector(ns *corev1.Namespace, selector *metav1.LabelSelect
 
 	// Check if the namespace's labels match the selector
 	return labelSelector.Matches(labels.Set(ns.Labels)), nil
-}
-
-func namespaceMatchedByAnyBindDefinition(logger logr.Logger, ns *corev1.Namespace, bindDefs []authorizationv1alpha1.BindDefinition) bool {
-	for _, bindDef := range bindDefs {
-		if IsRestrictedBindDefinition(bindDef.Name) {
-			continue
-		}
-
-		for _, roleBinding := range bindDef.Spec.RoleBindings {
-			for _, namespaceSelector := range roleBinding.NamespaceSelector {
-				matches, err := namespaceMatchesSelector(ns, &namespaceSelector)
-				if err != nil {
-					// Fail closed: if selector evaluation fails, treat namespace as matched
-					// to avoid accidentally allowing deletion.
-					logger.Error(err, "failed to evaluate namespace selector while checking namespace delete; treating namespace as matched",
-						"namespace", ns.Name, "bindDefinition", bindDef.Name)
-					return true
-				}
-
-				if matches {
-					return true
-				}
-			}
-		}
-	}
-
-	return false
 }

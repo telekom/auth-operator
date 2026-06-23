@@ -457,7 +457,7 @@ var _ = Describe("RestrictedRoleDefinition Webhook", func() {
 
 	Context("When deleting RestrictedRoleDefinition under Validating Webhook", func() {
 
-		It("Should always allow delete", func() {
+		It("Should allow delete when the selected policy has no default assignment", func() {
 			rrd := &RestrictedRoleDefinition{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-rrd-delete",

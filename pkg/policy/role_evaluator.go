@@ -37,6 +37,14 @@ func EvaluateRoleDefinitionWithLabels(
 
 	var violations []Violation
 
+	if rrd.Spec.TargetRole == authorizationv1alpha1.DefinitionClusterRole &&
+		!scopeAllowsClusterResources(policy.Spec.AppliesTo) {
+		violations = append(violations, Violation{
+			Field:   "spec.targetRole",
+			Message: `ClusterRoles require appliesTo.namespaces to include "*"`,
+		})
+	}
+
 	// Enforce appliesTo scope: the Role's target namespace must be within the policy's
 	// declared governance scope.
 	if rrd.Spec.TargetNamespace != "" && !namespaceInScope(ctx, policy.Spec.AppliesTo, rrd.Spec.TargetNamespace, labelGetter) {
@@ -147,12 +155,13 @@ func isAPIGroupFullyRestricted(rrd *authorizationv1alpha1.RestrictedRoleDefiniti
 }
 
 // isResourceFullyRestricted returns true if the resource is listed in
-// RestrictedResources with an empty Group, meaning the resource is restricted
-// from all API groups. If a specific group is set, the resource would only be
-// excluded from that group at runtime, allowing it through from other groups.
+// RestrictedResources with an empty or "*" Group, meaning the resource is
+// restricted from all API groups. If a specific group is set, the resource
+// would only be excluded from that group at runtime, allowing it through from
+// other groups.
 func isResourceFullyRestricted(rrd *authorizationv1alpha1.RestrictedRoleDefinition, res string) bool {
 	for _, rr := range rrd.Spec.RestrictedResources {
-		if MatchesResourceName(rr.Name, res) && rr.Group == "" {
+		if MatchesResourceName(rr.Name, res) && APIGroupRestrictionCovers(rr.Group, "*") {
 			return true
 		}
 	}

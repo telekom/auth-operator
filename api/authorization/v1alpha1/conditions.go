@@ -161,6 +161,11 @@ const (
 	// Use with the list of missing role names (accepts any type via %v).
 	RoleRefInvalidMessage AuthZConditionMessage = "Missing role references: %v"
 
+	// TargetNamespaceNotFoundReason is used when explicit RoleBinding target namespaces do not exist.
+	TargetNamespaceNotFoundReason AuthZConditionReason = "TargetNamespaceNotFound"
+	// TargetNamespaceNotFoundMessage is the format string when explicit target namespaces are missing.
+	TargetNamespaceNotFoundMessage AuthZConditionMessage = "Missing target namespaces: %v"
+
 	// RoleRefValidationSkippedReason is used when role reference validation is
 	// skipped because the missing-role-policy is set to "ignore".
 	RoleRefValidationSkippedReason AuthZConditionReason = "RoleRefValidationSkipped"

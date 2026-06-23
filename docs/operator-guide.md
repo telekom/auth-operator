@@ -140,7 +140,9 @@ ServiceAccount used for impersonated apply operations, and admission validates
 only that the configured `spec.impersonation.serviceAccountRef` name and
 namespace are present. Kubernetes RBAC on that impersonated ServiceAccount is the
 runtime permission boundary for generated Role, ClusterRole, RoleBinding, and
-ClusterRoleBinding changes.
+ClusterRoleBinding apply operations and policy-backed cleanup. If the referenced
+policy no longer exists, or a restricted resource is already deleting, final
+owned-resource cleanup uses the controller identity so finalizers can complete.
 
 Grant tenants access to `RestrictedRoleDefinition` and `RestrictedBindDefinition`
 instead of granting them write access to `RBACPolicy`. Keep the impersonated
@@ -295,6 +297,8 @@ metrics:
     enabled: false
     interval: ""
     additionalLabels: {}
+    tlsConfig:
+      insecureSkipVerify: false
 ```
 
 ---
@@ -428,6 +432,14 @@ helm upgrade auth-operator oci://ghcr.io/telekom/charts/auth-operator \
   --set metrics.serviceMonitor.additionalLabels.release=prometheus
 ```
 
+For authenticated metrics, the ServiceMonitor verifies the metrics endpoint TLS
+certificate by default. Helm rendering fails unless you configure
+`metrics.serviceMonitor.tlsConfig.caFile` for your Prometheus setup or
+explicitly set `metrics.serviceMonitor.tlsConfig.insecureSkipVerify=true` only
+for an accepted self-signed scrape endpoint. Set
+`metrics.serviceMonitor.tlsConfig.serverName` when Prometheus needs an SNI or
+verification name override.
+
 ### Health Checks
 
 | Endpoint | Port | Purpose |
@@ -555,9 +567,11 @@ networkPolicy:
     additionalRules: []              # Custom egress rules (e.g., cert-manager)
 ```
 
-> **Warning:** When `apiServerCIDR` is empty, egress to **any** destination on
-> ports 443/6443 is allowed. Always set `apiServerCIDR` to your cluster's
-> API server IP for proper isolation.
+When `networkPolicy.egress.enabled=true`, set `apiServerCIDR` to your cluster's
+API server IP or provide an equivalent API-server `additionalRules` entry. Helm
+rendering fails without one of these API-server egress paths so the operator is
+not installed into a namespace where it can resolve DNS but cannot reach the
+Kubernetes API.
 
 ---
 
@@ -569,6 +583,10 @@ networkPolicy:
    ```bash
    kubectl get roledefinitions -A -o yaml > roledefinitions-backup.yaml
    kubectl get binddefinitions -A -o yaml > binddefinitions-backup.yaml
+   kubectl get rbacpolicies -A -o yaml > rbacpolicies-backup.yaml
+   kubectl get restrictedroledefinitions -A -o yaml > restrictedroledefinitions-backup.yaml
+   kubectl get restrictedbinddefinitions -A -o yaml > restrictedbinddefinitions-backup.yaml
+   kubectl get webhookauthorizers -A -o yaml > webhookauthorizers-backup.yaml
    ```
 
 2. **Check release notes** for breaking changes
@@ -595,6 +613,9 @@ CRDs are not updated automatically by Helm. Apply manually if needed:
 ```bash
 kubectl apply -f https://raw.githubusercontent.com/telekom/auth-operator/main/config/crd/bases/authorization.t-caas.telekom.com_roledefinitions.yaml
 kubectl apply -f https://raw.githubusercontent.com/telekom/auth-operator/main/config/crd/bases/authorization.t-caas.telekom.com_binddefinitions.yaml
+kubectl apply -f https://raw.githubusercontent.com/telekom/auth-operator/main/config/crd/bases/authorization.t-caas.telekom.com_rbacpolicies.yaml
+kubectl apply -f https://raw.githubusercontent.com/telekom/auth-operator/main/config/crd/bases/authorization.t-caas.telekom.com_restrictedroledefinitions.yaml
+kubectl apply -f https://raw.githubusercontent.com/telekom/auth-operator/main/config/crd/bases/authorization.t-caas.telekom.com_restrictedbinddefinitions.yaml
 kubectl apply -f https://raw.githubusercontent.com/telekom/auth-operator/main/config/crd/bases/authorization.t-caas.telekom.com_webhookauthorizers.yaml
 ```
 
@@ -616,6 +637,9 @@ helm rollback auth-operator <revision> -n auth-operator-system
 
 - **RoleDefinition** resources (defines RBAC generation rules)
 - **BindDefinition** resources (defines subject bindings)
+- **RBACPolicy** resources (defines restricted RBAC policy boundaries)
+- **RestrictedRoleDefinition** resources (tenant-safe generated roles)
+- **RestrictedBindDefinition** resources (tenant-safe generated bindings)
 - **WebhookAuthorizer** resources (defines authorization rules)
 
 ### Backup Script
@@ -627,6 +651,9 @@ mkdir -p "$BACKUP_DIR"
 
 kubectl get roledefinitions -A -o yaml > "$BACKUP_DIR/roledefinitions.yaml"
 kubectl get binddefinitions -A -o yaml > "$BACKUP_DIR/binddefinitions.yaml"
+kubectl get rbacpolicies -A -o yaml > "$BACKUP_DIR/rbacpolicies.yaml"
+kubectl get restrictedroledefinitions -A -o yaml > "$BACKUP_DIR/restrictedroledefinitions.yaml"
+kubectl get restrictedbinddefinitions -A -o yaml > "$BACKUP_DIR/restrictedbinddefinitions.yaml"
 kubectl get webhookauthorizers -A -o yaml > "$BACKUP_DIR/webhookauthorizers.yaml"
 
 echo "Backup saved to $BACKUP_DIR"
@@ -763,8 +790,16 @@ kubectl get clusterroles -l app.kubernetes.io/managed-by=auth-operator
 # List all BindDefinitions
 kubectl get binddefinitions -A
 
+# List restricted policy resources
+kubectl get rbacpolicies,restrictedroledefinitions,restrictedbinddefinitions -A
+
 # List generated bindings
 kubectl get clusterrolebindings,rolebindings -A -l app.kubernetes.io/managed-by=auth-operator
+
+# Inspect restricted status and recent events
+kubectl describe restrictedroledefinition <name>
+kubectl describe restrictedbinddefinition <name>
+kubectl get events -A --field-selector involvedObject.kind=RestrictedBindDefinition --sort-by='.lastTimestamp'
 ```
 
 ### Force Reconciliation

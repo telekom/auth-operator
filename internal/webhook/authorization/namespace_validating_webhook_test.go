@@ -492,7 +492,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 			expectedAllow: true,
 		},
 		{
-			name:     "allow delete for unauthorized user when namespace is unclaimed by any BindDefinition",
+			name:     "deny delete for unauthorized user when namespace is unclaimed by any BindDefinition",
 			bindDefs: []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -525,7 +525,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 					},
 				},
 			},
-			expectedAllow: true,
+			expectedAllow: false,
 		},
 		{
 			name:     "deny delete for unauthorized user when tenant selector matches namespace",
@@ -2663,7 +2663,7 @@ func TestNamespaceValidatorSANamespaceInheritance(t *testing.T) {
 			expectedAllow: false,
 		},
 		{
-			name:      "SA DELETE operation on unclaimed namespace - allowed for orphan cleanup",
+			name:      "SA DELETE operation on unclaimed namespace is denied without bypass",
 			operation: admissionv1.Delete,
 			username:  "system:serviceaccount:tenant-alpha:my-operator",
 			targetNS: &corev1.Namespace{
@@ -2684,7 +2684,7 @@ func TestNamespaceValidatorSANamespaceInheritance(t *testing.T) {
 					},
 				},
 			},
-			expectedAllow: true,
+			expectedAllow: false,
 		},
 	}
 

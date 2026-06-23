@@ -138,6 +138,10 @@ var _ = Describe("BindDefinition Controller", func() {
 		})
 
 		AfterEach(func() {
+			crbName := helpers.BuildBindingName("full-test", "full-test-view")
+			_ = k8sClient.Delete(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: crbName}})
+			_ = k8sClient.Delete(ctx, &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: crbName, Namespace: targetNS}})
+
 			bd := &authorizationv1alpha1.BindDefinition{}
 			if err := k8sClient.Get(ctx, fullNamespacedName, bd); err == nil {
 				// Remove finalizer if present so we can delete cleanly
@@ -610,7 +614,7 @@ func TestBindDefinitionDriftDetection(t *testing.T) {
 			nil,
 			[]rbacv1.Subject{{Kind: "User", Name: "drifted-user", APIGroup: rbacv1.GroupName}},
 			rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "view"},
-		)
+		).WithOwnerReferences(ownerRefForBindDefinition(bindDef))
 		err = c.Apply(ctx, driftedAC, client.FieldOwner("external-drift-manager"), client.ForceOwnership)
 		g.Expect(err).NotTo(HaveOccurred())
 
@@ -748,7 +752,7 @@ func TestBindDefinitionDriftDetection(t *testing.T) {
 			nil,
 			[]rbacv1.Subject{{Kind: "User", Name: "drifted-rb-user", APIGroup: rbacv1.GroupName}},
 			rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "view"},
-		)
+		).WithOwnerReferences(ownerRefForBindDefinition(bindDef))
 		err = c.Apply(ctx, driftedRBAC, client.FieldOwner("external-drift-manager"), client.ForceOwnership)
 		g.Expect(err).NotTo(HaveOccurred())
 
@@ -816,7 +820,7 @@ func TestBindDefinitionDriftDetection(t *testing.T) {
 				bindDef.Name, bindDef.UID, false, false,
 			)).
 			WithAnnotations(helpers.BuildManagedSAAnnotations(bindDef.Name))
-		err = c.Apply(ctx, driftedSAAC, client.FieldOwner(pkgssa.FieldOwnerFor(bindDef.Name)))
+		err = c.Apply(ctx, driftedSAAC, client.FieldOwner(pkgssa.FieldOwnerFor(bindDef.Name, authorizationv1alpha1.BindDefinitionKind)))
 		g.Expect(err).NotTo(HaveOccurred())
 
 		// Reconcile to correct
@@ -872,7 +876,7 @@ func TestBindDefinitionDriftDetection(t *testing.T) {
 			nil,
 			[]rbacv1.Subject{{Kind: "User", Name: "drifted-1", APIGroup: rbacv1.GroupName}},
 			rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "view"},
-		)
+		).WithOwnerReferences(ownerRefForBindDefinition(bindDef))
 		err = c.Apply(ctx, driftedCRB1AC, client.FieldOwner(pkgssa.FieldOwner))
 		g.Expect(err).NotTo(HaveOccurred())
 
@@ -884,7 +888,7 @@ func TestBindDefinitionDriftDetection(t *testing.T) {
 			nil,
 			[]rbacv1.Subject{{Kind: "User", Name: "drifted-2", APIGroup: rbacv1.GroupName}},
 			rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "edit"},
-		)
+		).WithOwnerReferences(ownerRefForBindDefinition(bindDef))
 		err = c.Apply(ctx, driftedCRB2AC, client.FieldOwner(pkgssa.FieldOwner))
 		g.Expect(err).NotTo(HaveOccurred())
 
@@ -1513,7 +1517,7 @@ func TestEnsureClusterRoleBindings(t *testing.T) {
 			nil,
 			[]rbacv1.Subject{{Kind: "User", Name: "old-user", APIGroup: rbacv1.GroupName}},
 			rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "admin"},
-		)
+		).WithOwnerReferences(ownerRefForBindDefinition(bindDef))
 		g.Expect(c.Apply(ctx, existingCRBAC, client.FieldOwner(pkgssa.FieldOwner))).To(Succeed())
 
 		err := r.ensureClusterRoleBindings(ctx, bindDef)
@@ -1524,6 +1528,28 @@ func TestEnsureClusterRoleBindings(t *testing.T) {
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(crb.Subjects).To(HaveLen(1))
 		g.Expect(crb.Subjects[0].Name).To(Equal("test-user"))
+	})
+
+	t.Run("rejects unowned pre-existing ClusterRoleBinding", func(t *testing.T) {
+		crbName := helpers.BuildBindingName(bindDef.Spec.TargetName, "admin")
+		unownedCRB := &rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: crbName},
+			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "admin"},
+		}
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bindDef, unownedCRB).Build()
+		r := &BindDefinitionReconciler{
+			client:   c,
+			scheme:   scheme,
+			recorder: events.NewFakeRecorder(10),
+		}
+
+		err := r.ensureClusterRoleBindings(ctx, bindDef)
+		g.Expect(err).To(HaveOccurred())
+		g.Expect(err.Error()).To(ContainSubstring("already exists and is not owned by BindDefinition"))
+
+		keptCRB := &rbacv1.ClusterRoleBinding{}
+		g.Expect(c.Get(ctx, types.NamespacedName{Name: crbName}, keptCRB)).To(Succeed())
+		g.Expect(keptCRB.OwnerReferences).To(BeEmpty())
 	})
 }
 
@@ -1576,6 +1602,28 @@ func TestEnsureSingleRoleBinding(t *testing.T) {
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(rb.RoleRef.Name).To(Equal("edit"))
 		g.Expect(rb.RoleRef.Kind).To(Equal("ClusterRole"))
+	})
+
+	t.Run("rejects unowned pre-existing RoleBinding", func(t *testing.T) {
+		rbName := helpers.BuildBindingName(bindDef.Spec.TargetName, "edit")
+		unownedRB := &rbacv1.RoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: rbName, Namespace: "test-ns"},
+			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "edit"},
+		}
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bindDef, ns, unownedRB).Build()
+		r := &BindDefinitionReconciler{
+			client:   c,
+			scheme:   scheme,
+			recorder: events.NewFakeRecorder(10),
+		}
+
+		err := r.ensureSingleRoleBinding(ctx, bindDef, "test-ns", "edit", "ClusterRole")
+		g.Expect(err).To(HaveOccurred())
+		g.Expect(err.Error()).To(ContainSubstring("already exists and is not owned by BindDefinition"))
+
+		keptRB := &rbacv1.RoleBinding{}
+		g.Expect(c.Get(ctx, types.NamespacedName{Name: rbName, Namespace: "test-ns"}, keptRB)).To(Succeed())
+		g.Expect(keptRB.OwnerReferences).To(BeEmpty())
 	})
 }
 
@@ -1648,7 +1696,7 @@ func TestEnsureServiceAccounts(t *testing.T) {
 				bindDef.Name, bindDef.UID, false, false,
 			)).
 			WithAnnotations(helpers.BuildManagedSAAnnotations(bindDef.Name))
-		_, applyErr := pkgssa.PatchApplyServiceAccount(ctx, c, existingSAAC, pkgssa.FieldOwnerFor(bindDef.Name))
+		_, applyErr := pkgssa.PatchApplyServiceAccount(ctx, c, existingSAAC, pkgssa.FieldOwnerFor(bindDef.Name, authorizationv1alpha1.BindDefinitionKind))
 		g.Expect(applyErr).NotTo(HaveOccurred())
 
 		_, _, err := r.ensureServiceAccounts(ctx, bindDef)
@@ -2125,7 +2173,7 @@ func TestSANotOwnedByThisBindDef(t *testing.T) {
 		otherBDSAAC := pkgssa.ServiceAccountWith("contested-sa", "test-ns",
 			map[string]string{helpers.ManagedByLabelStandard: helpers.ManagedByValue}, false).
 			WithOwnerReferences(otherBDOwnerRef)
-		_, seedErr := pkgssa.PatchApplyServiceAccount(ctx, c, otherBDSAAC, pkgssa.FieldOwnerFor("other-bd"))
+		_, seedErr := pkgssa.PatchApplyServiceAccount(ctx, c, otherBDSAAC, pkgssa.FieldOwnerFor("other-bd", authorizationv1alpha1.BindDefinitionKind))
 		g.Expect(seedErr).NotTo(HaveOccurred())
 
 		err := r.applyServiceAccount(ctx, bindDef, bindDef.Spec.Subjects[0], false)
@@ -2800,7 +2848,7 @@ func TestApplyServiceAccount(t *testing.T) {
 		existingSAAC := pkgssa.ServiceAccountWith("existing-sa", "default",
 			map[string]string{"old": "label"}, false).
 			WithAnnotations(helpers.BuildManagedSAAnnotations("upd-sa-bd"))
-		_, seedErr := pkgssa.PatchApplyServiceAccount(ctx, c, existingSAAC, pkgssa.FieldOwnerFor("upd-sa-bd"))
+		_, seedErr := pkgssa.PatchApplyServiceAccount(ctx, c, existingSAAC, pkgssa.FieldOwnerFor("upd-sa-bd", authorizationv1alpha1.BindDefinitionKind))
 		g.Expect(seedErr).NotTo(HaveOccurred())
 
 		err := r.applyServiceAccount(ctx, bindDef, subject, true)

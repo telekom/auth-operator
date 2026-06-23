@@ -97,6 +97,17 @@ var _ = Describe("SSA Helper Functions", func() {
 			Expect(result).To(Equal("auth-operator/my-binddefinition"))
 		})
 
+		It("should include owner scope when provided", func() {
+			result := ssa.FieldOwnerFor("shared-name", "RestrictedBindDefinition")
+			Expect(result).To(Equal("auth-operator/RestrictedBindDefinition/shared-name"))
+		})
+
+		It("should separate different owner scopes with the same resource name", func() {
+			bindDefinitionOwner := ssa.FieldOwnerFor("shared-name", "BindDefinition")
+			restrictedBindDefinitionOwner := ssa.FieldOwnerFor("shared-name", "RestrictedBindDefinition")
+			Expect(bindDefinitionOwner).NotTo(Equal(restrictedBindDefinitionOwner))
+		})
+
 		It("should fit within 128 characters for any resource name", func() {
 			// Very long name (253 chars is max K8s name)
 			longName := ""

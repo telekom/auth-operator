@@ -48,6 +48,8 @@ kubectl logs -n auth-operator-system -l app=webhook-server --tail=100
 # Check CRD status summary
 kubectl get roledefinitions -A -o custom-columns='NAME:.metadata.name,READY:.status.conditions[?(@.type=="Ready")].status,REASON:.status.conditions[?(@.type=="Ready")].reason'
 kubectl get binddefinitions -A -o custom-columns='NAME:.metadata.name,READY:.status.conditions[?(@.type=="Ready")].status,REASON:.status.conditions[?(@.type=="Ready")].reason'
+kubectl get restrictedroledefinitions -A -o custom-columns='NAME:.metadata.name,READY:.status.conditions[?(@.type=="Ready")].status,POLICY:.status.conditions[?(@.type=="PolicyCompliant")].status,REASON:.status.conditions[?(@.type=="Ready")].reason'
+kubectl get restrictedbinddefinitions -A -o custom-columns='NAME:.metadata.name,READY:.status.conditions[?(@.type=="Ready")].status,POLICY:.status.conditions[?(@.type=="PolicyCompliant")].status,REASON:.status.conditions[?(@.type=="Ready")].reason'
 ```
 
 ---
@@ -83,6 +85,9 @@ kubectl get roledefinitions -A -o json | \
 
 kubectl get binddefinitions -A -o json | \
   jq '.items[] | select(.status.conditions[]? | select(.type=="Stalled" and .status=="True")) | .metadata.name'
+
+kubectl get restrictedroledefinitions,restrictedbinddefinitions -A -o json | \
+  jq '.items[] | select(.status.conditions[]? | select(.type=="Stalled" and .status=="True")) | .kind + "/" + .metadata.name'
 ```
 
 ---
@@ -360,8 +365,33 @@ kubectl get rbacpolicy <policy-name>
 | Issue | Solution |
 |-------|----------|
 | Forbidden verbs/resources configured in policy | Remove violating refs in restricted resource or update policy |
-| Namespace outside policy scope | Adjust `roleBindings.namespace` / `namespaceSelector` or update policy scope |
+| Target namespace outside policy scope | Adjust `roleBindings.namespace` / `namespaceSelector` or update policy scope |
+| ServiceAccount subject namespace outside policy scope | Move the ServiceAccount subject into the policy scope or add that namespace to `spec.appliesTo` |
 | Referenced policy missing | Recreate policy or update `spec.policyRef.name` (requires recreating resource due to immutability) |
+
+**Important:** `RBACPolicy.spec.appliesTo` scopes both target namespaces and
+ServiceAccount subject namespaces. A central CI ServiceAccount bound into a
+tenant namespace must be covered by the same policy scope, otherwise the
+RestrictedBindDefinition is deprovisioned.
+
+### Restricted Status and Events
+
+Restricted resources expose status fields that help distinguish generated,
+external, skipped, and policy-blocked objects:
+
+```bash
+kubectl get restrictedbinddefinition <name> -o jsonpath='{.status.generatedServiceAccounts}' | jq .
+kubectl get restrictedbinddefinition <name> -o jsonpath='{.status.externalServiceAccounts}' | jq .
+kubectl get restrictedbinddefinition <name> -o jsonpath='{.status.skippedServiceAccounts}' | jq .
+kubectl get restrictedbinddefinition <name> -o jsonpath='{.status.policyViolations}' | jq .
+kubectl describe restrictedbinddefinition <name>
+kubectl describe restrictedroledefinition <name>
+```
+
+Common event reasons include `PolicyViolation`, `PolicyNotFound`,
+`Deprovisioned`, `Ownership`, and `ServiceAccountSkipped`. Treat warning events
+as breadcrumbs; the durable source of truth is still `status.conditions` and
+`status.policyViolations`.
 
 ### RBACPolicy Deletion Blocked
 
@@ -554,6 +584,9 @@ kubectl logs -n "$NAMESPACE" -l app=webhook-server --tail=1000 > "$OUTPUT_DIR/we
 # CRD status
 kubectl get roledefinitions -A -o yaml > "$OUTPUT_DIR/roledefinitions.yaml" 2>&1 || true
 kubectl get binddefinitions -A -o yaml > "$OUTPUT_DIR/binddefinitions.yaml" 2>&1 || true
+kubectl get rbacpolicies -A -o yaml > "$OUTPUT_DIR/rbacpolicies.yaml" 2>&1 || true
+kubectl get restrictedroledefinitions -A -o yaml > "$OUTPUT_DIR/restrictedroledefinitions.yaml" 2>&1 || true
+kubectl get restrictedbinddefinitions -A -o yaml > "$OUTPUT_DIR/restrictedbinddefinitions.yaml" 2>&1 || true
 kubectl get webhookauthorizers -A -o yaml > "$OUTPUT_DIR/webhookauthorizers.yaml" 2>&1 || true
 
 # Events

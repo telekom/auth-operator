@@ -22,6 +22,7 @@ This document describes how the auth-operator is used within the T-CaaS (Telekom
   - [Third Parties](#third-parties)
   - [Onboarding Team](#onboarding-team)
   - [First Line Support](#first-line-support)
+- [Restricted RBAC Policy Model](#restricted-rbac-policy-model)
 
 ---
 
@@ -173,3 +174,81 @@ Role mappings are a way to uniquely identify the permission scope and may vary d
 | first-line-poweruser | Can execute all verbs on resources, except on restricted API groups and restricted API resources. | create, delete, deletecollection, patch, update, get, list, watch | acme.cert-manager.io/v1, admissionregistration.k8s.io/v1, apiextensions.k8s.io/v1, apiregistration.k8s.io/v1, authentication.t-caas.telekom.com/v1alpha1, authorization.t-caas.telekom.com/v1alpha1, autoscaling/v2, batch/v1, cert-manager.io/v1, certificates.k8s.io/v1, coordination.k8s.io/v1, crd.projectcalico.org/v1, events.k8s.io/v1, flowcontrol.apiserver.k8s.io/v1, node.k8s.io/v1, policy/v1, rbac.authorization.k8s.io/v1, scheduling.k8s.io/v1, snapshot.storage.k8s.io/v1, storage.k8s.io/v1, trident.netapp.io/v1, velero.io/v1 | namespaces, namespaces/finalize, nodes, nodes/proxy, secrets, pods/attach, pods/binding, pods/ephemeralcontainers, pods/eviction, pods/exec, pods/log, pods/portforward, pods/proxy, serviceaccounts/token, services/proxy |
 | first-line-collaborator | Can execute edit verbs on resources, except on restricted API groups and restricted API resources. | patch, update, get, list, watch | acme.cert-manager.io/v1, admissionregistration.k8s.io/v1, apiextensions.k8s.io/v1, apiregistration.k8s.io/v1, authentication.t-caas.telekom.com/v1alpha1, authorization.t-caas.telekom.com/v1alpha1, autoscaling/v2, batch/v1, cert-manager.io/v1, certificates.k8s.io/v1, coordination.k8s.io/v1, crd.projectcalico.org/v1, events.k8s.io/v1, flowcontrol.apiserver.k8s.io/v1, node.k8s.io/v1, policy/v1, rbac.authorization.k8s.io/v1, scheduling.k8s.io/v1, snapshot.storage.k8s.io/v1, storage.k8s.io/v1, trident.netapp.io/v1, velero.io/v1 | namespaces, namespaces/finalize, nodes, nodes/proxy, secrets, pods/attach, pods/binding, pods/ephemeralcontainers, pods/eviction, pods/exec, pods/log, pods/portforward, pods/proxy, serviceaccounts/token, services/proxy |
 | first-line-reader | Can execute read verbs on resources, except on restricted API groups and restricted API resources. | get, list, watch | | nodes/proxy, secrets, pods/attach, pods/binding, pods/ephemeralcontainers, pods/eviction, pods/exec, pods/log, pods/portforward, pods/proxy, serviceaccounts/token, services/proxy |
+
+---
+
+## Restricted RBAC Policy Model
+
+T-CaaS should use `RBACPolicy`, `RestrictedRoleDefinition`, and
+`RestrictedBindDefinition` when RBAC definitions are authored outside the
+platform-admin release pipeline. The unrestricted `RoleDefinition` and
+`BindDefinition` CRDs remain platform-owned because they can generate broad
+ClusterRoles, ClusterRoleBindings, and ServiceAccounts without policy approval.
+
+### Ownership Boundaries
+
+| Resource | Writer | Purpose |
+| -------- | ------ | ------- |
+| `RBACPolicy` | Platform administrators | Defines the maximum verbs, API groups, resources, subjects, namespaces, generated rule counts, and impersonation identity allowed for a tenant or support scope. |
+| `RestrictedRoleDefinition` | Delegated tenant/support automation selected by policy | Requests a generated Role or ClusterRole after forbidden verbs/resources are removed and policy limits are checked. |
+| `RestrictedBindDefinition` | Delegated tenant/support automation selected by policy | Requests RoleBindings or ClusterRoleBindings for subjects allowed by the policy. |
+
+`RBACPolicy.spec.defaultAssignment` maps T-CaaS groups and automation
+ServiceAccounts to the policy they may use. Admission rejects restricted
+resources whose requester is assigned to a different default policy. Keep
+`RBACPolicy` write access limited to platform administrators; tenant writers
+must not be able to relax their own policy.
+
+### Scope and Group Mapping
+
+Policy scope follows the existing T-CaaS namespace labels:
+
+```yaml
+spec:
+  appliesTo:
+    namespaceSelector:
+      matchLabels:
+        t-caas.telekom.com/owner: tenant
+        t-caas.telekom.com/tenant: sample-tenant
+  defaultAssignment:
+    groups:
+      - sample-tenant-prod-namespaced-admin
+      - sample-tenant-prod-namespaced-editor
+```
+
+`spec.appliesTo` is enforced for both target namespaces and ServiceAccount
+subject namespaces. A central CI or deployment ServiceAccount bound into tenant
+namespaces must either live in a namespace selected by the policy or be moved to
+a tenant-owned automation namespace that the policy includes.
+
+### Impersonated Apply
+
+When a policy enables impersonation, the restricted controllers apply generated
+RBAC as the configured ServiceAccount:
+
+```yaml
+spec:
+  impersonation:
+    enabled: true
+    serviceAccountRef:
+      namespace: sample-tenant
+      name: rbac-applier
+```
+
+The Helm value `controller.impersonation.enabled` is disabled by default. Enable
+it only after configuring the exact ServiceAccounts the controller may
+impersonate. Policy-backed apply, stale-prune, and violation cleanup use the
+impersonated ServiceAccount. Missing-policy cleanup and deletion finalizers use
+the controller identity because there may be no policy left to resolve an
+impersonated client from. In T-CaaS, prefer namespaced impersonation grants per
+tenant or automation namespace instead of cluster-wide impersonation.
+
+### Recommended T-CaaS Flow
+
+1. Platform admins define one `RBACPolicy` per tenant/support scope from the
+   existing role mapping tables.
+2. The policy assigns the expected OIDC groups and trusted automation
+   ServiceAccounts via `defaultAssignment`.
+3. Tenant automation submits restricted resources only for its assigned policy.
+4. The controller deprovisions generated RBAC when policy scope, subject, or
+   generated-rule limits are violated.

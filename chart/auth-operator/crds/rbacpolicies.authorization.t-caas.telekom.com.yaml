@@ -3,7 +3,7 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     argocd.argoproj.io/sync-options: Delete=false
-    controller-gen.kubebuilder.io/version: v0.20.0
+    controller-gen.kubebuilder.io/version: v0.21.0
     helm.sh/resource-policy: keep
   name: rbacpolicies.authorization.t-caas.telekom.com
 spec:
@@ -117,7 +117,10 @@ spec:
                     type: object
                     x-kubernetes-map-type: atomic
                   namespaces:
-                    description: Namespaces is an explicit list of namespace names.
+                    description: |-
+                      Namespaces is an explicit list of namespace names. Use "*" to make the
+                      policy explicitly cluster-wide; this is required for cluster-scoped
+                      generated resources such as ClusterRoles and ClusterRoleBindings.
                     items:
                       maxLength: 63
                       minLength: 1
@@ -916,6 +919,8 @@ spec:
                 format: int64
                 type: integer
             type: object
+        required:
+        - spec
         type: object
     served: true
     storage: true

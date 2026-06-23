@@ -40,6 +40,7 @@ spec:
   targetNamespace: team-alpha
   scopeNamespaced: true
   restrictedApis:
+    - name: certificates.k8s.io
     - name: velero.io
       versions:
         - groupVersion: velero.io/v1
@@ -51,11 +52,20 @@ spec:
       kind: Secret
       verbs:
         - all
+    - name: nodes
+      singularName: node
+      namespaced: false
+      kind: Node
+      verbs:
+        - all
   restrictedVerbs:
     - create
     - update
     - delete
     - patch
+    - escalate
+    - impersonate
+    - bind
 
 ---
 # -----------------------------------------------------------------------------
@@ -182,28 +192,6 @@ spec:
 
 ---
 # -----------------------------------------------------------------------------
-# CASE: Blocked by policy (cluster roles forbidden)
-# Object admission should succeed; reconciliation should mark policy violation.
-# -----------------------------------------------------------------------------
-apiVersion: authorization.t-caas.telekom.com/v1alpha1
-kind: RestrictedRoleDefinition
-metadata:
-  name: rrd-case-blocked-clusterrole-by-policy
-  labels:
-    app.kubernetes.io/name: auth-operator
-    app.kubernetes.io/managed-by: kustomize
-    t-caas.telekom.com/sample-case: blocked
-spec:
-  policyRef:
-    name: sample-policy-block-clusterrolebindings
-  targetRole: ClusterRole
-  targetName: sample-clusterrole-blocked
-  scopeNamespaced: false
-  restrictedVerbs:
-    - delete
-
----
-# -----------------------------------------------------------------------------
 # CASE: Partially allowed API surface
 # Expected behavior: generated rules exclude restricted APIs/resources/verbs.
 # -----------------------------------------------------------------------------
@@ -261,27 +249,3 @@ spec:
     - escalate
     - delete
     - patch
-
----
-# -----------------------------------------------------------------------------
-# CASE: Blocked by policy (forbidden verb omission)
-# Policy forbids "escalate" but this definition does not list it in restrictedVerbs.
-# Expected: policy violation and deprovision/degraded status.
-# -----------------------------------------------------------------------------
-apiVersion: authorization.t-caas.telekom.com/v1alpha1
-kind: RestrictedRoleDefinition
-metadata:
-  name: rrd-case-blocked-forbidden-verb-omission
-  labels:
-    app.kubernetes.io/name: auth-operator
-    app.kubernetes.io/managed-by: kustomize
-    t-caas.telekom.com/sample-case: blocked-forbidden-verb
-spec:
-  policyRef:
-    name: sample-policy-allow-all-paths
-  targetRole: Role
-  targetName: sample-blocked-forbidden-verb
-  targetNamespace: sample-tenant-a
-  scopeNamespaced: true
-  restrictedVerbs:
-    - delete

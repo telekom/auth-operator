@@ -41,6 +41,13 @@ const (
 	// This refreshes both the CRD UUID map and the API resources cache.
 	// In stable clusters with few CRD changes, this can be set higher.
 	defaultFullRescanInterval = 15 * time.Minute
+
+	verbBind     = "bind"
+	verbEscalate = "escalate"
+	verbGet      = "get"
+	verbList     = "list"
+	verbUpdate   = "update"
+	verbWatch    = "watch"
 )
 
 // APIResourcesByGroupVersion maps GroupVersion strings to their corresponding API resources.
@@ -604,7 +611,7 @@ func (r *ResourceTracker) collectAPIResourcesForGroupVersion(
 		subResourceRequiresExplicitVerbs := isSubresource &&
 			(strings.HasSuffix(resource.Name, "/status") || strings.HasSuffix(resource.Name, "/finalizers"))
 		if subResourceRequiresExplicitVerbs {
-			resource.Verbs = append(resource.Verbs, "list", "watch")
+			resource.Verbs = append(resource.Verbs, verbList, verbWatch)
 		}
 
 		// for roles and rolebindings in rbac.authorization.k8s.io/v1,
@@ -612,7 +619,7 @@ func (r *ResourceTracker) collectAPIResourcesForGroupVersion(
 		requiresExplicitBind := group == rbacv1.GroupName && version == "v1" &&
 			(resource.Name == "roles" || resource.Name == "rolebindings")
 		if requiresExplicitBind {
-			resource.Verbs = append(resource.Verbs, "bind")
+			resource.Verbs = append(resource.Verbs, verbBind)
 		}
 
 		// for roles in rbac.authorization.k8s.io/v1,
@@ -620,7 +627,7 @@ func (r *ResourceTracker) collectAPIResourcesForGroupVersion(
 		requiresExplicitEscalate := group == rbacv1.GroupName && version == "v1" &&
 			resource.Name == "roles"
 		if requiresExplicitEscalate {
-			resource.Verbs = append(resource.Verbs, "escalate")
+			resource.Verbs = append(resource.Verbs, verbEscalate)
 		}
 
 		// send the resource to the channel
@@ -638,14 +645,14 @@ func (r *ResourceTracker) collectAPIResourcesForGroupVersion(
 		// we add the finalizer explicitly as it's not part of discovery
 		finalizersSubresourceResource := resource.DeepCopy()
 		finalizersSubresourceResource.Name = fmt.Sprintf("%s/%s", resource.Name, "finalizers")
-		finalizersSubresourceResource.Verbs = metav1.Verbs{"update", "list", "watch"}
+		finalizersSubresourceResource.Verbs = metav1.Verbs{verbUpdate, verbList, verbWatch}
 		result = append(result, *finalizersSubresourceResource)
 		if group == "" && version == "v1" && resource.Name == "nodes" {
 			// nodes/metrics in the core group are not filtered by the RestrictedResources,
 			// as they are not part of the API discovery.
 			nodeMetricsSubresource := resource.DeepCopy()
 			nodeMetricsSubresource.Name = "nodes/metrics"
-			nodeMetricsSubresource.Verbs = metav1.Verbs{"get", "list", "watch"}
+			nodeMetricsSubresource.Verbs = metav1.Verbs{verbGet, verbList, verbWatch}
 			result = append(result, *nodeMetricsSubresource)
 		}
 	}

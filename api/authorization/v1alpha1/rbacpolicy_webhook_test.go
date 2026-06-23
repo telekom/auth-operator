@@ -35,6 +35,19 @@ var _ = Describe("RBACPolicy Webhook", func() {
 			Expect(k8sClient.Delete(ctx, pol)).To(Succeed())
 		})
 
+		It("Should deny an RBACPolicy without an appliesTo scope", func() {
+			pol := &RBACPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rbacpol-empty-scope",
+				},
+				Spec: RBACPolicySpec{},
+			}
+			err := k8sClient.Create(ctx, pol)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("spec"))
+			Expect(err.Error()).To(ContainSubstring("namespaceSelector or namespaces"))
+		})
+
 		It("Should admit an RBACPolicy with valid label selectors", func() {
 			pol := &RBACPolicy{
 				ObjectMeta: metav1.ObjectMeta{
@@ -218,6 +231,81 @@ var _ = Describe("RBACPolicy Webhook", func() {
 			}
 			Expect(k8sClient.Create(ctx, pol)).To(Succeed())
 			Expect(k8sClient.Delete(ctx, pol)).To(Succeed())
+		})
+
+		It("Should deny overlapping defaultAssignment groups", func() {
+			existing := &RBACPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rbacpol-default-assignment-group-existing",
+				},
+				Spec: RBACPolicySpec{
+					AppliesTo: PolicyScope{Namespaces: []string{"default"}},
+					DefaultAssignment: &DefaultPolicyAssignment{
+						Groups: []string{"oidc:shared-admins"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, existing)).To(Succeed())
+			defer func() {
+				Expect(k8sClient.Delete(ctx, existing)).To(Succeed())
+			}()
+
+			conflicting := &RBACPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rbacpol-default-assignment-group-conflict",
+				},
+				Spec: RBACPolicySpec{
+					AppliesTo: PolicyScope{Namespaces: []string{"default"}},
+					DefaultAssignment: &DefaultPolicyAssignment{
+						Groups: []string{"oidc:shared-admins"},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, conflicting)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("defaultAssignment.groups[0]"))
+			Expect(err.Error()).To(ContainSubstring(existing.Name))
+		})
+
+		It("Should deny overlapping defaultAssignment serviceAccounts on update", func() {
+			existing := &RBACPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rbacpol-default-assignment-sa-existing",
+				},
+				Spec: RBACPolicySpec{
+					AppliesTo: PolicyScope{Namespaces: []string{"default"}},
+					DefaultAssignment: &DefaultPolicyAssignment{
+						ServiceAccounts: []SARef{{Name: "shared-applier", Namespace: "team-a"}},
+					},
+				},
+			}
+			updated := &RBACPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rbacpol-default-assignment-sa-update",
+				},
+				Spec: RBACPolicySpec{
+					AppliesTo: PolicyScope{Namespaces: []string{"default"}},
+					DefaultAssignment: &DefaultPolicyAssignment{
+						ServiceAccounts: []SARef{{Name: "other-applier", Namespace: "team-a"}},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, existing)).To(Succeed())
+			defer func() {
+				Expect(k8sClient.Delete(ctx, existing)).To(Succeed())
+			}()
+			Expect(k8sClient.Create(ctx, updated)).To(Succeed())
+			defer func() {
+				Expect(k8sClient.Delete(ctx, updated)).To(Succeed())
+			}()
+
+			latest := &RBACPolicy{}
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(updated), latest)).To(Succeed())
+			latest.Spec.DefaultAssignment.ServiceAccounts = []SARef{{Name: "shared-applier", Namespace: "team-a"}}
+			err := k8sClient.Update(ctx, latest)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("defaultAssignment.serviceAccounts[0]"))
+			Expect(err.Error()).To(ContainSubstring(existing.Name))
 		})
 
 		It("Should deny an RBACPolicy with empty defaultAssignment", func() {

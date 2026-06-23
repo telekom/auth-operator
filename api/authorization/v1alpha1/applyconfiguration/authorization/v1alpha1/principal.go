@@ -26,7 +26,9 @@ type PrincipalApplyConfiguration struct {
 	User *string `json:"user,omitempty"`
 	// Groups is the requesting user groups in SubjectAccessReview request.
 	Groups []string `json:"groups,omitempty"`
-	// Namespace is the requesting user namespace in case the requesting user is a ServiceAccount.
+	// Namespace scopes User to a Kubernetes ServiceAccount namespace. When set,
+	// User may be either the short ServiceAccount name or the full
+	// system:serviceaccount:<namespace>:<name> username.
 	Namespace *string `json:"namespace,omitempty"`
 }
 

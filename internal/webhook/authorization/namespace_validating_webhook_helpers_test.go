@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	"github.com/telekom/auth-operator/pkg/indexer"
 	admissionv1 "k8s.io/api/admission/v1"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -651,6 +652,124 @@ func TestAuthorizeViaBindDefinitions(t *testing.T) {
 				t.Error("expected denied, got allowed")
 			}
 		})
+	}
+}
+
+func TestAuthorizeViaBindDefinitionsExplicitNamespacePrecedence(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(authorizationv1alpha1.AddToScheme(scheme))
+
+	bd := &authorizationv1alpha1.BindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "explicit-precedence-bd"},
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
+			TargetName: "explicit-precedence-target",
+			Subjects: []rbacv1.Subject{
+				{APIGroup: rbacv1.GroupName, Kind: rbacv1.GroupKind, Name: "allowed-group"},
+			},
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{{
+				Namespace:       "explicit-ns",
+				ClusterRoleRefs: []string{"admin"},
+				NamespaceSelector: []metav1.LabelSelector{
+					{MatchLabels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"}},
+				},
+			}},
+		},
+	}
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bd).Build()
+	validator := &NamespaceValidator{Client: fakeClient}
+	logger := logf.FromContext(context.Background())
+
+	tests := []struct {
+		name     string
+		ns       *corev1.Namespace
+		expectOK bool
+	}{
+		{
+			name: "explicit namespace is authorized",
+			ns: &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+				Name:   "explicit-ns",
+				Labels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "platform"},
+			}},
+			expectOK: true,
+		},
+		{
+			name: "selector match is ignored when explicit namespace is set",
+			ns: &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+				Name:   "selected-ns",
+				Labels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"},
+			}},
+			expectOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{
+				Name:      tt.ns.Name,
+				Operation: admissionv1.Create,
+				UserInfo: authenticationv1.UserInfo{
+					Username: "user1",
+					Groups:   []string{"allowed-group"},
+				},
+			}}
+
+			resp := validator.authorizeViaBindDefinitions(context.Background(), logger, req, tt.ns)
+			if tt.expectOK && !resp.Allowed {
+				t.Fatalf("expected allowed, got denied: %v", resp.Result)
+			}
+			if !tt.expectOK && resp.Allowed {
+				t.Fatal("expected denied because explicit namespace takes precedence over selector, got allowed")
+			}
+		})
+	}
+}
+
+func TestAuthorizeViaBindDefinitionsUsesLiveReader(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(authorizationv1alpha1.AddToScheme(scheme))
+
+	bd := &authorizationv1alpha1.BindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "live-reader-bd"},
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
+			TargetName: "live-reader-target",
+			Subjects: []rbacv1.Subject{
+				{APIGroup: rbacv1.GroupName, Kind: rbacv1.GroupKind, Name: "allowed-group"},
+			},
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{{
+				ClusterRoleRefs: []string{"admin"},
+				NamespaceSelector: []metav1.LabelSelector{
+					{MatchLabels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"}},
+				},
+			}},
+		},
+	}
+	cachedClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithIndex(&authorizationv1alpha1.BindDefinition{}, indexer.BindDefinitionHasRoleBindingsField, indexer.BindDefinitionHasRoleBindingsFunc).
+		WithObjects(bd).
+		Build()
+	liveReader := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bd).Build()
+
+	v := &NamespaceValidator{Client: cachedClient, Reader: liveReader}
+	logger := logf.FromContext(context.Background())
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name:   "test-ns",
+		Labels: map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"},
+	}}
+	req := admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{
+		Name:      "test-ns",
+		Operation: admissionv1.Create,
+		UserInfo: authenticationv1.UserInfo{
+			Username: "user1",
+			Groups:   []string{"allowed-group"},
+		},
+	}}
+
+	resp := v.authorizeViaBindDefinitions(context.Background(), logger, req, ns)
+	if !resp.Allowed {
+		t.Fatalf("expected live-reader BindDefinition to allow request, got: %v", resp.Result)
 	}
 }
 

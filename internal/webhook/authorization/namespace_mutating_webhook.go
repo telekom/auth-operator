@@ -3,6 +3,7 @@ package webhooks
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -22,6 +23,7 @@ import (
 // NamespaceMutator is a mutating webhook that adds labels to namespaces based on user groups or ServiceAccount.
 type NamespaceMutator struct {
 	Client       client.Client
+	Reader       client.Reader
 	Decoder      admission.Decoder
 	TDGMigration bool
 }
@@ -57,7 +59,7 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 	if err != nil {
 		logger.Error(err, "failed to decode namespace", "namespace", req.Name)
 		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultErrored).Inc()
-		return admission.Errored(http.StatusBadRequest, err)
+		return admission.Errored(http.StatusBadRequest, errors.New("unable to decode namespace request"))
 	}
 
 	// Get the user's groups and parse service account info
@@ -74,8 +76,9 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 	// Collect labels from matching BindDefinitions
 	labelsToAdd, listErr := m.collectBindDefinitionLabels(ctx, req.Name, req.UserInfo.Username, userGroups, saInfo)
 	if listErr != nil {
+		logger.Error(listErr, "failed to collect BindDefinition labels", "namespace", req.Name)
 		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultErrored).Inc()
-		return admission.Errored(http.StatusInternalServerError, listErr)
+		return admission.Errored(http.StatusInternalServerError, errors.New("unable to validate namespace request"))
 	}
 
 	// Last resort: if no BindDefinition matched and the user is a ServiceAccount,
@@ -85,12 +88,12 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 		(req.Operation == admissionv1.Create || req.Operation == admissionv1.Update) {
 		saCtx, saCancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
 		defer saCancel()
-		inherited, saErr := GetSANamespaceTrackedLabels(saCtx, m.Client, saInfo)
+		inherited, saErr := GetSANamespaceTrackedLabels(saCtx, m.admissionReader(), saInfo)
 		if saErr != nil {
 			logger.Error(saErr, "failed to lookup SA namespace labels",
 				"saNamespace", saInfo.Namespace, "targetNamespace", req.Name)
 			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultErrored).Inc()
-			return admission.Errored(http.StatusInternalServerError, saErr)
+			return admission.Errored(http.StatusInternalServerError, errors.New("unable to validate namespace request"))
 		}
 		if len(inherited) > 0 {
 			if ns.Labels != nil {
@@ -136,21 +139,20 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 func (m *NamespaceMutator) collectBindDefinitionLabels(ctx context.Context, nsName, username string, userGroups []string, saInfo ServiceAccountInfo) (map[string]string, error) {
 	logger := logf.FromContext(ctx).WithName("namespace-mutator")
 
-	// Fetch all BindDefinition CRDs
-	bindDefinitions := &authorizationv1alpha1.BindDefinitionList{}
 	listCtx, cancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
 	defer cancel()
-	if err := m.Client.List(listCtx, bindDefinitions); err != nil {
+	bindDefinitions, err := freshBindDefinitionsWithRoleBindings(listCtx, m.Client, m.admissionReader())
+	if err != nil {
 		logger.Error(err, "failed to list BindDefinitions", "namespace", nsName)
 		return nil, err
 	}
 
 	logger.V(2).Info("checking BindDefinitions for label mutations",
-		"namespace", nsName, "bindDefinitionCount", len(bindDefinitions.Items))
+		"namespace", nsName, "bindDefinitionCount", len(bindDefinitions))
 
 	labelsToAdd := map[string]string{}
 
-	for bdIdx, bindDef := range bindDefinitions.Items {
+	for bdIdx, bindDef := range bindDefinitions {
 		if IsRestrictedBindDefinition(bindDef.Name) {
 			logger.V(4).Info("skipping restricted BindDefinition", "bindDefinitionName", bindDef.Name)
 			continue
@@ -164,6 +166,12 @@ func (m *NamespaceMutator) collectBindDefinitionLabels(ctx context.Context, nsNa
 				"namespace", nsName, "bindDefinition", bindDef.Name)
 
 			for rbIdx, roleBinding := range bindDef.Spec.RoleBindings {
+				if roleBinding.Namespace != "" {
+					logger.V(4).Info("skipping namespace selectors because explicit namespace is set",
+						"namespace", nsName, "roleBindingIndex", rbIdx,
+						"explicitNamespace", roleBinding.Namespace)
+					continue
+				}
 				if len(roleBinding.NamespaceSelector) > 0 {
 					logger.V(3).Info("processing RoleBinding namespace selectors",
 						"namespace", nsName, "roleBindingIndex", rbIdx,
@@ -188,6 +196,13 @@ func (m *NamespaceMutator) collectBindDefinitionLabels(ctx context.Context, nsNa
 	}
 
 	return labelsToAdd, nil
+}
+
+func (m *NamespaceMutator) admissionReader() client.Reader {
+	if m.Reader != nil {
+		return m.Reader
+	}
+	return m.Client
 }
 
 // applyLabelPatch adds the given labels to the namespace and returns a patch response.

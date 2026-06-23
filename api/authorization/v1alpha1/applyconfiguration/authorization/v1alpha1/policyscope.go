@@ -28,7 +28,9 @@ import (
 type PolicyScopeApplyConfiguration struct {
 	// NamespaceSelector selects namespaces by label selector.
 	NamespaceSelector *v1.LabelSelectorApplyConfiguration `json:"namespaceSelector,omitempty"`
-	// Namespaces is an explicit list of namespace names.
+	// Namespaces is an explicit list of namespace names. Use "*" to make the
+	// policy explicitly cluster-wide; this is required for cluster-scoped
+	// generated resources such as ClusterRoles and ClusterRoleBindings.
 	Namespaces []string `json:"namespaces,omitempty"`
 }
 

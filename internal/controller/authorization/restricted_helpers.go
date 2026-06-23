@@ -147,6 +147,13 @@ func handlePolicyViolations(
 	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
 }
 
+// markPolicyEvaluationError records that policy compliance could not be proven
+// because policy evaluation depended on data the controller could not read.
+func markPolicyEvaluationError(obj conditions.Setter, generation int64, err error) {
+	conditions.MarkFalse(obj, authorizationv1alpha1.PolicyCompliantCondition, generation,
+		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, stalledErrorDetail(err))
+}
+
 // markPolicyCompliant marks a restricted resource as policy-compliant and records an event.
 func markPolicyCompliant(
 	obj conditions.Setter,

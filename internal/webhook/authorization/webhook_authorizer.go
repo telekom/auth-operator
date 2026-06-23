@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -21,7 +20,6 @@ import (
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/pkg/helpers"
-	"github.com/telekom/auth-operator/pkg/indexer"
 	pkgmetrics "github.com/telekom/auth-operator/pkg/metrics"
 	"github.com/telekom/auth-operator/pkg/tracing"
 
@@ -47,8 +45,9 @@ const maxRequestBodySize = 1 << 20 // 1MB
 
 // Validation rejection reasons returned by validateSAR.
 const (
-	reasonEmptyIdentity = "empty user identity and no groups"
-	reasonMissingAttrs  = "missing resource and non-resource attributes"
+	reasonEmptyIdentity           = "empty user identity and no groups"
+	reasonMissingAttrs            = "missing resource and non-resource attributes"
+	reasonInternalEvaluationError = "internal evaluation error"
 )
 
 // Decision values used in structured audit log entries are defined in
@@ -69,18 +68,14 @@ type evaluationResult struct {
 }
 
 // Authorizer implements an HTTP handler for SubjectAccessReview requests.
-// The Client field should be the cached client returned by manager.GetClient()
-// so that List and Get calls are served from the informer cache rather than
-// hitting the API server on every SubjectAccessReview evaluation.
+// The Client field should be a live reader, typically manager.GetAPIReader(),
+// because authorization decisions must not allow requests from stale informer
+// state after rules or namespace labels change.
 type Authorizer struct {
-	Client  client.Client
+	Client  client.Reader
 	Log     logr.Logger
 	Tracer  trace.Tracer
 	Limiter *rate.Limiter
-
-	// indexFallbackWarned ensures the "field index unavailable" warning is
-	// logged only once instead of on every request.
-	indexFallbackWarned sync.Once
 }
 
 func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -130,7 +125,7 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			span.SetStatus(codes.Error, "invalid request body")
 		}
 		wa.recordErrorMetrics(start)
-		wa.writeNoOpinionResponse(w, "invalid request body")
+		wa.writeDeniedResponse(w, "invalid request body")
 		return
 	}
 
@@ -140,49 +135,36 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"user", sar.Spec.User,
 			"latency", time.Since(start).String())
 		wa.recordRejectedMetrics(start)
-		wa.writeNoOpinionResponse(w, reason)
+		wa.writeDeniedResponse(w, reason)
 		return
 	}
 
 	wa.annotateSARSpan(ctx, &sar)
 	wa.logReceivedSAR(&sar)
 
-	// Prepare a shared fallback cache in case the field index is unavailable,
-	// so global and scoped queries share a single fallback API call.
-	var fallbackCache []authorizationv1alpha1.WebhookAuthorizer
+	evalCtx, evalCancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
+	defer evalCancel()
 
-	globalItems, err := wa.listGlobalAuthorizers(ctx, &fallbackCache)
+	allItems, err := wa.listAllAuthorizers(evalCtx)
 	if err != nil {
-		wa.Log.Error(err, "failed to list global WebhookAuthorizers",
+		wa.Log.Error(err, "failed to list WebhookAuthorizers",
 			"user", sar.Spec.User,
 			"latency", time.Since(start).String())
 		if span := trace.SpanFromContext(ctx); span.IsRecording() {
 			span.RecordError(err)
-			span.SetStatus(codes.Error, "failed to list global WebhookAuthorizers")
+			span.SetStatus(codes.Error, "failed to list WebhookAuthorizers")
 		}
 		wa.recordErrorMetrics(start)
-		http.Error(w, "internal evaluation error", http.StatusInternalServerError)
+		wa.writeDeniedResponse(w, reasonInternalEvaluationError)
 		return
 	}
+	globalItems, scopedItems := splitAuthorizers(allItems)
 
 	items := globalItems
 
-	// Always query scoped authorizers so the active-rules gauge reflects the
+	// Always keep scoped authorizers loaded so the active-rules gauge reflects the
 	// full set regardless of request type. Scoped authorizers are only used
 	// for evaluation when the SAR targets a specific namespace.
-	scopedItems, err := wa.listScopedAuthorizers(ctx, &fallbackCache)
-	if err != nil {
-		wa.Log.Error(err, "failed to list scoped WebhookAuthorizers",
-			"user", sar.Spec.User,
-			"latency", time.Since(start).String())
-		if span := trace.SpanFromContext(ctx); span.IsRecording() {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, "failed to list scoped WebhookAuthorizers")
-		}
-		wa.recordErrorMetrics(start)
-		http.Error(w, "internal evaluation error", http.StatusInternalServerError)
-		return
-	}
 	if sar.Spec.ResourceAttributes != nil && sar.Spec.ResourceAttributes.Namespace != "" {
 		items = append(items, scopedItems...)
 	}
@@ -194,7 +176,7 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return strings.Compare(a.Name, b.Name)
 	})
 
-	result, err := wa.evaluateSAR(ctx, &sar, items)
+	result, err := wa.evaluateSAR(evalCtx, &sar, items)
 	if err != nil {
 		wa.Log.Error(err, "failed to evaluate SubjectAccessReview",
 			"user", sar.Spec.User,
@@ -204,7 +186,7 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			span.SetStatus(codes.Error, "failed to evaluate SubjectAccessReview")
 		}
 		wa.recordErrorMetrics(start)
-		http.Error(w, "internal evaluation error", http.StatusInternalServerError)
+		wa.writeDeniedResponse(w, reasonInternalEvaluationError)
 		return
 	}
 
@@ -391,92 +373,20 @@ func countTotalRules(authorizers []authorizationv1alpha1.WebhookAuthorizer) int 
 	return total
 }
 
-func (wa *Authorizer) listGlobalAuthorizers(ctx context.Context, cachedAll *[]authorizationv1alpha1.WebhookAuthorizer) ([]authorizationv1alpha1.WebhookAuthorizer, error) {
-	var globalAuth authorizationv1alpha1.WebhookAuthorizerList
-	listCtx, cancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
-	defer cancel()
-	if err := wa.Client.List(listCtx, &globalAuth, client.MatchingFields{
-		indexer.WebhookAuthorizerHasNamespaceSelectorField: "false",
-	}); err == nil {
-		return globalAuth.Items, nil
-	} else if !isFieldIndexError(err) {
-		// Propagate real errors (RBAC, network, etc.) instead of silently
-		// falling back to an unindexed full list which would mask bugs.
-		return nil, fmt.Errorf("indexed list of global WebhookAuthorizers: %w", err)
-	}
-
-	// Field index not registered — fall back to filtering a full list.
-	wa.indexFallbackWarned.Do(func() {
-		wa.Log.Info("field index unavailable for WebhookAuthorizers, falling back to unindexed list")
-	})
-	if cachedAll == nil || *cachedAll == nil {
-		all, err := wa.listAllAuthorizers(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if cachedAll != nil {
-			*cachedAll = all
-		}
-		globalItems := make([]authorizationv1alpha1.WebhookAuthorizer, 0, len(all))
-		for _, candidate := range all {
-			if helpers.IsLabelSelectorEmpty(&candidate.Spec.NamespaceSelector) {
-				globalItems = append(globalItems, candidate)
-			}
-		}
-		return globalItems, nil
-	}
-
-	globalItems := make([]authorizationv1alpha1.WebhookAuthorizer, 0, len(*cachedAll))
-	for _, candidate := range *cachedAll {
+func splitAuthorizers(
+	all []authorizationv1alpha1.WebhookAuthorizer,
+) (globalItems, scopedItems []authorizationv1alpha1.WebhookAuthorizer) {
+	globalItems = make([]authorizationv1alpha1.WebhookAuthorizer, 0, len(all))
+	scopedItems = make([]authorizationv1alpha1.WebhookAuthorizer, 0, len(all))
+	for _, candidate := range all {
 		if helpers.IsLabelSelectorEmpty(&candidate.Spec.NamespaceSelector) {
 			globalItems = append(globalItems, candidate)
-		}
-	}
-
-	return globalItems, nil
-}
-
-func (wa *Authorizer) listScopedAuthorizers(ctx context.Context, cachedAll *[]authorizationv1alpha1.WebhookAuthorizer) ([]authorizationv1alpha1.WebhookAuthorizer, error) {
-	var scopedAuth authorizationv1alpha1.WebhookAuthorizerList
-	listCtx, cancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
-	defer cancel()
-	if err := wa.Client.List(listCtx, &scopedAuth, client.MatchingFields{
-		indexer.WebhookAuthorizerHasNamespaceSelectorField: "true",
-	}); err == nil {
-		return scopedAuth.Items, nil
-	} else if !isFieldIndexError(err) {
-		// Propagate real errors (RBAC, network, etc.) instead of silently
-		// falling back to an unindexed full list which would mask bugs.
-		return nil, fmt.Errorf("indexed list of scoped WebhookAuthorizers: %w", err)
-	}
-
-	// Field index not registered — fall back to filtering a full list.
-	// Warning is logged once via indexFallbackWarned in listGlobalAuthorizers.
-	if cachedAll == nil || *cachedAll == nil {
-		all, err := wa.listAllAuthorizers(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if cachedAll != nil {
-			*cachedAll = all
-		}
-		scopedItems := make([]authorizationv1alpha1.WebhookAuthorizer, 0, len(all))
-		for _, candidate := range all {
-			if !helpers.IsLabelSelectorEmpty(&candidate.Spec.NamespaceSelector) {
-				scopedItems = append(scopedItems, candidate)
-			}
-		}
-		return scopedItems, nil
-	}
-
-	scopedItems := make([]authorizationv1alpha1.WebhookAuthorizer, 0, len(*cachedAll))
-	for _, candidate := range *cachedAll {
-		if !helpers.IsLabelSelectorEmpty(&candidate.Spec.NamespaceSelector) {
+		} else {
 			scopedItems = append(scopedItems, candidate)
 		}
 	}
 
-	return scopedItems, nil
+	return globalItems, scopedItems
 }
 
 func (wa *Authorizer) listAllAuthorizers(ctx context.Context) ([]authorizationv1alpha1.WebhookAuthorizer, error) {
@@ -487,26 +397,6 @@ func (wa *Authorizer) listAllAuthorizers(ctx context.Context) ([]authorizationv1
 		return nil, fmt.Errorf("list WebhookAuthorizers: %w", err)
 	}
 	return allAuth.Items, nil
-}
-
-// isFieldIndexError returns true when err indicates that a controller-runtime
-// field index has not been registered. These errors are expected when the
-// webhook process starts before the informer cache has the index configured
-// (e.g. in the standalone webhook binary), and justify falling back to an
-// unindexed full list. All other errors (RBAC, network, API server
-// unavailable) are NOT index errors and must be propagated.
-//
-// NOTE: controller-runtime returns an untyped fmt.Errorf for missing field
-// indexes (see cache/internal/informers_map.go), so there is no sentinel
-// error or typed error to use with errors.Is/errors.As. String matching is
-// the only reliable detection method available.
-func isFieldIndexError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "index") &&
-		(strings.Contains(msg, "does not exist") || strings.Contains(msg, "no index with name"))
 }
 
 type namespaceLabelCacheEntry struct {
@@ -571,49 +461,37 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 			"index", i,
 			"user", sar.Spec.User)
 
-		// Check DeniedPrincipals.
+		// Check DeniedPrincipals. Denies are scoped by the same resource and
+		// non-resource rules as allows; otherwise a deny-list entry in a
+		// namespaced authorizer would block unrelated requests in that namespace.
 		if wa.principalMatches(sar.Spec.User, sar.Spec.Groups, webhookAuthorizer.Spec.DeniedPrincipals) {
-			return evaluationResult{
-				allowed:        false,
-				reason:         fmt.Sprintf("Access denied by WebhookAuthorizer %s", webhookAuthorizer.Name),
-				decision:       pkgmetrics.AuthorizerDecisionDenied,
-				authorizerName: webhookAuthorizer.Name,
-				matchedRule:    -1,
-				matchedField:   "deniedPrincipal",
-				evaluatedCount: evaluated,
-				skippedCount:   skipped,
-			}, nil
+			if ruleIdx := wa.matchRequestRule(webhookAuthorizer.Spec.ResourceRules, webhookAuthorizer.Spec.NonResourceRules, sar); ruleIdx >= 0 {
+				return evaluationResult{
+					allowed:        false,
+					reason:         fmt.Sprintf("Access denied by WebhookAuthorizer %s", webhookAuthorizer.Name),
+					decision:       pkgmetrics.AuthorizerDecisionDenied,
+					authorizerName: webhookAuthorizer.Name,
+					matchedRule:    ruleIdx,
+					matchedField:   "deniedPrincipal",
+					evaluatedCount: evaluated,
+					skippedCount:   skipped,
+				}, nil
+			}
 		}
 
 		// Check AllowedPrincipals.
 		if wa.principalMatches(sar.Spec.User, sar.Spec.Groups, webhookAuthorizer.Spec.AllowedPrincipals) {
-			if sar.Spec.ResourceAttributes != nil {
-				if ruleIdx := wa.resourceRuleIndex(webhookAuthorizer.Spec.ResourceRules, sar.Spec.ResourceAttributes); ruleIdx >= 0 {
-					return evaluationResult{
-						allowed:        true,
-						reason:         fmt.Sprintf("Access granted by WebhookAuthorizer %s", webhookAuthorizer.Name),
-						decision:       pkgmetrics.AuthorizerDecisionAllowed,
-						authorizerName: webhookAuthorizer.Name,
-						matchedRule:    ruleIdx,
-						matchedField:   "resourceRule",
-						evaluatedCount: evaluated,
-						skippedCount:   skipped,
-					}, nil
-				}
-			}
-			if sar.Spec.NonResourceAttributes != nil {
-				if ruleIdx := wa.nonResourceRuleIndex(webhookAuthorizer.Spec.NonResourceRules, sar.Spec.NonResourceAttributes); ruleIdx >= 0 {
-					return evaluationResult{
-						allowed:        true,
-						reason:         fmt.Sprintf("Access granted by WebhookAuthorizer %s", webhookAuthorizer.Name),
-						decision:       pkgmetrics.AuthorizerDecisionAllowed,
-						authorizerName: webhookAuthorizer.Name,
-						matchedRule:    ruleIdx,
-						matchedField:   "nonResourceRule",
-						evaluatedCount: evaluated,
-						skippedCount:   skipped,
-					}, nil
-				}
+			if ruleIdx, matchedField := wa.matchRequestRuleWithField(webhookAuthorizer.Spec.ResourceRules, webhookAuthorizer.Spec.NonResourceRules, sar); ruleIdx >= 0 {
+				return evaluationResult{
+					allowed:        true,
+					reason:         fmt.Sprintf("Access granted by WebhookAuthorizer %s", webhookAuthorizer.Name),
+					decision:       pkgmetrics.AuthorizerDecisionAllowed,
+					authorizerName: webhookAuthorizer.Name,
+					matchedRule:    ruleIdx,
+					matchedField:   matchedField,
+					evaluatedCount: evaluated,
+					skippedCount:   skipped,
+				}, nil
 			}
 		}
 	}
@@ -678,13 +556,16 @@ func (wa *Authorizer) namespaceMatches(ctx context.Context, namespace string, se
 // principalMatches checks if the user or groups match the principals.
 func (wa *Authorizer) principalMatches(user string, groups []string, principals []authorizationv1alpha1.Principal) bool {
 	for _, principal := range principals {
+		if principal.Namespace != "" {
+			if principal.User != "" && len(principal.Groups) == 0 && isServiceAccountInNamespace(user, principal.User, principal.Namespace) {
+				return true
+			}
+			continue
+		}
 		if principal.User != "" && principal.User == user {
 			return true
 		}
 		if len(principal.Groups) > 0 && intersects(groups, principal.Groups) {
-			return true
-		}
-		if principal.Namespace != "" && isServiceAccountInNamespace(user, principal.User, principal.Namespace) {
 			return true
 		}
 	}
@@ -699,6 +580,33 @@ func intersects(slice1, slice2 []string) bool {
 		}
 	}
 	return false
+}
+
+func (wa *Authorizer) matchRequestRule(
+	resourceRules []authzv1.ResourceRule,
+	nonResourceRules []authzv1.NonResourceRule,
+	sar *authzv1.SubjectAccessReview,
+) int {
+	ruleIdx, _ := wa.matchRequestRuleWithField(resourceRules, nonResourceRules, sar)
+	return ruleIdx
+}
+
+func (wa *Authorizer) matchRequestRuleWithField(
+	resourceRules []authzv1.ResourceRule,
+	nonResourceRules []authzv1.NonResourceRule,
+	sar *authzv1.SubjectAccessReview,
+) (ruleIndex int, matchedField string) {
+	if sar.Spec.ResourceAttributes != nil {
+		if ruleIdx := wa.resourceRuleIndex(resourceRules, sar.Spec.ResourceAttributes); ruleIdx >= 0 {
+			return ruleIdx, "resourceRule"
+		}
+	}
+	if sar.Spec.NonResourceAttributes != nil {
+		if ruleIdx := wa.nonResourceRuleIndex(nonResourceRules, sar.Spec.NonResourceAttributes); ruleIdx >= 0 {
+			return ruleIdx, "nonResourceRule"
+		}
+	}
+	return -1, ""
 }
 
 // resourceRuleIndex returns the index of the first matching resource rule, or -1.
@@ -800,9 +708,10 @@ func validateSAR(sar *authzv1.SubjectAccessReview) string {
 	return ""
 }
 
-// writeNoOpinionResponse sends a valid SubjectAccessReview with
-// Allowed=false and Denied=false, indicating this webhook has no opinion.
-func (wa *Authorizer) writeNoOpinionResponse(w http.ResponseWriter, reason string) {
+// writeDeniedResponse sends a valid SubjectAccessReview with Denied=true so
+// internal evaluation failures fail closed instead of becoming webhook
+// transport failures that may be treated as no-opinion by the API server.
+func (wa *Authorizer) writeDeniedResponse(w http.ResponseWriter, reason string) {
 	response := authzv1.SubjectAccessReview{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "authorization.k8s.io/v1",
@@ -810,14 +719,14 @@ func (wa *Authorizer) writeNoOpinionResponse(w http.ResponseWriter, reason strin
 		},
 		Status: authzv1.SubjectAccessReviewStatus{
 			Allowed: false,
-			Denied:  false,
+			Denied:  true,
 			Reason:  reason,
 		},
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		wa.Log.Error(err, "failed to encode no-opinion response")
+		wa.Log.Error(err, "failed to encode denied response")
 	}
 }
 
@@ -831,14 +740,11 @@ func (wa *Authorizer) recordErrorMetrics(start time.Time) {
 }
 
 // recordRejectedMetrics records Prometheus request counter and duration
-// histogram with decision=no-opinion for malformed-SAR rejection paths. These
-// requests return a valid no-opinion response and are therefore not errors —
-// using the no-opinion label keeps the metrics semantically consistent with the
-// response written to the caller.
+// histogram with decision=denied for malformed-SAR rejection paths.
 func (wa *Authorizer) recordRejectedMetrics(start time.Time) {
 	duration := time.Since(start).Seconds()
-	pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(pkgmetrics.AuthorizerDecisionNoOpinion, pkgmetrics.AuthorizerNameNone).Inc()
-	pkgmetrics.AuthorizerRequestDuration.WithLabelValues(pkgmetrics.AuthorizerDecisionNoOpinion).Observe(duration)
+	pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(pkgmetrics.AuthorizerDecisionDenied, pkgmetrics.AuthorizerNameNone).Inc()
+	pkgmetrics.AuthorizerRequestDuration.WithLabelValues(pkgmetrics.AuthorizerDecisionDenied).Observe(duration)
 }
 
 // matchesRule checks if a value matches any pattern in the list.
@@ -852,8 +758,23 @@ func matchesRule(patterns []string, value string) bool {
 }
 
 // isServiceAccountInNamespace checks if the user is a service account in the specified namespace.
-func isServiceAccountInNamespace(user, saUser, namespace string) bool {
+func isServiceAccountInNamespace(user, principalUser, namespace string) bool {
+	userNamespace, userName, ok := parseServiceAccountUsername(user)
+	if !ok || userNamespace != namespace {
+		return false
+	}
+	principalNamespace, principalName, principalIsQualified := parseServiceAccountUsername(principalUser)
+	if principalIsQualified {
+		return principalNamespace == namespace && principalName == userName
+	}
+	return principalUser == userName
+}
+
+func parseServiceAccountUsername(user string) (namespace, name string, ok bool) {
 	// Format: system:serviceaccount:<namespace>:<serviceaccount>
 	parts := strings.Split(user, ":")
-	return len(parts) == 4 && parts[0] == systemPrefix && parts[1] == serviceAccountKind && parts[2] == namespace && parts[3] == saUser
+	if len(parts) != 4 || parts[0] != systemPrefix || parts[1] != serviceAccountKind {
+		return "", "", false
+	}
+	return parts[2], parts[3], true
 }

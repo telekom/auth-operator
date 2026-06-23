@@ -72,8 +72,8 @@ var _ = Describe("BindDefinition Webhook", func() {
 			}
 			Expect(k8sClient.Create(ctx, bd1)).To(Succeed())
 
-			// The webhook validator uses the manager's cached client for MatchingFields lookups.
-			// Use DryRun to poll until the informer cache has synced bd1, avoiding side effects.
+			// DryRun verifies duplicate admission behavior without leaving behind
+			// the rejected object.
 			bd2 := &BindDefinition{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-dup-bd-second",
@@ -186,8 +186,7 @@ var _ = Describe("BindDefinition Webhook", func() {
 					},
 				},
 			}
-			// The webhook validator uses the manager's cached client.
-			// Poll with DryRun until the informer cache has synced the ClusterRole.
+			// DryRun verifies the live ClusterRole reference before creating the object.
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Create(ctx, bd.DeepCopy(), client.DryRunAll)).To(Succeed())
 			}).WithTimeout(10 * time.Second).WithPolling(250 * time.Millisecond).Should(Succeed())
@@ -232,6 +231,45 @@ var _ = Describe("BindDefinition Webhook", func() {
 			err := k8sClient.Create(ctx, bd)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("at least one subject must be specified"))
+		})
+
+		It("should deny a BindDefinition with an empty ClusterRole ref name", func() {
+			bd := &BindDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-cel-empty-cr",
+				},
+				Spec: BindDefinitionSpec{
+					TargetName: "test-cel-empty-cr",
+					Subjects:   validSubjects,
+					ClusterRoleBindings: ClusterBinding{
+						ClusterRoleRefs: []string{""},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, bd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("clusterRoleRefs[0]"))
+		})
+
+		It("should deny a BindDefinition with an empty Role ref name", func() {
+			bd := &BindDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-cel-empty-role",
+				},
+				Spec: BindDefinitionSpec{
+					TargetName: "test-cel-empty-role",
+					Subjects:   validSubjects,
+					RoleBindings: []NamespaceBinding{
+						{
+							Namespace: "default",
+							RoleRefs:  []string{""},
+						},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, bd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("roleRefs[0]"))
 		})
 
 		It("should deny a BindDefinition with ServiceAccount subject missing namespace", func() {

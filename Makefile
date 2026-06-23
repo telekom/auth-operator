@@ -18,9 +18,10 @@ E2E_TEARDOWN ?= false
 export RUN_ID
 export KIND_CLUSTER_NAME
 export E2E_TEARDOWN
+KIND_K8S_VERSION ?= v1.36.1
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-# Keep in sync with KIND_K8S_VERSION for consistency between envtest and kind-based E2E tests.
-ENVTEST_K8S_VERSION = 1.34.1
+# Pin it separately because setup-envtest and kindest/node publish patch releases independently.
+ENVTEST_K8S_VERSION ?= $(patsubst v%,%,$(KIND_K8S_VERSION))
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -79,7 +80,6 @@ test: manifests generate fmt vet envtest ## Run tests.
 ##@ E2E Testing
 
 # Kind cluster configuration
-KIND_K8S_VERSION ?= v1.34.3
 E2E_IMG ?= auth-operator:e2e-test
 KIND_CONFIG_SINGLE ?= test/e2e/kind-config-single.yaml
 KIND_CONFIG_MULTI ?= test/e2e/kind-config-multi.yaml
@@ -314,9 +314,8 @@ lint-strict: golangci-lint ## Run golangci-lint with strict settings (as in CI).
 	$(GOLANGCI_LINT) run --timeout 10m --issues-exit-code 1
 
 .PHONY: vulncheck
-vulncheck: ## Run govulncheck to check for known vulnerabilities.
-	@command -v govulncheck >/dev/null 2>&1 || go install golang.org/x/vuln/cmd/govulncheck@latest
-	govulncheck ./...
+vulncheck: govulncheck ## Run govulncheck to check for known vulnerabilities.
+	$(GOVULNCHECK) ./...
 
 .PHONY: verify
 verify: lint-strict vet test vulncheck ## Run all verification checks (lint, vet, test, vulncheck).
@@ -341,7 +340,7 @@ helm-lint: ## Lint Helm chart.
 	$(MAKE) verify-helm-rbac
 
 .PHONY: verify-helm-rbac
-verify-helm-rbac: ## Verify rendered Helm RBAC permission contracts.
+verify-helm-rbac: kustomize ## Verify rendered Helm and Kustomize RBAC permission contracts.
 	@if ! command -v helm >/dev/null 2>&1; then echo "helm not installed, skipping verify-helm-rbac"; exit 0; fi
 	hack/verify-helm-rbac.sh
 
@@ -483,50 +482,69 @@ ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
 CRD_REF_DOCS = $(LOCALBIN)/crd-ref-docs
 MOCKGEN ?= $(LOCALBIN)/mockgen
+GOVULNCHECK ?= $(LOCALBIN)/govulncheck
 
 .PHONY: kustomize
-kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
+kustomize: $(LOCALBIN) ## Download kustomize locally if necessary.
+	$(call go-install-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5,$(KUSTOMIZE_VERSION),sigs.k8s.io/kustomize/kustomize/v5)
 $(KUSTOMIZE): $(LOCALBIN)
-	$(call go-install-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5,$(KUSTOMIZE_VERSION))
+	$(call go-install-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5,$(KUSTOMIZE_VERSION),sigs.k8s.io/kustomize/kustomize/v5)
 
 .PHONY: controller-gen
-controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.
+controller-gen: $(LOCALBIN) ## Download controller-gen locally if necessary.
+	$(call go-install-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen,$(CONTROLLER_TOOLS_VERSION),sigs.k8s.io/controller-tools)
 $(CONTROLLER_GEN): $(LOCALBIN)
-	$(call go-install-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen,$(CONTROLLER_TOOLS_VERSION))
+	$(call go-install-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen,$(CONTROLLER_TOOLS_VERSION),sigs.k8s.io/controller-tools)
 
 .PHONY: envtest
-envtest: $(ENVTEST) ## Download setup-envtest locally if necessary.
+envtest: $(LOCALBIN) ## Download setup-envtest locally if necessary.
+	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION),sigs.k8s.io/controller-runtime/tools/setup-envtest)
 $(ENVTEST): $(LOCALBIN)
-	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
+	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION),sigs.k8s.io/controller-runtime/tools/setup-envtest)
 
 .PHONY: golangci-lint
-golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
+golangci-lint: $(LOCALBIN) ## Download golangci-lint locally if necessary.
+	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,${GOLANGCI_LINT_VERSION},github.com/golangci/golangci-lint/v2)
 $(GOLANGCI_LINT): $(LOCALBIN)
-	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,${GOLANGCI_LINT_VERSION})
+	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,${GOLANGCI_LINT_VERSION},github.com/golangci/golangci-lint/v2)
 
 .PHONY: crd-ref-docs
-crd-ref-docs: $(CRD_REF_DOCS) ## Download crd-ref-docs locally if necessary.
+crd-ref-docs: $(LOCALBIN) ## Download crd-ref-docs locally if necessary.
+	$(call go-install-tool,$(CRD_REF_DOCS),github.com/elastic/crd-ref-docs,${CRD_REF_DOCS_VERSION},github.com/elastic/crd-ref-docs)
 $(CRD_REF_DOCS): $(LOCALBIN)
-	$(call go-install-tool,$(CRD_REF_DOCS),github.com/elastic/crd-ref-docs,${CRD_REF_DOCS_VERSION})
+	$(call go-install-tool,$(CRD_REF_DOCS),github.com/elastic/crd-ref-docs,${CRD_REF_DOCS_VERSION},github.com/elastic/crd-ref-docs)
 
 .PHONY: drawio
 drawio: ## Download Draw.io locally if necessary.
 	echo "Can't check if you downloaded Draw.io. If not please install it manually."
 
 .PHONY: mockgen
-mockgen: $(MOCKGEN) ## Download mockgen locally if necessary.
+mockgen: $(LOCALBIN) ## Download mockgen locally if necessary.
+	$(call go-install-tool,$(MOCKGEN),go.uber.org/mock/mockgen,$(MOCKGEN_VERSION),go.uber.org/mock)
 $(MOCKGEN): $(LOCALBIN)
-	$(call go-install-tool,$(MOCKGEN),go.uber.org/mock/mockgen,$(MOCKGEN_VERSION))
+	$(call go-install-tool,$(MOCKGEN),go.uber.org/mock/mockgen,$(MOCKGEN_VERSION),go.uber.org/mock)
+
+.PHONY: govulncheck
+govulncheck: $(LOCALBIN) ## Download govulncheck locally if necessary.
+	$(call go-install-tool,$(GOVULNCHECK),golang.org/x/vuln/cmd/govulncheck,$(GOVULNCHECK_VERSION),golang.org/x/vuln)
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary (ideally with version)
 # $2 - package url which can be installed
 # $3 - specific version of package
 define go-install-tool
-@[ -f $(1) ] || { \
+@{ \
 set -e; \
-package=$(2)@$(3) ;\
-echo "Downloading $${package}" ;\
-GOBIN=$(LOCALBIN) go install $${package} ;\
+tool="$(1)" ;\
+package="$(2)" ;\
+version="$(3)" ;\
+module="$(4)" ;\
+if [ -f "$${tool}" ] && \
+	go version -m "$${tool}" 2>/dev/null | grep -Eq "^[[:space:]]*path[[:space:]]+$${package}$$" && \
+	go version -m "$${tool}" 2>/dev/null | grep -Eq "^[[:space:]]*mod[[:space:]]+$${module}[[:space:]]+$${version}([[:space:]]|$$)" ; then \
+	exit 0 ;\
+fi ;\
+echo "Downloading $${package}@$${version}" ;\
+GOBIN=$(LOCALBIN) go install "$${package}@$${version}" ;\
 }
 endef

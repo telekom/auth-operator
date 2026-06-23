@@ -4,7 +4,7 @@
 ARG GO_VERSION=1.26.4
 # Digest pinned for supply-chain integrity; update with:
 #   docker buildx imagetools inspect golang:<version>-alpine
-FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine@sha256:f23e8b227fb4493eabe03bede4d5a32d04092da71962f1fb79b5f7d1e6c2a17f AS build
+FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine@sha256:3ad57304ad93bbec8548a0437ad9e06a455660655d9af011d58b993f6f615648 AS build
 
 ARG TARGETOS
 ARG TARGETARCH

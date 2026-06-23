@@ -35,6 +35,9 @@ const (
 	// EventReasonRoleRefNotFound indicates a referenced role was not found.
 	EventReasonRoleRefNotFound = "RoleRefNotFound"
 
+	// EventReasonTargetNamespaceNotFound indicates an explicit target namespace was not found.
+	EventReasonTargetNamespaceNotFound = "TargetNamespaceNotFound"
+
 	// EventReasonServiceAccountPreExisting indicates a ServiceAccount already exists
 	// and is not owned by any BindDefinition, so it will not be adopted.
 	EventReasonServiceAccountPreExisting = "ServiceAccountPreExisting"

@@ -548,7 +548,7 @@
             },
             "tlsConfig": {
               "type": "object",
-              "description": "TLS configuration for Prometheus scraping.",
+              "description": "TLS configuration for Prometheus scraping. When metrics authentication and ServiceMonitor are both enabled, set caFile or explicitly set insecureSkipVerify=true.",
               "additionalProperties": false,
               "properties": {
                 "caFile": {
@@ -562,7 +562,7 @@
                 "insecureSkipVerify": {
                   "type": "boolean",
                   "description": "Skip certificate verification for Prometheus TLS scraping.",
-                  "default": true
+                  "default": false
                 }
               }
             }
@@ -638,7 +638,7 @@
             },
             "apiServerCIDR": {
               "type": "string",
-              "description": "API server CIDR for egress restriction. Empty allows any destination on 443/6443."
+              "description": "API server CIDR for egress restriction. Required when egress is enabled unless additionalRules provides equivalent API-server access."
             },
             "additionalRules": {
               "type": "array",

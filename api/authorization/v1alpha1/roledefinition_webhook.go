@@ -21,18 +21,27 @@ import (
 )
 
 // RoleDefinitionValidator implements admission.Validator for RoleDefinition.
-// It holds a client reference for listing existing resources during validation.
+// It uses Reader for admission-critical live reads and falls back to Client in
+// unit tests that construct the validator directly.
 // +kubebuilder:object:generate=false
 type RoleDefinitionValidator struct {
 	Client client.Client
+	Reader client.Reader
 }
 
 var _ admission.Validator[*RoleDefinition] = &RoleDefinitionValidator{}
 
+func (v *RoleDefinitionValidator) reader() client.Reader {
+	if v.Reader != nil {
+		return v.Reader
+	}
+	return v.Client
+}
+
 // SetupWebhookWithManager will setup the manager to manage the webhooks.
 func (r *RoleDefinition) SetupWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr, r).
-		WithValidator(&RoleDefinitionValidator{Client: mgr.GetClient()}).
+		WithValidator(&RoleDefinitionValidator{Client: mgr.GetClient(), Reader: mgr.GetAPIReader()}).
 		Complete()
 }
 
@@ -61,21 +70,7 @@ func listErrorToAdmission(resource string, err error) error {
 		errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return apierrors.NewInternalError(fmt.Errorf("transient error listing %s; please retry", resource))
 	}
-	return apierrors.NewInternalError(fmt.Errorf("unable to list %s: %w", resource, err))
-}
-
-// roleTargetMatchingFields narrows duplicate target lookups to only candidates
-// that can collide in the RBAC API. ClusterRole names are cluster-scoped, while
-// Role names are scoped by namespace.
-func roleTargetMatchingFields(targetName, targetRole, targetNamespace string) client.MatchingFields {
-	fields := client.MatchingFields{
-		TargetNameField: targetName,
-		TargetRoleField: targetRole,
-	}
-	if targetRole == DefinitionNamespacedRole {
-		fields[TargetNamespaceField] = targetNamespace
-	}
-	return fields
+	return apierrors.NewInternalError(fmt.Errorf("unable to list %s", resource))
 }
 
 // validateNoDuplicateRestrictedAPIs rejects duplicate API group names in RestrictedAPIs.
@@ -111,42 +106,33 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 		return nil, err
 	}
 
-	// Use field indexes for efficient lookup by the exact RBAC target scope.
-	roleDefinitionList := &RoleDefinitionList{}
-	if err := v.Client.List(ctx, roleDefinitionList,
-		roleTargetMatchingFields(obj.Spec.TargetName, obj.Spec.TargetRole, obj.Spec.TargetNamespace)); err != nil {
+	existingRD, err := v.findRoleDefinitionTargetConflict(ctx, obj)
+	if err != nil {
 		logger.Error(err, "failed to list RoleDefinitions", "targetName", obj.Spec.TargetName)
 		return nil, listErrorToAdmission("RoleDefinitions", err)
 	}
-
-	for _, roleDefinition := range roleDefinitionList.Items {
-		if roleDefinition.Name != obj.Name &&
-			roleTargetCollision(obj.Spec.TargetRole, obj.Spec.TargetNamespace, roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetNamespace) {
-			logger.Info("validation failed: duplicate targetName",
-				"name", obj.Name, "targetName", obj.Spec.TargetName, "conflictsWith", roleDefinition.Name)
-			return nil, apierrors.NewInvalid(
-				schema.GroupKind{Group: GroupVersion.Group, Kind: "RoleDefinition"},
-				obj.Name,
-				field.ErrorList{field.Duplicate(field.NewPath("spec", "targetName"),
-					fmt.Sprintf("%s (already used by RoleDefinition %q)", obj.Spec.TargetName, roleDefinition.Name))})
-		}
+	if existingRD != nil {
+		logger.Info("validation failed: duplicate targetName",
+			"name", obj.Name, "targetName", obj.Spec.TargetName, "conflictsWith", existingRD.Name)
+		return nil, apierrors.NewInvalid(
+			schema.GroupKind{Group: GroupVersion.Group, Kind: "RoleDefinition"},
+			obj.Name,
+			field.ErrorList{field.Duplicate(field.NewPath("spec", "targetName"),
+				fmt.Sprintf("%s (already used by RoleDefinition %q)", obj.Spec.TargetName, existingRD.Name))})
 	}
 
 	// Check for cross-type targetName collision with RestrictedRoleDefinitions.
-	rrdList := &RestrictedRoleDefinitionList{}
-	if err := v.Client.List(ctx, rrdList,
-		roleTargetMatchingFields(obj.Spec.TargetName, obj.Spec.TargetRole, obj.Spec.TargetNamespace)); err != nil {
+	existingRRD, err := v.findRestrictedRoleDefinitionTargetConflict(ctx, obj)
+	if err != nil {
 		logger.Error(err, "failed to list RestrictedRoleDefinitions", "targetName", obj.Spec.TargetName)
 		return nil, listErrorToAdmission("RestrictedRoleDefinitions", err)
 	}
-	for _, existing := range rrdList.Items {
-		if roleTargetCollision(obj.Spec.TargetRole, obj.Spec.TargetNamespace, existing.Spec.TargetRole, existing.Spec.TargetNamespace) {
-			return nil, apierrors.NewInvalid(
-				schema.GroupKind{Group: GroupVersion.Group, Kind: "RoleDefinition"},
-				obj.Name,
-				field.ErrorList{field.Duplicate(field.NewPath("spec", "targetName"),
-					fmt.Sprintf("%s (already used by RestrictedRoleDefinition %q)", obj.Spec.TargetName, existing.Name))})
-		}
+	if existingRRD != nil {
+		return nil, apierrors.NewInvalid(
+			schema.GroupKind{Group: GroupVersion.Group, Kind: "RoleDefinition"},
+			obj.Name,
+			field.ErrorList{field.Duplicate(field.NewPath("spec", "targetName"),
+				fmt.Sprintf("%s (already used by RestrictedRoleDefinition %q)", obj.Spec.TargetName, existingRRD.Name))})
 	}
 
 	return nil, nil
@@ -195,45 +181,91 @@ func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 		return nil, err
 	}
 
-	// Use field indexes for efficient lookup by the exact RBAC target scope.
-	roleDefinitionList := &RoleDefinitionList{}
-	if err := v.Client.List(ctx, roleDefinitionList,
-		roleTargetMatchingFields(newObj.Spec.TargetName, newObj.Spec.TargetRole, newObj.Spec.TargetNamespace)); err != nil {
+	existingRD, err := v.findRoleDefinitionTargetConflict(ctx, newObj)
+	if err != nil {
 		logger.Error(err, "failed to list RoleDefinitions", "targetName", newObj.Spec.TargetName)
 		return nil, listErrorToAdmission("RoleDefinitions", err)
 	}
-
-	for _, roleDefinition := range roleDefinitionList.Items {
-		if roleDefinition.Name != newObj.Name &&
-			roleTargetCollision(newObj.Spec.TargetRole, newObj.Spec.TargetNamespace, roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetNamespace) {
-			logger.Info("validation failed: duplicate targetName",
-				"name", newObj.Name, "targetName", newObj.Spec.TargetName, "conflictsWith", roleDefinition.Name)
-			return nil, apierrors.NewInvalid(
-				schema.GroupKind{Group: GroupVersion.Group, Kind: "RoleDefinition"},
-				newObj.Name,
-				field.ErrorList{field.Duplicate(field.NewPath("spec", "targetName"),
-					fmt.Sprintf("%s (already used by RoleDefinition %q)", newObj.Spec.TargetName, roleDefinition.Name))})
-		}
+	if existingRD != nil {
+		logger.Info("validation failed: duplicate targetName",
+			"name", newObj.Name, "targetName", newObj.Spec.TargetName, "conflictsWith", existingRD.Name)
+		return nil, apierrors.NewInvalid(
+			schema.GroupKind{Group: GroupVersion.Group, Kind: "RoleDefinition"},
+			newObj.Name,
+			field.ErrorList{field.Duplicate(field.NewPath("spec", "targetName"),
+				fmt.Sprintf("%s (already used by RoleDefinition %q)", newObj.Spec.TargetName, existingRD.Name))})
 	}
 
 	// Keep cross-type targetName collision checks aligned with ValidateCreate.
-	rrdList := &RestrictedRoleDefinitionList{}
-	if err := v.Client.List(ctx, rrdList,
-		roleTargetMatchingFields(newObj.Spec.TargetName, newObj.Spec.TargetRole, newObj.Spec.TargetNamespace)); err != nil {
+	existingRRD, err := v.findRestrictedRoleDefinitionTargetConflict(ctx, newObj)
+	if err != nil {
 		logger.Error(err, "failed to list RestrictedRoleDefinitions", "targetName", newObj.Spec.TargetName)
 		return nil, listErrorToAdmission("RestrictedRoleDefinitions", err)
 	}
-	for _, existing := range rrdList.Items {
-		if roleTargetCollision(newObj.Spec.TargetRole, newObj.Spec.TargetNamespace, existing.Spec.TargetRole, existing.Spec.TargetNamespace) {
-			return nil, apierrors.NewInvalid(
-				schema.GroupKind{Group: GroupVersion.Group, Kind: "RoleDefinition"},
-				newObj.Name,
-				field.ErrorList{field.Duplicate(field.NewPath("spec", "targetName"),
-					fmt.Sprintf("%s (already used by RestrictedRoleDefinition %q)", newObj.Spec.TargetName, existing.Name))})
-		}
+	if existingRRD != nil {
+		return nil, apierrors.NewInvalid(
+			schema.GroupKind{Group: GroupVersion.Group, Kind: "RoleDefinition"},
+			newObj.Name,
+			field.ErrorList{field.Duplicate(field.NewPath("spec", "targetName"),
+				fmt.Sprintf("%s (already used by RestrictedRoleDefinition %q)", newObj.Spec.TargetName, existingRRD.Name))})
 	}
 
 	return nil, nil
+}
+
+//nolint:nilnil // A nil object with nil error means no conflicting targetName was found.
+func (v *RoleDefinitionValidator) findRoleDefinitionTargetConflict(
+	ctx context.Context,
+	obj *RoleDefinition,
+) (*RoleDefinition, error) {
+	reader := v.reader()
+	continueToken := ""
+	for {
+		rdList := &RoleDefinitionList{}
+		nextContinueToken, err := listAdmissionPage(ctx, reader, rdList, continueToken)
+		if err != nil {
+			return nil, err
+		}
+		for i := range rdList.Items {
+			existing := &rdList.Items[i]
+			if existing.Spec.TargetName == obj.Spec.TargetName &&
+				existing.Name != obj.Name &&
+				roleTargetCollision(obj.Spec.TargetRole, obj.Spec.TargetNamespace, existing.Spec.TargetRole, existing.Spec.TargetNamespace) {
+				return existing, nil
+			}
+		}
+		if nextContinueToken == "" {
+			return nil, nil
+		}
+		continueToken = nextContinueToken
+	}
+}
+
+//nolint:nilnil // A nil object with nil error means no conflicting targetName was found.
+func (v *RoleDefinitionValidator) findRestrictedRoleDefinitionTargetConflict(
+	ctx context.Context,
+	obj *RoleDefinition,
+) (*RestrictedRoleDefinition, error) {
+	reader := v.reader()
+	continueToken := ""
+	for {
+		rrdList := &RestrictedRoleDefinitionList{}
+		nextContinueToken, err := listAdmissionPage(ctx, reader, rrdList, continueToken)
+		if err != nil {
+			return nil, err
+		}
+		for i := range rrdList.Items {
+			existing := &rrdList.Items[i]
+			if existing.Spec.TargetName == obj.Spec.TargetName &&
+				roleTargetCollision(obj.Spec.TargetRole, obj.Spec.TargetNamespace, existing.Spec.TargetRole, existing.Spec.TargetNamespace) {
+				return existing, nil
+			}
+		}
+		if nextContinueToken == "" {
+			return nil, nil
+		}
+		continueToken = nextContinueToken
+	}
 }
 
 // ValidateDelete implements admission.Validator for RoleDefinition.

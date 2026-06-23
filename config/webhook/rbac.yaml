@@ -1,0 +1,150 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+#
+# SPDX-License-Identifier: Apache-2.0
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    authorization.t-caas.telekom.com/component: "webhook"
+  name: webhook-server
+rules:
+  # Namespace reads for WebhookAuthorizer namespaceSelector evaluation.
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+    verbs:
+      - get
+      - list
+      - watch
+  # Admission webhook configuration watches for cert rotation CA bundles.
+  - apiGroups:
+      - admissionregistration.k8s.io
+    resources:
+      - mutatingwebhookconfigurations
+      - validatingwebhookconfigurations
+    verbs:
+      - list
+      - watch
+  # Admission webhook configuration updates for cert rotation CA bundles.
+  - apiGroups:
+      - admissionregistration.k8s.io
+    resources:
+      - mutatingwebhookconfigurations
+    resourceNames:
+      - namespace-mutating-webhook-configuration
+    verbs:
+      - get
+      - patch
+      - update
+  - apiGroups:
+      - admissionregistration.k8s.io
+    resources:
+      - validatingwebhookconfigurations
+    resourceNames:
+      - namespace-validating-webhook-configuration
+      - validating-webhook-configuration
+    verbs:
+      - get
+      - patch
+      - update
+  # Read-only validation inputs for admission-time collision and policy checks.
+  - apiGroups:
+      - authorization.t-caas.telekom.com
+    resources:
+      - binddefinitions
+      - rbacpolicies
+      - restrictedbinddefinitions
+      - restrictedroledefinitions
+      - roledefinitions
+      - webhookauthorizers
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - authorization.t-caas.telekom.com
+    resources:
+      - binddefinitions/status
+      - rbacpolicies/status
+      - restrictedbinddefinitions/status
+      - restrictedroledefinitions/status
+      - webhookauthorizers/status
+    verbs:
+      - get
+  # BindDefinition webhook validation checks referenced role existence.
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - clusterroles
+      - roles
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    authorization.t-caas.telekom.com/component: "webhook"
+  name: webhook-server
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: webhook-server
+subjects:
+  - kind: ServiceAccount
+    name: webhook-server
+    namespace: system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    authorization.t-caas.telekom.com/component: "webhook"
+  name: webhook-secrets
+  namespace: system
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    resourceNames:
+      - webhook-certs
+    verbs:
+      - get
+      - patch
+      - update
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/managed-by: kustomize
+    authorization.t-caas.telekom.com/component: "webhook"
+  name: webhook-secrets
+  namespace: system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: webhook-secrets
+subjects:
+  - kind: ServiceAccount
+    name: webhook-server
+    namespace: system
