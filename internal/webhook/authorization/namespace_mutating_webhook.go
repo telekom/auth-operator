@@ -82,46 +82,11 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 		return admission.Errored(http.StatusInternalServerError, ErrNamespaceWebhookInternal)
 	}
 
-	// Last resort: if no BindDefinition matched and the user is a ServiceAccount,
-	// inherit tracked ownership labels from the SA's source namespace (issue #202).
-	// Only applies to CREATE/UPDATE — never to DELETE.
-	if len(labelsToAdd) == 0 && saInfo.IsServiceAccount &&
-		(req.Operation == admissionv1.Create || req.Operation == admissionv1.Update) {
-		saCtx, saCancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
-		defer saCancel()
-		inherited, saErr := GetSANamespaceTrackedLabels(saCtx, m.admissionReader(), saInfo)
-		if saErr != nil {
-			logger.Error(saErr, "failed to lookup SA namespace labels",
-				"saNamespace", saInfo.Namespace, "targetNamespace", req.Name)
-			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultErrored).Inc()
-			return admission.Errored(http.StatusInternalServerError, ErrNamespaceWebhookInternal)
-		}
-		if len(inherited) > 0 {
-			if ns.Labels != nil {
-				// Check for conflicts: if the target already has a tracked label with a different value, deny.
-				for k, inheritedVal := range inherited {
-					if existingVal, exists := ns.Labels[k]; exists && existingVal != inheritedVal {
-						logger.V(1).Info("SA namespace label inheritance denied - label conflict on target namespace",
-							"namespace", req.Name, "label", k, "existingValue", existingVal, "inheritedValue", inheritedVal)
-						metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultDenied).Inc()
-						return admission.Denied(fmt.Sprintf(DenialLabelConflictFmt, req.Name, k, existingVal, inheritedVal, saInfo.Namespace))
-					}
-				}
-				// Deny early if target has extra tracked keys not present on the SA namespace.
-				// This avoids a mutate-then-deny flow where the mutator would allow and patch,
-				// but the validating webhook would deny due to extra tracked keys.
-				if extraKey := FindExtraTrackedKey(ns.Labels, inherited); extraKey != "" {
-					logger.V(1).Info("SA namespace label inheritance denied - target has extra tracked key",
-						"namespace", req.Name, "extraKey", extraKey, "saNamespace", saInfo.Namespace)
-					metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultDenied).Inc()
-					return admission.Denied(fmt.Sprintf(DenialExtraTrackedKeyFmt,
-						req.Name, extraKey, saInfo.Namespace))
-				}
-			}
-			logger.V(1).Info("SA namespace label inheritance - inheriting labels from SA source namespace",
-				"namespace", req.Name, "saNamespace", saInfo.Namespace, "labelCount", len(inherited))
-			labelsToAdd = inherited
-		}
+	var response admission.Response
+	var handled bool
+	labelsToAdd, response, handled = m.inheritServiceAccountNamespaceLabels(ctx, req, ns, labelsToAdd, saInfo)
+	if handled {
+		return response
 	}
 
 	// If there are labels to add, mutate the namespace
@@ -146,6 +111,68 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 	logger.V(1).Info("namespace mutation denied - no labels matched", "namespace", req.Name, "username", req.UserInfo.Username)
 	metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultDenied).Inc()
 	return admission.Denied(DenialNoOIDCAttributes)
+}
+
+func (m *NamespaceMutator) inheritServiceAccountNamespaceLabels(
+	ctx context.Context,
+	req admission.Request,
+	ns *corev1.Namespace,
+	labelsToAdd map[string]string,
+	saInfo ServiceAccountInfo,
+) (map[string]string, admission.Response, bool) {
+	if len(labelsToAdd) > 0 || !saInfo.IsServiceAccount {
+		return labelsToAdd, admission.Response{}, false
+	}
+
+	logger := logf.FromContext(ctx).WithName("namespace-mutator")
+	saCtx, saCancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
+	defer saCancel()
+	inherited, err := GetSANamespaceTrackedLabels(saCtx, m.admissionReader(), saInfo)
+	if err != nil {
+		logger.Error(err, "failed to lookup SA namespace labels",
+			"saNamespace", saInfo.Namespace, "targetNamespace", req.Name)
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultErrored).Inc()
+		return labelsToAdd, admission.Errored(http.StatusInternalServerError, ErrNamespaceWebhookInternal), true
+	}
+	if len(inherited) == 0 {
+		return labelsToAdd, admission.Response{}, false
+	}
+	if response, denied := denyConflictingInheritedLabels(ctx, req, ns, inherited, saInfo); denied {
+		return labelsToAdd, response, true
+	}
+
+	logger.V(1).Info("SA namespace label inheritance - inheriting labels from SA source namespace",
+		"namespace", req.Name, "saNamespace", saInfo.Namespace, "labelCount", len(inherited))
+	return inherited, admission.Response{}, false
+}
+
+func denyConflictingInheritedLabels(
+	ctx context.Context,
+	req admission.Request,
+	ns *corev1.Namespace,
+	inherited map[string]string,
+	saInfo ServiceAccountInfo,
+) (admission.Response, bool) {
+	if ns.Labels == nil {
+		return admission.Response{}, false
+	}
+
+	logger := logf.FromContext(ctx).WithName("namespace-mutator")
+	for k, inheritedVal := range inherited {
+		if existingVal, exists := ns.Labels[k]; exists && existingVal != inheritedVal {
+			logger.V(1).Info("SA namespace label inheritance denied - label conflict on target namespace",
+				"namespace", req.Name, "label", k, "existingValue", existingVal, "inheritedValue", inheritedVal)
+			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultDenied).Inc()
+			return admission.Denied(fmt.Sprintf(DenialLabelConflictFmt, req.Name, k, existingVal, inheritedVal, saInfo.Namespace)), true
+		}
+	}
+	if extraKey := FindExtraTrackedKey(ns.Labels, inherited); extraKey != "" {
+		logger.V(1).Info("SA namespace label inheritance denied - target has extra tracked key",
+			"namespace", req.Name, "extraKey", extraKey, "saNamespace", saInfo.Namespace)
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultDenied).Inc()
+		return admission.Denied(fmt.Sprintf(DenialExtraTrackedKeyFmt, req.Name, extraKey, saInfo.Namespace)), true
+	}
+	return admission.Response{}, false
 }
 
 // collectBindDefinitionLabels iterates over all BindDefinitions and collects labels to add

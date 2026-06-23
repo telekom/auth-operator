@@ -91,7 +91,15 @@ func (v *RestrictedBindDefinitionValidator) ValidateUpdate(ctx context.Context, 
 	logger.V(1).Info("validating update", "name", newObj.Name)
 
 	if reflect.DeepEqual(oldObj.Spec, newObj.Spec) {
-		return nil, nil
+		return nil, validateDefaultPolicyForMetadataUpdate(
+			ctx,
+			v.defaultPolicyReader(),
+			schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedBindDefinitionKind},
+			newObj.Name,
+			newObj.Spec.PolicyRef.Name,
+			oldObj,
+			newObj,
+		)
 	}
 
 	// Enforce immutability of targetName and policyRef.
@@ -109,7 +117,15 @@ func (v *RestrictedBindDefinitionValidator) ValidateUpdate(ctx context.Context, 
 	}
 
 	if equality.Semantic.DeepEqual(oldObj.Spec, newObj.Spec) {
-		return nil, nil
+		return nil, validateDefaultPolicyForMetadataUpdate(
+			ctx,
+			v.defaultPolicyReader(),
+			schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedBindDefinitionKind},
+			newObj.Name,
+			newObj.Spec.PolicyRef.Name,
+			oldObj,
+			newObj,
+		)
 	}
 
 	if err := v.validateRestrictedBindDefinitionSpec(ctx, newObj); err != nil {

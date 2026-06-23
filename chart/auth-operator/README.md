@@ -108,6 +108,16 @@ Image reference precedence: `digest` > `tag` > `Chart.AppVersion`
 | `webhookServer.podDisruptionBudget.enabled` | Enable PDB | `true` |
 | `webhookServer.podDisruptionBudget.minAvailable` | Minimum available pods | `1` |
 
+### Namespace Admission
+
+The cluster-wide namespace mutating and validating webhooks are disabled by
+default. Enable them only after the bootstrap `BindDefinition` and
+`RBACPolicy` resources that authorize namespace ownership labels are present.
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `namespaceAdmission.enabled` | Install namespace create/update/delete admission webhooks | `false` |
+
 ### Service Account Configuration
 
 The controller and webhook server use separate ServiceAccounts with dedicated
@@ -165,7 +175,8 @@ For the full list of exposed metrics and recommended alert rules, see the
 | `networkPolicy.controllerManager.ingressFrom` | Custom ingress `from` rules for the metrics port (8080) | `[]` |
 | `networkPolicy.egress.enabled` | Enable egress rules (for default-deny egress environments) | `false` |
 | `networkPolicy.egress.dnsNamespace` | Namespace where CoreDNS runs (for UDP/TCP 53) | `"kube-system"` |
-| `networkPolicy.egress.apiServerCIDR` | API server CIDR for egress restriction; required when egress is enabled unless `additionalRules` provides equivalent API-server access | `""` |
+| `networkPolicy.egress.apiServerCIDR` | API server CIDR for egress restriction; required when egress is enabled unless `allowBroadAPIServerEgress=true` or `additionalRules` provides equivalent API-server access | `""` |
+| `networkPolicy.egress.allowBroadAPIServerEgress` | Allow any destination on TCP 443/6443 when `apiServerCIDR` is empty | `false` |
 | `networkPolicy.egress.additionalRules` | Additional custom egress rules | `[]` |
 
 ## High Availability

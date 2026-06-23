@@ -137,10 +137,10 @@ func TestServeHTTP_EvaluatesMatchingAuthorizersByName(t *testing.T) {
 	}
 
 	tests := []struct {
-		name       string
-		authorizer []authzv1alpha1.WebhookAuthorizer
-		wantAllow  bool
-		wantReason string
+		name             string
+		authorizer       []authzv1alpha1.WebhookAuthorizer
+		wantAllow        bool
+		wantPublicReason string
 	}{
 		{
 			name: "first authorizer allows before later deny",
@@ -148,8 +148,8 @@ func TestServeHTTP_EvaluatesMatchingAuthorizersByName(t *testing.T) {
 				newDenyAuthorizer("zzz-deny"),
 				newAllowAuthorizer("aaa-allow"),
 			},
-			wantAllow:  true,
-			wantReason: "aaa-allow",
+			wantAllow:        true,
+			wantPublicReason: "Access granted by WebhookAuthorizer",
 		},
 		{
 			name: "first authorizer denies before later allow",
@@ -157,8 +157,8 @@ func TestServeHTTP_EvaluatesMatchingAuthorizersByName(t *testing.T) {
 				newAllowAuthorizer("zzz-allow"),
 				newDenyAuthorizer("aaa-deny"),
 			},
-			wantAllow:  false,
-			wantReason: "aaa-deny",
+			wantAllow:        false,
+			wantPublicReason: "Access denied by WebhookAuthorizer",
 		},
 	}
 
@@ -187,8 +187,13 @@ func TestServeHTTP_EvaluatesMatchingAuthorizersByName(t *testing.T) {
 			if resp.Status.Allowed != tt.wantAllow {
 				t.Fatalf("expected allowed=%t, got %+v", tt.wantAllow, resp.Status)
 			}
-			if !strings.Contains(resp.Status.Reason, tt.wantReason) {
-				t.Fatalf("expected reason to mention %q, got %q", tt.wantReason, resp.Status.Reason)
+			if resp.Status.Reason != tt.wantPublicReason {
+				t.Fatalf("expected public reason %q, got %q", tt.wantPublicReason, resp.Status.Reason)
+			}
+			for _, authorizer := range tt.authorizer {
+				if strings.Contains(resp.Status.Reason, authorizer.Name) {
+					t.Fatalf("public reason leaks authorizer name %q: %q", authorizer.Name, resp.Status.Reason)
+				}
 			}
 		})
 	}
@@ -220,7 +225,7 @@ func TestServeHTTP_AuthorizerRulesUseLiveClient(t *testing.T) {
 		},
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/authorize", bytes.NewReader(marshalSAR(t, sar)))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/authorize", bytes.NewReader(marshalSAR(t, sar)))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -234,8 +239,11 @@ func TestServeHTTP_AuthorizerRulesUseLiveClient(t *testing.T) {
 	if resp.Status.Allowed {
 		t.Fatalf("expected fresh reader denial, got %+v", resp.Status)
 	}
-	if !strings.Contains(resp.Status.Reason, "fresh-deny") {
-		t.Fatalf("expected reason to mention fresh reader authorizer, got %q", resp.Status.Reason)
+	if resp.Status.Reason != "Access denied by WebhookAuthorizer" {
+		t.Fatalf("expected generic denial reason, got %q", resp.Status.Reason)
+	}
+	if strings.Contains(resp.Status.Reason, "fresh-deny") {
+		t.Fatalf("public reason leaks authorizer name: %q", resp.Status.Reason)
 	}
 }
 

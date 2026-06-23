@@ -193,13 +193,13 @@ jobs:
           exit-code: '0'
           trivyignores: '.trivyignore'
 
-      - name: Enforce Trivy HIGH and CRITICAL Helm findings
+      - name: Enforce Trivy MEDIUM, HIGH, and CRITICAL Helm findings
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: 'config'
           scan-ref: '/tmp/helm-rendered.yaml'
           format: 'table'
-          severity: 'CRITICAL,HIGH'
+          severity: 'CRITICAL,HIGH,MEDIUM'
           exit-code: '1'
           trivyignores: '.trivyignore'
 

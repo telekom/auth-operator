@@ -38,6 +38,23 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Guard release tag provenance
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          if ! [[ "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release tag ${TAG} is not a SemVer vX.Y.Z tag." >&2
+            exit 1
+          fi
+
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
+            echo "Release tag ${TAG} points at ${GITHUB_SHA}, which is not contained in protected main." >&2
+            exit 1
+          fi
 
       - name: Determine version
         id: version
@@ -746,13 +763,12 @@ jobs:
   helm-release:
     name: Release Helm Chart
     needs: [prepare, assemble, release]
-    # Run after release job: on tag pushes wait for release to succeed,
-    # on PRs the release job is skipped so allow helm-release to proceed.
+    # Publish charts only for release tags after release artifact creation succeeds.
     if: >-
-      !cancelled()
+      github.event_name != 'pull_request'
+      && !cancelled()
       && needs.prepare.result == 'success'
       && needs.assemble.result == 'success'
-      && github.event_name != 'pull_request'
       && needs.release.result == 'success'
     runs-on: ubuntu-latest
     permissions:

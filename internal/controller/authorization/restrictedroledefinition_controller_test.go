@@ -35,6 +35,7 @@ import (
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/discovery"
+	"github.com/telekom/auth-operator/pkg/helpers"
 	"github.com/telekom/auth-operator/pkg/indexer"
 )
 
@@ -992,7 +993,8 @@ func TestRRD_EnsureRole_DoesNotPropagateSourceLabels(t *testing.T) {
 	g.Expect(c.Get(rrdCtx(), types.NamespacedName{Name: "ensured-cluster-role-labels"}, &cr)).To(Succeed())
 	g.Expect(cr.Labels).NotTo(HaveKey(rbacv1.GroupName + "/aggregate-to-admin"))
 	g.Expect(cr.Labels).NotTo(HaveKey("custom.example.com/tenant"))
-	g.Expect(cr.Labels).To(HaveKeyWithValue("app.kubernetes.io/managed-by", "auth-operator"))
+	g.Expect(cr.Labels).To(HaveKeyWithValue(helpers.ManagedByLabelStandard, helpers.ManagedByValue))
+	g.Expect(cr.Labels).To(HaveKeyWithValue(helpers.AppNameLabel, helpers.ManagedByValue))
 }
 
 func TestRRD_EnsureRole_NormalizesOwnedClusterRoleMetadata(t *testing.T) {
@@ -1037,7 +1039,8 @@ func TestRRD_EnsureRole_NormalizesOwnedClusterRoleMetadata(t *testing.T) {
 	g.Expect(c.Get(rrdCtx(), types.NamespacedName{Name: "stale-agg-cluster-role"}, &cr)).To(Succeed())
 	g.Expect(cr.Labels).NotTo(HaveKey(rbacv1.GroupName + "/aggregate-to-admin"))
 	g.Expect(cr.Labels).NotTo(HaveKey("custom.example.com/keep"))
-	g.Expect(cr.Labels).To(HaveKeyWithValue("app.kubernetes.io/managed-by", "auth-operator"))
+	g.Expect(cr.Labels).To(HaveKeyWithValue(helpers.ManagedByLabelStandard, helpers.ManagedByValue))
+	g.Expect(cr.Labels).To(HaveKeyWithValue(helpers.AppNameLabel, helpers.ManagedByValue))
 	g.Expect(cr.AggregationRule).To(BeNil())
 }
 

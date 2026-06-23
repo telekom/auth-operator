@@ -2,6 +2,7 @@ package utils
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -435,20 +436,29 @@ func WaitForServiceEndpoints(serviceName, namespace string, timeout time.Duratio
 	return fmt.Errorf("timeout waiting for endpoints for service %s in namespace %s", serviceName, namespace)
 }
 
-// WaitForWebhookConfigurations waits for validating and mutating webhook configurations matching label selector.
+// WaitForWebhookConfigurations waits for webhook configurations matching label selector.
 func WaitForWebhookConfigurations(labelSelector string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
+	var lastErr error
 	for time.Now().Before(deadline) {
-		validating := CommandContext(context.Background(), "kubectl", "get", "validatingwebhookconfiguration", // #nosec G204
-			"-l", labelSelector, "-o", "name")
-		mutating := CommandContext(context.Background(), "kubectl", "get", "mutatingwebhookconfiguration", // #nosec G204
-			"-l", labelSelector, "-o", "name")
-		vOut, vErr := Run(validating)
-		mOut, mErr := Run(mutating)
-		if vErr == nil && mErr == nil && len(GetNonEmptyLines(string(vOut))) > 0 && len(GetNonEmptyLines(string(mOut))) > 0 {
-			return nil
+		validatingConfigs, validatingWebhooks, _, validatingErr := getWebhookCABundleCounts("validatingwebhookconfiguration", labelSelector)
+		mutatingConfigs, mutatingWebhooks, _, mutatingErr := getWebhookCABundleCounts("mutatingwebhookconfiguration", labelSelector)
+		switch {
+		case validatingErr != nil:
+			lastErr = validatingErr
+		case mutatingErr != nil:
+			lastErr = mutatingErr
+		default:
+			configs := validatingConfigs + mutatingConfigs
+			webhooks := validatingWebhooks + mutatingWebhooks
+			if configs > 0 && webhooks > 0 {
+				return nil
+			}
 		}
 		time.Sleep(2 * time.Second)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("timeout waiting for webhook configurations with label %s: %w", labelSelector, lastErr)
 	}
 	return fmt.Errorf("timeout waiting for webhook configurations with label %s", labelSelector)
 }
@@ -457,56 +467,114 @@ func WaitForWebhookConfigurations(labelSelector string, timeout time.Duration) e
 // This ensures the cert-rotator has injected the CA certificate before attempting TLS validation.
 func WaitForWebhookCABundle(labelSelector string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
+	var (
+		lastConfigs  int
+		lastWebhooks int
+		lastBundles  int
+		lastErr      error
+	)
 	for time.Now().Before(deadline) {
-		// Check if mutating webhook has caBundle populated
-		mutatingCmd := CommandContext(context.Background(), "kubectl", "get", "mutatingwebhookconfiguration", // #nosec G204
-			"-l", labelSelector,
-			"-o", "jsonpath={.items[*].webhooks[*].clientConfig.caBundle}")
-		mutatingOut, mutatingErr := Run(mutatingCmd)
+		mutatingConfigs, mutatingWebhooks, mutatingBundles, mutatingErr := getWebhookCABundleCounts("mutatingwebhookconfiguration", labelSelector)
+		validatingConfigs, validatingWebhooks, validatingBundles, validatingErr := getWebhookCABundleCounts("validatingwebhookconfiguration", labelSelector)
 
-		// Check if validating webhook has caBundle populated
-		validatingCmd := CommandContext(context.Background(), "kubectl", "get", "validatingwebhookconfiguration", // #nosec G204
-			"-l", labelSelector,
-			"-o", "jsonpath={.items[*].webhooks[*].clientConfig.caBundle}")
-		validatingOut, validatingErr := Run(validatingCmd)
+		switch {
+		case mutatingErr != nil:
+			lastErr = mutatingErr
+		case validatingErr != nil:
+			lastErr = validatingErr
+		default:
+			lastErr = nil
+			lastConfigs = mutatingConfigs + validatingConfigs
+			lastWebhooks = mutatingWebhooks + validatingWebhooks
+			lastBundles = mutatingBundles + validatingBundles
 
-		if mutatingErr == nil && validatingErr == nil {
-			mutatingBundle := strings.TrimSpace(string(mutatingOut))
-			validatingBundle := strings.TrimSpace(string(validatingOut))
-
-			// Both must have non-empty caBundle values
-			if mutatingBundle != "" && validatingBundle != "" {
+			if lastConfigs > 0 && lastWebhooks > 0 && lastBundles == lastWebhooks {
 				if DebugLevel >= 1 {
-					_, _ = fmt.Fprintf(GinkgoWriter, "Webhook CA bundles populated (mutating: %d bytes, validating: %d bytes)\n",
-						len(mutatingBundle), len(validatingBundle))
+					_, _ = fmt.Fprintf(GinkgoWriter, "Webhook CA bundles populated (configs: %d, webhooks: %d)\n",
+						lastConfigs, lastWebhooks)
 				}
 				return nil
 			}
 
 			if DebugLevel >= 2 {
-				_, _ = fmt.Fprintf(GinkgoWriter, "Waiting for CA bundle injection (mutating: %d bytes, validating: %d bytes)\n",
-					len(mutatingBundle), len(validatingBundle))
+				_, _ = fmt.Fprintf(GinkgoWriter, "Waiting for CA bundle injection (configs: %d, webhooks: %d, bundles: %d)\n",
+					lastConfigs, lastWebhooks, lastBundles)
 			}
 		}
 
 		time.Sleep(2 * time.Second)
 	}
-	return fmt.Errorf("timeout waiting for webhook CA bundle to be injected (label: %s)", labelSelector)
+	if lastErr != nil {
+		return fmt.Errorf("timeout waiting for webhook CA bundle to be injected (label: %s): %w", labelSelector, lastErr)
+	}
+	return fmt.Errorf("timeout waiting for webhook CA bundle to be injected (label: %s, configs: %d, webhooks: %d, bundles: %d)",
+		labelSelector, lastConfigs, lastWebhooks, lastBundles)
 }
 
-// WaitForWebhookReady waits for the webhook to be fully operational by performing a dry-run
-// namespace create, which validates that the TLS certificate is properly configured and
-// the webhook is responding correctly. This is more reliable than just checking pod readiness.
+type webhookConfigurationList struct {
+	Items []webhookConfiguration `json:"items"`
+}
+
+type webhookConfiguration struct {
+	Webhooks []webhookEntry `json:"webhooks"`
+}
+
+type webhookEntry struct {
+	ClientConfig webhookClientConfig `json:"clientConfig"`
+}
+
+type webhookClientConfig struct {
+	CABundle string `json:"caBundle"`
+}
+
+func getWebhookCABundleCounts(kind, labelSelector string) (configCount, webhookCount, bundleCount int, err error) {
+	cmd := CommandContext(context.Background(), "kubectl", "get", kind, // #nosec G204
+		"-l", labelSelector,
+		"-o", "json")
+	output, err := Run(cmd)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	return countWebhookCABundles(output)
+}
+
+func countWebhookCABundles(output []byte) (configCount, webhookCount, bundleCount int, err error) {
+	var list webhookConfigurationList
+	if err := json.Unmarshal(output, &list); err != nil {
+		return 0, 0, 0, fmt.Errorf("parse webhook configuration list: %w", err)
+	}
+
+	configCount = len(list.Items)
+	for _, item := range list.Items {
+		webhookCount += len(item.Webhooks)
+		for _, webhook := range item.Webhooks {
+			if strings.TrimSpace(webhook.ClientConfig.CABundle) != "" {
+				bundleCount++
+			}
+		}
+	}
+
+	return configCount, webhookCount, bundleCount, nil
+}
+
+// WaitForWebhookReady waits for the webhook to be fully operational by performing a
+// dry-run RoleDefinition create that exercises the active validating webhook.
 func WaitForWebhookReady(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	testNS := "webhook-readiness-check"
+	manifest := `apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: webhook-readiness-check
+spec:
+  targetRole: ClusterRole
+  targetName: webhook-readiness-check
+  scopeNamespaced: false
+`
 	var lastErr error
 
 	for time.Now().Before(deadline) {
-		// Perform a dry-run namespace create which will trigger the mutating webhook
-		// If the webhook is ready with valid TLS, this will succeed
-		cmd := CommandContext(context.Background(), "kubectl", "create", "namespace", testNS, // #nosec G204
-			"--dry-run=server", "-o", "yaml")
+		cmd := CommandContext(context.Background(), "kubectl", "apply", "--dry-run=server", "-f", "-") // #nosec G204
+		cmd.Stdin = strings.NewReader(manifest)
 		_, err := Run(cmd)
 		if err == nil {
 			if DebugLevel >= 1 {

@@ -86,8 +86,8 @@ func TestNamespaceMutatorSanitizesListErrors(t *testing.T) {
 	if strings.Contains(resp.Result.Message, sentinel.Error()) {
 		t.Fatalf("response leaked backend error: %q", resp.Result.Message)
 	}
-	if !strings.Contains(resp.Result.Message, "unable to validate namespace request") {
-		t.Fatalf("expected generic validation error, got %q", resp.Result.Message)
+	if !strings.Contains(resp.Result.Message, webhooks.ErrNamespaceWebhookInternal.Error()) {
+		t.Fatalf("expected internal admission error, got %q", resp.Result.Message)
 	}
 }
 
@@ -134,8 +134,8 @@ func TestNamespaceValidatorSanitizesListErrors(t *testing.T) {
 	if strings.Contains(resp.Result.Message, sentinel.Error()) {
 		t.Fatalf("response leaked backend error: %q", resp.Result.Message)
 	}
-	if !strings.Contains(resp.Result.Message, "unable to validate namespace request") {
-		t.Fatalf("expected generic validation error, got %q", resp.Result.Message)
+	if !strings.Contains(resp.Result.Message, webhooks.ErrNamespaceWebhookInternal.Error()) {
+		t.Fatalf("expected internal admission error, got %q", resp.Result.Message)
 	}
 }
 

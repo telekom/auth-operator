@@ -124,6 +124,11 @@ resources:
 | `auth_operator_authorizer_denied_principal_hits_total` | Counter | `authorizer` | Number of SAR denials due to denied-principal matching. |
 | `auth_operator_authorizer_rate_limited_total` | Counter | — | SubjectAccessReview requests rejected due to rate limiting on the `/authorize` endpoint. A sustained non-zero rate indicates traffic exceeds `--authorize-rate-limit`. |
 
+The `authorizer` and `binddefinition` labels intentionally identify policy
+objects for operations dashboards. In clusters where tenants can create many
+policy objects, restrict that write access or aggregate these series at scrape
+or query time to avoid unbounded active cardinality.
+
 ---
 
 ## Recommended Alert Rules

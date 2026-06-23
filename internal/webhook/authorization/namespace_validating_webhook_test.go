@@ -376,6 +376,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 							ObjectMeta: metav1.ObjectMeta{
 								Name: "tenant-ns",
 								Labels: map[string]string{
+									"t-caas.telekom.com/owner":  "tenant",
 									"t-caas.telekom.com/tenant": "tenant-a",
 								},
 							},
@@ -750,6 +751,43 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 			},
 			expectedAllow: true,
 		},
+		{
+			name:         "deny TDG migration bypass update with incoherent tenant labels",
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefPlatform},
+			tdgMigration: true,
+			request: crAdmission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
+					Name:      "invalid-tdg-ns",
+					Operation: admissionv1.Update,
+					UserInfo: authenticationv1.UserInfo{
+						Username: "system:serviceaccount:flux-system:helm-controller",
+					},
+					Object: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "invalid-tdg-ns",
+								Labels: map[string]string{
+									"kubernetes.io/metadata.name": "invalid-tdg-ns",
+									"t-caas.telekom.com/owner":    "tenant",
+								},
+							},
+						}),
+					},
+					OldObject: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "invalid-tdg-ns",
+								Labels: map[string]string{
+									"kubernetes.io/metadata.name": "invalid-tdg-ns",
+								},
+							},
+						}),
+					},
+				},
+			},
+			expectedAllow: false,
+		},
 		// === Adoption scenarios: old namespaces without t-caas labels ===
 		// These test the scenario where an existing namespace (created before
 		// auth-operator was deployed) needs to be adopted into the auth-operator
@@ -796,7 +834,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 			expectedAllow: false,
 		},
 		{
-			name:     "allow adoption: authorized SA adding tenant label to namespace without t-caas labels",
+			name:     "deny adoption: authorized SA cannot claim unlabeled existing namespace",
 			bindDefs: []authorizationv1alpha1.BindDefinition{bindDefTenant},
 			request: crAdmission.Request{
 				AdmissionRequest: admissionv1.AdmissionRequest{
@@ -829,7 +867,7 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 					},
 				},
 			},
-			expectedAllow: true,
+			expectedAllow: false,
 		},
 		{
 			name:     "deny adoption: adding thirdparty label to namespace without any t-caas labels",
@@ -1694,8 +1732,9 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 							ObjectMeta: metav1.ObjectMeta{
 								Name: "tenant-app-ns",
 								Labels: map[string]string{
-									"schiff.telekom.de/owner":  "cas",
-									"t-caas.telekom.com/owner": "tenant",
+									"schiff.telekom.de/owner":   "cas",
+									"t-caas.telekom.com/owner":  "tenant",
+									"t-caas.telekom.com/tenant": "cas",
 								},
 							},
 						}),

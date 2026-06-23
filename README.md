@@ -228,10 +228,15 @@ Bindings are named as: `{targetName}-{roleName}-binding`
 ### WebhookAuthorizer
 
 Configures fine-grained SubjectAccessReview decisions for the webhook server.
+The Kubernetes API server must be configured with an authorization webhook that
+calls the auth-operator `/authorize` endpoint before these resources affect live
+API authorization.
 Within a WebhookAuthorizer, denied principals are rejected before allow rules
 are evaluated. Allowed principals must also match a resource or non-resource
 rule. When multiple authorizers match, they are evaluated deterministically by
-name; the first allow or deny decision is returned.
+name; the first allow or deny decision is returned. A request with no matching
+authorizer returns no opinion, so the API server can continue evaluating later
+authorizers in its chain.
 
 **Key capabilities:**
 - **Resource and non-resource rules** - Match Kubernetes API requests or paths such as `/healthz`

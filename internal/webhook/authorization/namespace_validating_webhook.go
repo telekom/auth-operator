@@ -79,6 +79,14 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 				return *resp
 			}
 
+			if !ValidTrackedOwnershipLabels(ns.Labels) {
+				denialMsg := fmt.Sprintf(DenialInvalidTrackedLabelsFmt, ns.Name)
+				logger.V(1).Info("namespace update denied - invalid tracked ownership labels",
+					"namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username)
+				metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultDenied).Inc()
+				return admission.Denied(denialMsg)
+			}
+
 			logger.V(3).Info("namespace labels validated", "namespace", req.Name)
 		} else {
 			logger.V(1).Info("AUDIT: privileged bypass skipped update label checks",
@@ -147,7 +155,8 @@ func (v *NamespaceValidator) decodeNamespaces(logger logr.Logger, req admission.
 }
 
 // validateLabelImmutability checks that controlled labels are not modified or removed
-// during namespace updates. Initial adoption (adding a label for the first time) is allowed.
+// during namespace updates. Initial adoption (adding a label for the first time) is allowed
+// only for trusted bypass users.
 // Returns a denial response if a violation is found, or nil if validation passes.
 func (v *NamespaceValidator) validateLabelImmutability(logger logr.Logger, req admission.Request, ns, oldNs *corev1.Namespace, bypassResult BypassCheckResult) *admission.Response {
 	// Ensure Labels maps are not nil to prevent nil pointer dereference
@@ -176,8 +185,16 @@ func (v *NamespaceValidator) validateLabelImmutability(logger logr.Logger, req a
 		oldValue, oldExists := oldNs.Labels[key]
 		newValue, newExists := ns.Labels[key]
 
-		// Allow initial label adoption: label didn't exist before, now being added.
+		// Allow initial label adoption for bypass users: label didn't exist
+		// before, now being added.
 		if !oldExists && newExists {
+			if !bypassResult.ShouldBypass {
+				logger.V(2).Info("label adoption denied for non-bypass user",
+					"namespace", req.Name, "label", key, "newValue", newValue)
+				metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultDenied).Inc()
+				resp := admission.Denied(fmt.Sprintf(DenialLabelModificationFmt, key))
+				return &resp
+			}
 			logger.V(2).Info("label adoption allowed",
 				"namespace", req.Name, "label", key, "newValue", newValue)
 			continue

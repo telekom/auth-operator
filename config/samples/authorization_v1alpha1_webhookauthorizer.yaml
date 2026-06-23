@@ -173,6 +173,9 @@ spec:
         - roledefinitions
         - binddefinitions
         - webhookauthorizers
+        - rbacpolicies
+        - restrictedroledefinitions
+        - restrictedbinddefinitions
       verbs:
         - create
         - update

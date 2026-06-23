@@ -5,10 +5,13 @@ resources:
 - serviceaccount.yaml
 - rbac.yaml
 - manifests.yaml
-- namespace_webhooks.yaml
 - service.yaml
 - secret.yaml
 - deployment.yaml
+
+# Namespace admission webhooks are intentionally not installed by default.
+# Opt-in overlays must add namespace_webhooks.yaml and matching cert-rotation
+# flags for the namespace webhook configuration names.
 
 configurations:
 - kustomizeconfig.yaml

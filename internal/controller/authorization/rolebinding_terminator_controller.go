@@ -55,6 +55,11 @@ const (
 	terminationResourceChannelSize = 100
 )
 
+var (
+	errNoControllingBindDefinitionOwner = errors.New("no controlling BindDefinition owner reference found")
+	errBindDefinitionOwnerUIDMismatch   = errors.New("BindDefinition owner reference UID mismatch")
+)
+
 // namespaceDeletionResourceBlocking represents a resource type and the specific instances blocking namespace deletion.
 type namespaceDeletionResourceBlocking struct {
 	ResourceType string // e.g., "pods", "persistentvolumeclaims"
@@ -380,17 +385,37 @@ func (r *RoleBindingTerminator) getOwningBindDefinition(ctx context.Context, own
 		if ownerRef.Kind != "BindDefinition" || ownerRef.APIVersion != authorizationv1alpha1.GroupVersion.String() {
 			continue
 		}
+		if ownerRef.Controller == nil || !*ownerRef.Controller {
+			continue
+		}
 		bindDefinition := &authorizationv1alpha1.BindDefinition{}
 		err := r.client.Get(ctx, types.NamespacedName{Name: ownerRef.Name}, bindDefinition)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get BindDefinition %s: %w", ownerRef.Name, err)
 		}
 		if bindDefinition.UID != ownerRef.UID {
-			return nil, fmt.Errorf("BindDefinition owner reference %s UID mismatch", ownerRef.Name)
+			return nil, fmt.Errorf("%w: %s", errBindDefinitionOwnerUIDMismatch, ownerRef.Name)
 		}
 		return bindDefinition, nil
 	}
-	return nil, fmt.Errorf("no BindDefinition owner reference found")
+	return nil, errNoControllingBindDefinitionOwner
+}
+
+func isInvalidBindDefinitionOwnerError(err error) bool {
+	return errors.Is(err, errNoControllingBindDefinitionOwner) ||
+		errors.Is(err, errBindDefinitionOwnerUIDMismatch) ||
+		apierrors.IsNotFound(err)
+}
+
+func (r *RoleBindingTerminator) removeRoleBindingFinalizer(ctx context.Context, roleBinding *rbacv1.RoleBinding) (bool, error) {
+	old := roleBinding.DeepCopy()
+	if !controllerutil.RemoveFinalizer(roleBinding, authorizationv1alpha1.RoleBindingFinalizer) {
+		return false, nil
+	}
+	if err := r.client.Patch(ctx, roleBinding, client.MergeFromWithOptions(old, client.MergeFromWithOptimisticLock{})); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // Reconcile handles the reconciliation loop for RoleBinding resources owned by BindDefinitions.
@@ -418,8 +443,24 @@ func (r *RoleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request)
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleBindingTerminator, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, err
 	}
-	// we don't care about RoleBindings not owned by a BindDefinition
-	if !isOwnedByBindDefinition(roleBinding.GetOwnerReferences()) {
+	bindDefinition, ownerErr := r.getOwningBindDefinition(ctx, roleBinding.OwnerReferences)
+	if ownerErr != nil {
+		if !isInvalidBindDefinitionOwnerError(ownerErr) {
+			logger.Error(ownerErr, "failed to verify owning BindDefinition for RoleBinding")
+			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleBindingTerminator, metrics.ResultError).Inc()
+			metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleBindingTerminator, metrics.ErrorTypeAPI).Inc()
+			return ctrl.Result{}, ownerErr
+		}
+		if removed, err := r.removeRoleBindingFinalizer(ctx, &roleBinding); err != nil {
+			logger.Error(err, "failed to remove finalizer from RoleBinding with invalid BindDefinition owner")
+			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleBindingTerminator, metrics.ResultError).Inc()
+			metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleBindingTerminator, metrics.ErrorTypeAPI).Inc()
+			return ctrl.Result{}, err
+		} else if removed {
+			logger.V(1).Info("removed finalizer from RoleBinding with invalid BindDefinition owner", "ownerError", ownerErr.Error())
+			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleBindingTerminator, metrics.ResultSuccess).Inc()
+			return ctrl.Result{}, nil
+		}
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleBindingTerminator, metrics.ResultSkipped).Inc()
 		return ctrl.Result{}, nil
 	}
@@ -457,14 +498,12 @@ func (r *RoleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request)
 	// If namespace is not terminating, we can safely remove the finalizer. it must mean the removal was triggered by another reason and it would get recreated if needed
 	namespaceIsTerminating := !namespace.GetDeletionTimestamp().IsZero() && namespace.Status.Phase == corev1.NamespaceTerminating
 	if !namespaceIsTerminating {
-		old := roleBinding.DeepCopy()
-		if controllerutil.RemoveFinalizer(&roleBinding, authorizationv1alpha1.RoleBindingFinalizer) {
-			if err := r.client.Patch(ctx, &roleBinding, client.MergeFromWithOptions(old, client.MergeFromWithOptimisticLock{})); err != nil {
-				logger.Error(err, "failed to remove finalizer from RoleBinding")
-				metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleBindingTerminator, metrics.ResultError).Inc()
-				metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleBindingTerminator, metrics.ErrorTypeAPI).Inc()
-				return ctrl.Result{}, err
-			}
+		if removed, err := r.removeRoleBindingFinalizer(ctx, &roleBinding); err != nil {
+			logger.Error(err, "failed to remove finalizer from RoleBinding")
+			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleBindingTerminator, metrics.ResultError).Inc()
+			metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleBindingTerminator, metrics.ErrorTypeAPI).Inc()
+			return ctrl.Result{}, err
+		} else if removed {
 			logger.V(1).Info("removed finalizer from RoleBinding")
 			// Evict the cache entry — no longer needed for a non-terminating namespace.
 			r.namespaceTerminationResourcesCache.Delete(roleBinding.Namespace)
@@ -517,25 +556,16 @@ func (r *RoleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	// No resources found - safe to remove finalizer from RoleBinding
-	bindDefinition, err := r.getOwningBindDefinition(ctx, roleBinding.OwnerReferences)
-	if err != nil {
-		logger.Error(err, "failed to get owning BindDefinition for RoleBinding", "roleBindingName", roleBinding.Name, "namespace", namespace.Name)
-		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleBindingTerminator, metrics.ResultError).Inc()
-		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleBindingTerminator, metrics.ErrorTypeAPI).Inc()
-		return ctrl.Result{}, err
-	}
 	logger = logger.WithValues("bindDefinitionName", bindDefinition.Name)
 
 	logger.V(1).Info("terminating namespace has no more resources - proceeding to remove RoleBinding finalizers")
-	old := roleBinding.DeepCopy()
-	if controllerutil.RemoveFinalizer(&roleBinding, authorizationv1alpha1.RoleBindingFinalizer) {
+	if removed, err := r.removeRoleBindingFinalizer(ctx, &roleBinding); err != nil {
+		logger.Error(err, "failed to remove finalizer from RoleBinding", "roleBindingName", roleBinding.Name, "roleBinding", roleBinding.Name, "namespace", namespace.Name)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleBindingTerminator, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleBindingTerminator, metrics.ErrorTypeAPI).Inc()
+		return ctrl.Result{}, err
+	} else if removed {
 		logger.V(2).Info("removing finalizer from RoleBinding in terminating namespace")
-		if err := r.client.Patch(ctx, &roleBinding, client.MergeFromWithOptions(old, client.MergeFromWithOptimisticLock{})); err != nil {
-			logger.Error(err, "failed to remove finalizer from RoleBinding", "roleBindingName", roleBinding.Name, "roleBinding", roleBinding.Name, "namespace", namespace.Name)
-			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleBindingTerminator, metrics.ResultError).Inc()
-			metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleBindingTerminator, metrics.ErrorTypeAPI).Inc()
-			return ctrl.Result{}, err
-		}
 		r.recorder.Eventf(bindDefinition, nil, corev1.EventTypeNormal, authorizationv1alpha1.EventReasonFinalizerRemoved, authorizationv1alpha1.EventActionFinalizerRemove, "Removed finalizer from RoleBinding %s in terminating namespace %s", roleBinding.Name, namespace.Name)
 		// Evict the cache entry — this RoleBinding's finalizer removal means
 		// termination cleanup is complete (all blocking resources already gone).
