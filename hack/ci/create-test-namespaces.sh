@@ -44,6 +44,12 @@ kubectl label namespace team-alpha --overwrite \
   t-caas.telekom.com/environment=development \
   t-caas.telekom.com/owner=tenant
 
+kubectl create namespace team-beta --dry-run=client -o yaml | kubectl apply -f -
+kubectl label namespace team-beta --overwrite \
+  t-caas.telekom.com/tenant=true \
+  t-caas.telekom.com/environment=staging \
+  t-caas.telekom.com/owner=tenant
+
 # --- Tenant Beta ---
 kubectl create namespace tenant-beta --dry-run=client -o yaml | kubectl apply -f -
 kubectl label namespace tenant-beta --overwrite \
@@ -67,6 +73,11 @@ kubectl create namespace t-caas-logging --dry-run=client -o yaml | kubectl apply
 kubectl label namespace t-caas-logging --overwrite \
   t-caas.telekom.com/owner=platform \
   kubernetes.io/metadata.name=t-caas-logging
+
+kubectl create namespace platform-system --dry-run=client -o yaml | kubectl apply -f -
+kubectl label namespace platform-system --overwrite \
+  t-caas.telekom.com/managed-by=platform-team \
+  t-caas.telekom.com/owner=platform
 
 # --- GitOps namespaces (matchExpressions, Exists operator) ---
 kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -

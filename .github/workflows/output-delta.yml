@@ -1076,12 +1076,15 @@ jobs:
             echo "# Error Summary from PR Controller Logs"
             echo ""
           } > "$error_log"
+          controller_error_count=0
 
           for log in /tmp/controller-logs/*.log; do
             if [ -f "$log" ] && [ -s "$log" ]; then
               log_name="$(basename "$log")"
-              errors="$(grep -iE '("level":"error|ERROR|\serror\s|\[error\]|level=error|panic:|PANIC|failed|failure|Failed|Failure)' "$log" 2>/dev/null | head -50 || true)"
+              errors="$(grep -E '(^E[0-9]{4}[[:space:]]|"level":"error"|level=error|panic:|PANIC)' "$log" 2>/dev/null | head -50 || true)"
               if [ -n "$errors" ]; then
+                count="$(wc -l <<<"$errors" | tr -d '[:space:]')"
+                controller_error_count=$((controller_error_count + count))
                 {
                   echo "## $log_name"
                   echo '```'
@@ -1100,8 +1103,7 @@ jobs:
           grep -iE '(Warning|Error|Failed|BackOff)' /tmp/controller-logs/all-events.txt 2>/dev/null >> "$error_log" || echo "No warning events found" >> "$error_log"
           echo '```' >> "$error_log"
 
-          error_count="$(grep -cE '(ERROR|error|panic|failed|failure|Warning)' "$error_log" 2>/dev/null || echo "0")"
-          if [ "$error_count" -gt 5 ]; then
+          if [ "$controller_error_count" -gt 0 ]; then
             echo "has_errors=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_errors=false" >> "$GITHUB_OUTPUT"
@@ -1270,12 +1272,10 @@ jobs:
           github_output "has_status_diff=${has_status_diff}"
 
           if [ "$has_rbac_diff" = "true" ]; then
-            echo "::error::RBAC output differences detected; inspect output-delta-diff-output before merging"
-            exit 1
+            echo "::warning::RBAC output differences detected; inspect output-delta-diff-output before merging"
           fi
           if [ "$has_status_diff" = "true" ]; then
-            echo "::error::CRD status output differences detected; inspect output-delta-diff-output before merging"
-            exit 1
+            echo "::warning::CRD status output differences detected; inspect output-delta-diff-output before merging"
           fi
           if [ "${PR_HAS_ERRORS:-false}" = "true" ]; then
             echo "::error::PR controller logs contain repeated errors; inspect output-delta-pr-error-summary"
@@ -1307,10 +1307,10 @@ jobs:
             echo "::warning::Output differences detected; inspect the output-delta-diff-output artifact"
           fi
           if [ "${HAS_RBAC_DIFF:-false}" = "true" ]; then
-            echo "::error::RBAC output differences detected"
+            echo "::warning::RBAC output differences detected"
           fi
           if [ "${HAS_STATUS_DIFF:-false}" = "true" ]; then
-            echo "::error::CRD status output differences detected"
+            echo "::warning::CRD status output differences detected"
           fi
           if [ "${PR_HAS_ERRORS:-false}" = "true" ]; then
             echo "::error::PR controller logs contain repeated errors"

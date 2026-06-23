@@ -33,6 +33,8 @@ metadata:
     t-caas.telekom.com/policy-tier: workload
 spec:
   appliesTo:
+    namespaces:
+      - team-alpha
     namespaceSelector:
       matchLabels:
         t-caas.telekom.com/tenant: "true"
@@ -111,6 +113,9 @@ spec:
     namespaces:
       # Explicit global scope is required for ClusterRoles and ClusterRoleBindings.
       - "*"
+      - platform-system
+      - team-alpha
+      - team-beta
     namespaceSelector:
       matchExpressions:
         - key: t-caas.telekom.com/managed-by
