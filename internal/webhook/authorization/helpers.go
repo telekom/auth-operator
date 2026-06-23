@@ -156,8 +156,6 @@ func CheckBypass(username string, groups []string, operation admissionv1.Operati
 			return BypassCheckResult{ShouldBypass: true, Reason: "schiff-tenant m2m-sa (tdgMigration)"}
 		case schiffSystemM2MSA:
 			return BypassCheckResult{ShouldBypass: true, Reason: "schiff-system m2m-sa (tdgMigration)"}
-		case capiOperatorManagerSAConst:
-			return BypassCheckResult{ShouldBypass: true, Reason: "capi-operator-manager (tdgMigration)"}
 		case tridentOperatorSystemSA:
 			if operation == admissionv1.Update && namespace == tridentSystemNamespace {
 				return BypassCheckResult{ShouldBypass: true, Reason: "trident-operator for trident-system (tdgMigration)"}

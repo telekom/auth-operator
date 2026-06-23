@@ -335,6 +335,32 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 			expectedAllow: false,
 		},
 		{
+			name:         "deny TDG migration create for capi operator manager",
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefPlatform},
+			tdgMigration: true,
+			request: crAdmission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
+					Name:      "platform-ns",
+					Operation: admissionv1.Create,
+					UserInfo: authenticationv1.UserInfo{
+						Username: "system:serviceaccount:capi-operator-system:capi-operator-manager",
+					},
+					Object: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "platform-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner": "platform",
+								},
+							},
+						}),
+					},
+				},
+			},
+			expectedAllow: false,
+		},
+		{
 			name:     "allow create for platform admin on platform namespace",
 			bindDefs: []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			request: crAdmission.Request{
@@ -523,6 +549,42 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 								Name: "invalid-ns",
 								Labels: map[string]string{
 									"t-caas.telekom.com/owner": "invalid-owner",
+								},
+							},
+						}),
+					},
+				},
+			},
+			expectedAllow: false,
+		},
+		{
+			name:         "deny TDG migration delete for capi operator manager",
+			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefPlatform},
+			tdgMigration: true,
+			request: crAdmission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
+					Name:      "platform-ns",
+					Operation: admissionv1.Delete,
+					UserInfo: authenticationv1.UserInfo{
+						Username: "system:serviceaccount:capi-operator-system:capi-operator-manager",
+					},
+					Object: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "platform-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner": "platform",
+								},
+							},
+						}),
+					},
+					OldObject: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "platform-ns",
+								Labels: map[string]string{
+									"t-caas.telekom.com/owner": "platform",
 								},
 							},
 						}),
