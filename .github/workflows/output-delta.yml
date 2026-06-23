@@ -55,24 +55,45 @@ jobs:
       - name: Load trusted tool versions
         run: |
           set -euo pipefail
+          yq_version=""
+          yq_linux_amd64_sha256=""
           while IFS='=' read -r key value; do
             case "${key}" in
-              KIND_VERSION|YQ_VERSION)
+              KIND_VERSION)
                 if [[ ! "${value}" =~ ^v[0-9A-Za-z._+-]+$ ]]; then
                   echo "Invalid ${key}: ${value}" >&2
                   exit 1
                 fi
                 echo "${key}=${value}" >> "$GITHUB_ENV"
                 ;;
+              YQ_VERSION)
+                if [[ ! "${value}" =~ ^v[0-9A-Za-z._+-]+$ ]]; then
+                  echo "Invalid ${key}: ${value}" >&2
+                  exit 1
+                fi
+                yq_version="${value}"
+                ;;
               YQ_LINUX_AMD64_SHA256)
                 if [[ ! "${value}" =~ ^[0-9a-f]{64}$ ]]; then
                   echo "Invalid ${key}: ${value}" >&2
                   exit 1
                 fi
-                echo "${key}=${value}" >> "$GITHUB_ENV"
+                yq_linux_amd64_sha256="${value}"
                 ;;
             esac
           done < <(grep -Ev '^(#|$)' main-branch/versions.env)
+
+          if [ -z "$yq_version" ] && [ -z "$yq_linux_amd64_sha256" ]; then
+            yq_version="v4.53.3"
+            yq_linux_amd64_sha256="fa52a4e758c63d38299163fbdd1edfb4c4963247918bf9c1c5d31d84789eded4"
+            echo "::notice::main versions.env does not define yq; using pinned bootstrap ${yq_version}"
+          elif [ -z "$yq_version" ] || [ -z "$yq_linux_amd64_sha256" ]; then
+            echo "main versions.env must define both YQ_VERSION and YQ_LINUX_AMD64_SHA256" >&2
+            exit 1
+          fi
+
+          echo "YQ_VERSION=${yq_version}" >> "$GITHUB_ENV"
+          echo "YQ_LINUX_AMD64_SHA256=${yq_linux_amd64_sha256}" >> "$GITHUB_ENV"
 
       - name: Setup Go Environment
         uses: ./main-branch/.github/actions/setup-go-env
@@ -445,24 +466,45 @@ jobs:
       - name: Load trusted tool versions
         run: |
           set -euo pipefail
+          yq_version=""
+          yq_linux_amd64_sha256=""
           while IFS='=' read -r key value; do
             case "${key}" in
-              KIND_VERSION|YQ_VERSION)
+              KIND_VERSION)
                 if [[ ! "${value}" =~ ^v[0-9A-Za-z._+-]+$ ]]; then
                   echo "Invalid ${key}: ${value}" >&2
                   exit 1
                 fi
                 echo "${key}=${value}" >> "$GITHUB_ENV"
                 ;;
+              YQ_VERSION)
+                if [[ ! "${value}" =~ ^v[0-9A-Za-z._+-]+$ ]]; then
+                  echo "Invalid ${key}: ${value}" >&2
+                  exit 1
+                fi
+                yq_version="${value}"
+                ;;
               YQ_LINUX_AMD64_SHA256)
                 if [[ ! "${value}" =~ ^[0-9a-f]{64}$ ]]; then
                   echo "Invalid ${key}: ${value}" >&2
                   exit 1
                 fi
-                echo "${key}=${value}" >> "$GITHUB_ENV"
+                yq_linux_amd64_sha256="${value}"
                 ;;
             esac
           done < <(grep -Ev '^(#|$)' main-branch/versions.env)
+
+          if [ -z "$yq_version" ] && [ -z "$yq_linux_amd64_sha256" ]; then
+            yq_version="v4.53.3"
+            yq_linux_amd64_sha256="fa52a4e758c63d38299163fbdd1edfb4c4963247918bf9c1c5d31d84789eded4"
+            echo "::notice::main versions.env does not define yq; using pinned bootstrap ${yq_version}"
+          elif [ -z "$yq_version" ] || [ -z "$yq_linux_amd64_sha256" ]; then
+            echo "main versions.env must define both YQ_VERSION and YQ_LINUX_AMD64_SHA256" >&2
+            exit 1
+          fi
+
+          echo "YQ_VERSION=${yq_version}" >> "$GITHUB_ENV"
+          echo "YQ_LINUX_AMD64_SHA256=${yq_linux_amd64_sha256}" >> "$GITHUB_ENV"
 
       - name: Setup Go Environment
         uses: ./main-branch/.github/actions/setup-go-env
