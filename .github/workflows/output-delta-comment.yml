@@ -5,81 +5,97 @@
 name: Output Delta Comment
 
 on:
-  workflow_run:
-    workflows: ['Output Delta']
-    types: [completed]
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - '.dockerignore'
+      - 'Dockerfile'
+      - 'Makefile'
+      - 'api/**'
+      - 'cmd/**'
+      - 'chart/auth-operator/templates/**'
+      - 'chart/auth-operator/values.schema.json'
+      - 'chart/auth-operator/values.yaml'
+      - 'config/**'
+      - 'hack/**'
+      - 'internal/**'
+      - 'pkg/**'
+      - '.github/actions/**'
+      - '.github/workflows/output-delta.yml'
+      - '.github/workflows/output-delta-comment.yml'
+      - 'go.mod'
+      - 'go.sum'
+      - 'main.go'
+      - 'versions.env'
 
 permissions:
+  actions: read
   contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: output-delta-comment-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   comment:
     name: Post Output Delta Comment
-    if: github.event.workflow_run.event == 'pull_request' || github.event.workflow_run.event == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    permissions:
-      actions: read
-      contents: read
-      issues: write
-      pull-requests: read
     steps:
-      - name: Resolve pull request
-        id: pr
+      # This pull_request_target workflow has write permissions so it can
+      # comment on fork PRs. Do not checkout or execute pull-request code here.
+      - name: Wait for matching Output Delta run
+        id: output-delta
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
-          HEAD_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
-          RUN_EVENT: ${{ github.event.workflow_run.event }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          if [ -n "${PR_NUMBER:-}" ]; then
-            echo "number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          deadline=$((SECONDS + 5400))
+          while true; do
+            run_json="$(gh api \
+              -H "Accept: application/vnd.github+json" \
+              "repos/${GH_REPO}/actions/workflows/output-delta.yml/runs?event=pull_request&head_sha=${HEAD_SHA}&per_page=1" \
+              --jq '.workflow_runs[0] // empty')"
 
-          pr_number="$(gh api \
-            -H "Accept: application/vnd.github+json" \
-            "repos/${GH_REPO}/commits/${HEAD_SHA}/pulls" \
-            --jq '.[0].number // ""')"
+            if [ -n "$run_json" ]; then
+              status="$(jq -r '.status // ""' <<< "$run_json")"
+              conclusion="$(jq -r '.conclusion // ""' <<< "$run_json")"
+              run_id="$(jq -r '.id // ""' <<< "$run_json")"
+              run_url="$(jq -r '.html_url // ""' <<< "$run_json")"
 
-          if [ -z "$pr_number" ] && [ -n "${HEAD_BRANCH:-}" ] && [ -n "${HEAD_REPOSITORY:-}" ]; then
-            head_owner="${HEAD_REPOSITORY%%/*}"
-            if [ -n "$head_owner" ] && [ "$head_owner" != "$HEAD_REPOSITORY" ]; then
-              pr_number="$(gh api \
-                --method GET \
-                -H "Accept: application/vnd.github+json" \
-                "repos/${GH_REPO}/pulls" \
-                -f state=all \
-                -f per_page=100 \
-                -f head="${head_owner}:${HEAD_BRANCH}" \
-                | jq -r --arg sha "$HEAD_SHA" 'map(select(.head.sha == $sha)) | .[0].number // ""')"
+              if [ "$status" = "completed" ]; then
+                {
+                  echo "run_id=${run_id}"
+                  echo "run_url=${run_url}"
+                  echo "conclusion=${conclusion}"
+                } >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+
+              echo "::notice::Output Delta run ${run_id} for ${HEAD_SHA} is ${status}; waiting."
+            else
+              echo "::notice::No Output Delta run found yet for ${HEAD_SHA}; waiting."
             fi
-          fi
 
-          if [ -z "$pr_number" ]; then
-            if [ "${RUN_EVENT:-}" = "pull_request" ]; then
-              echo "::error::No pull request found for pull_request workflow run ${HEAD_SHA}; cannot post output-delta comment."
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::Timed out waiting for Output Delta run for ${HEAD_SHA}."
               exit 1
             fi
 
-            echo "::notice::No pull request found for workflow run ${HEAD_SHA}; skipping output-delta comment."
-            echo "number=" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "number=${pr_number}" >> "$GITHUB_OUTPUT"
+            sleep 30
+          done
 
       - name: Check current PR head
         id: current
-        if: steps.pr.outputs.number != ''
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
           current_head="$(gh pr view "$PR_NUMBER" \
@@ -99,9 +115,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RUN_ID: ${{ github.event.workflow_run.id }}
-          RUN_URL: ${{ github.event.workflow_run.html_url }}
-          WORKFLOW_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_ID: ${{ steps.output-delta.outputs.run_id }}
+          RUN_URL: ${{ steps.output-delta.outputs.run_url }}
+          WORKFLOW_CONCLUSION: ${{ steps.output-delta.outputs.conclusion }}
         run: |
           set -euo pipefail
           mkdir -p /tmp/output-delta-comment
@@ -243,7 +259,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
           body_file=/tmp/output-delta-comment/body.md
