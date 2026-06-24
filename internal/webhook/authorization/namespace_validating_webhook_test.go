@@ -814,6 +814,43 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 			expectedAllow: true,
 		},
 		{
+			name:         "deny CAPI bypass label adoption even when TDGMigration enabled",
+			bindDefs:     []authorizationv1alpha1.BindDefinition{},
+			tdgMigration: true,
+			request: crAdmission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
+					Name:      "platform-ns",
+					Operation: admissionv1.Update,
+					UserInfo: authenticationv1.UserInfo{
+						Username: "system:serviceaccount:capi-operator-system:capi-operator-manager",
+					},
+					Object: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "platform-ns",
+								Labels: map[string]string{
+									"schiff.telekom.de/owner":  "platform",
+									"t-caas.telekom.com/owner": "platform",
+								},
+							},
+						}),
+					},
+					OldObject: runtime.RawExtension{
+						Raw: mustMarshalJSON(t, &corev1.Namespace{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "platform-ns",
+								Labels: map[string]string{
+									"schiff.telekom.de/owner": "platform",
+								},
+							},
+						}),
+					},
+				},
+			},
+			expectedAllow: false,
+		},
+		{
 			name:         "deny TDG migration bypass update with incoherent tenant labels",
 			bindDefs:     []authorizationv1alpha1.BindDefinition{bindDefPlatform},
 			tdgMigration: true,
@@ -2612,6 +2649,71 @@ func TestNamespaceValidatorUsesReaderForBindDefinitions(t *testing.T) {
 	resp := validator.Handle(context.Background(), req)
 	if resp.Allowed {
 		t.Fatal("expected stale cached BindDefinition not to authorize namespace create")
+	}
+}
+
+func TestNamespaceValidatorUpdateCannotSelfAuthorizeByAddingSelectorLabel(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(authorizationv1alpha1.AddToScheme(scheme))
+
+	bindDef := &authorizationv1alpha1.BindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "environment-binddefinition"},
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
+			TargetName: "environment-target",
+			Subjects: []rbacv1.Subject{{
+				APIGroup: rbacv1.GroupName,
+				Kind:     rbacv1.GroupKind,
+				Name:     "oidc:environment-admins",
+			}},
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{{
+				ClusterRoleRefs: []string{"environment-admin"},
+				NamespaceSelector: []metav1.LabelSelector{{
+					MatchLabels: map[string]string{"environment": "dev"},
+				}},
+			}},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(bindDef).
+		WithIndex(&authorizationv1alpha1.BindDefinition{}, indexer.BindDefinitionHasRoleBindingsField, indexer.BindDefinitionHasRoleBindingsFunc).
+		Build()
+	validator := &webhooks.NamespaceValidator{
+		Client:  fakeClient,
+		Decoder: crAdmission.NewDecoder(scheme),
+	}
+
+	newNamespace := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "tenant-ns",
+			Labels: map[string]string{"environment": "dev"},
+		},
+	}
+	oldNamespace := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "tenant-ns",
+			Labels: map[string]string{},
+		},
+	}
+	req := crAdmission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Kind:      metav1.GroupVersionKind{Group: "", Version: "v1", Kind: "Namespace"},
+			Name:      newNamespace.Name,
+			Operation: admissionv1.Update,
+			UserInfo: authenticationv1.UserInfo{
+				Username: "platform-user",
+				Groups:   []string{"oidc:environment-admins"},
+			},
+			Object:    runtime.RawExtension{Raw: mustMarshalJSON(t, newNamespace)},
+			OldObject: runtime.RawExtension{Raw: mustMarshalJSON(t, oldNamespace)},
+		},
+	}
+
+	resp := validator.Handle(context.Background(), req)
+	if resp.Allowed {
+		t.Fatal("expected namespace update to be denied when only the new labels match the selector")
 	}
 }
 

@@ -60,6 +60,7 @@ BYPASS CATEGORIES:
    - kustomize-controller: For Flux Kustomizations
    - schiff-tenant/schiff-system m2m-sa: For migration automation
    - trident-system trident-operator: For storage migration
+   - Scope: UPDATE operations only
    - Rationale: Temporary bypasses during platform migration
 
 MODIFYING BYPASS ACCOUNTS:
@@ -109,9 +110,10 @@ func ParseServiceAccount(username string) ServiceAccountInfo {
 
 // BypassCheckResult represents the result of a bypass check.
 type BypassCheckResult struct {
-	ShouldBypass          bool
-	SkipUpdateLabelChecks bool
-	Reason                string
+	ShouldBypass               bool
+	SkipUpdateLabelChecks      bool
+	AllowProtectedLabelChanges bool
+	Reason                     string
 }
 
 // CheckBypass checks if a request should bypass the namespace webhook (both mutator and validator).
@@ -120,18 +122,20 @@ func CheckBypass(username string, groups []string, operation admissionv1.Operati
 	// Allow kubernetes-admin without processing.
 	if username == kubernetesAdmin {
 		return BypassCheckResult{
-			ShouldBypass:          true,
-			SkipUpdateLabelChecks: true,
-			Reason:                "kubernetes-admin",
+			ShouldBypass:               true,
+			SkipUpdateLabelChecks:      true,
+			AllowProtectedLabelChanges: true,
+			Reason:                     "kubernetes-admin",
 		}
 	}
 
 	// Allow any principal in system:masters without processing.
 	if hasGroup(groups, systemMastersGroup) {
 		return BypassCheckResult{
-			ShouldBypass:          true,
-			SkipUpdateLabelChecks: true,
-			Reason:                "system:masters",
+			ShouldBypass:               true,
+			SkipUpdateLabelChecks:      true,
+			AllowProtectedLabelChanges: true,
+			Reason:                     "system:masters",
 		}
 	}
 
@@ -146,19 +150,19 @@ func CheckBypass(username string, groups []string, operation admissionv1.Operati
 	}
 
 	// TDG migration specific bypasses
-	if tdgMigration {
+	if tdgMigration && operation == admissionv1.Update {
 		switch username {
 		case helmControllerSA:
-			return BypassCheckResult{ShouldBypass: true, Reason: "helm-controller (tdgMigration)"}
+			return BypassCheckResult{ShouldBypass: true, AllowProtectedLabelChanges: true, Reason: "helm-controller (tdgMigration)"}
 		case kustomizeControllerSA:
-			return BypassCheckResult{ShouldBypass: true, Reason: "kustomize-controller (tdgMigration)"}
+			return BypassCheckResult{ShouldBypass: true, AllowProtectedLabelChanges: true, Reason: "kustomize-controller (tdgMigration)"}
 		case schiffTenantM2MSA:
-			return BypassCheckResult{ShouldBypass: true, Reason: "schiff-tenant m2m-sa (tdgMigration)"}
+			return BypassCheckResult{ShouldBypass: true, AllowProtectedLabelChanges: true, Reason: "schiff-tenant m2m-sa (tdgMigration)"}
 		case schiffSystemM2MSA:
-			return BypassCheckResult{ShouldBypass: true, Reason: "schiff-system m2m-sa (tdgMigration)"}
+			return BypassCheckResult{ShouldBypass: true, AllowProtectedLabelChanges: true, Reason: "schiff-system m2m-sa (tdgMigration)"}
 		case tridentOperatorSystemSA:
-			if operation == admissionv1.Update && namespace == tridentSystemNamespace {
-				return BypassCheckResult{ShouldBypass: true, Reason: "trident-operator for trident-system (tdgMigration)"}
+			if namespace == tridentSystemNamespace {
+				return BypassCheckResult{ShouldBypass: true, AllowProtectedLabelChanges: true, Reason: "trident-operator for trident-system (tdgMigration)"}
 			}
 		}
 	}

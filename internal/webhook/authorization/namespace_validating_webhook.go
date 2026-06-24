@@ -102,12 +102,18 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 			"namespace", req.Name,
 			"operation", req.Operation,
 			"bypassReason", bypassResult.Reason,
-			"skipUpdateLabelChecks", bypassResult.SkipUpdateLabelChecks)
+			"skipUpdateLabelChecks", bypassResult.SkipUpdateLabelChecks,
+			"allowProtectedLabelChanges", bypassResult.AllowProtectedLabelChanges)
 		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
 		return admission.Allowed("")
 	}
 
-	return v.authorizeViaBindDefinitions(ctx, logger, req, &ns)
+	authzNamespace := &ns
+	if req.Operation == admissionv1.Update {
+		authzNamespace = &oldNs
+	}
+
+	return v.authorizeViaBindDefinitions(ctx, logger, req, authzNamespace)
 }
 
 // decodeNamespaces decodes the namespace objects from the admission request based on
@@ -185,11 +191,12 @@ func (v *NamespaceValidator) validateLabelImmutability(logger logr.Logger, req a
 		oldValue, oldExists := oldNs.Labels[key]
 		newValue, newExists := ns.Labels[key]
 
-		// Allow initial label adoption for bypass users: label didn't exist
-		// before, now being added.
+		// Allow initial label adoption only for explicit protected-label
+		// migration bypasses; other operational bypasses still keep label
+		// adoption denied.
 		if !oldExists && newExists {
-			if !bypassResult.ShouldBypass {
-				logger.V(2).Info("label adoption denied for non-bypass user",
+			if !bypassResult.AllowProtectedLabelChanges {
+				logger.V(2).Info("label adoption denied for principal without label-adoption bypass",
 					"namespace", req.Name, "label", key, "newValue", newValue)
 				metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultDenied).Inc()
 				resp := admission.Denied(fmt.Sprintf(DenialLabelModificationFmt, key))
@@ -209,9 +216,10 @@ func (v *NamespaceValidator) validateLabelImmutability(logger logr.Logger, req a
 			continue
 		}
 
-		// Allow removal of the legacy schiff.telekom.de/owner label by bypass users
-		// once the new t-caas.telekom.com/owner label is established.
-		if bypassResult.ShouldBypass &&
+		// Allow removal of the legacy schiff.telekom.de/owner label by
+		// protected-label migration bypasses once the new
+		// t-caas.telekom.com/owner label is established.
+		if bypassResult.AllowProtectedLabelChanges &&
 			key == legacyOwnerLabel && oldExists && !newExists {
 			_, newOwnerExists := ns.Labels[authorizationv1alpha1.LabelKeyOwner]
 			if newOwnerExists {
@@ -237,7 +245,7 @@ func (v *NamespaceValidator) validateLabelImmutability(logger logr.Logger, req a
 // detectOwnerReclassification returns true if a tenant↔thirdparty reclassification is
 // happening during TDG migration by a bypass user. Platform is never reclassifiable.
 func (v *NamespaceValidator) detectOwnerReclassification(logger logr.Logger, req admission.Request, ns, oldNs *corev1.Namespace, bypassResult BypassCheckResult) bool {
-	if !v.TDGMigration || !bypassResult.ShouldBypass {
+	if !v.TDGMigration || !bypassResult.AllowProtectedLabelChanges {
 		return false
 	}
 	oldOwner := oldNs.Labels[authorizationv1alpha1.LabelKeyOwner]

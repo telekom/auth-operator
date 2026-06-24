@@ -157,6 +157,14 @@ func TestCheckBypass(t *testing.T) {
 			wantReason:   "helm-controller (tdgMigration)",
 		},
 		{
+			name:         "helm-controller create with tdgMigration does not bypass",
+			username:     "system:serviceaccount:flux-system:helm-controller",
+			operation:    admissionv1.Create,
+			namespace:    "any-ns",
+			tdgMigration: true,
+			wantBypass:   false,
+		},
+		{
 			name:         "helm-controller without tdgMigration",
 			username:     "system:serviceaccount:flux-system:helm-controller",
 			operation:    admissionv1.Update,
@@ -174,6 +182,14 @@ func TestCheckBypass(t *testing.T) {
 			wantReason:   "kustomize-controller (tdgMigration)",
 		},
 		{
+			name:         "kustomize-controller delete with tdgMigration does not bypass",
+			username:     "system:serviceaccount:flux-system:kustomize-controller",
+			operation:    admissionv1.Delete,
+			namespace:    "any-ns",
+			tdgMigration: true,
+			wantBypass:   false,
+		},
+		{
 			name:         "schiff-tenant m2m-sa with tdgMigration",
 			username:     "system:serviceaccount:schiff-tenant:m2m-sa",
 			operation:    admissionv1.Update,
@@ -183,6 +199,14 @@ func TestCheckBypass(t *testing.T) {
 			wantReason:   "schiff-tenant m2m-sa (tdgMigration)",
 		},
 		{
+			name:         "schiff-tenant m2m-sa create with tdgMigration does not bypass",
+			username:     "system:serviceaccount:schiff-tenant:m2m-sa",
+			operation:    admissionv1.Create,
+			namespace:    "any-ns",
+			tdgMigration: true,
+			wantBypass:   false,
+		},
+		{
 			name:         "schiff-system m2m-sa with tdgMigration",
 			username:     "system:serviceaccount:schiff-system:m2m-sa",
 			operation:    admissionv1.Update,
@@ -190,6 +214,14 @@ func TestCheckBypass(t *testing.T) {
 			tdgMigration: true,
 			wantBypass:   true,
 			wantReason:   "schiff-system m2m-sa (tdgMigration)",
+		},
+		{
+			name:         "schiff-system m2m-sa delete with tdgMigration does not bypass",
+			username:     "system:serviceaccount:schiff-system:m2m-sa",
+			operation:    admissionv1.Delete,
+			namespace:    "any-ns",
+			tdgMigration: true,
+			wantBypass:   false,
 		},
 		{
 			name:         "capi-operator-manager create with tdgMigration does not bypass",
@@ -330,6 +362,14 @@ func TestCheckBypassValidatorCases(t *testing.T) {
 			wantReason:   "helm-controller (tdgMigration)",
 		},
 		{
+			name:         "helm-controller create with tdgMigration does not bypass",
+			username:     "system:serviceaccount:flux-system:helm-controller",
+			operation:    admissionv1.Create,
+			namespace:    "any-ns",
+			tdgMigration: true,
+			wantBypass:   false,
+		},
+		{
 			name:         "kustomize-controller with tdgMigration",
 			username:     "system:serviceaccount:flux-system:kustomize-controller",
 			operation:    admissionv1.Update,
@@ -337,6 +377,14 @@ func TestCheckBypassValidatorCases(t *testing.T) {
 			tdgMigration: true,
 			wantBypass:   true,
 			wantReason:   "kustomize-controller (tdgMigration)",
+		},
+		{
+			name:         "kustomize-controller delete with tdgMigration does not bypass",
+			username:     "system:serviceaccount:flux-system:kustomize-controller",
+			operation:    admissionv1.Delete,
+			namespace:    "any-ns",
+			tdgMigration: true,
+			wantBypass:   false,
 		},
 		{
 			name:         "schiff-tenant m2m-sa with tdgMigration",
@@ -348,6 +396,14 @@ func TestCheckBypassValidatorCases(t *testing.T) {
 			wantReason:   "schiff-tenant m2m-sa (tdgMigration)",
 		},
 		{
+			name:         "schiff-tenant m2m-sa create with tdgMigration does not bypass",
+			username:     "system:serviceaccount:schiff-tenant:m2m-sa",
+			operation:    admissionv1.Create,
+			namespace:    "any-ns",
+			tdgMigration: true,
+			wantBypass:   false,
+		},
+		{
 			name:         "schiff-system m2m-sa with tdgMigration",
 			username:     "system:serviceaccount:schiff-system:m2m-sa",
 			operation:    admissionv1.Update,
@@ -355,6 +411,14 @@ func TestCheckBypassValidatorCases(t *testing.T) {
 			tdgMigration: true,
 			wantBypass:   true,
 			wantReason:   "schiff-system m2m-sa (tdgMigration)",
+		},
+		{
+			name:         "schiff-system m2m-sa delete with tdgMigration does not bypass",
+			username:     "system:serviceaccount:schiff-system:m2m-sa",
+			operation:    admissionv1.Delete,
+			namespace:    "any-ns",
+			tdgMigration: true,
+			wantBypass:   false,
 		},
 		{
 			name:         "capi-operator-manager create with tdgMigration does not bypass",
