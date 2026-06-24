@@ -41,6 +41,9 @@ spec:
         - --tdg-migration={{ .Values.webhookServer.tdgMigration }}
         - --authorize-rate-limit={{ .Values.webhookServer.authorizeRateLimit }}
         - --authorize-rate-burst={{ .Values.webhookServer.authorizeRateBurst }}
+        {{- if .Values.webhookServer.authorizeAuth.tokenSecretName }}
+        - --authorize-auth-token-file=/var/run/auth-operator/authorize-auth/token
+        {{- end }}
         {{- if gt (int .Values.webhookServer.replicas) 1 }}
         - --leader-elect=true
         {{- end }}
@@ -98,6 +101,11 @@ spec:
         - mountPath: /tmp/k8s-webhook-server/serving-certs
           name: cert
           readOnly: true
+        {{- if .Values.webhookServer.authorizeAuth.tokenSecretName }}
+        - mountPath: /var/run/auth-operator/authorize-auth
+          name: authorize-auth-token
+          readOnly: true
+        {{- end }}
         {{- if .Values.metrics.auth.enabled }}
         - mountPath: /tmp/k8s-metrics-server/serving-certs
           name: metrics-certs
@@ -139,6 +147,15 @@ spec:
         secret:
           defaultMode: 420
           secretName: {{ include "auth-operator.fullname" . }}-webhook-certs
+      {{- if .Values.webhookServer.authorizeAuth.tokenSecretName }}
+      - name: authorize-auth-token
+        secret:
+          defaultMode: 420
+          secretName: {{ .Values.webhookServer.authorizeAuth.tokenSecretName | quote }}
+          items:
+          - key: {{ .Values.webhookServer.authorizeAuth.tokenSecretKey | quote }}
+            path: token
+      {{- end }}
       {{- if .Values.metrics.auth.enabled }}
       - name: metrics-certs
         emptyDir: {}

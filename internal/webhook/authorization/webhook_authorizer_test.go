@@ -1216,6 +1216,87 @@ func TestServeHTTP_RateLimiting(t *testing.T) {
 	}
 }
 
+func TestServeHTTP_BearerTokenRequiredBeforeRateLimit(t *testing.T) {
+	scheme := newScheme(t)
+	cl := newIndexedClient(scheme)
+	handler := &Authorizer{
+		Client:      cl,
+		Log:         logr.Discard(),
+		BearerToken: "shared-token",
+		Limiter:     rate.NewLimiter(rate.Limit(0), 1),
+	}
+
+	sar := authzv1.SubjectAccessReview{
+		Spec: authzv1.SubjectAccessReviewSpec{
+			User:   "test-user",
+			Groups: []string{"test-group"},
+			ResourceAttributes: &authzv1.ResourceAttributes{
+				Namespace: "default",
+				Verb:      "get",
+				Resource:  "pods",
+			},
+		},
+	}
+	body := marshalSAR(t, sar)
+	assertUnauthorizedDeny := func(name string, rec *httptest.ResponseRecorder) {
+		t.Helper()
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected %s to return %d with a denied SubjectAccessReview, got %d", name, http.StatusOK, rec.Code)
+		}
+		var response authzv1.SubjectAccessReview
+		if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+			t.Fatalf("decode %s response: %v", name, err)
+		}
+		if response.Status.Allowed {
+			t.Fatalf("%s response should have Allowed=false", name)
+		}
+		if !response.Status.Denied {
+			t.Fatalf("%s response should have Denied=true", name)
+		}
+		if response.Status.Reason != reasonUnauthorized {
+			t.Fatalf("expected %s reason %q, got %q", name, reasonUnauthorized, response.Status.Reason)
+		}
+	}
+
+	unauthorizedReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	unauthorizedRec := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorizedRec, unauthorizedReq)
+	assertUnauthorizedDeny("missing bearer token", unauthorizedRec)
+
+	wrongTokenReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	wrongTokenReq.Header.Set("Authorization", "Bearer wrong-token")
+	wrongTokenRec := httptest.NewRecorder()
+	handler.ServeHTTP(wrongTokenRec, wrongTokenReq)
+	assertUnauthorizedDeny("wrong bearer token", wrongTokenRec)
+
+	authorizedReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	authorizedReq.Header.Set("Authorization", "Bearer shared-token")
+	authorizedRec := httptest.NewRecorder()
+	handler.ServeHTTP(authorizedRec, authorizedReq)
+	if authorizedRec.Code != http.StatusOK {
+		t.Fatalf("expected valid bearer token to return %d, got %d", http.StatusOK, authorizedRec.Code)
+	}
+	var firstResponse authzv1.SubjectAccessReview
+	if err := json.NewDecoder(authorizedRec.Body).Decode(&firstResponse); err != nil {
+		t.Fatalf("decode authorized response: %v", err)
+	}
+	if firstResponse.Status.Reason == "rate limit exceeded" {
+		t.Fatal("unauthorized requests consumed the subject rate-limit bucket")
+	}
+
+	rateLimitedReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	rateLimitedReq.Header.Set("Authorization", "Bearer shared-token")
+	rateLimitedRec := httptest.NewRecorder()
+	handler.ServeHTTP(rateLimitedRec, rateLimitedReq)
+	var secondResponse authzv1.SubjectAccessReview
+	if err := json.NewDecoder(rateLimitedRec.Body).Decode(&secondResponse); err != nil {
+		t.Fatalf("decode rate-limited response: %v", err)
+	}
+	if secondResponse.Status.Reason != "rate limit exceeded" {
+		t.Fatalf("expected second authenticated request to be rate-limited, got reason %q", secondResponse.Status.Reason)
+	}
+}
+
 func TestServeHTTP_RateLimitingIsPerSubject(t *testing.T) {
 	scheme := newScheme(t)
 	cl := newIndexedClient(scheme)

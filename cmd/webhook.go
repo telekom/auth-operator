@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -44,6 +45,7 @@ var (
 	enableTDGMigration             bool
 	authorizeRateLimit             float64
 	authorizeRateBurst             int
+	authorizeAuthTokenFile         string
 	webhookLeaderElect             bool
 )
 
@@ -255,9 +257,14 @@ func configureWebhooks(mgr manager.Manager, tp *tracing.Provider) error {
 		Log:    ctrl.Log.WithName("Authorizer"),
 		Tracer: tp.TracerIfEnabled(),
 	}
-	if err := validateRateLimitFlags(authorizeRateLimit, authorizeRateBurst); err != nil {
+	if err := validateAuthorizeConfig(authorizeRateLimit, authorizeRateBurst, authorizeAuthTokenFile); err != nil {
 		return err
 	}
+	token, err := loadAuthorizeAuthToken(authorizeAuthTokenFile)
+	if err != nil {
+		return err
+	}
+	authorizer.BearerToken = token
 	if authorizeRateLimit > 0 {
 		authorizer.Limiter = rate.NewLimiter(rate.Limit(authorizeRateLimit), authorizeRateBurst)
 		log.Info("rate limiting enabled for /authorize",
@@ -352,10 +359,13 @@ func init() {
 
 	webhookCmd.Flags().BoolVar(&enableTDGMigration, "tdg-migration", false,
 		"If set, the legacy labels and behavior for TDG migration will be enabled.")
-	webhookCmd.Flags().Float64Var(&authorizeRateLimit, "authorize-rate-limit", 100,
+	webhookCmd.Flags().Float64Var(&authorizeRateLimit, "authorize-rate-limit", 0,
 		"Maximum sustained requests per second for the /authorize endpoint. Set to 0 to disable rate limiting.")
 	webhookCmd.Flags().IntVar(&authorizeRateBurst, "authorize-rate-burst", 200,
 		"Maximum burst size for the /authorize endpoint rate limiter.")
+	webhookCmd.Flags().StringVar(&authorizeAuthTokenFile, "authorize-auth-token-file", "",
+		"Path to a file containing the bearer token required for /authorize requests. "+
+			"Required when /authorize rate limiting is enabled.")
 
 	webhookCmd.Flags().BoolVar(&webhookLeaderElect, "leader-elect", false,
 		"Enable leader election for the webhook manager. Required when running "+
@@ -371,4 +381,30 @@ func validateRateLimitFlags(limit float64, burst int) error {
 		return fmt.Errorf("--authorize-rate-burst must be positive when rate limiting is enabled, got %d", burst)
 	}
 	return nil
+}
+
+// validateAuthorizeConfig validates /authorize rate-limit and caller-auth settings.
+func validateAuthorizeConfig(limit float64, burst int, tokenFile string) error {
+	if err := validateRateLimitFlags(limit, burst); err != nil {
+		return err
+	}
+	if limit > 0 && tokenFile == "" {
+		return fmt.Errorf("--authorize-rate-limit requires --authorize-auth-token-file to prevent untrusted callers from consuming another subject's limit")
+	}
+	return nil
+}
+
+func loadAuthorizeAuthToken(path string) (string, error) {
+	if path == "" {
+		return "", nil
+	}
+	tokenBytes, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read --authorize-auth-token-file: %w", err)
+	}
+	token := strings.TrimSpace(string(tokenBytes))
+	if token == "" {
+		return "", fmt.Errorf("--authorize-auth-token-file must not be empty")
+	}
+	return token, nil
 }

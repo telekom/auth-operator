@@ -9,6 +9,8 @@ package cmd
 
 import (
 	"flag"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -200,6 +202,68 @@ func TestValidateRateLimitFlags(t *testing.T) {
 	}
 }
 
+func TestValidateAuthorizeConfig(t *testing.T) {
+	tests := []struct {
+		name        string
+		limit       float64
+		burst       int
+		tokenFile   string
+		expectError bool
+	}{
+		{"disabled without token", 0, 0, "", false},
+		{"token without rate limit", 0, 0, "/var/run/token", false},
+		{"rate limit with token", 100, 200, "/var/run/token", false},
+		{"rate limit without token", 100, 200, "", true},
+		{"invalid burst with token", 100, 0, "/var/run/token", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateAuthorizeConfig(tt.limit, tt.burst, tt.tokenFile)
+			if (err != nil) != tt.expectError {
+				t.Errorf("validateAuthorizeConfig(%v, %d, %q): expected error=%v, got %v",
+					tt.limit, tt.burst, tt.tokenFile, tt.expectError, err)
+			}
+		})
+	}
+}
+
+func TestLoadAuthorizeAuthToken(t *testing.T) {
+	dir := t.TempDir()
+	tokenFile := filepath.Join(dir, "token")
+	if err := os.WriteFile(tokenFile, []byte("shared-token\n"), 0o600); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
+	emptyFile := filepath.Join(dir, "empty")
+	if err := os.WriteFile(emptyFile, []byte("  \n"), 0o600); err != nil {
+		t.Fatalf("write empty token file: %v", err)
+	}
+
+	tests := []struct {
+		name        string
+		path        string
+		want        string
+		expectError bool
+	}{
+		{"disabled", "", "", false},
+		{"trims token file", tokenFile, "shared-token", false},
+		{"empty token file", emptyFile, "", true},
+		{"missing token file", filepath.Join(dir, "missing"), "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := loadAuthorizeAuthToken(tt.path)
+			if (err != nil) != tt.expectError {
+				t.Fatalf("loadAuthorizeAuthToken(%q): expected error=%v, got %v", tt.path, tt.expectError, err)
+			}
+			if got != tt.want {
+				t.Errorf("loadAuthorizeAuthToken(%q) = %q, want %q", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRootCommandStructure(t *testing.T) {
 	// Verify rootCmd has expected subcommands
 	subcommands := rootCmd.Commands()
@@ -276,6 +340,9 @@ func TestWebhookCmdFlags(t *testing.T) {
 		"cert-rotation-mutating-webhook",
 		"cert-rotation-validating-webhook",
 		"tdg-migration",
+		"authorize-rate-limit",
+		"authorize-rate-burst",
+		"authorize-auth-token-file",
 	}
 
 	for _, name := range expectedFlags {
@@ -334,6 +401,9 @@ func TestFlagDefaults(t *testing.T) {
 		{"webhook", "enable-http2", "false"},
 		{"webhook", "disable-cert-rotation", "false"},
 		{"webhook", "tdg-migration", "false"},
+		{"webhook", "authorize-rate-limit", "0"},
+		{"webhook", "authorize-rate-burst", "200"},
+		{"webhook", "authorize-auth-token-file", ""},
 	}
 
 	for _, tt := range tests {
