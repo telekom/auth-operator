@@ -199,6 +199,7 @@ jobs:
           baseline_result=unknown
           candidate_result=unknown
           latest_tag=
+          diff_comment_status=none
 
           valid_bool() {
             case "$1" in
@@ -285,6 +286,7 @@ jobs:
             write_placeholder_report_comment() {
               local message="$1"
               local detail="${2:-}"
+              diff_comment_status=placeholder
 
               {
                 echo "<!-- output-delta:part1 -->"
@@ -556,6 +558,9 @@ jobs:
                   raise SystemExit(f"Generated output-delta comment part {index} is too large")
               (diff_dir / f"part-{index:0{digits}d}.md").write_text(body, encoding="utf-8")
           PY
+            if [ -n "$(find "$diff_dir" -type f -name 'part-*.md' -print -quit)" ]; then
+              diff_comment_status=full
+            fi
           }
 
           write_comment_body() {
@@ -619,7 +624,7 @@ jobs:
               else
                 case "$has_diff" in
                   true)
-                    if [ "$diff_comment_count" -gt 0 ]; then
+                    if [ "$diff_comment_count" -gt 0 ] && [ "$diff_comment_status" = "full" ]; then
                       echo "Output differences were detected. The full diff is posted below in ${diff_comment_count} bot comment(s)."
                     else
                       echo "Output differences were detected, but the inline diff could not be generated. Inspect the \`output-delta-diff-output\` artifact before merging."
