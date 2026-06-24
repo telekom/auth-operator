@@ -329,6 +329,7 @@ jobs:
               elif [ "$IS_APPLICABLE" != "true" ]; then
                 echo "No output differences were detected for this PR."
                 echo "No output-delta input files changed."
+                echo "There is no diff to inspect for this run."
               else
                 case "$has_diff" in
                   true)
