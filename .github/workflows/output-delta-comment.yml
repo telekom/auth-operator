@@ -276,6 +276,64 @@ jobs:
             done < "$status_file"
           }
 
+          write_diff_comment_bodies() {
+            local diff_file=/tmp/output-delta-comment/diff-output/full-diff.txt
+            local diff_dir=/tmp/output-delta-comment/diff-comments
+            rm -rf "$diff_dir"
+            mkdir -p "$diff_dir"
+
+            if [ "$has_diff" != "true" ]; then
+              return 0
+            fi
+            if [ ! -s "$diff_file" ]; then
+              echo "::warning::Output-delta diff artifact did not contain full-diff.txt; no inline diff comments generated."
+              return 0
+            fi
+
+            python3 - "$diff_file" "$diff_dir" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          diff_file = Path(sys.argv[1])
+          diff_dir = Path(sys.argv[2])
+          text = diff_file.read_text(encoding="utf-8", errors="replace")
+
+          # Keep enough headroom for markers, headings, code fences, and GitHub's
+          # issue-comment size limit.
+          max_chunk_bytes = 55000
+          encoded = text.encode("utf-8")
+          chunks = [
+              encoded[index:index + max_chunk_bytes].decode("utf-8", errors="replace")
+              for index in range(0, len(encoded), max_chunk_bytes)
+          ] or [""]
+
+          def fence_for(chunk: str) -> str:
+              longest = max((len(match.group(0)) for match in re.finditer(r"`+", chunk)), default=0)
+              return "`" * max(4, longest + 1)
+
+          total = len(chunks)
+          digits = max(4, len(str(total)))
+          for index, chunk in enumerate(chunks, start=1):
+              fence = fence_for(chunk)
+              heading = "## :bar_chart: Output Delta Report"
+              if index > 1:
+                  heading = "## :bar_chart: Output Delta Report (cont.)"
+              body = "\n".join([
+                  f"<!-- output-delta:part{index} -->",
+                  heading,
+                  "",
+                  f"Full output diff from `output-delta-diff-output` ({index}/{total}).",
+                  "",
+                  fence + "diff",
+                  chunk.rstrip("\n"),
+                  fence,
+                  "",
+              ])
+              (diff_dir / f"part-{index:0{digits}d}.md").write_text(body, encoding="utf-8")
+          PY
+          }
+
           write_comment_body() {
             local workflow_conclusion="${WORKFLOW_CONCLUSION:-unknown}"
             local workflow_run="${RUN_URL:-}"
@@ -286,6 +344,10 @@ jobs:
             local status_diff_display="${has_status_diff}"
             local pr_errors_display="${pr_has_errors}"
             local tag_diff_display="${has_tag_diff}"
+            local diff_comment_count=0
+            if [ -d /tmp/output-delta-comment/diff-comments ]; then
+              diff_comment_count="$(find /tmp/output-delta-comment/diff-comments -type f -name 'part-*.md' | wc -l | tr -d '[:space:]')"
+            fi
             if [ "$IS_CURRENT" = "false" ]; then
               workflow_conclusion=stale_head
               baseline_display=skipped
@@ -333,7 +395,11 @@ jobs:
               else
                 case "$has_diff" in
                   true)
-                    echo "Output differences were detected. Inspect the \`output-delta-diff-output\` artifact before merging."
+                    if [ "$diff_comment_count" -gt 0 ]; then
+                      echo "Output differences were detected. The full diff is posted below in ${diff_comment_count} bot comment(s)."
+                    else
+                      echo "Output differences were detected, but the inline diff could not be generated. Inspect the \`output-delta-diff-output\` artifact before merging."
+                    fi
                     ;;
                   false)
                     echo "No output differences were detected between trusted main baseline and this PR. There is no diff to inspect for this run."
@@ -383,6 +449,16 @@ jobs:
             echo "::warning::Output-delta comment artifact did not contain status.env; posting unknown-status comment."
           fi
 
+          if [ "$IS_CURRENT" = "true" ] && [ "$IS_APPLICABLE" = "true" ] && [ "$RUN_FOUND" = "true" ] && [ -n "$RUN_ID" ] && [ "$has_diff" = "true" ]; then
+            if ! gh run download "$RUN_ID" \
+              --repo "$GH_REPO" \
+              --name output-delta-diff-output \
+              --dir /tmp/output-delta-comment/diff-output; then
+              echo "::warning::Output-delta diff artifact is missing; no inline diff comments generated."
+            fi
+          fi
+
+          write_diff_comment_bodies
           write_comment_body
 
       - name: Create or update PR comment
@@ -417,3 +493,33 @@ jobs:
               --input /tmp/output-delta-comment/comment.json >/dev/null
             echo "Created output-delta comment on PR #${PR_NUMBER}."
           fi
+
+          shopt -s nullglob
+          diff_dir=/tmp/output-delta-comment/diff-comments
+          mapfile -t diff_comment_ids < <(gh api --paginate "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
+            --jq '.[] | select(.user.login == "github-actions[bot]") | select(.body | contains("<!-- output-delta:part")) | .id')
+          diff_comment_files=("$diff_dir"/part-*.md)
+
+          for index in "${!diff_comment_files[@]}"; do
+            jq -n --rawfile body "${diff_comment_files[$index]}" '{body: $body}' > /tmp/output-delta-comment/diff-comment.json
+            if [ "$index" -lt "${#diff_comment_ids[@]}" ]; then
+              gh api \
+                --method PATCH \
+                "repos/${GH_REPO}/issues/comments/${diff_comment_ids[$index]}" \
+                --input /tmp/output-delta-comment/diff-comment.json >/dev/null
+              echo "Updated output-delta full-diff comment $((index + 1)) on PR #${PR_NUMBER}."
+            else
+              gh api \
+                --method POST \
+                "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
+                --input /tmp/output-delta-comment/diff-comment.json >/dev/null
+              echo "Created output-delta full-diff comment $((index + 1)) on PR #${PR_NUMBER}."
+            fi
+          done
+
+          for ((index=${#diff_comment_files[@]}; index<${#diff_comment_ids[@]}; index++)); do
+            gh api \
+              --method DELETE \
+              "repos/${GH_REPO}/issues/comments/${diff_comment_ids[$index]}" >/dev/null
+            echo "Deleted stale output-delta full-diff comment $((index + 1)) on PR #${PR_NUMBER}."
+          done
