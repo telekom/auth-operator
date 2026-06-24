@@ -31,11 +31,11 @@ func envOrDefault(key, fallback string) string {
 }
 
 func prometheusOperatorVersion() string {
-	return envOrDefault("E2E_UTILS_PROMETHEUS_OPERATOR_VERSION", "v0.72.0")
+	return envOrDefault("E2E_UTILS_PROMETHEUS_OPERATOR_VERSION", "v0.92.0")
 }
 
 func certmanagerVersion() string {
-	return envOrDefault("E2E_UTILS_CERT_MANAGER_VERSION", "v1.14.4")
+	return envOrDefault("E2E_UTILS_CERT_MANAGER_VERSION", "v1.20.2")
 }
 
 // GetE2EOutputDir returns the base output directory for e2e artifacts.
