@@ -532,6 +532,16 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		"bindDefinition", bindDefinition.Name,
 		"missingRoleRefCount", missingRoleRefCount)
 
+	desiredCRBs, desiredRBs := bindDefinitionDesiredBindingKeys(bindDefinition, perRoleBindingNamespaces)
+	if err := r.pruneStaleBindingResources(ctx, bindDefinition, desiredCRBs, desiredRBs, r.client); err != nil {
+		logger.Error(err, "Failed to prune stale BindDefinition resources",
+			"bindDefinition", bindDefinition.Name)
+		r.markStalled(ctx, bindDefinition, err)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerBindDefinition, metrics.ErrorTypeAPI).Inc()
+		return ctrl.Result{}, err
+	}
+
 	// Mark Ready and apply final status via SSA (kstatus)
 	logger.V(2).Info("Marking BindDefinition as Ready and applying status",
 		"bindDefinition", bindDefinition.Name,
@@ -930,7 +940,7 @@ func (r *BindDefinitionReconciler) checkBindingOwnership(
 		return fmt.Errorf("unknown target binding kind %q", targetKind)
 	}
 
-	if err := r.client.Get(ctx, key, existing); err != nil {
+	if err := r.ownershipReader().Get(ctx, key, existing); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil
 		}
@@ -962,7 +972,7 @@ func (r *BindDefinitionReconciler) deleteOwnedRoleBindingOnRoleRefChange(
 	desiredRoleRef rbacv1.RoleRef,
 ) error {
 	existing := &rbacv1.RoleBinding{}
-	if err := r.client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, existing); err != nil {
+	if err := r.ownershipReader().Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, existing); err != nil {
 		return client.IgnoreNotFound(err)
 	}
 	if !hasControllerOwnerRef(existing, bindDef) || existing.RoleRef == desiredRoleRef {
@@ -973,6 +983,130 @@ func (r *BindDefinitionReconciler) deleteOwnedRoleBindingOnRoleRefChange(
 	}
 	metrics.RBACResourcesDeleted.WithLabelValues(metrics.ResourceRoleBinding).Inc()
 	return nil
+}
+
+func (r *BindDefinitionReconciler) ownershipReader() client.Reader {
+	if r.reader != nil {
+		return r.reader
+	}
+	return r.client
+}
+
+func bindDefinitionDesiredBindingKeys(
+	bindDef *authorizationv1alpha1.BindDefinition,
+	perRoleBindingNamespaces [][]corev1.Namespace,
+) (desiredCRBs, desiredRBs map[string]struct{}) {
+	desiredCRBs = make(map[string]struct{})
+	for _, clusterRoleRef := range bindDef.Spec.ClusterRoleBindings.ClusterRoleRefs {
+		desiredCRBs[helpers.BuildBindingName(bindDef.Spec.TargetName, clusterRoleRef)] = struct{}{}
+	}
+
+	desiredRBs = make(map[string]struct{})
+	for i, roleBinding := range bindDef.Spec.RoleBindings {
+		if i >= len(perRoleBindingNamespaces) {
+			break
+		}
+		for _, ns := range perRoleBindingNamespaces[i] {
+			if conditions.IsNamespaceTerminating(&ns) {
+				continue
+			}
+			for _, clusterRoleRef := range roleBinding.ClusterRoleRefs {
+				key := ns.Name + "/" + helpers.BuildBindingName(bindDef.Spec.TargetName, clusterRoleRef)
+				desiredRBs[key] = struct{}{}
+			}
+			for _, roleRef := range roleBinding.RoleRefs {
+				key := ns.Name + "/" + helpers.BuildBindingName(bindDef.Spec.TargetName, roleRef)
+				desiredRBs[key] = struct{}{}
+			}
+		}
+	}
+
+	return desiredCRBs, desiredRBs
+}
+
+func (r *BindDefinitionReconciler) listOwnedClusterRoleBindings(
+	ctx context.Context,
+	bindDef *authorizationv1alpha1.BindDefinition,
+) ([]rbacv1.ClusterRoleBinding, error) {
+	crbList := &rbacv1.ClusterRoleBindingList{}
+	if err := r.ownershipReader().List(ctx, crbList); err != nil {
+		return nil, fmt.Errorf("list ClusterRoleBindings for ownerRef cleanup: %w", err)
+	}
+	owned := make([]rbacv1.ClusterRoleBinding, 0, len(crbList.Items))
+	for i := range crbList.Items {
+		if hasControllerOwnerRef(&crbList.Items[i], bindDef) {
+			owned = append(owned, crbList.Items[i])
+		}
+	}
+	return owned, nil
+}
+
+func (r *BindDefinitionReconciler) listOwnedRoleBindings(
+	ctx context.Context,
+	bindDef *authorizationv1alpha1.BindDefinition,
+) ([]rbacv1.RoleBinding, error) {
+	rbList := &rbacv1.RoleBindingList{}
+	if err := r.ownershipReader().List(ctx, rbList); err != nil {
+		return nil, fmt.Errorf("list RoleBindings for ownerRef cleanup: %w", err)
+	}
+	owned := make([]rbacv1.RoleBinding, 0, len(rbList.Items))
+	for i := range rbList.Items {
+		if hasControllerOwnerRef(&rbList.Items[i], bindDef) {
+			owned = append(owned, rbList.Items[i])
+		}
+	}
+	return owned, nil
+}
+
+func (r *BindDefinitionReconciler) pruneStaleBindingResources(
+	ctx context.Context,
+	bindDef *authorizationv1alpha1.BindDefinition,
+	desiredCRBs map[string]struct{},
+	desiredRBs map[string]struct{},
+	deleteClient client.Client,
+) error {
+	logger := log.FromContext(ctx)
+	if deleteClient == nil {
+		deleteClient = r.client
+	}
+
+	var pruneErrors []error
+	crbs, err := r.listOwnedClusterRoleBindings(ctx, bindDef)
+	if err != nil {
+		return fmt.Errorf("list owned ClusterRoleBindings for pruning: %w", err)
+	}
+	for i := range crbs {
+		crb := &crbs[i]
+		if _, ok := desiredCRBs[crb.Name]; ok {
+			continue
+		}
+		logger.Info("pruning stale ClusterRoleBinding", "name", crb.Name, "bindDefinition", bindDef.Name)
+		if err := deleteClient.Delete(ctx, crb); err != nil && !apierrors.IsNotFound(err) {
+			pruneErrors = append(pruneErrors, fmt.Errorf("delete stale ClusterRoleBinding %s: %w", crb.Name, err))
+			continue
+		}
+		metrics.RBACResourcesDeleted.WithLabelValues(metrics.ResourceClusterRoleBinding).Inc()
+	}
+
+	rbs, err := r.listOwnedRoleBindings(ctx, bindDef)
+	if err != nil {
+		return fmt.Errorf("list owned RoleBindings for pruning: %w", err)
+	}
+	for i := range rbs {
+		rb := &rbs[i]
+		key := rb.Namespace + "/" + rb.Name
+		if _, ok := desiredRBs[key]; ok {
+			continue
+		}
+		logger.Info("pruning stale RoleBinding", "namespace", rb.Namespace, "name", rb.Name, "bindDefinition", bindDef.Name)
+		if err := deleteClient.Delete(ctx, rb); err != nil && !apierrors.IsNotFound(err) {
+			pruneErrors = append(pruneErrors, fmt.Errorf("delete stale RoleBinding %s/%s: %w", rb.Namespace, rb.Name, err))
+			continue
+		}
+		metrics.RBACResourcesDeleted.WithLabelValues(metrics.ResourceRoleBinding).Inc()
+	}
+
+	return errors.Join(pruneErrors...)
 }
 
 // validateServiceAccountNamespace checks if the namespace exists and is not terminating.

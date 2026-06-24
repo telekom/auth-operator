@@ -3473,6 +3473,160 @@ func TestReconcileResourcesWithSSAError(t *testing.T) {
 	g.Expect(err.Error()).To(ContainSubstring("injected SSA error"))
 }
 
+func TestBindDefinitionPruneStaleBindingResources(t *testing.T) {
+	ctx := context.Background()
+	g := NewWithT(t)
+
+	scheme := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(scheme)
+	_ = rbacv1.SchemeBuilder.AddToScheme(scheme)
+	_ = corev1.SchemeBuilder.AddToScheme(scheme)
+
+	bindDef := &authorizationv1alpha1.BindDefinition{
+		TypeMeta:   metav1.TypeMeta{APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: "BindDefinition"},
+		ObjectMeta: metav1.ObjectMeta{Name: "prune-bd", UID: "prune-bd-uid"},
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
+			TargetName: "prune-target",
+			Subjects:   []rbacv1.Subject{{Kind: "Group", Name: "devs", APIGroup: rbacv1.GroupName}},
+			ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+				ClusterRoleRefs: []string{"view"},
+			},
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+				{Namespace: "prune-ns", ClusterRoleRefs: []string{"edit"}},
+			},
+		},
+	}
+	ownerRef := metav1.OwnerReference{
+		APIVersion: authorizationv1alpha1.GroupVersion.String(),
+		Kind:       "BindDefinition",
+		Name:       bindDef.Name,
+		UID:        bindDef.UID,
+		Controller: boolPtr(true),
+	}
+	desiredCRB := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            helpers.BuildBindingName(bindDef.Spec.TargetName, "view"),
+			OwnerReferences: []metav1.OwnerReference{ownerRef},
+		},
+	}
+	staleCRB := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            helpers.BuildBindingName(bindDef.Spec.TargetName, "old"),
+			OwnerReferences: []metav1.OwnerReference{ownerRef},
+		},
+	}
+	unownedCRB := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: helpers.BuildBindingName(bindDef.Spec.TargetName, "external")},
+	}
+	desiredRB := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            helpers.BuildBindingName(bindDef.Spec.TargetName, "edit"),
+			Namespace:       "prune-ns",
+			OwnerReferences: []metav1.OwnerReference{ownerRef},
+		},
+	}
+	staleRB := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            helpers.BuildBindingName(bindDef.Spec.TargetName, "old"),
+			Namespace:       "prune-ns",
+			OwnerReferences: []metav1.OwnerReference{ownerRef},
+		},
+	}
+	unownedRB := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      helpers.BuildBindingName(bindDef.Spec.TargetName, "external"),
+			Namespace: "prune-ns",
+		},
+	}
+
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(bindDef, desiredCRB, staleCRB, unownedCRB, desiredRB, staleRB, unownedRB).
+		Build()
+	r := &BindDefinitionReconciler{client: c, reader: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
+
+	desiredCRBs, desiredRBs := bindDefinitionDesiredBindingKeys(bindDef, [][]corev1.Namespace{{
+		{ObjectMeta: metav1.ObjectMeta{Name: "prune-ns"}},
+	}})
+	g.Expect(r.pruneStaleBindingResources(ctx, bindDef, desiredCRBs, desiredRBs, c)).To(Succeed())
+
+	var crb rbacv1.ClusterRoleBinding
+	g.Expect(c.Get(ctx, types.NamespacedName{Name: desiredCRB.Name}, &crb)).To(Succeed())
+	g.Expect(c.Get(ctx, types.NamespacedName{Name: unownedCRB.Name}, &crb)).To(Succeed())
+	err := c.Get(ctx, types.NamespacedName{Name: staleCRB.Name}, &crb)
+	g.Expect(apierrors.IsNotFound(err)).To(BeTrue())
+
+	var rb rbacv1.RoleBinding
+	g.Expect(c.Get(ctx, types.NamespacedName{Namespace: "prune-ns", Name: desiredRB.Name}, &rb)).To(Succeed())
+	g.Expect(c.Get(ctx, types.NamespacedName{Namespace: "prune-ns", Name: unownedRB.Name}, &rb)).To(Succeed())
+	err = c.Get(ctx, types.NamespacedName{Namespace: "prune-ns", Name: staleRB.Name}, &rb)
+	g.Expect(apierrors.IsNotFound(err)).To(BeTrue())
+}
+
+func TestBindDefinitionReconcilePrunesSelectorStaleRoleBinding(t *testing.T) {
+	ctx := context.Background()
+	g := NewWithT(t)
+
+	scheme := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(scheme)
+	_ = rbacv1.SchemeBuilder.AddToScheme(scheme)
+	_ = corev1.SchemeBuilder.AddToScheme(scheme)
+
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "selector-prune-ns",
+			Labels: map[string]string{"env": "dev"},
+		},
+		Status: corev1.NamespaceStatus{Phase: corev1.NamespaceActive},
+	}
+	bindDef := &authorizationv1alpha1.BindDefinition{
+		TypeMeta: metav1.TypeMeta{APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: "BindDefinition"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "selector-prune-bd",
+			UID:        "selector-prune-bd-uid",
+			Generation: 2,
+		},
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
+			TargetName: "selector-prune-target",
+			Subjects:   []rbacv1.Subject{{Kind: "Group", Name: "devs", APIGroup: rbacv1.GroupName}},
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+				{
+					NamespaceSelector: []metav1.LabelSelector{{MatchLabels: map[string]string{"env": "prod"}}},
+					ClusterRoleRefs:   []string{"view"},
+				},
+			},
+		},
+	}
+	staleRB := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      helpers.BuildBindingName(bindDef.Spec.TargetName, "view"),
+			Namespace: ns.Name,
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: authorizationv1alpha1.GroupVersion.String(),
+				Kind:       "BindDefinition",
+				Name:       bindDef.Name,
+				UID:        bindDef.UID,
+				Controller: boolPtr(true),
+			}},
+		},
+		RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "view"},
+	}
+
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(bindDef, ns, staleRB).
+		WithStatusSubresource(bindDef).
+		Build()
+	r := &BindDefinitionReconciler{client: c, reader: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
+
+	_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: bindDef.Name}})
+	g.Expect(err).NotTo(HaveOccurred())
+
+	var rb rbacv1.RoleBinding
+	err = c.Get(ctx, types.NamespacedName{Namespace: ns.Name, Name: staleRB.Name}, &rb)
+	g.Expect(apierrors.IsNotFound(err)).To(BeTrue())
+}
+
 func TestReconcileDeleteError(t *testing.T) {
 	ctx := context.Background()
 
