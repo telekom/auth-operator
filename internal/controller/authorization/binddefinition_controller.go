@@ -532,7 +532,15 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		"bindDefinition", bindDefinition.Name,
 		"missingRoleRefCount", missingRoleRefCount)
 
-	desiredCRBs, desiredRBs := bindDefinitionDesiredBindingKeys(bindDefinition, perRoleBindingNamespaces)
+	desiredCRBs, desiredRBs, err := bindDefinitionDesiredBindingKeys(bindDefinition, perRoleBindingNamespaces)
+	if err != nil {
+		logger.Error(err, "Failed to compute desired BindDefinition resource keys",
+			"bindDefinition", bindDefinition.Name)
+		r.markStalled(ctx, bindDefinition, err)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerBindDefinition, metrics.ErrorTypeAPI).Inc()
+		return ctrl.Result{}, err
+	}
 	if err := r.pruneStaleBindingResources(ctx, bindDefinition, desiredCRBs, desiredRBs, r.client); err != nil {
 		logger.Error(err, "Failed to prune stale BindDefinition resources",
 			"bindDefinition", bindDefinition.Name)
@@ -995,18 +1003,25 @@ func (r *BindDefinitionReconciler) ownershipReader() client.Reader {
 func bindDefinitionDesiredBindingKeys(
 	bindDef *authorizationv1alpha1.BindDefinition,
 	perRoleBindingNamespaces [][]corev1.Namespace,
-) (desiredCRBs, desiredRBs map[string]struct{}) {
+) (desiredCRBs, desiredRBs map[string]struct{}, err error) {
 	desiredCRBs = make(map[string]struct{})
 	for _, clusterRoleRef := range bindDef.Spec.ClusterRoleBindings.ClusterRoleRefs {
 		desiredCRBs[helpers.BuildBindingName(bindDef.Spec.TargetName, clusterRoleRef)] = struct{}{}
 	}
 
 	desiredRBs = make(map[string]struct{})
+	if len(perRoleBindingNamespaces) != len(bindDef.Spec.RoleBindings) {
+		return desiredCRBs, desiredRBs, fmt.Errorf("perRoleBindingNamespaces length (%d) does not match RoleBindings length (%d)",
+			len(perRoleBindingNamespaces), len(bindDef.Spec.RoleBindings))
+	}
+
 	for i, roleBinding := range bindDef.Spec.RoleBindings {
 		if i >= len(perRoleBindingNamespaces) {
-			break
+			return desiredCRBs, desiredRBs, fmt.Errorf("perRoleBindingNamespaces length (%d) does not match RoleBindings length (%d)",
+				len(perRoleBindingNamespaces), len(bindDef.Spec.RoleBindings))
 		}
-		for _, ns := range perRoleBindingNamespaces[i] {
+		targetNamespaces := perRoleBindingNamespaces[i] //nolint:gosec // Length equality is checked above and guarded before this parallel-slice access.
+		for _, ns := range targetNamespaces {
 			if conditions.IsNamespaceTerminating(&ns) {
 				continue
 			}
@@ -1021,7 +1036,7 @@ func bindDefinitionDesiredBindingKeys(
 		}
 	}
 
-	return desiredCRBs, desiredRBs
+	return desiredCRBs, desiredRBs, nil
 }
 
 func (r *BindDefinitionReconciler) listOwnedClusterRoleBindings(

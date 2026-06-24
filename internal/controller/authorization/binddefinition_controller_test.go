@@ -3545,15 +3545,16 @@ func TestBindDefinitionPruneStaleBindingResources(t *testing.T) {
 		Build()
 	r := &BindDefinitionReconciler{client: c, reader: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
-	desiredCRBs, desiredRBs := bindDefinitionDesiredBindingKeys(bindDef, [][]corev1.Namespace{{
+	desiredCRBs, desiredRBs, err := bindDefinitionDesiredBindingKeys(bindDef, [][]corev1.Namespace{{
 		{ObjectMeta: metav1.ObjectMeta{Name: "prune-ns"}},
 	}})
+	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(r.pruneStaleBindingResources(ctx, bindDef, desiredCRBs, desiredRBs, c)).To(Succeed())
 
 	var crb rbacv1.ClusterRoleBinding
 	g.Expect(c.Get(ctx, types.NamespacedName{Name: desiredCRB.Name}, &crb)).To(Succeed())
 	g.Expect(c.Get(ctx, types.NamespacedName{Name: unownedCRB.Name}, &crb)).To(Succeed())
-	err := c.Get(ctx, types.NamespacedName{Name: staleCRB.Name}, &crb)
+	err = c.Get(ctx, types.NamespacedName{Name: staleCRB.Name}, &crb)
 	g.Expect(apierrors.IsNotFound(err)).To(BeTrue())
 
 	var rb rbacv1.RoleBinding
