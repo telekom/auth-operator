@@ -1904,8 +1904,30 @@ func TestRDReconcileStallsUnsafeStoredAggregateFrom(t *testing.T) {
 		},
 	}
 
+	stale := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: rd.Spec.TargetName,
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: authorizationv1alpha1.GroupVersion.String(),
+				Kind:       "RoleDefinition",
+				Name:       rd.Name,
+				UID:        rd.UID,
+			}},
+		},
+		AggregationRule: &rbacv1.AggregationRule{
+			ClusterRoleSelectors: []metav1.LabelSelector{{
+				MatchLabels: map[string]string{
+					"kubernetes.io/bootstrapping": "rbac-defaults",
+				},
+			}},
+		},
+		Rules: []rbacv1.PolicyRule{
+			{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"get"}},
+		},
+	}
+
 	c := fake.NewClientBuilder().WithScheme(s).
-		WithObjects(rd).
+		WithObjects(rd, stale).
 		WithStatusSubresource(rd).
 		Build()
 	r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
@@ -1918,7 +1940,7 @@ func TestRDReconcileStallsUnsafeStoredAggregateFrom(t *testing.T) {
 
 	var generated rbacv1.ClusterRole
 	err = c.Get(context.Background(), types.NamespacedName{Name: rd.Spec.TargetName}, &generated)
-	g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "unsafe aggregateFrom must not create the target ClusterRole")
+	g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "unsafe aggregateFrom must remove the stale target ClusterRole")
 
 	var updated authorizationv1alpha1.RoleDefinition
 	g.Expect(c.Get(context.Background(), types.NamespacedName{Name: rd.Name}, &updated)).To(Succeed())
@@ -2003,7 +2025,17 @@ func TestHandleDeletionDeleteAndStatusError(t *testing.T) {
 		},
 	}
 
-	cr := &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "del-both-cr"}}
+	cr := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "del-both-cr",
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: authorizationv1alpha1.GroupVersion.String(),
+				Kind:       "RoleDefinition",
+				Name:       rd.Name,
+				UID:        rd.UID,
+			}},
+		},
+	}
 
 	statusPatchCount := 0
 	c := fake.NewClientBuilder().WithScheme(s).

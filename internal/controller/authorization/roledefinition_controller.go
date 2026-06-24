@@ -279,6 +279,13 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if roleDefinition.Spec.AggregateFrom != nil {
 		if err := authorizationv1alpha1.ValidateRoleDefinitionAggregateFrom(roleDefinition); err != nil {
 			logger.Error(err, "invalid stored aggregateFrom selector", "roleDefinitionName", roleDefinition.Name)
+			if cleanupErr := r.cleanupInvalidAggregateFromTarget(ctx, roleDefinition); cleanupErr != nil {
+				logger.Error(cleanupErr, "failed to clean up invalid aggregateFrom target", "roleDefinitionName", roleDefinition.Name)
+				r.markStalled(ctx, roleDefinition, err)
+				metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ResultError).Inc()
+				metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ErrorTypeAPI).Inc()
+				return ctrl.Result{}, cleanupErr
+			}
 			r.markStalled(ctx, roleDefinition, err)
 			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ResultError).Inc()
 			metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ErrorTypeValidation).Inc()

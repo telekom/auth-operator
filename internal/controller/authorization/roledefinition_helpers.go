@@ -166,41 +166,75 @@ func (r *RoleDefinitionReconciler) handleDeletion(
 	logger.V(2).Info("Attempting to delete role",
 		"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
 
-	if err := r.client.Delete(ctx, role); apierrors.IsNotFound(err) {
+	if err := r.client.Get(ctx, client.ObjectKeyFromObject(role), role); apierrors.IsNotFound(err) {
 		logger.V(2).Info("Role not found - removing finalizer",
 			"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
-		// Re-fetch to get the latest ResourceVersion after SSA status updates
-		if err := r.client.Get(ctx, client.ObjectKeyFromObject(roleDefinition), roleDefinition); err != nil {
-			return ctrl.Result{}, fmt.Errorf("re-fetch RoleDefinition %s before finalizer removal: %w", roleDefinition.Name, err)
-		}
-		old := roleDefinition.DeepCopy()
-		controllerutil.RemoveFinalizer(roleDefinition, authorizationv1alpha1.RoleDefinitionFinalizer)
-		if err := r.client.Patch(ctx, roleDefinition, client.MergeFromWithOptions(old, client.MergeFromWithOptimisticLock{})); err != nil {
-			logger.Error(err, "Failed to remove finalizer", "roleDefinitionName", roleDefinition.Name)
-			return ctrl.Result{}, err
-		}
-		logger.V(1).Info("RoleDefinition deletion completed successfully", "roleDefinitionName", roleDefinition.Name)
-		return ctrl.Result{}, nil
+	} else if err != nil {
+		logger.Error(err, "Failed to get role before deletion",
+			"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
+		return r.markDeletionFailed(ctx, roleDefinition, err)
+	} else if !hasOwnerRef(role, roleDefinition) {
+		logger.Info("Skipping deletion of target role because it is not owned by this RoleDefinition",
+			"roleDefinitionName", roleDefinition.Name,
+			"roleName", roleDefinition.Spec.TargetName,
+			"targetRole", roleDefinition.Spec.TargetRole)
+		r.recorder.Eventf(roleDefinition, nil, corev1.EventTypeWarning,
+			authorizationv1alpha1.EventReasonOwnership, authorizationv1alpha1.EventActionDelete,
+			"Skipping deletion of target %s %s because it is not owned by RoleDefinition %s (UID: %s)",
+			roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetName, roleDefinition.GetName(), roleDefinition.GetUID())
+	} else if err := r.client.Delete(ctx, role); apierrors.IsNotFound(err) {
+		logger.V(2).Info("Role disappeared before deletion - removing finalizer",
+			"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
 	} else if err != nil {
 		logger.Error(err, "Failed to delete role",
 			"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
-		// Use a generic message in the condition to avoid leaking internal
-		// error details (e.g. server responses, resource paths) to CRD
-		// consumers who may not have elevated RBAC. The full error is
-		// logged above for operator administrators.
-		conditions.MarkFalse(roleDefinition, authorizationv1alpha1.DeleteCondition, roleDefinition.Generation,
-			authorizationv1alpha1.DeleteReason, "failed to delete managed resource (check operator logs for details)")
-		if updateErr := ssa.ApplyRoleDefinitionStatus(ctx, r.client, roleDefinition); updateErr != nil {
-			logger.Error(updateErr, "Failed to apply status after deletion error",
-				"roleDefinitionName", roleDefinition.Name)
-			return ctrl.Result{}, fmt.Errorf("deletion failed with error %s and a second error was found during update of role definition status: %w",
-				err.Error(), updateErr)
-		}
-		return ctrl.Result{}, err
+		return r.markDeletionFailed(ctx, roleDefinition, err)
+	} else {
+		logger.V(2).Info("Requeuing RoleDefinition deletion", "roleDefinitionName", roleDefinition.Name)
+		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 
-	logger.V(2).Info("Requeuing RoleDefinition deletion", "roleDefinitionName", roleDefinition.Name)
-	return ctrl.Result{RequeueAfter: time.Second}, nil
+	return r.removeRoleDefinitionFinalizer(ctx, roleDefinition)
+}
+
+func (r *RoleDefinitionReconciler) markDeletionFailed(
+	ctx context.Context,
+	roleDefinition *authorizationv1alpha1.RoleDefinition,
+	err error,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	// Use a generic message in the condition to avoid leaking internal
+	// error details (e.g. server responses, resource paths) to CRD
+	// consumers who may not have elevated RBAC. The full error is
+	// logged by the caller for operator administrators.
+	conditions.MarkFalse(roleDefinition, authorizationv1alpha1.DeleteCondition, roleDefinition.Generation,
+		authorizationv1alpha1.DeleteReason, "failed to delete managed resource (check operator logs for details)")
+	if updateErr := ssa.ApplyRoleDefinitionStatus(ctx, r.client, roleDefinition); updateErr != nil {
+		logger.Error(updateErr, "Failed to apply status after deletion error",
+			"roleDefinitionName", roleDefinition.Name)
+		return ctrl.Result{}, fmt.Errorf("deletion failed with error %s and a second error was found during update of role definition status: %w",
+			err.Error(), updateErr)
+	}
+	return ctrl.Result{}, err
+}
+
+func (r *RoleDefinitionReconciler) removeRoleDefinitionFinalizer(
+	ctx context.Context,
+	roleDefinition *authorizationv1alpha1.RoleDefinition,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	// Re-fetch to get the latest ResourceVersion after SSA status updates.
+	if err := r.client.Get(ctx, client.ObjectKeyFromObject(roleDefinition), roleDefinition); err != nil {
+		return ctrl.Result{}, fmt.Errorf("re-fetch RoleDefinition %s before finalizer removal: %w", roleDefinition.Name, err)
+	}
+	old := roleDefinition.DeepCopy()
+	controllerutil.RemoveFinalizer(roleDefinition, authorizationv1alpha1.RoleDefinitionFinalizer)
+	if err := r.client.Patch(ctx, roleDefinition, client.MergeFromWithOptions(old, client.MergeFromWithOptimisticLock{})); err != nil {
+		logger.Error(err, "Failed to remove finalizer", "roleDefinitionName", roleDefinition.Name)
+		return ctrl.Result{}, err
+	}
+	logger.V(1).Info("RoleDefinition deletion completed successfully", "roleDefinitionName", roleDefinition.Name)
+	return ctrl.Result{}, nil
 }
 
 // buildFinalRules builds the final policy rules from the filtered API resources.
@@ -329,7 +363,7 @@ func (r *RoleDefinitionReconciler) ensureRole(
 			// Clear any leftover .rules from a previous rule-based reconciliation.
 			// SSA cannot clear omitempty fields, so a merge patch is needed for
 			// the transition from rule-based to aggregation-based.
-			if err := r.clearRulesOnAggregationTransition(ctx, roleDefinition.Spec.TargetName); err != nil {
+			if err := r.clearRulesOnAggregationTransition(ctx, roleDefinition); err != nil {
 				return err
 			}
 		} else {
@@ -343,10 +377,10 @@ func (r *RoleDefinitionReconciler) ensureRole(
 			// reconciliation. SSA cannot remove the field because
 			// AggregationRule uses omitempty, so a merge patch is needed for the
 			// transition back to rule-based.
-			if err := r.clearAggregationRuleIfSet(ctx, roleDefinition.Spec.TargetName); err != nil {
+			if err := r.clearAggregationRuleIfSet(ctx, roleDefinition); err != nil {
 				return err
 			}
-			if err := r.clearClusterRoleRulesIfEmpty(ctx, roleDefinition.Spec.TargetName, finalRules); err != nil {
+			if err := r.clearClusterRoleRulesIfEmpty(ctx, roleDefinition, finalRules); err != nil {
 				return err
 			}
 		}
@@ -371,7 +405,7 @@ func (r *RoleDefinitionReconciler) ensureRole(
 			mergedLabels,
 			finalRules,
 		).WithOwnerReferences(ownerRef).WithAnnotations(annotations)
-		if err := r.clearRoleRulesIfEmpty(ctx, roleDefinition.Spec.TargetNamespace, roleDefinition.Spec.TargetName, finalRules); err != nil {
+		if err := r.clearRoleRulesIfEmpty(ctx, roleDefinition, finalRules); err != nil {
 			return err
 		}
 		// RoleDefinitions own their generated RBAC resources end-to-end. Force
@@ -474,6 +508,37 @@ func (r *RoleDefinitionReconciler) checkRoleOwnership(
 		roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetName, roleDefinition.GetName(), roleDefinition.GetUID())
 }
 
+// cleanupInvalidAggregateFromTarget removes a previously generated aggregating
+// ClusterRole when a stored RoleDefinition now fails aggregateFrom validation.
+func (r *RoleDefinitionReconciler) cleanupInvalidAggregateFromTarget(
+	ctx context.Context,
+	roleDefinition *authorizationv1alpha1.RoleDefinition,
+) error {
+	if roleDefinition.Spec.TargetRole != authorizationv1alpha1.DefinitionClusterRole {
+		return nil
+	}
+
+	existing := &rbacv1.ClusterRole{}
+	if err := r.client.Get(ctx, client.ObjectKey{Name: roleDefinition.Spec.TargetName}, existing); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	if !hasOwnerRef(existing, roleDefinition) {
+		log.FromContext(ctx).Info("Skipping cleanup of invalid aggregateFrom target because it is not owned by this RoleDefinition",
+			"roleDefinitionName", roleDefinition.Name,
+			"clusterRole", roleDefinition.Spec.TargetName)
+		r.recorder.Eventf(roleDefinition, nil, corev1.EventTypeWarning,
+			authorizationv1alpha1.EventReasonOwnership, authorizationv1alpha1.EventActionDelete,
+			"Skipping cleanup of target ClusterRole %s because it is not owned by RoleDefinition %s (UID: %s)",
+			roleDefinition.Spec.TargetName, roleDefinition.GetName(), roleDefinition.GetUID())
+		return nil
+	}
+
+	if err := r.client.Delete(ctx, existing); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("deleting invalid aggregateFrom target ClusterRole %s: %w", roleDefinition.Spec.TargetName, err)
+	}
+	return nil
+}
+
 // clearAggregationRuleIfSet removes the aggregationRule from an existing ClusterRole using a
 // JSON merge patch. This is necessary when a RoleDefinition transitions from aggregation-based
 // to rule-based because SSA cannot clear the field (its ApplyConfiguration uses omitempty,
@@ -483,10 +548,16 @@ func (r *RoleDefinitionReconciler) checkRoleOwnership(
 // so the overhead in steady state is a single in-memory lookup + nil-check with no API call.
 // The merge patch is only sent when the aggregation rule is actually present, i.e. during the
 // one-time transition from aggregation-based back to rule-based.
-func (r *RoleDefinitionReconciler) clearAggregationRuleIfSet(ctx context.Context, name string) error {
+func (r *RoleDefinitionReconciler) clearAggregationRuleIfSet(
+	ctx context.Context,
+	roleDefinition *authorizationv1alpha1.RoleDefinition,
+) error {
 	existing := &rbacv1.ClusterRole{}
-	if err := r.client.Get(ctx, client.ObjectKey{Name: name}, existing); err != nil {
+	if err := r.client.Get(ctx, client.ObjectKey{Name: roleDefinition.Spec.TargetName}, existing); err != nil {
 		return client.IgnoreNotFound(err)
+	}
+	if !hasOwnerRef(existing, roleDefinition) {
+		return nil
 	}
 	if existing.AggregationRule != nil {
 		patch := client.RawPatch(types.MergePatchType, []byte(`{"aggregationRule":null}`))
@@ -507,10 +578,16 @@ func (r *RoleDefinitionReconciler) clearAggregationRuleIfSet(ctx context.Context
 // steady-state cost is a single in-memory lookup.  The merge patch is only sent
 // when .rules is non-empty and .aggregationRule is nil (i.e. during the one-time
 // transition from rule-based to aggregation-based).
-func (r *RoleDefinitionReconciler) clearRulesOnAggregationTransition(ctx context.Context, name string) error {
+func (r *RoleDefinitionReconciler) clearRulesOnAggregationTransition(
+	ctx context.Context,
+	roleDefinition *authorizationv1alpha1.RoleDefinition,
+) error {
 	existing := &rbacv1.ClusterRole{}
-	if err := r.client.Get(ctx, client.ObjectKey{Name: name}, existing); err != nil {
+	if err := r.client.Get(ctx, client.ObjectKey{Name: roleDefinition.Spec.TargetName}, existing); err != nil {
 		return client.IgnoreNotFound(err)
+	}
+	if !hasOwnerRef(existing, roleDefinition) {
+		return nil
 	}
 	// Only clear if the role currently has rules but no aggregation rule yet
 	// (transition in progress). Once the aggregation controller takes over, we
@@ -524,13 +601,20 @@ func (r *RoleDefinitionReconciler) clearRulesOnAggregationTransition(ctx context
 	return nil
 }
 
-func (r *RoleDefinitionReconciler) clearClusterRoleRulesIfEmpty(ctx context.Context, name string, finalRules []rbacv1.PolicyRule) error {
+func (r *RoleDefinitionReconciler) clearClusterRoleRulesIfEmpty(
+	ctx context.Context,
+	roleDefinition *authorizationv1alpha1.RoleDefinition,
+	finalRules []rbacv1.PolicyRule,
+) error {
 	if len(finalRules) > 0 {
 		return nil
 	}
 	existing := &rbacv1.ClusterRole{}
-	if err := r.client.Get(ctx, client.ObjectKey{Name: name}, existing); err != nil {
+	if err := r.client.Get(ctx, client.ObjectKey{Name: roleDefinition.Spec.TargetName}, existing); err != nil {
 		return client.IgnoreNotFound(err)
+	}
+	if !hasOwnerRef(existing, roleDefinition) {
+		return nil
 	}
 	if len(existing.Rules) == 0 {
 		return nil
@@ -542,13 +626,24 @@ func (r *RoleDefinitionReconciler) clearClusterRoleRulesIfEmpty(ctx context.Cont
 	return nil
 }
 
-func (r *RoleDefinitionReconciler) clearRoleRulesIfEmpty(ctx context.Context, namespace, name string, finalRules []rbacv1.PolicyRule) error {
+func (r *RoleDefinitionReconciler) clearRoleRulesIfEmpty(
+	ctx context.Context,
+	roleDefinition *authorizationv1alpha1.RoleDefinition,
+	finalRules []rbacv1.PolicyRule,
+) error {
 	if len(finalRules) > 0 {
 		return nil
 	}
 	existing := &rbacv1.Role{}
-	if err := r.client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, existing); err != nil {
+	key := client.ObjectKey{
+		Namespace: roleDefinition.Spec.TargetNamespace,
+		Name:      roleDefinition.Spec.TargetName,
+	}
+	if err := r.client.Get(ctx, key, existing); err != nil {
 		return client.IgnoreNotFound(err)
+	}
+	if !hasOwnerRef(existing, roleDefinition) {
+		return nil
 	}
 	if len(existing.Rules) == 0 {
 		return nil
