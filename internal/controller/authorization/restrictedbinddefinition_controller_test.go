@@ -1935,6 +1935,54 @@ func TestRBD_DeprovisionCleansUpResources(t *testing.T) {
 	g.Expect(emitted[len(emitted)-1]).NotTo(gomega.ContainSubstring("policy violations"))
 }
 
+func TestRBD_DeprovisionContinuesAfterDeleteError(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "partial-deprov-rbd", UID: "partial-deprov-rbd-uid"},
+		Status: authorizationv1alpha1.RestrictedBindDefinitionStatus{
+			GeneratedServiceAccounts: []rbacv1.Subject{
+				{Kind: rbacv1.ServiceAccountKind, Name: "partial-deprov-sa", Namespace: "default"},
+			},
+		},
+	}
+	ownerRef := restrictedTestOwnerRef(authorizationv1alpha1.RestrictedBindDefinitionKind, rbd.Name, rbd.UID)
+	crb := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "partial-deprov-crb", OwnerReferences: []metav1.OwnerReference{ownerRef}},
+	}
+	rb := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "partial-deprov-rb", Namespace: "default", OwnerReferences: []metav1.OwnerReference{ownerRef}},
+	}
+	sa := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{Name: "partial-deprov-sa", Namespace: "default", OwnerReferences: []metav1.OwnerReference{ownerRef}},
+	}
+
+	scheme := newTestScheme()
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(rbd, crb, rb, sa).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+				if obj.GetName() == crb.Name {
+					return fmt.Errorf("injected ClusterRoleBinding delete error")
+				}
+				return c.Delete(ctx, obj, opts...)
+			},
+		}).
+		Build()
+	r := NewRestrictedBindDefinitionReconciler(c, scheme, events.NewFakeRecorder(10))
+
+	err := r.rbdDeprovision(rbdCtx(), rbd, nil)
+	g.Expect(err).To(gomega.MatchError(gomega.ContainSubstring("delete ClusterRoleBinding partial-deprov-crb")))
+
+	var keptCRB rbacv1.ClusterRoleBinding
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: crb.Name}, &keptCRB)).To(gomega.Succeed())
+	var deletedRB rbacv1.RoleBinding
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Namespace: rb.Namespace, Name: rb.Name}, &deletedRB)).To(gomega.HaveOccurred())
+	var deletedSA corev1.ServiceAccount
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Namespace: sa.Namespace, Name: sa.Name}, &deletedSA)).To(gomega.HaveOccurred())
+}
+
 func TestRBD_DeprovisionUsesLiveReaderWhenCachedOwnerIndexMisses(t *testing.T) {
 	g := gomega.NewWithT(t)
 
@@ -2077,6 +2125,44 @@ func TestRBD_PruneStaleResources_UsesProvidedDeleteClient(t *testing.T) {
 	err := r.rbdPruneStaleResources(rbdCtx(), rbd, nil, nil, deleteClient)
 	g.Expect(err).To(gomega.MatchError(gomega.ContainSubstring("impersonated delete denied")))
 	g.Expect(deleteCalled).To(gomega.BeTrue())
+}
+
+func TestRBD_PruneStaleResourcesContinuesAfterDeleteError(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "partial-prune-rbd", UID: "partial-prune-rbd-uid"},
+	}
+	ownerRef := restrictedTestOwnerRef(authorizationv1alpha1.RestrictedBindDefinitionKind, rbd.Name, rbd.UID)
+	crb := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "partial-prune-crb", OwnerReferences: []metav1.OwnerReference{ownerRef}},
+	}
+	rb := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "partial-prune-rb", Namespace: "default", OwnerReferences: []metav1.OwnerReference{ownerRef}},
+	}
+
+	scheme := newTestScheme()
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(crb, rb).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+				if obj.GetName() == crb.Name {
+					return fmt.Errorf("injected stale ClusterRoleBinding delete error")
+				}
+				return c.Delete(ctx, obj, opts...)
+			},
+		}).
+		Build()
+	r := NewRestrictedBindDefinitionReconciler(c, scheme, events.NewFakeRecorder(10))
+
+	err := r.rbdPruneStaleResources(rbdCtx(), rbd, nil, nil, nil)
+	g.Expect(err).To(gomega.MatchError(gomega.ContainSubstring("delete stale ClusterRoleBinding partial-prune-crb")))
+
+	var keptCRB rbacv1.ClusterRoleBinding
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: crb.Name}, &keptCRB)).To(gomega.Succeed())
+	var deletedRB rbacv1.RoleBinding
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Namespace: rb.Namespace, Name: rb.Name}, &deletedRB)).To(gomega.HaveOccurred())
 }
 
 func TestRBD_PruneStaleResources_UsesLiveOwnerRefWithoutOwnerIndex(t *testing.T) {
@@ -2303,6 +2389,50 @@ func TestRBD_PruneStaleServiceAccounts_UsesLiveOwnerRefWithoutOwnerIndex(t *test
 
 	var deletedSA corev1.ServiceAccount
 	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Namespace: "default", Name: "fallback-stale-sa"}, &deletedSA)).To(gomega.HaveOccurred())
+}
+
+func TestRBD_PruneStaleServiceAccountsContinuesAfterDeleteError(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "partial-sa-prune-rbd", UID: "partial-sa-prune-rbd-uid"},
+		Status: authorizationv1alpha1.RestrictedBindDefinitionStatus{
+			GeneratedServiceAccounts: []rbacv1.Subject{
+				{Kind: rbacv1.ServiceAccountKind, Name: "aa-fail-sa", Namespace: "default"},
+				{Kind: rbacv1.ServiceAccountKind, Name: "zz-clean-sa", Namespace: "default"},
+			},
+		},
+	}
+	ownerRef := restrictedTestOwnerRef(authorizationv1alpha1.RestrictedBindDefinitionKind, rbd.Name, rbd.UID)
+	failSA := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{Name: "aa-fail-sa", Namespace: "default", OwnerReferences: []metav1.OwnerReference{ownerRef}},
+	}
+	cleanSA := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{Name: "zz-clean-sa", Namespace: "default", OwnerReferences: []metav1.OwnerReference{ownerRef}},
+	}
+
+	scheme := newTestScheme()
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(failSA, cleanSA).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+				if obj.GetName() == failSA.Name {
+					return fmt.Errorf("injected stale ServiceAccount delete error")
+				}
+				return c.Delete(ctx, obj, opts...)
+			},
+		}).
+		Build()
+	r := NewRestrictedBindDefinitionReconciler(c, scheme, events.NewFakeRecorder(10))
+
+	err := r.rbdPruneStaleServiceAccounts(rbdCtx(), rbd, nil, rbdDesiredServiceAccounts(rbd.Status.GeneratedServiceAccounts), nil)
+	g.Expect(err).To(gomega.MatchError(gomega.ContainSubstring("delete stale ServiceAccount default/aa-fail-sa")))
+
+	var keptSA corev1.ServiceAccount
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Namespace: failSA.Namespace, Name: failSA.Name}, &keptSA)).To(gomega.Succeed())
+	var deletedSA corev1.ServiceAccount
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Namespace: cleanSA.Namespace, Name: cleanSA.Name}, &deletedSA)).To(gomega.HaveOccurred())
 }
 
 func TestRBD_PruneStaleServiceAccounts_IgnoresSpoofedOwnerRefWithoutStatus(t *testing.T) {

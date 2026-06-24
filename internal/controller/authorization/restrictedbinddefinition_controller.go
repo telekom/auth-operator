@@ -1141,41 +1141,46 @@ func (r *RestrictedBindDefinitionReconciler) rbdPruneStaleResources(
 	if deleteClient == nil {
 		deleteClient = r.client
 	}
+	var errs []error
 
 	// Prune stale ClusterRoleBindings.
 	crbs, err := r.rbdListOwnedClusterRoleBindings(ctx, rbd)
 	if err != nil {
-		return fmt.Errorf("list owned ClusterRoleBindings for pruning: %w", err)
-	}
-	for i := range crbs {
-		crb := &crbs[i]
-		if _, ok := desiredCRBs[crb.Name]; !ok {
-			logger.Info("pruning stale ClusterRoleBinding", "name", crb.Name, "rbd", rbd.Name)
-			if err := deleteClient.Delete(ctx, crb); err != nil && !apierrors.IsNotFound(err) {
-				return fmt.Errorf("delete stale ClusterRoleBinding %s: %w", crb.Name, err)
+		errs = append(errs, fmt.Errorf("list owned ClusterRoleBindings for pruning: %w", err))
+	} else {
+		for i := range crbs {
+			crb := &crbs[i]
+			if _, ok := desiredCRBs[crb.Name]; !ok {
+				logger.Info("pruning stale ClusterRoleBinding", "name", crb.Name, "rbd", rbd.Name)
+				if err := deleteClient.Delete(ctx, crb); err != nil && !apierrors.IsNotFound(err) {
+					errs = append(errs, fmt.Errorf("delete stale ClusterRoleBinding %s: %w", crb.Name, err))
+					continue
+				}
+				metrics.RBACResourcesDeleted.WithLabelValues(metrics.ResourceClusterRoleBinding).Inc()
 			}
-			metrics.RBACResourcesDeleted.WithLabelValues(metrics.ResourceClusterRoleBinding).Inc()
 		}
 	}
 
 	// Prune stale RoleBindings.
 	rbs, err := r.rbdListOwnedRoleBindings(ctx, rbd)
 	if err != nil {
-		return fmt.Errorf("list owned RoleBindings for pruning: %w", err)
-	}
-	for i := range rbs {
-		rb := &rbs[i]
-		key := rb.Namespace + "/" + rb.Name
-		if _, ok := desiredRBs[key]; !ok {
-			logger.Info("pruning stale RoleBinding", "namespace", rb.Namespace, "name", rb.Name, "rbd", rbd.Name)
-			if err := deleteClient.Delete(ctx, rb); err != nil && !apierrors.IsNotFound(err) {
-				return fmt.Errorf("delete stale RoleBinding %s/%s: %w", rb.Namespace, rb.Name, err)
+		errs = append(errs, fmt.Errorf("list owned RoleBindings for pruning: %w", err))
+	} else {
+		for i := range rbs {
+			rb := &rbs[i]
+			key := rb.Namespace + "/" + rb.Name
+			if _, ok := desiredRBs[key]; !ok {
+				logger.Info("pruning stale RoleBinding", "namespace", rb.Namespace, "name", rb.Name, "rbd", rbd.Name)
+				if err := deleteClient.Delete(ctx, rb); err != nil && !apierrors.IsNotFound(err) {
+					errs = append(errs, fmt.Errorf("delete stale RoleBinding %s/%s: %w", rb.Namespace, rb.Name, err))
+					continue
+				}
+				metrics.RBACResourcesDeleted.WithLabelValues(metrics.ResourceRoleBinding).Inc()
 			}
-			metrics.RBACResourcesDeleted.WithLabelValues(metrics.ResourceRoleBinding).Inc()
 		}
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 func (r *RestrictedBindDefinitionReconciler) rbdPruneStaleServiceAccounts(
@@ -1194,6 +1199,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdPruneStaleServiceAccounts(
 	if err != nil {
 		return fmt.Errorf("list owned ServiceAccounts for pruning: %w", err)
 	}
+	var errs []error
 	for i := range serviceAccounts {
 		sa := &serviceAccounts[i]
 		key := sa.Namespace + "/" + sa.Name
@@ -1207,11 +1213,12 @@ func (r *RestrictedBindDefinitionReconciler) rbdPruneStaleServiceAccounts(
 		}
 		logger.Info("pruning stale ServiceAccount", "namespace", sa.Namespace, "name", sa.Name, "rbd", rbd.Name)
 		if err := deleteClient.Delete(ctx, sa); err != nil && !apierrors.IsNotFound(err) {
-			return fmt.Errorf("delete stale ServiceAccount %s: %w", key, err)
+			errs = append(errs, fmt.Errorf("delete stale ServiceAccount %s: %w", key, err))
+			continue
 		}
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 // rbdEnsureServiceAccounts ensures all ServiceAccount subjects exist, tracking
@@ -1614,34 +1621,42 @@ func (r *RestrictedBindDefinitionReconciler) rbdDeprovision(
 	if deleteClient == nil {
 		deleteClient = r.client
 	}
+	var errs []error
 
 	// Delete owned ClusterRoleBindings.
 	crbs, err := r.rbdListOwnedClusterRoleBindings(ctx, rbd)
 	if err != nil {
-		return fmt.Errorf("list owned ClusterRoleBindings: %w", err)
-	}
-	for i := range crbs {
-		crb := &crbs[i]
-		if err := deleteClient.Delete(ctx, crb); err != nil && !apierrors.IsNotFound(err) {
-			return fmt.Errorf("delete ClusterRoleBinding %s: %w", crb.Name, err)
+		errs = append(errs, fmt.Errorf("list owned ClusterRoleBindings: %w", err))
+	} else {
+		for i := range crbs {
+			crb := &crbs[i]
+			if err := deleteClient.Delete(ctx, crb); err != nil && !apierrors.IsNotFound(err) {
+				errs = append(errs, fmt.Errorf("delete ClusterRoleBinding %s: %w", crb.Name, err))
+				continue
+			}
+			metrics.RBACResourcesDeleted.WithLabelValues(metrics.ResourceClusterRoleBinding).Inc()
 		}
-		metrics.RBACResourcesDeleted.WithLabelValues(metrics.ResourceClusterRoleBinding).Inc()
 	}
 
 	// Delete owned RoleBindings.
 	rbs, err := r.rbdListOwnedRoleBindings(ctx, rbd)
 	if err != nil {
-		return fmt.Errorf("list owned RoleBindings: %w", err)
-	}
-	for i := range rbs {
-		rb := &rbs[i]
-		if err := deleteClient.Delete(ctx, rb); err != nil && !apierrors.IsNotFound(err) {
-			return fmt.Errorf("delete RoleBinding %s/%s: %w", rb.Namespace, rb.Name, err)
+		errs = append(errs, fmt.Errorf("list owned RoleBindings: %w", err))
+	} else {
+		for i := range rbs {
+			rb := &rbs[i]
+			if err := deleteClient.Delete(ctx, rb); err != nil && !apierrors.IsNotFound(err) {
+				errs = append(errs, fmt.Errorf("delete RoleBinding %s/%s: %w", rb.Namespace, rb.Name, err))
+				continue
+			}
+			metrics.RBACResourcesDeleted.WithLabelValues(metrics.ResourceRoleBinding).Inc()
 		}
-		metrics.RBACResourcesDeleted.WithLabelValues(metrics.ResourceRoleBinding).Inc()
 	}
 
 	if err := r.rbdPruneStaleServiceAccounts(ctx, rbd, nil, rbdDesiredServiceAccounts(rbd.Status.GeneratedServiceAccounts), deleteClient); err != nil {
+		errs = append(errs, err)
+	}
+	if err := errors.Join(errs...); err != nil {
 		return err
 	}
 
