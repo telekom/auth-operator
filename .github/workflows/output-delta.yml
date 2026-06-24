@@ -420,13 +420,8 @@ jobs:
             kubectl logs -n "$ns" -l control-plane=webhook-server > "/tmp/controller-logs/tag-${ns}-webhook.log" 2>/dev/null || true
           done
 
-          kubectl delete -k config/samples/broken/ --ignore-not-found --timeout=60s 2>/dev/null || true
-          kubectl delete -k config/samples/ --ignore-not-found --timeout=60s 2>/dev/null || true
-          make undeploy 2>/dev/null || true
-          kubectl wait --for=delete deployment/auth-operator-controller-manager -n auth-operator-system --timeout=180s 2>/dev/null || true
-          kubectl wait --for=delete deployment/auth-operator-webhook-server -n auth-operator-system --timeout=180s 2>/dev/null || true
-
           echo "tag_success=true" >> "$GITHUB_OUTPUT"
+          echo "::notice::Skipping latest-tag in-step cleanup; the baseline kind cluster is deleted after artifacts are uploaded."
 
       - name: Upload main output
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
