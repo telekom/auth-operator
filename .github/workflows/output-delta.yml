@@ -1248,6 +1248,30 @@ jobs:
             fi
           }
 
+          has_diff_files() {
+            local dir="$1"
+            local file
+            for file in "$dir"/*.diff; do
+              [ -e "$file" ] || continue
+              if [ -s "$file" ]; then
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          append_diff_files() {
+            local dir="$1"
+            local out="$2"
+            local file
+            for file in "$dir"/*.diff; do
+              [ -e "$file" ] || continue
+              if [ -s "$file" ]; then
+                cat "$file" >> "$out"
+              fi
+            done
+          }
+
           for resource in clusterroles roles clusterrolebindings rolebindings serviceaccounts; do
             diff_file "/tmp/main-output/${resource}.yaml" "/tmp/pr-output/${resource}.yaml" "/tmp/diff-output/main/${resource}.diff"
           done
@@ -1255,7 +1279,12 @@ jobs:
             diff_file "/tmp/main-output/${resource}.yaml" "/tmp/pr-output/${resource}.yaml" "/tmp/diff-output/main/${resource}.diff"
           done
           diff_file /tmp/main-output/metrics.txt /tmp/pr-output/metrics.txt /tmp/diff-output/main/metrics.diff
+          has_main_diff=false
+          if has_diff_files /tmp/diff-output/main; then
+            has_main_diff=true
+          fi
 
+          has_tag_diff=false
           if [ "$TAG_SUCCESS" = "true" ] && [ -d /tmp/tag-output ]; then
             for resource in clusterroles roles clusterrolebindings rolebindings serviceaccounts; do
               diff_file "/tmp/tag-output/${resource}.yaml" "/tmp/pr-output/${resource}.yaml" "/tmp/diff-output/tag/${resource}.diff"
@@ -1264,13 +1293,16 @@ jobs:
               diff_file "/tmp/tag-output/${resource}.yaml" "/tmp/pr-output/${resource}.yaml" "/tmp/diff-output/tag/${resource}.diff"
             done
             diff_file /tmp/tag-output/metrics.txt /tmp/pr-output/metrics.txt /tmp/diff-output/tag/metrics.diff
-            github_output "has_tag_diff=true"
-          else
-            github_output "has_tag_diff=false"
+            if has_diff_files /tmp/diff-output/tag; then
+              has_tag_diff=true
+            fi
           fi
+          github_output "has_tag_diff=${has_tag_diff}"
 
-          cat /tmp/diff-output/main/*.diff /tmp/diff-output/tag/*.diff > /tmp/diff-output/full-diff.txt 2>/dev/null || true
-          if diff -qr /tmp/main-output /tmp/pr-output >/dev/null 2>&1; then
+          : > /tmp/diff-output/full-diff.txt
+          append_diff_files /tmp/diff-output/main /tmp/diff-output/full-diff.txt
+          append_diff_files /tmp/diff-output/tag /tmp/diff-output/full-diff.txt
+          if [ "$has_main_diff" = "false" ] && [ "$has_tag_diff" = "false" ] && diff -qr /tmp/main-output /tmp/pr-output >/dev/null 2>&1; then
             github_output "has_diff=false"
           else
             github_output "has_diff=true"
