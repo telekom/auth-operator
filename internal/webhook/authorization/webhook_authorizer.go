@@ -56,6 +56,7 @@ const maxRequestBodySize = 1 << 20 // 1MB
 const (
 	reasonEmptyIdentity           = "empty user identity and no groups"
 	reasonMissingAttrs            = "missing resource and non-resource attributes"
+	reasonMultipleAttrs           = "resource and non-resource attributes are mutually exclusive"
 	reasonInternalEvaluationError = "internal evaluation error"
 	reasonUnauthorized            = "unauthorized"
 )
@@ -192,9 +193,11 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	items := append([]authorizationv1alpha1.WebhookAuthorizer(nil), globalItems...)
 
 	// Always keep scoped authorizers loaded so the active-rules gauge reflects the
-	// full set regardless of request type. Scoped authorizers are only used
-	// for evaluation when the SAR targets a specific namespace.
-	if sar.Spec.ResourceAttributes != nil && sar.Spec.ResourceAttributes.Namespace != "" {
+	// full set regardless of request type. Scoped authorizers are only used for
+	// namespaced evaluation when the SAR targets a specific namespace; for
+	// resource SARs without a namespace, they may only fail closed through a
+	// matching deniedPrincipal/resourceRule.
+	if sar.Spec.ResourceAttributes != nil {
 		items = append(items, scopedItems...)
 	}
 
@@ -531,6 +534,22 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 				resourceNS = sar.Spec.ResourceAttributes.Namespace
 			}
 			if resourceNS == "" {
+				if sar.Spec.ResourceAttributes != nil &&
+					wa.principalMatches(sar.Spec.User, sar.Spec.Groups, webhookAuthorizer.Spec.DeniedPrincipals) {
+					if ruleIdx := wa.resourceRuleIndex(webhookAuthorizer.Spec.ResourceRules, sar.Spec.ResourceAttributes); ruleIdx >= 0 {
+						evaluated++
+						return evaluationResult{
+							allowed:        false,
+							reason:         fmt.Sprintf("Access denied by WebhookAuthorizer %s", webhookAuthorizer.Name),
+							decision:       pkgmetrics.AuthorizerDecisionDenied,
+							authorizerName: webhookAuthorizer.Name,
+							matchedRule:    ruleIdx,
+							matchedField:   "deniedPrincipal",
+							evaluatedCount: evaluated,
+							skippedCount:   skipped,
+						}, nil
+					}
+				}
 				wa.Log.V(2).Info("skipping namespace-scoped authorizer for non-namespaced SAR",
 					"authorizer", webhookAuthorizer.Name)
 				skipped++
@@ -732,17 +751,17 @@ func (wa *Authorizer) resourceRuleIndex(rules []authzv1.ResourceRule, attr *auth
 		resourceKey = attr.Resource + "/" + attr.Subresource
 	}
 	for i, rule := range rules {
-		if !matchesRule(rule.Verbs, attr.Verb) {
+		if !matchesExactOrAll(rule.Verbs, attr.Verb) {
 			continue
 		}
-		if !matchesRule(rule.APIGroups, attr.Group) {
+		if !matchesExactOrAll(rule.APIGroups, attr.Group) {
 			continue
 		}
-		if !matchesRule(rule.Resources, resourceKey) {
+		if !matchesResourceRule(rule.Resources, resourceKey, attr.Subresource) {
 			continue
 		}
 		// ResourceNames: non-empty list restricts which resource names are allowed.
-		if len(rule.ResourceNames) > 0 && !matchesRule(rule.ResourceNames, attr.Name) {
+		if len(rule.ResourceNames) > 0 && !matchesExactOrAll(rule.ResourceNames, attr.Name) {
 			continue
 		}
 		return i
@@ -753,8 +772,8 @@ func (wa *Authorizer) resourceRuleIndex(rules []authzv1.ResourceRule, attr *auth
 // nonResourceRuleIndex returns the index of the first matching non-resource rule, or -1.
 func (wa *Authorizer) nonResourceRuleIndex(rules []authzv1.NonResourceRule, attr *authzv1.NonResourceAttributes) int {
 	for i, rule := range rules {
-		if matchesRule(rule.Verbs, attr.Verb) &&
-			matchesRule(rule.NonResourceURLs, attr.Path) {
+		if matchesExactOrAll(rule.Verbs, attr.Verb) &&
+			matchesNonResourceURLRule(rule.NonResourceURLs, attr.Path) {
 			return i
 		}
 	}
@@ -810,6 +829,9 @@ func validateSAR(sar *authzv1.SubjectAccessReview) string {
 	}
 	if sar.Spec.ResourceAttributes == nil && sar.Spec.NonResourceAttributes == nil {
 		return reasonMissingAttrs
+	}
+	if sar.Spec.ResourceAttributes != nil && sar.Spec.NonResourceAttributes != nil {
+		return reasonMultipleAttrs
 	}
 	return ""
 }
@@ -872,13 +894,35 @@ func (wa *Authorizer) recordRejectedMetrics(start time.Time) {
 	pkgmetrics.AuthorizerRequestDuration.WithLabelValues(pkgmetrics.AuthorizerDecisionDenied).Observe(duration)
 }
 
-// matchesRule checks if a value matches any pattern in the list.
-func matchesRule(patterns []string, value string) bool {
+// matchesExactOrAll matches Kubernetes ResourceRule fields where only exact
+// values or the full "*" wildcard are supported.
+func matchesExactOrAll(patterns []string, value string) bool {
 	for _, pattern := range patterns {
 		if pattern == "*" || pattern == value {
 			return true
 		}
-		if strings.HasSuffix(pattern, "*") && strings.HasPrefix(value, strings.TrimSuffix(pattern, "*")) {
+	}
+	return false
+}
+
+func matchesResourceRule(patterns []string, resourceKey, subresource string) bool {
+	for _, pattern := range patterns {
+		if pattern == "*" || pattern == resourceKey {
+			return true
+		}
+		if subresource != "" && pattern == "*/"+subresource {
+			return true
+		}
+	}
+	return false
+}
+
+func matchesNonResourceURLRule(patterns []string, path string) bool {
+	for _, pattern := range patterns {
+		if pattern == "*" || pattern == path {
+			return true
+		}
+		if strings.HasSuffix(pattern, "/*") && strings.HasPrefix(path, strings.TrimSuffix(pattern, "*")) {
 			return true
 		}
 	}

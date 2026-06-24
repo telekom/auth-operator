@@ -248,6 +248,61 @@ func TestServeHTTP_AuthorizerRulesUseLiveClient(t *testing.T) {
 	}
 }
 
+func TestServeHTTP_ScopedAuthorizerDeniesClusterScopedResourceSAR(t *testing.T) {
+	scheme := newScheme(t)
+	scopedDeny := &authzv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{Name: "scoped-cluster-deny"},
+		Spec: authzv1alpha1.WebhookAuthorizerSpec{
+			NamespaceSelector: metav1.LabelSelector{
+				MatchLabels: map[string]string{"env": "prod"},
+			},
+			DeniedPrincipals: []authzv1alpha1.Principal{{Groups: []string{"tenant-admins"}}},
+			ResourceRules: []authzv1.ResourceRule{{
+				Verbs:     []string{"delete"},
+				APIGroups: []string{"rbac.authorization.k8s.io"},
+				Resources: []string{"clusterroles"},
+			}},
+		},
+	}
+	handler := &Authorizer{
+		Client: newIndexedClient(scheme, scopedDeny),
+		Log:    logr.Discard(),
+	}
+	sar := authzv1.SubjectAccessReview{
+		Spec: authzv1.SubjectAccessReviewSpec{
+			User:   "alice",
+			Groups: []string{"tenant-admins"},
+			ResourceAttributes: &authzv1.ResourceAttributes{
+				Verb:     "delete",
+				Group:    "rbac.authorization.k8s.io",
+				Resource: "clusterroles",
+				Name:     "dangerous-role",
+			},
+		},
+	}
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(marshalSAR(t, sar)))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d; body: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+	var resp authzv1.SubjectAccessReview
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Status.Allowed {
+		t.Fatal("expected cluster-scoped SAR to be denied")
+	}
+	if !resp.Status.Denied {
+		t.Fatal("expected Denied=true for scoped deniedPrincipal on cluster-scoped resource SAR")
+	}
+	if resp.Status.Reason != "Access denied by WebhookAuthorizer" {
+		t.Fatalf("expected sanitized deny reason, got %q", resp.Status.Reason)
+	}
+}
+
 func TestAuditLog_DenyDecisionAtV0(t *testing.T) {
 	var buf strings.Builder
 	logger := capturingLogger(&buf, 0)
@@ -1539,6 +1594,48 @@ func TestServeHTTP_RejectsNoAttributes(t *testing.T) {
 	}
 }
 
+func TestServeHTTP_RejectsBothResourceAndNonResourceAttributes(t *testing.T) {
+	var buf strings.Builder
+	logger := capturingLogger(&buf, 1)
+	scheme := newScheme(t)
+	cl := newIndexedClient(scheme)
+
+	handler := &Authorizer{Client: cl, Log: logger}
+
+	sar := authzv1.SubjectAccessReview{
+		Spec: authzv1.SubjectAccessReviewSpec{
+			User:                  "some-user",
+			ResourceAttributes:    &authzv1.ResourceAttributes{Verb: "delete", Resource: "secrets"},
+			NonResourceAttributes: &authzv1.NonResourceAttributes{Verb: "get", Path: "/healthz"},
+		},
+	}
+	body := marshalSAR(t, sar)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var resp authzv1.SubjectAccessReview
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Status.Allowed {
+		t.Error("expected Allowed=false for SAR with both resource and non-resource attributes")
+	}
+	if !resp.Status.Denied {
+		t.Error("expected Denied=true for SAR with both resource and non-resource attributes")
+	}
+	if resp.Status.Reason != reasonMultipleAttrs {
+		t.Errorf("expected reason %q, got: %s", reasonMultipleAttrs, resp.Status.Reason)
+	}
+	if !strings.Contains(buf.String(), "rejecting malformed SubjectAccessReview") {
+		t.Errorf("expected rejection log entry, got:\n%s", buf.String())
+	}
+}
+
 func TestServeHTTP_AcceptsNonResourceAttributes(t *testing.T) {
 	scheme := newScheme(t)
 	cl := newIndexedClient(scheme)
@@ -1920,6 +2017,56 @@ func TestResourceRuleIndex_ResourceNamesMatching(t *testing.T) {
 	})
 }
 
+func TestResourceRuleIndex_KubernetesWildcardSemantics(t *testing.T) {
+	scheme := newScheme(t)
+	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+	handler := &Authorizer{Client: cl, Log: logr.Discard()}
+
+	tests := []struct {
+		name string
+		rule authzv1.ResourceRule
+		attr authzv1.ResourceAttributes
+		want bool
+	}{
+		{
+			name: "resource prefix wildcard is not supported",
+			rule: authzv1.ResourceRule{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pod*"}},
+			attr: authzv1.ResourceAttributes{Verb: "get", Group: "", Resource: "pods"},
+		},
+		{
+			name: "all resources subresource wildcard matches requested subresource",
+			rule: authzv1.ResourceRule{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"*/log"}},
+			attr: authzv1.ResourceAttributes{Verb: "get", Group: "", Resource: "pods", Subresource: "log"},
+			want: true,
+		},
+		{
+			name: "api group prefix wildcard is not supported",
+			rule: authzv1.ResourceRule{Verbs: []string{"get"}, APIGroups: []string{"apps*"}, Resources: []string{"deployments"}},
+			attr: authzv1.ResourceAttributes{Verb: "get", Group: "apps.example.com", Resource: "deployments"},
+		},
+		{
+			name: "resource name prefix wildcard is not supported",
+			rule: authzv1.ResourceRule{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"secrets"}, ResourceNames: []string{"prod-*"}},
+			attr: authzv1.ResourceAttributes{Verb: "get", Group: "", Resource: "secrets", Name: "prod-secret"},
+		},
+		{
+			name: "verb prefix wildcard is not supported",
+			rule: authzv1.ResourceRule{Verbs: []string{"get*"}, APIGroups: []string{""}, Resources: []string{"pods"}},
+			attr: authzv1.ResourceAttributes{Verb: "get", Group: "", Resource: "pods"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			idx := handler.resourceRuleIndex([]authzv1.ResourceRule{tt.rule}, &tt.attr)
+			got := idx >= 0
+			if got != tt.want {
+				t.Fatalf("resourceRuleIndex() matched = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestNonResourceRuleIndex_SuffixWildcardMatching(t *testing.T) {
 	scheme := newScheme(t)
 	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
@@ -1942,6 +2089,28 @@ func TestNonResourceRuleIndex_SuffixWildcardMatching(t *testing.T) {
 		idx := handler.nonResourceRuleIndex(rules, attr)
 		if idx >= 0 {
 			t.Errorf("expected no match for unrelated path, got rule index %d", idx)
+		}
+	})
+
+	t.Run("non-terminal wildcard does not match child path", func(t *testing.T) {
+		prefixRules := []authzv1.NonResourceRule{
+			{Verbs: []string{"get"}, NonResourceURLs: []string{"/api*"}},
+		}
+		attr := &authzv1.NonResourceAttributes{Verb: "get", Path: "/api/v1"}
+		idx := handler.nonResourceRuleIndex(prefixRules, attr)
+		if idx >= 0 {
+			t.Errorf("expected no match for unsupported /api* wildcard, got rule index %d", idx)
+		}
+	})
+
+	t.Run("non-terminal wildcard does not match sibling path", func(t *testing.T) {
+		prefixRules := []authzv1.NonResourceRule{
+			{Verbs: []string{"get"}, NonResourceURLs: []string{"/api*"}},
+		}
+		attr := &authzv1.NonResourceAttributes{Verb: "get", Path: "/apis"}
+		idx := handler.nonResourceRuleIndex(prefixRules, attr)
+		if idx >= 0 {
+			t.Errorf("expected no match for unsupported /api* wildcard, got rule index %d", idx)
 		}
 	})
 }
