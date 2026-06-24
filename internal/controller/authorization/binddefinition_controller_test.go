@@ -3265,6 +3265,46 @@ func TestDeleteSubjectServiceAccounts(t *testing.T) {
 		err := r.deleteSubjectServiceAccounts(ctx, bindDef)
 		g.Expect(err).NotTo(HaveOccurred())
 	})
+
+	t.Run("deletes previously generated SA removed from spec", func(t *testing.T) {
+		g := NewWithT(t)
+
+		bindDef := &authorizationv1alpha1.BindDefinition{
+			TypeMeta: metav1.TypeMeta{APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: "BindDefinition"},
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "del-status-sa-bd",
+				UID:  "del-status-sa-uid",
+			},
+			Spec: authorizationv1alpha1.BindDefinitionSpec{
+				TargetName: "del-status-sa",
+				Subjects:   []rbacv1.Subject{{Kind: "Group", Name: "devs", APIGroup: rbacv1.GroupName}},
+			},
+			Status: authorizationv1alpha1.BindDefinitionStatus{
+				GeneratedServiceAccounts: []rbacv1.Subject{
+					{Kind: rbacv1.ServiceAccountKind, Name: "removed-sa", Namespace: "default"},
+				},
+			},
+		}
+		sa := &corev1.ServiceAccount{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "removed-sa",
+				Namespace: "default",
+				OwnerReferences: []metav1.OwnerReference{
+					{APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: "BindDefinition", Name: bindDef.Name, UID: bindDef.UID, Controller: boolPtr(false)},
+				},
+			},
+		}
+
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bindDef, sa).WithStatusSubresource(bindDef).Build()
+		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
+
+		err := r.deleteSubjectServiceAccounts(ctx, bindDef)
+		g.Expect(err).NotTo(HaveOccurred())
+
+		var deleted corev1.ServiceAccount
+		err = c.Get(ctx, types.NamespacedName{Namespace: "default", Name: "removed-sa"}, &deleted)
+		g.Expect(apierrors.IsNotFound(err)).To(BeTrue())
+	})
 }
 
 func TestDeleteAllClusterRoleBindingsUnit(t *testing.T) {
@@ -3561,6 +3601,80 @@ func TestBindDefinitionPruneStaleBindingResources(t *testing.T) {
 	g.Expect(c.Get(ctx, types.NamespacedName{Namespace: "prune-ns", Name: desiredRB.Name}, &rb)).To(Succeed())
 	g.Expect(c.Get(ctx, types.NamespacedName{Namespace: "prune-ns", Name: unownedRB.Name}, &rb)).To(Succeed())
 	err = c.Get(ctx, types.NamespacedName{Namespace: "prune-ns", Name: staleRB.Name}, &rb)
+	g.Expect(apierrors.IsNotFound(err)).To(BeTrue())
+}
+
+func TestBindDefinitionPruneStaleServiceAccounts(t *testing.T) {
+	ctx := context.Background()
+	g := NewWithT(t)
+
+	scheme := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(scheme)
+	_ = rbacv1.SchemeBuilder.AddToScheme(scheme)
+	_ = corev1.SchemeBuilder.AddToScheme(scheme)
+
+	bindDef := &authorizationv1alpha1.BindDefinition{
+		TypeMeta: metav1.TypeMeta{APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: "BindDefinition"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "prune-sa-bd",
+			UID:  "prune-sa-bd-uid",
+		},
+		Status: authorizationv1alpha1.BindDefinitionStatus{
+			GeneratedServiceAccounts: []rbacv1.Subject{
+				{Kind: rbacv1.ServiceAccountKind, Name: "desired-sa", Namespace: "prune-sa-ns"},
+				{Kind: rbacv1.ServiceAccountKind, Name: "stale-sa", Namespace: "prune-sa-ns"},
+			},
+		},
+	}
+	ownerRef := metav1.OwnerReference{
+		APIVersion: authorizationv1alpha1.GroupVersion.String(),
+		Kind:       "BindDefinition",
+		Name:       bindDef.Name,
+		UID:        bindDef.UID,
+		Controller: boolPtr(false),
+	}
+	desiredSA := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "desired-sa",
+			Namespace:       "prune-sa-ns",
+			OwnerReferences: []metav1.OwnerReference{ownerRef},
+		},
+	}
+	staleSA := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "stale-sa",
+			Namespace:       "prune-sa-ns",
+			OwnerReferences: []metav1.OwnerReference{ownerRef},
+		},
+	}
+	spoofedSA := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "spoofed-sa",
+			Namespace:       "prune-sa-ns",
+			OwnerReferences: []metav1.OwnerReference{ownerRef},
+		},
+	}
+	externalSA := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{Name: "external-sa", Namespace: "prune-sa-ns"},
+	}
+
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(bindDef, desiredSA, staleSA, spoofedSA, externalSA).
+		WithStatusSubresource(bindDef).
+		Build()
+	r := &BindDefinitionReconciler{client: c, reader: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
+
+	desired := bindDefinitionDesiredServiceAccounts([]rbacv1.Subject{
+		{Kind: rbacv1.ServiceAccountKind, Name: "desired-sa", Namespace: "prune-sa-ns"},
+	})
+	g.Expect(r.pruneStaleServiceAccounts(ctx, bindDef, desired, bindDef.Status.GeneratedServiceAccounts)).To(Succeed())
+
+	var sa corev1.ServiceAccount
+	g.Expect(c.Get(ctx, types.NamespacedName{Namespace: "prune-sa-ns", Name: "desired-sa"}, &sa)).To(Succeed())
+	g.Expect(c.Get(ctx, types.NamespacedName{Namespace: "prune-sa-ns", Name: "external-sa"}, &sa)).To(Succeed())
+	g.Expect(c.Get(ctx, types.NamespacedName{Namespace: "prune-sa-ns", Name: "spoofed-sa"}, &sa)).To(Succeed())
+	err := c.Get(ctx, types.NamespacedName{Namespace: "prune-sa-ns", Name: "stale-sa"}, &sa)
 	g.Expect(apierrors.IsNotFound(err)).To(BeTrue())
 }
 
