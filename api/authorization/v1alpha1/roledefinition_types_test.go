@@ -14,8 +14,8 @@ import (
 
 func safeAggregateFromSelectorLabels() map[string]string {
 	return map[string]string{
-		"t-caas.telekom.com/rbac-fragment":   "true",
-		"t-caas.telekom.com/aggregate-scope": "team",
+		aggregateFromFragmentLabelKey: aggregateFromFragmentLabelValue,
+		aggregateFromScopeLabelKey:    "team",
 	}
 }
 
@@ -73,6 +73,23 @@ func TestValidateRoleDefinitionSpec(t *testing.T) {
 				},
 			},
 			wantErr: "aggregationLabels can only be used when targetRole is 'ClusterRole'",
+		},
+		{
+			name: "reject metadata aggregation label on Role",
+			rd: &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-role",
+					Labels: map[string]string{
+						rbacv1.GroupName + "/aggregate-to-view": "true",
+					},
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionNamespacedRole,
+					TargetName:      "test-role",
+					TargetNamespace: "default",
+				},
+			},
+			wantErr: "metadata labels propagate",
 		},
 		{
 			name: "reject aggregateFrom on Role",

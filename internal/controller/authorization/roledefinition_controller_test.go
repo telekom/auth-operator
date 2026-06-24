@@ -1935,8 +1935,7 @@ func TestRDReconcileStallsUnsafeStoredAggregateFrom(t *testing.T) {
 	_, err := r.Reconcile(context.Background(), reconcile.Request{
 		NamespacedName: types.NamespacedName{Name: rd.Name},
 	})
-	g.Expect(err).To(HaveOccurred())
-	g.Expect(err.Error()).To(ContainSubstring("rbac-fragment"))
+	g.Expect(err).NotTo(HaveOccurred())
 
 	var generated rbacv1.ClusterRole
 	err = c.Get(context.Background(), types.NamespacedName{Name: rd.Spec.TargetName}, &generated)
@@ -1990,8 +1989,7 @@ func TestRDReconcileStallsStoredAggregateFromOnNamespacedRole(t *testing.T) {
 	_, err := r.Reconcile(context.Background(), reconcile.Request{
 		NamespacedName: types.NamespacedName{Name: rd.Name},
 	})
-	g.Expect(err).To(HaveOccurred())
-	g.Expect(err.Error()).To(ContainSubstring("aggregateFrom can only be used when targetRole is 'ClusterRole'"))
+	g.Expect(err).NotTo(HaveOccurred())
 
 	var generated rbacv1.Role
 	err = c.Get(context.Background(), types.NamespacedName{Namespace: rd.Spec.TargetNamespace, Name: rd.Spec.TargetName}, &generated)

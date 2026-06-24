@@ -383,6 +383,27 @@ var _ = Describe("RoleDefinition Webhook", func() {
 			Expect(err.Error()).To(ContainSubstring("metadata labels propagate"))
 		})
 
+		It("Should deny Kubernetes RBAC aggregation labels on Role metadata", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-role-agg-metadata-denied",
+					Labels: map[string]string{
+						rbacv1.GroupName + "/aggregate-to-view": "true",
+					},
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionNamespacedRole,
+					TargetName:      "test-role-agg-metadata-denied",
+					TargetNamespace: "default",
+					ScopeNamespaced: true,
+				},
+			}
+			err := k8sClient.Create(ctx, rd)
+			Expect(err).To(HaveOccurred(), "expected Role metadata aggregate-to-view rejection")
+			Expect(apierrors.IsForbidden(err)).To(BeTrue(), "expected Forbidden status error")
+			Expect(err.Error()).To(ContainSubstring("metadata labels propagate"))
+		})
+
 		It("Should deny aggregateFrom with empty selector criteria", func() {
 			rd := &RoleDefinition{
 				ObjectMeta: metav1.ObjectMeta{

@@ -289,7 +289,7 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			r.markStalled(ctx, roleDefinition, err)
 			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ResultError).Inc()
 			metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ErrorTypeValidation).Inc()
-			return ctrl.Result{}, err
+			return ctrl.Result{}, nil
 		}
 	}
 

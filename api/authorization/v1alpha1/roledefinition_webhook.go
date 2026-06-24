@@ -305,6 +305,13 @@ func validateRoleDefinitionSpec(obj *RoleDefinition) error {
 		return apierrors.NewBadRequest("targetNamespace must be empty when targetRole is 'ClusterRole'")
 	}
 
+	// Metadata labels propagate to the generated Role or ClusterRole. Reject
+	// Kubernetes RBAC aggregation labels for every targetRole so reconciliation
+	// does not silently drop admitted input.
+	if err := rejectForbiddenMetadataAggregationLabels(obj); err != nil {
+		return err
+	}
+
 	// Aggregation fields are only valid for ClusterRole targets
 	if obj.Spec.TargetRole != DefinitionClusterRole {
 		if len(obj.Spec.AggregationLabels) > 0 {
@@ -317,7 +324,6 @@ func validateRoleDefinitionSpec(obj *RoleDefinition) error {
 
 	// Reject aggregation labels that target built-in ClusterRoles to prevent
 	// privilege escalation via ClusterRole aggregation.
-	// Only applies to ClusterRole targets since aggregation is a ClusterRole-only concept.
 	if obj.Spec.TargetRole == DefinitionClusterRole {
 		if err := rejectForbiddenAggregationLabels(obj); err != nil {
 			return err
@@ -357,6 +363,10 @@ func rejectForbiddenAggregationLabels(obj *RoleDefinition) error {
 			)
 		}
 	}
+	return rejectForbiddenMetadataAggregationLabels(obj)
+}
+
+func rejectForbiddenMetadataAggregationLabels(obj *RoleDefinition) error {
 	for key := range obj.Labels {
 		if strings.HasPrefix(key, kubernetesRBACAggregationLabelPrefix) {
 			return apierrors.NewForbidden(
@@ -364,7 +374,7 @@ func rejectForbiddenAggregationLabels(obj *RoleDefinition) error {
 				obj.Name,
 				field.Forbidden(
 					field.NewPath("metadata", "labels").Key(key),
-					"must not use Kubernetes RBAC aggregation labels because metadata labels propagate to the generated ClusterRole",
+					"must not use Kubernetes RBAC aggregation labels because metadata labels propagate to the generated RBAC object",
 				),
 			)
 		}
@@ -394,7 +404,7 @@ func ValidateRoleDefinitionAggregateFrom(obj *RoleDefinition) error {
 				obj.Name,
 				field.Forbidden(
 					field.NewPath("spec", "aggregateFrom", "clusterRoleSelectors").Index(i),
-					"empty selector would match all ClusterRoles; specify matchLabels or matchExpressions",
+					"empty selector would match all ClusterRoles; specify matchLabels",
 				),
 			)
 		}
