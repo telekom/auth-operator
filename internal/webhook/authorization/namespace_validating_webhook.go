@@ -162,7 +162,7 @@ func (v *NamespaceValidator) decodeNamespaces(logger logr.Logger, req admission.
 
 // validateLabelImmutability checks that controlled labels are not modified or removed
 // during namespace updates. Initial adoption (adding a label for the first time) is allowed
-// only for trusted bypass users.
+// only for protected-label migration bypasses.
 // Returns a denial response if a violation is found, or nil if validation passes.
 func (v *NamespaceValidator) validateLabelImmutability(logger logr.Logger, req admission.Request, ns, oldNs *corev1.Namespace, bypassResult BypassCheckResult) *admission.Response {
 	// Ensure Labels maps are not nil to prevent nil pointer dereference
@@ -243,7 +243,8 @@ func (v *NamespaceValidator) validateLabelImmutability(logger logr.Logger, req a
 }
 
 // detectOwnerReclassification returns true if a tenant↔thirdparty reclassification is
-// happening during TDG migration by a bypass user. Platform is never reclassifiable.
+// happening during TDG migration by a protected-label migration bypass. Platform is
+// never reclassifiable.
 func (v *NamespaceValidator) detectOwnerReclassification(logger logr.Logger, req admission.Request, ns, oldNs *corev1.Namespace, bypassResult BypassCheckResult) bool {
 	if !v.TDGMigration || !bypassResult.AllowProtectedLabelChanges {
 		return false

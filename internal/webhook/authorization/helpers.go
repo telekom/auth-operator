@@ -60,7 +60,8 @@ BYPASS CATEGORIES:
    - kustomize-controller: For Flux Kustomizations
    - schiff-tenant/schiff-system m2m-sa: For migration automation
    - trident-system trident-operator: For storage migration
-   - Scope: UPDATE operations only
+   - Scope: Migration accounts are temporary bypass principals; trident-system
+     remains limited to UPDATE operations on the trident-system namespace.
    - Rationale: Temporary bypasses during platform migration
 
 MODIFYING BYPASS ACCOUNTS:
@@ -150,7 +151,7 @@ func CheckBypass(username string, groups []string, operation admissionv1.Operati
 	}
 
 	// TDG migration specific bypasses
-	if tdgMigration && operation == admissionv1.Update {
+	if tdgMigration {
 		switch username {
 		case helmControllerSA:
 			return BypassCheckResult{ShouldBypass: true, AllowProtectedLabelChanges: true, Reason: "helm-controller (tdgMigration)"}
@@ -161,7 +162,7 @@ func CheckBypass(username string, groups []string, operation admissionv1.Operati
 		case schiffSystemM2MSA:
 			return BypassCheckResult{ShouldBypass: true, AllowProtectedLabelChanges: true, Reason: "schiff-system m2m-sa (tdgMigration)"}
 		case tridentOperatorSystemSA:
-			if namespace == tridentSystemNamespace {
+			if operation == admissionv1.Update && namespace == tridentSystemNamespace {
 				return BypassCheckResult{ShouldBypass: true, AllowProtectedLabelChanges: true, Reason: "trident-operator for trident-system (tdgMigration)"}
 			}
 		}
