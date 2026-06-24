@@ -29,7 +29,10 @@ spec:
         control-plane: controller-manager
     spec:
       securityContext:
+        fsGroup: 65532
+        runAsGroup: 65532
         runAsNonRoot: true
+        runAsUser: 65532
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -54,6 +57,7 @@ spec:
             capabilities:
               drop:
                 - "ALL"
+            readOnlyRootFilesystem: true
           livenessProbe:
             httpGet:
               path: /healthz
