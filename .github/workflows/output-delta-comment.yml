@@ -282,11 +282,52 @@ jobs:
             rm -rf "$diff_dir"
             mkdir -p "$diff_dir"
 
+            write_placeholder_report_comment() {
+              local message="$1"
+              local detail="${2:-}"
+
+              {
+                echo "<!-- output-delta:part1 -->"
+                echo "## :bar_chart: Output Delta Report"
+                echo ""
+                echo "$message"
+                if [ -n "$detail" ]; then
+                  echo "$detail"
+                fi
+                echo ""
+                echo "No full diff content was generated for this run."
+              } > "$diff_dir/part-0001.md"
+            }
+
             if [ "$has_diff" != "true" ]; then
+              if [ "$IS_CURRENT" = "false" ]; then
+                write_placeholder_report_comment \
+                  "Output differences were not computed for this stale workflow event." \
+                  "The PR head moved from \`${HEAD_SHA}\` to \`${CURRENT_HEAD}\`; wait for the current-head Output Delta run."
+              elif [ "$IS_CURRENT" = "unknown" ]; then
+                write_placeholder_report_comment \
+                  "Output differences could not be computed because the workflow could not confirm the current PR head." \
+                  "Inspect the workflow logs before merging."
+              elif [ "$IS_APPLICABLE" != "true" ]; then
+                write_placeholder_report_comment \
+                  "No output differences were detected for this PR." \
+                  "No output-delta input files changed, so the Output Delta comparison workflow was not run."
+              elif [ "$has_diff" = "false" ]; then
+                write_placeholder_report_comment \
+                  "No output differences were detected between trusted main baseline and this PR." \
+                  "There is no diff to inspect for this run."
+              else
+                write_placeholder_report_comment \
+                  "Output differences could not be computed for this run." \
+                  "Inspect the workflow run and uploaded artifacts before merging."
+              fi
               return 0
             fi
             if [ ! -s "$diff_file" ]; then
               echo "::warning::Output-delta diff artifact did not contain full-diff.txt; no inline diff comments generated."
+              write_placeholder_report_comment \
+                "Output differences were detected, but the inline full diff could not be generated." \
+                "The downloaded output-delta-diff-output artifact did not contain full-diff.txt."
               return 0
             fi
 
