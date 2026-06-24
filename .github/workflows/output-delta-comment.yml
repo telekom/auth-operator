@@ -145,24 +145,44 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          current_head="$(gh pr view "$PR_NUMBER" \
+          api_error="$(mktemp)"
+          trap 'rm -f "$api_error"' EXIT
+
+          if ! current_head="$(gh pr view "$PR_NUMBER" \
             --repo "$GH_REPO" \
             --json headRefOid \
-            --jq '.headRefOid')"
-          if [ "$current_head" != "$HEAD_SHA" ]; then
-            echo "::notice::Skipping stale output-delta run for ${HEAD_SHA}; current PR head is ${current_head}."
-            echo "is_current=false" >> "$GITHUB_OUTPUT"
+            --jq '.headRefOid' 2>"$api_error")"; then
+            cat "$api_error" >&2
+            echo "::warning::Could not confirm current PR head; posting unknown-status comment."
+            {
+              echo "is_current=unknown"
+              echo "current_head=unknown"
+            } >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          echo "is_current=true" >> "$GITHUB_OUTPUT"
+          if [ "$current_head" != "$HEAD_SHA" ]; then
+            echo "::notice::Posting stale output-delta comment for ${HEAD_SHA}; current PR head is ${current_head}."
+            {
+              echo "is_current=false"
+              echo "current_head=${current_head}"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          {
+            echo "is_current=true"
+            echo "current_head=${current_head}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Download comment data
-        if: steps.current.outputs.is_current == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           IS_APPLICABLE: ${{ steps.applicability.outputs.is_applicable }}
+          IS_CURRENT: ${{ steps.current.outputs.is_current }}
+          CURRENT_HEAD: ${{ steps.current.outputs.current_head }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           RUN_FOUND: ${{ steps.output-delta.outputs.run_found }}
           RUN_ID: ${{ steps.output-delta.outputs.run_id }}
           RUN_URL: ${{ steps.output-delta.outputs.run_url }}
@@ -266,7 +286,25 @@ jobs:
             local status_diff_display="${has_status_diff}"
             local pr_errors_display="${pr_has_errors}"
             local tag_diff_display="${has_tag_diff}"
-            if [ "$IS_APPLICABLE" != "true" ]; then
+            if [ "$IS_CURRENT" = "false" ]; then
+              workflow_conclusion=stale_head
+              baseline_display=skipped
+              candidate_display=skipped
+              diff_display=unknown
+              rbac_diff_display=false
+              status_diff_display=false
+              pr_errors_display=false
+              tag_diff_display=false
+            elif [ "$IS_CURRENT" = "unknown" ]; then
+              workflow_conclusion=current_head_unknown
+              baseline_display=unknown
+              candidate_display=unknown
+              diff_display=unknown
+              rbac_diff_display=false
+              status_diff_display=false
+              pr_errors_display=false
+              tag_diff_display=false
+            elif [ "$IS_APPLICABLE" != "true" ]; then
               workflow_conclusion=skipped
               workflow_run=not_applicable
               baseline_display=skipped
@@ -282,7 +320,13 @@ jobs:
               echo "<!-- auth-operator-output-delta-comment -->"
               echo "## Output Delta"
               echo ""
-              if [ "$IS_APPLICABLE" != "true" ]; then
+              if [ "$IS_CURRENT" = "false" ]; then
+                echo "Output differences were not computed for this workflow event because it is stale."
+                echo "The PR head moved from \`${HEAD_SHA}\` to \`${CURRENT_HEAD}\`; wait for the current-head Output Delta run."
+              elif [ "$IS_CURRENT" = "unknown" ]; then
+                echo "Output differences could not be computed because the workflow could not confirm the current PR head."
+                echo "No diff is available for this run; inspect the workflow logs before merging."
+              elif [ "$IS_APPLICABLE" != "true" ]; then
                 echo "No output differences were detected for this PR."
                 echo "No output-delta input files changed."
               else
@@ -316,7 +360,11 @@ jobs:
             } > /tmp/output-delta-comment/body.md
           }
 
-          if [ "$IS_APPLICABLE" != "true" ]; then
+          if [ "$IS_CURRENT" = "false" ]; then
+            echo "::notice::Posting stale-head comment."
+          elif [ "$IS_CURRENT" = "unknown" ]; then
+            echo "::warning::Posting current-head-unknown comment."
+          elif [ "$IS_APPLICABLE" != "true" ]; then
             has_diff=false
             echo "::notice::Posting no-diff comment; no inputs changed."
           elif [ "$RUN_FOUND" = "true" ] && [ -n "$RUN_ID" ]; then
@@ -330,14 +378,13 @@ jobs:
             echo "::warning::No completed Output Delta run was found; posting unknown-status comment."
           fi
 
-          if [ "$IS_APPLICABLE" = "true" ] && ! read_status_data; then
+          if [ "$IS_CURRENT" = "true" ] && [ "$IS_APPLICABLE" = "true" ] && ! read_status_data; then
             echo "::warning::Output-delta comment artifact did not contain status.env; posting unknown-status comment."
           fi
 
           write_comment_body
 
       - name: Create or update PR comment
-        if: steps.current.outputs.is_current == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -353,7 +400,7 @@ jobs:
 
           jq -n --rawfile body "$body_file" '{body: $body}' > /tmp/output-delta-comment/comment.json
           comment_id="$(gh api --paginate "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
-            --jq '.[] | select(.body | contains("<!-- auth-operator-output-delta-comment -->")) | .id' \
+            --jq '.[] | select(.user.login == "github-actions[bot]") | select(.body | contains("<!-- auth-operator-output-delta-comment -->")) | .id' \
             | tail -n 1)"
 
           if [ -n "$comment_id" ]; then
