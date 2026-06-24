@@ -267,15 +267,15 @@ jobs:
             local pr_errors_display="${pr_has_errors}"
             local tag_diff_display="${has_tag_diff}"
             if [ "$IS_APPLICABLE" != "true" ]; then
-              workflow_conclusion=not_applicable
+              workflow_conclusion=skipped
               workflow_run=not_applicable
               baseline_display=skipped
               candidate_display=skipped
-              diff_display=not_applicable
-              rbac_diff_display=not_applicable
-              status_diff_display=not_applicable
-              pr_errors_display=not_applicable
-              tag_diff_display=not_applicable
+              diff_display=false
+              rbac_diff_display=false
+              status_diff_display=false
+              pr_errors_display=false
+              tag_diff_display=false
             fi
 
             {
@@ -283,7 +283,8 @@ jobs:
               echo "## Output Delta"
               echo ""
               if [ "$IS_APPLICABLE" != "true" ]; then
-                echo "No output-delta comparison was required for this PR. There is no diff to inspect for this run."
+                echo "No output differences were detected for this PR."
+                echo "No output-delta input files changed."
               else
                 case "$has_diff" in
                   true)
@@ -316,8 +317,8 @@ jobs:
           }
 
           if [ "$IS_APPLICABLE" != "true" ]; then
-            has_diff=unknown
-            echo "::notice::No output-delta-relevant files changed; posting not-applicable comment."
+            has_diff=false
+            echo "::notice::Posting no-diff comment; no inputs changed."
           elif [ "$RUN_FOUND" = "true" ] && [ -n "$RUN_ID" ]; then
             if ! gh run download "$RUN_ID" \
               --repo "$GH_REPO" \
