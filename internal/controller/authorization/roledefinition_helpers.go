@@ -212,8 +212,8 @@ func (r *RoleDefinitionReconciler) markDeletionFailed(
 	if updateErr := ssa.ApplyRoleDefinitionStatus(ctx, r.client, roleDefinition); updateErr != nil {
 		logger.Error(updateErr, "Failed to apply status after deletion error",
 			"roleDefinitionName", roleDefinition.Name)
-		return ctrl.Result{}, fmt.Errorf("deletion failed with error %s and a second error was found during update of role definition status: %w",
-			err.Error(), updateErr)
+		return ctrl.Result{}, fmt.Errorf("deletion failed: %w; update role definition status after deletion failure: %w",
+			err, updateErr)
 	}
 	return ctrl.Result{}, err
 }

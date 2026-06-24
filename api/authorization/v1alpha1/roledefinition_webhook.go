@@ -347,9 +347,9 @@ const (
 	aggregateFromScopeLabelKey           = "t-caas.telekom.com/aggregate-scope"
 )
 
-// rejectForbiddenAggregationLabels checks both spec.aggregationLabels and
-// metadata.labels for Kubernetes RBAC aggregation keys. RoleDefinition must not
-// feed generated rules into built-in or externally managed aggregating roles.
+// rejectForbiddenAggregationLabels checks spec.aggregationLabels for Kubernetes
+// RBAC aggregation keys. RoleDefinition must not feed generated rules into
+// built-in or externally managed aggregating roles.
 func rejectForbiddenAggregationLabels(obj *RoleDefinition) error {
 	for key := range obj.Spec.AggregationLabels {
 		if strings.HasPrefix(key, kubernetesRBACAggregationLabelPrefix) {
@@ -363,7 +363,7 @@ func rejectForbiddenAggregationLabels(obj *RoleDefinition) error {
 			)
 		}
 	}
-	return rejectForbiddenMetadataAggregationLabels(obj)
+	return nil
 }
 
 func rejectForbiddenMetadataAggregationLabels(obj *RoleDefinition) error {

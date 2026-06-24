@@ -775,6 +775,48 @@ func TestHandleDeletion(t *testing.T) {
 		g.Expect(result.RequeueAfter).NotTo(BeZero())
 	})
 
+	t.Run("wraps deletion and status update errors", func(t *testing.T) {
+		g := NewWithT(t)
+
+		rd := &authorizationv1alpha1.RoleDefinition{
+			TypeMeta: metav1.TypeMeta{
+				APIVersion: authorizationv1alpha1.GroupVersion.String(),
+				Kind:       "RoleDefinition",
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "failed-delete-rd",
+				UID:        "failed-delete-uid",
+				Generation: 3,
+			},
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				TargetName: "failed-delete-role",
+				TargetRole: authorizationv1alpha1.DefinitionClusterRole,
+			},
+		}
+		deleteErr := errors.New("delete failed")
+		statusErr := errors.New("status apply failed")
+
+		c := fake.NewClientBuilder().WithScheme(s).
+			WithObjects(rd).
+			WithStatusSubresource(rd).
+			WithInterceptorFuncs(interceptor.Funcs{
+				SubResourceApply: func(_ context.Context, _ client.Client, subResourceName string, _ runtime.ApplyConfiguration, _ ...client.SubResourceApplyOption) error {
+					if subResourceName == "status" {
+						return statusErr
+					}
+					return nil
+				},
+			}).
+			Build()
+		r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+		_, err := r.markDeletionFailed(ctx, rd, deleteErr)
+
+		g.Expect(err).To(HaveOccurred())
+		g.Expect(errors.Is(err, deleteErr)).To(BeTrue())
+		g.Expect(errors.Is(err, statusErr)).To(BeTrue())
+	})
+
 	t.Run("removes finalizer when role already deleted", func(t *testing.T) {
 		g := NewWithT(t)
 
