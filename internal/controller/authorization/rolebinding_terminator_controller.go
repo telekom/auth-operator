@@ -86,6 +86,10 @@ func newNamespaceTerminationStatus() *namespaceTerminationStatus {
 	}
 }
 
+type apiResourceProvider interface {
+	GetAPIResources() (discovery.APIResourcesByGroupVersion, error)
+}
+
 // RoleBindingTerminator is responsible for handling finalizers on RoleBindings owned by BindDefinitions.
 // During deletion, if the namespace is terminating it checks for remaining resources before removing finalizers; otherwise it removes them directly.
 type RoleBindingTerminator struct {
@@ -93,7 +97,7 @@ type RoleBindingTerminator struct {
 	reader                             client.Reader
 	scheme                             *runtime.Scheme
 	dynamicClient                      dynamic.Interface
-	resourceTracker                    *discovery.ResourceTracker
+	resourceTracker                    apiResourceProvider
 	recorder                           events.EventRecorder
 	namespaceTerminationResourcesCache sync.Map // map[string]*namespaceTerminationStatus
 }
@@ -183,7 +187,7 @@ func (r *RoleBindingTerminator) getNamespacedBlockingResources(ctx context.Conte
 // sub-resources) that still exist in a terminating namespace. A non-empty slice means
 // the namespace cannot be fully cleaned up yet and RoleBinding finalizers must be kept.
 // Returns ([]namespaceDeletionResourceBlocking, error).
-func namespaceHasResources(ctx context.Context, resourceTracker *discovery.ResourceTracker, dynamicClient dynamic.Interface, namespace string) ([]namespaceDeletionResourceBlocking, error) {
+func namespaceHasResources(ctx context.Context, resourceTracker apiResourceProvider, dynamicClient dynamic.Interface, namespace string) ([]namespaceDeletionResourceBlocking, error) {
 	logger := log.FromContext(ctx)
 	logger.V(2).Info("starting namespace resource check", "namespace", namespace)
 
@@ -243,6 +247,12 @@ func namespaceHasResources(ctx context.Context, resourceTracker *discovery.Resou
 				continue
 			}
 
+			if !resource.Namespaced {
+				logger.V(4).Info("skipping cluster-scoped resource", "namespace", namespace, "resource", resource.Name, "groupVersion", groupVersion)
+				resourcesSkipped.Add(1)
+				continue
+			}
+
 			if !supportsList(resource.Verbs) {
 				// if resource does not support "list", skip it
 				logger.V(4).Info("skipping resource without list verb", "namespace", namespace, "resource", resource.Name, "groupVersion", groupVersion)
@@ -261,9 +271,9 @@ func namespaceHasResources(ctx context.Context, resourceTracker *discovery.Resou
 				// using dynamic client to not instantiate all typed clients
 				list, err := dynamicClient.Resource(gvr).Namespace(namespace).List(ctx, metav1.ListOptions{})
 				if err != nil {
-					logger.V(2).Info("skipping resource due to list error", "namespace", namespace, "resource", gvr.String(), "error", err)
+					logger.Error(err, "failed to list resource while checking namespace termination", "namespace", namespace, "resource", gvr.String())
 					resourcesSkipped.Add(1)
-					return nil
+					return fmt.Errorf("list %s in namespace %s: %w", gvr.String(), namespace, err)
 				}
 
 				resourcesChecked.Add(1)
@@ -293,11 +303,12 @@ func namespaceHasResources(ctx context.Context, resourceTracker *discovery.Resou
 			})
 		}
 	}
-	if err := errGroup.Wait(); err != nil {
-		return nil, fmt.Errorf("error listing resources in namespace %s: %w", namespace, err)
-	}
+	waitErr := errGroup.Wait()
 	close(blockingResourcesChannel)
 	collectorWg.Wait() // Wait for collector goroutine to finish processing all items
+	if waitErr != nil {
+		return nil, fmt.Errorf("error listing resources in namespace %s: %w", namespace, waitErr)
+	}
 
 	// If we found blocking resources, return them all
 	if len(blockingResources) > 0 {
