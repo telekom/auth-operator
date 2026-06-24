@@ -166,12 +166,11 @@ func (r *RestrictedBindDefinitionReconciler) rbdEvaluatePolicy(
 	ctx context.Context,
 	rbd *authorizationv1alpha1.RestrictedBindDefinition,
 	rbacPolicy *authorizationv1alpha1.RBACPolicy,
-	applyClient client.Client,
 ) (result ctrl.Result, handled bool, retErr error) {
 	labelGetter := newLabelGetter(r.ownershipReader())
 	violations := policy.EvaluateBindDefinition(ctx, rbacPolicy, rbd, labelGetter)
 	if err := labelGetter.Err(); err != nil {
-		if deprovisionErr := r.rbdDeprovision(ctx, rbd, applyClient); deprovisionErr != nil {
+		if deprovisionErr := r.rbdDeprovision(ctx, rbd, r.client); deprovisionErr != nil {
 			err = errors.Join(err, fmt.Errorf("deprovision after policy selector evaluation failure: %w", deprovisionErr))
 		} else {
 			rbdClearDeprovisionedStatus(rbd)
@@ -191,7 +190,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdEvaluatePolicy(
 		ControllerLabel: metrics.ControllerRestrictedBindDefinition,
 		ResourceKind:    "RestrictedBindDefinition",
 		Deprovision: func(ctx context.Context) error {
-			if err := r.rbdDeprovision(ctx, rbd, applyClient); err != nil {
+			if err := r.rbdDeprovision(ctx, rbd, r.client); err != nil {
 				return err
 			}
 			rbdClearDeprovisionedStatus(rbd)
@@ -586,29 +585,11 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 		return ctrl.Result{}, err
 	}
 	if rbacPolicy.GetDeletionTimestamp() != nil {
-		applyClient, impersonatedUser, err := r.rbdResolveApplyClient(rbacPolicy)
-		if err != nil {
-			r.rbdMarkStalled(ctx, rbd, err)
-			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
-			metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
-			return ctrl.Result{}, fmt.Errorf("resolve apply client for deleting RBACPolicy %s referenced by RestrictedBindDefinition %s: %w",
-				rbacPolicy.Name, rbd.Name, err)
-		}
-		r.rbdLogApplyIdentity(ctx, rbd.Name, rbacPolicy.Name, impersonatedUser)
-		return r.rbdHandleDeletingPolicy(ctx, rbd, rbacPolicy, applyClient)
+		return r.rbdHandleDeletingPolicy(ctx, rbd, rbacPolicy)
 	}
-
-	applyClient, impersonatedUser, err := r.rbdResolveApplyClient(rbacPolicy)
-	if err != nil {
-		r.rbdMarkStalled(ctx, rbd, err)
-		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
-		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
-		return ctrl.Result{}, fmt.Errorf("resolve apply client for RestrictedBindDefinition %s: %w", rbd.Name, err)
-	}
-	r.rbdLogApplyIdentity(ctx, rbd.Name, rbacPolicy.Name, impersonatedUser)
 
 	// Step 6: Evaluate policy compliance.
-	if result, handled, err := r.rbdEvaluatePolicy(ctx, rbd, rbacPolicy, applyClient); handled {
+	if result, handled, err := r.rbdEvaluatePolicy(ctx, rbd, rbacPolicy); handled {
 		return result, err
 	}
 
@@ -629,7 +610,7 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 	rbd.Status.MissingRoleRefs = missingRoles
 	metrics.RoleRefsMissing.WithLabelValues(rbd.Name).Set(float64(len(missingRoles)))
 	if len(missingRoles) > 0 {
-		return r.rbdHandleMissingRoleRefs(ctx, rbd, missingRoles, applyClient)
+		return r.rbdHandleMissingRoleRefs(ctx, rbd, missingRoles)
 	}
 
 	missingTargetNamespaces, err := r.rbdFindMissingTargetNamespaces(ctx, rbd)
@@ -642,6 +623,14 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 
 	// Step 8: Reconcile RBAC resources.
 	saCreationConfig := rbdSACreationConfig(rbacPolicy)
+	applyClient, impersonatedUser, err := r.rbdResolveApplyClient(rbacPolicy)
+	if err != nil {
+		r.rbdMarkStalled(ctx, rbd, err)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
+		return ctrl.Result{}, fmt.Errorf("resolve apply client for RestrictedBindDefinition %s: %w", rbd.Name, err)
+	}
+	r.rbdLogApplyIdentity(ctx, rbd.Name, rbacPolicy.Name, impersonatedUser)
 	if err := r.rbdReconcileResources(ctx, rbd, applyClient, saCreationConfig); err != nil {
 		r.rbdMarkStalled(ctx, rbd, err)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
@@ -733,7 +722,6 @@ func (r *RestrictedBindDefinitionReconciler) rbdHandleDeletingPolicy(
 	ctx context.Context,
 	rbd *authorizationv1alpha1.RestrictedBindDefinition,
 	rbacPolicy *authorizationv1alpha1.RBACPolicy,
-	deleteClient client.Client,
 ) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("referenced RBACPolicy is deleting", "name", rbd.Name, "policyRef", rbacPolicy.Name)
@@ -743,7 +731,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdHandleDeletingPolicy(
 		authorizationv1alpha1.EventReasonPolicyViolation, authorizationv1alpha1.EventActionReconcile,
 		"Referenced RBACPolicy %q is being deleted", rbacPolicy.Name)
 	rbd.Status.PolicyViolations = []string{fmt.Sprintf("policy %q is being deleted", rbacPolicy.Name)}
-	if err := r.rbdDeprovision(ctx, rbd, deleteClient); err != nil {
+	if err := r.rbdDeprovision(ctx, rbd, r.client); err != nil {
 		r.rbdMarkStalled(ctx, rbd, err)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
@@ -782,10 +770,9 @@ func (r *RestrictedBindDefinitionReconciler) rbdHandleMissingRoleRefs(
 	ctx context.Context,
 	rbd *authorizationv1alpha1.RestrictedBindDefinition,
 	missingRoles []string,
-	applyClient client.Client,
 ) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-	if err := r.rbdDeprovision(ctx, rbd, applyClient); err != nil {
+	if err := r.rbdDeprovision(ctx, rbd, r.client); err != nil {
 		r.rbdMarkStalled(ctx, rbd, err)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
@@ -873,7 +860,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdReconcileServiceAccounts(
 		return nil, err
 	}
 	desiredSAs := rbdDesiredServiceAccounts(rbd.Status.GeneratedServiceAccounts)
-	if err := r.rbdPruneStaleServiceAccounts(ctx, rbd, desiredSAs, previousGeneratedSAs, applyClient); err != nil {
+	if err := r.rbdPruneStaleServiceAccounts(ctx, rbd, desiredSAs, previousGeneratedSAs, r.client); err != nil {
 		return nil, err
 	}
 	return effectiveSubjects, nil
@@ -894,7 +881,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdReconcileBindings(
 		if retErr == nil || pruneAttempted {
 			return
 		}
-		if pruneErr := r.rbdPruneStaleResources(ctx, rbd, desiredCRBs, desiredRBs, applyClient); pruneErr != nil {
+		if pruneErr := r.rbdPruneStaleResources(ctx, rbd, desiredCRBs, desiredRBs, r.client); pruneErr != nil {
 			retErr = errors.Join(retErr, fmt.Errorf("prune stale RBAC resources after reconcile error: %w", pruneErr))
 		}
 	}()
@@ -954,7 +941,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdReconcileBindings(
 
 	// Prune stale owned resources that are no longer in the desired set.
 	pruneAttempted = true
-	return r.rbdPruneStaleResources(ctx, rbd, desiredCRBs, desiredRBs, applyClient)
+	return r.rbdPruneStaleResources(ctx, rbd, desiredCRBs, desiredRBs, r.client)
 }
 
 func (r *RestrictedBindDefinitionReconciler) rbdDesiredBindingKeys(

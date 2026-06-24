@@ -198,6 +198,13 @@ func TestRRD_Reconcile_UsesReaderForPolicyEvaluation(t *testing.T) {
 			RoleLimits: &authorizationv1alpha1.RoleLimits{
 				AllowClusterRoles: false,
 			},
+			Impersonation: &authorizationv1alpha1.ImpersonationConfig{
+				Enabled: true,
+				ServiceAccountRef: &authorizationv1alpha1.SARef{
+					Name:      "rbac-applier",
+					Namespace: "team-a",
+				},
+			},
 		},
 	}
 	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
@@ -281,7 +288,7 @@ func TestRRD_Reconcile_DeletingPolicyIsUnavailable(t *testing.T) {
 	g.Expect(conditions.IsStalled(&updated)).To(BeTrue())
 }
 
-func TestRRD_Reconcile_DeletingPolicyUsesImpersonatedDeleteClient(t *testing.T) {
+func TestRRD_Reconcile_DeletingPolicyUsesControllerClientForRevocation(t *testing.T) {
 	g := NewWithT(t)
 	now := metav1.Now()
 
@@ -323,22 +330,20 @@ func TestRRD_Reconcile_DeletingPolicyUsesImpersonatedDeleteClient(t *testing.T) 
 	}
 
 	r, c := newRRDTestReconcilerFake(pol, rrd, cr)
-	r.restConfig = &rest.Config{Host: "https://cluster.local"}
-	deleteClient := &deleteForbiddenClient{Client: c}
-	var capturedUsername string
-	r.impersonatedClientFactory = func(_ *rest.Config, _ *runtime.Scheme, username string) (client.Client, error) {
-		capturedUsername = username
-		return deleteClient, nil
+	var impersonationFactoryCalled bool
+	r.impersonatedClientFactory = func(_ *rest.Config, _ *runtime.Scheme, _ string) (client.Client, error) {
+		impersonationFactoryCalled = true
+		return nil, fmt.Errorf("impersonated client must not be resolved for deleting policy revocation")
 	}
 
-	_, err := r.Reconcile(rrdCtx(), ctrl.Request{NamespacedName: types.NamespacedName{Name: rrd.Name}})
-	g.Expect(err).To(HaveOccurred())
-	g.Expect(err.Error()).To(ContainSubstring("delete denied"))
-	g.Expect(capturedUsername).To(Equal("system:serviceaccount:team-a:rbac-applier"))
-	g.Expect(deleteClient.deleteCalls).To(Equal(1))
+	result, err := r.Reconcile(rrdCtx(), ctrl.Request{NamespacedName: types.NamespacedName{Name: rrd.Name}})
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(result.RequeueAfter).To(Equal(DefaultRequeueInterval))
+	g.Expect(impersonationFactoryCalled).To(BeFalse())
 
-	var kept rbacv1.ClusterRole
-	g.Expect(c.Get(rrdCtx(), types.NamespacedName{Name: cr.Name}, &kept)).To(Succeed())
+	var deleted rbacv1.ClusterRole
+	err = c.Get(rrdCtx(), types.NamespacedName{Name: cr.Name}, &deleted)
+	g.Expect(apierrors.IsNotFound(err)).To(BeTrue())
 }
 
 func TestRRD_Reconcile_PolicyViolation(t *testing.T) {
@@ -383,11 +388,18 @@ func TestRRD_Reconcile_PolicyViolation(t *testing.T) {
 	}
 
 	r, c := newRRDTestReconcilerFake(pol, rrd, ownedRole)
+	var impersonationFactoryCalled bool
+	r.impersonatedClientFactory = func(_ *rest.Config, _ *runtime.Scheme, _ string) (client.Client, error) {
+		impersonationFactoryCalled = true
+		return nil, fmt.Errorf("impersonated client must not be resolved for policy-violation revocation")
+	}
+
 	result, err := r.Reconcile(rrdCtx(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: "violating-rrd"},
 	})
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(result.RequeueAfter).To(Equal(DefaultRequeueInterval))
+	g.Expect(impersonationFactoryCalled).To(BeFalse())
 
 	var updated authorizationv1alpha1.RestrictedRoleDefinition
 	g.Expect(c.Get(rrdCtx(), types.NamespacedName{Name: "violating-rrd"}, &updated)).To(Succeed())

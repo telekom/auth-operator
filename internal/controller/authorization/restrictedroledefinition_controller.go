@@ -164,12 +164,11 @@ func (r *RestrictedRoleDefinitionReconciler) rrdEvaluatePolicy(
 	ctx context.Context,
 	rrd *authorizationv1alpha1.RestrictedRoleDefinition,
 	rbacPolicy *authorizationv1alpha1.RBACPolicy,
-	applyClient client.Client,
 ) (result ctrl.Result, handled bool, retErr error) {
 	labelGetter := newLabelGetter(r.ownershipReader())
 	violations := policy.EvaluateRoleDefinitionWithLabels(ctx, rbacPolicy, rrd, labelGetter)
 	if err := labelGetter.Err(); err != nil {
-		if deprovisionErr := r.rrdDeprovision(ctx, rrd, applyClient); deprovisionErr != nil {
+		if deprovisionErr := r.rrdDeprovision(ctx, rrd, r.client); deprovisionErr != nil {
 			err = errors.Join(err, fmt.Errorf("deprovision after policy selector evaluation failure: %w", deprovisionErr))
 		}
 		markPolicyEvaluationError(rrd, rrd.Generation, err)
@@ -186,7 +185,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdEvaluatePolicy(
 	result, err := handlePolicyViolations(ctx, rrd, rrd.Generation, violations, r.recorder, rrd, ViolationHandlerConfig{
 		ControllerLabel: metrics.ControllerRestrictedRoleDefinition,
 		ResourceKind:    "RestrictedRoleDefinition",
-		Deprovision:     func(ctx context.Context) error { return r.rrdDeprovision(ctx, rrd, applyClient) },
+		Deprovision:     func(ctx context.Context) error { return r.rrdDeprovision(ctx, rrd, r.client) },
 		MarkStalled:     func(ctx context.Context, err error) { r.rrdMarkStalled(ctx, rrd, err) },
 		SetReconciled:   func(v bool) { rrd.Status.RoleReconciled = v },
 		ApplyStatus:     func(ctx context.Context) error { return ssa.ApplyRestrictedRoleDefinitionStatus(ctx, r.client, rrd) },
@@ -373,29 +372,11 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 		return ctrl.Result{}, fmt.Errorf("fetch RBACPolicy %s: %w", rrd.Spec.PolicyRef.Name, err)
 	}
 	if rbacPolicy.GetDeletionTimestamp() != nil {
-		applyClient, impersonatedUser, err := r.rrdResolveApplyClient(rbacPolicy)
-		if err != nil {
-			r.rrdMarkStalled(ctx, rrd, err)
-			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
-			metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
-			return ctrl.Result{}, fmt.Errorf("resolve apply client for deleting RBACPolicy %s referenced by RestrictedRoleDefinition %s: %w",
-				rbacPolicy.Name, rrd.Name, err)
-		}
-		r.rrdLogApplyIdentity(ctx, rrd.Name, rbacPolicy.Name, impersonatedUser)
-		return r.rrdHandleDeletingPolicy(ctx, rrd, rbacPolicy, applyClient)
+		return r.rrdHandleDeletingPolicy(ctx, rrd, rbacPolicy)
 	}
-
-	applyClient, impersonatedUser, err := r.rrdResolveApplyClient(rbacPolicy)
-	if err != nil {
-		r.rrdMarkStalled(ctx, rrd, err)
-		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
-		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
-		return ctrl.Result{}, fmt.Errorf("resolve apply client for RestrictedRoleDefinition %s: %w", rrd.Name, err)
-	}
-	r.rrdLogApplyIdentity(ctx, rrd.Name, rbacPolicy.Name, impersonatedUser)
 
 	// Step 6: Evaluate policy compliance.
-	if result, handled, err := r.rrdEvaluatePolicy(ctx, rrd, rbacPolicy, applyClient); handled {
+	if result, handled, err := r.rrdEvaluatePolicy(ctx, rrd, rbacPolicy); handled {
 		return result, err
 	}
 
@@ -406,7 +387,7 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 	// Step 7: Discover and filter API resources.
 	finalRules, requeue, err := r.rrdDiscoverAndFilter(ctx, rrd)
 	if err != nil {
-		if deprovisionErr := r.rrdDeprovision(ctx, rrd, applyClient); deprovisionErr != nil {
+		if deprovisionErr := r.rrdDeprovision(ctx, rrd, r.client); deprovisionErr != nil {
 			err = errors.Join(err, fmt.Errorf("deprovision after role discovery failure: %w", deprovisionErr))
 		}
 		markPolicyEvaluationError(rrd, rrd.Generation, err)
@@ -429,7 +410,7 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 		result, err := handlePolicyViolations(ctx, rrd, rrd.Generation, []policy.Violation{*v}, r.recorder, rrd, ViolationHandlerConfig{
 			ControllerLabel: metrics.ControllerRestrictedRoleDefinition,
 			ResourceKind:    "RestrictedRoleDefinition",
-			Deprovision:     func(ctx context.Context) error { return r.rrdDeprovision(ctx, rrd, applyClient) },
+			Deprovision:     func(ctx context.Context) error { return r.rrdDeprovision(ctx, rrd, r.client) },
 			MarkStalled:     func(ctx context.Context, err error) { r.rrdMarkStalled(ctx, rrd, err) },
 			SetReconciled:   func(v bool) { rrd.Status.RoleReconciled = v },
 			ApplyStatus:     func(ctx context.Context) error { return ssa.ApplyRestrictedRoleDefinitionStatus(ctx, r.client, rrd) },
@@ -438,6 +419,14 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 	}
 
 	// Step 8: Ensure the target role exists.
+	applyClient, impersonatedUser, err := r.rrdResolveApplyClient(rbacPolicy)
+	if err != nil {
+		r.rrdMarkStalled(ctx, rrd, err)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
+		return ctrl.Result{}, fmt.Errorf("resolve apply client for RestrictedRoleDefinition %s: %w", rrd.Name, err)
+	}
+	r.rrdLogApplyIdentity(ctx, rrd.Name, rbacPolicy.Name, impersonatedUser)
 	if err := r.rrdEnsureRole(ctx, rrd, finalRules, applyClient); err != nil {
 		r.rrdMarkStalled(ctx, rrd, err)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
@@ -494,7 +483,6 @@ func (r *RestrictedRoleDefinitionReconciler) rrdHandleDeletingPolicy(
 	ctx context.Context,
 	rrd *authorizationv1alpha1.RestrictedRoleDefinition,
 	rbacPolicy *authorizationv1alpha1.RBACPolicy,
-	deleteClient client.Client,
 ) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("referenced RBACPolicy is deleting", "name", rrd.Name, "policyRef", rbacPolicy.Name)
@@ -505,7 +493,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdHandleDeletingPolicy(
 		authorizationv1alpha1.EventReasonPolicyViolation, authorizationv1alpha1.EventActionReconcile,
 		"Referenced RBACPolicy %q is being deleted", rbacPolicy.Name)
 
-	if err := r.rrdDeprovision(ctx, rrd, deleteClient); err != nil {
+	if err := r.rrdDeprovision(ctx, rrd, r.client); err != nil {
 		r.rrdMarkStalled(ctx, rrd, err)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()

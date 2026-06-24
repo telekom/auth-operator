@@ -350,6 +350,13 @@ func TestRBD_Reconcile_PolicyViolation_Deprovision(t *testing.T) {
 			BindingLimits: &authorizationv1alpha1.BindingLimits{
 				AllowClusterRoleBindings: false,
 			},
+			Impersonation: &authorizationv1alpha1.ImpersonationConfig{
+				Enabled: true,
+				ServiceAccountRef: &authorizationv1alpha1.SARef{
+					Name:      "rbac-applier",
+					Namespace: "team-a",
+				},
+			},
 		},
 	}
 
@@ -395,11 +402,18 @@ func TestRBD_Reconcile_PolicyViolation_Deprovision(t *testing.T) {
 	}
 
 	r, c := newRBDTestReconciler(rbdPolicyWithDefaultAllowances(pol), rbd, ownedCRB, ownedSA)
+	var impersonationFactoryCalled bool
+	r.impersonatedClientFactory = func(_ *rest.Config, _ *runtime.Scheme, _ string) (client.Client, error) {
+		impersonationFactoryCalled = true
+		return nil, fmt.Errorf("impersonated client must not be resolved for policy-violation revocation")
+	}
+
 	result, err := r.Reconcile(rbdCtx(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: "violating-rbd"},
 	})
 	g.Expect(err).NotTo(gomega.HaveOccurred())
 	g.Expect(result.RequeueAfter).To(gomega.Equal(DefaultRequeueInterval))
+	g.Expect(impersonationFactoryCalled).To(gomega.BeFalse())
 
 	var updated authorizationv1alpha1.RestrictedBindDefinition
 	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: "violating-rbd"}, &updated)).To(gomega.Succeed())
@@ -498,7 +512,7 @@ func TestRBD_Reconcile_DeletingPolicyDeprovisions(t *testing.T) {
 	g.Expect(conditions.IsStalled(&updated)).To(gomega.BeTrue())
 }
 
-func TestRBD_Reconcile_DeletingPolicyUsesImpersonatedDeleteClient(t *testing.T) {
+func TestRBD_Reconcile_DeletingPolicyUsesControllerClientForRevocation(t *testing.T) {
 	g := gomega.NewWithT(t)
 	now := metav1.Now()
 
@@ -542,22 +556,20 @@ func TestRBD_Reconcile_DeletingPolicyUsesImpersonatedDeleteClient(t *testing.T) 
 	}
 
 	r, c := newRBDTestReconciler(pol, rbd, crb)
-	r.restConfig = &rest.Config{Host: "https://cluster.local"}
-	deleteClient := &deleteForbiddenClient{Client: c}
-	var capturedUsername string
-	r.impersonatedClientFactory = func(_ *rest.Config, _ *runtime.Scheme, username string) (client.Client, error) {
-		capturedUsername = username
-		return deleteClient, nil
+	var impersonationFactoryCalled bool
+	r.impersonatedClientFactory = func(_ *rest.Config, _ *runtime.Scheme, _ string) (client.Client, error) {
+		impersonationFactoryCalled = true
+		return nil, fmt.Errorf("impersonated client must not be resolved for deleting policy revocation")
 	}
 
-	_, err := r.Reconcile(rbdCtx(), ctrl.Request{NamespacedName: types.NamespacedName{Name: rbd.Name}})
-	g.Expect(err).To(gomega.HaveOccurred())
-	g.Expect(err.Error()).To(gomega.ContainSubstring("delete denied"))
-	g.Expect(capturedUsername).To(gomega.Equal("system:serviceaccount:team-a:rbac-applier"))
-	g.Expect(deleteClient.deleteCalls).To(gomega.Equal(1))
+	result, err := r.Reconcile(rbdCtx(), ctrl.Request{NamespacedName: types.NamespacedName{Name: rbd.Name}})
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	g.Expect(result.RequeueAfter).To(gomega.Equal(DefaultRequeueInterval))
+	g.Expect(impersonationFactoryCalled).To(gomega.BeFalse())
 
-	var kept rbacv1.ClusterRoleBinding
-	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: crb.Name}, &kept)).To(gomega.Succeed())
+	var deleted rbacv1.ClusterRoleBinding
+	err = c.Get(rbdCtx(), types.NamespacedName{Name: crb.Name}, &deleted)
+	g.Expect(apierrors.IsNotFound(err)).To(gomega.BeTrue())
 }
 
 func TestRBD_Reconcile_GetError(t *testing.T) {
@@ -1314,6 +1326,13 @@ func TestRBD_Reconcile_PrunesStaleGeneratedServiceAccount(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "prune-sa-policy", Generation: 1},
 		Spec: authorizationv1alpha1.RBACPolicySpec{
 			AppliesTo: authorizationv1alpha1.PolicyScope{Namespaces: []string{"default"}},
+			Impersonation: &authorizationv1alpha1.ImpersonationConfig{
+				Enabled: true,
+				ServiceAccountRef: &authorizationv1alpha1.SARef{
+					Name:      "rbac-applier",
+					Namespace: "team-a",
+				},
+			},
 		},
 	}
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default"}}
@@ -1346,9 +1365,19 @@ func TestRBD_Reconcile_PrunesStaleGeneratedServiceAccount(t *testing.T) {
 	clusterRole := &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "view"}}
 
 	r, c := newRBDTestReconciler(rbdPolicyWithDefaultAllowances(pol), rbd, ns, staleSA, clusterRole)
+	r.restConfig = &rest.Config{Host: "https://cluster.local"}
+	applyClient := &deleteForbiddenClient{Client: c}
+	var impersonationFactoryCalled bool
+	r.impersonatedClientFactory = func(_ *rest.Config, _ *runtime.Scheme, _ string) (client.Client, error) {
+		impersonationFactoryCalled = true
+		return applyClient, nil
+	}
+
 	result, err := r.Reconcile(rbdCtx(), ctrl.Request{NamespacedName: types.NamespacedName{Name: rbd.Name}})
 	g.Expect(err).NotTo(gomega.HaveOccurred())
 	g.Expect(result.RequeueAfter).To(gomega.Equal(DefaultRequeueInterval))
+	g.Expect(impersonationFactoryCalled).To(gomega.BeTrue())
+	g.Expect(applyClient.deleteCalls).To(gomega.Equal(0))
 
 	var deletedSA corev1.ServiceAccount
 	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Namespace: "default", Name: "stale-sa"}, &deletedSA)).NotTo(gomega.Succeed())
@@ -3169,9 +3198,12 @@ func TestRBD_ReconcileResources_PrunesStaleBindingsOnNameCollision(t *testing.T)
 	}
 
 	r, c := newRBDTestReconciler(rbd, ns, staleCRB)
-	err := r.rbdReconcileResources(rbdCtx(), rbd, c, nil)
+	applyClient := &deleteForbiddenClient{Client: c}
+	err := r.rbdReconcileResources(rbdCtx(), rbd, applyClient, nil)
 	g.Expect(err).To(gomega.HaveOccurred())
 	g.Expect(err.Error()).To(gomega.ContainSubstring("RoleBinding name collision"))
+	g.Expect(err.Error()).NotTo(gomega.ContainSubstring("delete denied"))
+	g.Expect(applyClient.deleteCalls).To(gomega.Equal(0))
 
 	var deletedCRB rbacv1.ClusterRoleBinding
 	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: staleCRB.Name}, &deletedCRB)).To(gomega.HaveOccurred())
