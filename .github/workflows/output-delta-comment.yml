@@ -332,6 +332,7 @@ jobs:
             fi
 
             python3 - "$diff_file" "$diff_dir" <<'PY'
+          import html
           import re
           import sys
           from pathlib import Path
@@ -342,35 +343,217 @@ jobs:
 
           # Keep enough headroom for markers, headings, code fences, and GitHub's
           # issue-comment size limit.
-          max_chunk_bytes = 55000
-          encoded = text.encode("utf-8")
-          chunks = [
-              encoded[index:index + max_chunk_bytes].decode("utf-8", errors="replace")
-              for index in range(0, len(encoded), max_chunk_bytes)
-          ] or [""]
+          max_comment_bytes = 55000
+          max_body_bytes = 51000
+          max_diff_bytes = 45500
 
           def fence_for(chunk: str) -> str:
               longest = max((len(match.group(0)) for match in re.finditer(r"`+", chunk)), default=0)
               return "`" * max(4, longest + 1)
 
-          total = len(chunks)
-          digits = max(4, len(str(total)))
-          for index, chunk in enumerate(chunks, start=1):
+          def split_unified_diffs(diff_text: str) -> list[str]:
+              lines = diff_text.splitlines()
+              sections = []
+              start = None
+              for index, line in enumerate(lines):
+                  if line.startswith("--- ") and index + 1 < len(lines) and lines[index + 1].startswith("+++ "):
+                      if start is not None:
+                          sections.append("\n".join(lines[start:index]).rstrip("\n"))
+                      start = index
+              if start is not None:
+                  sections.append("\n".join(lines[start:]).rstrip("\n"))
+              if not sections and diff_text.strip():
+                  sections.append(diff_text.rstrip("\n"))
+              return [section for section in sections if section.strip()]
+
+          def header_path(line: str) -> str:
+              return line[4:].split("\t", 1)[0].strip() if len(line) > 4 else ""
+
+          def resource_name(path: str) -> str:
+              if path == "/dev/null":
+                  return path
+              match = re.search(r"/tmp/(?:main|tag|pr)-output/(.+)$", path)
+              if match:
+                  return match.group(1)
+              return path.rsplit("/", 1)[-1] or path
+
+          def comparison_for(left: str, right: str) -> str:
+              if "/tmp/tag-output/" in left or "/tmp/tag-output/" in right:
+                  return "Latest release tag -> PR"
+              if "/tmp/main-output/" in left or "/tmp/main-output/" in right:
+                  return "Trusted main baseline -> PR"
+              return "Other output"
+
+          def group_for(resource: str) -> str:
+              stem = resource.rsplit("/", 1)[-1]
+              if stem in {
+                  "clusterroles.yaml",
+                  "roles.yaml",
+                  "clusterrolebindings.yaml",
+                  "rolebindings.yaml",
+                  "serviceaccounts.yaml",
+              }:
+                  return "RBAC resources"
+              if stem in {
+                  "roledefinitions-status.yaml",
+                  "binddefinitions-status.yaml",
+                  "rbacpolicies-status.yaml",
+                  "restrictedbinddefinitions-status.yaml",
+                  "restrictedroledefinitions-status.yaml",
+                  "webhookauthorizers-status.yaml",
+              }:
+                  return "CR status"
+              if stem == "metrics.txt":
+                  return "Metrics"
+              return "Other output"
+
+          def stats_for(section: str) -> tuple[int, int, int]:
+              additions = 0
+              deletions = 0
+              hunks = 0
+              for line in section.splitlines():
+                  if line.startswith("@@"):
+                      hunks += 1
+                  elif line.startswith("+") and not line.startswith("+++"):
+                      additions += 1
+                  elif line.startswith("-") and not line.startswith("---"):
+                      deletions += 1
+              return additions, deletions, hunks
+
+          def split_bytes(value: str, limit: int) -> list[str]:
+              encoded = value.encode("utf-8")
+              chunks = [
+                  encoded[index:index + limit].decode("utf-8", errors="replace")
+                  for index in range(0, len(encoded), limit)
+              ]
+              return chunks or [""]
+
+          def details_block(item: dict[str, object]) -> str:
+              label = html.escape(str(item["resource"]))
+              additions = int(item["additions"])
+              deletions = int(item["deletions"])
+              hunks = int(item["hunks"])
+              chunk_label = ""
+              if int(item["chunk_total"]) > 1:
+                  chunk_label = f" chunk {item['chunk_index']}/{item['chunk_total']}"
+              hunk_label = "hunk" if hunks == 1 else "hunks"
+              summary = f"<code>{label}</code>{chunk_label} (+{additions}/-{deletions}, {hunks} {hunk_label})"
+              chunk = str(item["chunk"]).rstrip("\n")
               fence = fence_for(chunk)
+              return "\n".join([
+                  "<details>",
+                  f"<summary>{summary}</summary>",
+                  "",
+                  fence + "diff",
+                  chunk,
+                  fence,
+                  "",
+                  "</details>",
+                  "",
+                  "",
+              ])
+
+          sections = split_unified_diffs(text)
+          items = []
+          for section in sections:
+              lines = section.splitlines()
+              left = header_path(lines[0]) if len(lines) >= 1 and lines[0].startswith("--- ") else ""
+              right = header_path(lines[1]) if len(lines) >= 2 and lines[1].startswith("+++ ") else ""
+              resource = resource_name(right if right != "/dev/null" else left)
+              additions, deletions, hunks = stats_for(section)
+              pieces = split_bytes(section, max_diff_bytes)
+              for chunk_index, chunk in enumerate(pieces, start=1):
+                  items.append({
+                      "comparison": comparison_for(left, right),
+                      "group": group_for(resource),
+                      "resource": resource,
+                      "additions": additions,
+                      "deletions": deletions,
+                      "hunks": hunks,
+                      "chunk": chunk,
+                      "chunk_index": chunk_index,
+                      "chunk_total": len(pieces),
+                  })
+
+          if not items:
+              items.append({
+                  "comparison": "Other output",
+                  "group": "Other output",
+                  "resource": "full-diff.txt",
+                  "additions": 0,
+                  "deletions": 0,
+                  "hunks": 0,
+                  "chunk": text.rstrip("\n"),
+                  "chunk_index": 1,
+                  "chunk_total": 1,
+              })
+
+          parts: list[str] = []
+          current: list[str] = []
+          current_bytes = 0
+          current_comparison = None
+          current_group = None
+
+          def encoded_len(value: str) -> int:
+              return len(value.encode("utf-8"))
+
+          def flush() -> None:
+              global current, current_bytes, current_comparison, current_group
+              if current:
+                  parts.append("".join(current).rstrip("\n") + "\n")
+              current = []
+              current_bytes = 0
+              current_comparison = None
+              current_group = None
+
+          def ensure_context(comparison: str, group: str) -> str:
+              context = []
+              global current_comparison, current_group
+              if current_comparison != comparison:
+                  context.append(f"### {comparison}\n\n")
+                  current_comparison = comparison
+                  current_group = None
+              if current_group != group:
+                  context.append(f"#### {group}\n\n")
+                  current_group = group
+              return "".join(context)
+
+          for item in items:
+              comparison = str(item["comparison"])
+              group = str(item["group"])
+              block = details_block(item)
+              context = ensure_context(comparison, group)
+              addition = context + block
+              if current and current_bytes + encoded_len(addition) > max_body_bytes:
+                  current_comparison = None
+                  current_group = None
+                  context = ensure_context(comparison, group)
+                  addition = context + block
+                  flush()
+                  context = ensure_context(comparison, group)
+                  addition = context + block
+              current.append(addition)
+              current_bytes += encoded_len(addition)
+          flush()
+
+          total = max(1, len(parts))
+          digits = max(4, len(str(total)))
+          for index, part in enumerate(parts, start=1):
               heading = "## :bar_chart: Output Delta Report"
               if index > 1:
                   heading = "## :bar_chart: Output Delta Report (cont.)"
-              body = "\n".join([
+              header = "\n".join([
                   f"<!-- output-delta:part{index} -->",
                   heading,
                   "",
                   f"Full output diff from `output-delta-diff-output` ({index}/{total}).",
+                  "Sections are grouped by comparison and resource type. File diffs are collapsed by default.",
                   "",
-                  fence + "diff",
-                  chunk.rstrip("\n"),
-                  fence,
                   "",
               ])
+              body = header + part
+              if encoded_len(body) > max_comment_bytes:
+                  raise SystemExit(f"Generated output-delta comment part {index} is too large")
               (diff_dir / f"part-{index:0{digits}d}.md").write_text(body, encoding="utf-8")
           PY
           }
