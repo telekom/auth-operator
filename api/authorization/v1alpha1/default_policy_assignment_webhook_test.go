@@ -655,7 +655,7 @@ func TestRestrictedValidatorsSkipDefaultPolicyAssignmentForSpecUnchangedUpdates(
 	ctxOperator := admission.NewContextWithRequest(context.Background(), admission.Request{
 		AdmissionRequest: admissionv1.AdmissionRequest{
 			UserInfo: authenticationv1.UserInfo{
-				Username: "system:serviceaccount:auth-operator-system:auth-operator-manager",
+				Username: "system:serviceaccount:auth-operator-system:manager",
 			},
 		},
 	})
@@ -696,6 +696,43 @@ func TestRestrictedValidatorsSkipDefaultPolicyAssignmentForSpecUnchangedUpdates(
 
 		if _, err := validator.ValidateUpdate(ctxOperator, oldRRD, newRRD); err != nil {
 			t.Fatalf("expected spec-unchanged finalizer update to bypass requester default-policy checks, got: %v", err)
+		}
+	})
+}
+
+func TestAuthOperatorControllerServiceAccountRequiresOperatorNamespace(t *testing.T) {
+	t.Run("allows kustomize default manager without pod namespace", func(t *testing.T) {
+		t.Setenv("POD_NAMESPACE", "")
+		if !isAuthOperatorControllerServiceAccount("system:serviceaccount:auth-operator-system:manager") {
+			t.Fatal("expected default kustomize manager serviceaccount to be allowed")
+		}
+	})
+
+	t.Run("allows helm controller manager in pod namespace", func(t *testing.T) {
+		t.Setenv("POD_NAMESPACE", "auth-operator")
+		if !isAuthOperatorControllerServiceAccount("system:serviceaccount:auth-operator:team-auth-operator-controller-manager") {
+			t.Fatal("expected auth-operator controller manager in POD_NAMESPACE to be allowed")
+		}
+	})
+
+	t.Run("rejects matching serviceaccount name outside pod namespace", func(t *testing.T) {
+		t.Setenv("POD_NAMESPACE", "auth-operator")
+		if isAuthOperatorControllerServiceAccount("system:serviceaccount:tenant-a:team-auth-operator-controller-manager") {
+			t.Fatal("expected auth-operator-looking serviceaccount outside POD_NAMESPACE to be rejected")
+		}
+	})
+
+	t.Run("allows fullname override controller manager in pod namespace", func(t *testing.T) {
+		t.Setenv("POD_NAMESPACE", "auth-operator")
+		if !isAuthOperatorControllerServiceAccount("system:serviceaccount:auth-operator:tenant-controller-manager") {
+			t.Fatal("expected controller-manager serviceaccount in POD_NAMESPACE to be allowed")
+		}
+	})
+
+	t.Run("rejects regular user", func(t *testing.T) {
+		t.Setenv("POD_NAMESPACE", "auth-operator")
+		if isAuthOperatorControllerServiceAccount("alice") {
+			t.Fatal("expected regular user to be rejected")
 		}
 	})
 }

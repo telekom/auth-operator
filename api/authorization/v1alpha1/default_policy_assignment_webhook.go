@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"sort"
 	"strings"
@@ -316,7 +317,14 @@ func isAuthOperatorControllerServiceAccount(username string) bool {
 	if sa.Namespace == "auth-operator-system" && sa.Name == "manager" {
 		return true
 	}
-	return strings.HasSuffix(sa.Name, "-controller-manager") ||
+
+	operatorNamespace := os.Getenv("POD_NAMESPACE")
+	if operatorNamespace == "" || sa.Namespace != operatorNamespace {
+		return false
+	}
+
+	return sa.Name == "manager" ||
+		strings.HasSuffix(sa.Name, "-controller-manager") ||
 		(strings.Contains(sa.Name, "auth-operator") && strings.HasSuffix(sa.Name, "-manager"))
 }
 
