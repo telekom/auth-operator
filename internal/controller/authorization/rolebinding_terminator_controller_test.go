@@ -17,7 +17,10 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
+	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -25,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	"github.com/telekom/auth-operator/pkg/discovery"
 )
 
 func newTestScheme() *runtime.Scheme {
@@ -56,6 +60,15 @@ func testBindDefinition() *authorizationv1alpha1.BindDefinition {
 			},
 		},
 	}
+}
+
+type fakeAPIResourceProvider struct {
+	resources discovery.APIResourcesByGroupVersion
+	err       error
+}
+
+func (f fakeAPIResourceProvider) GetAPIResources() (discovery.APIResourcesByGroupVersion, error) {
+	return f.resources, f.err
 }
 
 func TestIsOwnedByBindDefinition(t *testing.T) {
@@ -711,6 +724,131 @@ func TestRBTerminatorReconcileBlockingResourcesError(t *testing.T) {
 	})
 	g.Expect(err).To(HaveOccurred())
 	g.Expect(err.Error()).To(ContainSubstring("injected blocking resources error"))
+}
+
+func TestRBTerminatorReconcileDynamicListErrorKeepsFinalizer(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+	scheme := newTestScheme()
+
+	now := metav1.Now()
+	bdOwnerRef := testBindDefinitionControllerOwnerRef("test-bd", "bd-uid")
+	rb := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "list-error-rb",
+			Namespace:         "list-error-ns",
+			OwnerReferences:   []metav1.OwnerReference{bdOwnerRef},
+			DeletionTimestamp: &now,
+			Finalizers:        []string{authorizationv1alpha1.RoleBindingFinalizer},
+		},
+		RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "view"},
+	}
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "list-error-ns",
+			DeletionTimestamp: &now,
+			Finalizers:        []string{"kubernetes"},
+		},
+		Status: corev1.NamespaceStatus{Phase: corev1.NamespaceTerminating},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(rb, ns, testBindDefinition()).Build()
+	podGVR := schema.GroupVersionResource{Version: "v1", Resource: "pods"}
+	dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
+		runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{podGVR: "PodList"},
+	)
+	dynamicClient.PrependReactor("list", "pods", func(_ k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("injected pod list error")
+	})
+	resourceTracker := fakeAPIResourceProvider{
+		resources: discovery.APIResourcesByGroupVersion{
+			"v1": {
+				{Name: "pods", Namespaced: true, Verbs: metav1.Verbs{"list"}},
+			},
+		},
+	}
+	r := &RoleBindingTerminator{
+		client:          c,
+		scheme:          scheme,
+		dynamicClient:   dynamicClient,
+		resourceTracker: resourceTracker,
+		recorder:        events.NewFakeRecorder(10),
+	}
+
+	_, err := r.Reconcile(ctx, reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: "list-error-rb", Namespace: "list-error-ns"},
+	})
+	g.Expect(err).To(HaveOccurred())
+	g.Expect(err.Error()).To(ContainSubstring("injected pod list error"))
+
+	var updated rbacv1.RoleBinding
+	g.Expect(c.Get(ctx, types.NamespacedName{Name: "list-error-rb", Namespace: "list-error-ns"}, &updated)).To(Succeed())
+	g.Expect(updated.Finalizers).To(ContainElement(authorizationv1alpha1.RoleBindingFinalizer))
+}
+
+func TestRBTerminatorReconcileSkipsClusterScopedResources(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+	scheme := newTestScheme()
+
+	now := metav1.Now()
+	bdOwnerRef := testBindDefinitionControllerOwnerRef("test-bd", "bd-uid")
+	rb := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "cluster-scoped-rb",
+			Namespace:         "cluster-scoped-ns",
+			OwnerReferences:   []metav1.OwnerReference{bdOwnerRef},
+			DeletionTimestamp: &now,
+			Finalizers:        []string{authorizationv1alpha1.RoleBindingFinalizer},
+		},
+		RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "view"},
+	}
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "cluster-scoped-ns",
+			DeletionTimestamp: &now,
+			Finalizers:        []string{"kubernetes"},
+		},
+		Status: corev1.NamespaceStatus{Phase: corev1.NamespaceTerminating},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(scheme).
+		WithObjects(rb, ns, testBindDefinition()).
+		WithStatusSubresource(ns).
+		Build()
+	nodeGVR := schema.GroupVersionResource{Version: "v1", Resource: "nodes"}
+	dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
+		runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{nodeGVR: "NodeList"},
+	)
+	dynamicClient.PrependReactor("list", "nodes", func(_ k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("cluster-scoped nodes should not be listed through a namespace")
+	})
+	resourceTracker := fakeAPIResourceProvider{
+		resources: discovery.APIResourcesByGroupVersion{
+			"v1": {
+				{Name: "nodes", Namespaced: false, Verbs: metav1.Verbs{"list"}},
+			},
+		},
+	}
+	r := &RoleBindingTerminator{
+		client:          c,
+		scheme:          scheme,
+		dynamicClient:   dynamicClient,
+		resourceTracker: resourceTracker,
+		recorder:        events.NewFakeRecorder(10),
+	}
+
+	result, err := r.Reconcile(ctx, reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: "cluster-scoped-rb", Namespace: "cluster-scoped-ns"},
+	})
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(result).To(Equal(reconcile.Result{}))
+
+	var updated rbacv1.RoleBinding
+	err = c.Get(ctx, types.NamespacedName{Name: "cluster-scoped-rb", Namespace: "cluster-scoped-ns"}, &updated)
+	g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "RoleBinding should be gone after finalizer removal")
 }
 
 func TestRBTerminatorReconcileErrorRemovingFinalizerNonTerminating(t *testing.T) {
