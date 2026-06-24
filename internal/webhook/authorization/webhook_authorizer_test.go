@@ -248,6 +248,61 @@ func TestServeHTTP_AuthorizerRulesUseLiveClient(t *testing.T) {
 	}
 }
 
+func TestServeHTTP_ScopedAuthorizerDeniesClusterScopedResourceSAR(t *testing.T) {
+	scheme := newScheme(t)
+	scopedDeny := &authzv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{Name: "scoped-cluster-deny"},
+		Spec: authzv1alpha1.WebhookAuthorizerSpec{
+			NamespaceSelector: metav1.LabelSelector{
+				MatchLabels: map[string]string{"env": "prod"},
+			},
+			DeniedPrincipals: []authzv1alpha1.Principal{{Groups: []string{"tenant-admins"}}},
+			ResourceRules: []authzv1.ResourceRule{{
+				Verbs:     []string{"delete"},
+				APIGroups: []string{"rbac.authorization.k8s.io"},
+				Resources: []string{"clusterroles"},
+			}},
+		},
+	}
+	handler := &Authorizer{
+		Client: newIndexedClient(scheme, scopedDeny),
+		Log:    logr.Discard(),
+	}
+	sar := authzv1.SubjectAccessReview{
+		Spec: authzv1.SubjectAccessReviewSpec{
+			User:   "alice",
+			Groups: []string{"tenant-admins"},
+			ResourceAttributes: &authzv1.ResourceAttributes{
+				Verb:     "delete",
+				Group:    "rbac.authorization.k8s.io",
+				Resource: "clusterroles",
+				Name:     "dangerous-role",
+			},
+		},
+	}
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(marshalSAR(t, sar)))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d; body: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+	var resp authzv1.SubjectAccessReview
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Status.Allowed {
+		t.Fatal("expected cluster-scoped SAR to be denied")
+	}
+	if !resp.Status.Denied {
+		t.Fatal("expected Denied=true for scoped deniedPrincipal on cluster-scoped resource SAR")
+	}
+	if resp.Status.Reason != "Access denied by WebhookAuthorizer" {
+		t.Fatalf("expected sanitized deny reason, got %q", resp.Status.Reason)
+	}
+}
+
 func TestAuditLog_DenyDecisionAtV0(t *testing.T) {
 	var buf strings.Builder
 	logger := capturingLogger(&buf, 0)
@@ -1452,6 +1507,48 @@ func TestServeHTTP_RejectsNoAttributes(t *testing.T) {
 	}
 	if !strings.Contains(resp.Status.Reason, reasonMissingAttrs) {
 		t.Errorf("expected reason about missing attributes, got: %s", resp.Status.Reason)
+	}
+	if !strings.Contains(buf.String(), "rejecting malformed SubjectAccessReview") {
+		t.Errorf("expected rejection log entry, got:\n%s", buf.String())
+	}
+}
+
+func TestServeHTTP_RejectsBothResourceAndNonResourceAttributes(t *testing.T) {
+	var buf strings.Builder
+	logger := capturingLogger(&buf, 1)
+	scheme := newScheme(t)
+	cl := newIndexedClient(scheme)
+
+	handler := &Authorizer{Client: cl, Log: logger}
+
+	sar := authzv1.SubjectAccessReview{
+		Spec: authzv1.SubjectAccessReviewSpec{
+			User:                  "some-user",
+			ResourceAttributes:    &authzv1.ResourceAttributes{Verb: "delete", Resource: "secrets"},
+			NonResourceAttributes: &authzv1.NonResourceAttributes{Verb: "get", Path: "/healthz"},
+		},
+	}
+	body := marshalSAR(t, sar)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var resp authzv1.SubjectAccessReview
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Status.Allowed {
+		t.Error("expected Allowed=false for SAR with both resource and non-resource attributes")
+	}
+	if !resp.Status.Denied {
+		t.Error("expected Denied=true for SAR with both resource and non-resource attributes")
+	}
+	if resp.Status.Reason != reasonMultipleAttrs {
+		t.Errorf("expected reason %q, got: %s", reasonMultipleAttrs, resp.Status.Reason)
 	}
 	if !strings.Contains(buf.String(), "rejecting malformed SubjectAccessReview") {
 		t.Errorf("expected rejection log entry, got:\n%s", buf.String())

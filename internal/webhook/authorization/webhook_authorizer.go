@@ -54,6 +54,7 @@ const maxRequestBodySize = 1 << 20 // 1MB
 const (
 	reasonEmptyIdentity           = "empty user identity and no groups"
 	reasonMissingAttrs            = "missing resource and non-resource attributes"
+	reasonMultipleAttrs           = "resource and non-resource attributes are mutually exclusive"
 	reasonInternalEvaluationError = "internal evaluation error"
 )
 
@@ -181,9 +182,11 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	items := append([]authorizationv1alpha1.WebhookAuthorizer(nil), globalItems...)
 
 	// Always keep scoped authorizers loaded so the active-rules gauge reflects the
-	// full set regardless of request type. Scoped authorizers are only used
-	// for evaluation when the SAR targets a specific namespace.
-	if sar.Spec.ResourceAttributes != nil && sar.Spec.ResourceAttributes.Namespace != "" {
+	// full set regardless of request type. Scoped authorizers are only used for
+	// namespaced evaluation when the SAR targets a specific namespace; for
+	// resource SARs without a namespace, they may only fail closed through a
+	// matching deniedPrincipal/resourceRule.
+	if sar.Spec.ResourceAttributes != nil {
 		items = append(items, scopedItems...)
 	}
 
@@ -520,6 +523,22 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 				resourceNS = sar.Spec.ResourceAttributes.Namespace
 			}
 			if resourceNS == "" {
+				if sar.Spec.ResourceAttributes != nil &&
+					wa.principalMatches(sar.Spec.User, sar.Spec.Groups, webhookAuthorizer.Spec.DeniedPrincipals) {
+					if ruleIdx := wa.resourceRuleIndex(webhookAuthorizer.Spec.ResourceRules, sar.Spec.ResourceAttributes); ruleIdx >= 0 {
+						evaluated++
+						return evaluationResult{
+							allowed:        false,
+							reason:         fmt.Sprintf("Access denied by WebhookAuthorizer %s", webhookAuthorizer.Name),
+							decision:       pkgmetrics.AuthorizerDecisionDenied,
+							authorizerName: webhookAuthorizer.Name,
+							matchedRule:    ruleIdx,
+							matchedField:   "deniedPrincipal",
+							evaluatedCount: evaluated,
+							skippedCount:   skipped,
+						}, nil
+					}
+				}
 				wa.Log.V(2).Info("skipping namespace-scoped authorizer for non-namespaced SAR",
 					"authorizer", webhookAuthorizer.Name)
 				skipped++
@@ -799,6 +818,9 @@ func validateSAR(sar *authzv1.SubjectAccessReview) string {
 	}
 	if sar.Spec.ResourceAttributes == nil && sar.Spec.NonResourceAttributes == nil {
 		return reasonMissingAttrs
+	}
+	if sar.Spec.ResourceAttributes != nil && sar.Spec.NonResourceAttributes != nil {
+		return reasonMultipleAttrs
 	}
 	return ""
 }
