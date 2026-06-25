@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -207,6 +208,97 @@ var _ = Describe("ResourceTracker CRD Deletion Handling", func() {
 				return !exists
 			}, "60s", "1s").Should(BeTrue(), "test CRD resources should be removed after deletion")
 		})
+	})
+})
+
+var _ = Describe("ResourceTracker CRD Watch Handling", func() {
+	It("discovers CRDs created after startup without waiting for periodic refresh", func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		watchCRD := &apiextensionsv1.CustomResourceDefinition{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "watchstartupresources.watchstartup.example.com",
+			},
+			Spec: apiextensionsv1.CustomResourceDefinitionSpec{
+				Group: "watchstartup.example.com",
+				Names: apiextensionsv1.CustomResourceDefinitionNames{
+					Plural:   "watchstartupresources",
+					Singular: "watchstartupresource",
+					Kind:     "WatchStartupResource",
+					ListKind: "WatchStartupResourceList",
+				},
+				Scope: apiextensionsv1.NamespaceScoped,
+				Versions: []apiextensionsv1.CustomResourceDefinitionVersion{
+					{
+						Name:    "v1",
+						Served:  true,
+						Storage: true,
+						Schema: &apiextensionsv1.CustomResourceValidation{
+							OpenAPIV3Schema: &apiextensionsv1.JSONSchemaProps{
+								Type: "object",
+							},
+						},
+					},
+				},
+			},
+		}
+		defer func() {
+			_ = k8sClient.Delete(context.Background(), watchCRD)
+			Eventually(func() bool {
+				err := k8sClient.Get(context.Background(), client.ObjectKeyFromObject(watchCRD), &apiextensionsv1.CustomResourceDefinition{})
+				return apierrors.IsNotFound(err)
+			}, "30s", "1s").Should(BeTrue(), "watch startup CRD should be deleted")
+		}()
+
+		resourceTracker := NewResourceTracker(scheme.Scheme, cfg)
+		resourceTracker.CollectionInterval = time.Hour
+		resourceTracker.FullRescanInterval = time.Hour
+		signalReceived := make(chan struct{}, 1)
+		resourceTracker.AddSignalFunc(func() error {
+			select {
+			case signalReceived <- struct{}{}:
+			default:
+			}
+			return nil
+		})
+
+		go func() {
+			defer GinkgoRecover()
+			_ = resourceTracker.Start(ctx)
+		}()
+
+		By("waiting for ResourceTracker to be ready")
+		Eventually(func() bool {
+			_, err := resourceTracker.GetAPIResources()
+			return err == nil
+		}, "30s", "1s").Should(BeTrue())
+
+		By("creating a CRD after ResourceTracker startup")
+		Expect(k8sClient.Create(ctx, watchCRD)).To(Succeed())
+		Eventually(func() bool {
+			crd := &apiextensionsv1.CustomResourceDefinition{}
+			if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(watchCRD), crd); err != nil {
+				return false
+			}
+			for _, cond := range crd.Status.Conditions {
+				if cond.Type == apiextensionsv1.Established && cond.Status == apiextensionsv1.ConditionTrue {
+					return true
+				}
+			}
+			return false
+		}, "30s", "1s").Should(BeTrue(), "watch startup CRD should be established")
+
+		By("verifying the watch-driven cache update and signal")
+		Eventually(func() bool {
+			resources, err := resourceTracker.GetAPIResources()
+			if err != nil {
+				return false
+			}
+			_, exists := resources["watchstartup.example.com/v1"]
+			return exists
+		}, "60s", "1s").Should(BeTrue(), "watch startup CRD should be discovered without periodic refresh")
+		Eventually(signalReceived, "10s", "1s").Should(Receive())
 	})
 })
 
