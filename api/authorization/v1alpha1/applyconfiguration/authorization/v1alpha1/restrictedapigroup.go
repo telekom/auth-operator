@@ -39,7 +39,7 @@ type RestrictedAPIGroupApplyConfiguration struct {
 	// When specified, only the listed verbs are removed from the generated role for resources
 	// in this group — remaining verbs are still allowed.
 	// This enables per-API-group read-only restrictions without enumerating every resource.
-	// Note: "*" matches only the literal wildcard verb, not all verbs.
+	// A verb value of "*" restricts all discovered verbs in this API group.
 	Verbs []string `json:"verbs,omitempty"`
 }
 

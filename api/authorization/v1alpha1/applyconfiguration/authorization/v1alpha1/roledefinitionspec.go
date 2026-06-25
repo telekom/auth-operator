@@ -57,6 +57,7 @@ type RoleDefinitionSpecApplyConfiguration struct {
 	RestrictedResources []v1.APIResource `json:"restrictedResources,omitempty"`
 	// RestrictedVerbs holds all verbs which will *NOT* be reconciled into the "TargetRole".
 	// The RBAC operator discovers all resource verbs available and removes those listed here.
+	// A value of "*" restricts all discovered verbs.
 	RestrictedVerbs []string `json:"restrictedVerbs,omitempty"`
 	// BreakglassAllowed marks generated ClusterRoles as eligible for temporary
 	// privilege escalation via k8s-breakglass. The generated ClusterRole always
