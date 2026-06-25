@@ -446,7 +446,7 @@ func (r *ResourceTracker) collectAPIResourcesWithLock(ctx context.Context, waitF
 	return true, nil
 }
 
-func (r *ResourceTracker) acquireCollectLock(ctx context.Context, waitForLock bool) (func(), bool, error) {
+func (r *ResourceTracker) acquireCollectLock(ctx context.Context, waitForLock bool) (unlock func(), locked bool, err error) {
 	if r.collectMu.TryLock() {
 		return r.collectMu.Unlock, true, nil
 	}
