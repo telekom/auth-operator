@@ -44,6 +44,12 @@ func ownerRefForRoleDefinition(roleDefinition *authorizationv1alpha1.RoleDefinit
 	)
 }
 
+func buildRoleDefinitionResourceLabels(roleDefinition *authorizationv1alpha1.RoleDefinition) map[string]string {
+	labels := helpers.BuildResourceLabels(roleDefinition.Labels)
+	delete(labels, authorizationv1alpha1.BreakglassCompatibleLabel)
+	return labels
+}
+
 // markStalled marks the RoleDefinition as stalled with the given error (kstatus pattern).
 // Uses SSA to apply the stalled condition atomically.
 // The error is logged at debug level; callers log at the appropriate severity.
@@ -68,7 +74,7 @@ func (r *RoleDefinitionReconciler) markStalled(
 func (r *RoleDefinitionReconciler) buildRoleObject(
 	roleDefinition *authorizationv1alpha1.RoleDefinition,
 ) (client.Object, error) {
-	labels := helpers.BuildResourceLabels(roleDefinition.Labels)
+	labels := buildRoleDefinitionResourceLabels(roleDefinition)
 	annotations := helpers.BuildResourceAnnotations("RoleDefinition", roleDefinition.Name)
 
 	switch roleDefinition.Spec.TargetRole {
@@ -279,7 +285,7 @@ func (r *RoleDefinitionReconciler) ensureRole(
 	// then apply aggregation labels (ClusterRole-only) on top, and finally
 	// re-set operator identification labels so aggregationLabels can never
 	// overwrite them.
-	mergedLabels := helpers.BuildResourceLabels(roleDefinition.Labels)
+	mergedLabels := buildRoleDefinitionResourceLabels(roleDefinition)
 	if roleDefinition.Spec.TargetRole == authorizationv1alpha1.DefinitionClusterRole {
 		for k, v := range roleDefinition.Spec.AggregationLabels {
 			mergedLabels[k] = v
