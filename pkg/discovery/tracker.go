@@ -45,6 +45,7 @@ const (
 	// Maximum time to wait for the CRD watch to be established during tracker
 	// startup before continuing with periodic self-healing.
 	defaultWatchStartupTimeout = 10 * time.Second
+	collectLockRetryInterval   = 10 * time.Millisecond
 
 	verbBind     = "bind"
 	verbEscalate = "escalate"
@@ -344,12 +345,14 @@ func (r *ResourceTracker) collectAPIResourcesBlocking(ctx context.Context) (bool
 
 func (r *ResourceTracker) collectAPIResourcesWithLock(ctx context.Context, waitForLock bool) (bool, error) {
 	startTime := time.Now()
-	if waitForLock {
-		r.collectMu.Lock()
-	} else if !r.collectMu.TryLock() {
+	unlock, locked, err := r.acquireCollectLock(ctx, waitForLock)
+	if err != nil {
+		return false, err
+	}
+	if !locked {
 		return false, nil
 	}
-	defer r.collectMu.Unlock()
+	defer unlock()
 
 	logger := log.FromContext(ctx)
 	logger.V(2).Info("collecting API resources")
@@ -441,6 +444,28 @@ func (r *ResourceTracker) collectAPIResourcesWithLock(ctx context.Context, waitF
 
 	logger.V(2).Info("API resources cache updated")
 	return true, nil
+}
+
+func (r *ResourceTracker) acquireCollectLock(ctx context.Context, waitForLock bool) (func(), bool, error) {
+	if r.collectMu.TryLock() {
+		return r.collectMu.Unlock, true, nil
+	}
+	if !waitForLock {
+		return nil, false, nil
+	}
+
+	ticker := time.NewTicker(collectLockRetryInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, false, ctx.Err()
+		case <-ticker.C:
+			if r.collectMu.TryLock() {
+				return r.collectMu.Unlock, true, nil
+			}
+		}
+	}
 }
 
 func (r *ResourceTracker) periodicCollection(ctx context.Context) {

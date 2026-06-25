@@ -212,6 +212,25 @@ var _ = Describe("ResourceTracker CRD Deletion Handling", func() {
 })
 
 var _ = Describe("ResourceTracker CRD Watch Handling", func() {
+	It("stops blocking collection when the context is canceled while waiting for the collection lock", func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		resourceTracker := NewResourceTracker(scheme.Scheme, cfg)
+		resourceTracker.collectMu.Lock()
+		defer resourceTracker.collectMu.Unlock()
+
+		done := make(chan error, 1)
+		go func() {
+			defer GinkgoRecover()
+			_, err := resourceTracker.collectAPIResourcesBlocking(ctx)
+			done <- err
+		}()
+
+		cancel()
+		Eventually(done, "1s", "10ms").Should(Receive(MatchError(context.Canceled)))
+	})
+
 	It("discovers CRDs created after startup without waiting for periodic refresh", func() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()

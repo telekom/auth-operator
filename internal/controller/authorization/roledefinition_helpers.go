@@ -2,6 +2,7 @@ package authorization
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -212,8 +213,7 @@ func (r *RoleDefinitionReconciler) markDeletionFailed(
 	if updateErr := ssa.ApplyRoleDefinitionStatus(ctx, r.client, roleDefinition); updateErr != nil {
 		logger.Error(updateErr, "Failed to apply status after deletion error",
 			"roleDefinitionName", roleDefinition.Name)
-		return ctrl.Result{}, fmt.Errorf("deletion failed: %w; update role definition status after deletion failure: %w",
-			err, updateErr)
+		return ctrl.Result{}, errors.Join(err, fmt.Errorf("update role definition status after deletion failure: %w", updateErr))
 	}
 	return ctrl.Result{}, err
 }
