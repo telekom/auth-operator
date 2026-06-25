@@ -24,6 +24,7 @@ import (
 	"github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/helpers"
 	"github.com/telekom/auth-operator/pkg/metrics"
+	"github.com/telekom/auth-operator/pkg/policy"
 	pkgssa "github.com/telekom/auth-operator/pkg/ssa"
 )
 
@@ -202,7 +203,8 @@ func (r *RoleDefinitionReconciler) buildFinalRules(
 	}
 
 	// Add non-resource URL rule for ClusterRoles only (namespaced Roles cannot have NonResourceURLs)
-	if roleDefinition.Spec.TargetRole == authorizationv1alpha1.DefinitionClusterRole && !slices.Contains(roleDefinition.Spec.RestrictedVerbs, "get") {
+	if roleDefinition.Spec.TargetRole == authorizationv1alpha1.DefinitionClusterRole &&
+		!policy.ContainsStringOrWildcard(roleDefinition.Spec.RestrictedVerbs, "get") {
 		finalRules = append(finalRules, rbacv1.PolicyRule{
 			NonResourceURLs: []string{"/metrics"},
 			Verbs:           []string{"get"},
