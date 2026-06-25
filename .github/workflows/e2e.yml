@@ -149,7 +149,7 @@ jobs:
       - name: Cleanup cluster
         if: always()
         run: |
-          kind delete cluster --name auth-operator-e2e || true
+          kind delete cluster --name auth-operator-e2e-helm || true
 
   e2e-complex:
     name: E2E Complex Tests
@@ -196,7 +196,7 @@ jobs:
       - name: Cleanup cluster
         if: always()
         run: |
-          kind delete cluster --name auth-operator-e2e || true
+          kind delete cluster --name auth-operator-e2e-complex || true
 
   e2e-ha:
     name: E2E HA Tests
