@@ -353,6 +353,21 @@ func TestBuildFinalRules(t *testing.T) {
 		}
 	})
 
+	t.Run("should NOT include /metrics when wildcard is restricted", func(t *testing.T) {
+		rd := &authorizationv1alpha1.RoleDefinition{
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				TargetRole:      authorizationv1alpha1.DefinitionClusterRole,
+				RestrictedVerbs: []string{"*"},
+			},
+		}
+
+		rules := r.buildFinalRules(rd, map[string]*rbacv1.PolicyRule{})
+
+		if len(rules) != 0 {
+			t.Fatalf("expected no rules when wildcard restricts get, got %d", len(rules))
+		}
+	})
+
 	t.Run("should NOT include /metrics for namespaced Role", func(t *testing.T) {
 		rd := &authorizationv1alpha1.RoleDefinition{
 			Spec: authorizationv1alpha1.RoleDefinitionSpec{
@@ -594,6 +609,28 @@ func TestFilterAPIResourcesForRoleDefinition(t *testing.T) {
 		}
 		if rulesContainVerb(rules, "delete") || rulesContainVerb(rules, "patch") {
 			t.Error("restricted verbs should be filtered out")
+		}
+	})
+
+	t.Run("should filter all verbs when restricted verbs contains wildcard", func(t *testing.T) {
+		rd := &authorizationv1alpha1.RoleDefinition{
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				TargetRole:      authorizationv1alpha1.DefinitionClusterRole,
+				ScopeNamespaced: false,
+				RestrictedVerbs: []string{"*"},
+			},
+		}
+
+		apiResources := discovery.APIResourcesByGroupVersion{
+			"v1": {{Name: "pods", Verbs: metav1.Verbs{"get", "list", "create", "delete", "*"}, Namespaced: false}},
+		}
+
+		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(rules) != 0 {
+			t.Errorf("expected no rules when wildcard restricts every verb, got %d", len(rules))
 		}
 	})
 

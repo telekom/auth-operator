@@ -508,7 +508,8 @@ func allowedVerbsForAPIResource(
 
 	verbs := make([]string, 0, len(resource.Verbs))
 	for _, verb := range resource.Verbs {
-		if slices.Contains(roleDefinition.Spec.RestrictedVerbs, verb) || slices.Contains(apiGroupRestrictedVerbs, verb) {
+		if policy.ContainsStringOrWildcard(roleDefinition.Spec.RestrictedVerbs, verb) ||
+			policy.ContainsStringOrWildcard(apiGroupRestrictedVerbs, verb) {
 			continue
 		}
 		verbs = append(verbs, verb)

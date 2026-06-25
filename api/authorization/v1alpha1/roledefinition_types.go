@@ -24,7 +24,7 @@ type RestrictedAPIGroup struct {
 	// When specified, only the listed verbs are removed from the generated role for resources
 	// in this group — remaining verbs are still allowed.
 	// This enables per-API-group read-only restrictions without enumerating every resource.
-	// Note: "*" matches only the literal wildcard verb, not all verbs.
+	// A verb value of "*" restricts all discovered verbs in this API group.
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=16
 	// +kubebuilder:validation:items:MinLength=1
@@ -100,6 +100,7 @@ type RoleDefinitionSpec struct {
 
 	// RestrictedVerbs holds all verbs which will *NOT* be reconciled into the "TargetRole".
 	// The RBAC operator discovers all resource verbs available and removes those listed here.
+	// A value of "*" restricts all discovered verbs.
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=16
 	// +kubebuilder:validation:items:MinLength=1
