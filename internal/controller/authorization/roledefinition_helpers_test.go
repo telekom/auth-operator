@@ -894,6 +894,26 @@ func TestBuildRoleObjectBreakglassLabel(t *testing.T) {
 		g.Expect(cr.Labels).To(HaveKeyWithValue(authorizationv1alpha1.BreakglassCompatibleLabel, "false"))
 	})
 
+	t.Run("ClusterRole spec overrides metadata breakglass label", func(t *testing.T) {
+		g := NewWithT(t)
+		rd := &authorizationv1alpha1.RoleDefinition{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					authorizationv1alpha1.BreakglassCompatibleLabel: "true",
+				},
+			},
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				TargetRole:        authorizationv1alpha1.DefinitionClusterRole,
+				TargetName:        "test-cr",
+				BreakglassAllowed: false,
+			},
+		}
+		obj, err := r.buildRoleObject(rd)
+		g.Expect(err).NotTo(HaveOccurred())
+		cr := obj.(*rbacv1.ClusterRole)
+		g.Expect(cr.Labels).To(HaveKeyWithValue(authorizationv1alpha1.BreakglassCompatibleLabel, "false"))
+	})
+
 	t.Run("Role ignores BreakglassAllowed", func(t *testing.T) {
 		g := NewWithT(t)
 		rd := &authorizationv1alpha1.RoleDefinition{
@@ -908,6 +928,28 @@ func TestBuildRoleObjectBreakglassLabel(t *testing.T) {
 		g.Expect(err).NotTo(HaveOccurred())
 		role := obj.(*rbacv1.Role)
 		g.Expect(role.Labels).NotTo(HaveKey(authorizationv1alpha1.BreakglassCompatibleLabel))
+	})
+
+	t.Run("Role strips metadata breakglass label", func(t *testing.T) {
+		g := NewWithT(t)
+		rd := &authorizationv1alpha1.RoleDefinition{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					authorizationv1alpha1.BreakglassCompatibleLabel: "true",
+					"custom": "keep",
+				},
+			},
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
+				TargetName:      "test-role",
+				TargetNamespace: "default",
+			},
+		}
+		obj, err := r.buildRoleObject(rd)
+		g.Expect(err).NotTo(HaveOccurred())
+		role := obj.(*rbacv1.Role)
+		g.Expect(role.Labels).NotTo(HaveKey(authorizationv1alpha1.BreakglassCompatibleLabel))
+		g.Expect(role.Labels).To(HaveKeyWithValue("custom", "keep"))
 	})
 }
 
@@ -1024,6 +1066,92 @@ func TestEnsureRoleBreakglassLabelApplied(t *testing.T) {
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(appliedLabels).To(HaveKeyWithValue(authorizationv1alpha1.BreakglassCompatibleLabel, "true"),
 		"ensureRole must include the breakglass-compatible label in the SSA apply configuration")
+}
+
+func TestEnsureRoleClusterRoleBreakglassSpecOverridesMetadataLabel(t *testing.T) {
+	ctx := context.Background()
+	g := NewWithT(t)
+
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+
+	rd := &authorizationv1alpha1.RoleDefinition{
+		TypeMeta: metav1.TypeMeta{APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: "RoleDefinition"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "bg-metadata-rd",
+			UID:  "bg-metadata-uid",
+			Labels: map[string]string{
+				authorizationv1alpha1.BreakglassCompatibleLabel: "true",
+			},
+		},
+		Spec: authorizationv1alpha1.RoleDefinitionSpec{
+			TargetRole:        authorizationv1alpha1.DefinitionClusterRole,
+			TargetName:        "bg-metadata-cr",
+			BreakglassAllowed: false,
+		},
+	}
+
+	var appliedLabels map[string]string
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(rd).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Apply: func(_ context.Context, _ client.WithWatch, obj runtime.ApplyConfiguration, _ ...client.ApplyOption) error {
+				if cr, ok := obj.(*rbacv1ac.ClusterRoleApplyConfiguration); ok && cr.ObjectMetaApplyConfiguration != nil {
+					appliedLabels = cr.Labels
+				}
+				return nil
+			},
+		}).Build()
+	r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	err := r.ensureRole(ctx, rd, []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}}})
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(appliedLabels).To(HaveKeyWithValue(authorizationv1alpha1.BreakglassCompatibleLabel, "false"))
+}
+
+func TestEnsureRoleNamespacedRoleStripsMetadataBreakglassLabel(t *testing.T) {
+	ctx := context.Background()
+	g := NewWithT(t)
+
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+
+	rd := &authorizationv1alpha1.RoleDefinition{
+		TypeMeta: metav1.TypeMeta{APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: "RoleDefinition"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "strip-bg-label-rd",
+			UID:  "strip-bg-label-uid",
+			Labels: map[string]string{
+				authorizationv1alpha1.BreakglassCompatibleLabel: "true",
+				"custom": "keep",
+			},
+		},
+		Spec: authorizationv1alpha1.RoleDefinitionSpec{
+			TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
+			TargetName:      "strip-bg-label-role",
+			TargetNamespace: "default",
+		},
+	}
+
+	var appliedLabels map[string]string
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(rd).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Apply: func(_ context.Context, _ client.WithWatch, obj runtime.ApplyConfiguration, _ ...client.ApplyOption) error {
+				if role, ok := obj.(*rbacv1ac.RoleApplyConfiguration); ok && role.ObjectMetaApplyConfiguration != nil {
+					appliedLabels = role.Labels
+				}
+				return nil
+			},
+		}).Build()
+	r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	err := r.ensureRole(ctx, rd, []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}}})
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(appliedLabels).NotTo(HaveKey(authorizationv1alpha1.BreakglassCompatibleLabel))
+	g.Expect(appliedLabels).To(HaveKeyWithValue("custom", "keep"))
 }
 
 func TestEnsureRoleClusterRoleSSAError(t *testing.T) {
