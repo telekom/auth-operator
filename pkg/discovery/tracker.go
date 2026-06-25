@@ -344,7 +344,6 @@ func (r *ResourceTracker) collectAPIResourcesBlocking(ctx context.Context) (bool
 }
 
 func (r *ResourceTracker) collectAPIResourcesWithLock(ctx context.Context, waitForLock bool) (bool, error) {
-	startTime := time.Now()
 	unlock, locked, err := r.acquireCollectLock(ctx, waitForLock)
 	if err != nil {
 		return false, err
@@ -354,6 +353,7 @@ func (r *ResourceTracker) collectAPIResourcesWithLock(ctx context.Context, waitF
 	}
 	defer unlock()
 
+	startTime := time.Now()
 	logger := log.FromContext(ctx)
 	logger.V(2).Info("collecting API resources")
 
