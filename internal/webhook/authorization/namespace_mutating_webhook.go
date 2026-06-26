@@ -75,7 +75,7 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 	}
 
 	// Collect labels from matching BindDefinitions
-	labelsToAdd, listErr := m.collectBindDefinitionLabels(ctx, req.Name, req.UserInfo.Username, userGroups, saInfo)
+	labelsToAdd, explicitNamespaceAllowed, listErr := m.collectBindDefinitionLabels(ctx, req.Name, req.UserInfo.Username, userGroups, saInfo)
 	if listErr != nil {
 		logger.Error(listErr, "failed to collect BindDefinition labels", "namespace", req.Name)
 		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultErrored).Inc()
@@ -105,6 +105,18 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 			return admission.Denied(fmt.Sprintf(DenialInvalidTrackedLabelsFmt, ns.Name))
 		}
 		return m.applyLabelPatch(ctx, req, ns, labelsToAdd)
+	}
+	if explicitNamespaceAllowed {
+		if !ValidTrackedOwnershipLabels(ns.Labels) {
+			logger.V(1).Info("namespace mutation denied - invalid tracked ownership labels on explicit namespace",
+				"namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username)
+			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultDenied).Inc()
+			return admission.Denied(fmt.Sprintf(DenialInvalidTrackedLabelsFmt, ns.Name))
+		}
+		logger.V(1).Info("namespace mutation allowed - explicit namespace binding matched",
+			"namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username)
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
+		return admission.Allowed("Explicit namespace binding matched")
 	}
 
 	// If no labels to add, deny the request with a warning
@@ -176,8 +188,9 @@ func denyConflictingInheritedLabels(
 }
 
 // collectBindDefinitionLabels iterates over all BindDefinitions and collects labels to add
-// from those whose subjects match the requesting user.
-func (m *NamespaceMutator) collectBindDefinitionLabels(ctx context.Context, nsName, username string, userGroups []string, saInfo ServiceAccountInfo) (map[string]string, error) {
+// from those whose subjects match the requesting user. The boolean return value reports
+// whether an exact explicit namespace binding matched the request namespace.
+func (m *NamespaceMutator) collectBindDefinitionLabels(ctx context.Context, nsName, username string, userGroups []string, saInfo ServiceAccountInfo) (labelsToAdd map[string]string, explicitNamespaceAllowed bool, err error) {
 	logger := logf.FromContext(ctx).WithName("namespace-mutator")
 
 	listCtx, cancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
@@ -185,13 +198,13 @@ func (m *NamespaceMutator) collectBindDefinitionLabels(ctx context.Context, nsNa
 	bindDefinitions, err := freshBindDefinitionsWithRoleBindings(listCtx, m.Client, m.admissionReader())
 	if err != nil {
 		logger.Error(err, "failed to list BindDefinitions", "namespace", nsName)
-		return nil, err
+		return nil, false, err
 	}
 
 	logger.V(2).Info("checking BindDefinitions for label mutations",
 		"namespace", nsName, "bindDefinitionCount", len(bindDefinitions))
 
-	labelsToAdd := map[string]string{}
+	labelsToAdd = map[string]string{}
 
 	for bdIdx, bindDef := range bindDefinitions {
 		if IsRestrictedBindDefinition(bindDef.Name) {
@@ -208,9 +221,15 @@ func (m *NamespaceMutator) collectBindDefinitionLabels(ctx context.Context, nsNa
 
 			for rbIdx, roleBinding := range bindDef.Spec.RoleBindings {
 				if roleBinding.Namespace != "" {
-					logger.V(4).Info("skipping namespace selectors because explicit namespace is set",
-						"namespace", nsName, "roleBindingIndex", rbIdx,
-						"explicitNamespace", roleBinding.Namespace)
+					if roleBinding.Namespace == nsName {
+						explicitNamespaceAllowed = true
+						logger.V(3).Info("explicit namespace binding matched",
+							"namespace", nsName, "bindDefinition", bindDef.Name, "roleBindingIndex", rbIdx)
+					} else {
+						logger.V(4).Info("explicit namespace did not match request namespace, skipping selectors",
+							"namespace", nsName, "roleBindingIndex", rbIdx,
+							"explicitNamespace", roleBinding.Namespace)
+					}
 					continue
 				}
 				if len(roleBinding.NamespaceSelector) > 0 {
@@ -236,7 +255,7 @@ func (m *NamespaceMutator) collectBindDefinitionLabels(ctx context.Context, nsNa
 		}
 	}
 
-	return labelsToAdd, nil
+	return labelsToAdd, explicitNamespaceAllowed, nil
 }
 
 func (m *NamespaceMutator) admissionReader() client.Reader {
