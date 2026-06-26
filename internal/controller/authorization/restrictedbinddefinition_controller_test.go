@@ -1771,6 +1771,84 @@ func TestRBD_Reconcile_DisableAdoptionTrue_PreservesSameOwnerServiceAccount(t *t
 	g.Expect(updated.Status.ExternalServiceAccounts).To(gomega.BeEmpty())
 }
 
+func TestRBD_Reconcile_RecoversGeneratedServiceAccountAfterFinalStatusApplyFailure(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	subject := rbacv1.Subject{Kind: rbacv1.ServiceAccountKind, Name: "retry-sa", Namespace: "retry-ns"}
+	pol := &authorizationv1alpha1.RBACPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "retry-policy", Generation: 1},
+		Spec: authorizationv1alpha1.RBACPolicySpec{
+			AppliesTo: authorizationv1alpha1.PolicyScope{Namespaces: []string{"retry-ns"}},
+			SubjectLimits: &authorizationv1alpha1.SubjectLimits{
+				AllowedKinds: []string{rbacv1.ServiceAccountKind},
+				ServiceAccountLimits: &authorizationv1alpha1.ServiceAccountLimits{
+					Creation: &authorizationv1alpha1.SACreationConfig{
+						AllowAutoCreate: true,
+						DisableAdoption: true,
+					},
+				},
+			},
+		},
+	}
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "retry-ns"}}
+	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "retry-rbd", UID: types.UID("retry-rbd-uid"), Generation: 1},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			PolicyRef:  authorizationv1alpha1.RBACPolicyReference{Name: pol.Name},
+			TargetName: "retry-target",
+			Subjects:   []rbacv1.Subject{subject},
+			ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
+				ClusterRoleRefs: []string{"view"},
+			},
+		},
+	}
+	clusterRole := &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "view"}}
+
+	scheme := newTestScheme()
+	statusApplyCalls := 0
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(rbdPolicyWithDefaultAllowances(pol), rbd, ns, clusterRole).
+		WithReturnManagedFields().
+		WithStatusSubresource(
+			&authorizationv1alpha1.RestrictedBindDefinition{},
+			&authorizationv1alpha1.RBACPolicy{},
+		).
+		WithInterceptorFuncs(interceptor.Funcs{
+			SubResourceApply: func(ctx context.Context, c client.Client, subResource string, obj runtime.ApplyConfiguration, opts ...client.SubResourceApplyOption) error {
+				statusApplyCalls++
+				if statusApplyCalls == 1 {
+					return fmt.Errorf("injected final status error")
+				}
+				return c.SubResource(subResource).Apply(ctx, obj, opts...)
+			},
+		}).
+		Build()
+	r := NewRestrictedBindDefinitionReconciler(c, scheme, events.NewFakeRecorder(10))
+
+	_, err := r.Reconcile(rbdCtx(), ctrl.Request{NamespacedName: types.NamespacedName{Name: rbd.Name}})
+	g.Expect(err).To(gomega.MatchError(gomega.ContainSubstring("injected final status error")))
+
+	var firstCRB rbacv1.ClusterRoleBinding
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: "retry-target-view-binding"}, &firstCRB)).To(gomega.Succeed())
+	g.Expect(firstCRB.Subjects).To(gomega.ConsistOf(subject))
+
+	result, err := r.Reconcile(rbdCtx(), ctrl.Request{NamespacedName: types.NamespacedName{Name: rbd.Name}})
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	g.Expect(result.RequeueAfter).To(gomega.Equal(DefaultRequeueInterval))
+
+	var updated authorizationv1alpha1.RestrictedBindDefinition
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: rbd.Name}, &updated)).To(gomega.Succeed())
+	g.Expect(updated.Status.GeneratedServiceAccounts).To(gomega.ConsistOf(subject))
+	g.Expect(updated.Status.ExternalServiceAccounts).To(gomega.BeEmpty())
+	g.Expect(updated.Status.SkippedServiceAccounts).To(gomega.BeEmpty())
+	g.Expect(conditions.IsReady(&updated)).To(gomega.BeTrue())
+
+	var recoveredCRB rbacv1.ClusterRoleBinding
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: "retry-target-view-binding"}, &recoveredCRB)).To(gomega.Succeed())
+	g.Expect(recoveredCRB.Subjects).To(gomega.ConsistOf(subject))
+}
+
 func TestRBD_EnsureServiceAccounts_CreateRaceDoesNotAdoptExternalServiceAccount(t *testing.T) {
 	g := gomega.NewWithT(t)
 
@@ -3769,7 +3847,7 @@ func TestRBD_ClassifyServiceAccountUsesLiveGeneratedStatus(t *testing.T) {
 	g.Expect(externalSA).To(gomega.BeEmpty())
 }
 
-func TestRBD_ClassifyServiceAccountSkipsSameOwnerRefWithoutGeneratedStatus(t *testing.T) {
+func TestRBD_ClassifyServiceAccountSkipsBareSameOwnerRefWithoutGeneratedStatus(t *testing.T) {
 	g := gomega.NewWithT(t)
 
 	subject := rbacv1.Subject{Kind: rbacv1.ServiceAccountKind, Name: "runner", Namespace: "default"}
@@ -3799,6 +3877,55 @@ func TestRBD_ClassifyServiceAccountSkipsSameOwnerRefWithoutGeneratedStatus(t *te
 
 	g.Expect(bindSubject).To(gomega.BeFalse())
 	g.Expect(manageSA).To(gomega.BeFalse())
+	g.Expect(externalSA).To(gomega.BeEmpty())
+}
+
+func TestRBD_ClassifyServiceAccountRecoversGeneratedMarkersWithoutStatus(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	subject := rbacv1.Subject{Kind: rbacv1.ServiceAccountKind, Name: "runner", Namespace: "default"}
+	rbdUID := types.UID("same-owner-generated-rbd-uid")
+	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "same-owner-generated-rbd", UID: rbdUID},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			Subjects: []rbacv1.Subject{subject},
+		},
+	}
+	ownedSA := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      subject.Name,
+			Namespace: subject.Namespace,
+			Labels: map[string]string{
+				helpers.ManagedByLabelStandard: helpers.ManagedByValue,
+			},
+			Annotations: map[string]string{
+				helpers.SourceKindAnnotation: authorizationv1alpha1.RestrictedBindDefinitionKind,
+				helpers.SourceNameAnnotation: rbd.Name,
+			},
+			OwnerReferences: []metav1.OwnerReference{
+				restrictedTestOwnerRef(authorizationv1alpha1.RestrictedBindDefinitionKind, rbd.Name, rbdUID),
+			},
+			ManagedFields: []metav1.ManagedFieldsEntry{
+				{
+					APIVersion: authorizationv1alpha1.GroupVersion.String(),
+					Manager:    pkgssa.FieldOwnerFor(rbd.Name, authorizationv1alpha1.RestrictedBindDefinitionKind),
+					Operation:  metav1.ManagedFieldsOperationApply,
+				},
+			},
+		},
+	}
+
+	scheme := newTestScheme()
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(rbd).
+		Build()
+	r := NewRestrictedBindDefinitionReconciler(c, scheme, events.NewFakeRecorder(10))
+
+	bindSubject, manageSA, externalSA := r.rbdClassifyExistingServiceAccount(rbdCtx(), rbd, subject, ownedSA, nil)
+
+	g.Expect(bindSubject).To(gomega.BeFalse())
+	g.Expect(manageSA).To(gomega.BeTrue())
 	g.Expect(externalSA).To(gomega.BeEmpty())
 }
 
