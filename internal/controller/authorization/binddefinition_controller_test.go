@@ -4832,8 +4832,8 @@ func TestReconcile_MissingExplicitRoleBindingNamespaceNotReady(t *testing.T) {
 	var rb rbacv1.RoleBinding
 	g.Expect(c.Get(ctx, types.NamespacedName{Namespace: "existing-ns", Name: "missing-ns-target-view-binding"}, &rb)).
 		To(Succeed())
-	g.Expect(c.Get(ctx, types.NamespacedName{Namespace: "missing-ns", Name: "missing-ns-target-view-binding"}, &rb)).
-		To(HaveOccurred())
+	err = c.Get(ctx, types.NamespacedName{Namespace: "missing-ns", Name: "missing-ns-target-view-binding"}, &rb)
+	g.Expect(apierrors.IsNotFound(err)).To(BeTrue())
 
 	var updated authorizationv1alpha1.BindDefinition
 	g.Expect(c.Get(ctx, types.NamespacedName{Name: bd.Name}, &updated)).To(Succeed())
