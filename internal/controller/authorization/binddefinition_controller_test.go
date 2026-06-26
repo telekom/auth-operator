@@ -1845,6 +1845,44 @@ func TestValidateRoleReferences(t *testing.T) {
 		g.Expect(missing).To(ContainElement("Role/test-ns/missing-role"))
 	})
 
+	t.Run("should return non-NotFound Role lookup errors", func(t *testing.T) {
+		g := NewWithT(t)
+
+		ns := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-ns"},
+			Status:     corev1.NamespaceStatus{Phase: corev1.NamespaceActive},
+		}
+		bindDef := &authorizationv1alpha1.BindDefinition{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-bd"},
+			Spec: authorizationv1alpha1.BindDefinitionSpec{
+				TargetName: "test",
+				Subjects:   []rbacv1.Subject{{Kind: "User", Name: "u"}},
+				RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+					{
+						RoleRefs:  []string{"existing-role"},
+						Namespace: "test-ns",
+					},
+				},
+			},
+		}
+
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ns).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					if _, ok := obj.(*rbacv1.Role); ok {
+						return fmt.Errorf("injected role lookup error")
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+			}).Build()
+		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
+
+		missing, err := r.validateRoleReferences(ctx, bindDef)
+		g.Expect(err).To(MatchError(ContainSubstring("check Role test-ns/existing-role existence")))
+		g.Expect(err).To(MatchError(ContainSubstring("injected role lookup error")))
+		g.Expect(missing).To(BeEmpty())
+	})
+
 	t.Run("should not duplicate ClusterRole references", func(t *testing.T) {
 		g := NewWithT(t)
 
