@@ -10,6 +10,7 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	rbacv1ac "k8s.io/client-go/applyconfigurations/rbac/v1"
@@ -748,7 +749,15 @@ func TestHandleDeletion(t *testing.T) {
 		}
 
 		cr := &rbacv1.ClusterRole{
-			ObjectMeta: metav1.ObjectMeta{Name: "del-cluster-role"},
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "del-cluster-role",
+				OwnerReferences: []metav1.OwnerReference{{
+					APIVersion: authorizationv1alpha1.GroupVersion.String(),
+					Kind:       "RoleDefinition",
+					Name:       rd.Name,
+					UID:        rd.UID,
+				}},
+			},
 		}
 
 		c := fake.NewClientBuilder().WithScheme(s).
@@ -764,6 +773,48 @@ func TestHandleDeletion(t *testing.T) {
 		g.Expect(err).NotTo(HaveOccurred())
 		// First call triggers delete and requeues
 		g.Expect(result.RequeueAfter).NotTo(BeZero())
+	})
+
+	t.Run("wraps deletion and status update errors", func(t *testing.T) {
+		g := NewWithT(t)
+
+		rd := &authorizationv1alpha1.RoleDefinition{
+			TypeMeta: metav1.TypeMeta{
+				APIVersion: authorizationv1alpha1.GroupVersion.String(),
+				Kind:       "RoleDefinition",
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "failed-delete-rd",
+				UID:        "failed-delete-uid",
+				Generation: 3,
+			},
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				TargetName: "failed-delete-role",
+				TargetRole: authorizationv1alpha1.DefinitionClusterRole,
+			},
+		}
+		deleteErr := errors.New("delete failed")
+		statusErr := errors.New("status apply failed")
+
+		c := fake.NewClientBuilder().WithScheme(s).
+			WithObjects(rd).
+			WithStatusSubresource(rd).
+			WithInterceptorFuncs(interceptor.Funcs{
+				SubResourceApply: func(_ context.Context, _ client.Client, subResourceName string, _ runtime.ApplyConfiguration, _ ...client.SubResourceApplyOption) error {
+					if subResourceName == "status" {
+						return statusErr
+					}
+					return nil
+				},
+			}).
+			Build()
+		r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+		_, err := r.markDeletionFailed(ctx, rd, deleteErr)
+
+		g.Expect(err).To(HaveOccurred())
+		g.Expect(errors.Is(err, deleteErr)).To(BeTrue())
+		g.Expect(errors.Is(err, statusErr)).To(BeTrue())
 	})
 
 	t.Run("removes finalizer when role already deleted", func(t *testing.T) {
@@ -855,7 +906,16 @@ func TestHandleDeletion(t *testing.T) {
 		}
 
 		role := &rbacv1.Role{
-			ObjectMeta: metav1.ObjectMeta{Name: "existing-role", Namespace: "test-ns"},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "existing-role",
+				Namespace: "test-ns",
+				OwnerReferences: []metav1.OwnerReference{{
+					APIVersion: authorizationv1alpha1.GroupVersion.String(),
+					Kind:       "RoleDefinition",
+					Name:       rd.Name,
+					UID:        rd.UID,
+				}},
+			},
 		}
 
 		c := fake.NewClientBuilder().WithScheme(s).
@@ -871,6 +931,104 @@ func TestHandleDeletion(t *testing.T) {
 		g.Expect(err).NotTo(HaveOccurred())
 		// Delete triggers requeue to check if deletion succeeded
 		g.Expect(result.RequeueAfter).NotTo(BeZero())
+	})
+
+	t.Run("skips unowned ClusterRole deletion and removes finalizer", func(t *testing.T) {
+		g := NewWithT(t)
+
+		rd := &authorizationv1alpha1.RoleDefinition{
+			TypeMeta: metav1.TypeMeta{
+				APIVersion: authorizationv1alpha1.GroupVersion.String(),
+				Kind:       "RoleDefinition",
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "skip-unowned-rd",
+				UID:        "skip-unowned-rd-uid",
+				Finalizers: []string{authorizationv1alpha1.RoleDefinitionFinalizer},
+			},
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				TargetName: "shared-cluster-role",
+				TargetRole: authorizationv1alpha1.DefinitionClusterRole,
+			},
+		}
+
+		cr := &rbacv1.ClusterRole{
+			ObjectMeta: metav1.ObjectMeta{Name: "shared-cluster-role"},
+		}
+
+		c := fake.NewClientBuilder().WithScheme(s).
+			WithObjects(rd, cr).
+			WithStatusSubresource(rd).
+			Build()
+		r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+		role, err := r.buildRoleObject(rd)
+		g.Expect(err).NotTo(HaveOccurred())
+
+		result, err := r.handleDeletion(ctx, rd, role)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(result.RequeueAfter).To(BeZero())
+
+		var stillThere rbacv1.ClusterRole
+		g.Expect(c.Get(ctx, client.ObjectKey{Name: "shared-cluster-role"}, &stillThere)).To(Succeed())
+
+		var updated authorizationv1alpha1.RoleDefinition
+		g.Expect(c.Get(ctx, client.ObjectKey{Name: rd.Name}, &updated)).To(Succeed())
+		g.Expect(updated.Finalizers).NotTo(ContainElement(authorizationv1alpha1.RoleDefinitionFinalizer))
+	})
+
+	t.Run("skips differently owned Role deletion and removes finalizer", func(t *testing.T) {
+		g := NewWithT(t)
+
+		rd := &authorizationv1alpha1.RoleDefinition{
+			TypeMeta: metav1.TypeMeta{
+				APIVersion: authorizationv1alpha1.GroupVersion.String(),
+				Kind:       "RoleDefinition",
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "skip-owned-rd",
+				UID:        "skip-owned-rd-uid",
+				Finalizers: []string{authorizationv1alpha1.RoleDefinitionFinalizer},
+			},
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				TargetName:      "shared-role",
+				TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
+				TargetNamespace: "test-ns",
+			},
+		}
+
+		role := &rbacv1.Role{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "shared-role",
+				Namespace: "test-ns",
+				OwnerReferences: []metav1.OwnerReference{{
+					APIVersion: authorizationv1alpha1.GroupVersion.String(),
+					Kind:       "RoleDefinition",
+					Name:       "other-rd",
+					UID:        "other-rd-uid",
+				}},
+			},
+		}
+
+		c := fake.NewClientBuilder().WithScheme(s).
+			WithObjects(rd, role).
+			WithStatusSubresource(rd).
+			Build()
+		r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+		builtRole, err := r.buildRoleObject(rd)
+		g.Expect(err).NotTo(HaveOccurred())
+
+		result, err := r.handleDeletion(ctx, rd, builtRole)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(result.RequeueAfter).To(BeZero())
+
+		var stillThere rbacv1.Role
+		g.Expect(c.Get(ctx, client.ObjectKey{Namespace: "test-ns", Name: "shared-role"}, &stillThere)).To(Succeed())
+
+		var updated authorizationv1alpha1.RoleDefinition
+		g.Expect(c.Get(ctx, client.ObjectKey{Name: rd.Name}, &updated)).To(Succeed())
+		g.Expect(updated.Finalizers).NotTo(ContainElement(authorizationv1alpha1.RoleDefinitionFinalizer))
 	})
 }
 
@@ -1272,7 +1430,17 @@ func TestHandleDeletionDeleteError(t *testing.T) {
 		},
 	}
 
-	cr := &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "del-err-cr"}}
+	cr := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "del-err-cr",
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: authorizationv1alpha1.GroupVersion.String(),
+				Kind:       "RoleDefinition",
+				Name:       rd.Name,
+				UID:        rd.UID,
+			}},
+		},
+	}
 
 	c := fake.NewClientBuilder().WithScheme(s).
 		WithObjects(rd, cr).
@@ -1381,6 +1549,105 @@ func TestEnsureRoleNamespacedRoleClearsStaleRulesWhenDesiredRulesEmpty(t *testin
 	g.Expect(role.Rules).To(BeEmpty())
 }
 
+func TestRoleDefinitionCleanupSkipsUnownedTargets(t *testing.T) {
+	ctx := context.Background()
+	g := NewWithT(t)
+
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+
+	rd := &authorizationv1alpha1.RoleDefinition{
+		TypeMeta:   metav1.TypeMeta{APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: "RoleDefinition"},
+		ObjectMeta: metav1.ObjectMeta{Name: "cleanup-rd", UID: "cleanup-rd-uid"},
+		Spec: authorizationv1alpha1.RoleDefinitionSpec{
+			TargetRole:      authorizationv1alpha1.DefinitionClusterRole,
+			TargetName:      "cleanup-cluster-role",
+			TargetNamespace: "cleanup-ns",
+		},
+	}
+
+	aggregating := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "cleanup-cluster-role"},
+		AggregationRule: &rbacv1.AggregationRule{
+			ClusterRoleSelectors: []metav1.LabelSelector{{MatchLabels: map[string]string{"team": "alpha"}}},
+		},
+		Rules: []rbacv1.PolicyRule{
+			{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"get"}},
+		},
+	}
+	namespaced := &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{Name: "cleanup-cluster-role", Namespace: "cleanup-ns"},
+		Rules: []rbacv1.PolicyRule{
+			{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"get"}},
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(rd, aggregating, namespaced).Build()
+	r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	g.Expect(r.clearAggregationRuleIfSet(ctx, rd)).To(Succeed())
+	g.Expect(r.clearRulesOnAggregationTransition(ctx, rd)).To(Succeed())
+	g.Expect(r.clearClusterRoleRulesIfEmpty(ctx, rd, nil)).To(Succeed())
+
+	var cr rbacv1.ClusterRole
+	g.Expect(c.Get(ctx, client.ObjectKey{Name: "cleanup-cluster-role"}, &cr)).To(Succeed())
+	g.Expect(cr.AggregationRule).NotTo(BeNil())
+	g.Expect(cr.Rules).NotTo(BeEmpty())
+
+	rd.Spec.TargetRole = authorizationv1alpha1.DefinitionNamespacedRole
+	g.Expect(r.clearRoleRulesIfEmpty(ctx, rd, nil)).To(Succeed())
+
+	var role rbacv1.Role
+	g.Expect(c.Get(ctx, client.ObjectKey{Namespace: "cleanup-ns", Name: "cleanup-cluster-role"}, &role)).To(Succeed())
+	g.Expect(role.Rules).NotTo(BeEmpty())
+}
+
+func TestCleanupInvalidAggregateFromTargetDeletesOnlyOwnedClusterRole(t *testing.T) {
+	ctx := context.Background()
+	g := NewWithT(t)
+
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+
+	rd := &authorizationv1alpha1.RoleDefinition{
+		TypeMeta:   metav1.TypeMeta{APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: "RoleDefinition"},
+		ObjectMeta: metav1.ObjectMeta{Name: "invalid-aggregate-rd", UID: "invalid-aggregate-rd-uid"},
+		Spec: authorizationv1alpha1.RoleDefinitionSpec{
+			TargetRole: authorizationv1alpha1.DefinitionClusterRole,
+			TargetName: "invalid-aggregate-role",
+		},
+	}
+	owned := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "invalid-aggregate-role",
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: authorizationv1alpha1.GroupVersion.String(),
+				Kind:       "RoleDefinition",
+				Name:       rd.Name,
+				UID:        rd.UID,
+			}},
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(rd, owned).Build()
+	r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	g.Expect(r.cleanupInvalidAggregateFromTarget(ctx, rd)).To(Succeed())
+
+	var deleted rbacv1.ClusterRole
+	err := c.Get(ctx, client.ObjectKey{Name: "invalid-aggregate-role"}, &deleted)
+	g.Expect(apierrors.IsNotFound(err)).To(BeTrue())
+
+	unowned := &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "invalid-aggregate-role"}}
+	c = fake.NewClientBuilder().WithScheme(s).WithObjects(rd, unowned).Build()
+	r = &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	g.Expect(r.cleanupInvalidAggregateFromTarget(ctx, rd)).To(Succeed())
+	g.Expect(c.Get(ctx, client.ObjectKey{Name: "invalid-aggregate-role"}, &deleted)).To(Succeed())
+}
+
 func TestEnsureRoleWithAggregationLabels(t *testing.T) {
 	ctx := context.Background()
 	g := NewWithT(t)
@@ -1397,7 +1664,7 @@ func TestEnsureRoleWithAggregationLabels(t *testing.T) {
 			TargetName:      "custom-viewer",
 			ScopeNamespaced: false,
 			AggregationLabels: map[string]string{
-				"rbac.authorization.k8s.io/aggregate-to-view": "true",
+				"custom.example.com/aggregate-to-monitoring": "true",
 			},
 		},
 	}
@@ -1414,9 +1681,106 @@ func TestEnsureRoleWithAggregationLabels(t *testing.T) {
 	// Verify the ClusterRole was created with aggregation labels merged in
 	cr := &rbacv1.ClusterRole{}
 	g.Expect(c.Get(ctx, client.ObjectKeyFromObject(&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "custom-viewer"}}), cr)).To(Succeed())
-	g.Expect(cr.Labels).To(HaveKeyWithValue("rbac.authorization.k8s.io/aggregate-to-view", "true"))
+	g.Expect(cr.Labels).To(HaveKeyWithValue("custom.example.com/aggregate-to-monitoring", "true"))
 	g.Expect(cr.Rules).To(HaveLen(1))
 	g.Expect(cr.AggregationRule).To(BeNil())
+}
+
+func TestEnsureRoleFiltersKubernetesRBACAggregationLabels(t *testing.T) {
+	ctx := context.Background()
+	g := NewWithT(t)
+
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+
+	rd := &authorizationv1alpha1.RoleDefinition{
+		TypeMeta: metav1.TypeMeta{APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: "RoleDefinition"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "unsafe-agg-labels-rd",
+			UID:  "unsafe-agg-labels-uid",
+			Labels: map[string]string{
+				"rbac.authorization.k8s.io/aggregate-to-admin": "true",
+				"custom.example.com/source-label":              "kept",
+			},
+		},
+		Spec: authorizationv1alpha1.RoleDefinitionSpec{
+			TargetRole:      authorizationv1alpha1.DefinitionClusterRole,
+			TargetName:      "unsafe-custom-viewer",
+			ScopeNamespaced: false,
+			AggregationLabels: map[string]string{
+				"rbac.authorization.k8s.io/aggregate-to-view": "true",
+				"custom.example.com/aggregate-to-monitoring":  "true",
+			},
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(rd).Build()
+	r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	rules := []rbacv1.PolicyRule{
+		{APIGroups: []string{""}, Resources: []string{"configmaps"}, Verbs: []string{"get", "list"}},
+	}
+	g.Expect(r.ensureRole(ctx, rd, rules)).To(Succeed())
+
+	cr := &rbacv1.ClusterRole{}
+	g.Expect(c.Get(ctx, client.ObjectKeyFromObject(&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "unsafe-custom-viewer"}}), cr)).To(Succeed())
+	g.Expect(cr.Labels).NotTo(HaveKey("rbac.authorization.k8s.io/aggregate-to-admin"))
+	g.Expect(cr.Labels).NotTo(HaveKey("rbac.authorization.k8s.io/aggregate-to-view"))
+	g.Expect(cr.Labels).To(HaveKeyWithValue("custom.example.com/source-label", "kept"))
+	g.Expect(cr.Labels).To(HaveKeyWithValue("custom.example.com/aggregate-to-monitoring", "true"))
+}
+
+func TestEnsureRolePrunesExistingKubernetesRBACAggregationLabels(t *testing.T) {
+	ctx := context.Background()
+	g := NewWithT(t)
+
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+
+	rd := &authorizationv1alpha1.RoleDefinition{
+		TypeMeta: metav1.TypeMeta{APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: "RoleDefinition"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "prune-unsafe-agg-labels-rd",
+			UID:  "prune-unsafe-agg-labels-uid",
+		},
+		Spec: authorizationv1alpha1.RoleDefinitionSpec{
+			TargetRole:      authorizationv1alpha1.DefinitionClusterRole,
+			TargetName:      "prune-unsafe-custom-viewer",
+			ScopeNamespaced: false,
+		},
+	}
+	controller := true
+	existing := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: rd.Spec.TargetName,
+			Labels: map[string]string{
+				"rbac.authorization.k8s.io/aggregate-to-admin": "true",
+				"custom.example.com/external":                  "kept",
+			},
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: authorizationv1alpha1.GroupVersion.String(),
+				Kind:       "RoleDefinition",
+				Name:       rd.Name,
+				UID:        rd.UID,
+				Controller: &controller,
+			}},
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(rd, existing).Build()
+	r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	rules := []rbacv1.PolicyRule{
+		{APIGroups: []string{""}, Resources: []string{"configmaps"}, Verbs: []string{"get", "list"}},
+	}
+	g.Expect(r.ensureRole(ctx, rd, rules)).To(Succeed())
+
+	cr := &rbacv1.ClusterRole{}
+	g.Expect(c.Get(ctx, client.ObjectKeyFromObject(&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: rd.Spec.TargetName}}), cr)).To(Succeed())
+	g.Expect(cr.Labels).NotTo(HaveKey("rbac.authorization.k8s.io/aggregate-to-admin"))
+	g.Expect(cr.Labels).To(HaveKeyWithValue("custom.example.com/external", "kept"))
 }
 
 func TestEnsureRoleWithAggregateFrom(t *testing.T) {
@@ -1436,7 +1800,10 @@ func TestEnsureRoleWithAggregateFrom(t *testing.T) {
 			ScopeNamespaced: false,
 			AggregateFrom: &rbacv1.AggregationRule{
 				ClusterRoleSelectors: []metav1.LabelSelector{
-					{MatchLabels: map[string]string{"t-caas.telekom.com/aggregate-to-tenant-admin": "true"}},
+					{MatchLabels: map[string]string{
+						"t-caas.telekom.com/rbac-fragment":   "true",
+						"t-caas.telekom.com/aggregate-scope": "tenant-admin",
+					}},
 				},
 			},
 		},
@@ -1456,7 +1823,10 @@ func TestEnsureRoleWithAggregateFrom(t *testing.T) {
 	g.Expect(cr.AggregationRule).NotTo(BeNil())
 	g.Expect(cr.AggregationRule.ClusterRoleSelectors).To(HaveLen(1))
 	g.Expect(cr.AggregationRule.ClusterRoleSelectors[0].MatchLabels).To(
-		HaveKeyWithValue("t-caas.telekom.com/aggregate-to-tenant-admin", "true"),
+		HaveKeyWithValue("t-caas.telekom.com/rbac-fragment", "true"),
+	)
+	g.Expect(cr.AggregationRule.ClusterRoleSelectors[0].MatchLabels).To(
+		HaveKeyWithValue("t-caas.telekom.com/aggregate-scope", "tenant-admin"),
 	)
 }
 
@@ -1483,7 +1853,10 @@ func TestEnsureRole_TransitionFromRulesToAggregateFrom(t *testing.T) {
 			ScopeNamespaced: false,
 			AggregateFrom: &rbacv1.AggregationRule{
 				ClusterRoleSelectors: []metav1.LabelSelector{
-					{MatchLabels: map[string]string{"custom/aggregate-to-transition": "true"}},
+					{MatchLabels: map[string]string{
+						"t-caas.telekom.com/rbac-fragment":   "true",
+						"t-caas.telekom.com/aggregate-scope": "transition",
+					}},
 				},
 			},
 		},

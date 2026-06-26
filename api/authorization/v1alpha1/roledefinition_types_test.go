@@ -12,6 +12,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+func safeAggregateFromSelectorLabels() map[string]string {
+	return map[string]string{
+		aggregateFromFragmentLabelKey: aggregateFromFragmentLabelValue,
+		aggregateFromScopeLabelKey:    "team",
+	}
+}
+
 func TestValidateRoleDefinitionSpec(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -47,7 +54,7 @@ func TestValidateRoleDefinitionSpec(t *testing.T) {
 					TargetName: "test-role",
 					AggregateFrom: &rbacv1.AggregationRule{
 						ClusterRoleSelectors: []metav1.LabelSelector{
-							{MatchLabels: map[string]string{"role": "viewer"}},
+							{MatchLabels: safeAggregateFromSelectorLabels()},
 						},
 					},
 				},
@@ -68,6 +75,23 @@ func TestValidateRoleDefinitionSpec(t *testing.T) {
 			wantErr: "aggregationLabels can only be used when targetRole is 'ClusterRole'",
 		},
 		{
+			name: "reject metadata aggregation label on Role",
+			rd: &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-role",
+					Labels: map[string]string{
+						rbacv1.GroupName + "/aggregate-to-view": "true",
+					},
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionNamespacedRole,
+					TargetName:      "test-role",
+					TargetNamespace: "default",
+				},
+			},
+			wantErr: "metadata labels propagate",
+		},
+		{
 			name: "reject aggregateFrom on Role",
 			rd: &RoleDefinition{
 				Spec: RoleDefinitionSpec{
@@ -76,7 +100,7 @@ func TestValidateRoleDefinitionSpec(t *testing.T) {
 					TargetNamespace: "default",
 					AggregateFrom: &rbacv1.AggregationRule{
 						ClusterRoleSelectors: []metav1.LabelSelector{
-							{MatchLabels: map[string]string{"role": "viewer"}},
+							{MatchLabels: safeAggregateFromSelectorLabels()},
 						},
 					},
 				},
@@ -91,7 +115,7 @@ func TestValidateRoleDefinitionSpec(t *testing.T) {
 					TargetName: "test-role",
 					AggregateFrom: &rbacv1.AggregationRule{
 						ClusterRoleSelectors: []metav1.LabelSelector{
-							{MatchLabels: map[string]string{"role": "viewer"}},
+							{MatchLabels: safeAggregateFromSelectorLabels()},
 						},
 					},
 					RestrictedAPIs: []RestrictedAPIGroup{{Name: "apps"}},
@@ -107,7 +131,7 @@ func TestValidateRoleDefinitionSpec(t *testing.T) {
 					TargetName: "test-role",
 					AggregateFrom: &rbacv1.AggregationRule{
 						ClusterRoleSelectors: []metav1.LabelSelector{
-							{MatchLabels: map[string]string{"role": "viewer"}},
+							{MatchLabels: safeAggregateFromSelectorLabels()},
 						},
 					},
 					RestrictedResources: []metav1.APIResource{{Name: "secrets"}},
@@ -123,7 +147,7 @@ func TestValidateRoleDefinitionSpec(t *testing.T) {
 					TargetName: "test-role",
 					AggregateFrom: &rbacv1.AggregationRule{
 						ClusterRoleSelectors: []metav1.LabelSelector{
-							{MatchLabels: map[string]string{"role": "viewer"}},
+							{MatchLabels: safeAggregateFromSelectorLabels()},
 						},
 					},
 					RestrictedVerbs: []string{"delete"},
@@ -143,6 +167,61 @@ func TestValidateRoleDefinitionSpec(t *testing.T) {
 				},
 			},
 			wantErr: "must have at least one clusterRoleSelector",
+		},
+		{
+			name: "reject aggregateFrom without fragment label",
+			rd: &RoleDefinition{
+				Spec: RoleDefinitionSpec{
+					TargetRole: DefinitionClusterRole,
+					TargetName: "test-role",
+					AggregateFrom: &rbacv1.AggregationRule{
+						ClusterRoleSelectors: []metav1.LabelSelector{
+							{MatchLabels: map[string]string{
+								"t-caas.telekom.com/aggregate-scope": "team",
+							}},
+						},
+					},
+				},
+			},
+			wantErr: "t-caas.telekom.com/rbac-fragment",
+		},
+		{
+			name: "reject aggregateFrom with system label",
+			rd: &RoleDefinition{
+				Spec: RoleDefinitionSpec{
+					TargetRole: DefinitionClusterRole,
+					TargetName: "test-role",
+					AggregateFrom: &rbacv1.AggregationRule{
+						ClusterRoleSelectors: []metav1.LabelSelector{
+							{MatchLabels: map[string]string{
+								"t-caas.telekom.com/rbac-fragment":   "true",
+								"t-caas.telekom.com/aggregate-scope": "team",
+								"kubernetes.io/bootstrapping":        "rbac-defaults",
+							}},
+						},
+					},
+				},
+			},
+			wantErr: "aggregateFrom selectors may only use",
+		},
+		{
+			name: "reject aggregateFrom with matchExpressions",
+			rd: &RoleDefinition{
+				Spec: RoleDefinitionSpec{
+					TargetRole: DefinitionClusterRole,
+					TargetName: "test-role",
+					AggregateFrom: &rbacv1.AggregationRule{
+						ClusterRoleSelectors: []metav1.LabelSelector{{
+							MatchLabels: safeAggregateFromSelectorLabels(),
+							MatchExpressions: []metav1.LabelSelectorRequirement{{
+								Key:      "t-caas.telekom.com/aggregate-scope",
+								Operator: metav1.LabelSelectorOpExists,
+							}},
+						}},
+					},
+				},
+			},
+			wantErr: "matchExpressions are not allowed",
 		},
 		{
 			name: "reject Role without targetNamespace",

@@ -1875,6 +1875,134 @@ func TestRDReconcileGetError(t *testing.T) {
 	g.Expect(err.Error()).To(ContainSubstring("injected get error"))
 }
 
+func TestRDReconcileStallsUnsafeStoredAggregateFrom(t *testing.T) {
+	g := NewWithT(t)
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+
+	rd := &authorizationv1alpha1.RoleDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: authorizationv1alpha1.GroupVersion.String(),
+			Kind:       "RoleDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "unsafe-aggregate-from",
+			UID:        "unsafe-aggregate-from-uid",
+			Generation: 3,
+		},
+		Spec: authorizationv1alpha1.RoleDefinitionSpec{
+			TargetRole: authorizationv1alpha1.DefinitionClusterRole,
+			TargetName: "unsafe-aggregating-role",
+			AggregateFrom: &rbacv1.AggregationRule{
+				ClusterRoleSelectors: []metav1.LabelSelector{{
+					MatchLabels: map[string]string{
+						"kubernetes.io/bootstrapping": "rbac-defaults",
+					},
+				}},
+			},
+		},
+	}
+
+	stale := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: rd.Spec.TargetName,
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: authorizationv1alpha1.GroupVersion.String(),
+				Kind:       "RoleDefinition",
+				Name:       rd.Name,
+				UID:        rd.UID,
+			}},
+		},
+		AggregationRule: &rbacv1.AggregationRule{
+			ClusterRoleSelectors: []metav1.LabelSelector{{
+				MatchLabels: map[string]string{
+					"kubernetes.io/bootstrapping": "rbac-defaults",
+				},
+			}},
+		},
+		Rules: []rbacv1.PolicyRule{
+			{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"get"}},
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(rd, stale).
+		WithStatusSubresource(rd).
+		Build()
+	r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	_, err := r.Reconcile(context.Background(), reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: rd.Name},
+	})
+	g.Expect(err).NotTo(HaveOccurred())
+
+	var generated rbacv1.ClusterRole
+	err = c.Get(context.Background(), types.NamespacedName{Name: rd.Spec.TargetName}, &generated)
+	g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "unsafe aggregateFrom must remove the stale target ClusterRole")
+
+	var updated authorizationv1alpha1.RoleDefinition
+	g.Expect(c.Get(context.Background(), types.NamespacedName{Name: rd.Name}, &updated)).To(Succeed())
+	g.Expect(updated.Status.ObservedGeneration).To(Equal(int64(3)))
+	condition := findCondition(updated.Status.Conditions, "Stalled")
+	g.Expect(condition).NotTo(BeNil())
+	g.Expect(condition.Status).To(Equal(metav1.ConditionTrue))
+}
+
+func TestRDReconcileStallsStoredAggregateFromOnNamespacedRole(t *testing.T) {
+	g := NewWithT(t)
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+
+	rd := &authorizationv1alpha1.RoleDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: authorizationv1alpha1.GroupVersion.String(),
+			Kind:       "RoleDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "aggregate-from-role",
+			UID:        "aggregate-from-role-uid",
+			Generation: 4,
+		},
+		Spec: authorizationv1alpha1.RoleDefinitionSpec{
+			TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
+			TargetName:      "aggregate-from-role-target",
+			TargetNamespace: "tenant-a",
+			AggregateFrom: &rbacv1.AggregationRule{
+				ClusterRoleSelectors: []metav1.LabelSelector{{
+					MatchLabels: map[string]string{
+						"t-caas.telekom.com/rbac-fragment":   "true",
+						"t-caas.telekom.com/aggregate-scope": "tenant-admin",
+					},
+				}},
+			},
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(rd).
+		WithStatusSubresource(rd).
+		Build()
+	r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	_, err := r.Reconcile(context.Background(), reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: rd.Name},
+	})
+	g.Expect(err).NotTo(HaveOccurred())
+
+	var generated rbacv1.Role
+	err = c.Get(context.Background(), types.NamespacedName{Namespace: rd.Spec.TargetNamespace, Name: rd.Spec.TargetName}, &generated)
+	g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "aggregateFrom must not create a namespaced Role")
+
+	var updated authorizationv1alpha1.RoleDefinition
+	g.Expect(c.Get(context.Background(), types.NamespacedName{Name: rd.Name}, &updated)).To(Succeed())
+	g.Expect(updated.Status.ObservedGeneration).To(Equal(int64(4)))
+	condition := findCondition(updated.Status.Conditions, "Stalled")
+	g.Expect(condition).NotTo(BeNil())
+	g.Expect(condition.Status).To(Equal(metav1.ConditionTrue))
+}
+
 // TestHandleDeletionDeleteAndStatusError covers the combined error path
 // where Delete fails AND the subsequent status update also fails.
 func TestHandleDeletionDeleteAndStatusError(t *testing.T) {
@@ -1895,7 +2023,17 @@ func TestHandleDeletionDeleteAndStatusError(t *testing.T) {
 		},
 	}
 
-	cr := &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "del-both-cr"}}
+	cr := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "del-both-cr",
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: authorizationv1alpha1.GroupVersion.String(),
+				Kind:       "RoleDefinition",
+				Name:       rd.Name,
+				UID:        rd.UID,
+			}},
+		},
+	}
 
 	statusPatchCount := 0
 	c := fake.NewClientBuilder().WithScheme(s).

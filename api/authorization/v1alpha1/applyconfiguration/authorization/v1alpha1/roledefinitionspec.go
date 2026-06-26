@@ -65,16 +65,17 @@ type RoleDefinitionSpecApplyConfiguration struct {
 	// or "false" based on this field's value.
 	// Only applicable when TargetRole is ClusterRole. Defaults to false.
 	BreakglassAllowed *bool `json:"breakglassAllowed,omitempty"`
-	// AggregationLabels are additional labels applied to the generated ClusterRole so that
-	// it participates in Kubernetes' built-in ClusterRole aggregation mechanism.
-	// For example, setting `rbac.authorization.k8s.io/aggregate-to-view: "true"` causes the
-	// generated ClusterRole's rules to be aggregated into the default "view" ClusterRole.
-	// Only applicable when targetRole is ClusterRole.
+	// AggregationLabels are additional labels applied to the generated ClusterRole.
+	// Kubernetes RBAC aggregation labels such as rbac.authorization.k8s.io/aggregate-to-view
+	// are rejected because generated roles must not feed built-in or externally managed
+	// aggregating ClusterRoles. Only applicable when targetRole is ClusterRole.
 	AggregationLabels map[string]string `json:"aggregationLabels,omitempty"`
 	// AggregateFrom generates an aggregating ClusterRole that uses label selectors
 	// to compose rules from other ClusterRoles, instead of specifying rules directly.
 	// When set, the controller skips API discovery and filtering; the generated ClusterRole
 	// carries an aggregationRule and its rules[] are managed by the RBAC aggregation controller.
+	// Selectors must use explicit matchLabels for t-caas.telekom.com/rbac-fragment="true"
+	// and t-caas.telekom.com/aggregate-scope to avoid selecting system or unrelated ClusterRoles.
 	// Mutually exclusive with RestrictedAPIs, RestrictedResources, and RestrictedVerbs.
 	// Only applicable when targetRole is ClusterRole.
 	AggregateFrom *rbacv1.AggregationRule `json:"aggregateFrom,omitempty"`

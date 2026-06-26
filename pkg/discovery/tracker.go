@@ -42,6 +42,11 @@ const (
 	// In stable clusters with few CRD changes, this can be set higher.
 	defaultFullRescanInterval = 15 * time.Minute
 
+	// Maximum time to wait for the CRD watch to be established during tracker
+	// startup before continuing with periodic self-healing.
+	defaultWatchStartupTimeout = 10 * time.Second
+	collectLockRetryInterval   = 10 * time.Millisecond
+
 	verbBind     = "bind"
 	verbEscalate = "escalate"
 	verbGet      = "get"
@@ -208,21 +213,41 @@ func (r *ResourceTracker) Start(ctx context.Context) error {
 		return err
 	}
 
-	// Mark as started. This is needed as Controller-Runtime starts all
-	// runnables concurrently, and the RoleDefinitionReconciler may
-	// call GetAPIResources() before the initial collection is done.
-	// By marking as started only after the initial collection, we ensure
-	// that the RoleDefinitionReconciler always gets a valid cache on first call (or ErrResourceTrackerNotStarted).
-	// Subsequent calls will be blocked until the first collection is done
-	// by the mutex in GetAPIResources().
-	r.started.Store(true)
-
-	// Start CRD watch with jitter and exponential backoff
+	// Start CRD watch with jitter and exponential backoff before exposing the
+	// initial cache. Otherwise a CRD created after the initial collection but
+	// before the watch is established can be missed until the periodic refresh.
+	watchReady := make(chan struct{})
 	go func() {
-		if err := r.launchWatch(ctx); err != nil {
+		if err := r.launchWatch(ctx, watchReady); err != nil {
 			log.FromContext(ctx).Error(err, "failed to launch CRD watch")
 		}
 	}()
+
+	logger := log.FromContext(ctx)
+	select {
+	case <-watchReady:
+		// Refresh UUIDs and collect once more after the watch is live. This
+		// closes the startup gap for CRDs created between initUUIDMap and the
+		// watch establishment.
+		if err := r.refreshUUIDMap(ctx); err != nil {
+			return fmt.Errorf("unable to refresh CRD UUID map after CRD watch startup: %w", err)
+		}
+		if _, err := r.collectAPIResourcesBlocking(ctx); err != nil {
+			return err
+		}
+	case <-time.After(defaultWatchStartupTimeout):
+		logger.Info("continuing ResourceTracker startup before CRD watch readiness",
+			"timeout", defaultWatchStartupTimeout)
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	// Mark as started. This is needed as Controller-Runtime starts all
+	// runnables concurrently, and the RoleDefinitionReconciler may
+	// call GetAPIResources() before the startup collections are done.
+	// By marking as started only after startup collection, we ensure
+	// that the RoleDefinitionReconciler always gets a valid cache on first call (or ErrResourceTrackerNotStarted).
+	r.started.Store(true)
 
 	// Start periodic collection
 	go r.periodicCollection(ctx)
@@ -311,12 +336,24 @@ func (r *ResourceTracker) GetAPIResources() (APIResourcesByGroupVersion, error) 
 // It runs the collection with higher QPS and Burst to speed up the process.
 // It collects resources concurrently for each API group version.
 func (r *ResourceTracker) collectAPIResources(ctx context.Context) (bool, error) {
-	startTime := time.Now()
-	if !r.collectMu.TryLock() {
+	return r.collectAPIResourcesWithLock(ctx, false)
+}
+
+func (r *ResourceTracker) collectAPIResourcesBlocking(ctx context.Context) (bool, error) {
+	return r.collectAPIResourcesWithLock(ctx, true)
+}
+
+func (r *ResourceTracker) collectAPIResourcesWithLock(ctx context.Context, waitForLock bool) (bool, error) {
+	unlock, locked, err := r.acquireCollectLock(ctx, waitForLock)
+	if err != nil {
+		return false, err
+	}
+	if !locked {
 		return false, nil
 	}
-	defer r.collectMu.Unlock()
+	defer unlock()
 
+	startTime := time.Now()
 	logger := log.FromContext(ctx)
 	logger.V(2).Info("collecting API resources")
 
@@ -407,6 +444,28 @@ func (r *ResourceTracker) collectAPIResources(ctx context.Context) (bool, error)
 
 	logger.V(2).Info("API resources cache updated")
 	return true, nil
+}
+
+func (r *ResourceTracker) acquireCollectLock(ctx context.Context, waitForLock bool) (unlock func(), locked bool, err error) {
+	if r.collectMu.TryLock() {
+		return r.collectMu.Unlock, true, nil
+	}
+	if !waitForLock {
+		return nil, false, nil
+	}
+
+	ticker := time.NewTicker(collectLockRetryInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, false, ctx.Err()
+		case <-ticker.C:
+			if r.collectMu.TryLock() {
+				return r.collectMu.Unlock, true, nil
+			}
+		}
+	}
 }
 
 func (r *ResourceTracker) periodicCollection(ctx context.Context) {
@@ -504,16 +563,18 @@ func (r *ResourceTracker) refreshUUIDMap(ctx context.Context) error {
 	return nil
 }
 
-func (r *ResourceTracker) launchWatch(ctx context.Context) error {
+func (r *ResourceTracker) launchWatch(ctx context.Context, watchReady chan struct{}) error {
 	watchBackoff := NewForeverWatchBackoff()
-	if err := ExponentialBackoffWithContext(ctx, watchBackoff, r.watchAPIResources); err != nil {
+	if err := ExponentialBackoffWithContext(ctx, watchBackoff, func(ctx context.Context) {
+		r.watchAPIResources(ctx, watchReady)
+	}); err != nil {
 		return fmt.Errorf("failed to launch CRD watch with backoff: %w", err)
 	}
 
 	return nil
 }
 
-func (r *ResourceTracker) watchAPIResources(ctx context.Context) {
+func (r *ResourceTracker) watchAPIResources(ctx context.Context, watchReady chan struct{}) {
 	logger := log.FromContext(ctx)
 	cli, err := client.NewWithWatch(r.config, client.Options{Scheme: r.scheme})
 	if err != nil {
@@ -529,6 +590,13 @@ func (r *ResourceTracker) watchAPIResources(ctx context.Context) {
 	}
 
 	logger.Info("starting CRD watch for RoleDefinitionReconciler")
+	if watchReady != nil {
+		select {
+		case <-watchReady:
+		default:
+			close(watchReady)
+		}
+	}
 	for {
 		select {
 		case event, ok := <-watcher.ResultChan():

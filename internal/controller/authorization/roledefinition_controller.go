@@ -276,6 +276,23 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	conditions.MarkTrue(roleDefinition, authorizationv1alpha1.FinalizerCondition, roleDefinition.Generation,
 		authorizationv1alpha1.FinalizerReason, authorizationv1alpha1.FinalizerMessage)
 
+	if roleDefinition.Spec.AggregateFrom != nil {
+		if err := authorizationv1alpha1.ValidateRoleDefinitionAggregateFrom(roleDefinition); err != nil {
+			logger.Error(err, "invalid stored aggregateFrom selector", "roleDefinitionName", roleDefinition.Name)
+			if cleanupErr := r.cleanupInvalidAggregateFromTarget(ctx, roleDefinition); cleanupErr != nil {
+				logger.Error(cleanupErr, "failed to clean up invalid aggregateFrom target", "roleDefinitionName", roleDefinition.Name)
+				r.markStalled(ctx, roleDefinition, err)
+				metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ResultError).Inc()
+				metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ErrorTypeAPI).Inc()
+				return ctrl.Result{}, cleanupErr
+			}
+			r.markStalled(ctx, roleDefinition, err)
+			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ResultError).Inc()
+			metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleDefinition, metrics.ErrorTypeValidation).Inc()
+			return ctrl.Result{}, nil
+		}
+	}
+
 	// Step 4: Discover and filter resources, or skip for aggregating roles
 	var finalRules []rbacv1.PolicyRule
 	if roleDefinition.Spec.AggregateFrom != nil {

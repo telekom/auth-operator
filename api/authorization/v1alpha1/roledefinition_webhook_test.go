@@ -249,7 +249,7 @@ var _ = Describe("RoleDefinition Webhook", func() {
 					ScopeNamespaced: false,
 					AggregateFrom: &rbacv1.AggregationRule{
 						ClusterRoleSelectors: []metav1.LabelSelector{
-							{MatchLabels: map[string]string{"aggregate-to-admin": "true"}},
+							{MatchLabels: safeAggregateFromSelectorLabels()},
 						},
 					},
 				},
@@ -270,7 +270,7 @@ var _ = Describe("RoleDefinition Webhook", func() {
 					ScopeNamespaced: true,
 					AggregateFrom: &rbacv1.AggregationRule{
 						ClusterRoleSelectors: []metav1.LabelSelector{
-							{MatchLabels: map[string]string{"aggregate-to-admin": "true"}},
+							{MatchLabels: safeAggregateFromSelectorLabels()},
 						},
 					},
 				},
@@ -291,7 +291,7 @@ var _ = Describe("RoleDefinition Webhook", func() {
 					ScopeNamespaced: false,
 					AggregateFrom: &rbacv1.AggregationRule{
 						ClusterRoleSelectors: []metav1.LabelSelector{
-							{MatchLabels: map[string]string{"aggregate-to-admin": "true"}},
+							{MatchLabels: safeAggregateFromSelectorLabels()},
 						},
 					},
 					RestrictedVerbs: []string{"delete"},
@@ -338,18 +338,18 @@ var _ = Describe("RoleDefinition Webhook", func() {
 			err := k8sClient.Create(ctx, rd)
 			Expect(err).To(HaveOccurred(), "expected rejection for aggregate-to-cluster-admin")
 			Expect(apierrors.IsForbidden(err)).To(BeTrue(), "expected Forbidden status error")
-			Expect(err.Error()).To(ContainSubstring("built-in ClusterRole"))
+			Expect(err.Error()).To(ContainSubstring("Kubernetes RBAC aggregation labels"))
 		})
 
-		It("Should allow aggregation labels targeting admin, edit, and view", func() {
-			for _, target := range []string{"admin", "edit", "view"} {
+		It("Should deny Kubernetes RBAC aggregation labels", func() {
+			for _, target := range []string{"cluster-admin", "admin", "edit", "view"} {
 				rd := &RoleDefinition{
 					ObjectMeta: metav1.ObjectMeta{
-						Name: "test-agg-allowed-" + target,
+						Name: "test-agg-denied-" + target,
 					},
 					Spec: RoleDefinitionSpec{
 						TargetRole:      DefinitionClusterRole,
-						TargetName:      "test-agg-allowed-" + target,
+						TargetName:      "test-agg-denied-" + target,
 						ScopeNamespaced: false,
 						AggregationLabels: map[string]string{
 							"rbac.authorization.k8s.io/aggregate-to-" + target: "true",
@@ -357,11 +357,51 @@ var _ = Describe("RoleDefinition Webhook", func() {
 					},
 				}
 				err := k8sClient.Create(ctx, rd)
-				Expect(err).NotTo(HaveOccurred(), "aggregate-to-%s should be allowed per issue #51", target)
-				DeferCleanup(func() {
-					_ = k8sClient.Delete(ctx, rd)
-				})
+				Expect(err).To(HaveOccurred(), "expected rejection for aggregate-to-%s", target)
+				Expect(apierrors.IsForbidden(err)).To(BeTrue(), "expected Forbidden status error")
+				Expect(err.Error()).To(ContainSubstring("Kubernetes RBAC aggregation labels"))
 			}
+		})
+
+		It("Should deny Kubernetes RBAC aggregation labels on metadata", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-agg-metadata-denied",
+					Labels: map[string]string{
+						"rbac.authorization.k8s.io/aggregate-to-view": "true",
+					},
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-agg-metadata-denied",
+					ScopeNamespaced: false,
+				},
+			}
+			err := k8sClient.Create(ctx, rd)
+			Expect(err).To(HaveOccurred(), "expected metadata aggregate-to-view rejection")
+			Expect(apierrors.IsForbidden(err)).To(BeTrue(), "expected Forbidden status error")
+			Expect(err.Error()).To(ContainSubstring("metadata labels propagate"))
+		})
+
+		It("Should deny Kubernetes RBAC aggregation labels on Role metadata", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-role-agg-metadata-denied",
+					Labels: map[string]string{
+						rbacv1.GroupName + "/aggregate-to-view": "true",
+					},
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionNamespacedRole,
+					TargetName:      "test-role-agg-metadata-denied",
+					TargetNamespace: "default",
+					ScopeNamespaced: true,
+				},
+			}
+			err := k8sClient.Create(ctx, rd)
+			Expect(err).To(HaveOccurred(), "expected Role metadata aggregate-to-view rejection")
+			Expect(apierrors.IsForbidden(err)).To(BeTrue(), "expected Forbidden status error")
+			Expect(err.Error()).To(ContainSubstring("metadata labels propagate"))
 		})
 
 		It("Should deny aggregateFrom with empty selector criteria", func() {
@@ -383,6 +423,82 @@ var _ = Describe("RoleDefinition Webhook", func() {
 			err := k8sClient.Create(ctx, rd)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("empty selector would match all ClusterRoles"))
+		})
+
+		It("Should deny aggregateFrom selectors without rbac fragment marker", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-agg-missing-fragment",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-agg-missing-fragment",
+					ScopeNamespaced: false,
+					AggregateFrom: &rbacv1.AggregationRule{
+						ClusterRoleSelectors: []metav1.LabelSelector{{
+							MatchLabels: map[string]string{
+								"t-caas.telekom.com/aggregate-scope": "team",
+							},
+						}},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, rd)
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsForbidden(err)).To(BeTrue(), "expected Forbidden status error")
+			Expect(err.Error()).To(ContainSubstring("t-caas.telekom.com/rbac-fragment"))
+		})
+
+		It("Should deny aggregateFrom selectors with system labels", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-agg-system-selector",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-agg-system-selector",
+					ScopeNamespaced: false,
+					AggregateFrom: &rbacv1.AggregationRule{
+						ClusterRoleSelectors: []metav1.LabelSelector{{
+							MatchLabels: map[string]string{
+								"t-caas.telekom.com/rbac-fragment":   "true",
+								"t-caas.telekom.com/aggregate-scope": "team",
+								"kubernetes.io/bootstrapping":        "rbac-defaults",
+							},
+						}},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, rd)
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsForbidden(err)).To(BeTrue(), "expected Forbidden status error")
+			Expect(err.Error()).To(ContainSubstring("aggregateFrom selectors may only use"))
+		})
+
+		It("Should deny aggregateFrom selectors with matchExpressions", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-agg-match-expressions",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "test-agg-match-expressions",
+					ScopeNamespaced: false,
+					AggregateFrom: &rbacv1.AggregationRule{
+						ClusterRoleSelectors: []metav1.LabelSelector{{
+							MatchLabels: safeAggregateFromSelectorLabels(),
+							MatchExpressions: []metav1.LabelSelectorRequirement{{
+								Key:      "t-caas.telekom.com/aggregate-scope",
+								Operator: metav1.LabelSelectorOpExists,
+							}},
+						}},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, rd)
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsForbidden(err)).To(BeTrue(), "expected Forbidden status error")
+			Expect(err.Error()).To(ContainSubstring("matchExpressions are not allowed"))
 		})
 	})
 
@@ -783,7 +899,7 @@ var _ = Describe("RoleDefinition Webhook", func() {
 					TargetName: "test-agg-with-api-verbs",
 					AggregateFrom: &rbacv1.AggregationRule{
 						ClusterRoleSelectors: []metav1.LabelSelector{
-							{MatchLabels: map[string]string{"role": "viewer"}},
+							{MatchLabels: safeAggregateFromSelectorLabels()},
 						},
 					},
 					RestrictedAPIs: []RestrictedAPIGroup{

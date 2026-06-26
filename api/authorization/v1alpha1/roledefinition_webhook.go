@@ -12,6 +12,7 @@ import (
 
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -304,6 +305,13 @@ func validateRoleDefinitionSpec(obj *RoleDefinition) error {
 		return apierrors.NewBadRequest("targetNamespace must be empty when targetRole is 'ClusterRole'")
 	}
 
+	// Metadata labels propagate to the generated Role or ClusterRole. Reject
+	// Kubernetes RBAC aggregation labels for every targetRole so reconciliation
+	// does not silently drop admitted input.
+	if err := rejectForbiddenMetadataAggregationLabels(obj); err != nil {
+		return err
+	}
+
 	// Aggregation fields are only valid for ClusterRole targets
 	if obj.Spec.TargetRole != DefinitionClusterRole {
 		if len(obj.Spec.AggregationLabels) > 0 {
@@ -316,7 +324,6 @@ func validateRoleDefinitionSpec(obj *RoleDefinition) error {
 
 	// Reject aggregation labels that target built-in ClusterRoles to prevent
 	// privilege escalation via ClusterRole aggregation.
-	// Only applies to ClusterRole targets since aggregation is a ClusterRole-only concept.
 	if obj.Spec.TargetRole == DefinitionClusterRole {
 		if err := rejectForbiddenAggregationLabels(obj); err != nil {
 			return err
@@ -325,7 +332,7 @@ func validateRoleDefinitionSpec(obj *RoleDefinition) error {
 
 	// AggregateFrom is mutually exclusive with discovery-based fields
 	if obj.Spec.AggregateFrom != nil {
-		if err := validateAggregateFrom(obj); err != nil {
+		if err := ValidateRoleDefinitionAggregateFrom(obj); err != nil {
 			return err
 		}
 	}
@@ -333,48 +340,53 @@ func validateRoleDefinitionSpec(obj *RoleDefinition) error {
 	return nil
 }
 
-// forbiddenAggregationTargets lists built-in ClusterRoles that must never be
-// recipients of aggregation — granting into cluster-admin is a privilege escalation.
-// admin/edit/view are intentionally allowed as they are the standard Kubernetes
-// aggregation targets (see issue #51 Use Case 1).
-var forbiddenAggregationTargets = []string{"cluster-admin"}
+const (
+	kubernetesRBACAggregationLabelPrefix = rbacv1.GroupName + "/aggregate-to-"
+	aggregateFromFragmentLabelKey        = "t-caas.telekom.com/rbac-fragment"
+	aggregateFromFragmentLabelValue      = "true"
+	aggregateFromScopeLabelKey           = "t-caas.telekom.com/aggregate-scope"
+)
 
-// rejectForbiddenAggregationLabels checks both spec.aggregationLabels and
-// metadata.labels for aggregation keys targeting built-in ClusterRoles.
+// rejectForbiddenAggregationLabels checks spec.aggregationLabels for Kubernetes
+// RBAC aggregation keys. RoleDefinition must not feed generated rules into
+// built-in or externally managed aggregating roles.
 func rejectForbiddenAggregationLabels(obj *RoleDefinition) error {
 	for key := range obj.Spec.AggregationLabels {
-		for _, target := range forbiddenAggregationTargets {
-			if key == rbacv1.GroupName+"/aggregate-to-"+target {
-				return apierrors.NewForbidden(
-					schema.GroupResource{Group: GroupVersion.Group, Resource: "roledefinitions"},
-					obj.Name,
-					field.Forbidden(
-						field.NewPath("spec", "aggregationLabels").Key(key),
-						fmt.Sprintf("must not aggregate into built-in ClusterRole %q", target),
-					),
-				)
-			}
-		}
-	}
-	for key := range obj.Labels {
-		for _, target := range forbiddenAggregationTargets {
-			if key == rbacv1.GroupName+"/aggregate-to-"+target {
-				return apierrors.NewForbidden(
-					schema.GroupResource{Group: GroupVersion.Group, Resource: "roledefinitions"},
-					obj.Name,
-					field.Forbidden(
-						field.NewPath("metadata", "labels").Key(key),
-						fmt.Sprintf("must not aggregate into built-in ClusterRole %q — label propagates to generated ClusterRole", target),
-					),
-				)
-			}
+		if strings.HasPrefix(key, kubernetesRBACAggregationLabelPrefix) {
+			return apierrors.NewForbidden(
+				schema.GroupResource{Group: GroupVersion.Group, Resource: "roledefinitions"},
+				obj.Name,
+				field.Forbidden(
+					field.NewPath("spec", "aggregationLabels").Key(key),
+					"must not use Kubernetes RBAC aggregation labels",
+				),
+			)
 		}
 	}
 	return nil
 }
 
-// validateAggregateFrom validates the AggregateFrom field constraints.
-func validateAggregateFrom(obj *RoleDefinition) error {
+func rejectForbiddenMetadataAggregationLabels(obj *RoleDefinition) error {
+	for key := range obj.Labels {
+		if strings.HasPrefix(key, kubernetesRBACAggregationLabelPrefix) {
+			return apierrors.NewForbidden(
+				schema.GroupResource{Group: GroupVersion.Group, Resource: "roledefinitions"},
+				obj.Name,
+				field.Forbidden(
+					field.NewPath("metadata", "labels").Key(key),
+					"must not use Kubernetes RBAC aggregation labels because metadata labels propagate to the generated RBAC object",
+				),
+			)
+		}
+	}
+	return nil
+}
+
+// ValidateRoleDefinitionAggregateFrom validates the AggregateFrom field constraints.
+func ValidateRoleDefinitionAggregateFrom(obj *RoleDefinition) error {
+	if obj.Spec.TargetRole != DefinitionClusterRole {
+		return apierrors.NewBadRequest("aggregateFrom can only be used when targetRole is 'ClusterRole'")
+	}
 	if len(obj.Spec.RestrictedAPIs) > 0 || len(obj.Spec.RestrictedResources) > 0 || len(obj.Spec.RestrictedVerbs) > 0 {
 		return apierrors.NewBadRequest(
 			"aggregateFrom is mutually exclusive with restrictedApis, restrictedResources, and restrictedVerbs",
@@ -392,7 +404,57 @@ func validateAggregateFrom(obj *RoleDefinition) error {
 				obj.Name,
 				field.Forbidden(
 					field.NewPath("spec", "aggregateFrom", "clusterRoleSelectors").Index(i),
-					"empty selector would match all ClusterRoles; specify matchLabels or matchExpressions",
+					"empty selector would match all ClusterRoles; specify matchLabels",
+				),
+			)
+		}
+		if err := validateAggregateFromSelector(obj, i, selector); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateAggregateFromSelector(obj *RoleDefinition, index int, selector metav1.LabelSelector) error {
+	selectorPath := field.NewPath("spec", "aggregateFrom", "clusterRoleSelectors").Index(index)
+	if len(selector.MatchExpressions) > 0 {
+		return apierrors.NewForbidden(
+			schema.GroupResource{Group: GroupVersion.Group, Resource: "roledefinitions"},
+			obj.Name,
+			field.Forbidden(
+				selectorPath.Child("matchExpressions"),
+				"matchExpressions are not allowed for aggregateFrom; use explicit matchLabels",
+			),
+		)
+	}
+	if selector.MatchLabels[aggregateFromFragmentLabelKey] != aggregateFromFragmentLabelValue {
+		return apierrors.NewForbidden(
+			schema.GroupResource{Group: GroupVersion.Group, Resource: "roledefinitions"},
+			obj.Name,
+			field.Forbidden(
+				selectorPath.Child("matchLabels").Key(aggregateFromFragmentLabelKey),
+				fmt.Sprintf("must be %q", aggregateFromFragmentLabelValue),
+			),
+		)
+	}
+	if selector.MatchLabels[aggregateFromScopeLabelKey] == "" {
+		return apierrors.NewForbidden(
+			schema.GroupResource{Group: GroupVersion.Group, Resource: "roledefinitions"},
+			obj.Name,
+			field.Forbidden(
+				selectorPath.Child("matchLabels").Key(aggregateFromScopeLabelKey),
+				"must select an explicit aggregate scope",
+			),
+		)
+	}
+	for key := range selector.MatchLabels {
+		if key != aggregateFromFragmentLabelKey && key != aggregateFromScopeLabelKey {
+			return apierrors.NewForbidden(
+				schema.GroupResource{Group: GroupVersion.Group, Resource: "roledefinitions"},
+				obj.Name,
+				field.Forbidden(
+					selectorPath.Child("matchLabels").Key(key),
+					fmt.Sprintf("aggregateFrom selectors may only use %q and %q", aggregateFromFragmentLabelKey, aggregateFromScopeLabelKey),
 				),
 			)
 		}

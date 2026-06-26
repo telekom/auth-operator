@@ -46,7 +46,7 @@ func FuzzRoleDefinitionSpecValidation(f *testing.F) {
 		`{"metadata":{"name":"team-reader"},"spec":{"targetRole":"ClusterRole","targetName":"team-reader","scopeNamespaced":false}}`,
 		`{"metadata":{"name":"tenant-reader"},"spec":{"targetRole":"Role","targetName":"tenant-reader","targetNamespace":"default","scopeNamespaced":true}}`,
 		`{"metadata":{"name":"bad-version"},"spec":{"targetRole":"ClusterRole","targetName":"bad-version","restrictedApis":[{"name":"apps","versions":[{"groupVersion":"apps/notv1","version":"notv1"}]}]}}`,
-		`{"metadata":{"name":"aggregate"},"spec":{"targetRole":"ClusterRole","targetName":"aggregate","aggregateFrom":{"clusterRoleSelectors":[{"matchLabels":{"rbac.example.com/aggregate":"true"}}]}}}`,
+		`{"metadata":{"name":"aggregate"},"spec":{"targetRole":"ClusterRole","targetName":"aggregate","aggregateFrom":{"clusterRoleSelectors":[{"matchLabels":{"t-caas.telekom.com/rbac-fragment":"true","t-caas.telekom.com/aggregate-scope":"team"}}]}}}`,
 	} {
 		f.Add([]byte(seed))
 	}
