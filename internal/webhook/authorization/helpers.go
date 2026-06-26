@@ -120,7 +120,7 @@ type BypassCheckResult struct {
 
 // CheckBypass checks if a request should bypass the namespace webhook (both mutator and validator).
 // Returns bypass metadata for known principals that should be allowed without full processing.
-func CheckBypass(username string, groups []string, operation admissionv1.Operation, namespace string, tdgMigration bool, capiOperatorUpdateBypass bool) BypassCheckResult {
+func CheckBypass(username string, groups []string, operation admissionv1.Operation, namespace string, tdgMigration, capiOperatorUpdateBypass bool) BypassCheckResult {
 	// Allow kubernetes-admin without processing.
 	if username == kubernetesAdmin {
 		return BypassCheckResult{
