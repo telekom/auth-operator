@@ -1665,7 +1665,7 @@ func (r *BindDefinitionReconciler) validateRoleReferences(
 							missingRoles = append(missingRoles, roleName)
 						}
 					} else {
-						logger.Error(err, "Failed to check Role existence", "role", roleRef, "namespace", ns.Name)
+						return missingRoles, fmt.Errorf("check Role %s/%s existence: %w", ns.Name, roleRef, err)
 					}
 				}
 			}
