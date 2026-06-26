@@ -3907,7 +3907,7 @@ func TestRBD_ClassifyServiceAccountRecoversGeneratedMarkersWithoutStatus(t *test
 			},
 			ManagedFields: []metav1.ManagedFieldsEntry{
 				{
-					APIVersion: authorizationv1alpha1.GroupVersion.String(),
+					APIVersion: corev1.SchemeGroupVersion.String(),
 					Manager:    pkgssa.FieldOwnerFor(rbd.Name, authorizationv1alpha1.RestrictedBindDefinitionKind),
 					Operation:  metav1.ManagedFieldsOperationApply,
 				},
