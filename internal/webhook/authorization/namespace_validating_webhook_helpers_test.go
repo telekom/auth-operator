@@ -230,7 +230,7 @@ func TestDetectOwnerReclassification(t *testing.T) {
 		{
 			name:     "no TDG migration",
 			tdg:      false,
-			bypass:   BypassCheckResult{ShouldBypass: true},
+			bypass:   BypassCheckResult{ShouldBypass: true, AllowProtectedLabelChanges: true},
 			oldOwner: "tenant",
 			newOwner: "thirdparty",
 			expected: false,
@@ -246,7 +246,7 @@ func TestDetectOwnerReclassification(t *testing.T) {
 		{
 			name:     "same owner - no reclassification",
 			tdg:      true,
-			bypass:   BypassCheckResult{ShouldBypass: true},
+			bypass:   BypassCheckResult{ShouldBypass: true, AllowProtectedLabelChanges: true},
 			oldOwner: "tenant",
 			newOwner: "tenant",
 			expected: false,
@@ -254,7 +254,7 @@ func TestDetectOwnerReclassification(t *testing.T) {
 		{
 			name:     "platform to tenant - denied",
 			tdg:      true,
-			bypass:   BypassCheckResult{ShouldBypass: true},
+			bypass:   BypassCheckResult{ShouldBypass: true, AllowProtectedLabelChanges: true},
 			oldOwner: "platform",
 			newOwner: "tenant",
 			expected: false,
@@ -262,7 +262,7 @@ func TestDetectOwnerReclassification(t *testing.T) {
 		{
 			name:     "tenant to platform - denied",
 			tdg:      true,
-			bypass:   BypassCheckResult{ShouldBypass: true},
+			bypass:   BypassCheckResult{ShouldBypass: true, AllowProtectedLabelChanges: true},
 			oldOwner: "tenant",
 			newOwner: "platform",
 			expected: false,
@@ -270,7 +270,7 @@ func TestDetectOwnerReclassification(t *testing.T) {
 		{
 			name:     "empty old owner - denied",
 			tdg:      true,
-			bypass:   BypassCheckResult{ShouldBypass: true},
+			bypass:   BypassCheckResult{ShouldBypass: true, AllowProtectedLabelChanges: true},
 			oldOwner: "",
 			newOwner: "tenant",
 			expected: false,
@@ -278,7 +278,7 @@ func TestDetectOwnerReclassification(t *testing.T) {
 		{
 			name:     "empty new owner - denied",
 			tdg:      true,
-			bypass:   BypassCheckResult{ShouldBypass: true},
+			bypass:   BypassCheckResult{ShouldBypass: true, AllowProtectedLabelChanges: true},
 			oldOwner: "tenant",
 			newOwner: "",
 			expected: false,
@@ -286,7 +286,7 @@ func TestDetectOwnerReclassification(t *testing.T) {
 		{
 			name:     "tenant to thirdparty - allowed",
 			tdg:      true,
-			bypass:   BypassCheckResult{ShouldBypass: true},
+			bypass:   BypassCheckResult{ShouldBypass: true, AllowProtectedLabelChanges: true},
 			oldOwner: "tenant",
 			newOwner: "thirdparty",
 			expected: true,
@@ -294,7 +294,7 @@ func TestDetectOwnerReclassification(t *testing.T) {
 		{
 			name:     "thirdparty to tenant - allowed",
 			tdg:      true,
-			bypass:   BypassCheckResult{ShouldBypass: true},
+			bypass:   BypassCheckResult{ShouldBypass: true, AllowProtectedLabelChanges: true},
 			oldOwner: "thirdparty",
 			newOwner: "tenant",
 			expected: true,
@@ -346,11 +346,19 @@ func TestValidateLabelImmutability(t *testing.T) {
 			denySubstr: authorizationv1alpha1.LabelKeyOwner,
 		},
 		{
-			name:       "initial adoption - allowed for bypass user",
-			bypass:     BypassCheckResult{ShouldBypass: true},
+			name:       "initial adoption - allowed for protected-label migration bypass",
+			bypass:     BypassCheckResult{ShouldBypass: true, AllowProtectedLabelChanges: true},
 			oldLabels:  map[string]string{},
 			newLabels:  map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"},
 			expectDeny: false,
+		},
+		{
+			name:       "initial adoption - denied for operational bypass user",
+			bypass:     BypassCheckResult{ShouldBypass: true, Reason: "capi-operator-manager"},
+			oldLabels:  map[string]string{},
+			newLabels:  map[string]string{authorizationv1alpha1.LabelKeyOwner: "tenant"},
+			expectDeny: true,
+			denySubstr: authorizationv1alpha1.LabelKeyOwner,
 		},
 		{
 			name:       "modify owner label - denied",
@@ -379,9 +387,9 @@ func TestValidateLabelImmutability(t *testing.T) {
 			expectDeny: false,
 		},
 		{
-			name:   "bypass user legacy label removal with new owner - allowed",
+			name:   "protected-label migration bypass legacy label removal with new owner - allowed",
 			tdg:    true,
-			bypass: BypassCheckResult{ShouldBypass: true},
+			bypass: BypassCheckResult{ShouldBypass: true, AllowProtectedLabelChanges: true},
 			oldLabels: map[string]string{
 				legacyOwnerLabel:                     "tenant",
 				authorizationv1alpha1.LabelKeyOwner:  "tenant",

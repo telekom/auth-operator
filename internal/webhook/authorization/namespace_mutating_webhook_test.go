@@ -462,6 +462,100 @@ func TestNamespaceMutatorHandle(t *testing.T) {
 	}
 }
 
+func TestNamespaceMutatorDoesNotBypassCAPIOnTDGMigrationCreate(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(authorizationv1alpha1.AddToScheme(scheme))
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		Build()
+	mutator := &webhooks.NamespaceMutator{
+		Client:       fakeClient,
+		Decoder:      crAdmission.NewDecoder(scheme),
+		TDGMigration: true,
+	}
+
+	ns := &corev1.Namespace{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "Namespace",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "platform-ns",
+			Labels: map[string]string{
+				"t-caas.telekom.com/owner": "platform",
+			},
+		},
+	}
+	req := crAdmission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
+			Name:      ns.Name,
+			Operation: admissionv1.Create,
+			UserInfo: authenticationv1.UserInfo{
+				Username: "system:serviceaccount:capi-operator-system:capi-operator-manager",
+			},
+			Object: runtime.RawExtension{Raw: mustMarshalJSON(t, ns)},
+		},
+	}
+
+	resp := mutator.Handle(context.Background(), req)
+	if resp.Allowed {
+		t.Fatal("expected CAPI namespace create not to bypass mutating webhook during TDG migration")
+	}
+	if resp.Result == nil || resp.Result.Message != webhooks.DenialNoOIDCAttributes {
+		t.Fatalf("expected normal no-attributes denial, got %#v", resp.Result)
+	}
+}
+
+func TestNamespaceMutatorDoesNotBypassCAPIUpdateWhenDisabled(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(authorizationv1alpha1.AddToScheme(scheme))
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		Build()
+	mutator := &webhooks.NamespaceMutator{
+		Client:                          fakeClient,
+		Decoder:                         crAdmission.NewDecoder(scheme),
+		DisableCAPIOperatorUpdateBypass: true,
+	}
+
+	ns := &corev1.Namespace{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "Namespace",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "platform-ns",
+			Labels: map[string]string{
+				"t-caas.telekom.com/owner": "platform",
+			},
+		},
+	}
+	req := crAdmission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
+			Name:      ns.Name,
+			Operation: admissionv1.Update,
+			UserInfo: authenticationv1.UserInfo{
+				Username: "system:serviceaccount:capi-operator-system:capi-operator-manager",
+			},
+			Object: runtime.RawExtension{Raw: mustMarshalJSON(t, ns)},
+		},
+	}
+
+	resp := mutator.Handle(context.Background(), req)
+	if resp.Allowed {
+		t.Fatal("expected CAPI namespace update not to bypass mutating webhook when disabled")
+	}
+	if resp.Result == nil || resp.Result.Message != webhooks.DenialNoOIDCAttributes {
+		t.Fatalf("expected normal no-attributes denial, got %#v", resp.Result)
+	}
+}
+
 // TestNamespaceMutatorSANamespaceInheritance tests the SA namespace label inheritance feature (issue #202).
 // When no BindDefinition matches, but the requesting SA's source namespace has tracked ownership labels,
 // those labels are inherited by the target namespace as a last-resort fallback.

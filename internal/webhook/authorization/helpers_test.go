@@ -90,6 +90,7 @@ func TestCheckBypass(t *testing.T) {
 		operation    admissionv1.Operation
 		namespace    string
 		tdgMigration bool
+		disableCAPI  bool
 		wantBypass   bool
 		wantReason   string
 	}{
@@ -141,6 +142,23 @@ func TestCheckBypass(t *testing.T) {
 			wantReason: "capi-operator-manager",
 		},
 		{
+			name:         "capi-operator-manager for update with tdgMigration",
+			username:     "system:serviceaccount:capi-operator-system:capi-operator-manager",
+			operation:    admissionv1.Update,
+			namespace:    "any-ns",
+			tdgMigration: true,
+			wantBypass:   true,
+			wantReason:   "capi-operator-manager",
+		},
+		{
+			name:        "capi-operator-manager update does not bypass when disabled",
+			username:    "system:serviceaccount:capi-operator-system:capi-operator-manager",
+			operation:   admissionv1.Update,
+			namespace:   "any-ns",
+			disableCAPI: true,
+			wantBypass:  false,
+		},
+		{
 			name:       "capi-operator-manager for create",
 			username:   "system:serviceaccount:capi-operator-system:capi-operator-manager",
 			operation:  admissionv1.Create,
@@ -151,6 +169,15 @@ func TestCheckBypass(t *testing.T) {
 			name:         "helm-controller with tdgMigration",
 			username:     "system:serviceaccount:flux-system:helm-controller",
 			operation:    admissionv1.Update,
+			namespace:    "any-ns",
+			tdgMigration: true,
+			wantBypass:   true,
+			wantReason:   "helm-controller (tdgMigration)",
+		},
+		{
+			name:         "helm-controller create with tdgMigration bypasses",
+			username:     "system:serviceaccount:flux-system:helm-controller",
+			operation:    admissionv1.Create,
 			namespace:    "any-ns",
 			tdgMigration: true,
 			wantBypass:   true,
@@ -174,9 +201,27 @@ func TestCheckBypass(t *testing.T) {
 			wantReason:   "kustomize-controller (tdgMigration)",
 		},
 		{
+			name:         "kustomize-controller delete with tdgMigration bypasses",
+			username:     "system:serviceaccount:flux-system:kustomize-controller",
+			operation:    admissionv1.Delete,
+			namespace:    "any-ns",
+			tdgMigration: true,
+			wantBypass:   true,
+			wantReason:   "kustomize-controller (tdgMigration)",
+		},
+		{
 			name:         "schiff-tenant m2m-sa with tdgMigration",
 			username:     "system:serviceaccount:schiff-tenant:m2m-sa",
 			operation:    admissionv1.Update,
+			namespace:    "any-ns",
+			tdgMigration: true,
+			wantBypass:   true,
+			wantReason:   "schiff-tenant m2m-sa (tdgMigration)",
+		},
+		{
+			name:         "schiff-tenant m2m-sa create with tdgMigration bypasses",
+			username:     "system:serviceaccount:schiff-tenant:m2m-sa",
+			operation:    admissionv1.Create,
 			namespace:    "any-ns",
 			tdgMigration: true,
 			wantBypass:   true,
@@ -192,13 +237,29 @@ func TestCheckBypass(t *testing.T) {
 			wantReason:   "schiff-system m2m-sa (tdgMigration)",
 		},
 		{
-			name:         "capi-operator-manager with tdgMigration bypasses",
+			name:         "schiff-system m2m-sa delete with tdgMigration bypasses",
+			username:     "system:serviceaccount:schiff-system:m2m-sa",
+			operation:    admissionv1.Delete,
+			namespace:    "any-ns",
+			tdgMigration: true,
+			wantBypass:   true,
+			wantReason:   "schiff-system m2m-sa (tdgMigration)",
+		},
+		{
+			name:         "capi-operator-manager create with tdgMigration does not bypass",
 			username:     "system:serviceaccount:capi-operator-system:capi-operator-manager",
 			operation:    admissionv1.Create,
 			namespace:    "any-ns",
 			tdgMigration: true,
-			wantBypass:   true,
-			wantReason:   "capi-operator-manager (tdgMigration)",
+			wantBypass:   false,
+		},
+		{
+			name:         "capi-operator-manager delete with tdgMigration does not bypass",
+			username:     "system:serviceaccount:capi-operator-system:capi-operator-manager",
+			operation:    admissionv1.Delete,
+			namespace:    "any-ns",
+			tdgMigration: true,
+			wantBypass:   false,
 		},
 		{
 			name:         "trident-operator-system with tdgMigration for trident-system update",
@@ -244,7 +305,7 @@ func TestCheckBypass(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := CheckBypass(tt.username, tt.groups, tt.operation, tt.namespace, tt.tdgMigration)
+			result := CheckBypass(tt.username, tt.groups, tt.operation, tt.namespace, tt.tdgMigration, !tt.disableCAPI)
 			if result.ShouldBypass != tt.wantBypass {
 				t.Errorf("CheckBypass() ShouldBypass = %v, want %v", result.ShouldBypass, tt.wantBypass)
 			}
@@ -263,6 +324,7 @@ func TestCheckBypassValidatorCases(t *testing.T) {
 		operation    admissionv1.Operation
 		namespace    string
 		tdgMigration bool
+		disableCAPI  bool
 		wantBypass   bool
 		wantReason   string
 	}{
@@ -307,6 +369,23 @@ func TestCheckBypassValidatorCases(t *testing.T) {
 			wantReason: "capi-operator-manager",
 		},
 		{
+			name:         "capi-operator-manager for update with tdgMigration",
+			username:     "system:serviceaccount:capi-operator-system:capi-operator-manager",
+			operation:    admissionv1.Update,
+			namespace:    "any-ns",
+			tdgMigration: true,
+			wantBypass:   true,
+			wantReason:   "capi-operator-manager",
+		},
+		{
+			name:        "capi-operator-manager update does not bypass when disabled",
+			username:    "system:serviceaccount:capi-operator-system:capi-operator-manager",
+			operation:   admissionv1.Update,
+			namespace:   "any-ns",
+			disableCAPI: true,
+			wantBypass:  false,
+		},
+		{
 			name:       "capi-operator-manager for create without tdgMigration",
 			username:   "system:serviceaccount:capi-operator-system:capi-operator-manager",
 			operation:  admissionv1.Create,
@@ -323,9 +402,27 @@ func TestCheckBypassValidatorCases(t *testing.T) {
 			wantReason:   "helm-controller (tdgMigration)",
 		},
 		{
+			name:         "helm-controller create with tdgMigration bypasses",
+			username:     "system:serviceaccount:flux-system:helm-controller",
+			operation:    admissionv1.Create,
+			namespace:    "any-ns",
+			tdgMigration: true,
+			wantBypass:   true,
+			wantReason:   "helm-controller (tdgMigration)",
+		},
+		{
 			name:         "kustomize-controller with tdgMigration",
 			username:     "system:serviceaccount:flux-system:kustomize-controller",
 			operation:    admissionv1.Update,
+			namespace:    "any-ns",
+			tdgMigration: true,
+			wantBypass:   true,
+			wantReason:   "kustomize-controller (tdgMigration)",
+		},
+		{
+			name:         "kustomize-controller delete with tdgMigration bypasses",
+			username:     "system:serviceaccount:flux-system:kustomize-controller",
+			operation:    admissionv1.Delete,
 			namespace:    "any-ns",
 			tdgMigration: true,
 			wantBypass:   true,
@@ -341,6 +438,15 @@ func TestCheckBypassValidatorCases(t *testing.T) {
 			wantReason:   "schiff-tenant m2m-sa (tdgMigration)",
 		},
 		{
+			name:         "schiff-tenant m2m-sa create with tdgMigration bypasses",
+			username:     "system:serviceaccount:schiff-tenant:m2m-sa",
+			operation:    admissionv1.Create,
+			namespace:    "any-ns",
+			tdgMigration: true,
+			wantBypass:   true,
+			wantReason:   "schiff-tenant m2m-sa (tdgMigration)",
+		},
+		{
 			name:         "schiff-system m2m-sa with tdgMigration",
 			username:     "system:serviceaccount:schiff-system:m2m-sa",
 			operation:    admissionv1.Update,
@@ -350,13 +456,29 @@ func TestCheckBypassValidatorCases(t *testing.T) {
 			wantReason:   "schiff-system m2m-sa (tdgMigration)",
 		},
 		{
-			name:         "capi-operator-manager with tdgMigration",
+			name:         "schiff-system m2m-sa delete with tdgMigration bypasses",
+			username:     "system:serviceaccount:schiff-system:m2m-sa",
+			operation:    admissionv1.Delete,
+			namespace:    "any-ns",
+			tdgMigration: true,
+			wantBypass:   true,
+			wantReason:   "schiff-system m2m-sa (tdgMigration)",
+		},
+		{
+			name:         "capi-operator-manager create with tdgMigration does not bypass",
 			username:     "system:serviceaccount:capi-operator-system:capi-operator-manager",
 			operation:    admissionv1.Create,
 			namespace:    "any-ns",
 			tdgMigration: true,
-			wantBypass:   true,
-			wantReason:   "capi-operator-manager (tdgMigration)",
+			wantBypass:   false,
+		},
+		{
+			name:         "capi-operator-manager delete with tdgMigration does not bypass",
+			username:     "system:serviceaccount:capi-operator-system:capi-operator-manager",
+			operation:    admissionv1.Delete,
+			namespace:    "any-ns",
+			tdgMigration: true,
+			wantBypass:   false,
 		},
 		{
 			name:         "trident-operator-system with tdgMigration for trident-system update",
@@ -386,7 +508,7 @@ func TestCheckBypassValidatorCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := CheckBypass(tt.username, tt.groups, tt.operation, tt.namespace, tt.tdgMigration)
+			result := CheckBypass(tt.username, tt.groups, tt.operation, tt.namespace, tt.tdgMigration, !tt.disableCAPI)
 			if result.ShouldBypass != tt.wantBypass {
 				t.Errorf("CheckBypass() ShouldBypass = %v, want %v", result.ShouldBypass, tt.wantBypass)
 			}

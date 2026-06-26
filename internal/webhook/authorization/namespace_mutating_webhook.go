@@ -23,10 +23,11 @@ import (
 
 // NamespaceMutator is a mutating webhook that adds labels to namespaces based on user groups or ServiceAccount.
 type NamespaceMutator struct {
-	Client       client.Client
-	Reader       client.Reader
-	Decoder      admission.Decoder
-	TDGMigration bool
+	Client                          client.Client
+	Reader                          client.Reader
+	Decoder                         admission.Decoder
+	TDGMigration                    bool
+	DisableCAPIOperatorUpdateBypass bool
 }
 
 // Handle mutates the Namespace by adding a label based on user groups or ServiceAccount.
@@ -45,7 +46,14 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 		"namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username)
 
 	// Check for bypass conditions
-	bypassResult := CheckBypass(req.UserInfo.Username, req.UserInfo.Groups, req.Operation, req.Name, m.TDGMigration)
+	bypassResult := CheckBypass(
+		req.UserInfo.Username,
+		req.UserInfo.Groups,
+		req.Operation,
+		req.Name,
+		m.TDGMigration,
+		!m.DisableCAPIOperatorUpdateBypass,
+	)
 	if bypassResult.ShouldBypass {
 		// Log bypass at Info level for security auditing
 		logger.Info("AUDIT: webhook bypass granted",

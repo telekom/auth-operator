@@ -40,6 +40,7 @@ spec:
             - --cert-rotation-validating-webhook=$(VALIDATING_WEBHOOK_BINDER_NAME)
             - --leader-elect=true
             - --tdg-migration=$(TDG_MIGRATION)
+            - --capi-operator-update-bypass=$(CAPI_OPERATOR_UPDATE_BYPASS)
           image: controller:latest
           name: webhook
           env:
@@ -49,6 +50,8 @@ spec:
                   fieldPath: metadata.namespace
             - name: TDG_MIGRATION
               value: "false"
+            - name: CAPI_OPERATOR_UPDATE_BYPASS
+              value: "true"
             - name: WEBHOOK_SERVICE_NAME
               value: "webhook-service"
             - name: WEBHOOK_SECRET_NAME

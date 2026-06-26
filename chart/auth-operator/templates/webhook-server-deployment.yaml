@@ -39,6 +39,7 @@ spec:
         {{- end }}
         - --cert-rotation-validating-webhook={{ include "auth-operator.fullname" . }}-binder-validating-webhook-configuration
         - --tdg-migration={{ .Values.webhookServer.tdgMigration }}
+        - --capi-operator-update-bypass={{ .Values.webhookServer.capiOperatorUpdateBypass }}
         - --authorize-rate-limit={{ .Values.webhookServer.authorizeRateLimit }}
         - --authorize-rate-burst={{ .Values.webhookServer.authorizeRateBurst }}
         {{- if .Values.webhookServer.authorizeAuth.tokenSecretName }}
