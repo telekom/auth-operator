@@ -21,7 +21,7 @@ rules:
   - namespaces/status
   verbs:
   - get
-  - update
+  - patch
 # --- ServiceAccount management (BindDefinition and RestrictedBindDefinition auto-create) ---
 - apiGroups:
   - ""
