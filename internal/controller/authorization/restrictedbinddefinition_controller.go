@@ -713,7 +713,9 @@ func (r *RestrictedBindDefinitionReconciler) rbdHandleMissingPolicy(
 			rbd.Name, rbd.Spec.PolicyRef.Name, err)
 	}
 	rbdClearDeprovisionedStatus(rbd)
-	r.rbdApplyStatusAndMarkStalled(ctx, rbd, "policy not found")
+	if err := r.rbdApplyStatusAndMarkStalled(ctx, rbd, "policy not found"); err != nil {
+		return ctrl.Result{}, err
+	}
 	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultDegraded).Inc()
 	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
 }
@@ -739,7 +741,9 @@ func (r *RestrictedBindDefinitionReconciler) rbdHandleDeletingPolicy(
 			rbd.Name, rbacPolicy.Name, err)
 	}
 	rbdClearDeprovisionedStatus(rbd)
-	r.rbdApplyStatusAndMarkStalled(ctx, rbd, "policy deleting")
+	if err := r.rbdApplyStatusAndMarkStalled(ctx, rbd, "policy deleting"); err != nil {
+		return ctrl.Result{}, err
+	}
 	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultDegraded).Inc()
 	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
 }
@@ -1723,7 +1727,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdApplyStatusAndMarkStalled(
 	ctx context.Context,
 	rbd *authorizationv1alpha1.RestrictedBindDefinition,
 	msg string,
-) {
+) error {
 	logger := log.FromContext(ctx)
 	conditions.MarkStalled(rbd, rbd.Generation,
 		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, msg)
@@ -1731,7 +1735,9 @@ func (r *RestrictedBindDefinitionReconciler) rbdApplyStatusAndMarkStalled(
 	rbd.Status.ObservedGeneration = rbd.Generation
 	if err := ssa.ApplyRestrictedBindDefinitionStatus(ctx, r.client, rbd); err != nil {
 		logger.Error(err, "failed to apply status via SSA", "name", rbd.Name)
+		return fmt.Errorf("apply RestrictedBindDefinition %s stalled status: %w", rbd.Name, err)
 	}
+	return nil
 }
 
 func (r *RestrictedBindDefinitionReconciler) rbdLogApplyIdentity(

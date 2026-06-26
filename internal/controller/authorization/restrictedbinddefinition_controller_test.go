@@ -334,6 +334,48 @@ func TestRBD_Reconcile_PolicyNotFound(t *testing.T) {
 	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Namespace: ownedSA.Namespace, Name: ownedSA.Name}, &deletedSA)).NotTo(gomega.Succeed())
 }
 
+func TestRBD_Reconcile_PolicyNotFoundReturnsStatusApplyError(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	s := newTestScheme()
+	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "status-error-rbd", UID: "status-error-rbd-uid", Generation: 1},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			PolicyRef:  authorizationv1alpha1.RBACPolicyReference{Name: "missing-policy"},
+			TargetName: "status-error-binding",
+			Subjects: []rbacv1.Subject{
+				{Kind: rbacv1.UserKind, Name: "alice", APIGroup: rbacv1.GroupName},
+			},
+			ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
+				ClusterRoleRefs: []string{"view"},
+			},
+		},
+	}
+	c := fake.NewClientBuilder().
+		WithScheme(s).
+		WithObjects(rbd).
+		WithStatusSubresource(&authorizationv1alpha1.RestrictedBindDefinition{}).
+		WithInterceptorFuncs(interceptor.Funcs{
+			SubResourceApply: func(_ context.Context, _ client.Client, _ string, _ runtime.ApplyConfiguration, _ ...client.SubResourceApplyOption) error {
+				return fmt.Errorf("status apply failed")
+			},
+		}).
+		Build()
+	r := &RestrictedBindDefinitionReconciler{
+		client:   c,
+		reader:   c,
+		scheme:   s,
+		recorder: events.NewFakeRecorder(10),
+	}
+
+	_, err := r.Reconcile(rbdCtx(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: rbd.Name},
+	})
+	g.Expect(err).To(gomega.HaveOccurred())
+	g.Expect(err.Error()).To(gomega.ContainSubstring("stalled status"))
+	g.Expect(err.Error()).To(gomega.ContainSubstring("status apply failed"))
+}
+
 func TestRBD_Reconcile_PolicyViolation_Deprovision(t *testing.T) {
 	g := gomega.NewWithT(t)
 
