@@ -141,8 +141,12 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 	// Determine the missing-role policy from annotation.
 	policy := r.GetMissingRolePolicy()
 
-	if err := validateNamespaceBindings(schema.GroupKind{Group: GroupVersion.Group, Kind: "BindDefinition"}, r.Name, r.Spec.RoleBindings); err != nil {
+	kind := schema.GroupKind{Group: GroupVersion.Group, Kind: BindDefinitionKind}
+	if err := validateNamespaceBindings(kind, r.Name, r.Spec.RoleBindings); err != nil {
 		logger.Info("validation failed: invalid roleBindings", "name", r.Name, "error", err.Error())
+		return warnings, err
+	}
+	if err := v.validateRoleBindingNameCollisions(ctx, kind, r); err != nil {
 		return warnings, err
 	}
 
@@ -306,6 +310,93 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 	}
 
 	return warnings, nil
+}
+
+func (v *BindDefinitionValidator) validateRoleBindingNameCollisions(
+	ctx context.Context,
+	kind schema.GroupKind,
+	obj *BindDefinition,
+) error {
+	claims := make(map[string]roleBindingNameClaim)
+	for i, binding := range obj.Spec.RoleBindings {
+		namespaces, err := v.resolveRoleBindingNamespacesForValidation(ctx, binding, i, obj.Name)
+		if err != nil {
+			return err
+		}
+		for _, namespace := range namespaces {
+			for j, roleRef := range binding.ClusterRoleRefs {
+				path := field.NewPath("spec", "roleBindings").Index(i).Child("clusterRoleRefs").Index(j)
+				if err := recordRoleBindingNameClaim(kind, obj.Name, obj.Spec.TargetName, claims, namespace, "ClusterRole", roleRef, path); err != nil {
+					return err
+				}
+			}
+			for j, roleRef := range binding.RoleRefs {
+				path := field.NewPath("spec", "roleBindings").Index(i).Child("roleRefs").Index(j)
+				if err := recordRoleBindingNameClaim(kind, obj.Name, obj.Spec.TargetName, claims, namespace, "Role", roleRef, path); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (v *BindDefinitionValidator) resolveRoleBindingNamespacesForValidation(
+	ctx context.Context,
+	binding NamespaceBinding,
+	bindingIndex int,
+	objectName string,
+) ([]string, error) {
+	if binding.Namespace != "" {
+		return []string{binding.Namespace}, nil
+	}
+
+	namespaceSet := make(map[string]struct{})
+	for selectorIndex, namespaceSelector := range binding.NamespaceSelector {
+		selector, err := metav1.LabelSelectorAsSelector(&namespaceSelector)
+		if err != nil {
+			return nil, apierrors.NewInvalid(
+				schema.GroupKind{Group: GroupVersion.Group, Kind: BindDefinitionKind},
+				objectName,
+				field.ErrorList{field.Invalid(
+					field.NewPath("spec", "roleBindings").Index(bindingIndex).Child("namespaceSelector").Index(selectorIndex),
+					namespaceSelector,
+					err.Error())})
+		}
+
+		continueToken := ""
+		for {
+			namespaceList := &corev1.NamespaceList{}
+			nextContinueToken, err := listAdmissionPage(
+				ctx,
+				v.reader(),
+				namespaceList,
+				continueToken,
+				client.MatchingLabelsSelector{Selector: selector},
+			)
+			if err != nil {
+				return nil, apierrors.NewInternalError(errors.New("unable to list namespaces for RoleBinding name collision validation"))
+			}
+			for i := range namespaceList.Items {
+				namespace := &namespaceList.Items[i]
+				if namespace.Status.Phase == corev1.NamespaceTerminating {
+					continue
+				}
+				namespaceSet[namespace.Name] = struct{}{}
+			}
+			if nextContinueToken == "" {
+				break
+			}
+			continueToken = nextContinueToken
+		}
+	}
+
+	namespaces := make([]string, 0, len(namespaceSet))
+	for namespace := range namespaceSet {
+		namespaces = append(namespaces, namespace)
+	}
+	sort.Strings(namespaces)
+	return namespaces, nil
 }
 
 //nolint:nilnil // A nil object with nil error means no conflicting targetName was found.
