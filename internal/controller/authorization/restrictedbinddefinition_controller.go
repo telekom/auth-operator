@@ -992,7 +992,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdValidateRoleBindingNameCollision
 	claims := make(map[string]rbdRoleBindingNameClaim)
 	for _, clusterRoleRef := range restrictedClusterRoleRefs(rbd.Spec.ClusterRoleBindings) {
 		if err := rbdRecordRoleBindingNameClaim(rbd.Spec.TargetName, claims, "", "ClusterRole", clusterRoleRef); err != nil {
-			return err
+			return fmt.Errorf("ClusterRoleBinding name collision: %w", err)
 		}
 	}
 	for _, roleBinding := range rbd.Spec.RoleBindings {
