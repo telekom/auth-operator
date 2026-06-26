@@ -139,6 +139,10 @@ func validateWebhookAuthorizer(wa *WebhookAuthorizer) (admission.Warnings, error
 func validatePrincipalScopes(fieldName string, principals []Principal) error {
 	for i, p := range principals {
 		if p.Namespace == "" {
+			if p.User == "" && len(p.Groups) == 0 {
+				return apierrors.NewBadRequest(
+					fmt.Sprintf("spec.%s[%d] must specify user or at least one group", fieldName, i))
+			}
 			continue
 		}
 		if len(p.Groups) > 0 {

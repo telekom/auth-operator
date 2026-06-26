@@ -14,6 +14,7 @@ const (
 )
 
 // Principal represents a requesting user or service account identity.
+// +kubebuilder:validation:XValidation:rule="(has(self.user) && self.user != \"\") || (has(self.groups) && size(self.groups) > 0)",message="principal must specify user or at least one group"
 type Principal struct {
 	// User is the requesting user in SubjectAccessReview request.
 	// +kubebuilder:validation:Optional
