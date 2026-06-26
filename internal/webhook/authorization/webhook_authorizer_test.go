@@ -1231,6 +1231,8 @@ func TestServeHTTP_RateLimiting(t *testing.T) {
 	// Ensure the counter series exists so we can measure the delta.
 	pkgmetrics.AuthorizerRateLimitedTotal.Add(0)
 	initialCount := testutil.ToFloat64(pkgmetrics.AuthorizerRateLimitedTotal)
+	initialDeniedCount := testutil.ToFloat64(pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(
+		pkgmetrics.AuthorizerDecisionDenied, pkgmetrics.AuthorizerNameNone))
 
 	// First request should succeed (uses the burst token).
 	req1 := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
@@ -1268,6 +1270,11 @@ func TestServeHTTP_RateLimiting(t *testing.T) {
 	afterCount := testutil.ToFloat64(pkgmetrics.AuthorizerRateLimitedTotal)
 	if afterCount-initialCount < 1 {
 		t.Errorf("AuthorizerRateLimitedTotal did not increment: before=%v, after=%v", initialCount, afterCount)
+	}
+	afterDeniedCount := testutil.ToFloat64(pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(
+		pkgmetrics.AuthorizerDecisionDenied, pkgmetrics.AuthorizerNameNone))
+	if afterDeniedCount-initialDeniedCount < 1 {
+		t.Errorf("AuthorizerRequestsTotal denied metric did not increment: before=%v, after=%v", initialDeniedCount, afterDeniedCount)
 	}
 }
 

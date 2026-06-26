@@ -162,6 +162,7 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	wa.annotateSARSpan(ctx, &sar)
 	if wa.Limiter != nil && !wa.allowSubjectRequest(&sar) {
 		pkgmetrics.AuthorizerRateLimitedTotal.Inc()
+		wa.recordRejectedMetrics(start)
 		wa.Log.V(1).Info("rate limit exceeded, rejecting request",
 			"user", sar.Spec.User,
 			"groups", cappedGroups(sar.Spec.Groups),
@@ -887,7 +888,7 @@ func (wa *Authorizer) recordErrorMetrics(start time.Time) {
 }
 
 // recordRejectedMetrics records Prometheus request counter and duration
-// histogram with decision=denied for malformed-SAR rejection paths.
+// histogram with decision=denied for early rejection paths.
 func (wa *Authorizer) recordRejectedMetrics(start time.Time) {
 	duration := time.Since(start).Seconds()
 	pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(pkgmetrics.AuthorizerDecisionDenied, pkgmetrics.AuthorizerNameNone).Inc()
