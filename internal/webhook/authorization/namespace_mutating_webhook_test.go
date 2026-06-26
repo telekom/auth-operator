@@ -928,6 +928,101 @@ func TestNamespaceMutatorIgnoresSelectorsWhenExplicitNamespaceIsSet(t *testing.T
 	}
 }
 
+func TestNamespaceMutatorAllowsMatchingExplicitNamespaceWithoutPatch(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(authorizationv1alpha1.AddToScheme(scheme))
+
+	bd := &authorizationv1alpha1.BindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "explicit-namespace-mutator-bd"},
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
+			TargetName: "explicit-namespace-mutator-target",
+			Subjects: []rbacv1.Subject{
+				{APIGroup: rbacv1.GroupName, Kind: rbacv1.GroupKind, Name: "allowed-group"},
+			},
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{{
+				Namespace:       "explicit-ns",
+				ClusterRoleRefs: []string{"admin"},
+			}},
+		},
+	}
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bd).Build()
+	mutator := &webhooks.NamespaceMutator{
+		Client:  fakeClient,
+		Decoder: crAdmission.NewDecoder(scheme),
+	}
+
+	tests := []struct {
+		name          string
+		labels        map[string]string
+		expectAllowed bool
+	}{
+		{
+			name:          "exact explicit namespace with no tracked labels is allowed",
+			labels:        nil,
+			expectAllowed: true,
+		},
+		{
+			name: "exact explicit namespace with coherent tracked labels is allowed",
+			labels: map[string]string{
+				authorizationv1alpha1.LabelKeyOwner: authorizationv1alpha1.OwnerPlatform,
+			},
+			expectAllowed: true,
+		},
+		{
+			name: "exact explicit namespace with incoherent tracked labels is denied",
+			labels: map[string]string{
+				authorizationv1alpha1.LabelKeyOwner: authorizationv1alpha1.OwnerTenant,
+			},
+			expectAllowed: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ns := &corev1.Namespace{
+				TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Namespace"},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "explicit-ns",
+					Labels: tt.labels,
+				},
+			}
+			nsRaw, err := json.Marshal(ns)
+			if err != nil {
+				t.Fatalf("failed to marshal namespace: %v", err)
+			}
+			req := crAdmission.Request{AdmissionRequest: admissionv1.AdmissionRequest{
+				Operation: admissionv1.Create,
+				UserInfo: authenticationv1.UserInfo{
+					Username: "user1",
+					Groups:   []string{"allowed-group"},
+				},
+				Kind: metav1.GroupVersionKind{
+					Group:   "",
+					Version: "v1",
+					Kind:    "Namespace",
+				},
+				Name:   ns.Name,
+				Object: runtime.RawExtension{Raw: nsRaw},
+			}}
+
+			resp := mutator.Handle(context.Background(), req)
+			if tt.expectAllowed {
+				if !resp.Allowed {
+					t.Fatalf("expected explicit namespace request to be allowed, got denied: %v", resp.Result)
+				}
+				if len(resp.Patches) != 0 {
+					t.Fatalf("expected explicit namespace request to be allowed without patches, got: %v", resp.Patches)
+				}
+				return
+			}
+			if resp.Allowed {
+				t.Fatal("expected incoherent explicit namespace labels to be denied")
+			}
+		})
+	}
+}
+
 func TestNamespaceMutatorSanitizesInternalErrors(t *testing.T) {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
