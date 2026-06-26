@@ -27,10 +27,11 @@ const legacyOwnerLabel = "schiff.telekom.de/owner"
 
 // NamespaceValidator is a validating webhook that validates namespace operations based on BindDefinitions.
 type NamespaceValidator struct {
-	Client       client.Client
-	Reader       client.Reader
-	Decoder      admission.Decoder
-	TDGMigration bool
+	Client                          client.Client
+	Reader                          client.Reader
+	Decoder                         admission.Decoder
+	TDGMigration                    bool
+	DisableCAPIOperatorUpdateBypass bool
 }
 
 // Handle validates namespace operations based on BindDefinition configurations.
@@ -49,7 +50,14 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 		"namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username)
 
 	// Check for bypass conditions
-	bypassResult := CheckBypass(req.UserInfo.Username, req.UserInfo.Groups, req.Operation, req.Name, v.TDGMigration)
+	bypassResult := CheckBypass(
+		req.UserInfo.Username,
+		req.UserInfo.Groups,
+		req.Operation,
+		req.Name,
+		v.TDGMigration,
+		!v.DisableCAPIOperatorUpdateBypass,
+	)
 	if bypassResult.ShouldBypass {
 		logger.Info("AUDIT: webhook bypass granted",
 			"namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username,

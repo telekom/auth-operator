@@ -2510,6 +2510,52 @@ func TestNamespaceValidatorHandle(t *testing.T) {
 	}
 }
 
+func TestNamespaceValidatorDoesNotBypassCAPIUpdateWhenDisabled(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(authorizationv1alpha1.AddToScheme(scheme))
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithIndex(&authorizationv1alpha1.BindDefinition{}, indexer.BindDefinitionHasRoleBindingsField, indexer.BindDefinitionHasRoleBindingsFunc).
+		Build()
+	validator := &webhooks.NamespaceValidator{
+		Client:                          fakeClient,
+		Decoder:                         crAdmission.NewDecoder(scheme),
+		DisableCAPIOperatorUpdateBypass: true,
+	}
+
+	ns := &corev1.Namespace{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "Namespace",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "platform-ns",
+			Labels: map[string]string{
+				"t-caas.telekom.com/owner": "platform",
+			},
+		},
+	}
+	req := crAdmission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
+			Name:      ns.Name,
+			Operation: admissionv1.Update,
+			UserInfo: authenticationv1.UserInfo{
+				Username: "system:serviceaccount:capi-operator-system:capi-operator-manager",
+			},
+			Object:    runtime.RawExtension{Raw: mustMarshalJSON(t, ns)},
+			OldObject: runtime.RawExtension{Raw: mustMarshalJSON(t, ns)},
+		},
+	}
+
+	resp := validator.Handle(context.Background(), req)
+	if resp.Allowed {
+		t.Fatal("expected CAPI namespace update not to bypass validating webhook when disabled")
+	}
+}
+
 func TestNamespaceValidatorFallsBackWhenBindDefinitionIndexUnavailable(t *testing.T) {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))

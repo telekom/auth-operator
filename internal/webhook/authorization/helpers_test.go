@@ -90,6 +90,7 @@ func TestCheckBypass(t *testing.T) {
 		operation    admissionv1.Operation
 		namespace    string
 		tdgMigration bool
+		disableCAPI  bool
 		wantBypass   bool
 		wantReason   string
 	}{
@@ -148,6 +149,14 @@ func TestCheckBypass(t *testing.T) {
 			tdgMigration: true,
 			wantBypass:   true,
 			wantReason:   "capi-operator-manager",
+		},
+		{
+			name:        "capi-operator-manager update does not bypass when disabled",
+			username:    "system:serviceaccount:capi-operator-system:capi-operator-manager",
+			operation:   admissionv1.Update,
+			namespace:   "any-ns",
+			disableCAPI: true,
+			wantBypass:  false,
 		},
 		{
 			name:       "capi-operator-manager for create",
@@ -296,7 +305,7 @@ func TestCheckBypass(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := CheckBypass(tt.username, tt.groups, tt.operation, tt.namespace, tt.tdgMigration)
+			result := CheckBypass(tt.username, tt.groups, tt.operation, tt.namespace, tt.tdgMigration, !tt.disableCAPI)
 			if result.ShouldBypass != tt.wantBypass {
 				t.Errorf("CheckBypass() ShouldBypass = %v, want %v", result.ShouldBypass, tt.wantBypass)
 			}
@@ -315,6 +324,7 @@ func TestCheckBypassValidatorCases(t *testing.T) {
 		operation    admissionv1.Operation
 		namespace    string
 		tdgMigration bool
+		disableCAPI  bool
 		wantBypass   bool
 		wantReason   string
 	}{
@@ -366,6 +376,14 @@ func TestCheckBypassValidatorCases(t *testing.T) {
 			tdgMigration: true,
 			wantBypass:   true,
 			wantReason:   "capi-operator-manager",
+		},
+		{
+			name:        "capi-operator-manager update does not bypass when disabled",
+			username:    "system:serviceaccount:capi-operator-system:capi-operator-manager",
+			operation:   admissionv1.Update,
+			namespace:   "any-ns",
+			disableCAPI: true,
+			wantBypass:  false,
 		},
 		{
 			name:       "capi-operator-manager for create without tdgMigration",
@@ -490,7 +508,7 @@ func TestCheckBypassValidatorCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := CheckBypass(tt.username, tt.groups, tt.operation, tt.namespace, tt.tdgMigration)
+			result := CheckBypass(tt.username, tt.groups, tt.operation, tt.namespace, tt.tdgMigration, !tt.disableCAPI)
 			if result.ShouldBypass != tt.wantBypass {
 				t.Errorf("CheckBypass() ShouldBypass = %v, want %v", result.ShouldBypass, tt.wantBypass)
 			}

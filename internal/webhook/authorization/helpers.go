@@ -53,6 +53,7 @@ BYPASS CATEGORIES:
 3. CAPI Operator Manager:
    - Account: system:serviceaccount:capi-operator-system:capi-operator-manager
    - Scope: UPDATE operations only
+   - Configurable via the webhook server CAPI update-bypass setting
    - Rationale: Cluster API manager needs to manage cluster resources
 
 4. TDG Migration Mode (temporary, enabled via flag):
@@ -119,7 +120,7 @@ type BypassCheckResult struct {
 
 // CheckBypass checks if a request should bypass the namespace webhook (both mutator and validator).
 // Returns bypass metadata for known principals that should be allowed without full processing.
-func CheckBypass(username string, groups []string, operation admissionv1.Operation, namespace string, tdgMigration bool) BypassCheckResult {
+func CheckBypass(username string, groups []string, operation admissionv1.Operation, namespace string, tdgMigration bool, capiOperatorUpdateBypass bool) BypassCheckResult {
 	// Allow kubernetes-admin without processing.
 	if username == kubernetesAdmin {
 		return BypassCheckResult{
@@ -145,8 +146,8 @@ func CheckBypass(username string, groups []string, operation admissionv1.Operati
 		return BypassCheckResult{ShouldBypass: true, Reason: "trident-operator for t-caas-storage"}
 	}
 
-	// Allow capi-operator-manager for updates
-	if username == capiOperatorManagerSAConst && operation == admissionv1.Update {
+	// Allow capi-operator-manager for updates when the operational bypass is enabled.
+	if capiOperatorUpdateBypass && username == capiOperatorManagerSAConst && operation == admissionv1.Update {
 		return BypassCheckResult{ShouldBypass: true, Reason: "capi-operator-manager"}
 	}
 

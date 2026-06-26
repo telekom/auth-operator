@@ -358,6 +358,12 @@
           "enum": ["true", "false", true, false],
           "default": "false"
         },
+        "capiOperatorUpdateBypass": {
+          "type": ["string", "boolean"],
+          "description": "Allow capi-operator-manager to bypass namespace admission for UPDATE requests.",
+          "enum": ["true", "false", true, false],
+          "default": "true"
+        },
         "authorizeRateLimit": {
           "type": "number",
           "description": "Maximum sustained requests per second for the /authorize endpoint. Set to 0 to disable rate limiting. Per-pod limit. Requires webhookServer.authorizeAuth.tokenSecretName when > 0.",

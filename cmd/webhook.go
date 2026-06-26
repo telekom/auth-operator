@@ -43,6 +43,7 @@ var (
 	certRotationValidatingWebhooks []string
 	certRotationMutatingWebhooks   []string
 	enableTDGMigration             bool
+	enableCAPIOperatorUpdateBypass bool
 	authorizeRateLimit             float64
 	authorizeRateBurst             int
 	authorizeAuthTokenFile         string
@@ -283,23 +284,29 @@ func configureWebhooks(mgr manager.Manager, tp *tracing.Provider) error {
 		return fmt.Errorf("unable to create webhook for BindDefinition: %w", err)
 	}
 	// Setup Namespace mutator
-	log.Info("setting up Namespace mutator webhook", "tdgMigration", enableTDGMigration)
+	log.Info("setting up Namespace mutator webhook",
+		"tdgMigration", enableTDGMigration,
+		"capiOperatorUpdateBypass", enableCAPIOperatorUpdateBypass)
 	decoder := admission.NewDecoder(mgr.GetScheme())
 	namespaceMutator := &authorizationwebhook.NamespaceMutator{
-		Client:       mgr.GetClient(),
-		Reader:       mgr.GetAPIReader(),
-		Decoder:      decoder,
-		TDGMigration: enableTDGMigration,
+		Client:                          mgr.GetClient(),
+		Reader:                          mgr.GetAPIReader(),
+		Decoder:                         decoder,
+		TDGMigration:                    enableTDGMigration,
+		DisableCAPIOperatorUpdateBypass: !enableCAPIOperatorUpdateBypass,
 	}
 	mgr.GetWebhookServer().Register("/mutate-v1-namespace", &webhook.Admission{Handler: namespaceMutator})
 
 	// Setup Namespace validator
-	log.Info("setting up Namespace validator webhook", "tdgMigration", enableTDGMigration)
+	log.Info("setting up Namespace validator webhook",
+		"tdgMigration", enableTDGMigration,
+		"capiOperatorUpdateBypass", enableCAPIOperatorUpdateBypass)
 	namespaceValidator := &authorizationwebhook.NamespaceValidator{
-		Client:       mgr.GetClient(),
-		Reader:       mgr.GetAPIReader(),
-		Decoder:      decoder,
-		TDGMigration: enableTDGMigration,
+		Client:                          mgr.GetClient(),
+		Reader:                          mgr.GetAPIReader(),
+		Decoder:                         decoder,
+		TDGMigration:                    enableTDGMigration,
+		DisableCAPIOperatorUpdateBypass: !enableCAPIOperatorUpdateBypass,
 	}
 	mgr.GetWebhookServer().Register("/validate-v1-namespace", &webhook.Admission{Handler: namespaceValidator})
 
@@ -359,6 +366,8 @@ func init() {
 
 	webhookCmd.Flags().BoolVar(&enableTDGMigration, "tdg-migration", false,
 		"If set, the legacy labels and behavior for TDG migration will be enabled.")
+	webhookCmd.Flags().BoolVar(&enableCAPIOperatorUpdateBypass, "capi-operator-update-bypass", true,
+		"If set, the capi-operator-manager ServiceAccount may bypass namespace admission for UPDATE requests.")
 	webhookCmd.Flags().Float64Var(&authorizeRateLimit, "authorize-rate-limit", 0,
 		"Maximum sustained requests per second for the /authorize endpoint. Set to 0 to disable rate limiting.")
 	webhookCmd.Flags().IntVar(&authorizeRateBurst, "authorize-rate-burst", 200,
