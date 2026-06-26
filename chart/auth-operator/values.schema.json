@@ -360,7 +360,7 @@
         },
         "capiOperatorUpdateBypass": {
           "type": ["string", "boolean"],
-          "description": "Allow capi-operator-manager to bypass namespace admission for UPDATE requests.",
+          "description": "Allow capi-operator-manager to skip BindDefinition authorization for Namespace UPDATE requests; protected-label validation still runs.",
           "enum": ["true", "false", true, false],
           "default": "true"
         },

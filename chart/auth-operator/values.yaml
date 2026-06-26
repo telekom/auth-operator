@@ -106,9 +106,9 @@ webhookServer:
   # concurrent cert rotation updates to the same Secret/WebhookConfiguration.
   replicas: 2
   tdgMigration: "false"
-  # Allow the capi-operator-manager ServiceAccount to bypass namespace
-  # admission for UPDATE requests. Set to "false" to require normal
-  # BindDefinition authorization for those updates.
+  # Allow the capi-operator-manager ServiceAccount to skip BindDefinition
+  # authorization for Namespace UPDATE requests. Protected-label validation
+  # still runs. Set to "false" to require normal authorization for those updates.
   capiOperatorUpdateBypass: "true"
   # Maximum sustained requests per second for the /authorize endpoint.
   # Disabled by default because rate limiting must only be enabled when

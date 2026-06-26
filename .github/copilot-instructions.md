@@ -331,7 +331,7 @@ Do not pass raw logger instances across helper boundaries when `ctx` is availabl
 | `--cert-rotation-mutating-webhook` | Mutating webhook names to patch with CA bundle | `[]` |
 | `--cert-rotation-validating-webhook` | Validating webhook names to patch with CA bundle | `[]` |
 | `--tdg-migration` | Enable T-DDI to T-CaaS migration mode | `false` |
-| `--capi-operator-update-bypass` | Allow capi-operator-manager to bypass namespace admission for UPDATE requests | `true` |
+| `--capi-operator-update-bypass` | Allow capi-operator-manager to skip BindDefinition authorization for Namespace UPDATE requests; protected-label validation still runs | `true` |
 | `--authorize-rate-limit` | Per-pod sustained requests/second for authorize endpoint | `0` |
 | `--authorize-rate-burst` | Burst size for authorize endpoint rate limiter | `200` |
 | `--authorize-auth-token-file` | Bearer-token file required by `/authorize` callers | `""` |
