@@ -479,7 +479,7 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// This avoids duplicate API calls to list namespaces.
 	logger.V(2).Info("Collecting namespaces for BindDefinition",
 		"bindDefinition", bindDefinition.Name)
-	namespaceSet, perRoleBindingNamespaces, err := r.collectNamespaces(ctx, bindDefinition)
+	namespaceSet, perRoleBindingNamespaces, missingTargetNamespaces, err := r.collectNamespaces(ctx, bindDefinition)
 	if err != nil {
 		logger.Error(err, "Unable to collect namespaces", "bindDefinitionName", bindDefinition.Name)
 		r.markStalled(ctx, bindDefinition, err)
@@ -548,6 +548,15 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultError).Inc()
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerBindDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, err
+	}
+
+	if len(missingTargetNamespaces) > 0 {
+		requeueAfter := DefaultRequeueInterval
+		markRoleRefsInvalid := missingRoleRefCount == 0
+		if missingRoleRefCount > 0 {
+			requeueAfter = calculateMissingRoleRefBackoff(bindDefinition)
+		}
+		return r.handleMissingTargetNamespaces(ctx, bindDefinition, missingTargetNamespaces, markRoleRefsInvalid, requeueAfter)
 	}
 
 	// Mark Ready and apply final status via SSA (kstatus)
@@ -841,7 +850,7 @@ func (r *BindDefinitionReconciler) ensureRoleBindings(
 	}
 
 	for i, roleBinding := range bindDef.Spec.RoleBindings {
-		targetNamespaces := perRoleBindingNamespaces[i]
+		targetNamespaces := perRoleBindingNamespaces[i] // #nosec G602 -- Length equality is checked above and guarded before this parallel-slice access.
 
 		for _, ns := range targetNamespaces {
 			// Skip terminating namespaces
@@ -1025,7 +1034,7 @@ func bindDefinitionDesiredBindingKeys(
 			return desiredCRBs, desiredRBs, fmt.Errorf("perRoleBindingNamespaces length (%d) does not match RoleBindings length (%d)",
 				len(perRoleBindingNamespaces), len(bindDef.Spec.RoleBindings))
 		}
-		targetNamespaces := perRoleBindingNamespaces[i] //nolint:gosec // Length equality is checked above and guarded before this parallel-slice access.
+		targetNamespaces := perRoleBindingNamespaces[i] // #nosec G602 -- Length equality is checked above and guarded before this parallel-slice access.
 		for _, ns := range targetNamespaces {
 			if conditions.IsNamespaceTerminating(&ns) {
 				continue
@@ -1540,7 +1549,7 @@ func (r *BindDefinitionReconciler) deleteAllRoleBindings(
 ) error {
 	logger := log.FromContext(ctx)
 
-	namespaceSet, _, err := r.collectNamespaces(ctx, bindDef)
+	namespaceSet, _, _, err := r.collectNamespaces(ctx, bindDef)
 	if err != nil {
 		logger.Error(err, "failed to collect namespaces for RoleBinding cleanup",
 			"bindDefinitionName", bindDef.Name)
@@ -1680,21 +1689,73 @@ func (r *BindDefinitionReconciler) validateRoleReferences(
 // collectNamespaces resolves namespaces for each roleBinding and returns both an
 // aggregated set (for filtering/metrics) and a per-roleBinding slice (for ensureRoleBindings).
 // This avoids resolving namespaces twice per reconcile — once here and once in ensureRoleBindings.
-func (r *BindDefinitionReconciler) collectNamespaces(ctx context.Context, bindDefinition *authorizationv1alpha1.BindDefinition) (map[string]corev1.Namespace, [][]corev1.Namespace, error) {
+func (r *BindDefinitionReconciler) collectNamespaces(
+	ctx context.Context,
+	bindDefinition *authorizationv1alpha1.BindDefinition,
+) (
+	namespaceSet map[string]corev1.Namespace,
+	perRoleBinding [][]corev1.Namespace,
+	missingTargetNamespaces []string,
+	err error,
+) {
 	roleBindings := bindDefinition.Spec.RoleBindings
-	perRoleBinding := make([][]corev1.Namespace, len(roleBindings))
-	namespaceSet := make(map[string]corev1.Namespace)
+	perRoleBinding = make([][]corev1.Namespace, len(roleBindings))
+	namespaceSet = make(map[string]corev1.Namespace)
+	missingTargetNamespaceSet := make(map[string]struct{})
 
 	for i, roleBinding := range roleBindings {
 		resolved, err := r.resolveRoleBindingNamespaces(ctx, roleBinding)
 		if err != nil {
-			return nil, nil, fmt.Errorf("collect namespaces for roleBinding: %w", err)
+			return nil, nil, nil, fmt.Errorf("collect namespaces for roleBinding: %w", err)
 		}
 		perRoleBinding[i] = resolved
+		if roleBinding.Namespace != "" && len(resolved) == 0 && roleBindingHasRefs(roleBinding) {
+			missingTargetNamespaceSet[roleBinding.Namespace] = struct{}{}
+		}
 		for _, ns := range resolved {
 			namespaceSet[ns.Name] = ns
 		}
 	}
 
-	return namespaceSet, perRoleBinding, nil
+	missingTargetNamespaces = make([]string, 0, len(missingTargetNamespaceSet))
+	for namespace := range missingTargetNamespaceSet {
+		missingTargetNamespaces = append(missingTargetNamespaces, namespace)
+	}
+	slices.Sort(missingTargetNamespaces)
+
+	return namespaceSet, perRoleBinding, missingTargetNamespaces, nil
+}
+
+func roleBindingHasRefs(roleBinding authorizationv1alpha1.NamespaceBinding) bool {
+	return len(roleBinding.ClusterRoleRefs) > 0 || len(roleBinding.RoleRefs) > 0
+}
+
+func (r *BindDefinitionReconciler) handleMissingTargetNamespaces(
+	ctx context.Context,
+	bindDefinition *authorizationv1alpha1.BindDefinition,
+	missingNamespaces []string,
+	markRoleRefsInvalid bool,
+	requeueAfter time.Duration,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	if markRoleRefsInvalid {
+		conditions.MarkFalse(bindDefinition, authorizationv1alpha1.RoleRefValidCondition, bindDefinition.Generation,
+			authorizationv1alpha1.TargetNamespaceNotFoundReason,
+			authorizationv1alpha1.TargetNamespaceNotFoundMessage, missingNamespaces)
+	}
+	conditions.MarkNotReady(bindDefinition, bindDefinition.Generation,
+		authorizationv1alpha1.TargetNamespaceNotFoundReason,
+		authorizationv1alpha1.TargetNamespaceNotFoundMessage, missingNamespaces)
+	bindDefinition.Status.BindReconciled = false
+	r.recorder.Eventf(bindDefinition, nil, corev1.EventTypeWarning,
+		authorizationv1alpha1.EventReasonTargetNamespaceNotFound, authorizationv1alpha1.EventActionValidate,
+		"Explicit target namespaces not found: %v. RoleBindings were not created for missing namespaces.", missingNamespaces)
+	if err := r.applyStatus(ctx, bindDefinition); err != nil {
+		logger.Error(err, "failed to apply BindDefinition status", "name", bindDefinition.Name)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerBindDefinition, metrics.ErrorTypeAPI).Inc()
+		return ctrl.Result{}, fmt.Errorf("apply BindDefinition %s status: %w", bindDefinition.Name, err)
+	}
+	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultDegraded).Inc()
+	return ctrl.Result{RequeueAfter: requeueAfter}, nil
 }

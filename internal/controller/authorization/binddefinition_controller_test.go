@@ -1948,7 +1948,7 @@ func TestCollectNamespaces(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ns).Build()
 		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
-		nsSet, _, err := r.collectNamespaces(ctx, bindDef)
+		nsSet, _, _, err := r.collectNamespaces(ctx, bindDef)
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(nsSet).To(HaveKey("my-ns"))
 	})
@@ -1970,9 +1970,10 @@ func TestCollectNamespaces(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(scheme).Build()
 		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
-		nsSet, _, err := r.collectNamespaces(ctx, bindDef)
+		nsSet, _, missingNamespaces, err := r.collectNamespaces(ctx, bindDef)
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(nsSet).To(BeEmpty())
+		g.Expect(missingNamespaces).To(ConsistOf("nonexistent"))
 	})
 
 	t.Run("should collect namespaces by label selector", func(t *testing.T) {
@@ -2006,7 +2007,7 @@ func TestCollectNamespaces(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ns1, ns2, ns3).Build()
 		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
-		nsSet, _, err := r.collectNamespaces(ctx, bindDef)
+		nsSet, _, _, err := r.collectNamespaces(ctx, bindDef)
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(nsSet).To(HaveLen(2))
 		g.Expect(nsSet).To(HaveKey("ns-1"))
@@ -2039,7 +2040,7 @@ func TestCollectNamespaces(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ns).Build()
 		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
-		nsSet, _, err := r.collectNamespaces(ctx, bindDef)
+		nsSet, _, _, err := r.collectNamespaces(ctx, bindDef)
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(nsSet).To(HaveLen(1), "same namespace should be deduplicated")
 	})
@@ -2070,7 +2071,7 @@ func TestCollectNamespaces(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ns1, ns2).Build()
 		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
-		nsSet, _, err := r.collectNamespaces(ctx, bindDef)
+		nsSet, _, _, err := r.collectNamespaces(ctx, bindDef)
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(nsSet).To(HaveLen(2), "empty LabelSelector should match all namespaces per Kubernetes semantics")
 		g.Expect(nsSet).To(HaveKey("ns-a"))
@@ -2462,7 +2463,7 @@ func TestEnsureRoleBindings(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bindDef, ns).Build()
 		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
-		_, perRoleBindingNamespaces, err := r.collectNamespaces(ctx, bindDef)
+		_, perRoleBindingNamespaces, _, err := r.collectNamespaces(ctx, bindDef)
 		g.Expect(err).NotTo(HaveOccurred())
 
 		err = r.ensureRoleBindings(ctx, bindDef, perRoleBindingNamespaces)
@@ -2529,7 +2530,7 @@ func TestEnsureRoleBindings(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bindDef, ns, existing).Build()
 		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
-		_, perRoleBindingNamespaces, err := r.collectNamespaces(ctx, bindDef)
+		_, perRoleBindingNamespaces, _, err := r.collectNamespaces(ctx, bindDef)
 		g.Expect(err).NotTo(HaveOccurred())
 
 		err = r.ensureRoleBindings(ctx, bindDef, perRoleBindingNamespaces)
@@ -2580,7 +2581,7 @@ func TestEnsureRoleBindings(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bindDef, ns).Build()
 		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
-		_, perRoleBindingNamespaces, err := r.collectNamespaces(ctx, bindDef)
+		_, perRoleBindingNamespaces, _, err := r.collectNamespaces(ctx, bindDef)
 		g.Expect(err).NotTo(HaveOccurred())
 
 		err = r.ensureRoleBindings(ctx, bindDef, perRoleBindingNamespaces)
@@ -4810,6 +4811,157 @@ func TestReconcileDeleteCleansUpGaugeMetrics(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Missing-role policy tests (#52)
 // ---------------------------------------------------------------------------
+
+func TestReconcile_MissingExplicitRoleBindingNamespaceNotReady(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+	_ = corev1.AddToScheme(s)
+
+	clusterRole := &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "view"}}
+	existingNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "existing-ns"}}
+	bd := &authorizationv1alpha1.BindDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: authorizationv1alpha1.GroupVersion.String(),
+			Kind:       "BindDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "missing-ns-bd",
+			UID:        "missing-ns-bd-uid",
+			Finalizers: []string{authorizationv1alpha1.BindDefinitionFinalizer},
+		},
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
+			TargetName: "missing-ns-target",
+			Subjects: []rbacv1.Subject{
+				{Kind: rbacv1.UserKind, Name: "alice", APIGroup: rbacv1.GroupName},
+			},
+			ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{ClusterRoleRefs: []string{"view"}},
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+				{
+					Namespace:       "missing-ns",
+					ClusterRoleRefs: []string{"view"},
+				},
+				{
+					Namespace:       "existing-ns",
+					ClusterRoleRefs: []string{"view"},
+				},
+			},
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(bd, clusterRole, existingNS).
+		WithStatusSubresource(bd).
+		Build()
+	r := &BindDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	result, err := r.Reconcile(ctx, reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: bd.Name},
+	})
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(result.RequeueAfter).To(Equal(DefaultRequeueInterval))
+
+	var crb rbacv1.ClusterRoleBinding
+	g.Expect(c.Get(ctx, types.NamespacedName{Name: "missing-ns-target-view-binding"}, &crb)).To(Succeed())
+
+	var rb rbacv1.RoleBinding
+	g.Expect(c.Get(ctx, types.NamespacedName{Namespace: "existing-ns", Name: "missing-ns-target-view-binding"}, &rb)).
+		To(Succeed())
+	err = c.Get(ctx, types.NamespacedName{Namespace: "missing-ns", Name: "missing-ns-target-view-binding"}, &rb)
+	g.Expect(apierrors.IsNotFound(err)).To(BeTrue())
+
+	var updated authorizationv1alpha1.BindDefinition
+	g.Expect(c.Get(ctx, types.NamespacedName{Name: bd.Name}, &updated)).To(Succeed())
+	g.Expect(updated.Status.BindReconciled).To(BeFalse())
+	g.Expect(conditions.IsReady(&updated)).To(BeFalse())
+	roleRefCond := findCondition(updated.Status.Conditions, string(authorizationv1alpha1.RoleRefValidCondition))
+	g.Expect(roleRefCond).NotTo(BeNil(), "expected RoleRefsValid condition to be set")
+	g.Expect(roleRefCond.Status).To(Equal(metav1.ConditionFalse))
+	g.Expect(roleRefCond.Reason).To(Equal(string(authorizationv1alpha1.TargetNamespaceNotFoundReason)))
+	g.Expect(roleRefCond.Message).To(ContainSubstring("missing-ns"))
+}
+
+func TestReconcile_MissingExplicitNamespacePreservesMissingRoleRefs(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+	_ = corev1.AddToScheme(s)
+
+	existingNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "existing-ns"}}
+	bd := &authorizationv1alpha1.BindDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: authorizationv1alpha1.GroupVersion.String(),
+			Kind:       "BindDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "missing-ns-and-role-bd",
+			UID:        "missing-ns-and-role-bd-uid",
+			Finalizers: []string{authorizationv1alpha1.BindDefinitionFinalizer},
+			Annotations: map[string]string{
+				authorizationv1alpha1.MissingRolePolicyAnnotation: string(authorizationv1alpha1.MissingRolePolicyWarn),
+			},
+		},
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
+			TargetName: "missing-ns-and-role-target",
+			Subjects: []rbacv1.Subject{
+				{Kind: rbacv1.UserKind, Name: "alice", APIGroup: rbacv1.GroupName},
+			},
+			ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{ClusterRoleRefs: []string{"missing-role"}},
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+				{
+					Namespace:       "missing-ns",
+					ClusterRoleRefs: []string{"missing-role"},
+				},
+				{
+					Namespace:       "existing-ns",
+					ClusterRoleRefs: []string{"missing-role"},
+				},
+			},
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(bd, existingNS).
+		WithStatusSubresource(bd).
+		Build()
+	r := &BindDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	result, err := r.Reconcile(ctx, reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: bd.Name},
+	})
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(result.RequeueAfter).To(Equal(RoleRefRequeueInterval))
+
+	var rb rbacv1.RoleBinding
+	g.Expect(c.Get(ctx, types.NamespacedName{Namespace: "existing-ns", Name: "missing-ns-and-role-target-missing-role-binding"}, &rb)).
+		To(Succeed())
+	err = c.Get(ctx, types.NamespacedName{Namespace: "missing-ns", Name: "missing-ns-and-role-target-missing-role-binding"}, &rb)
+	g.Expect(apierrors.IsNotFound(err)).To(BeTrue())
+
+	var updated authorizationv1alpha1.BindDefinition
+	g.Expect(c.Get(ctx, types.NamespacedName{Name: bd.Name}, &updated)).To(Succeed())
+	g.Expect(updated.Status.BindReconciled).To(BeFalse())
+	g.Expect(updated.Status.MissingRoleRefs).To(ContainElement("ClusterRole/missing-role"))
+	g.Expect(conditions.IsReady(&updated)).To(BeFalse())
+
+	roleRefCond := findCondition(updated.Status.Conditions, string(authorizationv1alpha1.RoleRefValidCondition))
+	g.Expect(roleRefCond).NotTo(BeNil(), "expected RoleRefsValid condition to be set")
+	g.Expect(roleRefCond.Status).To(Equal(metav1.ConditionFalse))
+	g.Expect(roleRefCond.Reason).To(Equal(string(authorizationv1alpha1.RoleRefInvalidReason)))
+	g.Expect(roleRefCond.Message).To(ContainSubstring("missing-role"))
+
+	readyCond := findCondition(updated.Status.Conditions, string(authorizationv1alpha1.ReadyCondition))
+	g.Expect(readyCond).NotTo(BeNil(), "expected Ready condition to be set")
+	g.Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
+	g.Expect(readyCond.Reason).To(Equal(string(authorizationv1alpha1.TargetNamespaceNotFoundReason)))
+	g.Expect(readyCond.Message).To(ContainSubstring("missing-ns"))
+}
 
 // newBDWithPolicy creates a BindDefinition with the given missing-role policy
 // annotation and a reference to a non-existent ClusterRole.
