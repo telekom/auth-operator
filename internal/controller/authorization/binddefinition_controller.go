@@ -487,9 +487,6 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerBindDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, fmt.Errorf("collect namespaces for BindDefinition %s: %w", bindDefinition.Name, err)
 	}
-	if len(missingTargetNamespaces) > 0 {
-		return r.handleMissingTargetNamespaces(ctx, bindDefinition, missingTargetNamespaces)
-	}
 	logger.V(2).Info("Namespaces collected",
 		"bindDefinition", bindDefinition.Name,
 		"totalNamespaces", len(namespaceSet))
@@ -551,6 +548,10 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultError).Inc()
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerBindDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, err
+	}
+
+	if len(missingTargetNamespaces) > 0 {
+		return r.handleMissingTargetNamespaces(ctx, bindDefinition, missingTargetNamespaces)
 	}
 
 	// Mark Ready and apply final status via SSA (kstatus)
@@ -1736,7 +1737,6 @@ func (r *BindDefinitionReconciler) handleMissingTargetNamespaces(
 	conditions.MarkNotReady(bindDefinition, bindDefinition.Generation,
 		authorizationv1alpha1.TargetNamespaceNotFoundReason,
 		authorizationv1alpha1.TargetNamespaceNotFoundMessage, missingNamespaces)
-	bindDefinition.Status.MissingRoleRefs = nil
 	bindDefinition.Status.BindReconciled = false
 	r.recorder.Eventf(bindDefinition, nil, corev1.EventTypeWarning,
 		authorizationv1alpha1.EventReasonTargetNamespaceNotFound, authorizationv1alpha1.EventActionValidate,
@@ -1747,7 +1747,6 @@ func (r *BindDefinitionReconciler) handleMissingTargetNamespaces(
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerBindDefinition, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, fmt.Errorf("apply BindDefinition %s status: %w", bindDefinition.Name, err)
 	}
-	metrics.RoleRefsMissing.WithLabelValues(bindDefinition.Name).Set(0)
 	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultDegraded).Inc()
 	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
 }

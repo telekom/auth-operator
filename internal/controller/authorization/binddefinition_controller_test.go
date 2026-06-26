@@ -4784,6 +4784,7 @@ func TestReconcile_MissingExplicitRoleBindingNamespaceNotReady(t *testing.T) {
 	_ = corev1.AddToScheme(s)
 
 	clusterRole := &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "view"}}
+	existingNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "existing-ns"}}
 	bd := &authorizationv1alpha1.BindDefinition{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: authorizationv1alpha1.GroupVersion.String(),
@@ -4799,15 +4800,22 @@ func TestReconcile_MissingExplicitRoleBindingNamespaceNotReady(t *testing.T) {
 			Subjects: []rbacv1.Subject{
 				{Kind: rbacv1.UserKind, Name: "alice", APIGroup: rbacv1.GroupName},
 			},
-			RoleBindings: []authorizationv1alpha1.NamespaceBinding{{
-				Namespace:       "missing-ns",
-				ClusterRoleRefs: []string{"view"},
-			}},
+			ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{ClusterRoleRefs: []string{"view"}},
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+				{
+					Namespace:       "missing-ns",
+					ClusterRoleRefs: []string{"view"},
+				},
+				{
+					Namespace:       "existing-ns",
+					ClusterRoleRefs: []string{"view"},
+				},
+			},
 		},
 	}
 
 	c := fake.NewClientBuilder().WithScheme(s).
-		WithObjects(bd, clusterRole).
+		WithObjects(bd, clusterRole, existingNS).
 		WithStatusSubresource(bd).
 		Build()
 	r := &BindDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
@@ -4818,7 +4826,12 @@ func TestReconcile_MissingExplicitRoleBindingNamespaceNotReady(t *testing.T) {
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(result.RequeueAfter).To(Equal(DefaultRequeueInterval))
 
+	var crb rbacv1.ClusterRoleBinding
+	g.Expect(c.Get(ctx, types.NamespacedName{Name: "missing-ns-target-view-binding"}, &crb)).To(Succeed())
+
 	var rb rbacv1.RoleBinding
+	g.Expect(c.Get(ctx, types.NamespacedName{Namespace: "existing-ns", Name: "missing-ns-target-view-binding"}, &rb)).
+		To(Succeed())
 	g.Expect(c.Get(ctx, types.NamespacedName{Namespace: "missing-ns", Name: "missing-ns-target-view-binding"}, &rb)).
 		To(HaveOccurred())
 
