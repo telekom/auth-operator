@@ -317,7 +317,7 @@ func (v *BindDefinitionValidator) validateRoleBindingNameCollisions(
 	kind schema.GroupKind,
 	obj *BindDefinition,
 ) error {
-	return validateRoleBindingNameCollisionClaims(ctx, kind, obj.Name, obj.Spec.TargetName, obj.Spec.RoleBindings, v.resolveRoleBindingNamespacesForValidation)
+	return validateRoleBindingNameCollisionClaims(ctx, kind, obj.Name, obj.Spec.TargetName, nil, obj.Spec.RoleBindings, v.resolveRoleBindingNamespacesForValidation)
 }
 
 func (v *BindDefinitionValidator) resolveRoleBindingNamespacesForValidation(

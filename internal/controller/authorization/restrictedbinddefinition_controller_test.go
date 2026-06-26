@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/go-logr/logr"
@@ -3331,6 +3332,42 @@ func TestRBD_ReconcileResources_RejectsRoleBindingNameCollision(t *testing.T) {
 		Name:      "rb-collision-target-view-binding",
 		Namespace: "collision-ns",
 	}, &rb)).To(gomega.MatchError(gomega.ContainSubstring("not found")))
+}
+
+func TestRBD_ReconcileResources_RejectsClusterRoleBindingNameCollision(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	collidingRoleRefs := []string{
+		strings.Repeat("r", 43) + "-00009021",
+		strings.Repeat("r", 43) + "-00015513",
+	}
+	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "crb-collision-rbd",
+			Generation: 1,
+			Finalizers: []string{authorizationv1alpha1.RestrictedBindDefinitionFinalizer},
+		},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			TargetName: strings.Repeat("t", 200),
+			Subjects: []rbacv1.Subject{
+				{Kind: rbacv1.GroupKind, Name: "devs"},
+			},
+			ClusterRoleBindings: &authorizationv1alpha1.ClusterBinding{
+				ClusterRoleRefs: collidingRoleRefs,
+			},
+		},
+	}
+
+	r, c := newRBDTestReconciler(rbd)
+	err := r.rbdReconcileResources(rbdCtx(), rbd, c, nil)
+	g.Expect(err).To(gomega.HaveOccurred())
+	g.Expect(err.Error()).To(gomega.ContainSubstring("RoleBinding name collision"))
+	g.Expect(err.Error()).To(gomega.ContainSubstring(helpers.BuildBindingName(rbd.Spec.TargetName, collidingRoleRefs[0])))
+
+	var crb rbacv1.ClusterRoleBinding
+	g.Expect(c.Get(rbdCtx(), types.NamespacedName{
+		Name: helpers.BuildBindingName(rbd.Spec.TargetName, collidingRoleRefs[0]),
+	}, &crb)).To(gomega.MatchError(gomega.ContainSubstring("not found")))
 }
 
 func TestRBD_ReconcileResources_PrunesStaleBindingsOnNameCollision(t *testing.T) {

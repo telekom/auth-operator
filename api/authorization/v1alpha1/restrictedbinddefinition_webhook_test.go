@@ -5,6 +5,7 @@
 package v1alpha1
 
 import (
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -355,6 +356,31 @@ var _ = Describe("RestrictedBindDefinition Webhook", func() {
 			err := k8sClient.Create(ctx, rbd)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("spec.roleBindings[1].roleRefs[0]"))
+			Expect(err.Error()).To(ContainSubstring("collides with ClusterRole"))
+		})
+
+		It("Should deny ClusterRoleBinding name collisions", func() {
+			rbd := &RestrictedBindDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rbd-crb-name-collision",
+				},
+				Spec: RestrictedBindDefinitionSpec{
+					PolicyRef:  RBACPolicyReference{Name: policy.Name},
+					TargetName: strings.Repeat("t", 200),
+					Subjects: []rbacv1.Subject{
+						{Kind: rbacv1.GroupKind, APIGroup: rbacv1.GroupName, Name: "test-group"},
+					},
+					ClusterRoleBindings: &ClusterBinding{
+						ClusterRoleRefs: []string{
+							strings.Repeat("r", 43) + "-00009021",
+							strings.Repeat("r", 43) + "-00015513",
+						},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, rbd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("spec.clusterRoleBindings.clusterRoleRefs[1]"))
 			Expect(err.Error()).To(ContainSubstring("collides with ClusterRole"))
 		})
 	})

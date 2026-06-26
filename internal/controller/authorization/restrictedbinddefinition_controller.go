@@ -990,6 +990,11 @@ func (r *RestrictedBindDefinitionReconciler) rbdValidateRoleBindingNameCollision
 	rbd *authorizationv1alpha1.RestrictedBindDefinition,
 ) error {
 	claims := make(map[string]rbdRoleBindingNameClaim)
+	for _, clusterRoleRef := range restrictedClusterRoleRefs(rbd.Spec.ClusterRoleBindings) {
+		if err := rbdRecordRoleBindingNameClaim(rbd.Spec.TargetName, claims, "", "ClusterRole", clusterRoleRef); err != nil {
+			return err
+		}
+	}
 	for _, roleBinding := range rbd.Spec.RoleBindings {
 		targetNamespaces, err := r.rbdResolveNamespaces(ctx, roleBinding)
 		if err != nil {
