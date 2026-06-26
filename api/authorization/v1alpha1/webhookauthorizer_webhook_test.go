@@ -133,6 +133,23 @@ var _ = Describe("WebhookAuthorizer CEL Validation", func() {
 			// Cleanup.
 			Expect(k8sClient.Delete(ctx, wa)).To(Succeed())
 		})
+
+		It("Should deny a WebhookAuthorizer with an empty principal item", func() {
+			wa := &WebhookAuthorizer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-cel-empty-principal",
+				},
+				Spec: WebhookAuthorizerSpec{
+					ResourceRules: validResourceRules,
+					AllowedPrincipals: []Principal{
+						{},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, wa)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("principal must specify user or at least one group"))
+		})
 	})
 })
 
@@ -245,6 +262,35 @@ func TestValidateCreate_WarnsEmptyAllowedPrincipals(t *testing.T) {
 	}
 	if len(warnings) == 0 {
 		t.Error("expected warning for empty allowedPrincipals")
+	}
+}
+
+func TestValidateCreate_RejectsEmptyAllowedPrincipal(t *testing.T) {
+	v := &WebhookAuthorizerValidator{}
+	wa := newTestWebhookAuthorizer(func(wa *WebhookAuthorizer) {
+		wa.Spec.AllowedPrincipals = []Principal{{}}
+	})
+	_, err := v.ValidateCreate(context.Background(), wa)
+	if err == nil {
+		t.Fatal("expected error for empty allowed principal")
+	}
+	if got := err.Error(); !containsAll(got, "allowedPrincipals[0]", "user", "group") {
+		t.Fatalf("expected empty principal error, got %q", got)
+	}
+}
+
+func TestValidateCreate_RejectsEmptyDeniedPrincipal(t *testing.T) {
+	v := &WebhookAuthorizerValidator{}
+	wa := newTestWebhookAuthorizer(func(wa *WebhookAuthorizer) {
+		wa.Spec.AllowedPrincipals = nil
+		wa.Spec.DeniedPrincipals = []Principal{{}}
+	})
+	_, err := v.ValidateCreate(context.Background(), wa)
+	if err == nil {
+		t.Fatal("expected error for empty denied principal")
+	}
+	if got := err.Error(); !containsAll(got, "deniedPrincipals[0]", "user", "group") {
+		t.Fatalf("expected empty principal error, got %q", got)
 	}
 }
 
@@ -369,6 +415,21 @@ func TestValidateUpdate_AlwaysValidates(t *testing.T) {
 	_, err := v.ValidateUpdate(context.Background(), oldObj, newObj)
 	if err == nil {
 		t.Fatal("expected error for invalid new spec even with same generation")
+	}
+}
+
+func TestValidateUpdate_RejectsEmptyPrincipal(t *testing.T) {
+	v := &WebhookAuthorizerValidator{}
+	oldObj := newTestWebhookAuthorizer()
+	newObj := newTestWebhookAuthorizer(func(wa *WebhookAuthorizer) {
+		wa.Spec.AllowedPrincipals = []Principal{{}}
+	})
+	_, err := v.ValidateUpdate(context.Background(), oldObj, newObj)
+	if err == nil {
+		t.Fatal("expected update to reject empty principal")
+	}
+	if got := err.Error(); !containsAll(got, "allowedPrincipals[0]", "user", "group") {
+		t.Fatalf("expected empty principal error, got %q", got)
 	}
 }
 

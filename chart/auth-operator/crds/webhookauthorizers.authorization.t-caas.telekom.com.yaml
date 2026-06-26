@@ -76,6 +76,10 @@ spec:
                       maxLength: 253
                       type: string
                   type: object
+                  x-kubernetes-validations:
+                  - message: principal must specify user or at least one group
+                    rule: (has(self.user) && self.user != "") || (has(self.groups)
+                      && size(self.groups) > 0)
                 maxItems: 256
                 type: array
               deniedPrincipals:
@@ -106,6 +110,10 @@ spec:
                       maxLength: 253
                       type: string
                   type: object
+                  x-kubernetes-validations:
+                  - message: principal must specify user or at least one group
+                    rule: (has(self.user) && self.user != "") || (has(self.groups)
+                      && size(self.groups) > 0)
                 maxItems: 256
                 type: array
               namespaceSelector:
