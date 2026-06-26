@@ -186,7 +186,7 @@ func (r *RoleDefinitionReconciler) handleDeletion(
 	} else if err := r.client.Delete(ctx, role); apierrors.IsNotFound(err) {
 		logger.V(2).Info("Role disappeared before deletion - removing finalizer",
 			"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
-	} else if err != nil {
+	} else if err := r.client.Delete(ctx, role); err != nil && !apierrors.IsNotFound(err) {
 		logger.Error(err, "Failed to delete role",
 			"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
 		return r.markDeletionFailed(ctx, roleDefinition, err)
@@ -209,11 +209,11 @@ func (r *RoleDefinitionReconciler) markDeletionFailed(
 	// consumers who may not have elevated RBAC. The full error is
 	// logged by the caller for operator administrators.
 	conditions.MarkFalse(roleDefinition, authorizationv1alpha1.DeleteCondition, roleDefinition.Generation,
-		authorizationv1alpha1.DeleteReason, "failed to delete managed resource (check operator logs for details)")
+		authorizationv1alpha1.DeleteReason, "failed to clean up managed resource (check operator logs for details)")
 	if updateErr := ssa.ApplyRoleDefinitionStatus(ctx, r.client, roleDefinition); updateErr != nil {
 		logger.Error(updateErr, "Failed to apply status after deletion error",
 			"roleDefinitionName", roleDefinition.Name)
-		return ctrl.Result{}, errors.Join(err, fmt.Errorf("update role definition status after deletion failure: %w", updateErr))
+		return ctrl.Result{}, fmt.Errorf("apply status after role cleanup failure: %w", errors.Join(err, updateErr))
 	}
 	return ctrl.Result{}, err
 }

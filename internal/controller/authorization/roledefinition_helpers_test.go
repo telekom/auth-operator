@@ -750,13 +750,8 @@ func TestHandleDeletion(t *testing.T) {
 
 		cr := &rbacv1.ClusterRole{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: "del-cluster-role",
-				OwnerReferences: []metav1.OwnerReference{{
-					APIVersion: authorizationv1alpha1.GroupVersion.String(),
-					Kind:       "RoleDefinition",
-					Name:       rd.Name,
-					UID:        rd.UID,
-				}},
+				Name:            "del-cluster-role",
+				OwnerReferences: []metav1.OwnerReference{roleDefinitionTestOwnerRef(rd)},
 			},
 		}
 
@@ -907,14 +902,9 @@ func TestHandleDeletion(t *testing.T) {
 
 		role := &rbacv1.Role{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "existing-role",
-				Namespace: "test-ns",
-				OwnerReferences: []metav1.OwnerReference{{
-					APIVersion: authorizationv1alpha1.GroupVersion.String(),
-					Kind:       "RoleDefinition",
-					Name:       rd.Name,
-					UID:        rd.UID,
-				}},
+				Name:            "existing-role",
+				Namespace:       "test-ns",
+				OwnerReferences: []metav1.OwnerReference{roleDefinitionTestOwnerRef(rd)},
 			},
 		}
 
@@ -1430,17 +1420,10 @@ func TestHandleDeletionDeleteError(t *testing.T) {
 		},
 	}
 
-	cr := &rbacv1.ClusterRole{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "del-err-cr",
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: authorizationv1alpha1.GroupVersion.String(),
-				Kind:       "RoleDefinition",
-				Name:       rd.Name,
-				UID:        rd.UID,
-			}},
-		},
-	}
+	cr := &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{
+		Name:            "del-err-cr",
+		OwnerReferences: []metav1.OwnerReference{roleDefinitionTestOwnerRef(rd)},
+	}}
 
 	c := fake.NewClientBuilder().WithScheme(s).
 		WithObjects(rd, cr).

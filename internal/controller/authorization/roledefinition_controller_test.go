@@ -28,6 +28,17 @@ import (
 	pkgssa "github.com/telekom/auth-operator/pkg/ssa"
 )
 
+func roleDefinitionTestOwnerRef(rd *authorizationv1alpha1.RoleDefinition) metav1.OwnerReference {
+	controller := true
+	return metav1.OwnerReference{
+		APIVersion: authorizationv1alpha1.GroupVersion.String(),
+		Kind:       "RoleDefinition",
+		Name:       rd.Name,
+		UID:        rd.UID,
+		Controller: &controller,
+	}
+}
+
 var _ = Describe("RoleDefinition Controller", func() {
 	Context("When reconciling a resource", func() {
 		const resourceName = "test-resource"
@@ -99,6 +110,60 @@ var _ = Describe("RoleDefinition Controller", func() {
 		})
 	})
 })
+
+func TestRoleDefinitionHandleDeletionSkipsUnownedClusterRole(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+
+	rd := &authorizationv1alpha1.RoleDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: authorizationv1alpha1.GroupVersion.String(),
+			Kind:       "RoleDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "delete-unowned-rd",
+			UID:        "delete-unowned-rd-uid",
+			Finalizers: []string{authorizationv1alpha1.RoleDefinitionFinalizer},
+			Generation: 1,
+		},
+		Spec: authorizationv1alpha1.RoleDefinitionSpec{
+			TargetName:      "shared-clusterrole",
+			TargetRole:      authorizationv1alpha1.DefinitionClusterRole,
+			ScopeNamespaced: false,
+		},
+	}
+	unownedClusterRole := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "shared-clusterrole"},
+		Rules: []rbacv1.PolicyRule{{
+			APIGroups: []string{""},
+			Resources: []string{"pods"},
+			Verbs:     []string{"get"},
+		}},
+	}
+
+	c := fake.NewClientBuilder().
+		WithScheme(s).
+		WithObjects(rd, unownedClusterRole).
+		WithStatusSubresource(&authorizationv1alpha1.RoleDefinition{}).
+		Build()
+	r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	result, err := r.handleDeletion(ctx, rd, &rbacv1.ClusterRole{})
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(result).To(Equal(reconcile.Result{}))
+
+	var kept rbacv1.ClusterRole
+	g.Expect(c.Get(ctx, types.NamespacedName{Name: unownedClusterRole.Name}, &kept)).To(Succeed())
+	g.Expect(kept.Rules).To(Equal(unownedClusterRole.Rules))
+
+	var updated authorizationv1alpha1.RoleDefinition
+	g.Expect(c.Get(ctx, types.NamespacedName{Name: rd.Name}, &updated)).To(Succeed())
+	g.Expect(updated.Finalizers).NotTo(ContainElement(authorizationv1alpha1.RoleDefinitionFinalizer))
+}
 
 var _ = Describe("RoleDefinition Drift Detection and Rollback", func() {
 	ctx := context.Background()
@@ -2023,17 +2088,10 @@ func TestHandleDeletionDeleteAndStatusError(t *testing.T) {
 		},
 	}
 
-	cr := &rbacv1.ClusterRole{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "del-both-cr",
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: authorizationv1alpha1.GroupVersion.String(),
-				Kind:       "RoleDefinition",
-				Name:       rd.Name,
-				UID:        rd.UID,
-			}},
-		},
-	}
+	cr := &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{
+		Name:            "del-both-cr",
+		OwnerReferences: []metav1.OwnerReference{roleDefinitionTestOwnerRef(rd)},
+	}}
 
 	statusPatchCount := 0
 	c := fake.NewClientBuilder().WithScheme(s).
