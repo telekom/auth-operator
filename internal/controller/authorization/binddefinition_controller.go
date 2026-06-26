@@ -1028,7 +1028,7 @@ func bindDefinitionDesiredBindingKeys(
 			return desiredCRBs, desiredRBs, fmt.Errorf("perRoleBindingNamespaces length (%d) does not match RoleBindings length (%d)",
 				len(perRoleBindingNamespaces), len(bindDef.Spec.RoleBindings))
 		}
-		targetNamespaces := perRoleBindingNamespaces[i]
+		targetNamespaces := perRoleBindingNamespaces[i] // #nosec G602 -- Length equality is checked above and guarded before this parallel-slice access.
 		for _, ns := range targetNamespaces {
 			if conditions.IsNamespaceTerminating(&ns) {
 				continue
