@@ -551,7 +551,12 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	if len(missingTargetNamespaces) > 0 {
-		return r.handleMissingTargetNamespaces(ctx, bindDefinition, missingTargetNamespaces)
+		requeueAfter := DefaultRequeueInterval
+		markRoleRefsInvalid := missingRoleRefCount == 0
+		if missingRoleRefCount > 0 {
+			requeueAfter = calculateMissingRoleRefBackoff(bindDefinition)
+		}
+		return r.handleMissingTargetNamespaces(ctx, bindDefinition, missingTargetNamespaces, markRoleRefsInvalid, requeueAfter)
 	}
 
 	// Mark Ready and apply final status via SSA (kstatus)
@@ -1729,11 +1734,15 @@ func (r *BindDefinitionReconciler) handleMissingTargetNamespaces(
 	ctx context.Context,
 	bindDefinition *authorizationv1alpha1.BindDefinition,
 	missingNamespaces []string,
+	markRoleRefsInvalid bool,
+	requeueAfter time.Duration,
 ) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-	conditions.MarkFalse(bindDefinition, authorizationv1alpha1.RoleRefValidCondition, bindDefinition.Generation,
-		authorizationv1alpha1.TargetNamespaceNotFoundReason,
-		authorizationv1alpha1.TargetNamespaceNotFoundMessage, missingNamespaces)
+	if markRoleRefsInvalid {
+		conditions.MarkFalse(bindDefinition, authorizationv1alpha1.RoleRefValidCondition, bindDefinition.Generation,
+			authorizationv1alpha1.TargetNamespaceNotFoundReason,
+			authorizationv1alpha1.TargetNamespaceNotFoundMessage, missingNamespaces)
+	}
 	conditions.MarkNotReady(bindDefinition, bindDefinition.Generation,
 		authorizationv1alpha1.TargetNamespaceNotFoundReason,
 		authorizationv1alpha1.TargetNamespaceNotFoundMessage, missingNamespaces)
@@ -1748,5 +1757,5 @@ func (r *BindDefinitionReconciler) handleMissingTargetNamespaces(
 		return ctrl.Result{}, fmt.Errorf("apply BindDefinition %s status: %w", bindDefinition.Name, err)
 	}
 	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultDegraded).Inc()
-	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
+	return ctrl.Result{RequeueAfter: requeueAfter}, nil
 }
