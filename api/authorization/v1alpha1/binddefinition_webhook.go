@@ -317,28 +317,7 @@ func (v *BindDefinitionValidator) validateRoleBindingNameCollisions(
 	kind schema.GroupKind,
 	obj *BindDefinition,
 ) error {
-	claims := make(map[string]roleBindingNameClaim)
-	for i, binding := range obj.Spec.RoleBindings {
-		namespaces, err := v.resolveRoleBindingNamespacesForValidation(ctx, binding, i, obj.Name)
-		if err != nil {
-			return err
-		}
-		for _, namespace := range namespaces {
-			for j, roleRef := range binding.ClusterRoleRefs {
-				path := field.NewPath("spec", "roleBindings").Index(i).Child("clusterRoleRefs").Index(j)
-				if err := recordRoleBindingNameClaim(kind, obj.Name, obj.Spec.TargetName, claims, namespace, "ClusterRole", roleRef, path); err != nil {
-					return err
-				}
-			}
-			for j, roleRef := range binding.RoleRefs {
-				path := field.NewPath("spec", "roleBindings").Index(i).Child("roleRefs").Index(j)
-				if err := recordRoleBindingNameClaim(kind, obj.Name, obj.Spec.TargetName, claims, namespace, "Role", roleRef, path); err != nil {
-					return err
-				}
-			}
-		}
-	}
-	return nil
+	return validateRoleBindingNameCollisionClaims(ctx, kind, obj.Name, obj.Spec.TargetName, obj.Spec.RoleBindings, v.resolveRoleBindingNamespacesForValidation)
 }
 
 func (v *BindDefinitionValidator) resolveRoleBindingNamespacesForValidation(

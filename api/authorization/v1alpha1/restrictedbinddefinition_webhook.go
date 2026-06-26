@@ -302,22 +302,34 @@ func (v *RestrictedBindDefinitionValidator) validateRoleBindingNameCollisions(
 	kind schema.GroupKind,
 	obj *RestrictedBindDefinition,
 ) error {
+	return validateRoleBindingNameCollisionClaims(ctx, kind, obj.Name, obj.Spec.TargetName, obj.Spec.RoleBindings, v.resolveRoleBindingNamespacesForValidation)
+}
+
+type roleBindingNamespaceResolver func(context.Context, NamespaceBinding, int, string) ([]string, error)
+
+func validateRoleBindingNameCollisionClaims(
+	ctx context.Context,
+	kind schema.GroupKind,
+	objectName, targetName string,
+	bindings []NamespaceBinding,
+	resolveNamespaces roleBindingNamespaceResolver,
+) error {
 	claims := make(map[string]roleBindingNameClaim)
-	for i, binding := range obj.Spec.RoleBindings {
-		namespaces, err := v.resolveRoleBindingNamespacesForValidation(ctx, binding, i, obj.Name)
+	for i, binding := range bindings {
+		namespaces, err := resolveNamespaces(ctx, binding, i, objectName)
 		if err != nil {
 			return err
 		}
 		for _, namespace := range namespaces {
 			for j, roleRef := range binding.ClusterRoleRefs {
 				path := field.NewPath("spec", "roleBindings").Index(i).Child("clusterRoleRefs").Index(j)
-				if err := recordRoleBindingNameClaim(kind, obj.Name, obj.Spec.TargetName, claims, namespace, "ClusterRole", roleRef, path); err != nil {
+				if err := recordRoleBindingNameClaim(kind, objectName, targetName, claims, namespace, "ClusterRole", roleRef, path); err != nil {
 					return err
 				}
 			}
 			for j, roleRef := range binding.RoleRefs {
 				path := field.NewPath("spec", "roleBindings").Index(i).Child("roleRefs").Index(j)
-				if err := recordRoleBindingNameClaim(kind, obj.Name, obj.Spec.TargetName, claims, namespace, "Role", roleRef, path); err != nil {
+				if err := recordRoleBindingNameClaim(kind, objectName, targetName, claims, namespace, "Role", roleRef, path); err != nil {
 					return err
 				}
 			}
