@@ -18,7 +18,7 @@ rules:
   - namespaces/status
   verbs:
   - get
-  - update
+  - patch
 - apiGroups:
   - ""
   resources:
