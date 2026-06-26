@@ -108,7 +108,7 @@ Together, they provide a complete authorization solution:
 3. Developer has normal daily access via static RBAC
 4. For incident response, developer requests escalation via **k8s-breakglass**
 5. Approver reviews and approves the BreakglassSession
-6. Breakglass webhook grants temporary `cluster-admin` access
+6. Breakglass webhook grants temporary access to the configured escalation group
 7. Session expires automatically after configured duration
 
 ---
@@ -255,13 +255,13 @@ spec:
 Breakglass allows emergency escalation:
 
 ```yaml
-# BreakglassEscalation for emergency access
+# BreakglassEscalation for tenant emergency access
 apiVersion: breakglass.t-caas.telekom.com/v1alpha1
 kind: BreakglassEscalation
 metadata:
   name: tenant-emergency-access
 spec:
-  escalatedGroup: "cluster-admin"
+  escalatedGroup: "breakglass:tenant:myteam:poweruser"
   allowed:
     clusters: ["prod-*"]
     groups: ["tenant-developers"]  # Same group as BindDefinition
