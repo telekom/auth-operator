@@ -1028,7 +1028,7 @@ func bindDefinitionDesiredBindingKeys(
 			return desiredCRBs, desiredRBs, fmt.Errorf("perRoleBindingNamespaces length (%d) does not match RoleBindings length (%d)",
 				len(perRoleBindingNamespaces), len(bindDef.Spec.RoleBindings))
 		}
-		targetNamespaces := perRoleBindingNamespaces[i] //nolint:gosec // Length equality is checked above and guarded before this parallel-slice access.
+		targetNamespaces := perRoleBindingNamespaces[i]
 		for _, ns := range targetNamespaces {
 			if conditions.IsNamespaceTerminating(&ns) {
 				continue
@@ -1683,10 +1683,18 @@ func (r *BindDefinitionReconciler) validateRoleReferences(
 // collectNamespaces resolves namespaces for each roleBinding and returns both an
 // aggregated set (for filtering/metrics) and a per-roleBinding slice (for ensureRoleBindings).
 // This avoids resolving namespaces twice per reconcile — once here and once in ensureRoleBindings.
-func (r *BindDefinitionReconciler) collectNamespaces(ctx context.Context, bindDefinition *authorizationv1alpha1.BindDefinition) (map[string]corev1.Namespace, [][]corev1.Namespace, []string, error) {
+func (r *BindDefinitionReconciler) collectNamespaces(
+	ctx context.Context,
+	bindDefinition *authorizationv1alpha1.BindDefinition,
+) (
+	namespaceSet map[string]corev1.Namespace,
+	perRoleBinding [][]corev1.Namespace,
+	missingTargetNamespaces []string,
+	err error,
+) {
 	roleBindings := bindDefinition.Spec.RoleBindings
-	perRoleBinding := make([][]corev1.Namespace, len(roleBindings))
-	namespaceSet := make(map[string]corev1.Namespace)
+	perRoleBinding = make([][]corev1.Namespace, len(roleBindings))
+	namespaceSet = make(map[string]corev1.Namespace)
 	missingTargetNamespaceSet := make(map[string]struct{})
 
 	for i, roleBinding := range roleBindings {
@@ -1703,7 +1711,7 @@ func (r *BindDefinitionReconciler) collectNamespaces(ctx context.Context, bindDe
 		}
 	}
 
-	missingTargetNamespaces := make([]string, 0, len(missingTargetNamespaceSet))
+	missingTargetNamespaces = make([]string, 0, len(missingTargetNamespaceSet))
 	for namespace := range missingTargetNamespaceSet {
 		missingTargetNamespaces = append(missingTargetNamespaces, namespace)
 	}
