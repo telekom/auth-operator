@@ -1359,6 +1359,9 @@ func (r *RestrictedBindDefinitionReconciler) rbdClassifyExistingServiceAccount(
 			if r.rbdHasLiveGeneratedServiceAccountStatus(ctx, rbd, subject) {
 				return false, true, ""
 			}
+			if rbdHasRecoverableGeneratedServiceAccountMarkers(rbd, existing) {
+				return false, true, ""
+			}
 			logger.Info("ServiceAccount has this RestrictedBindDefinition controller ownerRef but no generated status record, skipping management",
 				"serviceAccount", subject.Name, "namespace", subject.Namespace,
 				"ownerName", ownerRBD.Name, "ownerUID", ownerRBD.UID)
@@ -1386,6 +1389,24 @@ func (r *RestrictedBindDefinitionReconciler) rbdClassifyExistingServiceAccount(
 	}
 
 	return false, true, ""
+}
+
+func rbdHasRecoverableGeneratedServiceAccountMarkers(
+	rbd *authorizationv1alpha1.RestrictedBindDefinition,
+	existing *corev1.ServiceAccount,
+) bool {
+	if existing.Labels[helpers.ManagedByLabelStandard] != helpers.ManagedByValue ||
+		existing.Annotations[helpers.SourceKindAnnotation] != authorizationv1alpha1.RestrictedBindDefinitionKind ||
+		existing.Annotations[helpers.SourceNameAnnotation] != rbd.Name {
+		return false
+	}
+	expectedFieldOwner := pkgssa.FieldOwnerFor(rbd.Name, authorizationv1alpha1.RestrictedBindDefinitionKind)
+	for _, field := range existing.ManagedFields {
+		if field.Manager == expectedFieldOwner && field.Operation == metav1.ManagedFieldsOperationApply {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *RestrictedBindDefinitionReconciler) rbdHasLiveGeneratedServiceAccountStatus(
