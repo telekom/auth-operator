@@ -137,7 +137,20 @@ func (r *WebhookAuthorizerReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, fmt.Errorf("apply reconciling status for %s: %w", wa.Name, err)
 	}
 
-	// Step 3: Validate NamespaceSelector
+	// Step 3: Validate the same semantic contract enforced by admission so
+	// legacy or webhook-bypassed objects cannot be reported as configured.
+	if _, err := authorizationv1alpha1.ValidateWebhookAuthorizer(wa); err != nil {
+		if ssaErr := r.markStalled(ctx, wa, err); ssaErr != nil {
+			return ctrl.Result{}, fmt.Errorf("mark stalled after spec validation error: %w", ssaErr)
+		}
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerWebhookAuthorizer, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerWebhookAuthorizer, metrics.ErrorTypeValidation).Inc()
+		logger.Error(err, "webhook authorizer spec validation failed",
+			"webhookAuthorizer", wa.Name)
+		return ctrl.Result{}, nil
+	}
+
+	// Step 4: Validate NamespaceSelector against live namespaces for diagnostics.
 	if err := r.validateNamespaceSelector(ctx, wa); err != nil {
 		// Distinguish between permanent validation errors and transient errors.
 		// Only label selector parse errors are permanent user mistakes —
@@ -165,12 +178,12 @@ func (r *WebhookAuthorizerReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, fmt.Errorf("validate namespace selector for %s: %w", wa.Name, err)
 	}
 
-	// Step 4: Mark as configured and ready
+	// Step 5: Mark as configured and ready
 	wa.Status.AuthorizerConfigured = true
 	conditions.MarkReady(wa, wa.Generation,
 		authorizationv1alpha1.ReadyReasonReconciled, authorizationv1alpha1.ReadyMessageReconciled)
 
-	// Step 5: Apply status via SSA
+	// Step 6: Apply status via SSA
 	if err := ssa.ApplyWebhookAuthorizerStatus(ctx, r.client, wa); err != nil {
 		logger.Error(err, "failed to apply status via SSA",
 			"webhookAuthorizer", wa.Name)

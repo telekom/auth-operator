@@ -255,6 +255,7 @@ func TestValidateCreate_WarnsEmptyAllowedPrincipals(t *testing.T) {
 	v := &WebhookAuthorizerValidator{}
 	wa := newTestWebhookAuthorizer(func(wa *WebhookAuthorizer) {
 		wa.Spec.AllowedPrincipals = nil
+		wa.Spec.DeniedPrincipals = []Principal{{User: "blocked-user"}}
 	})
 	warnings, err := v.ValidateCreate(context.Background(), wa)
 	if err != nil {
@@ -262,6 +263,21 @@ func TestValidateCreate_WarnsEmptyAllowedPrincipals(t *testing.T) {
 	}
 	if len(warnings) == 0 {
 		t.Error("expected warning for empty allowedPrincipals")
+	}
+}
+
+func TestValidateCreate_RejectsNoPrincipals(t *testing.T) {
+	v := &WebhookAuthorizerValidator{}
+	wa := newTestWebhookAuthorizer(func(wa *WebhookAuthorizer) {
+		wa.Spec.AllowedPrincipals = nil
+		wa.Spec.DeniedPrincipals = nil
+	})
+	_, err := v.ValidateCreate(context.Background(), wa)
+	if err == nil {
+		t.Fatal("expected error for missing principals")
+	}
+	if got := err.Error(); !containsAll(got, "allowedPrincipals", "deniedPrincipals", "non-empty") {
+		t.Fatalf("expected missing principals error, got %q", got)
 	}
 }
 

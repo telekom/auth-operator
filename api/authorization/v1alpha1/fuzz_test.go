@@ -79,6 +79,6 @@ func FuzzWebhookAuthorizerValidation(f *testing.F) {
 		if err := json.Unmarshal(data, &webhookAuthorizer); err != nil {
 			return
 		}
-		_, _ = validateWebhookAuthorizer(&webhookAuthorizer)
+		_, _ = ValidateWebhookAuthorizer(&webhookAuthorizer)
 	})
 }

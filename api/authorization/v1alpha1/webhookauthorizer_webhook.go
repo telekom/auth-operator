@@ -35,7 +35,7 @@ func (wa *WebhookAuthorizer) SetupWebhookWithManager(mgr ctrl.Manager) error {
 func (v *WebhookAuthorizerValidator) ValidateCreate(ctx context.Context, obj *WebhookAuthorizer) (admission.Warnings, error) {
 	logger := log.FromContext(ctx).WithName("webhookauthorizer-webhook")
 	logger.V(1).Info("validating create", "name", obj.Name)
-	return validateWebhookAuthorizer(obj)
+	return ValidateWebhookAuthorizer(obj)
 }
 
 // ValidateUpdate implements admission.Validator for WebhookAuthorizer.
@@ -45,7 +45,7 @@ func (v *WebhookAuthorizerValidator) ValidateCreate(ctx context.Context, obj *We
 func (v *WebhookAuthorizerValidator) ValidateUpdate(ctx context.Context, oldObj, newObj *WebhookAuthorizer) (admission.Warnings, error) {
 	logger := log.FromContext(ctx).WithName("webhookauthorizer-webhook")
 	logger.V(1).Info("validating update", "name", newObj.Name)
-	return validateWebhookAuthorizer(newObj)
+	return ValidateWebhookAuthorizer(newObj)
 }
 
 // ValidateDelete implements admission.Validator for WebhookAuthorizer.
@@ -55,8 +55,8 @@ func (v *WebhookAuthorizerValidator) ValidateDelete(ctx context.Context, obj *We
 	return nil, nil
 }
 
-// validateWebhookAuthorizer performs semantic validation on the spec.
-func validateWebhookAuthorizer(wa *WebhookAuthorizer) (admission.Warnings, error) {
+// ValidateWebhookAuthorizer performs semantic validation on the spec.
+func ValidateWebhookAuthorizer(wa *WebhookAuthorizer) (admission.Warnings, error) {
 	var warnings admission.Warnings
 
 	// Validate NamespaceSelector is parseable.
@@ -101,7 +101,12 @@ func validateWebhookAuthorizer(wa *WebhookAuthorizer) (admission.Warnings, error
 		}
 	}
 
-	// Warn if allowed principals are empty.
+	if len(wa.Spec.AllowedPrincipals) == 0 && len(wa.Spec.DeniedPrincipals) == 0 {
+		return nil, apierrors.NewBadRequest(
+			"at least one of spec.allowedPrincipals or spec.deniedPrincipals must be non-empty")
+	}
+
+	// Warn if allowed principals are empty but denied principals are configured.
 	if len(wa.Spec.AllowedPrincipals) == 0 {
 		warnings = append(warnings,
 			"spec.allowedPrincipals is empty; no requests will be allowed by this authorizer")
