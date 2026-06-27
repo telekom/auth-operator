@@ -43,7 +43,7 @@ kubectl get events -n auth-operator-system --sort-by='.lastTimestamp' | tail -20
 kubectl logs -n auth-operator-system -l control-plane=controller-manager --tail=100
 
 # View webhook logs (last 100 lines)
-kubectl logs -n auth-operator-system -l app=webhook-server --tail=100
+kubectl logs -n auth-operator-system -l control-plane=webhook-server --tail=100
 
 # Check CRD status summary
 kubectl get roledefinitions -A -o custom-columns='NAME:.metadata.name,READY:.status.conditions[?(@.type=="Ready")].status,REASON:.status.conditions[?(@.type=="Ready")].reason'
@@ -132,13 +132,13 @@ kubectl top pod -n auth-operator-system
 
 ```bash
 # Check if controller is leader (HA mode)
-kubectl get lease -n auth-operator-system auth-operator-leader-election -o yaml
+kubectl get lease -n auth-operator-system auth.t-caas.telekom.com -o yaml
 
 # Check work queue metrics
 curl -s http://localhost:8080/metrics | grep workqueue
 
-# Enable verbose logging temporarily
-kubectl set env deployment/auth-operator-controller-manager -n auth-operator-system LOG_LEVEL=debug
+# For Helm-managed installs, enable verbose logging temporarily
+helm upgrade auth-operator <chart-ref> -n auth-operator-system --reuse-values --set global.logLevel=4
 ```
 
 **Common Causes:**
@@ -173,7 +173,7 @@ kubectl run test-curl --image=curlimages/curl --rm -it --restart=Never -- \
   curl -k https://auth-operator-webhook-service.auth-operator-system.svc:443/healthz
 
 # Check webhook pod logs
-kubectl logs -n auth-operator-system -l app=webhook-server --tail=100
+kubectl logs -n auth-operator-system -l control-plane=webhook-server --tail=100
 ```
 
 **Common Causes:**
@@ -425,13 +425,13 @@ kubectl get restrictedbinddefinitions,restrictedroledefinitions -o json | \
 
 ```bash
 # Check cert-controller rotation
-kubectl logs -n auth-operator-system -l app=webhook-server | grep -i cert
+kubectl logs -n auth-operator-system -l control-plane=webhook-server | grep -i cert
 
 # Verify certificate secret exists
-kubectl get secret -n auth-operator-system auth-operator-webhook-server-cert
+kubectl get secret -n auth-operator-system auth-operator-webhook-certs
 
 # Check certificate expiry
-kubectl get secret -n auth-operator-system auth-operator-webhook-server-cert -o jsonpath='{.data.tls\.crt}' | \
+kubectl get secret -n auth-operator-system auth-operator-webhook-certs -o jsonpath='{.data.tls\.crt}' | \
   base64 -d | openssl x509 -noout -dates
 
 # Verify CA bundle in webhook config
@@ -512,14 +512,16 @@ or BindDefinitions.
 
 ```bash
 # Temporarily increase log verbosity
-kubectl set env deployment/auth-operator-controller-manager \
+helm upgrade auth-operator <chart-ref> \
   -n auth-operator-system \
-  -- -zap-log-level=debug
+  --reuse-values \
+  --set global.logLevel=4
 
 # Revert to normal logging
-kubectl set env deployment/auth-operator-controller-manager \
+helm upgrade auth-operator <chart-ref> \
   -n auth-operator-system \
-  -- -zap-log-level=info
+  --reuse-values \
+  --set global.logLevel=0
 ```
 
 ### Common Log Patterns
@@ -579,7 +581,7 @@ kubectl describe pods -n "$NAMESPACE" > "$OUTPUT_DIR/pod-describe.txt" 2>&1
 
 # Logs
 kubectl logs -n "$NAMESPACE" -l control-plane=controller-manager --tail=1000 > "$OUTPUT_DIR/controller-logs.txt" 2>&1 || true
-kubectl logs -n "$NAMESPACE" -l app=webhook-server --tail=1000 > "$OUTPUT_DIR/webhook-logs.txt" 2>&1 || true
+kubectl logs -n "$NAMESPACE" -l control-plane=webhook-server --tail=1000 > "$OUTPUT_DIR/webhook-logs.txt" 2>&1 || true
 
 # CRD status
 kubectl get roledefinitions -A -o yaml > "$OUTPUT_DIR/roledefinitions.yaml" 2>&1 || true
