@@ -356,6 +356,7 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 			}
 			r.rrdMarkStalled(ctx, rrd, err)
 			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
+			metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
 			return ctrl.Result{}, fmt.Errorf("add finalizer to RestrictedRoleDefinition %s: %w", rrd.Name, err)
 		}
 	}
@@ -398,6 +399,8 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 	}
 	if requeue {
 		if err := ssa.ApplyRestrictedRoleDefinitionStatus(ctx, r.client, rrd); err != nil {
+			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
+			metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
 			return ctrl.Result{}, fmt.Errorf("apply status before requeue for RestrictedRoleDefinition %s: %w", rrd.Name, err)
 		}
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultRequeue).Inc()

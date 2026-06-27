@@ -100,6 +100,42 @@ func TestRRD_Reconcile_NotFound(t *testing.T) {
 	g.Expect(result).To(Equal(ctrl.Result{}))
 }
 
+func TestRRD_Reconcile_FinalizerPatchErrorIncrementsReconcileErrors(t *testing.T) {
+	g := NewWithT(t)
+
+	s := newTestScheme()
+	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "finalizer-error-rrd", Generation: 1},
+		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+			PolicyRef:  authorizationv1alpha1.RBACPolicyReference{Name: "policy"},
+			TargetName: "target",
+			TargetRole: authorizationv1alpha1.DefinitionClusterRole,
+		},
+	}
+	c := fake.NewClientBuilder().
+		WithScheme(s).
+		WithObjects(rrd).
+		WithStatusSubresource(&authorizationv1alpha1.RestrictedRoleDefinition{}).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Patch: func(_ context.Context, _ client.WithWatch, _ client.Object, _ client.Patch, _ ...client.PatchOption) error {
+				return fmt.Errorf("patch failed")
+			},
+		}).
+		Build()
+	r := &RestrictedRoleDefinitionReconciler{
+		client:   c,
+		reader:   c,
+		scheme:   s,
+		recorder: events.NewFakeRecorder(10),
+	}
+
+	before := reconcileErrorCount(t, metrics.ControllerRestrictedRoleDefinition)
+	_, err := r.Reconcile(rrdCtx(), ctrl.Request{NamespacedName: types.NamespacedName{Name: rrd.Name}})
+	g.Expect(err).To(HaveOccurred())
+	g.Expect(err.Error()).To(ContainSubstring("add finalizer"))
+	g.Expect(reconcileErrorCount(t, metrics.ControllerRestrictedRoleDefinition)).To(Equal(before + 1))
+}
+
 func TestRRD_Reconcile_PolicyNotFound(t *testing.T) {
 	g := NewWithT(t)
 
@@ -177,12 +213,14 @@ func TestRRD_Reconcile_PolicyNotFoundReturnsStatusApplyError(t *testing.T) {
 		recorder: events.NewFakeRecorder(10),
 	}
 
+	before := reconcileErrorCount(t, metrics.ControllerRestrictedRoleDefinition)
 	_, err := r.Reconcile(rrdCtx(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: rrd.Name},
 	})
 	g.Expect(err).To(HaveOccurred())
 	g.Expect(err.Error()).To(ContainSubstring("stalled status"))
 	g.Expect(err.Error()).To(ContainSubstring("status apply failed"))
+	g.Expect(reconcileErrorCount(t, metrics.ControllerRestrictedRoleDefinition)).To(Equal(before + 1))
 }
 
 func TestRRD_Reconcile_UsesReaderForPolicyEvaluation(t *testing.T) {
@@ -1019,6 +1057,64 @@ func TestRRD_Reconcile_TrackerNotStarted_Requeues(t *testing.T) {
 	})
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(result.RequeueAfter).NotTo(BeZero())
+}
+
+func TestRRD_Reconcile_TrackerNotStartedStatusApplyErrorIncrementsReconcileErrors(t *testing.T) {
+	g := NewWithT(t)
+
+	pol := &authorizationv1alpha1.RBACPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "tracker-status-error-pol", Generation: 1},
+		Spec: authorizationv1alpha1.RBACPolicySpec{
+			AppliesTo: authorizationv1alpha1.PolicyScope{Namespaces: []string{"*"}},
+			RoleLimits: &authorizationv1alpha1.RoleLimits{
+				AllowClusterRoles: true,
+			},
+		},
+	}
+	rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "tracker-status-error-rrd",
+			Generation: 1,
+			Finalizers: []string{
+				authorizationv1alpha1.RestrictedRoleDefinitionFinalizer,
+			},
+		},
+		Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+			PolicyRef:  authorizationv1alpha1.RBACPolicyReference{Name: pol.Name},
+			TargetName: "tracker-role",
+			TargetRole: authorizationv1alpha1.DefinitionClusterRole,
+		},
+	}
+
+	s := newTestScheme()
+	c := fake.NewClientBuilder().
+		WithScheme(s).
+		WithObjects(pol, rrd).
+		WithStatusSubresource(
+			&authorizationv1alpha1.RestrictedRoleDefinition{},
+			&authorizationv1alpha1.RBACPolicy{},
+		).
+		WithInterceptorFuncs(interceptor.Funcs{
+			SubResourceApply: func(_ context.Context, _ client.Client, _ string, _ runtime.ApplyConfiguration, _ ...client.SubResourceApplyOption) error {
+				return fmt.Errorf("status apply failed")
+			},
+		}).
+		Build()
+	tracker := discovery.NewResourceTracker(s, nil)
+	r := &RestrictedRoleDefinitionReconciler{
+		client:          c,
+		reader:          c,
+		scheme:          s,
+		recorder:        events.NewFakeRecorder(10),
+		resourceTracker: tracker,
+	}
+
+	before := reconcileErrorCount(t, metrics.ControllerRestrictedRoleDefinition)
+	_, err := r.Reconcile(rrdCtx(), ctrl.Request{NamespacedName: types.NamespacedName{Name: rrd.Name}})
+	g.Expect(err).To(HaveOccurred())
+	g.Expect(err.Error()).To(ContainSubstring("apply status before requeue"))
+	g.Expect(err.Error()).To(ContainSubstring("status apply failed"))
+	g.Expect(reconcileErrorCount(t, metrics.ControllerRestrictedRoleDefinition)).To(Equal(before + 1))
 }
 
 func TestRRD_EnsureRole_InvalidTargetRole(t *testing.T) {
