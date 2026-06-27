@@ -14,6 +14,7 @@ import (
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -297,6 +298,49 @@ func TestReconcile_InvalidSpec_Stalled(t *testing.T) {
 			g.Expect(conditions.IsReconciling(&updated)).To(gomega.BeFalse())
 		})
 	}
+}
+
+func TestReconcile_InvalidSpec_StalledWithoutReconcilingApply(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	wa := &authorizationv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "invalid-authorizer",
+			Generation: 1,
+		},
+		Spec: authorizationv1alpha1.WebhookAuthorizerSpec{},
+	}
+
+	scheme := newTestScheme()
+	statusApplyCount := 0
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(wa).
+		WithStatusSubresource(&authorizationv1alpha1.WebhookAuthorizer{}).
+		WithInterceptorFuncs(interceptor.Funcs{
+			SubResourceApply: func(ctx context.Context, cl client.Client, subResourceName string, obj runtime.ApplyConfiguration, opts ...client.SubResourceApplyOption) error {
+				if subResourceName == "status" {
+					statusApplyCount++
+				}
+				return cl.SubResource(subResourceName).Apply(ctx, obj, opts...)
+			},
+		}).
+		Build()
+	recorder := events.NewFakeRecorder(10)
+	r := NewWebhookAuthorizerReconciler(c, scheme, recorder)
+
+	result, err := r.Reconcile(ctxWithLogger(), reconcileRequest("invalid-authorizer"))
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	g.Expect(result).To(gomega.Equal(ctrl.Result{}))
+	g.Expect(statusApplyCount).To(gomega.Equal(1), "invalid specs should skip the intermediate Reconciling status apply")
+
+	var updated authorizationv1alpha1.WebhookAuthorizer
+	g.Expect(c.Get(ctxWithLogger(), types.NamespacedName{Name: "invalid-authorizer"}, &updated)).To(gomega.Succeed())
+	g.Expect(updated.Status.ObservedGeneration).To(gomega.Equal(int64(1)))
+	g.Expect(updated.Status.AuthorizerConfigured).To(gomega.BeFalse())
+	g.Expect(conditions.IsStalled(&updated)).To(gomega.BeTrue())
+	g.Expect(conditions.IsReady(&updated)).To(gomega.BeFalse())
+	g.Expect(conditions.IsReconciling(&updated)).To(gomega.BeFalse())
 }
 
 func TestReconcile_GenerationUpdate(t *testing.T) {
