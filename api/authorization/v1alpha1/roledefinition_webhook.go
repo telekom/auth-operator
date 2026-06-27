@@ -306,16 +306,6 @@ func validateRoleDefinitionSpec(obj *RoleDefinition) error {
 		return err
 	}
 
-	// Validate TargetNamespace is required when TargetRole is Role
-	if obj.Spec.TargetRole == DefinitionNamespacedRole && obj.Spec.TargetNamespace == "" {
-		return apierrors.NewBadRequest("targetNamespace is required when targetRole is 'Role'")
-	}
-
-	// Validate TargetNamespace must not be set when TargetRole is ClusterRole
-	if obj.Spec.TargetRole == DefinitionClusterRole && obj.Spec.TargetNamespace != "" {
-		return apierrors.NewBadRequest("targetNamespace must be empty when targetRole is 'ClusterRole'")
-	}
-
 	// Metadata labels propagate to the generated Role or ClusterRole. Reject
 	// Kubernetes RBAC aggregation labels for every targetRole so reconciliation
 	// does not silently drop admitted input.
@@ -363,11 +353,15 @@ func validateRoleTargetFields(
 		allErrs = append(allErrs, field.Required(field.NewPath("spec", "targetRole"), "targetRole is required"))
 	} else if targetRole != DefinitionClusterRole && targetRole != DefinitionNamespacedRole {
 		allErrs = append(allErrs, field.NotSupported(field.NewPath("spec", "targetRole"), targetRole, []string{DefinitionClusterRole, DefinitionNamespacedRole}))
+	} else if targetRole == DefinitionNamespacedRole && targetNamespace == "" {
+		allErrs = append(allErrs, field.Required(field.NewPath("spec", "targetNamespace"), "targetNamespace is required when targetRole is 'Role'"))
+	} else if targetRole == DefinitionClusterRole && targetNamespace != "" {
+		allErrs = append(allErrs, field.Forbidden(field.NewPath("spec", "targetNamespace"), "targetNamespace must be empty when targetRole is 'ClusterRole'"))
 	}
 	if targetName == "" {
 		allErrs = append(allErrs, field.Required(field.NewPath("spec", "targetName"), "targetName is required"))
 	}
-	if targetNamespace != "" {
+	if targetNamespace != "" && targetRole != DefinitionClusterRole {
 		for _, msg := range utilvalidation.IsDNS1123Label(targetNamespace) {
 			allErrs = append(allErrs, field.Invalid(field.NewPath("spec", "targetNamespace"), targetNamespace, msg))
 		}

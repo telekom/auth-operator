@@ -184,6 +184,27 @@ func TestValidateRestrictedRoleDefinitionTargetFields(t *testing.T) {
 			},
 			wantErr: "spec.targetNamespace",
 		},
+		{
+			name: "reject Role without targetNamespace",
+			rrd: &RestrictedRoleDefinition{
+				Spec: RestrictedRoleDefinitionSpec{
+					TargetRole: DefinitionNamespacedRole,
+					TargetName: "tenant-role",
+				},
+			},
+			wantErr: "targetNamespace is required when targetRole is 'Role'",
+		},
+		{
+			name: "reject ClusterRole with targetNamespace",
+			rrd: &RestrictedRoleDefinition{
+				Spec: RestrictedRoleDefinitionSpec{
+					TargetRole:      DefinitionClusterRole,
+					TargetName:      "tenant-role",
+					TargetNamespace: "tenant-a",
+				},
+			},
+			wantErr: "targetNamespace must be empty when targetRole is 'ClusterRole'",
+		},
 	}
 
 	validator := &RestrictedRoleDefinitionValidator{}
