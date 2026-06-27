@@ -705,6 +705,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdHandleMissingPolicy(
 		authorizationv1alpha1.EventReasonPolicyNotFound, authorizationv1alpha1.EventActionReconcile,
 		"Referenced RBACPolicy %q not found", rbd.Spec.PolicyRef.Name)
 	rbd.Status.PolicyViolations = []string{fmt.Sprintf("policy %q not found", rbd.Spec.PolicyRef.Name)}
+	metrics.SetPolicyViolationsActive(metrics.ControllerRestrictedBindDefinition, rbd.Name, len(rbd.Status.PolicyViolations))
 	if err := r.rbdDeprovision(ctx, rbd, r.client); err != nil {
 		r.rbdMarkStalled(ctx, rbd, err)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
@@ -733,6 +734,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdHandleDeletingPolicy(
 		authorizationv1alpha1.EventReasonPolicyViolation, authorizationv1alpha1.EventActionReconcile,
 		"Referenced RBACPolicy %q is being deleted", rbacPolicy.Name)
 	rbd.Status.PolicyViolations = []string{fmt.Sprintf("policy %q is being deleted", rbacPolicy.Name)}
+	metrics.SetPolicyViolationsActive(metrics.ControllerRestrictedBindDefinition, rbd.Name, len(rbd.Status.PolicyViolations))
 	if err := r.rbdDeprovision(ctx, rbd, r.client); err != nil {
 		r.rbdMarkStalled(ctx, rbd, err)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()

@@ -235,6 +235,15 @@ func readGaugeValue(t *testing.T, gauge prometheus.Gauge) float64 {
 	return metric.GetGauge().GetValue()
 }
 
+func policyViolationsMetricValue(t *testing.T, controller string) float64 {
+	t.Helper()
+	gauge, err := metrics.PolicyViolationsActive.GetMetricWithLabelValues(controller)
+	if err != nil {
+		t.Fatalf("get policy violation metric: %v", err)
+	}
+	return readGaugeValue(t, gauge)
+}
+
 func rbdPolicyWithDefaultAllowances(policy *authorizationv1alpha1.RBACPolicy) *authorizationv1alpha1.RBACPolicy {
 	if policy.Spec.BindingLimits == nil {
 		policy.Spec.BindingLimits = &authorizationv1alpha1.BindingLimits{AllowClusterRoleBindings: true}
@@ -316,6 +325,10 @@ func TestRBD_Reconcile_PolicyNotFound(t *testing.T) {
 		},
 	}
 
+	metrics.DeletePolicyViolationContribution(metrics.ControllerRestrictedBindDefinition, rbd.Name)
+	beforePolicyViolations := policyViolationsMetricValue(t, metrics.ControllerRestrictedBindDefinition)
+	defer metrics.DeletePolicyViolationContribution(metrics.ControllerRestrictedBindDefinition, rbd.Name)
+
 	r, c := newRBDTestReconciler(rbd, ownedCRB, ownedSA)
 	result, err := r.Reconcile(rbdCtx(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: "test-rbd"},
@@ -328,6 +341,7 @@ func TestRBD_Reconcile_PolicyNotFound(t *testing.T) {
 	g.Expect(updated.Status.PolicyViolations).To(gomega.HaveLen(1))
 	g.Expect(updated.Status.PolicyViolations[0]).To(gomega.ContainSubstring("missing-policy"))
 	g.Expect(conditions.IsStalled(&updated)).To(gomega.BeTrue())
+	g.Expect(policyViolationsMetricValue(t, metrics.ControllerRestrictedBindDefinition)).To(gomega.Equal(beforePolicyViolations + 1))
 
 	var deletedCRB rbacv1.ClusterRoleBinding
 	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: ownedCRB.Name}, &deletedCRB)).NotTo(gomega.Succeed())
@@ -541,6 +555,10 @@ func TestRBD_Reconcile_DeletingPolicyDeprovisions(t *testing.T) {
 		},
 	}
 
+	metrics.DeletePolicyViolationContribution(metrics.ControllerRestrictedBindDefinition, rbd.Name)
+	beforePolicyViolations := policyViolationsMetricValue(t, metrics.ControllerRestrictedBindDefinition)
+	defer metrics.DeletePolicyViolationContribution(metrics.ControllerRestrictedBindDefinition, rbd.Name)
+
 	r, c := newRBDTestReconciler(pol, rbd, crb)
 	result, err := r.Reconcile(rbdCtx(), ctrl.Request{NamespacedName: types.NamespacedName{Name: rbd.Name}})
 	g.Expect(err).NotTo(gomega.HaveOccurred())
@@ -553,6 +571,7 @@ func TestRBD_Reconcile_DeletingPolicyDeprovisions(t *testing.T) {
 	g.Expect(c.Get(rbdCtx(), types.NamespacedName{Name: rbd.Name}, &updated)).To(gomega.Succeed())
 	g.Expect(updated.Status.PolicyViolations).To(gomega.ConsistOf("policy \"deleting-policy\" is being deleted"))
 	g.Expect(conditions.IsStalled(&updated)).To(gomega.BeTrue())
+	g.Expect(policyViolationsMetricValue(t, metrics.ControllerRestrictedBindDefinition)).To(gomega.Equal(beforePolicyViolations + 1))
 }
 
 func TestRBD_Reconcile_DeletingPolicyUsesControllerClientForRevocation(t *testing.T) {
