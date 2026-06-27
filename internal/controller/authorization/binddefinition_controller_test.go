@@ -2,6 +2,7 @@ package authorization
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -2484,7 +2485,7 @@ func TestEnsureRoleBindings(t *testing.T) {
 		g.Expect(roleRB.RoleRef.Name).To(Equal("developer"))
 	})
 
-	t.Run("recreates owned RoleBinding when roleRef kind changes", func(t *testing.T) {
+	t.Run("deletes owned RoleBinding before roleRef kind change and recreates on next pass", func(t *testing.T) {
 		g := NewWithT(t)
 
 		ns := &corev1.Namespace{
@@ -2534,12 +2535,80 @@ func TestEnsureRoleBindings(t *testing.T) {
 		g.Expect(err).NotTo(HaveOccurred())
 
 		err = r.ensureRoleBindings(ctx, bindDef, perRoleBindingNamespaces)
+		g.Expect(errors.Is(err, errRoleBindingRecreatePending)).To(BeTrue())
+
+		var deleted rbacv1.RoleBinding
+		err = c.Get(ctx, types.NamespacedName{Name: existing.Name, Namespace: existing.Namespace}, &deleted)
+		g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "first pass should only delete the old immutable RoleBinding")
+
+		err = r.ensureRoleBindings(ctx, bindDef, perRoleBindingNamespaces)
 		g.Expect(err).NotTo(HaveOccurred())
 
 		var rb rbacv1.RoleBinding
 		g.Expect(c.Get(ctx, types.NamespacedName{Name: existing.Name, Namespace: existing.Namespace}, &rb)).To(Succeed())
 		g.Expect(rb.RoleRef).To(Equal(rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: "admin"}))
 		g.Expect(rb.Subjects).To(ConsistOf(bindDef.Spec.Subjects))
+	})
+
+	t.Run("waits while old RoleBinding with changed roleRef is terminating", func(t *testing.T) {
+		g := NewWithT(t)
+
+		now := metav1.Now()
+		ns := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: "transition-ns"},
+			Status:     corev1.NamespaceStatus{Phase: corev1.NamespaceActive},
+		}
+		bindDef := &authorizationv1alpha1.BindDefinition{
+			TypeMeta: metav1.TypeMeta{
+				APIVersion: authorizationv1alpha1.GroupVersion.String(),
+				Kind:       "BindDefinition",
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "transition-bd",
+				UID:  "transition-bd-uid",
+			},
+			Spec: authorizationv1alpha1.BindDefinitionSpec{
+				TargetName: "transition-target",
+				Subjects: []rbacv1.Subject{
+					{Kind: rbacv1.GroupKind, Name: "devs", APIGroup: rbacv1.GroupName},
+				},
+				RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+					{Namespace: "transition-ns", RoleRefs: []string{"admin"}},
+				},
+			},
+		}
+		existing := &rbacv1.RoleBinding{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              helpers.BuildBindingName("transition-target", "admin"),
+				Namespace:         "transition-ns",
+				DeletionTimestamp: &now,
+				Finalizers:        []string{authorizationv1alpha1.RoleBindingFinalizer},
+				OwnerReferences: []metav1.OwnerReference{{
+					APIVersion:         authorizationv1alpha1.GroupVersion.String(),
+					Kind:               "BindDefinition",
+					Name:               bindDef.Name,
+					UID:                bindDef.UID,
+					Controller:         ptr.To(true),
+					BlockOwnerDeletion: ptr.To(true),
+				}},
+			},
+			Subjects: bindDef.Spec.Subjects,
+			RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "admin"},
+		}
+
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bindDef, ns, existing).Build()
+		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
+
+		_, perRoleBindingNamespaces, _, err := r.collectNamespaces(ctx, bindDef)
+		g.Expect(err).NotTo(HaveOccurred())
+
+		err = r.ensureRoleBindings(ctx, bindDef, perRoleBindingNamespaces)
+		g.Expect(errors.Is(err, errRoleBindingRecreatePending)).To(BeTrue())
+
+		var rb rbacv1.RoleBinding
+		g.Expect(c.Get(ctx, types.NamespacedName{Name: existing.Name, Namespace: existing.Namespace}, &rb)).To(Succeed())
+		g.Expect(rb.RoleRef).To(Equal(rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "admin"}))
+		g.Expect(rb.DeletionTimestamp).NotTo(BeNil())
 	})
 
 	t.Run("skips terminating namespaces", func(t *testing.T) {
@@ -2616,6 +2685,73 @@ func TestEnsureRoleBindings(t *testing.T) {
 		err := r.ensureRoleBindings(ctx, bindDef, nil)
 		g.Expect(err).NotTo(HaveOccurred())
 	})
+}
+
+func TestReconcileRequeuesAfterRoleBindingRoleRefChangeDelete(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+	_ = corev1.AddToScheme(s)
+
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{Name: "transition-ns"},
+		Status:     corev1.NamespaceStatus{Phase: corev1.NamespaceActive},
+	}
+	bindDef := &authorizationv1alpha1.BindDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: authorizationv1alpha1.GroupVersion.String(),
+			Kind:       "BindDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "transition-bd",
+			UID:        "transition-bd-uid",
+			Generation: 1,
+			Finalizers: []string{authorizationv1alpha1.BindDefinitionFinalizer},
+		},
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
+			TargetName: "transition-target",
+			Subjects: []rbacv1.Subject{
+				{Kind: rbacv1.GroupKind, Name: "devs", APIGroup: rbacv1.GroupName},
+			},
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+				{Namespace: "transition-ns", RoleRefs: []string{"admin"}},
+			},
+		},
+	}
+	rbName := helpers.BuildBindingName("transition-target", "admin")
+	existing := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      rbName,
+			Namespace: "transition-ns",
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion:         authorizationv1alpha1.GroupVersion.String(),
+				Kind:               "BindDefinition",
+				Name:               bindDef.Name,
+				UID:                bindDef.UID,
+				Controller:         ptr.To(true),
+				BlockOwnerDeletion: ptr.To(true),
+			}},
+		},
+		Subjects: bindDef.Spec.Subjects,
+		RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "admin"},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(bindDef, ns, existing).
+		WithStatusSubresource(bindDef).
+		Build()
+	r := &BindDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	result, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: bindDef.Name}})
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(result.RequeueAfter).To(Equal(roleBindingRecreateRequeueInterval))
+
+	var deleted rbacv1.RoleBinding
+	err = c.Get(ctx, types.NamespacedName{Name: rbName, Namespace: "transition-ns"}, &deleted)
+	g.Expect(apierrors.IsNotFound(err)).To(BeTrue())
 }
 
 func TestDeleteAllRoleBindings(t *testing.T) {
