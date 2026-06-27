@@ -251,6 +251,25 @@ func TestValidateCreate_NonResourceRuleNoPaths(t *testing.T) {
 	}
 }
 
+func TestValidateCreate_RejectsNamespaceSelectorWithNonResourceRules(t *testing.T) {
+	v := &WebhookAuthorizerValidator{}
+	wa := newTestWebhookAuthorizer(func(wa *WebhookAuthorizer) {
+		wa.Spec.NonResourceRules = []authzv1.NonResourceRule{
+			{Verbs: []string{"get"}, NonResourceURLs: []string{"/logs"}},
+		}
+		wa.Spec.NamespaceSelector = metav1.LabelSelector{
+			MatchLabels: map[string]string{"environment": "prod"},
+		}
+	})
+	_, err := v.ValidateCreate(context.Background(), wa)
+	if err == nil {
+		t.Fatal("expected error for namespaceSelector with nonResourceRules")
+	}
+	if got := err.Error(); !containsAll(got, "namespaceSelector", "nonResourceRules", "no namespace") {
+		t.Fatalf("expected namespaceSelector/nonResourceRules error, got %q", got)
+	}
+}
+
 func TestValidateCreate_WarnsEmptyAllowedPrincipals(t *testing.T) {
 	v := &WebhookAuthorizerValidator{}
 	wa := newTestWebhookAuthorizer(func(wa *WebhookAuthorizer) {

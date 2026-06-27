@@ -350,9 +350,6 @@ spec:
     - groups:
         - tenant-admins
         - tenant-developers@customer.com
-  namespaceSelector:
-    matchLabels:
-      kubernetes.io/metadata.name: kube-system
 
 ---
 # -----------------------------------------------------------------------------

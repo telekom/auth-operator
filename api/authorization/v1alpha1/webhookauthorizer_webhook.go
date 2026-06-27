@@ -57,8 +57,6 @@ func (v *WebhookAuthorizerValidator) ValidateDelete(ctx context.Context, obj *We
 
 // ValidateWebhookAuthorizer performs semantic validation on the spec.
 func ValidateWebhookAuthorizer(wa *WebhookAuthorizer) (admission.Warnings, error) {
-	var warnings admission.Warnings
-
 	// Validate NamespaceSelector is parseable.
 	if !isLabelSelectorEmpty(&wa.Spec.NamespaceSelector) {
 		if _, err := metav1.LabelSelectorAsSelector(&wa.Spec.NamespaceSelector); err != nil {
@@ -67,24 +65,35 @@ func ValidateWebhookAuthorizer(wa *WebhookAuthorizer) (admission.Warnings, error
 		}
 	}
 
+	if err := validateWebhookAuthorizerRules(wa); err != nil {
+		return nil, err
+	}
+	return validateWebhookAuthorizerPrincipals(wa)
+}
+
+func validateWebhookAuthorizerRules(wa *WebhookAuthorizer) error {
 	// At least one of resourceRules or nonResourceRules must be defined.
 	if len(wa.Spec.ResourceRules) == 0 && len(wa.Spec.NonResourceRules) == 0 {
-		return nil, apierrors.NewBadRequest(
+		return apierrors.NewBadRequest(
 			"at least one of spec.resourceRules or spec.nonResourceRules must be non-empty")
+	}
+	if !isLabelSelectorEmpty(&wa.Spec.NamespaceSelector) && len(wa.Spec.NonResourceRules) > 0 {
+		return apierrors.NewBadRequest(
+			"spec.namespaceSelector cannot be combined with spec.nonResourceRules because non-resource requests have no namespace")
 	}
 
 	// Validate each resourceRule has at least one verb, apiGroup, and resource.
 	for i, rule := range wa.Spec.ResourceRules {
 		if len(rule.Verbs) == 0 {
-			return nil, apierrors.NewBadRequest(
+			return apierrors.NewBadRequest(
 				fmt.Sprintf("spec.resourceRules[%d] must have at least one verb", i))
 		}
 		if len(rule.APIGroups) == 0 {
-			return nil, apierrors.NewBadRequest(
+			return apierrors.NewBadRequest(
 				fmt.Sprintf("spec.resourceRules[%d] must have at least one apiGroup (use \"\" for core API group)", i))
 		}
 		if len(rule.Resources) == 0 {
-			return nil, apierrors.NewBadRequest(
+			return apierrors.NewBadRequest(
 				fmt.Sprintf("spec.resourceRules[%d] must have at least one resource", i))
 		}
 	}
@@ -92,14 +101,20 @@ func ValidateWebhookAuthorizer(wa *WebhookAuthorizer) (admission.Warnings, error
 	// Validate each nonResourceRule has at least one verb and one URL path.
 	for i, rule := range wa.Spec.NonResourceRules {
 		if len(rule.Verbs) == 0 {
-			return nil, apierrors.NewBadRequest(
+			return apierrors.NewBadRequest(
 				fmt.Sprintf("spec.nonResourceRules[%d] must have at least one verb", i))
 		}
 		if len(rule.NonResourceURLs) == 0 {
-			return nil, apierrors.NewBadRequest(
+			return apierrors.NewBadRequest(
 				fmt.Sprintf("spec.nonResourceRules[%d] must have at least one URL path", i))
 		}
 	}
+
+	return nil
+}
+
+func validateWebhookAuthorizerPrincipals(wa *WebhookAuthorizer) (admission.Warnings, error) {
+	var warnings admission.Warnings
 
 	if len(wa.Spec.AllowedPrincipals) == 0 && len(wa.Spec.DeniedPrincipals) == 0 {
 		return nil, apierrors.NewBadRequest(

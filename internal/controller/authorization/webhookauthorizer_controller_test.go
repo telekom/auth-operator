@@ -255,6 +255,19 @@ func TestReconcile_InvalidSpec_Stalled(t *testing.T) {
 				AllowedPrincipals: []authorizationv1alpha1.Principal{{User: "admin"}},
 			},
 		},
+		{
+			name: "non-resource rule with namespace selector",
+			spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+				NonResourceRules: []authzv1.NonResourceRule{{
+					Verbs:           []string{"get"},
+					NonResourceURLs: []string{"/logs"},
+				}},
+				AllowedPrincipals: []authorizationv1alpha1.Principal{{User: "admin"}},
+				NamespaceSelector: metav1.LabelSelector{
+					MatchLabels: map[string]string{"environment": "prod"},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
