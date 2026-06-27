@@ -231,6 +231,7 @@ func (v *RestrictedBindDefinitionValidator) validateRestrictedBindDefinitionSpec
 }
 
 func validateRestrictedBindDefinitionSubjects(kind schema.GroupKind, name string, subjects []rbacv1.Subject) error {
+	restrictedSupportedSubjectKinds := []string{rbacv1.UserKind, rbacv1.GroupKind, rbacv1.ServiceAccountKind}
 	var allErrs field.ErrorList
 	for i, subject := range subjects {
 		subjectPath := field.NewPath("spec", "subjects").Index(i)
@@ -240,7 +241,7 @@ func validateRestrictedBindDefinitionSubjects(kind schema.GroupKind, name string
 		switch subject.Kind {
 		case rbacv1.UserKind, rbacv1.GroupKind:
 			if subject.APIGroup != rbacv1.GroupName {
-				allErrs = append(allErrs, field.Invalid(subjectPath.Child("apiGroup"), subject.APIGroup, "User and Group subjects must use rbac.authorization.k8s.io"))
+				allErrs = append(allErrs, field.Invalid(subjectPath.Child("apiGroup"), subject.APIGroup, fmt.Sprintf("User and Group subjects must use %s", rbacv1.GroupName)))
 			}
 			if subject.Namespace != "" {
 				allErrs = append(allErrs, field.Forbidden(subjectPath.Child("namespace"), "User and Group subjects must not set namespace"))
@@ -257,7 +258,7 @@ func validateRestrictedBindDefinitionSubjects(kind schema.GroupKind, name string
 				}
 			}
 		default:
-			allErrs = append(allErrs, field.NotSupported(subjectPath.Child("kind"), subject.Kind, supportedSubjectKinds))
+			allErrs = append(allErrs, field.NotSupported(subjectPath.Child("kind"), subject.Kind, restrictedSupportedSubjectKinds))
 		}
 	}
 	if len(allErrs) > 0 {
