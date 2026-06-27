@@ -521,7 +521,7 @@ helm upgrade auth-operator <chart-ref> \
 helm upgrade auth-operator <chart-ref> \
   -n auth-operator-system \
   --reuse-values \
-  --set global.logLevel=0
+  --set global.logLevel=2
 ```
 
 ### Common Log Patterns
