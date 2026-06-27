@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -1356,6 +1357,48 @@ func TestServeHTTP_BearerTokenRequiredBeforeRateLimit(t *testing.T) {
 	}
 	if secondResponse.Status.Reason != "rate limit exceeded" {
 		t.Fatalf("expected second authenticated request to be rate-limited, got reason %q", secondResponse.Status.Reason)
+	}
+}
+
+func TestAuthenticateRequest_ReloadsBearerTokenFile(t *testing.T) {
+	tokenFile := t.TempDir() + "/authorize-token"
+	if err := os.WriteFile(tokenFile, []byte("old-token\n"), 0o600); err != nil {
+		t.Fatalf("write old token: %v", err)
+	}
+
+	handler := &Authorizer{
+		Log:             logr.Discard(),
+		BearerTokenFile: tokenFile,
+	}
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", nil)
+	req.Header.Set("Authorization", "Bearer old-token")
+	if !handler.authenticateRequest(httptest.NewRecorder(), req) {
+		t.Fatal("old token should authenticate before rotation")
+	}
+
+	if err := os.WriteFile(tokenFile, []byte("new-token\n"), 0o600); err != nil {
+		t.Fatalf("write new token: %v", err)
+	}
+
+	staleReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", nil)
+	staleReq.Header.Set("Authorization", "Bearer old-token")
+	staleRec := httptest.NewRecorder()
+	if handler.authenticateRequest(staleRec, staleReq) {
+		t.Fatal("old token should be rejected after rotation")
+	}
+	var staleResponse authzv1.SubjectAccessReview
+	if err := json.NewDecoder(staleRec.Body).Decode(&staleResponse); err != nil {
+		t.Fatalf("decode stale-token response: %v", err)
+	}
+	if staleResponse.Status.Reason != reasonUnauthorized {
+		t.Fatalf("expected stale-token reason %q, got %q", reasonUnauthorized, staleResponse.Status.Reason)
+	}
+
+	rotatedReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", nil)
+	rotatedReq.Header.Set("Authorization", "Bearer new-token")
+	if !handler.authenticateRequest(httptest.NewRecorder(), rotatedReq) {
+		t.Fatal("new token should authenticate after rotation")
 	}
 }
 

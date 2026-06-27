@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -89,6 +90,10 @@ type Authorizer struct {
 	// BearerToken is optional. When set, /authorize requests must include
 	// Authorization: Bearer <token> before the request body is trusted.
 	BearerToken string
+	// BearerTokenFile is optional. When set, the token is loaded from this
+	// file for each request so projected Secret rotations take effect without
+	// restarting the webhook pod.
+	BearerTokenFile string
 	// Limiter is used as a per-subject limiter template. Each SAR subject gets
 	// an independent token bucket with this limit and burst, preventing one
 	// identity from consuming another identity's authorization budget.
@@ -860,16 +865,37 @@ func (wa *Authorizer) writeDeniedResponse(w http.ResponseWriter, reason string) 
 }
 
 func (wa *Authorizer) authenticateRequest(w http.ResponseWriter, r *http.Request) bool {
-	if wa.BearerToken == "" {
+	expectedToken, err := wa.expectedBearerToken()
+	if err != nil {
+		wa.Log.Error(err, "failed to load /authorize bearer token")
+		wa.writeDeniedResponse(w, reasonUnauthorized)
+		return false
+	}
+	if expectedToken == "" {
 		return true
 	}
 	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if !ok || token == "" || !constantTimeTokenEqual(token, wa.BearerToken) {
+	if !ok || token == "" || !constantTimeTokenEqual(token, expectedToken) {
 		wa.Log.V(1).Info("rejecting unauthorized SubjectAccessReview request")
 		wa.writeDeniedResponse(w, reasonUnauthorized)
 		return false
 	}
 	return true
+}
+
+func (wa *Authorizer) expectedBearerToken() (string, error) {
+	if wa.BearerTokenFile == "" {
+		return wa.BearerToken, nil
+	}
+	tokenBytes, err := os.ReadFile(wa.BearerTokenFile)
+	if err != nil {
+		return "", fmt.Errorf("read bearer token file: %w", err)
+	}
+	token := strings.TrimSpace(string(tokenBytes))
+	if token == "" {
+		return "", fmt.Errorf("bearer token file must not be empty")
+	}
+	return token, nil
 }
 
 func constantTimeTokenEqual(a, b string) bool {
