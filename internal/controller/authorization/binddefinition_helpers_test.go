@@ -961,6 +961,7 @@ func TestDeleteServiceAccountUnit(t *testing.T) {
 	t.Run("skips SA referenced by other BindDefinitions", func(t *testing.T) {
 		g := NewWithT(t)
 
+		isNotController := false
 		bindDef := &authorizationv1alpha1.BindDefinition{
 			TypeMeta: metav1.TypeMeta{
 				APIVersion: authorizationv1alpha1.GroupVersion.String(),
@@ -993,7 +994,8 @@ func TestDeleteServiceAccountUnit(t *testing.T) {
 					helpers.SourceNamesAnnotation: "other-bd,shared-sa-bd",
 				},
 				OwnerReferences: []metav1.OwnerReference{
-					{APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: "BindDefinition", Name: "shared-sa-bd", UID: "shared-sa-uid", Controller: &isController},
+					{APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: "BindDefinition", Name: "shared-sa-bd", UID: "shared-sa-uid", Controller: &isNotController},
+					{APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: "BindDefinition", Name: "other-bd", UID: "other-uid", Controller: &isNotController},
 				},
 			},
 		}
@@ -1008,6 +1010,12 @@ func TestDeleteServiceAccountUnit(t *testing.T) {
 		retainedSA := &corev1.ServiceAccount{}
 		g.Expect(c.Get(ctx, client.ObjectKey{Name: "shared-sa", Namespace: "test-ns"}, retainedSA)).To(Succeed())
 		g.Expect(retainedSA.Annotations).To(HaveKeyWithValue(helpers.SourceNamesAnnotation, "other-bd"))
+		g.Expect(retainedSA.OwnerReferences).To(ContainElement(WithTransform(func(ref metav1.OwnerReference) string {
+			return ref.Name
+		}, Equal("other-bd"))))
+		g.Expect(retainedSA.OwnerReferences).NotTo(ContainElement(WithTransform(func(ref metav1.OwnerReference) string {
+			return ref.Name
+		}, Equal("shared-sa-bd"))))
 	})
 }
 

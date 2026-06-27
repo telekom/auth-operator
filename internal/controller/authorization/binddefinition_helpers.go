@@ -67,6 +67,26 @@ func hasControllerOwnerRef(obj, owner metav1.Object) bool {
 	return hasOwnerRefMatching(obj, owner, true)
 }
 
+func removeOwnerRef(obj, owner metav1.Object) bool {
+	ownerUID := owner.GetUID()
+	ownerAPIVersion, ownerKind := ownerReferenceIdentity(owner)
+	if ownerUID == "" || ownerAPIVersion == "" || ownerKind == "" || owner.GetName() == "" {
+		return false
+	}
+	originalLen := len(obj.GetOwnerReferences())
+	ownerRefs := slices.DeleteFunc(obj.GetOwnerReferences(), func(ref metav1.OwnerReference) bool {
+		return ref.APIVersion == ownerAPIVersion &&
+			ref.Kind == ownerKind &&
+			ref.Name == owner.GetName() &&
+			ref.UID == ownerUID
+	})
+	if len(ownerRefs) == originalLen {
+		return false
+	}
+	obj.SetOwnerReferences(ownerRefs)
+	return true
+}
+
 func hasOwnerRefMatching(obj, owner metav1.Object, requireController bool) bool {
 	ownerUID := owner.GetUID()
 	ownerAPIVersion, ownerKind := ownerReferenceIdentity(owner)
@@ -191,7 +211,7 @@ func (r *BindDefinitionReconciler) deleteServiceAccount(
 	}
 
 	// Check if referenced by other BindDefinitions
-	isReferenced, err := r.isSAReferencedByOtherBindDefs(ctx, bindDef.Name, sa.Name, sa.Namespace)
+	isReferenced, err := r.isSAReferencedByOtherBindDefs(ctx, bindDef.Name, sa.Name, sa.Namespace, sa)
 	if err != nil {
 		logger.Error(err, "Failed to check if ServiceAccount is referenced by other BindDefinitions",
 			"bindDefinitionName", bindDef.Name, "serviceAccount", sa.Name, "namespace", sa.Namespace)
@@ -208,27 +228,37 @@ func (r *BindDefinitionReconciler) deleteServiceAccount(
 			if getErr := r.client.Get(ctx, types.NamespacedName{Name: sa.Name, Namespace: sa.Namespace}, fresh); getErr != nil {
 				return getErr
 			}
-			if fresh.Annotations == nil {
-				return nil
+			sourceNamesChanged := false
+			newSourceNames := ""
+			if fresh.Annotations != nil {
+				oldSourceNames := fresh.Annotations[helpers.SourceNamesAnnotation]
+				newSourceNames = helpers.RemoveSourceName(oldSourceNames, bindDef.Name)
+				if newSourceNames != oldSourceNames {
+					sourceNamesChanged = true
+				}
 			}
-			oldSourceNames := fresh.Annotations[helpers.SourceNamesAnnotation]
-			newSourceNames := helpers.RemoveSourceName(oldSourceNames, bindDef.Name)
-			if newSourceNames == oldSourceNames {
+			ownerRefChanged := hasOwnerRef(fresh, bindDef)
+			if !sourceNamesChanged && !ownerRefChanged {
 				return nil
 			}
 			orig := fresh.DeepCopy()
-			fresh.Annotations[helpers.SourceNamesAnnotation] = newSourceNames
+			if sourceNamesChanged {
+				fresh.Annotations[helpers.SourceNamesAnnotation] = newSourceNames
+			}
+			if ownerRefChanged {
+				removeOwnerRef(fresh, bindDef)
+			}
 			if err := r.client.Patch(ctx, fresh, sigs_client.MergeFromWithOptions(orig, sigs_client.MergeFromWithOptimisticLock{})); err != nil {
 				return err
 			}
 			patched = true
 			return nil
 		}); patchErr != nil {
-			logger.Error(patchErr, "Failed to update source-names annotation on retained ServiceAccount",
+			logger.Error(patchErr, "Failed to update metadata on retained ServiceAccount",
 				"bindDefinitionName", bindDef.Name, "serviceAccount", sa.Name, "namespace", sa.Namespace)
 			// Non-fatal - continue with deletion cleanup
 		} else if patched {
-			logger.V(2).Info("Updated source-names annotation on retained ServiceAccount",
+			logger.V(2).Info("Updated metadata on retained ServiceAccount",
 				"bindDefinitionName", bindDef.Name, "serviceAccount", sa.Name)
 		}
 
