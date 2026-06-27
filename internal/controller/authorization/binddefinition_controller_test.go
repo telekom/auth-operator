@@ -3042,7 +3042,7 @@ func TestNamespaceToBindDefinitionRequests(t *testing.T) {
 		g.Expect(requests).To(BeEmpty())
 	})
 
-	t.Run("skips BindDefinitions with non-matching selectors", func(t *testing.T) {
+	t.Run("queues BindDefinitions with selectors after labels stop matching", func(t *testing.T) {
 		g := NewWithT(t)
 
 		bd := &authorizationv1alpha1.BindDefinition{
@@ -3067,7 +3067,9 @@ func TestNamespaceToBindDefinitionRequests(t *testing.T) {
 			Labels: map[string]string{"env": "staging"},
 		}}
 		requests := r.namespaceToBindDefinitionRequests(ctx, ns)
-		g.Expect(requests).To(BeEmpty())
+		g.Expect(requests).To(ConsistOf(reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: "non-matching-bd"},
+		}))
 	})
 
 	t.Run("matches all BDs with roleBindings during namespace termination", func(t *testing.T) {
@@ -3207,7 +3209,7 @@ func TestBindDefinitionMatchesNamespace(t *testing.T) {
 		})).To(BeFalse())
 	})
 
-	t.Run("label selector match", func(t *testing.T) {
+	t.Run("label selector routes regardless of current labels", func(t *testing.T) {
 		g := NewWithT(t)
 		bd := &authorizationv1alpha1.BindDefinition{
 			Spec: authorizationv1alpha1.BindDefinitionSpec{
@@ -3223,7 +3225,7 @@ func TestBindDefinitionMatchesNamespace(t *testing.T) {
 		})).To(BeTrue())
 		g.Expect(bindDefinitionMatchesNamespace(bd, &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{Name: "ns1", Labels: map[string]string{"env": "dev"}},
-		})).To(BeFalse())
+		})).To(BeTrue())
 	})
 
 	t.Run("terminating namespace matches all BDs with roleBindings", func(t *testing.T) {
