@@ -157,6 +157,103 @@ func TestBindDefinitionValidatorSanitizesInternalErrors(t *testing.T) {
 	}
 }
 
+func TestBindDefinitionValidatorRejectsRequiredAndSubjectShape(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := AddToScheme(scheme); err != nil {
+		t.Fatalf("add authorization scheme: %v", err)
+	}
+	if err := rbacv1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add rbac scheme: %v", err)
+	}
+
+	validator := &BindDefinitionValidator{
+		Client: fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithIndex(&BindDefinition{}, TargetNameField, func(obj client.Object) []string {
+				return []string{obj.(*BindDefinition).Spec.TargetName}
+			}).
+			WithIndex(&RestrictedBindDefinition{}, TargetNameField, func(obj client.Object) []string {
+				return []string{obj.(*RestrictedBindDefinition).Spec.TargetName}
+			}).
+			Build(),
+	}
+
+	testCases := []struct {
+		name string
+		bd   *BindDefinition
+		want []string
+	}{
+		{
+			name: "empty spec",
+			bd: &BindDefinition{
+				ObjectMeta: metav1.ObjectMeta{Name: "empty-spec"},
+			},
+			want: []string{"spec.targetName", "spec.subjects", "at least one binding"},
+		},
+		{
+			name: "empty subject name",
+			bd: bindDefinitionForSubjectValidation("empty-subject-name", []rbacv1.Subject{{
+				Kind:     rbacv1.UserKind,
+				APIGroup: rbacv1.GroupName,
+			}}),
+			want: []string{"spec.subjects[0].name", "subject name is required"},
+		},
+		{
+			name: "user subject namespace",
+			bd: bindDefinitionForSubjectValidation("user-namespace", []rbacv1.Subject{{
+				Kind:      rbacv1.UserKind,
+				APIGroup:  rbacv1.GroupName,
+				Name:      "alice",
+				Namespace: "default",
+			}}),
+			want: []string{"spec.subjects[0].namespace", "must not set namespace"},
+		},
+		{
+			name: "group subject apiGroup",
+			bd: bindDefinitionForSubjectValidation("group-apigroup", []rbacv1.Subject{{
+				Kind:     rbacv1.GroupKind,
+				APIGroup: "",
+				Name:     "team-a",
+			}}),
+			want: []string{"spec.subjects[0].apiGroup", rbacv1.GroupName},
+		},
+		{
+			name: "serviceaccount subject apiGroup",
+			bd: bindDefinitionForSubjectValidation("serviceaccount-apigroup", []rbacv1.Subject{{
+				Kind:      rbacv1.ServiceAccountKind,
+				APIGroup:  rbacv1.GroupName,
+				Name:      "robot",
+				Namespace: "default",
+			}}),
+			want: []string{"spec.subjects[0].apiGroup", "must not set apiGroup"},
+		},
+		{
+			name: "serviceaccount subject invalid namespace",
+			bd: bindDefinitionForSubjectValidation("serviceaccount-invalid-namespace", []rbacv1.Subject{{
+				Kind:      rbacv1.ServiceAccountKind,
+				Name:      "robot",
+				Namespace: "Bad/Name",
+			}}),
+			want: []string{"spec.subjects[0].namespace", "Bad/Name"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := validator.validateBindDefinitionSpec(context.Background(), tc.bd)
+			if err == nil {
+				t.Fatal("expected validation error, got nil")
+			}
+			got := err.Error()
+			for _, want := range tc.want {
+				if !strings.Contains(got, want) {
+					t.Fatalf("expected error to contain %q, got %q", want, got)
+				}
+			}
+		})
+	}
+}
+
 func bindDefinitionForSanitization(name string, subjects []rbacv1.Subject, mutate func(*BindDefinitionSpec)) *BindDefinition {
 	spec := BindDefinitionSpec{
 		TargetName: name,
@@ -166,5 +263,23 @@ func bindDefinitionForSanitization(name string, subjects []rbacv1.Subject, mutat
 	return &BindDefinition{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 		Spec:       spec,
+	}
+}
+
+func bindDefinitionForSubjectValidation(name string, subjects []rbacv1.Subject) *BindDefinition {
+	return &BindDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+			Annotations: map[string]string{
+				MissingRolePolicyAnnotation: string(MissingRolePolicyIgnore),
+			},
+		},
+		Spec: BindDefinitionSpec{
+			TargetName: name,
+			Subjects:   subjects,
+			ClusterRoleBindings: ClusterBinding{
+				ClusterRoleRefs: []string{"view"},
+			},
+		},
 	}
 }
