@@ -21,6 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	authorizationv1alpha1ac "github.com/telekom/auth-operator/api/authorization/v1alpha1/applyconfiguration/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/pkg/discovery"
 )
 
@@ -698,11 +699,25 @@ func TestRoleDefinitionMarkStalled(t *testing.T) {
 				TargetName: "stalled-role",
 				TargetRole: authorizationv1alpha1.DefinitionClusterRole,
 			},
+			Status: authorizationv1alpha1.RoleDefinitionStatus{
+				RoleReconciled: true,
+			},
 		}
 
+		var appliedRoleReconciled *bool
 		c := fake.NewClientBuilder().WithScheme(s).
 			WithObjects(rd).
 			WithStatusSubresource(rd).
+			WithInterceptorFuncs(interceptor.Funcs{
+				SubResourceApply: func(_ context.Context, _ client.Client, subResourceName string, obj runtime.ApplyConfiguration, _ ...client.SubResourceApplyOption) error {
+					if subResourceName == "status" {
+						if ac, ok := obj.(*authorizationv1alpha1ac.RoleDefinitionApplyConfiguration); ok && ac.Status != nil {
+							appliedRoleReconciled = ac.Status.RoleReconciled
+						}
+					}
+					return nil
+				},
+			}).
 			Build()
 		r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
 
@@ -710,6 +725,7 @@ func TestRoleDefinitionMarkStalled(t *testing.T) {
 
 		// Verify condition was set in-memory
 		g.Expect(rd.Status.ObservedGeneration).To(Equal(int64(5)))
+		g.Expect(rd.Status.RoleReconciled).To(BeFalse())
 		stalledFound := false
 		for _, cond := range rd.Status.Conditions {
 			if cond.Type == "Stalled" {
@@ -719,6 +735,8 @@ func TestRoleDefinitionMarkStalled(t *testing.T) {
 			}
 		}
 		g.Expect(stalledFound).To(BeTrue(), "Stalled condition should be set")
+		g.Expect(appliedRoleReconciled).NotTo(BeNil())
+		g.Expect(*appliedRoleReconciled).To(BeFalse())
 	})
 }
 
