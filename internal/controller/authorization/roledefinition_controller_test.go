@@ -1971,13 +1971,8 @@ func TestRDReconcileStallsUnsafeStoredAggregateFrom(t *testing.T) {
 
 	stale := &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: rd.Spec.TargetName,
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: authorizationv1alpha1.GroupVersion.String(),
-				Kind:       "RoleDefinition",
-				Name:       rd.Name,
-				UID:        rd.UID,
-			}},
+			Name:            rd.Spec.TargetName,
+			OwnerReferences: []metav1.OwnerReference{roleDefinitionTestOwnerRef(rd)},
 		},
 		AggregationRule: &rbacv1.AggregationRule{
 			ClusterRoleSelectors: []metav1.LabelSelector{{

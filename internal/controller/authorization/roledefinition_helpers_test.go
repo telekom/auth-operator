@@ -157,7 +157,36 @@ func TestCheckRoleOwnership_OwnedExistingRoleAllowed(t *testing.T) {
 	}
 	existing := &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "owned-role",
+			Name:            "owned-role",
+			OwnerReferences: []metav1.OwnerReference{roleDefinitionTestOwnerRef(roleDefinition)},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(roleDefinition, existing).Build()
+	r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	g.Expect(r.checkRoleOwnership(context.Background(), roleDefinition)).To(Succeed())
+}
+
+func TestCheckRoleOwnership_NonControllerOwnerReferenceRejected(t *testing.T) {
+	g := NewWithT(t)
+
+	s := runtime.NewScheme()
+	g.Expect(authorizationv1alpha1.AddToScheme(s)).To(Succeed())
+	g.Expect(rbacv1.AddToScheme(s)).To(Succeed())
+
+	roleDefinition := &authorizationv1alpha1.RoleDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "owner-rd",
+			UID:  "owner-rd-uid",
+		},
+		Spec: authorizationv1alpha1.RoleDefinitionSpec{
+			TargetRole: authorizationv1alpha1.DefinitionClusterRole,
+			TargetName: "shared-role",
+		},
+	}
+	existing := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "shared-role",
 			OwnerReferences: []metav1.OwnerReference{{
 				APIVersion: authorizationv1alpha1.GroupVersion.String(),
 				Kind:       "RoleDefinition",
@@ -169,7 +198,10 @@ func TestCheckRoleOwnership_OwnedExistingRoleAllowed(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(roleDefinition, existing).Build()
 	r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
 
-	g.Expect(r.checkRoleOwnership(context.Background(), roleDefinition)).To(Succeed())
+	err := r.checkRoleOwnership(context.Background(), roleDefinition)
+
+	g.Expect(err).To(HaveOccurred())
+	g.Expect(err.Error()).To(ContainSubstring("already exists and is not owned by RoleDefinition"))
 }
 
 var _ = Describe("RoleDefinition Helpers", func() {
@@ -946,6 +978,58 @@ func TestHandleDeletion(t *testing.T) {
 		g.Expect(updated.Finalizers).NotTo(ContainElement(authorizationv1alpha1.RoleDefinitionFinalizer))
 	})
 
+	t.Run("skips non-controller owned ClusterRole deletion and removes finalizer", func(t *testing.T) {
+		g := NewWithT(t)
+
+		rd := &authorizationv1alpha1.RoleDefinition{
+			TypeMeta: metav1.TypeMeta{
+				APIVersion: authorizationv1alpha1.GroupVersion.String(),
+				Kind:       "RoleDefinition",
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "skip-non-controller-rd",
+				UID:        "skip-non-controller-rd-uid",
+				Finalizers: []string{authorizationv1alpha1.RoleDefinitionFinalizer},
+			},
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				TargetName: "non-controller-cluster-role",
+				TargetRole: authorizationv1alpha1.DefinitionClusterRole,
+			},
+		}
+
+		cr := &rbacv1.ClusterRole{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "non-controller-cluster-role",
+				OwnerReferences: []metav1.OwnerReference{{
+					APIVersion: authorizationv1alpha1.GroupVersion.String(),
+					Kind:       "RoleDefinition",
+					Name:       rd.Name,
+					UID:        rd.UID,
+				}},
+			},
+		}
+
+		c := fake.NewClientBuilder().WithScheme(s).
+			WithObjects(rd, cr).
+			WithStatusSubresource(rd).
+			Build()
+		r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+		role, err := r.buildRoleObject(rd)
+		g.Expect(err).NotTo(HaveOccurred())
+
+		result, err := r.handleDeletion(ctx, rd, role)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(result.RequeueAfter).To(BeZero())
+
+		var stillThere rbacv1.ClusterRole
+		g.Expect(c.Get(ctx, client.ObjectKey{Name: "non-controller-cluster-role"}, &stillThere)).To(Succeed())
+
+		var updated authorizationv1alpha1.RoleDefinition
+		g.Expect(c.Get(ctx, client.ObjectKey{Name: rd.Name}, &updated)).To(Succeed())
+		g.Expect(updated.Finalizers).NotTo(ContainElement(authorizationv1alpha1.RoleDefinitionFinalizer))
+	})
+
 	t.Run("skips differently owned Role deletion and removes finalizer", func(t *testing.T) {
 		g := NewWithT(t)
 
@@ -1442,13 +1526,8 @@ func TestEnsureRoleClusterRoleClearsStaleRulesWhenDesiredRulesEmpty(t *testing.T
 	}
 	existing := &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "clear-rd-cluster-role",
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: authorizationv1alpha1.GroupVersion.String(),
-				Kind:       "RoleDefinition",
-				Name:       rd.Name,
-				UID:        rd.UID,
-			}},
+			Name:            "clear-rd-cluster-role",
+			OwnerReferences: []metav1.OwnerReference{roleDefinitionTestOwnerRef(rd)},
 		},
 		Rules: []rbacv1.PolicyRule{
 			{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"get"}},
@@ -1486,14 +1565,9 @@ func TestEnsureRoleNamespacedRoleClearsStaleRulesWhenDesiredRulesEmpty(t *testin
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "clear-rd-ns"}}
 	existing := &rbacv1.Role{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "clear-rd-role",
-			Namespace: "clear-rd-ns",
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: authorizationv1alpha1.GroupVersion.String(),
-				Kind:       "RoleDefinition",
-				Name:       rd.Name,
-				UID:        rd.UID,
-			}},
+			Name:            "clear-rd-role",
+			Namespace:       "clear-rd-ns",
+			OwnerReferences: []metav1.OwnerReference{roleDefinitionTestOwnerRef(rd)},
 		},
 		Rules: []rbacv1.PolicyRule{
 			{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"get"}},
@@ -1548,6 +1622,7 @@ func TestRoleDefinitionCleanupSkipsUnownedTargets(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(rd, aggregating, namespaced).Build()
 	r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
 
+	g.Expect(r.cleanupInvalidAggregateFromTarget(ctx, rd)).To(Succeed())
 	g.Expect(r.clearAggregationRuleIfSet(ctx, rd)).To(Succeed())
 	g.Expect(r.clearRulesOnAggregationTransition(ctx, rd)).To(Succeed())
 	g.Expect(r.clearClusterRoleRulesIfEmpty(ctx, rd, nil)).To(Succeed())
@@ -1562,6 +1637,74 @@ func TestRoleDefinitionCleanupSkipsUnownedTargets(t *testing.T) {
 
 	var role rbacv1.Role
 	g.Expect(c.Get(ctx, client.ObjectKey{Namespace: "cleanup-ns", Name: "cleanup-cluster-role"}, &role)).To(Succeed())
+	g.Expect(role.Rules).NotTo(BeEmpty())
+}
+
+func TestRoleDefinitionCleanupSkipsNonControllerOwnedTargets(t *testing.T) {
+	ctx := context.Background()
+	g := NewWithT(t)
+
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+
+	rd := &authorizationv1alpha1.RoleDefinition{
+		TypeMeta:   metav1.TypeMeta{APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: "RoleDefinition"},
+		ObjectMeta: metav1.ObjectMeta{Name: "cleanup-non-controller-rd", UID: "cleanup-non-controller-rd-uid"},
+		Spec: authorizationv1alpha1.RoleDefinitionSpec{
+			TargetRole:      authorizationv1alpha1.DefinitionClusterRole,
+			TargetName:      "cleanup-non-controller-cluster-role",
+			TargetNamespace: "cleanup-non-controller-ns",
+		},
+	}
+
+	ownerRef := metav1.OwnerReference{
+		APIVersion: authorizationv1alpha1.GroupVersion.String(),
+		Kind:       "RoleDefinition",
+		Name:       rd.Name,
+		UID:        rd.UID,
+	}
+	aggregating := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "cleanup-non-controller-cluster-role",
+			OwnerReferences: []metav1.OwnerReference{ownerRef},
+		},
+		AggregationRule: &rbacv1.AggregationRule{
+			ClusterRoleSelectors: []metav1.LabelSelector{{MatchLabels: map[string]string{"team": "alpha"}}},
+		},
+		Rules: []rbacv1.PolicyRule{
+			{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"get"}},
+		},
+	}
+	namespaced := &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "cleanup-non-controller-cluster-role",
+			Namespace:       "cleanup-non-controller-ns",
+			OwnerReferences: []metav1.OwnerReference{ownerRef},
+		},
+		Rules: []rbacv1.PolicyRule{
+			{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"get"}},
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(rd, aggregating, namespaced).Build()
+	r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	g.Expect(r.cleanupInvalidAggregateFromTarget(ctx, rd)).To(Succeed())
+	g.Expect(r.clearAggregationRuleIfSet(ctx, rd)).To(Succeed())
+	g.Expect(r.clearRulesOnAggregationTransition(ctx, rd)).To(Succeed())
+	g.Expect(r.clearClusterRoleRulesIfEmpty(ctx, rd, nil)).To(Succeed())
+
+	var cr rbacv1.ClusterRole
+	g.Expect(c.Get(ctx, client.ObjectKey{Name: "cleanup-non-controller-cluster-role"}, &cr)).To(Succeed())
+	g.Expect(cr.AggregationRule).NotTo(BeNil())
+	g.Expect(cr.Rules).NotTo(BeEmpty())
+
+	rd.Spec.TargetRole = authorizationv1alpha1.DefinitionNamespacedRole
+	g.Expect(r.clearRoleRulesIfEmpty(ctx, rd, nil)).To(Succeed())
+
+	var role rbacv1.Role
+	g.Expect(c.Get(ctx, client.ObjectKey{Namespace: "cleanup-non-controller-ns", Name: "cleanup-non-controller-cluster-role"}, &role)).To(Succeed())
 	g.Expect(role.Rules).NotTo(BeEmpty())
 }
 
@@ -1583,13 +1726,8 @@ func TestCleanupInvalidAggregateFromTargetDeletesOnlyOwnedClusterRole(t *testing
 	}
 	owned := &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "invalid-aggregate-role",
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: authorizationv1alpha1.GroupVersion.String(),
-				Kind:       "RoleDefinition",
-				Name:       rd.Name,
-				UID:        rd.UID,
-			}},
+			Name:            "invalid-aggregate-role",
+			OwnerReferences: []metav1.OwnerReference{roleDefinitionTestOwnerRef(rd)},
 		},
 	}
 
@@ -1831,12 +1969,7 @@ func TestEnsureRole_TransitionFromRulesToAggregateFrom(t *testing.T) {
 			Labels: map[string]string{
 				"app.kubernetes.io/managed-by": "auth-operator",
 			},
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion: authorizationv1alpha1.GroupVersion.String(),
-				Kind:       "RoleDefinition",
-				Name:       rd.Name,
-				UID:        rd.UID,
-			}},
+			OwnerReferences: []metav1.OwnerReference{roleDefinitionTestOwnerRef(rd)},
 		},
 		Rules: []rbacv1.PolicyRule{
 			{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods"}},
