@@ -296,14 +296,7 @@ func TestBuildFinalRules(t *testing.T) {
 		recorder: recorder,
 	}
 
-	t.Run("should include /metrics non-resource URL for ClusterRole", func(t *testing.T) {
-		rd := &authorizationv1alpha1.RoleDefinition{
-			Spec: authorizationv1alpha1.RoleDefinitionSpec{
-				TargetRole:      authorizationv1alpha1.DefinitionClusterRole,
-				RestrictedVerbs: []string{"delete"},
-			},
-		}
-
+	t.Run("should not include /metrics non-resource URL for ClusterRole", func(t *testing.T) {
 		rulesByAPIGroupAndVerbs := map[string]*rbacv1.PolicyRule{
 			"v1|[get list]": {
 				APIGroups: []string{""},
@@ -312,31 +305,20 @@ func TestBuildFinalRules(t *testing.T) {
 			},
 		}
 
-		rules := r.buildFinalRules(rd, rulesByAPIGroupAndVerbs)
+		rules := r.buildFinalRules(rulesByAPIGroupAndVerbs)
 
-		// Should have 2 rules: the resource rule + non-resource URL rule
-		if len(rules) != 2 {
-			t.Fatalf("expected 2 rules, got %d", len(rules))
+		if len(rules) != 1 {
+			t.Fatalf("expected 1 resource rule, got %d", len(rules))
 		}
 
-		// Last rule should be non-resource URL
-		lastRule := rules[len(rules)-1]
-		if len(lastRule.NonResourceURLs) == 0 {
-			t.Error("expected non-resource URL rule at end")
-		}
-		if lastRule.NonResourceURLs[0] != "/metrics" {
-			t.Errorf("expected /metrics, got %s", lastRule.NonResourceURLs[0])
+		for _, rule := range rules {
+			if len(rule.NonResourceURLs) > 0 {
+				t.Errorf("expected no non-resource URL rule, got %v", rule.NonResourceURLs)
+			}
 		}
 	})
 
 	t.Run("should NOT include /metrics when get is restricted", func(t *testing.T) {
-		rd := &authorizationv1alpha1.RoleDefinition{
-			Spec: authorizationv1alpha1.RoleDefinitionSpec{
-				TargetRole:      authorizationv1alpha1.DefinitionClusterRole,
-				RestrictedVerbs: []string{"get"},
-			},
-		}
-
 		rulesByAPIGroupAndVerbs := map[string]*rbacv1.PolicyRule{
 			"v1|[list]": {
 				APIGroups: []string{""},
@@ -345,7 +327,7 @@ func TestBuildFinalRules(t *testing.T) {
 			},
 		}
 
-		rules := r.buildFinalRules(rd, rulesByAPIGroupAndVerbs)
+		rules := r.buildFinalRules(rulesByAPIGroupAndVerbs)
 
 		for _, rule := range rules {
 			if len(rule.NonResourceURLs) > 0 {
@@ -355,14 +337,7 @@ func TestBuildFinalRules(t *testing.T) {
 	})
 
 	t.Run("should NOT include /metrics when wildcard is restricted", func(t *testing.T) {
-		rd := &authorizationv1alpha1.RoleDefinition{
-			Spec: authorizationv1alpha1.RoleDefinitionSpec{
-				TargetRole:      authorizationv1alpha1.DefinitionClusterRole,
-				RestrictedVerbs: []string{"*"},
-			},
-		}
-
-		rules := r.buildFinalRules(rd, map[string]*rbacv1.PolicyRule{})
+		rules := r.buildFinalRules(map[string]*rbacv1.PolicyRule{})
 
 		if len(rules) != 0 {
 			t.Fatalf("expected no rules when wildcard restricts get, got %d", len(rules))
@@ -370,13 +345,6 @@ func TestBuildFinalRules(t *testing.T) {
 	})
 
 	t.Run("should NOT include /metrics for namespaced Role", func(t *testing.T) {
-		rd := &authorizationv1alpha1.RoleDefinition{
-			Spec: authorizationv1alpha1.RoleDefinitionSpec{
-				TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
-				RestrictedVerbs: []string{"delete"},
-			},
-		}
-
 		rulesByAPIGroupAndVerbs := map[string]*rbacv1.PolicyRule{
 			"v1|[get list]": {
 				APIGroups: []string{""},
@@ -385,7 +353,7 @@ func TestBuildFinalRules(t *testing.T) {
 			},
 		}
 
-		rules := r.buildFinalRules(rd, rulesByAPIGroupAndVerbs)
+		rules := r.buildFinalRules(rulesByAPIGroupAndVerbs)
 
 		for _, rule := range rules {
 			if len(rule.NonResourceURLs) > 0 {
@@ -395,12 +363,6 @@ func TestBuildFinalRules(t *testing.T) {
 	})
 
 	t.Run("should sort resources within rules deterministically", func(t *testing.T) {
-		rd := &authorizationv1alpha1.RoleDefinition{
-			Spec: authorizationv1alpha1.RoleDefinitionSpec{
-				TargetRole: authorizationv1alpha1.DefinitionNamespacedRole,
-			},
-		}
-
 		rulesByAPIGroupAndVerbs := map[string]*rbacv1.PolicyRule{
 			"v1|[get list]": {
 				APIGroups: []string{""},
@@ -409,7 +371,7 @@ func TestBuildFinalRules(t *testing.T) {
 			},
 		}
 
-		rules := r.buildFinalRules(rd, rulesByAPIGroupAndVerbs)
+		rules := r.buildFinalRules(rulesByAPIGroupAndVerbs)
 
 		if len(rules) != 1 {
 			t.Fatalf("expected 1 rule, got %d", len(rules))
@@ -430,21 +392,10 @@ func TestBuildFinalRules(t *testing.T) {
 	})
 
 	t.Run("should handle empty rules map", func(t *testing.T) {
-		rd := &authorizationv1alpha1.RoleDefinition{
-			Spec: authorizationv1alpha1.RoleDefinitionSpec{
-				TargetRole:      authorizationv1alpha1.DefinitionClusterRole,
-				RestrictedVerbs: []string{"delete"},
-			},
-		}
+		rules := r.buildFinalRules(map[string]*rbacv1.PolicyRule{})
 
-		rules := r.buildFinalRules(rd, map[string]*rbacv1.PolicyRule{})
-
-		// Should only have the /metrics rule
-		if len(rules) != 1 {
-			t.Fatalf("expected 1 rule (/metrics), got %d", len(rules))
-		}
-		if len(rules[0].NonResourceURLs) == 0 || rules[0].NonResourceURLs[0] != "/metrics" {
-			t.Error("expected /metrics non-resource URL rule")
+		if len(rules) != 0 {
+			t.Fatalf("expected no rules for empty discovery input, got %d", len(rules))
 		}
 	})
 }
