@@ -140,6 +140,7 @@ func (r *BindDefinitionReconciler) markStalled(
 	conditions.MarkStalled(bindDefinition, bindDefinition.Generation,
 		authorizationv1alpha1.StalledReasonError, authorizationv1alpha1.StalledMessageError, "check operator logs for details")
 	bindDefinition.Status.ObservedGeneration = bindDefinition.Generation
+	bindDefinition.Status.BindReconciled = false
 	if updateErr := ssa.ApplyBindDefinitionStatus(ctx, r.client, bindDefinition); updateErr != nil {
 		logger.Error(updateErr, "failed to apply Stalled status via SSA", "bindDefinitionName", bindDefinition.Name)
 	}
