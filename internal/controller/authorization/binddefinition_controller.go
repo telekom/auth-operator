@@ -308,9 +308,12 @@ func bindDefinitionMatchesNamespace(bd *authorizationv1alpha1.BindDefinition, ns
 	}
 
 	for _, rb := range bd.Spec.RoleBindings {
-		// Explicit namespace match.
-		if rb.Namespace == ns.Name {
-			return true
+		// Explicit namespace takes precedence over selectors for the same binding.
+		if rb.Namespace != "" {
+			if rb.Namespace == ns.Name {
+				return true
+			}
+			continue
 		}
 		// Any selector can be affected by label changes on this namespace.
 		if len(rb.NamespaceSelector) > 0 {

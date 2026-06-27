@@ -3209,6 +3209,28 @@ func TestBindDefinitionMatchesNamespace(t *testing.T) {
 		})).To(BeFalse())
 	})
 
+	t.Run("explicit namespace ignores selector for other namespaces", func(t *testing.T) {
+		g := NewWithT(t)
+		bd := &authorizationv1alpha1.BindDefinition{
+			Spec: authorizationv1alpha1.BindDefinitionSpec{
+				RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+					{
+						Namespace: "target-ns",
+						NamespaceSelector: []metav1.LabelSelector{
+							{MatchLabels: map[string]string{"env": "prod"}},
+						},
+					},
+				},
+			},
+		}
+		g.Expect(bindDefinitionMatchesNamespace(bd, &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: "target-ns", Labels: map[string]string{"env": "dev"}},
+		})).To(BeTrue())
+		g.Expect(bindDefinitionMatchesNamespace(bd, &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: "other-ns", Labels: map[string]string{"env": "prod"}},
+		})).To(BeFalse())
+	})
+
 	t.Run("label selector routes regardless of current labels", func(t *testing.T) {
 		g := NewWithT(t)
 		bd := &authorizationv1alpha1.BindDefinition{
