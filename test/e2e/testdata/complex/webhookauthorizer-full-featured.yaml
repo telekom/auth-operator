@@ -3,7 +3,6 @@
 # - NonResourceRules for URLs
 # - AllowedPrincipals with users and groups
 # - DeniedPrincipals (deny takes precedence)
-# - NamespaceSelector
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: WebhookAuthorizer
 metadata:
@@ -82,13 +81,3 @@ spec:
         - temporary-access
     - user: restricted-sa
       namespace: kube-system
-  # Only allow in matching namespaces
-  namespaceSelector:
-    matchLabels:
-      authorization.t-caas.telekom.com/managed: "true"
-    matchExpressions:
-      - key: environment
-        operator: In
-        values:
-          - development
-          - staging

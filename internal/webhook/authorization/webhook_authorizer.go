@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	"github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/helpers"
 	pkgmetrics "github.com/telekom/auth-operator/pkg/metrics"
 	"github.com/telekom/auth-operator/pkg/tracing"
@@ -506,7 +507,31 @@ func (wa *Authorizer) listAllAuthorizers(ctx context.Context) ([]authorizationv1
 	if err := wa.Client.List(listCtx, &allAuth); err != nil {
 		return nil, fmt.Errorf("list WebhookAuthorizers: %w", err)
 	}
-	return allAuth.Items, nil
+	items := make([]authorizationv1alpha1.WebhookAuthorizer, 0, len(allAuth.Items))
+	for _, item := range allAuth.Items {
+		if !authorizerReadyForEvaluation(item) {
+			wa.Log.V(2).Info("skipping unconfigured WebhookAuthorizer",
+				"authorizer", item.Name,
+				"generation", item.Generation,
+				"observedGeneration", item.Status.ObservedGeneration)
+			continue
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+func authorizerReadyForEvaluation(item authorizationv1alpha1.WebhookAuthorizer) bool {
+	if item.Status.ObservedGeneration == 0 && len(item.Status.Conditions) == 0 {
+		return true
+	}
+	if item.Generation > 0 && item.Status.ObservedGeneration > 0 && item.Status.ObservedGeneration != item.Generation {
+		return false
+	}
+	if len(item.Status.Conditions) > 0 && !conditions.IsReady(&item) {
+		return false
+	}
+	return item.Status.AuthorizerConfigured
 }
 
 type namespaceLabelCacheEntry struct {
