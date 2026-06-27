@@ -404,6 +404,7 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		if apierrors.IsNotFound(err) {
 			logger.V(1).Info("BindDefinition not found (deleted), skipping reconcile",
 				"bindDefinition", req.Name)
+			deleteBindDefinitionMetricSeries(req.Name)
 			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultSkipped).Inc()
 			return ctrl.Result{}, nil
 		}
@@ -438,12 +439,7 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			logger.V(1).Info("Delete reconcile completed successfully",
 				"bindDefinition", bindDefinition.Name)
 			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultFinalized).Inc()
-			// Clean up per-BD gauge series so they don't linger with stale values.
-			metrics.DeleteManagedResourceSeries(metrics.ControllerBindDefinition, bindDefinition.Name)
-			metrics.RoleRefsMissing.DeleteLabelValues(bindDefinition.Name)
-			metrics.NamespacesActive.DeleteLabelValues(bindDefinition.Name)
-			metrics.ExternalSAsReferenced.DeleteLabelValues(bindDefinition.Name)
-			metrics.ServiceAccountSkippedPreExisting.DeleteLabelValues(bindDefinition.Name)
+			deleteBindDefinitionMetricSeries(bindDefinition.Name)
 		}
 		return result, err
 	}
@@ -524,6 +520,7 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				metrics.ReconcileErrors.WithLabelValues(metrics.ControllerBindDefinition, metrics.ErrorTypeAPI).Inc()
 				return ctrl.Result{}, fmt.Errorf("prune BindDefinition %s bindings after missing role refs: %w", bindDefinition.Name, pruneErr)
 			}
+			metrics.DeleteManagedResourceSeries(metrics.ControllerBindDefinition, bindDefinition.Name)
 			r.markStalled(ctx, bindDefinition, err)
 			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultDegraded).Inc()
 			return ctrl.Result{RequeueAfter: RoleRefRequeueInterval}, nil
@@ -1417,11 +1414,7 @@ func (r *BindDefinitionReconciler) reconcileDelete(
 	logger.V(1).Info("BindDefinition marked for deletion - cleaning up resources",
 		"bindDefinitionName", bindDefinition.Name)
 
-	// Remove per-BD gauge metrics so they don't persist after deletion.
-	metrics.RoleRefsMissing.DeleteLabelValues(bindDefinition.Name)
-	metrics.NamespacesActive.DeleteLabelValues(bindDefinition.Name)
-	metrics.ExternalSAsReferenced.DeleteLabelValues(bindDefinition.Name)
-	metrics.ServiceAccountSkippedPreExisting.DeleteLabelValues(bindDefinition.Name)
+	deleteBindDefinitionMetricSeries(bindDefinition.Name)
 
 	conditions.MarkTrue(bindDefinition, authorizationv1alpha1.DeleteCondition, bindDefinition.Generation,
 		authorizationv1alpha1.DeleteReason, authorizationv1alpha1.DeleteMessage)
@@ -1468,6 +1461,14 @@ func (r *BindDefinitionReconciler) reconcileDelete(
 	logger.V(1).Info("reconcileDelete completed successfully", "bindDefinitionName", bindDefinition.Name)
 
 	return ctrl.Result{}, nil
+}
+
+func deleteBindDefinitionMetricSeries(name string) {
+	metrics.DeleteManagedResourceSeries(metrics.ControllerBindDefinition, name)
+	metrics.RoleRefsMissing.DeleteLabelValues(name)
+	metrics.NamespacesActive.DeleteLabelValues(name)
+	metrics.ExternalSAsReferenced.DeleteLabelValues(name)
+	metrics.ServiceAccountSkippedPreExisting.DeleteLabelValues(name)
 }
 
 // deleteSubjectServiceAccounts deletes ServiceAccounts specified in current
