@@ -186,7 +186,7 @@ func (r *RoleDefinitionReconciler) handleDeletion(
 	} else if err := r.client.Delete(ctx, role); apierrors.IsNotFound(err) {
 		logger.V(2).Info("Role disappeared before deletion - removing finalizer",
 			"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
-	} else if err := r.client.Delete(ctx, role); err != nil && !apierrors.IsNotFound(err) {
+	} else if err != nil {
 		logger.Error(err, "Failed to delete role",
 			"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
 		return r.markDeletionFailed(ctx, roleDefinition, err)
