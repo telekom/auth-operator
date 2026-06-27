@@ -349,13 +349,14 @@ func validateRoleTargetFields(
 	targetNamespace string,
 ) error {
 	var allErrs field.ErrorList
-	if targetRole == "" {
+	switch {
+	case targetRole == "":
 		allErrs = append(allErrs, field.Required(field.NewPath("spec", "targetRole"), "targetRole is required"))
-	} else if targetRole != DefinitionClusterRole && targetRole != DefinitionNamespacedRole {
+	case targetRole != DefinitionClusterRole && targetRole != DefinitionNamespacedRole:
 		allErrs = append(allErrs, field.NotSupported(field.NewPath("spec", "targetRole"), targetRole, []string{DefinitionClusterRole, DefinitionNamespacedRole}))
-	} else if targetRole == DefinitionNamespacedRole && targetNamespace == "" {
+	case targetRole == DefinitionNamespacedRole && targetNamespace == "":
 		allErrs = append(allErrs, field.Required(field.NewPath("spec", "targetNamespace"), "targetNamespace is required when targetRole is 'Role'"))
-	} else if targetRole == DefinitionClusterRole && targetNamespace != "" {
+	case targetRole == DefinitionClusterRole && targetNamespace != "":
 		allErrs = append(allErrs, field.Forbidden(field.NewPath("spec", "targetNamespace"), "targetNamespace must be empty when targetRole is 'ClusterRole'"))
 	}
 	if targetName == "" {
