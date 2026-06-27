@@ -113,6 +113,11 @@ func (r *WebhookAuthorizerReconciler) Reconcile(ctx context.Context, req ctrl.Re
 			logger.V(1).Info("WebhookAuthorizer not found (deleted), cleaning up metrics",
 				"webhookAuthorizer", req.Name)
 			metrics.DeleteAuthorizerSeries(req.Name)
+			if metricErr := r.refreshAuthorizerActiveRulesMetric(ctx); metricErr != nil {
+				logger.Error(metricErr, "failed to refresh active rules metric after WebhookAuthorizer deletion",
+					"webhookAuthorizer", req.Name)
+				metrics.ReconcileErrors.WithLabelValues(metrics.ControllerWebhookAuthorizer, metrics.ErrorTypeAPI).Inc()
+			}
 			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerWebhookAuthorizer, metrics.ResultSkipped).Inc()
 			return ctrl.Result{}, nil
 		}
@@ -122,6 +127,13 @@ func (r *WebhookAuthorizerReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerWebhookAuthorizer, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, fmt.Errorf("fetch WebhookAuthorizer %s: %w", req.Name, err)
 	}
+	defer func() {
+		if err := r.refreshAuthorizerActiveRulesMetric(ctx); err != nil {
+			logger.Error(err, "failed to refresh active rules metric",
+				"webhookAuthorizer", wa.Name)
+			metrics.ReconcileErrors.WithLabelValues(metrics.ControllerWebhookAuthorizer, metrics.ErrorTypeAPI).Inc()
+		}
+	}()
 
 	// Step 2: Validate the same semantic contract enforced by admission so
 	// legacy or webhook-bypassed objects cannot be reported as configured.
@@ -244,6 +256,36 @@ func (r *WebhookAuthorizerReconciler) validateNamespaceSelector(
 // convertLabelSelector converts a metav1.LabelSelector to a labels.Selector.
 func convertLabelSelector(ls *metav1.LabelSelector) (labels.Selector, error) {
 	return metav1.LabelSelectorAsSelector(ls)
+}
+
+func (r *WebhookAuthorizerReconciler) refreshAuthorizerActiveRulesMetric(ctx context.Context) error {
+	list := &authorizationv1alpha1.WebhookAuthorizerList{}
+	if err := r.client.List(ctx, list); err != nil {
+		return fmt.Errorf("list WebhookAuthorizers for active rules metric: %w", err)
+	}
+
+	total := 0
+	for i := range list.Items {
+		if !webhookAuthorizerReadyForActiveRulesMetric(list.Items[i]) {
+			continue
+		}
+		total += len(list.Items[i].Spec.ResourceRules) + len(list.Items[i].Spec.NonResourceRules)
+	}
+	metrics.AuthorizerActiveRules.Set(float64(total))
+	return nil
+}
+
+func webhookAuthorizerReadyForActiveRulesMetric(item authorizationv1alpha1.WebhookAuthorizer) bool {
+	if item.Status.ObservedGeneration == 0 && len(item.Status.Conditions) == 0 {
+		return true
+	}
+	if item.Generation > 0 && item.Status.ObservedGeneration > 0 && item.Status.ObservedGeneration != item.Generation {
+		return false
+	}
+	if len(item.Status.Conditions) > 0 && !conditions.IsReady(&item) {
+		return false
+	}
+	return item.Status.AuthorizerConfigured
 }
 
 // markStalled marks the WebhookAuthorizer as stalled with the given error.
