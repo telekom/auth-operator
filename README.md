@@ -263,7 +263,7 @@ authorizers in its chain.
 Architecture diagrams are maintained in [docs/drawio/](docs/drawio/). To update:
 
 ```bash
-# Edit docs/drawio/auth-operator.drawio
+# Edit docs/drawio/authn-authz-operator.drawio
 make export-images  # Regenerates PNGs
 ```
 
