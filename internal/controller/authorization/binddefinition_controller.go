@@ -516,6 +516,14 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			logger.Info("Reconciliation blocked by missing-role-policy=error",
 				"bindDefinition", bindDefinition.Name,
 				"missingCount", missingRoleRefCount)
+			if pruneErr := r.pruneStaleBindingResources(ctx, bindDefinition, map[string]struct{}{}, map[string]struct{}{}, r.client); pruneErr != nil {
+				logger.Error(pruneErr, "Failed to prune BindDefinition bindings after missing-role-policy=error",
+					"bindDefinition", bindDefinition.Name)
+				r.markStalled(ctx, bindDefinition, pruneErr)
+				metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultError).Inc()
+				metrics.ReconcileErrors.WithLabelValues(metrics.ControllerBindDefinition, metrics.ErrorTypeAPI).Inc()
+				return ctrl.Result{}, fmt.Errorf("prune BindDefinition %s bindings after missing role refs: %w", bindDefinition.Name, pruneErr)
+			}
 			r.markStalled(ctx, bindDefinition, err)
 			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultDegraded).Inc()
 			return ctrl.Result{RequeueAfter: RoleRefRequeueInterval}, nil
