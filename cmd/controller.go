@@ -216,6 +216,7 @@ and their status is kept up to date.`,
 				mgr.GetClient(),
 				mgr.GetScheme(),
 				mgr.GetEventRecorder("WebhookAuthorizerReconciler"),
+				reconcilerOpts...,
 			)
 			if err := webhookAuthorizerController.SetupWithManager(mgr, webhookAuthorizerConcurrency); err != nil {
 				return fmt.Errorf("unable to setup controller WebhookAuthorizer with manager: %w", err)

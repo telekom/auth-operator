@@ -118,6 +118,7 @@ func (r *RBACPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			trace.WithAttributes(
 				tracing.AttrController.String("RBACPolicy"),
 				tracing.AttrResource.String(req.Name),
+				tracing.AttrNamespace.String(req.Namespace),
 			))
 		defer func() {
 			if retErr != nil {

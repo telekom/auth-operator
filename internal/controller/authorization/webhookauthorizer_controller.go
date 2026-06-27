@@ -28,6 +28,10 @@ import (
 	"github.com/telekom/auth-operator/api/authorization/v1alpha1/applyconfiguration/ssa"
 	"github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/metrics"
+	"github.com/telekom/auth-operator/pkg/tracing"
+
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // NamespaceSelectorValidationError indicates that a WebhookAuthorizer's
@@ -59,19 +63,28 @@ type WebhookAuthorizerReconciler struct {
 	client   client.Client
 	scheme   *runtime.Scheme
 	recorder events.EventRecorder
+	tracer   trace.Tracer
 }
+
+// setTracer implements tracerSetter.
+func (r *WebhookAuthorizerReconciler) setTracer(t trace.Tracer) { r.tracer = t }
 
 // NewWebhookAuthorizerReconciler creates a new WebhookAuthorizer reconciler.
 func NewWebhookAuthorizerReconciler(
 	c client.Client,
 	scheme *runtime.Scheme,
 	recorder events.EventRecorder,
+	opts ...ReconcilerOption,
 ) *WebhookAuthorizerReconciler {
-	return &WebhookAuthorizerReconciler{
+	r := &WebhookAuthorizerReconciler{
 		client:   c,
 		scheme:   scheme,
 		recorder: recorder,
 	}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -91,9 +104,26 @@ func (r *WebhookAuthorizerReconciler) SetupWithManager(mgr ctrl.Manager, concurr
 //  4. Validate NamespaceSelector can be parsed (stall on error)
 //  5. Set status.authorizerConfigured = true and mark Ready
 //  6. Apply status via SSA
-func (r *WebhookAuthorizerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *WebhookAuthorizerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, retErr error) {
 	startTime := time.Now()
 	logger := log.FromContext(ctx)
+
+	if r.tracer != nil {
+		var span trace.Span
+		ctx, span = r.tracer.Start(ctx, "reconcile.WebhookAuthorizer",
+			trace.WithAttributes(
+				tracing.AttrController.String("WebhookAuthorizer"),
+				tracing.AttrResource.String(req.Name),
+				tracing.AttrNamespace.String(req.Namespace),
+			))
+		defer func() {
+			if retErr != nil {
+				span.RecordError(retErr)
+				span.SetStatus(codes.Error, retErr.Error())
+			}
+			span.End()
+		}()
+	}
 
 	logger.V(1).Info("=== Reconcile START ===",
 		"webhookAuthorizer", req.Name)

@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	"go.opentelemetry.io/otel/trace/noop"
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -245,6 +246,32 @@ func TestReconcile_ActiveRulesGaugeRefreshErrorIsBestEffort(t *testing.T) {
 	g.Expect(updated.Status.ObservedGeneration).To(gomega.Equal(int64(1)))
 	g.Expect(updated.Status.AuthorizerConfigured).To(gomega.BeTrue())
 	g.Expect(conditions.IsReady(&updated)).To(gomega.BeTrue())
+}
+
+func TestReconcile_WithTracer(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	wa := &authorizationv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "traced-authorizer",
+			Generation: 1,
+		},
+		Spec: validWebhookAuthorizerSpec(),
+	}
+
+	scheme := newTestScheme()
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(wa).
+		WithStatusSubresource(&authorizationv1alpha1.WebhookAuthorizer{}).
+		Build()
+	recorder := events.NewFakeRecorder(10)
+	tracer := noop.NewTracerProvider().Tracer("test")
+	r := NewWebhookAuthorizerReconciler(c, scheme, recorder, WithTracer(tracer))
+
+	result, err := r.Reconcile(ctxWithLogger(), reconcileRequest("traced-authorizer"))
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	g.Expect(result.RequeueAfter).To(gomega.Equal(DefaultRequeueInterval))
 }
 
 func TestReconcile_WithMatchLabels_Ready(t *testing.T) {
@@ -589,6 +616,17 @@ func TestNewWebhookAuthorizerReconciler(t *testing.T) {
 	g.Expect(r.recorder).To(gomega.Equal(recorder))
 }
 
+func TestNewWebhookAuthorizerReconciler_WithTracer(t *testing.T) {
+	g := gomega.NewWithT(t)
+	scheme := newTestScheme()
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	recorder := events.NewFakeRecorder(10)
+	tracer := noop.NewTracerProvider().Tracer("test")
+
+	r := NewWebhookAuthorizerReconciler(c, scheme, recorder, WithTracer(tracer))
+	g.Expect(r.tracer).NotTo(gomega.BeNil())
+}
+
 func TestValidateNamespaceSelector_EmptySelector(t *testing.T) {
 	g := gomega.NewWithT(t)
 
@@ -696,7 +734,8 @@ func TestReconcile_TransientNamespaceListError_ReturnsError(t *testing.T) {
 		}).
 		Build()
 	recorder := events.NewFakeRecorder(10)
-	r := NewWebhookAuthorizerReconciler(c, scheme, recorder)
+	tracer := noop.NewTracerProvider().Tracer("test")
+	r := NewWebhookAuthorizerReconciler(c, scheme, recorder, WithTracer(tracer))
 
 	// Reconcile should return an error (transient, retryable)
 	_, err := r.Reconcile(ctxWithLogger(), reconcileRequest("transient-authorizer"))
