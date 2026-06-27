@@ -14,6 +14,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	utilvalidation "k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -278,6 +279,16 @@ func (v *RoleDefinitionValidator) ValidateDelete(ctx context.Context, obj *RoleD
 
 // validateRoleDefinitionSpec validates the RoleDefinition spec fields.
 func validateRoleDefinitionSpec(obj *RoleDefinition) error {
+	if err := validateRoleTargetFields(
+		schema.GroupKind{Group: GroupVersion.Group, Kind: "RoleDefinition"},
+		obj.Name,
+		obj.Spec.TargetRole,
+		obj.Spec.TargetName,
+		obj.Spec.TargetNamespace,
+	); err != nil {
+		return err
+	}
+
 	// breakglassAllowed is only meaningful for ClusterRoles — Roles are
 	// namespace-scoped and not eligible for breakglass escalation.
 	if obj.Spec.BreakglassAllowed && obj.Spec.TargetRole == DefinitionNamespacedRole {
@@ -337,6 +348,33 @@ func validateRoleDefinitionSpec(obj *RoleDefinition) error {
 		}
 	}
 
+	return nil
+}
+
+func validateRoleTargetFields(
+	kind schema.GroupKind,
+	name string,
+	targetRole string,
+	targetName string,
+	targetNamespace string,
+) error {
+	var allErrs field.ErrorList
+	if targetRole == "" {
+		allErrs = append(allErrs, field.Required(field.NewPath("spec", "targetRole"), "targetRole is required"))
+	} else if targetRole != DefinitionClusterRole && targetRole != DefinitionNamespacedRole {
+		allErrs = append(allErrs, field.NotSupported(field.NewPath("spec", "targetRole"), targetRole, []string{DefinitionClusterRole, DefinitionNamespacedRole}))
+	}
+	if targetName == "" {
+		allErrs = append(allErrs, field.Required(field.NewPath("spec", "targetName"), "targetName is required"))
+	}
+	if targetNamespace != "" {
+		for _, msg := range utilvalidation.IsDNS1123Label(targetNamespace) {
+			allErrs = append(allErrs, field.Invalid(field.NewPath("spec", "targetNamespace"), targetNamespace, msg))
+		}
+	}
+	if len(allErrs) > 0 {
+		return apierrors.NewInvalid(kind, name, allErrs)
+	}
 	return nil
 }
 

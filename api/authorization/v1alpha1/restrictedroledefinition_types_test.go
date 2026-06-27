@@ -5,6 +5,8 @@
 package v1alpha1
 
 import (
+	"context"
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -145,6 +147,56 @@ func TestRestrictedRoleDefinitionClusterRoleSpec(t *testing.T) {
 	}
 	if rrd.Spec.TargetNamespace != "" {
 		t.Errorf("expected empty targetNamespace, got %q", rrd.Spec.TargetNamespace)
+	}
+}
+
+func TestValidateRestrictedRoleDefinitionTargetFields(t *testing.T) {
+	tests := []struct {
+		name    string
+		rrd     *RestrictedRoleDefinition
+		wantErr string
+	}{
+		{
+			name: "reject missing target fields",
+			rrd: &RestrictedRoleDefinition{
+				Spec: RestrictedRoleDefinitionSpec{},
+			},
+			wantErr: "targetRole is required",
+		},
+		{
+			name: "reject invalid targetRole",
+			rrd: &RestrictedRoleDefinition{
+				Spec: RestrictedRoleDefinitionSpec{
+					TargetRole: "InvalidRole",
+					TargetName: "tenant-role",
+				},
+			},
+			wantErr: "supported values: \"ClusterRole\", \"Role\"",
+		},
+		{
+			name: "reject invalid targetNamespace",
+			rrd: &RestrictedRoleDefinition{
+				Spec: RestrictedRoleDefinitionSpec{
+					TargetRole:      DefinitionNamespacedRole,
+					TargetName:      "tenant-role",
+					TargetNamespace: "Bad/Name",
+				},
+			},
+			wantErr: "spec.targetNamespace",
+		},
+	}
+
+	validator := &RestrictedRoleDefinitionValidator{}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validator.validateRestrictedRoleDefinitionSpec(context.Background(), tt.rrd)
+			if err == nil {
+				t.Fatalf("expected error containing %q", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("expected error containing %q, got %q", tt.wantErr, err.Error())
+			}
+		})
 	}
 }
 
