@@ -229,32 +229,32 @@ spec:
 			defer cleanup()
 
 			cases := []struct {
-				name           string
-				sar            authzv1.SubjectAccessReview
-				allowed        bool
-				denied         bool
-				reason         string
+				name    string
+				sar     authzv1.SubjectAccessReview
+				allowed bool
+				denied  bool
+				reason  string
 			}{
 				{
-					name:           "user allow",
-					sar:            resourceSAR("e2e-allowed-user", nil, "get", "pods", testNSPlain),
-					allowed:        true,
-					denied:         false,
-					reason:         "Access granted by WebhookAuthorizer",
+					name:    "user allow",
+					sar:     resourceSAR("e2e-allowed-user", nil, "get", "pods", testNSPlain),
+					allowed: true,
+					denied:  false,
+					reason:  "Access granted by WebhookAuthorizer",
 				},
 				{
-					name:           "explicit deny takes precedence within matching authorizer",
-					sar:            resourceSAR("e2e-denied-user", nil, "delete", "pods", testNSPlain),
-					allowed:        false,
-					denied:         true,
-					reason:         "Access denied by WebhookAuthorizer",
+					name:    "explicit deny takes precedence within matching authorizer",
+					sar:     resourceSAR("e2e-denied-user", nil, "delete", "pods", testNSPlain),
+					allowed: false,
+					denied:  true,
+					reason:  "Access denied by WebhookAuthorizer",
 				},
 				{
-					name:           "group principal allow",
-					sar:            resourceSAR("e2e-group-user", []string{"oidc:wa-e2e-group"}, "get", "configmaps", testNSPlain),
-					allowed:        true,
-					denied:         false,
-					reason:         "Access granted by WebhookAuthorizer",
+					name:    "group principal allow",
+					sar:     resourceSAR("e2e-group-user", []string{"oidc:wa-e2e-group"}, "get", "configmaps", testNSPlain),
+					allowed: true,
+					denied:  false,
+					reason:  "Access granted by WebhookAuthorizer",
 				},
 				{
 					name: "service account principal allow",
@@ -265,37 +265,37 @@ spec:
 						"services",
 						testNSPlain,
 					),
-					allowed:        true,
-					denied:         false,
-					reason:         "Access granted by WebhookAuthorizer",
+					allowed: true,
+					denied:  false,
+					reason:  "Access granted by WebhookAuthorizer",
 				},
 				{
-					name:           "namespace selector match",
-					sar:            resourceSAR("e2e-ns-user", nil, "get", "secrets", testNSLabeled),
-					allowed:        true,
-					denied:         false,
-					reason:         "Access granted by WebhookAuthorizer",
+					name:    "namespace selector match",
+					sar:     resourceSAR("e2e-ns-user", nil, "get", "secrets", testNSLabeled),
+					allowed: true,
+					denied:  false,
+					reason:  "Access granted by WebhookAuthorizer",
 				},
 				{
-					name:           "namespace selector mismatch is no opinion",
-					sar:            resourceSAR("e2e-ns-user", nil, "get", "secrets", testNSPlain),
-					allowed:        false,
-					denied:         false,
-					reason:         "Access denied: no matching rules",
+					name:    "namespace selector mismatch is no opinion",
+					sar:     resourceSAR("e2e-ns-user", nil, "get", "secrets", testNSPlain),
+					allowed: false,
+					denied:  false,
+					reason:  "Access denied: no matching rules",
 				},
 				{
-					name:           "non-resource allow",
-					sar:            nonResourceSAR("e2e-health-user", nil, "get", "/healthz"),
-					allowed:        true,
-					denied:         false,
-					reason:         "Access granted by WebhookAuthorizer",
+					name:    "non-resource allow",
+					sar:     nonResourceSAR("e2e-health-user", nil, "get", "/healthz"),
+					allowed: true,
+					denied:  false,
+					reason:  "Access granted by WebhookAuthorizer",
 				},
 				{
-					name:           "unknown user is no opinion",
-					sar:            resourceSAR("e2e-unknown-user", nil, "get", "pods", testNSPlain),
-					allowed:        false,
-					denied:         false,
-					reason:         "Access denied: no matching rules",
+					name:    "unknown user is no opinion",
+					sar:     resourceSAR("e2e-unknown-user", nil, "get", "pods", testNSPlain),
+					allowed: false,
+					denied:  false,
+					reason:  "Access denied: no matching rules",
 				},
 			}
 
