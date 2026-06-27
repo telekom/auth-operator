@@ -1402,6 +1402,69 @@ func TestAuthenticateRequest_ReloadsBearerTokenFile(t *testing.T) {
 	}
 }
 
+func TestAuthenticateRequest_DeniesWhenBearerTokenFileUnavailable(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T) string
+	}{
+		{
+			name: "missing file",
+			setup: func(t *testing.T) string {
+				t.Helper()
+				return t.TempDir() + "/missing-token"
+			},
+		},
+		{
+			name: "empty file",
+			setup: func(t *testing.T) string {
+				t.Helper()
+				tokenFile := t.TempDir() + "/empty-token"
+				if err := os.WriteFile(tokenFile, []byte(" \n\t"), 0o600); err != nil {
+					t.Fatalf("write empty token: %v", err)
+				}
+				return tokenFile
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tokenFile := tc.setup(t)
+			handler := &Authorizer{
+				Log:             logr.Discard(),
+				BearerTokenFile: tokenFile,
+			}
+
+			if _, err := handler.expectedBearerToken(); err == nil {
+				t.Fatal("expected token file load to fail")
+			} else if !strings.Contains(err.Error(), tokenFile) {
+				t.Fatalf("expected error %q to include token file %q", err.Error(), tokenFile)
+			}
+
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", nil)
+			req.Header.Set("Authorization", "Bearer any-token")
+			rec := httptest.NewRecorder()
+			if handler.authenticateRequest(rec, req) {
+				t.Fatal("request should not authenticate when token file cannot be loaded")
+			}
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected denied SAR response to return %d, got %d", http.StatusOK, rec.Code)
+			}
+			var response authzv1.SubjectAccessReview
+			if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+				t.Fatalf("decode denied response: %v", err)
+			}
+			if response.Status.Allowed {
+				t.Fatal("response should have Allowed=false")
+			}
+			if !response.Status.Denied {
+				t.Fatal("response should have Denied=true")
+			}
+			if response.Status.Reason != reasonUnauthorized {
+				t.Fatalf("expected reason %q, got %q", reasonUnauthorized, response.Status.Reason)
+			}
+		})
+	}
+}
+
 func TestServeHTTP_RateLimitingIsPerSubject(t *testing.T) {
 	scheme := newScheme(t)
 	cl := newIndexedClient(scheme)

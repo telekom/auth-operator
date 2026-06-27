@@ -893,7 +893,7 @@ func (wa *Authorizer) expectedBearerToken() (string, error) {
 	}
 	token := strings.TrimSpace(string(tokenBytes))
 	if token == "" {
-		return "", fmt.Errorf("bearer token file must not be empty")
+		return "", fmt.Errorf("bearer token file %q must not be empty", wa.BearerTokenFile)
 	}
 	return token, nil
 }
