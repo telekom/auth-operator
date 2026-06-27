@@ -527,7 +527,7 @@ func validateBindDefinitionRequiredFields(kind schema.GroupKind, obj *BindDefini
 		}
 	}
 	if !hasReferencedRole {
-		allErrs = append(allErrs, field.Required(field.NewPath("spec", "clusterRoleBindings", "clusterRoleRefs"), "at least one binding with a referenced role must be specified"))
+		allErrs = append(allErrs, field.Required(field.NewPath("spec"), "at least one binding with a referenced role must be specified"))
 	}
 	if len(allErrs) > 0 {
 		return apierrors.NewInvalid(kind, obj.Name, allErrs)

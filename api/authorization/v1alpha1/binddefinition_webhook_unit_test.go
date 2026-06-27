@@ -188,7 +188,7 @@ func TestBindDefinitionValidatorRejectsRequiredAndSubjectShape(t *testing.T) {
 			bd: &BindDefinition{
 				ObjectMeta: metav1.ObjectMeta{Name: "empty-spec"},
 			},
-			want: []string{"spec.targetName", "spec.subjects", "at least one binding"},
+			want: []string{"spec.targetName", "spec.subjects", "spec: Required value", "at least one binding"},
 		},
 		{
 			name: "empty subject name",
