@@ -273,7 +273,7 @@ func TestValidateCreate_WarnsEmptyAllowedPrincipals(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
-	if !hasWarning(warnings, "spec.allowedPrincipals is empty") {
+	if !hasWarning(warnings, "spec.allowedPrincipals is empty", "no requests will be allowed") {
 		t.Errorf("expected empty-allowedPrincipals warning, got %v", warnings)
 	}
 }
