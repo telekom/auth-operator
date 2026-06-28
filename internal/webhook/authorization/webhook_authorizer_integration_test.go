@@ -159,6 +159,7 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 			})
 			Expect(resp.Status.Allowed).To(BeFalse())
 			Expect(resp.Status.Reason).To(ContainSubstring("denied"))
+			Expect(resp.Status.Denied).To(BeTrue())
 		})
 	})
 
@@ -231,6 +232,7 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 				},
 			})
 			Expect(resp.Status.Allowed).To(BeFalse())
+			Expect(resp.Status.Denied).To(BeFalse())
 		})
 
 		It("denies cluster-scoped request (no namespace)", func() {
@@ -243,6 +245,7 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 				},
 			})
 			Expect(resp.Status.Allowed).To(BeFalse())
+			Expect(resp.Status.Denied).To(BeFalse())
 		})
 	})
 
@@ -454,6 +457,7 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 				},
 			})
 			Expect(resp.Status.Allowed).To(BeFalse())
+			Expect(resp.Status.Denied).To(BeFalse())
 		})
 
 		It("denies bare user with same name as namespace-scoped service account", func() {
@@ -466,6 +470,7 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 				},
 			})
 			Expect(resp.Status.Allowed).To(BeFalse())
+			Expect(resp.Status.Denied).To(BeFalse())
 		})
 	})
 
