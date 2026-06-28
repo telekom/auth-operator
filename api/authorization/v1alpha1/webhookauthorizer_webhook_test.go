@@ -24,6 +24,19 @@ func containsAll(s string, parts ...string) bool {
 	return true
 }
 
+// hasWarning reports whether exactly one warning contains all parts. It fails
+// closed on duplicates so a regression that emits the same warning twice (or
+// replaces it with an unrelated one) is caught instead of silently passing.
+func hasWarning(warnings []string, parts ...string) bool {
+	matches := 0
+	for _, w := range warnings {
+		if containsAll(w, parts...) {
+			matches++
+		}
+	}
+	return matches == 1
+}
+
 var _ = Describe("WebhookAuthorizer CEL Validation", func() {
 
 	validResourceRules := []authzv1.ResourceRule{
@@ -260,8 +273,8 @@ func TestValidateCreate_WarnsEmptyAllowedPrincipals(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
-	if len(warnings) == 0 {
-		t.Error("expected warning for empty allowedPrincipals")
+	if !hasWarning(warnings, "spec.allowedPrincipals is empty") {
+		t.Errorf("expected empty-allowedPrincipals warning, got %v", warnings)
 	}
 }
 
@@ -304,8 +317,8 @@ func TestValidateCreate_WarnsOverlappingPrincipals(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
-	if len(warnings) == 0 {
-		t.Error("expected warning for overlapping principals")
+	if !hasWarning(warnings, `"user:alice"`, "denied takes precedence") {
+		t.Errorf("expected overlapping-principal warning, got %v", warnings)
 	}
 }
 
@@ -319,8 +332,8 @@ func TestValidateCreate_WarnsOverlappingGroups(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
-	if len(warnings) == 0 {
-		t.Error("expected warning for overlapping groups")
+	if !hasWarning(warnings, `"group:admins"`, "denied takes precedence") {
+		t.Errorf("expected overlapping-group warning, got %v", warnings)
 	}
 }
 
