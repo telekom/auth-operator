@@ -353,7 +353,10 @@ func formatBlockingResourcesMessage(blockingResources []namespaceDeletionResourc
 
 	for _, rb := range blockingResources {
 		// Sort names within each entry for stable output.
-		slices.Sort(rb.Names)
+		// Clone the shared Names slice before sorting to prevent concurrent
+		// reconcilers from racing on the cached backing array.
+		names := slices.Clone(rb.Names)
+		slices.Sort(names)
 
 		var resourceType string
 		if rb.APIGroup == "" {
@@ -363,14 +366,14 @@ func formatBlockingResourcesMessage(blockingResources []namespaceDeletionResourc
 		}
 
 		switch {
-		case rb.Count == 1 && len(rb.Names) > 0:
-			resourceDetails = append(resourceDetails, fmt.Sprintf("%s: %s", resourceType, rb.Names[0]))
-		case len(rb.Names) > 0:
+		case rb.Count == 1 && len(names) > 0:
+			resourceDetails = append(resourceDetails, fmt.Sprintf("%s: %s", resourceType, names[0]))
+		case len(names) > 0:
 			// Show first few names if multiple.
-			if len(rb.Names) <= 3 {
-				resourceDetails = append(resourceDetails, fmt.Sprintf("%s (%d): %s", resourceType, rb.Count, strings.Join(rb.Names, ", ")))
+			if len(names) <= 3 {
+				resourceDetails = append(resourceDetails, fmt.Sprintf("%s (%d): %s", resourceType, rb.Count, strings.Join(names, ", ")))
 			} else {
-				resourceDetails = append(resourceDetails, fmt.Sprintf("%s (%d): %s, +%d more", resourceType, rb.Count, strings.Join(rb.Names[:3], ", "), rb.Count-3))
+				resourceDetails = append(resourceDetails, fmt.Sprintf("%s (%d): %s, +%d more", resourceType, rb.Count, strings.Join(names[:3], ", "), rb.Count-3))
 			}
 		default:
 			resourceDetails = append(resourceDetails, fmt.Sprintf("%s (%d)", resourceType, rb.Count))
