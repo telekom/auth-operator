@@ -2037,5 +2037,5 @@ func TestCheckRoleOwnership_StaleCacheUnownedExistingRoleRejected(t *testing.T) 
 
 	err := r.checkRoleOwnership(ctx, roleDef)
 	g.Expect(err).To(HaveOccurred())
-	g.Expect(err.Error()).To(ContainSubstring("controlled by RoleDefinition/other-rd"))
+	g.Expect(err.Error()).To(ContainSubstring("controlled by RoleDefinition other-rd"))
 }

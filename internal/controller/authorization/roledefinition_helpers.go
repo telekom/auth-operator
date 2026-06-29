@@ -464,7 +464,11 @@ func (r *RoleDefinitionReconciler) checkRoleOwnership(
 		return nil
 	}
 
-	if err := r.reader.Get(ctx, key, existing); err != nil {
+	reader := r.reader
+	if reader == nil {
+		reader = r.client
+	}
+	if err := reader.Get(ctx, key, existing); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil // Target doesn't exist yet — will be created by SSA.
 		}
