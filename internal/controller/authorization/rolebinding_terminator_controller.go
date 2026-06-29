@@ -19,10 +19,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	corev1ac "k8s.io/client-go/applyconfigurations/core/v1"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/events"
-	corev1ac "k8s.io/client-go/applyconfigurations/core/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -625,19 +625,19 @@ func (r *RoleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request)
 		logger.V(3).Info("RoleBinding does not have finalizer", "roleBindingName", roleBinding.Name)
 	}
 
-		conditions.MarkFalse(
-			conditions.NewNamespaceWrapper(&namespace),
-			authorizationv1alpha1.NamespaceTerminationBlockedCondition,
-			0,
-			authorizationv1alpha1.NamespaceTerminationAllowedReason,
-			authorizationv1alpha1.NamespaceTerminationAllowedMessage,
-		)
-		if condAC := extractNamespaceCondition(&namespace, authorizationv1alpha1.NamespaceTerminationBlockedCondition); condAC != nil {
-			ac := corev1ac.Namespace(namespace.Name).WithStatus(corev1ac.NamespaceStatus().WithConditions(condAC))
-			if err := r.client.SubResource("status").Apply(ctx, ac, client.FieldOwner("auth-operator"), client.ForceOwnership); err != nil {
-				logger.Error(err, "failed to update Namespace status with blocking resources information", "namespace", namespace.Name)
-			}
+	conditions.MarkFalse(
+		conditions.NewNamespaceWrapper(&namespace),
+		authorizationv1alpha1.NamespaceTerminationBlockedCondition,
+		0,
+		authorizationv1alpha1.NamespaceTerminationAllowedReason,
+		authorizationv1alpha1.NamespaceTerminationAllowedMessage,
+	)
+	if condAC := extractNamespaceCondition(&namespace, authorizationv1alpha1.NamespaceTerminationBlockedCondition); condAC != nil {
+		ac := corev1ac.Namespace(namespace.Name).WithStatus(corev1ac.NamespaceStatus().WithConditions(condAC))
+		if err := r.client.SubResource("status").Apply(ctx, ac, client.FieldOwner("auth-operator"), client.ForceOwnership); err != nil {
+			logger.Error(err, "failed to update Namespace status with blocking resources information", "namespace", namespace.Name)
 		}
+	}
 
 	logger.V(2).Info("reconcileTerminatingNamespaces completed")
 	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleBindingTerminator, metrics.ResultFinalized).Inc()
