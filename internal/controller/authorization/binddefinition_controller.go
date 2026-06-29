@@ -1814,7 +1814,6 @@ func (r *BindDefinitionReconciler) handleMissingTargetNamespaces(
 	return ctrl.Result{RequeueAfter: requeueAfter}, nil
 }
 
-
 // isLegitimatelyOwnedByBindDefinition checks whether the given ServiceAccount is
 // legitimately owned by a BindDefinition. It prevents spoofed OwnerReferences
 // from tricking the controller into adopting pre-existing ServiceAccounts.
@@ -1829,9 +1828,12 @@ func (r *BindDefinitionReconciler) isLegitimatelyOwnedByBindDefinition(ctx conte
 			ownerRef.APIVersion == authorizationv1alpha1.GroupVersion.String() &&
 			ownerRef.Name != "" &&
 			ownerRef.UID != "" {
-			
 			var bd authorizationv1alpha1.BindDefinition
-			if err := r.reader.Get(ctx, types.NamespacedName{Name: ownerRef.Name}, &bd); err == nil {
+			reader := r.reader
+			if reader == nil {
+				reader = r.client
+			}
+			if err := reader.Get(ctx, types.NamespacedName{Name: ownerRef.Name}, &bd); err == nil {
 				if bd.UID == ownerRef.UID {
 					return true
 				}
