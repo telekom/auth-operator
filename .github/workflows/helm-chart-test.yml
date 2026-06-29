@@ -221,7 +221,6 @@ jobs:
       - name: Run chart-testing (install)
         run: |
           ct install --config .github/ct.yaml --charts chart/auth-operator --helm-extra-set-args "--set image.repository=auth-operator --set image.tag=test"
-        continue-on-error: true  # Chart already installed above, this validates upgrade path
 
       - name: Cleanup
         if: always()
