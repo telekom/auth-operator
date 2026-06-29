@@ -16,6 +16,7 @@ webhooks:
       name: '{{ include "auth-operator.fullname" . }}-webhook-service'
       namespace: '{{ .Release.Namespace }}'
       path: /validate-authorization-t-caas-telekom-com-v1alpha1-binddefinition
+      port: {{ .Values.webhookServer.service.port | default 443 }}
   failurePolicy: Fail
   name: binddefinition.validating.webhook.auth.t-caas.telekom.de
   rules:
@@ -39,6 +40,7 @@ webhooks:
       name: '{{ include "auth-operator.fullname" . }}-webhook-service'
       namespace: '{{ .Release.Namespace }}'
       path: /validate-authorization-t-caas-telekom-com-v1alpha1-rbacpolicy
+      port: {{ .Values.webhookServer.service.port | default 443 }}
   failurePolicy: Fail
   name: rbacpolicy.validating.webhook.auth.t-caas.telekom.de
   rules:
@@ -63,6 +65,7 @@ webhooks:
       name: '{{ include "auth-operator.fullname" . }}-webhook-service'
       namespace: '{{ .Release.Namespace }}'
       path: /validate-authorization-t-caas-telekom-com-v1alpha1-restrictedbinddefinition
+      port: {{ .Values.webhookServer.service.port | default 443 }}
   failurePolicy: Fail
   name: restrictedbinddefinition.validating.webhook.auth.t-caas.telekom.de
   rules:
@@ -87,6 +90,7 @@ webhooks:
       name: '{{ include "auth-operator.fullname" . }}-webhook-service'
       namespace: '{{ .Release.Namespace }}'
       path: /validate-authorization-t-caas-telekom-com-v1alpha1-restrictedroledefinition
+      port: {{ .Values.webhookServer.service.port | default 443 }}
   failurePolicy: Fail
   name: restrictedroledefinition.validating.webhook.auth.t-caas.telekom.de
   rules:
@@ -111,6 +115,7 @@ webhooks:
       name: '{{ include "auth-operator.fullname" . }}-webhook-service'
       namespace: '{{ .Release.Namespace }}'
       path: /validate-authorization-t-caas-telekom-com-v1alpha1-roledefinition
+      port: {{ .Values.webhookServer.service.port | default 443 }}
   failurePolicy: Fail
   name: roledefinition.validating.webhook.auth.t-caas.telekom.de
   rules:
@@ -134,6 +139,7 @@ webhooks:
       name: '{{ include "auth-operator.fullname" . }}-webhook-service'
       namespace: '{{ .Release.Namespace }}'
       path: /validate-authorization-t-caas-telekom-com-v1alpha1-webhookauthorizer
+      port: {{ .Values.webhookServer.service.port | default 443 }}
   failurePolicy: Fail
   name: webhookauthorizer.validating.webhook.auth.t-caas.telekom.de
   rules:
