@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	corev1ac "k8s.io/client-go/applyconfigurations/core/v1"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/events"
@@ -454,6 +455,20 @@ func (r *RoleBindingTerminator) removeRoleBindingFinalizer(ctx context.Context, 
 	return true, nil
 }
 
+func extractNamespaceCondition(ns *corev1.Namespace, condType authorizationv1alpha1.AuthZConditionType) *corev1ac.NamespaceConditionApplyConfiguration {
+	for _, c := range ns.Status.Conditions {
+		if string(c.Type) == string(condType) {
+			return corev1ac.NamespaceCondition().
+				WithType(c.Type).
+				WithStatus(c.Status).
+				WithReason(c.Reason).
+				WithMessage(c.Message).
+				WithLastTransitionTime(c.LastTransitionTime)
+		}
+	}
+	return nil
+}
+
 // Reconcile handles the reconciliation loop for RoleBinding resources owned by BindDefinitions.
 // It manages finalizer cleanup during namespace termination.
 func (r *RoleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -573,7 +588,6 @@ func (r *RoleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request)
 			logger.V(1).Info("blocking resource found", "namespace", namespace.Name, "resourceType", resourceType, "count", br.Count, "names", br.Names)
 		}
 
-		old := namespace.DeepCopy()
 		conditions.MarkTrue(
 			conditions.NewNamespaceWrapper(&namespace),
 			authorizationv1alpha1.NamespaceTerminationBlockedCondition,
@@ -581,10 +595,11 @@ func (r *RoleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request)
 			authorizationv1alpha1.NamespaceTerminationBlockedReason,
 			conditions.ConditionMessage(fmt.Sprintf("%s: %s", authorizationv1alpha1.NamespaceTerminationBlockedMessage, formatBlockingResourcesMessage(blockingResources))),
 		)
-		// Best-effort status patch on Namespace (core type) — SSA migration deferred.
-		// Uses optimistic lock to avoid overwriting concurrent updates.
-		if err := r.client.Status().Patch(ctx, &namespace, client.MergeFromWithOptions(old, client.MergeFromWithOptimisticLock{})); err != nil {
-			logger.Error(err, "Failed to update Namespace status with blocking resources information", "namespace", namespace.Name)
+		if condAC := extractNamespaceCondition(&namespace, authorizationv1alpha1.NamespaceTerminationBlockedCondition); condAC != nil {
+			ac := corev1ac.Namespace(namespace.Name).WithStatus(corev1ac.NamespaceStatus().WithConditions(condAC))
+			if err := r.client.SubResource("status").Apply(ctx, ac, client.FieldOwner("auth-operator"), client.ForceOwnership); err != nil {
+				logger.Error(err, "Failed to update Namespace status with blocking resources information", "namespace", namespace.Name)
+			}
 		}
 
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleBindingTerminator, metrics.ResultRequeue).Inc()
@@ -613,7 +628,6 @@ func (r *RoleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request)
 		logger.V(3).Info("RoleBinding does not have finalizer", "roleBindingName", roleBinding.Name)
 	}
 
-	oldNS := namespace.DeepCopy()
 	conditions.MarkFalse(
 		conditions.NewNamespaceWrapper(&namespace),
 		authorizationv1alpha1.NamespaceTerminationBlockedCondition,
@@ -621,10 +635,11 @@ func (r *RoleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request)
 		authorizationv1alpha1.NamespaceTerminationAllowedReason,
 		authorizationv1alpha1.NamespaceTerminationAllowedMessage,
 	)
-	// Best-effort status patch on Namespace (core type) — SSA migration deferred.
-	// Uses optimistic lock to avoid overwriting concurrent updates.
-	if err := r.client.Status().Patch(ctx, &namespace, client.MergeFromWithOptions(oldNS, client.MergeFromWithOptimisticLock{})); err != nil {
-		logger.Error(err, "failed to update Namespace status with blocking resources information", "namespace", namespace.Name)
+	if condAC := extractNamespaceCondition(&namespace, authorizationv1alpha1.NamespaceTerminationBlockedCondition); condAC != nil {
+		ac := corev1ac.Namespace(namespace.Name).WithStatus(corev1ac.NamespaceStatus().WithConditions(condAC))
+		if err := r.client.SubResource("status").Apply(ctx, ac, client.FieldOwner("auth-operator"), client.ForceOwnership); err != nil {
+			logger.Error(err, "failed to update Namespace status with blocking resources information", "namespace", namespace.Name)
+		}
 	}
 
 	logger.V(2).Info("reconcileTerminatingNamespaces completed")
