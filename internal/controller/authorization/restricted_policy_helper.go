@@ -41,9 +41,9 @@ func mapPolicyToRestrictedRequests(
 
 	if err := c.List(listCtx, list, client.MatchingFields{fieldIndex: obj.GetName()}); err != nil {
 		if helpers.IsMissingFieldIndexError(err) {
-			logger.V(2).Info(fmt.Sprintf("policyRef field index unavailable, falling back to full %s scan", kind), "policy", obj.GetName())
+			logger.V(2).Info("policyRef field index unavailable, falling back to full scan", "kind", kind, "policy", obj.GetName())
 			if listErr := c.List(listCtx, list); listErr != nil {
-				logger.Error(listErr, fmt.Sprintf("failed to list %ss for policy", kind), "policy", obj.GetName())
+				logger.Error(listErr, "failed to list resources for policy", "kind", kind, "policy", obj.GetName())
 				return nil
 			}
 			items := getItems()
@@ -55,7 +55,7 @@ func mapPolicyToRestrictedRequests(
 			}
 			return requests
 		}
-		logger.Error(err, fmt.Sprintf("failed to list %ss for policy", kind), "policy", obj.GetName())
+		logger.Error(err, "failed to list resources for policy", "kind", kind, "policy", obj.GetName())
 		return nil
 	}
 
