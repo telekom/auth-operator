@@ -42,6 +42,8 @@ type RestrictedRoleDefinitionSpec struct {
 	// TargetNamespace is the target namespace for the Role.
 	// Required when "TargetRole" is "Role".
 	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^([a-z0-9]([-a-z0-9]*[a-z0-9])?)?$`
 	TargetNamespace string `json:"targetNamespace,omitempty"`
 
 	// ScopeNamespaced controls whether the API resource filter includes
