@@ -8,6 +8,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -4792,20 +4793,56 @@ func TestReconcileDeleteCleansUpGaugeMetrics(t *testing.T) {
 	// Simulate metrics being set during a prior reconciliation
 	metrics.RoleRefsMissing.WithLabelValues(bdName).Set(2)
 	metrics.NamespacesActive.WithLabelValues(bdName).Set(5)
+	metrics.ExternalSAsReferenced.WithLabelValues(bdName).Set(3)
+	metrics.ServiceAccountSkippedPreExisting.WithLabelValues(bdName).Inc()
+	metrics.ManagedResources.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResourceClusterRoleBinding, bdName).Set(1)
+	metrics.ManagedResources.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResourceRoleBinding, bdName).Set(2)
+	metrics.ManagedResources.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResourceServiceAccount, bdName).Set(3)
 
 	_, err := r.reconcileDelete(ctx, bd)
 	g.Expect(err).NotTo(HaveOccurred())
 
-	// After deletion the per-BD gauge label sets should be cleaned up.
-	// Prometheus GetMetricWithLabelValues returns an existing metric if it
-	// was previously registered; after DeleteLabelValues the metric entry
-	// should no longer be present. We verify by checking that a fresh Get
-	// returns a gauge with value 0 (Prometheus creates a new default-0 entry).
-	roleGauge, _ := metrics.RoleRefsMissing.GetMetricWithLabelValues(bdName)
-	g.Expect(roleGauge).NotTo(BeNil())
+	expectBindDefinitionMetricSeriesCleared(g, bdName)
+}
 
-	nsGauge, _ := metrics.NamespacesActive.GetMetricWithLabelValues(bdName)
-	g.Expect(nsGauge).NotTo(BeNil())
+func TestReconcile_NotFoundCleansUpMetricSeries(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+	_ = corev1.AddToScheme(s)
+
+	bdName := "metrics-not-found-bd"
+	metrics.RoleRefsMissing.WithLabelValues(bdName).Set(2)
+	metrics.NamespacesActive.WithLabelValues(bdName).Set(5)
+	metrics.ExternalSAsReferenced.WithLabelValues(bdName).Set(3)
+	metrics.ServiceAccountSkippedPreExisting.WithLabelValues(bdName).Inc()
+	metrics.ManagedResources.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResourceClusterRoleBinding, bdName).Set(1)
+	metrics.ManagedResources.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResourceRoleBinding, bdName).Set(2)
+	metrics.ManagedResources.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResourceServiceAccount, bdName).Set(3)
+
+	c := fake.NewClientBuilder().WithScheme(s).Build()
+	r := &BindDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	result, err := r.Reconcile(ctx, reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: bdName},
+	})
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(result).To(Equal(reconcile.Result{}))
+
+	expectBindDefinitionMetricSeriesCleared(g, bdName)
+}
+
+func expectBindDefinitionMetricSeriesCleared(g *WithT, name string) {
+	g.Expect(testutil.ToFloat64(metrics.RoleRefsMissing.WithLabelValues(name))).To(Equal(float64(0)))
+	g.Expect(testutil.ToFloat64(metrics.NamespacesActive.WithLabelValues(name))).To(Equal(float64(0)))
+	g.Expect(testutil.ToFloat64(metrics.ExternalSAsReferenced.WithLabelValues(name))).To(Equal(float64(0)))
+	g.Expect(testutil.ToFloat64(metrics.ServiceAccountSkippedPreExisting.WithLabelValues(name))).To(Equal(float64(0)))
+	g.Expect(testutil.ToFloat64(metrics.ManagedResources.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResourceClusterRoleBinding, name))).To(Equal(float64(0)))
+	g.Expect(testutil.ToFloat64(metrics.ManagedResources.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResourceRoleBinding, name))).To(Equal(float64(0)))
+	g.Expect(testutil.ToFloat64(metrics.ManagedResources.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResourceServiceAccount, name))).To(Equal(float64(0)))
 }
 
 // ---------------------------------------------------------------------------
@@ -5092,6 +5129,92 @@ func TestReconcile_MissingRolePolicy_Error(t *testing.T) {
 	var rbList rbacv1.RoleBindingList
 	g.Expect(c.List(ctx, &rbList)).To(Succeed())
 	g.Expect(rbList.Items).To(BeEmpty(), "expected no RoleBindings to be created in error mode")
+}
+
+func TestReconcile_MissingRolePolicy_ErrorPrunesOwnedBindings(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+	_ = corev1.AddToScheme(s)
+
+	bd := newBDWithPolicy("policy-error-prune-bd", authorizationv1alpha1.MissingRolePolicyError)
+	bd.Spec.RoleBindings = []authorizationv1alpha1.NamespaceBinding{{
+		Namespace:       "policy-error-ns",
+		ClusterRoleRefs: []string{"nonexistent-role"},
+	}}
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "policy-error-ns"}}
+	ownerRef := metav1.OwnerReference{
+		APIVersion:         authorizationv1alpha1.GroupVersion.String(),
+		Kind:               "BindDefinition",
+		Name:               bd.Name,
+		UID:                bd.UID,
+		Controller:         ptr.To(true),
+		BlockOwnerDeletion: ptr.To(true),
+	}
+	bindingName := helpers.BuildBindingName(bd.Spec.TargetName, "nonexistent-role")
+	ownedCRB := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            bindingName,
+			OwnerReferences: []metav1.OwnerReference{ownerRef},
+		},
+		RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "nonexistent-role"},
+		Subjects: bd.Spec.Subjects,
+	}
+	ownedRB := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            bindingName,
+			Namespace:       ns.Name,
+			OwnerReferences: []metav1.OwnerReference{ownerRef},
+		},
+		RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "nonexistent-role"},
+		Subjects: bd.Spec.Subjects,
+	}
+	unownedCRB := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "unowned-" + bindingName},
+		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "nonexistent-role"},
+		Subjects:   bd.Spec.Subjects,
+	}
+	unownedRB := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "unowned-" + bindingName, Namespace: ns.Name},
+		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "nonexistent-role"},
+		Subjects:   bd.Spec.Subjects,
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(bd, ns, ownedCRB, ownedRB, unownedCRB, unownedRB).
+		WithStatusSubresource(bd).
+		Build()
+	r := &BindDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+	metrics.ManagedResources.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResourceClusterRoleBinding, bd.Name).Set(1)
+	metrics.ManagedResources.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResourceRoleBinding, bd.Name).Set(1)
+	metrics.ManagedResources.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResourceServiceAccount, bd.Name).Set(1)
+
+	result, err := r.Reconcile(ctx, reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: bd.Name},
+	})
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(result.RequeueAfter).To(Equal(RoleRefRequeueInterval))
+
+	var crb rbacv1.ClusterRoleBinding
+	err = c.Get(ctx, types.NamespacedName{Name: ownedCRB.Name}, &crb)
+	g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "owned ClusterRoleBinding should be pruned")
+	g.Expect(c.Get(ctx, types.NamespacedName{Name: unownedCRB.Name}, &crb)).To(Succeed(), "unowned ClusterRoleBinding should be preserved")
+
+	var rb rbacv1.RoleBinding
+	err = c.Get(ctx, types.NamespacedName{Namespace: ns.Name, Name: ownedRB.Name}, &rb)
+	g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "owned RoleBinding should be pruned")
+	g.Expect(c.Get(ctx, types.NamespacedName{Namespace: ns.Name, Name: unownedRB.Name}, &rb)).To(Succeed(), "unowned RoleBinding should be preserved")
+
+	var updated authorizationv1alpha1.BindDefinition
+	g.Expect(c.Get(ctx, types.NamespacedName{Name: bd.Name}, &updated)).To(Succeed())
+	g.Expect(updated.Status.MissingRoleRefs).To(ContainElement("ClusterRole/nonexistent-role"))
+	g.Expect(testutil.ToFloat64(metrics.ManagedResources.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResourceClusterRoleBinding, bd.Name))).To(Equal(float64(0)))
+	g.Expect(testutil.ToFloat64(metrics.ManagedResources.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResourceRoleBinding, bd.Name))).To(Equal(float64(0)))
+	g.Expect(testutil.ToFloat64(metrics.ManagedResources.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResourceServiceAccount, bd.Name))).To(Equal(float64(0)))
+	g.Expect(testutil.ToFloat64(metrics.RoleRefsMissing.WithLabelValues(bd.Name))).To(Equal(float64(1)))
 }
 
 func TestReconcile_MissingRolePolicy_Ignore(t *testing.T) {
