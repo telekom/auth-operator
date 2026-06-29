@@ -160,6 +160,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdResolveApplyClient(
 	)
 }
 
+//nolint:dupl // Both controllers share this common evaluation structure
 func (r *RestrictedRoleDefinitionReconciler) rrdEvaluatePolicy(
 	ctx context.Context,
 	rrd *authorizationv1alpha1.RestrictedRoleDefinition,
@@ -229,7 +230,6 @@ func (r *RestrictedRoleDefinitionReconciler) queueAll() handler.MapFunc {
 
 // policyToRestrictedRoleDefinitions maps an RBACPolicy event to reconcile requests
 // for all RestrictedRoleDefinitions referencing that policy.
-//
 func (r *RestrictedRoleDefinitionReconciler) policyToRestrictedRoleDefinitions(ctx context.Context, obj client.Object) []reconcile.Request {
 	list := &authorizationv1alpha1.RestrictedRoleDefinitionList{}
 	return mapPolicyToRestrictedRequests(

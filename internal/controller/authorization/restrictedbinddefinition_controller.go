@@ -162,6 +162,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdResolveApplyClient(
 	)
 }
 
+//nolint:dupl // Both controllers share this common evaluation structure
 func (r *RestrictedBindDefinitionReconciler) rbdEvaluatePolicy(
 	ctx context.Context,
 	rbd *authorizationv1alpha1.RestrictedBindDefinition,
@@ -216,7 +217,6 @@ func (r *RestrictedBindDefinitionReconciler) rbdPolicyLifecycleConfig(rbd *autho
 
 // policyToRestrictedBindDefinitions maps an RBACPolicy event to reconcile requests
 // for all RestrictedBindDefinitions referencing that policy.
-//
 func (r *RestrictedBindDefinitionReconciler) policyToRestrictedBindDefinitions(ctx context.Context, obj client.Object) []reconcile.Request {
 	rbdList := &authorizationv1alpha1.RestrictedBindDefinitionList{}
 	return mapPolicyToRestrictedRequests(
