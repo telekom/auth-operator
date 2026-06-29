@@ -58,13 +58,13 @@ type RoleDefinitionSpec struct {
 	// +kubebuilder:validation:Enum=ClusterRole;Role
 	TargetRole string `json:"targetRole"`
 
-	// TargetName is the name of the target role. This can be any name that accurately describes the ClusterRole/Role.
-	// Must be a valid Kubernetes name (max 63 characters for most resources).
+	// TargetName is the name of the target role. This can be any valid Kubernetes
+	// RFC 1123 subdomain name for the generated ClusterRole/Role.
 	// This field is immutable after creation; changing it would orphan the generated role and its bindings.
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinLength=5
-	// +kubebuilder:validation:MaxLength=63
-	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?)*$`
 	TargetName string `json:"targetName"`
 
 	// TargetNamespace is the target namespace for the Role. Required when "TargetRole" is "Role".
