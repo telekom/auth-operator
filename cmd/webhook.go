@@ -266,6 +266,7 @@ func configureWebhooks(mgr manager.Manager, tp *tracing.Provider) error {
 		return err
 	}
 	authorizer.BearerToken = token
+	authorizer.BearerTokenFile = authorizeAuthTokenFile
 	if authorizeRateLimit > 0 {
 		authorizer.Limiter = rate.NewLimiter(rate.Limit(authorizeRateLimit), authorizeRateBurst)
 		log.Info("rate limiting enabled for /authorize",
