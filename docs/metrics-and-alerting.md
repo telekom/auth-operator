@@ -84,7 +84,9 @@ resources:
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
 | `auth_operator_rbac_resources_applied_total` | Counter | `resource_type` | Resources created or updated via SSA. Types: `ClusterRole`, `Role`, `ClusterRoleBinding`, `RoleBinding`, `ServiceAccount`. |
+| `auth_operator_rbac_resources_skipped_total` | Counter | `resource_type` | RBAC resources where SSA was skipped because the cached object already matched desired state. |
 | `auth_operator_rbac_resources_deleted_total` | Counter | `resource_type` | Resources deleted during finalizer cleanup. |
+| `auth_operator_status_resources_skipped_total` | Counter | `resource_type` | Status updates skipped because the cached status already matched desired state. |
 | `auth_operator_managed_resources` | Gauge | `controller`, `resource_type`, `name` | Current number of managed resources per source resource. Use `sum by (resource_type)(…)` for cluster-wide totals. |
 
 ### Binding Health
@@ -94,6 +96,9 @@ resources:
 | `auth_operator_role_refs_missing` | Gauge | `binddefinition` | Number of referenced Roles/ClusterRoles that do not exist for a BindDefinition or RestrictedBindDefinition. Non-zero triggers a faster 10 s requeue. |
 | `auth_operator_namespaces_active` | Gauge | `binddefinition` | Number of active (non-terminating) namespaces matching selectors. |
 | `auth_operator_serviceaccount_skipped_preexisting_total` | Counter | `binddefinition` | Pre-existing ServiceAccounts that were intentionally not adopted (no OwnerRef added). |
+| `auth_operator_external_serviceaccounts_referenced` | Gauge | `binddefinition` | External pre-existing ServiceAccounts referenced by each BindDefinition. These ServiceAccounts are used but not managed by the operator. |
+| `auth_operator_namespace_fanout_skipped_total` | Counter | — | BindDefinitions filtered out during namespace-event fan-out because no namespace field or selector matched. |
+| `auth_operator_namespace_fanout_enqueued_total` | Counter | — | BindDefinitions enqueued during namespace-event fan-out because namespace routing matched. |
 
 ### Policy Compliance (Restricted CRDs)
 
