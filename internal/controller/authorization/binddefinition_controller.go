@@ -1384,7 +1384,7 @@ func (r *BindDefinitionReconciler) ensureServiceAccounts(
 		}
 
 		saExists := err == nil
-		if saExists && !isOwnedByBindDefinition(existing.OwnerReferences) {
+		if saExists && !r.isLegitimatelyOwnedByBindDefinition(ctx, existing, bindDef) {
 			// SA exists but is not owned by any BD — do not adopt it.
 			saRef := fmt.Sprintf("%s/%s", subject.Namespace, subject.Name)
 			externalSAs = append(externalSAs, saRef)
@@ -1812,4 +1812,33 @@ func (r *BindDefinitionReconciler) handleMissingTargetNamespaces(
 	}
 	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultDegraded).Inc()
 	return ctrl.Result{RequeueAfter: requeueAfter}, nil
+}
+
+// isLegitimatelyOwnedByBindDefinition checks whether the given ServiceAccount is
+// legitimately owned by a BindDefinition. It prevents spoofed OwnerReferences
+// from tricking the controller into adopting pre-existing ServiceAccounts.
+func (r *BindDefinitionReconciler) isLegitimatelyOwnedByBindDefinition(ctx context.Context, sa *corev1.ServiceAccount, currentBD *authorizationv1alpha1.BindDefinition) bool {
+	// If the current BindDefinition already owns it, it's legit
+	if hasOwnerRef(sa, currentBD) {
+		return true
+	}
+
+	for _, ownerRef := range sa.OwnerReferences {
+		if ownerRef.Kind == authorizationv1alpha1.BindDefinitionKind &&
+			ownerRef.APIVersion == authorizationv1alpha1.GroupVersion.String() &&
+			ownerRef.Name != "" &&
+			ownerRef.UID != "" {
+			var bd authorizationv1alpha1.BindDefinition
+			reader := r.reader
+			if reader == nil {
+				reader = r.client
+			}
+			if err := reader.Get(ctx, types.NamespacedName{Name: ownerRef.Name}, &bd); err == nil {
+				if bd.UID == ownerRef.UID {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
