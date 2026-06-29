@@ -323,10 +323,15 @@ func bindDefinitionMatchesNamespace(bd *authorizationv1alpha1.BindDefinition, ns
 	return false
 }
 
-// For checking if terminating BindDefinition refers a ServiceAccount
-// that other non-terminating BindDefinitions reference.
-func (r *BindDefinitionReconciler) isSAReferencedByOtherBindDefs(ctx context.Context, currentBindDefName, saName, saNamespace string) (bool, error) {
-	// List all BindDefinitions
+// isSAReferencedByOtherBindDefs checks whether another live BindDefinition
+// references and already owns the ServiceAccount. A spec reference alone is not
+// enough to retain the ServiceAccount during deletion because the peer
+// BindDefinition may not have reconciled/adopted it yet.
+func (r *BindDefinitionReconciler) isSAReferencedByOtherBindDefs(
+	ctx context.Context,
+	currentBindDefName, saName, saNamespace string,
+	sa *corev1.ServiceAccount,
+) (bool, error) {
 	bindDefList := &authorizationv1alpha1.BindDefinitionList{}
 	err := r.client.List(ctx, bindDefList)
 	if err != nil {
@@ -334,19 +339,21 @@ func (r *BindDefinitionReconciler) isSAReferencedByOtherBindDefs(ctx context.Con
 	}
 	for _, bindDef := range bindDefList.Items {
 		if bindDef.Name == currentBindDefName {
-			// Skip the BindDefinition that's being deleted
+			// Skip the BindDefinition that's being deleted.
 			continue
 		}
-		// Check if any of the subjects in this BindDefinition reference the ServiceAccount
+		if !bindDef.DeletionTimestamp.IsZero() {
+			continue
+		}
 		for _, subject := range bindDef.Spec.Subjects {
 			if subject.Kind == authorizationv1alpha1.BindSubjectServiceAccount &&
 				subject.Name == saName &&
-				subject.Namespace == saNamespace {
+				subject.Namespace == saNamespace &&
+				hasOwnerRef(sa, &bindDef) {
 				return true, nil
 			}
 		}
 	}
-	// No other BindDefinitions reference this ServiceAccount
 	return false, nil
 }
 

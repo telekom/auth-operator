@@ -2105,17 +2105,18 @@ func TestIsSAReferencedByOtherBindDefs(t *testing.T) {
 
 		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bd).Build()
 		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
+		sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "my-sa", Namespace: "default"}}
 
-		ref, err := r.isSAReferencedByOtherBindDefs(ctx, "bd-1", "my-sa", "default")
+		ref, err := r.isSAReferencedByOtherBindDefs(ctx, "bd-1", "my-sa", "default", sa)
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(ref).To(BeFalse())
 	})
 
-	t.Run("should return true when another BindDef references the SA", func(t *testing.T) {
+	t.Run("should return true when another live owning BindDef references the SA", func(t *testing.T) {
 		g := NewWithT(t)
 
 		bd1 := &authorizationv1alpha1.BindDefinition{
-			ObjectMeta: metav1.ObjectMeta{Name: "bd-1", Namespace: "default"},
+			ObjectMeta: metav1.ObjectMeta{Name: "bd-1", Namespace: "default", UID: "uid-1"},
 			Spec: authorizationv1alpha1.BindDefinitionSpec{
 				TargetName: "test-1",
 				Subjects: []rbacv1.Subject{
@@ -2124,7 +2125,7 @@ func TestIsSAReferencedByOtherBindDefs(t *testing.T) {
 			},
 		}
 		bd2 := &authorizationv1alpha1.BindDefinition{
-			ObjectMeta: metav1.ObjectMeta{Name: "bd-2", Namespace: "default"},
+			ObjectMeta: metav1.ObjectMeta{Name: "bd-2", Namespace: "default", UID: "uid-2"},
 			Spec: authorizationv1alpha1.BindDefinitionSpec{
 				TargetName: "test-2",
 				Subjects: []rbacv1.Subject{
@@ -2132,14 +2133,125 @@ func TestIsSAReferencedByOtherBindDefs(t *testing.T) {
 				},
 			},
 		}
+		sa := &corev1.ServiceAccount{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "shared-sa",
+				Namespace: "default",
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion: authorizationv1alpha1.GroupVersion.String(),
+						Kind:       authorizationv1alpha1.BindDefinitionKind,
+						Name:       "bd-2",
+						UID:        "uid-2",
+						Controller: ptr.To(false),
+					},
+				},
+			},
+		}
 
 		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bd1, bd2).Build()
 		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
-		// bd-1 is being deleted, check if bd-2 also references the SA
-		ref, err := r.isSAReferencedByOtherBindDefs(ctx, "bd-1", "shared-sa", "default")
+		ref, err := r.isSAReferencedByOtherBindDefs(ctx, "bd-1", "shared-sa", "default", sa)
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(ref).To(BeTrue())
+	})
+
+	t.Run("should return false when another BindDef references but does not own the SA", func(t *testing.T) {
+		g := NewWithT(t)
+
+		bd1 := &authorizationv1alpha1.BindDefinition{
+			ObjectMeta: metav1.ObjectMeta{Name: "bd-1", Namespace: "default", UID: "uid-1"},
+			Spec: authorizationv1alpha1.BindDefinitionSpec{
+				TargetName: "test-1",
+				Subjects: []rbacv1.Subject{
+					{Kind: "ServiceAccount", Name: "shared-sa", Namespace: "default"},
+				},
+			},
+		}
+		bd2 := &authorizationv1alpha1.BindDefinition{
+			ObjectMeta: metav1.ObjectMeta{Name: "bd-2", Namespace: "default", UID: "uid-2"},
+			Spec: authorizationv1alpha1.BindDefinitionSpec{
+				TargetName: "test-2",
+				Subjects: []rbacv1.Subject{
+					{Kind: "ServiceAccount", Name: "shared-sa", Namespace: "default"},
+				},
+			},
+		}
+		sa := &corev1.ServiceAccount{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "shared-sa",
+				Namespace: "default",
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion: authorizationv1alpha1.GroupVersion.String(),
+						Kind:       authorizationv1alpha1.BindDefinitionKind,
+						Name:       "bd-1",
+						UID:        "uid-1",
+						Controller: ptr.To(false),
+					},
+				},
+			},
+		}
+
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bd1, bd2).Build()
+		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
+
+		ref, err := r.isSAReferencedByOtherBindDefs(ctx, "bd-1", "shared-sa", "default", sa)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(ref).To(BeFalse())
+	})
+
+	t.Run("should return false when another owning BindDef is deleting", func(t *testing.T) {
+		g := NewWithT(t)
+
+		now := metav1.Now()
+		bd1 := &authorizationv1alpha1.BindDefinition{
+			ObjectMeta: metav1.ObjectMeta{Name: "bd-1", Namespace: "default", UID: "uid-1"},
+			Spec: authorizationv1alpha1.BindDefinitionSpec{
+				TargetName: "test-1",
+				Subjects: []rbacv1.Subject{
+					{Kind: "ServiceAccount", Name: "shared-sa", Namespace: "default"},
+				},
+			},
+		}
+		bd2 := &authorizationv1alpha1.BindDefinition{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "bd-2",
+				Namespace:         "default",
+				UID:               "uid-2",
+				DeletionTimestamp: &now,
+				Finalizers:        []string{authorizationv1alpha1.BindDefinitionFinalizer},
+			},
+			Spec: authorizationv1alpha1.BindDefinitionSpec{
+				TargetName: "test-2",
+				Subjects: []rbacv1.Subject{
+					{Kind: "ServiceAccount", Name: "shared-sa", Namespace: "default"},
+				},
+			},
+		}
+		sa := &corev1.ServiceAccount{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "shared-sa",
+				Namespace: "default",
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion: authorizationv1alpha1.GroupVersion.String(),
+						Kind:       authorizationv1alpha1.BindDefinitionKind,
+						Name:       "bd-2",
+						UID:        "uid-2",
+						Controller: ptr.To(false),
+					},
+				},
+			},
+		}
+
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bd1, bd2).Build()
+		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
+
+		ref, err := r.isSAReferencedByOtherBindDefs(ctx, "bd-1", "shared-sa", "default", sa)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(ref).To(BeFalse())
 	})
 
 	t.Run("should not count the deleting BindDef itself", func(t *testing.T) {
@@ -2157,8 +2269,9 @@ func TestIsSAReferencedByOtherBindDefs(t *testing.T) {
 
 		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bd).Build()
 		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
+		sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "my-sa", Namespace: "default"}}
 
-		ref, err := r.isSAReferencedByOtherBindDefs(ctx, "only-bd", "my-sa", "default")
+		ref, err := r.isSAReferencedByOtherBindDefs(ctx, "only-bd", "my-sa", "default", sa)
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(ref).To(BeFalse(), "should not count the BindDef being deleted")
 	})
@@ -4560,7 +4673,7 @@ func TestReconcileDeletePreservesSharedSA(t *testing.T) {
 		Status:     corev1.NamespaceStatus{Phase: corev1.NamespaceActive},
 	}
 
-	isController := true
+	isNotController := false
 
 	// BD-A: being deleted, references shared-sa
 	bdA := &authorizationv1alpha1.BindDefinition{
@@ -4599,7 +4712,8 @@ func TestReconcileDeletePreservesSharedSA(t *testing.T) {
 		},
 	}
 
-	// SA owned by BD-A
+	// SA owned by both BDs, matching the state after both have reconciled the
+	// shared ServiceAccount. A peer spec reference alone is not enough to retain it.
 	sa := &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "shared-sa",
@@ -4610,7 +4724,14 @@ func TestReconcileDeletePreservesSharedSA(t *testing.T) {
 					Kind:       "BindDefinition",
 					Name:       "bd-a",
 					UID:        "uid-a",
-					Controller: &isController,
+					Controller: &isNotController,
+				},
+				{
+					APIVersion: authorizationv1alpha1.GroupVersion.String(),
+					Kind:       "BindDefinition",
+					Name:       "bd-b",
+					UID:        "uid-b",
+					Controller: &isNotController,
 				},
 			},
 		},
@@ -4629,6 +4750,93 @@ func TestReconcileDeletePreservesSharedSA(t *testing.T) {
 	existingSA := &corev1.ServiceAccount{}
 	err = c.Get(ctx, types.NamespacedName{Name: "shared-sa", Namespace: "shared-ns"}, existingSA)
 	g.Expect(err).NotTo(HaveOccurred(), "SA should be preserved because another BD references it")
+	g.Expect(existingSA.OwnerReferences).To(ContainElement(WithTransform(func(ref metav1.OwnerReference) string {
+		return ref.Name
+	}, Equal("bd-b"))))
+	g.Expect(existingSA.OwnerReferences).NotTo(ContainElement(WithTransform(func(ref metav1.OwnerReference) string {
+		return ref.Name
+	}, Equal("bd-a"))))
+}
+
+// TestReconcileDeleteRemovesSAWhenPeerOnlyReferences verifies that deleting a
+// BindDefinition does not leave an unowned ServiceAccount behind just because
+// another BindDefinition has a matching subject spec.
+func TestReconcileDeleteRemovesSAWhenPeerOnlyReferences(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+
+	s := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(s)
+	_ = rbacv1.AddToScheme(s)
+	_ = corev1.AddToScheme(s)
+
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{Name: "shared-ns"},
+		Status:     corev1.NamespaceStatus{Phase: corev1.NamespaceActive},
+	}
+
+	isNotController := false
+
+	bdA := &authorizationv1alpha1.BindDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: authorizationv1alpha1.GroupVersion.String(),
+			Kind:       "BindDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "bd-a",
+			UID:        "uid-a",
+			Finalizers: []string{authorizationv1alpha1.BindDefinitionFinalizer},
+		},
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
+			TargetName: "shared-target",
+			Subjects: []rbacv1.Subject{
+				{Kind: "ServiceAccount", Name: "shared-sa", Namespace: "shared-ns"},
+			},
+		},
+	}
+
+	bdB := &authorizationv1alpha1.BindDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: authorizationv1alpha1.GroupVersion.String(),
+			Kind:       "BindDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{Name: "bd-b", UID: "uid-b"},
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
+			TargetName: "other-target",
+			Subjects: []rbacv1.Subject{
+				{Kind: "ServiceAccount", Name: "shared-sa", Namespace: "shared-ns"},
+			},
+		},
+	}
+
+	sa := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "shared-sa",
+			Namespace: "shared-ns",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: authorizationv1alpha1.GroupVersion.String(),
+					Kind:       "BindDefinition",
+					Name:       "bd-a",
+					UID:        "uid-a",
+					Controller: &isNotController,
+				},
+			},
+		},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(bdA, bdB, ns, sa).
+		WithStatusSubresource(bdA).
+		Build()
+	r := &BindDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
+
+	_, err := r.reconcileDelete(ctx, bdA)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	deletedSA := &corev1.ServiceAccount{}
+	err = c.Get(ctx, types.NamespacedName{Name: "shared-sa", Namespace: "shared-ns"}, deletedSA)
+	g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "SA should be deleted when the peer has not adopted it")
 }
 
 // TestReconcileDeleteRemovesSAWhenNotShared verifies that deleting a BD removes
