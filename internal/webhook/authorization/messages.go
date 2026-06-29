@@ -7,9 +7,9 @@ import "errors"
 // and reference in tests and documentation.
 
 const (
-	// DenialNoOIDCAttributes is returned by the namespace mutator when the user
+	// DenialNoOIDCAttributes is returned by the namespace mutator when the caller
 	// has no matching BindDefinition subjects and is not a bypass-eligible admin.
-	DenialNoOIDCAttributes = "The user does not have any OIDC attributes assigned to this cluster and the user is not a Kubernetes admin. Namespace creation is not allowed."
+	DenialNoOIDCAttributes = "No matching BindDefinition subjects found for this caller and the caller is not a cluster admin. Namespace operation is not allowed."
 
 	// DenialLabelModificationFmt is a format string returned by the namespace
 	// validator when a user attempts to modify or remove a controlled label.
