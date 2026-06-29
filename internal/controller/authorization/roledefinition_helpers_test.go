@@ -755,9 +755,18 @@ func TestHandleDeletion(t *testing.T) {
 			},
 		}
 
+		deleteCount := 0
 		c := fake.NewClientBuilder().WithScheme(s).
 			WithObjects(rd, cr).
 			WithStatusSubresource(rd).
+			WithInterceptorFuncs(interceptor.Funcs{
+				Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+					if _, ok := obj.(*rbacv1.ClusterRole); ok {
+						deleteCount++
+					}
+					return c.Delete(ctx, obj, opts...)
+				},
+			}).
 			Build()
 		r := &RoleDefinitionReconciler{client: c, scheme: s, recorder: events.NewFakeRecorder(10)}
 
@@ -768,6 +777,7 @@ func TestHandleDeletion(t *testing.T) {
 		g.Expect(err).NotTo(HaveOccurred())
 		// First call triggers delete and requeues
 		g.Expect(result.RequeueAfter).NotTo(BeZero())
+		g.Expect(deleteCount).To(Equal(1))
 	})
 
 	t.Run("wraps deletion and status update errors", func(t *testing.T) {
