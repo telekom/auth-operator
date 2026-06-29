@@ -1685,6 +1685,40 @@ func TestEnsureServiceAccounts(t *testing.T) {
 		g.Expect(*sa.AutomountServiceAccountToken).To(BeFalse())
 	})
 
+	t.Run("does not adopt SA when BindDefinition owner ref is spoofed", func(t *testing.T) {
+		g := NewWithT(t)
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bindDef, ns).Build()
+		r := &BindDefinitionReconciler{
+			client:   c,
+			scheme:   scheme,
+			recorder: events.NewFakeRecorder(10),
+		}
+
+		// Create a spoofed SA with a fake BindDefinition owner
+		spoofedSAAC := pkgssa.ServiceAccountWith("test-sa", "test-ns", nil, true).
+			WithOwnerReferences(pkgssa.OwnerReference(
+				authorizationv1alpha1.GroupVersion.String(), "BindDefinition",
+				"fake-bd", "fake-uid", false, false,
+			))
+		_, applyErr := pkgssa.PatchApplyServiceAccount(ctx, c, spoofedSAAC, "some-other-manager")
+		g.Expect(applyErr).NotTo(HaveOccurred())
+
+		// Run ensureServiceAccounts
+		generated, external, err := r.ensureServiceAccounts(ctx, bindDef)
+		g.Expect(err).NotTo(HaveOccurred())
+
+		// Should not generate, should mark as external
+		g.Expect(generated).To(BeEmpty())
+		g.Expect(external).To(ContainElement("test-ns/test-sa"))
+
+		// SA should not be adopted by our BindDefinition
+		sa := &corev1.ServiceAccount{}
+		err = c.Get(ctx, types.NamespacedName{Name: "test-sa", Namespace: "test-ns"}, sa)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(sa.OwnerReferences).To(HaveLen(1))
+		g.Expect(sa.OwnerReferences[0].UID).To(Equal(types.UID("fake-uid"))) // Still the spoofed one
+	})
+
 	t.Run("updates ServiceAccount when it exists and is owned", func(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bindDef, ns).Build()
 		r := &BindDefinitionReconciler{
@@ -5817,3 +5851,4 @@ func TestCalculateMissingRoleRefBackoff(t *testing.T) {
 		})
 	}
 }
+

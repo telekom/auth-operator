@@ -1384,7 +1384,7 @@ func (r *BindDefinitionReconciler) ensureServiceAccounts(
 		}
 
 		saExists := err == nil
-		if saExists && !isOwnedByBindDefinition(existing.OwnerReferences) {
+		if saExists && !r.isLegitimatelyOwnedByBindDefinition(ctx, existing, bindDef) {
 			// SA exists but is not owned by any BD — do not adopt it.
 			saRef := fmt.Sprintf("%s/%s", subject.Namespace, subject.Name)
 			externalSAs = append(externalSAs, saRef)
@@ -1812,4 +1812,41 @@ func (r *BindDefinitionReconciler) handleMissingTargetNamespaces(
 	}
 	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultDegraded).Inc()
 	return ctrl.Result{RequeueAfter: requeueAfter}, nil
+}
+
+
+// isLegitimatelyOwnedByBindDefinition checks whether the given ServiceAccount is
+// legitimately owned by a BindDefinition. It prevents spoofed OwnerReferences
+// from tricking the controller into adopting pre-existing ServiceAccounts.
+func (r *BindDefinitionReconciler) isLegitimatelyOwnedByBindDefinition(ctx context.Context, sa *corev1.ServiceAccount, currentBD *authorizationv1alpha1.BindDefinition) bool {
+	// If the current BindDefinition already owns it, it's legit
+	if hasOwnerRef(sa, currentBD) {
+		return true
+	}
+
+	for _, ownerRef := range sa.OwnerReferences {
+		if ownerRef.Kind == authorizationv1alpha1.BindDefinitionKind &&
+			ownerRef.APIVersion == authorizationv1alpha1.GroupVersion.String() &&
+			ownerRef.Name != "" &&
+			ownerRef.UID != "" {
+			
+			// 1. Check if the referenced BindDefinition actually exists with this UID
+			var bd authorizationv1alpha1.BindDefinition
+			if err := r.client.Get(ctx, types.NamespacedName{Name: ownerRef.Name}, &bd); err == nil {
+				if bd.UID == ownerRef.UID {
+					return true
+				}
+			}
+			
+			// 2. Fallback: check managed fields signal in case the cache is stale
+			// or the BD was just deleted but the SA hasn't been garbage collected.
+			expectedFieldOwner := pkgssa.FieldOwnerFor(ownerRef.Name, authorizationv1alpha1.BindDefinitionKind)
+			for _, field := range sa.ManagedFields {
+				if field.Manager == expectedFieldOwner && field.Operation == metav1.ManagedFieldsOperationApply {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
