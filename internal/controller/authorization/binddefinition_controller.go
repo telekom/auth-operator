@@ -512,42 +512,7 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		"roleBindings", len(bindDefinition.Spec.RoleBindings))
 	missingRoleRefCount, err := r.reconcileResources(ctx, bindDefinition, activeNamespaces, perRoleBindingNamespaces)
 	if err != nil {
-		if errors.Is(err, errRoleBindingRecreatePending) {
-			logger.Info("Requeuing after deleting RoleBinding before immutable roleRef change",
-				"bindDefinition", bindDefinition.Name,
-				"requeueAfter", roleBindingRecreateRequeueInterval)
-			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultDegraded).Inc()
-			return ctrl.Result{RequeueAfter: roleBindingRecreateRequeueInterval}, nil
-		}
-
-		// When the error policy blocks reconciliation due to missing roles,
-		// apply status (which includes the RoleRefsValid=False condition) and
-		// requeue with the short interval so we retry quickly once the roles
-		// appear. We do NOT use the default exponential backoff here.
-		if errors.Is(err, ErrMissingRoleRefs) {
-			logger.Info("Reconciliation blocked by missing-role-policy=error",
-				"bindDefinition", bindDefinition.Name,
-				"missingCount", missingRoleRefCount)
-			if pruneErr := r.pruneStaleBindingResources(ctx, bindDefinition, map[string]struct{}{}, map[string]struct{}{}, r.client); pruneErr != nil {
-				logger.Error(pruneErr, "Failed to prune BindDefinition bindings after missing-role-policy=error",
-					"bindDefinition", bindDefinition.Name)
-				r.markStalled(ctx, bindDefinition, pruneErr)
-				metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultError).Inc()
-				metrics.ReconcileErrors.WithLabelValues(metrics.ControllerBindDefinition, metrics.ErrorTypeAPI).Inc()
-				return ctrl.Result{}, fmt.Errorf("prune BindDefinition %s bindings after missing role refs: %w", bindDefinition.Name, pruneErr)
-			}
-			metrics.DeleteManagedResourceSeries(metrics.ControllerBindDefinition, bindDefinition.Name)
-			r.markStalled(ctx, bindDefinition, err)
-			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultDegraded).Inc()
-			return ctrl.Result{RequeueAfter: RoleRefRequeueInterval}, nil
-		}
-
-		logger.Error(err, "Error occurred in reconcileResources",
-			"bindDefinition", bindDefinition.Name)
-		r.markStalled(ctx, bindDefinition, err)
-		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultError).Inc()
-		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerBindDefinition, metrics.ErrorTypeAPI).Inc()
-		return ctrl.Result{}, err
+		return r.handleReconcileResourcesError(ctx, bindDefinition, missingRoleRefCount, err)
 	}
 	logger.V(2).Info("Resource reconciliation completed",
 		"bindDefinition", bindDefinition.Name,
@@ -618,6 +583,60 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		"requeueAfter", DefaultRequeueInterval)
 	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultSuccess).Inc()
 	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
+}
+
+func (r *BindDefinitionReconciler) handleReconcileResourcesError(
+	ctx context.Context,
+	bindDefinition *authorizationv1alpha1.BindDefinition,
+	missingRoleRefCount int,
+	err error,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	if errors.Is(err, errRoleBindingRecreatePending) {
+		logger.Info("Requeuing after deleting RoleBinding before immutable roleRef change",
+			"bindDefinition", bindDefinition.Name,
+			"requeueAfter", roleBindingRecreateRequeueInterval)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultDegraded).Inc()
+		return ctrl.Result{RequeueAfter: roleBindingRecreateRequeueInterval}, nil
+	}
+
+	if errors.Is(err, ErrMissingRoleRefs) {
+		return r.handleMissingRoleRefsError(ctx, bindDefinition, missingRoleRefCount, err)
+	}
+
+	logger.Error(err, "Error occurred in reconcileResources",
+		"bindDefinition", bindDefinition.Name)
+	r.markStalled(ctx, bindDefinition, err)
+	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultError).Inc()
+	metrics.ReconcileErrors.WithLabelValues(metrics.ControllerBindDefinition, metrics.ErrorTypeAPI).Inc()
+	return ctrl.Result{}, err
+}
+
+func (r *BindDefinitionReconciler) handleMissingRoleRefsError(
+	ctx context.Context,
+	bindDefinition *authorizationv1alpha1.BindDefinition,
+	missingRoleRefCount int,
+	err error,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	logger.Info("Reconciliation blocked by missing-role-policy=error",
+		"bindDefinition", bindDefinition.Name,
+		"missingCount", missingRoleRefCount)
+
+	if pruneErr := r.pruneStaleBindingResources(ctx, bindDefinition, map[string]struct{}{}, map[string]struct{}{}, r.client); pruneErr != nil {
+		logger.Error(pruneErr, "Failed to prune BindDefinition bindings after missing-role-policy=error",
+			"bindDefinition", bindDefinition.Name)
+		r.markStalled(ctx, bindDefinition, pruneErr)
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerBindDefinition, metrics.ErrorTypeAPI).Inc()
+		return ctrl.Result{}, fmt.Errorf("prune BindDefinition %s bindings after missing role refs: %w", bindDefinition.Name, pruneErr)
+	}
+
+	metrics.DeleteManagedResourceSeries(metrics.ControllerBindDefinition, bindDefinition.Name)
+	r.markStalled(ctx, bindDefinition, err)
+	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultDegraded).Inc()
+	return ctrl.Result{RequeueAfter: RoleRefRequeueInterval}, nil
 }
 
 // calculateMissingRoleRefBackoff returns an exponential backoff duration for
