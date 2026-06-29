@@ -459,6 +459,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdHandleMissingPolicy(
 	conditions.MarkFalse(rrd, authorizationv1alpha1.PolicyCompliantCondition, rrd.Generation,
 		authorizationv1alpha1.PolicyCompliantReasonPolicyNotFound, authorizationv1alpha1.PolicyCompliantMessagePolicyNotFound, rrd.Spec.PolicyRef.Name)
 	rrd.Status.PolicyViolations = []string{fmt.Sprintf("policy %q not found", rrd.Spec.PolicyRef.Name)}
+	metrics.SetPolicyViolationsActive(metrics.ControllerRestrictedRoleDefinition, rrd.Name, len(rrd.Status.PolicyViolations))
 	r.recorder.Eventf(rrd, nil, corev1.EventTypeWarning,
 		authorizationv1alpha1.EventReasonPolicyNotFound, authorizationv1alpha1.EventActionReconcile,
 		"Referenced RBACPolicy %q not found", rrd.Spec.PolicyRef.Name)
@@ -489,6 +490,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdHandleDeletingPolicy(
 	conditions.MarkFalse(rrd, authorizationv1alpha1.PolicyCompliantCondition, rrd.Generation,
 		authorizationv1alpha1.PolicyCompliantReasonPolicyDeleting, authorizationv1alpha1.PolicyCompliantMessagePolicyDeleting, rbacPolicy.Name)
 	rrd.Status.PolicyViolations = []string{fmt.Sprintf("policy %q is being deleted", rbacPolicy.Name)}
+	metrics.SetPolicyViolationsActive(metrics.ControllerRestrictedRoleDefinition, rrd.Name, len(rrd.Status.PolicyViolations))
 	r.recorder.Eventf(rrd, nil, corev1.EventTypeWarning,
 		authorizationv1alpha1.EventReasonPolicyViolation, authorizationv1alpha1.EventActionReconcile,
 		"Referenced RBACPolicy %q is being deleted", rbacPolicy.Name)

@@ -37,6 +37,7 @@ import (
 	"github.com/telekom/auth-operator/pkg/discovery"
 	"github.com/telekom/auth-operator/pkg/helpers"
 	"github.com/telekom/auth-operator/pkg/indexer"
+	"github.com/telekom/auth-operator/pkg/metrics"
 )
 
 // --- Standard Go tests (no envtest) ---
@@ -124,6 +125,10 @@ func TestRRD_Reconcile_PolicyNotFound(t *testing.T) {
 		},
 	}
 
+	metrics.DeletePolicyViolationContribution(metrics.ControllerRestrictedRoleDefinition, rrd.Name)
+	beforePolicyViolations := policyViolationsMetricValue(t, metrics.ControllerRestrictedRoleDefinition)
+	defer metrics.DeletePolicyViolationContribution(metrics.ControllerRestrictedRoleDefinition, rrd.Name)
+
 	r, c := newRRDTestReconcilerFake(rrd, ownedRole)
 	result, err := r.Reconcile(rrdCtx(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: "test-rrd"},
@@ -136,6 +141,7 @@ func TestRRD_Reconcile_PolicyNotFound(t *testing.T) {
 	g.Expect(updated.Status.PolicyViolations).To(HaveLen(1))
 	g.Expect(updated.Status.PolicyViolations[0]).To(ContainSubstring("missing-policy"))
 	g.Expect(conditions.IsStalled(&updated)).To(BeTrue())
+	g.Expect(policyViolationsMetricValue(t, metrics.ControllerRestrictedRoleDefinition)).To(Equal(beforePolicyViolations + 1))
 
 	var deletedRole rbacv1.ClusterRole
 	g.Expect(c.Get(rrdCtx(), types.NamespacedName{Name: ownedRole.Name}, &deletedRole)).NotTo(Succeed())
@@ -272,6 +278,10 @@ func TestRRD_Reconcile_DeletingPolicyIsUnavailable(t *testing.T) {
 		},
 	}
 
+	metrics.DeletePolicyViolationContribution(metrics.ControllerRestrictedRoleDefinition, rrd.Name)
+	beforePolicyViolations := policyViolationsMetricValue(t, metrics.ControllerRestrictedRoleDefinition)
+	defer metrics.DeletePolicyViolationContribution(metrics.ControllerRestrictedRoleDefinition, rrd.Name)
+
 	r, c := newRRDTestReconcilerFake(pol, rrd, ownedClusterRole)
 	result, err := r.Reconcile(rrdCtx(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: rrd.Name},
@@ -286,6 +296,7 @@ func TestRRD_Reconcile_DeletingPolicyIsUnavailable(t *testing.T) {
 	g.Expect(c.Get(rrdCtx(), types.NamespacedName{Name: rrd.Name}, &updated)).To(Succeed())
 	g.Expect(updated.Status.PolicyViolations).To(ConsistOf("policy \"deleting-policy\" is being deleted"))
 	g.Expect(conditions.IsStalled(&updated)).To(BeTrue())
+	g.Expect(policyViolationsMetricValue(t, metrics.ControllerRestrictedRoleDefinition)).To(Equal(beforePolicyViolations + 1))
 }
 
 func TestRRD_Reconcile_DeletingPolicyUsesControllerClientForRevocation(t *testing.T) {
