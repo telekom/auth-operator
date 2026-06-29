@@ -40,7 +40,7 @@ func TestValidateRoleDefinitionSpec(t *testing.T) {
 			rd: &RoleDefinition{
 				Spec: RoleDefinitionSpec{
 					TargetRole: DefinitionClusterRole,
-					TargetName: strings.Repeat("a", 64),
+					TargetName: strings.Repeat("a", 63) + "." + strings.Repeat("b", 63),
 				},
 			},
 		},

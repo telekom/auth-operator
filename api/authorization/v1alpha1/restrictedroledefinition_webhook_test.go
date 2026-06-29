@@ -77,7 +77,7 @@ var _ = Describe("RestrictedRoleDefinition Webhook", func() {
 				targetName string
 			}{
 				{name: "test-rrd-subdomain-dot", targetName: "team.alpha.reader"},
-				{name: "test-rrd-subdomain-long", targetName: strings.Repeat("a", 64)},
+				{name: "test-rrd-subdomain-long", targetName: strings.Repeat("a", 63) + "." + strings.Repeat("b", 63)},
 			} {
 				rrd := &RestrictedRoleDefinition{
 					ObjectMeta: metav1.ObjectMeta{
