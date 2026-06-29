@@ -12,7 +12,6 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
@@ -289,11 +288,13 @@ func namespaceLabelOrPhaseChangePredicate() predicate.Predicate {
 	}
 }
 
-// bindDefinitionMatchesNamespace reports whether a BindDefinition has any
-// roleBinding whose namespace selector or explicit namespace field could
-// match the given namespace. BindDefinitions with no roleBindings (cluster-only)
-// are skipped. During namespace termination, all BDs with roleBindings are
-// matched to ensure finalizer cleanup.
+// bindDefinitionMatchesNamespace reports whether a Namespace event can affect a
+// BindDefinition's desired RoleBindings. Selector-backed bindings must
+// reconcile on namespace label events even when the current labels no longer
+// match, because label removals need immediate stale RoleBinding cleanup.
+// BindDefinitions with no roleBindings (cluster-only) are skipped. During
+// namespace termination, all BDs with roleBindings are matched to ensure
+// finalizer cleanup.
 func bindDefinitionMatchesNamespace(bd *authorizationv1alpha1.BindDefinition, ns *corev1.Namespace) bool {
 	if len(bd.Spec.RoleBindings) == 0 {
 		// Cluster-only BD — no namespace-scoped work needed.
@@ -307,23 +308,16 @@ func bindDefinitionMatchesNamespace(bd *authorizationv1alpha1.BindDefinition, ns
 	}
 
 	for _, rb := range bd.Spec.RoleBindings {
-		// Explicit namespace match.
-		if rb.Namespace == ns.Name {
-			return true
+		// Explicit namespace takes precedence over selectors for the same binding.
+		if rb.Namespace != "" {
+			if rb.Namespace == ns.Name {
+				return true
+			}
+			continue
 		}
-		// Label selector match. An empty LabelSelector ({}) produces
-		// labels.Everything() and matches all namespaces, consistent with
-		// Kubernetes semantics and the BindDefinition validating webhook.
-		for _, sel := range rb.NamespaceSelector {
-			selector, err := metav1.LabelSelectorAsSelector(&sel)
-			if err != nil {
-				// Invalid selector — include this BD so reconciliation
-				// can report the error via conditions.
-				return true
-			}
-			if selector.Matches(labels.Set(ns.GetLabels())) {
-				return true
-			}
+		// Any selector can be affected by label changes on this namespace.
+		if len(rb.NamespaceSelector) > 0 {
+			return true
 		}
 	}
 	return false
