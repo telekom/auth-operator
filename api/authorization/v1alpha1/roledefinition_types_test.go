@@ -20,10 +20,9 @@ func safeAggregateFromSelectorLabels() map[string]string {
 	}
 }
 
-// NOTE: This test proves that validateRoleDefinitionSpec() processes fields correctly,
-// but it does NOT test that the CRD's OpenAPI schema itself rejects invalid patterns
-// (like the regex for TargetName). Schema validation (such as regex pattern matching)
-// is handled by the Kubernetes API server based on the generated OpenAPI schema.
+// NOTE: This test proves that validateRoleDefinitionSpec() processes fields correctly.
+// It does NOT test that the CRD's OpenAPI schema itself rejects invalid patterns.
+// Schema validation is handled by the Kubernetes API server.
 // A webhook or envtest would be needed to test schema rejections end-to-end.
 func TestValidateRoleDefinitionSpec(t *testing.T) {
 	tests := []struct {
