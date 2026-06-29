@@ -809,8 +809,10 @@ func TestBindDefinitionDriftDetection(t *testing.T) {
 		}
 
 		// Create ServiceAccount
-		_, _, err := r.ensureServiceAccounts(ctx, bindDef)
+		generatedSAs, _, err := r.ensureServiceAccounts(ctx, bindDef)
 		g.Expect(err).NotTo(HaveOccurred())
+		bindDef.Status.GeneratedServiceAccounts = generatedSAs
+		g.Expect(c.Update(ctx, bindDef)).NotTo(HaveOccurred())
 
 		// Verify SA created with automount=false
 		sa := &corev1.ServiceAccount{}
@@ -1720,8 +1722,57 @@ func TestEnsureServiceAccounts(t *testing.T) {
 		g.Expect(sa.OwnerReferences[0].UID).To(Equal(types.UID("fake-uid"))) // Still the spoofed one
 	})
 
+	t.Run("does not adopt SA when owner ref points to a real but unrelated BindDefinition", func(t *testing.T) {
+		g := NewWithT(t)
+
+		unrelatedBD := &authorizationv1alpha1.BindDefinition{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "unrelated-bd",
+				UID:  types.UID("real-uid-123"),
+			},
+			Status: authorizationv1alpha1.BindDefinitionStatus{
+				// Notice: It does NOT have this SA in GeneratedServiceAccounts
+			},
+		}
+
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bindDef, ns, unrelatedBD).Build()
+		r := &BindDefinitionReconciler{
+			client:   c,
+			scheme:   scheme,
+			recorder: events.NewFakeRecorder(10),
+		}
+
+		// Create a spoofed SA with an owner ref pointing to the unrelatedBD
+		spoofedSAAC := pkgssa.ServiceAccountWith("test-sa", "test-ns", nil, true).
+			WithOwnerReferences(pkgssa.OwnerReference(
+				authorizationv1alpha1.GroupVersion.String(), "BindDefinition",
+				"unrelated-bd", "real-uid-123", false, false,
+			))
+		_, applyErr := pkgssa.PatchApplyServiceAccount(ctx, c, spoofedSAAC, pkgssa.FieldOwnerFor("unrelated-bd", authorizationv1alpha1.BindDefinitionKind))
+		g.Expect(applyErr).NotTo(HaveOccurred())
+
+		// Run ensureServiceAccounts
+		generated, external, err := r.ensureServiceAccounts(ctx, bindDef)
+		g.Expect(err).NotTo(HaveOccurred())
+
+		// Should not generate, should mark as external
+		g.Expect(generated).To(BeEmpty())
+		g.Expect(external).To(ContainElement("test-ns/test-sa"))
+
+		// SA should not be adopted by our BindDefinition
+		sa := &corev1.ServiceAccount{}
+		err = c.Get(ctx, types.NamespacedName{Name: "test-sa", Namespace: "test-ns"}, sa)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(sa.OwnerReferences).To(HaveLen(1))
+		g.Expect(sa.OwnerReferences[0].UID).To(Equal(types.UID("real-uid-123"))) // Still the spoofed one
+	})
+
 	t.Run("updates ServiceAccount when it exists and is owned", func(t *testing.T) {
-		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bindDef, ns).Build()
+		ownedBindDef := bindDef.DeepCopy()
+		ownedBindDef.Status.GeneratedServiceAccounts = []rbacv1.Subject{
+			{Kind: authorizationv1alpha1.BindSubjectServiceAccount, Name: "test-sa", Namespace: "test-ns"},
+		}
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ownedBindDef, ns).Build()
 		r := &BindDefinitionReconciler{
 			client:   c,
 			scheme:   scheme,

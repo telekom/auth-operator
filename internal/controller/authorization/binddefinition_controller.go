@@ -1384,7 +1384,16 @@ func (r *BindDefinitionReconciler) ensureServiceAccounts(
 		}
 
 		saExists := err == nil
-		if saExists && !r.isLegitimatelyOwnedByBindDefinition(ctx, existing, bindDef) {
+		isLegit := false
+		if saExists {
+			var legitErr error
+			isLegit, legitErr = r.isLegitimatelyOwnedByBindDefinition(ctx, existing, bindDef)
+			if legitErr != nil {
+				return nil, nil, legitErr
+			}
+		}
+
+		if saExists && !isLegit {
 			// SA exists but is not owned by any BD — do not adopt it.
 			saRef := fmt.Sprintf("%s/%s", subject.Namespace, subject.Name)
 			externalSAs = append(externalSAs, saRef)
@@ -1817,28 +1826,29 @@ func (r *BindDefinitionReconciler) handleMissingTargetNamespaces(
 // isLegitimatelyOwnedByBindDefinition checks whether the given ServiceAccount is
 // legitimately owned by a BindDefinition. It prevents spoofed OwnerReferences
 // from tricking the controller into adopting pre-existing ServiceAccounts.
-func (r *BindDefinitionReconciler) isLegitimatelyOwnedByBindDefinition(ctx context.Context, sa *corev1.ServiceAccount, currentBD *authorizationv1alpha1.BindDefinition) bool {
-	// If the current BindDefinition already owns it, it's legit
-	if hasOwnerRef(sa, currentBD) {
-		return true
-	}
-
+func (r *BindDefinitionReconciler) isLegitimatelyOwnedByBindDefinition(ctx context.Context, sa *corev1.ServiceAccount, _ *authorizationv1alpha1.BindDefinition) (bool, error) {
 	for _, ownerRef := range sa.OwnerReferences {
 		if ownerRef.Kind == authorizationv1alpha1.BindDefinitionKind &&
 			ownerRef.APIVersion == authorizationv1alpha1.GroupVersion.String() &&
 			ownerRef.Name != "" &&
 			ownerRef.UID != "" {
 			var bd authorizationv1alpha1.BindDefinition
-			reader := r.reader
-			if reader == nil {
-				reader = r.client
+			if err := r.ownershipReader().Get(ctx, types.NamespacedName{Name: ownerRef.Name}, &bd); err != nil {
+				if apierrors.IsNotFound(err) {
+					continue
+				}
+				return false, fmt.Errorf("failed to get BindDefinition %s: %w", ownerRef.Name, err)
 			}
-			if err := reader.Get(ctx, types.NamespacedName{Name: ownerRef.Name}, &bd); err == nil {
-				if bd.UID == ownerRef.UID {
-					return true
+
+			if bd.UID == ownerRef.UID {
+				// Verify the BD actually generated and owns THIS SA
+				for _, genSA := range bd.Status.GeneratedServiceAccounts {
+					if genSA.Name == sa.Name && genSA.Namespace == sa.Namespace {
+						return true, nil
+					}
 				}
 			}
 		}
 	}
-	return false
+	return false, nil
 }

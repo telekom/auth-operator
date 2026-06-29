@@ -529,6 +529,10 @@ var _ = Describe("BindDefinition Helpers", func() {
 				},
 			}
 			Expect(k8sClient.Create(ctx, bindDef)).To(Succeed())
+			bindDef.Status.GeneratedServiceAccounts = []rbacv1.Subject{
+				{Kind: "ServiceAccount", Name: bindDef.Spec.Subjects[0].Name, Namespace: "default"},
+			}
+			Expect(k8sClient.Status().Update(ctx, bindDef)).To(Succeed())
 
 			// Fetch to get UID
 			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(bindDef), bindDef)).To(Succeed())
@@ -586,6 +590,10 @@ var _ = Describe("BindDefinition Helpers", func() {
 				},
 			}
 			Expect(k8sClient.Create(ctx, bindDef)).To(Succeed())
+			bindDef.Status.GeneratedServiceAccounts = []rbacv1.Subject{
+				{Kind: "ServiceAccount", Name: bindDef.Spec.Subjects[0].Name, Namespace: "default"},
+			}
+			Expect(k8sClient.Status().Update(ctx, bindDef)).To(Succeed())
 
 			// Fetch to get UID
 			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(bindDef), bindDef)).To(Succeed())
