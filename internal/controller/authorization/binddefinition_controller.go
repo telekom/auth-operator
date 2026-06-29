@@ -1477,7 +1477,9 @@ func (r *BindDefinitionReconciler) reconcileDelete(
 	}
 
 	// Clean up tracking annotations from external ServiceAccounts
-	r.cleanupExternalSAReferences(ctx, bindDefinition)
+	if err := r.cleanupExternalSAReferences(ctx, bindDefinition); err != nil {
+		return ctrl.Result{}, fmt.Errorf("cleanup external ServiceAccount references for BindDefinition %s: %w", bindDefinition.Name, err)
+	}
 
 	// Delete ServiceAccounts
 	if err := r.deleteSubjectServiceAccounts(ctx, bindDefinition); err != nil {
