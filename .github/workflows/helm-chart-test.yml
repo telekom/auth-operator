@@ -16,6 +16,7 @@ on:
       - 'hack/verify-helm-rbac.sh'
       - 'hack/verify-rendered-rbac.go'
       - '.github/workflows/helm-chart-test.yml'
+      - '.github/ct.yaml'
   pull_request:
     branches: [main]
     paths:
@@ -27,6 +28,7 @@ on:
       - 'hack/verify-helm-rbac.sh'
       - 'hack/verify-rendered-rbac.go'
       - '.github/workflows/helm-chart-test.yml'
+      - '.github/ct.yaml'
   workflow_dispatch:
 
 permissions:
