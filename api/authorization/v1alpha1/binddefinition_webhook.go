@@ -13,6 +13,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	utilvalidation "k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -103,6 +104,14 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 	logger := log.FromContext(ctx).WithName("binddefinition-webhook")
 	var warnings admission.Warnings
 
+	kind := schema.GroupKind{Group: GroupVersion.Group, Kind: BindDefinitionKind}
+	if err := validateBindDefinitionRequiredFields(kind, r); err != nil {
+		return warnings, err
+	}
+	if err := validateBindDefinitionSubjects(kind, r.Name, r.Spec.Subjects); err != nil {
+		return warnings, err
+	}
+
 	existingBD, err := v.findBindDefinitionTargetNameConflict(ctx, r)
 	if err != nil {
 		logger.Error(err, "failed to list BindDefinitions", "targetName", r.Spec.TargetName)
@@ -125,23 +134,9 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 			fmt.Sprintf("targetName %s is already in use by RestrictedBindDefinition %q", r.Spec.TargetName, existingRBD.Name))
 	}
 
-	// Validate subject Kinds are one of the RBAC-supported types.
-	for i, subject := range r.Spec.Subjects {
-		switch subject.Kind {
-		case rbacv1.UserKind, rbacv1.GroupKind, rbacv1.ServiceAccountKind:
-			// valid
-		default:
-			fldErr := field.NotSupported(field.NewPath("spec", "subjects").Index(i).Child("kind"), subject.Kind, supportedSubjectKinds)
-			return warnings, apierrors.NewInvalid(
-				schema.GroupKind{Group: GroupVersion.Group, Kind: "BindDefinition"},
-				r.Name, field.ErrorList{fldErr})
-		}
-	}
-
 	// Determine the missing-role policy from annotation.
 	policy := r.GetMissingRolePolicy()
 
-	kind := schema.GroupKind{Group: GroupVersion.Group, Kind: BindDefinitionKind}
 	if err := validateNamespaceBindings(kind, r.Name, r.Spec.RoleBindings); err != nil {
 		logger.Info("validation failed: invalid roleBindings", "name", r.Name, "error", err.Error())
 		return warnings, err
@@ -512,6 +507,66 @@ func validateNamespaceBindings(kind schema.GroupKind, name string, bindings []Na
 						err.Error())})
 			}
 		}
+	}
+	return nil
+}
+
+func validateBindDefinitionRequiredFields(kind schema.GroupKind, obj *BindDefinition) error {
+	var allErrs field.ErrorList
+	if obj.Spec.TargetName == "" {
+		allErrs = append(allErrs, field.Required(field.NewPath("spec", "targetName"), "targetName is required"))
+	}
+	if len(obj.Spec.Subjects) == 0 {
+		allErrs = append(allErrs, field.Required(field.NewPath("spec", "subjects"), "at least one subject must be specified"))
+	}
+	hasReferencedRole := len(obj.Spec.ClusterRoleBindings.ClusterRoleRefs) > 0
+	for _, binding := range obj.Spec.RoleBindings {
+		if len(binding.ClusterRoleRefs) > 0 || len(binding.RoleRefs) > 0 {
+			hasReferencedRole = true
+			break
+		}
+	}
+	if !hasReferencedRole {
+		allErrs = append(allErrs, field.Required(field.NewPath("spec"), "at least one binding with a referenced role must be specified"))
+	}
+	if len(allErrs) > 0 {
+		return apierrors.NewInvalid(kind, obj.Name, allErrs)
+	}
+	return nil
+}
+
+func validateBindDefinitionSubjects(kind schema.GroupKind, name string, subjects []rbacv1.Subject) error {
+	var allErrs field.ErrorList
+	for i, subject := range subjects {
+		subjectPath := field.NewPath("spec", "subjects").Index(i)
+		if subject.Name == "" {
+			allErrs = append(allErrs, field.Required(subjectPath.Child("name"), "subject name is required"))
+		}
+		switch subject.Kind {
+		case rbacv1.UserKind, rbacv1.GroupKind:
+			if subject.APIGroup != rbacv1.GroupName {
+				allErrs = append(allErrs, field.Invalid(subjectPath.Child("apiGroup"), subject.APIGroup, "User and Group subjects must use rbac.authorization.k8s.io"))
+			}
+			if subject.Namespace != "" {
+				allErrs = append(allErrs, field.Forbidden(subjectPath.Child("namespace"), "User and Group subjects must not set namespace"))
+			}
+		case rbacv1.ServiceAccountKind:
+			if subject.APIGroup != "" {
+				allErrs = append(allErrs, field.Forbidden(subjectPath.Child("apiGroup"), "ServiceAccount subjects must not set apiGroup"))
+			}
+			if subject.Namespace == "" {
+				allErrs = append(allErrs, field.Required(subjectPath.Child("namespace"), "ServiceAccount subjects must specify a namespace"))
+			} else {
+				for _, msg := range utilvalidation.IsDNS1123Label(subject.Namespace) {
+					allErrs = append(allErrs, field.Invalid(subjectPath.Child("namespace"), subject.Namespace, msg))
+				}
+			}
+		default:
+			allErrs = append(allErrs, field.NotSupported(subjectPath.Child("kind"), subject.Kind, supportedSubjectKinds))
+		}
+	}
+	if len(allErrs) > 0 {
+		return apierrors.NewInvalid(kind, name, allErrs)
 	}
 	return nil
 }

@@ -229,7 +229,12 @@ func TestUnrestrictedValidatorsUseReaderForAdmissionCriticalLookups(t *testing.T
 			),
 		}
 		bd := &BindDefinition{
-			ObjectMeta: metav1.ObjectMeta{Name: "plain-binding"},
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "plain-binding",
+				Annotations: map[string]string{
+					MissingRolePolicyAnnotation: string(MissingRolePolicyIgnore),
+				},
+			},
 			Spec: BindDefinitionSpec{
 				TargetName: "shared-binding-target",
 				Subjects: []rbacv1.Subject{{
@@ -237,6 +242,9 @@ func TestUnrestrictedValidatorsUseReaderForAdmissionCriticalLookups(t *testing.T
 					APIGroup: rbacv1.GroupName,
 					Name:     "alice",
 				}},
+				ClusterRoleBindings: ClusterBinding{
+					ClusterRoleRefs: []string{"view"},
+				},
 			},
 		}
 
