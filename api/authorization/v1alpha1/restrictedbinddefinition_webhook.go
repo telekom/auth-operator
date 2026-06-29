@@ -19,6 +19,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	utilvalidation "k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -219,24 +220,51 @@ func (v *RestrictedBindDefinitionValidator) validateRestrictedBindDefinitionSpec
 				fmt.Sprintf("%s (already used by BindDefinition %q)", obj.Spec.TargetName, existingBD.Name))})
 	}
 
-	// Validate subject Kinds are one of the RBAC-supported types.
-	for i, subject := range obj.Spec.Subjects {
-		switch subject.Kind {
-		case rbacv1.UserKind, rbacv1.GroupKind, rbacv1.ServiceAccountKind:
-			// valid
-		default:
-			fldErr := field.NotSupported(field.NewPath("spec", "subjects").Index(i).Child("kind"), subject.Kind, supportedSubjectKinds)
-			return apierrors.NewInvalid(
-				schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedBindDefinitionKind},
-				obj.Name, field.ErrorList{fldErr})
-		}
-	}
-
 	kind := schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedBindDefinitionKind}
+	if err := validateRestrictedBindDefinitionSubjects(kind, obj.Name, obj.Spec.Subjects); err != nil {
+		return err
+	}
 	if err := validateNamespaceBindings(kind, obj.Name, obj.Spec.RoleBindings); err != nil {
 		return err
 	}
 	return v.validateRoleBindingNameCollisions(ctx, kind, obj)
+}
+
+func validateRestrictedBindDefinitionSubjects(kind schema.GroupKind, name string, subjects []rbacv1.Subject) error {
+	restrictedSupportedSubjectKinds := []string{rbacv1.UserKind, rbacv1.GroupKind, rbacv1.ServiceAccountKind}
+	var allErrs field.ErrorList
+	for i, subject := range subjects {
+		subjectPath := field.NewPath("spec", "subjects").Index(i)
+		if subject.Name == "" {
+			allErrs = append(allErrs, field.Required(subjectPath.Child("name"), "subject name is required"))
+		}
+		switch subject.Kind {
+		case rbacv1.UserKind, rbacv1.GroupKind:
+			if subject.APIGroup != rbacv1.GroupName {
+				allErrs = append(allErrs, field.Invalid(subjectPath.Child("apiGroup"), subject.APIGroup, fmt.Sprintf("User and Group subjects must use %s", rbacv1.GroupName)))
+			}
+			if subject.Namespace != "" {
+				allErrs = append(allErrs, field.Forbidden(subjectPath.Child("namespace"), "User and Group subjects must not set namespace"))
+			}
+		case rbacv1.ServiceAccountKind:
+			if subject.APIGroup != "" {
+				allErrs = append(allErrs, field.Forbidden(subjectPath.Child("apiGroup"), "ServiceAccount subjects must not set apiGroup"))
+			}
+			if subject.Namespace == "" {
+				allErrs = append(allErrs, field.Required(subjectPath.Child("namespace"), "ServiceAccount subjects must specify a namespace"))
+			} else {
+				for _, msg := range utilvalidation.IsDNS1123Label(subject.Namespace) {
+					allErrs = append(allErrs, field.Invalid(subjectPath.Child("namespace"), subject.Namespace, msg))
+				}
+			}
+		default:
+			allErrs = append(allErrs, field.NotSupported(subjectPath.Child("kind"), subject.Kind, restrictedSupportedSubjectKinds))
+		}
+	}
+	if len(allErrs) > 0 {
+		return apierrors.NewInvalid(kind, name, allErrs)
+	}
+	return nil
 }
 
 //nolint:nilnil // A nil object with nil error means no conflicting targetName was found.

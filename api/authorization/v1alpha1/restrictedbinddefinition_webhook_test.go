@@ -282,6 +282,80 @@ var _ = Describe("RestrictedBindDefinition Webhook", func() {
 			Expect(err.Error()).To(ContainSubstring("ServiceAccount subjects must specify a namespace"))
 		})
 
+		It("Should deny malformed RBAC subject shapes", func() {
+			testCases := []struct {
+				name       string
+				objectName string
+				subject    rbacv1.Subject
+				want       []string
+			}{
+				{
+					name:       "empty subject name",
+					objectName: "test-rbd-subject-empty-name",
+					subject:    rbacv1.Subject{Kind: rbacv1.GroupKind, APIGroup: rbacv1.GroupName},
+					want:       []string{"spec.subjects[0].name", "subject name is required"},
+				},
+				{
+					name:       "user subject apiGroup",
+					objectName: "test-rbd-subject-user-apigroup",
+					subject:    rbacv1.Subject{Kind: rbacv1.UserKind, Name: "alice"},
+					want:       []string{"spec.subjects[0].apiGroup", rbacv1.GroupName},
+				},
+				{
+					name:       "user subject namespace",
+					objectName: "test-rbd-subject-user-namespace",
+					subject:    rbacv1.Subject{Kind: rbacv1.UserKind, APIGroup: rbacv1.GroupName, Name: "alice", Namespace: "default"},
+					want:       []string{"spec.subjects[0].namespace", "must not set namespace"},
+				},
+				{
+					name:       "group subject apiGroup",
+					objectName: "test-rbd-subject-group-apigroup",
+					subject:    rbacv1.Subject{Kind: rbacv1.GroupKind, Name: "team-a"},
+					want:       []string{"spec.subjects[0].apiGroup", rbacv1.GroupName},
+				},
+				{
+					name:       "serviceaccount subject apiGroup",
+					objectName: "test-rbd-subject-sa-apigroup",
+					subject:    rbacv1.Subject{Kind: rbacv1.ServiceAccountKind, APIGroup: rbacv1.GroupName, Name: "runner", Namespace: "default"},
+					want:       []string{"spec.subjects[0].apiGroup", "must not set apiGroup"},
+				},
+				{
+					name:       "serviceaccount subject invalid namespace",
+					objectName: "test-rbd-subject-sa-bad-ns",
+					subject:    rbacv1.Subject{Kind: rbacv1.ServiceAccountKind, Name: "runner", Namespace: "Bad/Name"},
+					want:       []string{"spec.subjects[0].namespace", "Bad/Name"},
+				},
+				{
+					name:       "unsupported subject kind",
+					objectName: "test-rbd-subject-bad-kind",
+					subject:    rbacv1.Subject{Kind: "Robot", Name: "bot"},
+					want:       []string{"spec.subjects[0].kind", "Unsupported value"},
+				},
+			}
+
+			for _, tc := range testCases {
+				By(tc.name)
+				rbd := &RestrictedBindDefinition{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: tc.objectName,
+					},
+					Spec: RestrictedBindDefinitionSpec{
+						PolicyRef:  RBACPolicyReference{Name: policy.Name},
+						TargetName: tc.objectName,
+						Subjects:   []rbacv1.Subject{tc.subject},
+						ClusterRoleBindings: &ClusterBinding{
+							ClusterRoleRefs: []string{"view"},
+						},
+					},
+				}
+				err := k8sClient.Create(ctx, rbd)
+				Expect(err).To(HaveOccurred())
+				for _, want := range tc.want {
+					Expect(err.Error()).To(ContainSubstring(want))
+				}
+			}
+		})
+
 		It("Should deny a RestrictedBindDefinition roleBinding with refs but no namespace target", func() {
 			rbd := &RestrictedBindDefinition{
 				ObjectMeta: metav1.ObjectMeta{
