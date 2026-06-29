@@ -44,8 +44,6 @@ Welcome to the auth-operator e2e test documentation!
 |----------|---------|-------------|
 | **[README.md](README.md)** | Complete guide | First time setup, comprehensive reference |
 | **[QUICKREF.md](QUICKREF.md)** | Cheat sheet | Quick commands, troubleshooting |
-| **[SUMMARY.md](SUMMARY.md)** | Quality assessment | Understanding test health |
-| **[IMPROVEMENTS.md](IMPROVEMENTS.md)** | Enhancement guide | Planning refactoring |
 
 ---
 
