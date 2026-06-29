@@ -5,6 +5,7 @@
 package v1alpha1
 
 import (
+	"strings"
 	"testing"
 
 	. "github.com/onsi/gomega"
@@ -31,6 +32,15 @@ func TestValidateRoleDefinitionSpec(t *testing.T) {
 				Spec: RoleDefinitionSpec{
 					TargetRole: DefinitionClusterRole,
 					TargetName: "test-role",
+				},
+			},
+		},
+		{
+			name: "valid ClusterRole with RFC1123 subdomain targetName",
+			rd: &RoleDefinition{
+				Spec: RoleDefinitionSpec{
+					TargetRole: DefinitionClusterRole,
+					TargetName: strings.Repeat("a", 64),
 				},
 			},
 		},
