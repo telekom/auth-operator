@@ -25,6 +25,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	authorizationv1alpha1ac "github.com/telekom/auth-operator/api/authorization/v1alpha1/applyconfiguration/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/helpers"
 	"github.com/telekom/auth-operator/pkg/indexer"
@@ -2757,11 +2758,25 @@ func TestMarkStalledBindDefinition(t *testing.T) {
 				TargetName: "stalled",
 				Subjects:   []rbacv1.Subject{{Kind: "Group", Name: "g", APIGroup: rbacv1.GroupName}},
 			},
+			Status: authorizationv1alpha1.BindDefinitionStatus{
+				BindReconciled: true,
+			},
 		}
 
+		var appliedBindReconciled *bool
 		c := fake.NewClientBuilder().WithScheme(scheme).
 			WithObjects(bindDef).
 			WithStatusSubresource(bindDef).
+			WithInterceptorFuncs(interceptor.Funcs{
+				SubResourceApply: func(_ context.Context, _ client.Client, subResourceName string, obj runtime.ApplyConfiguration, _ ...client.SubResourceApplyOption) error {
+					if subResourceName == "status" {
+						if ac, ok := obj.(*authorizationv1alpha1ac.BindDefinitionApplyConfiguration); ok && ac.Status != nil {
+							appliedBindReconciled = ac.Status.BindReconciled
+						}
+					}
+					return nil
+				},
+			}).
 			Build()
 		r := &BindDefinitionReconciler{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
 
@@ -2769,6 +2784,7 @@ func TestMarkStalledBindDefinition(t *testing.T) {
 
 		// Verify condition was set in-memory
 		g.Expect(bindDef.Status.ObservedGeneration).To(Equal(int64(3)))
+		g.Expect(bindDef.Status.BindReconciled).To(BeFalse())
 		stalledFound := false
 		for _, cond := range bindDef.Status.Conditions {
 			if cond.Type == "Stalled" {
@@ -2778,6 +2794,8 @@ func TestMarkStalledBindDefinition(t *testing.T) {
 			}
 		}
 		g.Expect(stalledFound).To(BeTrue(), "Stalled condition should be set")
+		g.Expect(appliedBindReconciled).NotTo(BeNil())
+		g.Expect(*appliedBindReconciled).To(BeFalse())
 	})
 }
 
