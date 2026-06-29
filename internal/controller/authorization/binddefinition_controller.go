@@ -75,6 +75,11 @@ const (
 	// self-heal within a reasonable window once they appear.
 	roleRefRequeueMax = 5 * time.Minute
 
+	// roleBindingRecreateRequeueInterval is used after deleting a RoleBinding
+	// whose immutable roleRef must change. The next pass should wait for the
+	// old binding to disappear before applying the replacement.
+	roleBindingRecreateRequeueInterval = 2 * time.Second
+
 	// maxActiveNamespaceNamesToLog bounds namespace-name logging to avoid
 	// oversized log lines that include large namespace sets.
 	maxActiveNamespaceNamesToLog = 20
@@ -98,6 +103,8 @@ func summarizeNamespaceNames(namespaces []corev1.Namespace, limit int) []string 
 
 // ErrMissingRoleRefs indicates that one or more referenced roles do not exist in the cluster.
 var ErrMissingRoleRefs = errors.New("missing role references")
+
+var errRoleBindingRecreatePending = errors.New("role binding recreate pending")
 
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions/status,verbs=get;update;patch
@@ -505,6 +512,14 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		"roleBindings", len(bindDefinition.Spec.RoleBindings))
 	missingRoleRefCount, err := r.reconcileResources(ctx, bindDefinition, activeNamespaces, perRoleBindingNamespaces)
 	if err != nil {
+		if errors.Is(err, errRoleBindingRecreatePending) {
+			logger.Info("Requeuing after deleting RoleBinding before immutable roleRef change",
+				"bindDefinition", bindDefinition.Name,
+				"requeueAfter", roleBindingRecreateRequeueInterval)
+			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerBindDefinition, metrics.ResultDegraded).Inc()
+			return ctrl.Result{RequeueAfter: roleBindingRecreateRequeueInterval}, nil
+		}
+
 		// When the error policy blocks reconciliation due to missing roles,
 		// apply status (which includes the RoleRefsValid=False condition) and
 		// requeue with the short interval so we retry quickly once the roles
@@ -900,11 +915,15 @@ func (r *BindDefinitionReconciler) ensureSingleRoleBinding(
 		Name:     roleRef,
 	}
 
-	if err := r.deleteOwnedRoleBindingOnRoleRefChange(ctx, bindDef, namespace, rbName, desiredRoleRef); err != nil {
+	roleRefChangePending, err := r.deleteOwnedRoleBindingOnRoleRefChange(ctx, bindDef, namespace, rbName, desiredRoleRef)
+	if err != nil {
 		conditions.MarkFalse(bindDef, authorizationv1alpha1.CreateCondition, bindDef.Generation,
 			authorizationv1alpha1.CreateReason, authorizationv1alpha1.CreateMessage)
 		r.applyStatusNonFatal(ctx, bindDef)
 		return err
+	}
+	if roleRefChangePending {
+		return errRoleBindingRecreatePending
 	}
 	if err := r.checkBindingOwnership(ctx, bindDef, "RoleBinding", rbName, namespace); err != nil {
 		conditions.MarkFalse(bindDef, authorizationv1alpha1.CreateCondition, bindDef.Generation,
@@ -998,19 +1017,25 @@ func (r *BindDefinitionReconciler) deleteOwnedRoleBindingOnRoleRefChange(
 	namespace string,
 	name string,
 	desiredRoleRef rbacv1.RoleRef,
-) error {
+) (bool, error) {
 	existing := &rbacv1.RoleBinding{}
 	if err := r.ownershipReader().Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, existing); err != nil {
-		return client.IgnoreNotFound(err)
+		return false, client.IgnoreNotFound(err)
 	}
 	if !hasControllerOwnerRef(existing, bindDef) || existing.RoleRef == desiredRoleRef {
-		return nil
+		return false, nil
 	}
-	if err := r.client.Delete(ctx, existing); err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("delete RoleBinding %s/%s before roleRef change: %w", namespace, name, err)
+	if !existing.DeletionTimestamp.IsZero() {
+		return true, nil
+	}
+	if err := r.client.Delete(ctx, existing); err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("delete RoleBinding %s/%s before roleRef change: %w", namespace, name, err)
 	}
 	metrics.RBACResourcesDeleted.WithLabelValues(metrics.ResourceRoleBinding).Inc()
-	return nil
+	return true, nil
 }
 
 func (r *BindDefinitionReconciler) ownershipReader() client.Reader {
