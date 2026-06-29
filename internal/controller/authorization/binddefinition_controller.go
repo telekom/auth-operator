@@ -1832,7 +1832,6 @@ func (r *BindDefinitionReconciler) isLegitimatelyOwnedByBindDefinition(ctx conte
 			ownerRef.APIVersion == authorizationv1alpha1.GroupVersion.String() &&
 			ownerRef.Name != "" &&
 			ownerRef.UID != "" {
-
 			var bd authorizationv1alpha1.BindDefinition
 			if err := r.ownershipReader().Get(ctx, types.NamespacedName{Name: ownerRef.Name}, &bd); err != nil {
 				if apierrors.IsNotFound(err) {
@@ -1844,14 +1843,10 @@ func (r *BindDefinitionReconciler) isLegitimatelyOwnedByBindDefinition(ctx conte
 			if bd.UID == ownerRef.UID {
 				// Verify the BD actually generated and owns THIS SA
 				for _, genSA := range bd.Status.GeneratedServiceAccounts {
-					fmt.Printf("DEBUG: checking status genSA=%s/%s against %s/%s\n", genSA.Namespace, genSA.Name, sa.Namespace, sa.Name)
 					if genSA.Name == sa.Name && genSA.Namespace == sa.Namespace {
-						fmt.Printf("DEBUG: returning true\n")
 						return true, nil
 					}
 				}
-				fmt.Printf("DEBUG: not found in status\n")
-
 			}
 		}
 	}
