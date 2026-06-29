@@ -2,6 +2,7 @@ package authorization
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -670,8 +671,9 @@ func parseReferencedBy(value string) []string {
 func (r *BindDefinitionReconciler) cleanupExternalSAReferences(
 	ctx context.Context,
 	bindDef *authorizationv1alpha1.BindDefinition,
-) {
+) error {
 	logger := log.FromContext(ctx)
+	var errs []error
 
 	// Clean up based on current status (which tracks what we've been referencing)
 	for _, saRef := range bindDef.Status.ExternalServiceAccounts {
@@ -683,9 +685,9 @@ func (r *BindDefinitionReconciler) cleanupExternalSAReferences(
 		}
 		ns, name := parts[0], parts[1]
 		if err := r.removeExternalSAReference(ctx, ns, name, bindDef.Name); err != nil {
-			// Log but don't fail - best effort cleanup
 			logger.Error(err, "Failed to remove tracking annotation from external ServiceAccount",
 				"serviceAccount", name, "namespace", ns)
+			errs = append(errs, err)
 		}
 	}
 
@@ -698,14 +700,24 @@ func (r *BindDefinitionReconciler) cleanupExternalSAReferences(
 		sa := &corev1.ServiceAccount{}
 		err := r.client.Get(ctx, types.NamespacedName{Name: subject.Name, Namespace: subject.Namespace}, sa)
 		if err != nil {
-			continue // SA doesn't exist or error - skip
+			if !apierrors.IsNotFound(err) {
+				logger.Error(err, "Failed to get external ServiceAccount during cleanup",
+					"serviceAccount", subject.Name, "namespace", subject.Namespace)
+				errs = append(errs, err)
+			}
+			continue
 		}
 		if !isOwnedByBindDefinition(sa.OwnerReferences) {
 			// External SA - remove our reference
 			if err := r.removeExternalSAReference(ctx, subject.Namespace, subject.Name, bindDef.Name); err != nil {
 				logger.Error(err, "Failed to remove tracking annotation from external ServiceAccount",
 					"serviceAccount", subject.Name, "namespace", subject.Namespace)
+				errs = append(errs, err)
 			}
 		}
 	}
+	if len(errs) > 0 {
+		return fmt.Errorf("failed to clean up tracking annotations from external ServiceAccounts: %w", errors.Join(errs...))
+	}
+	return nil
 }
