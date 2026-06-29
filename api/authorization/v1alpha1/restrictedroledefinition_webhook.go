@@ -190,6 +190,16 @@ func (v *RestrictedRoleDefinitionValidator) defaultPolicyReader() client.Reader 
 func (v *RestrictedRoleDefinitionValidator) validateRestrictedRoleDefinitionSpec(ctx context.Context, obj *RestrictedRoleDefinition) error {
 	logger := log.FromContext(ctx).WithName("restrictedroledefinition-webhook")
 
+	if err := validateRoleTargetFields(
+		schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedRoleDefinitionKind},
+		obj.Name,
+		obj.Spec.TargetRole,
+		obj.Spec.TargetName,
+		obj.Spec.TargetNamespace,
+	); err != nil {
+		return err
+	}
+
 	// Check duplicate targetName. Collisions are scoped by targetRole and,
 	// for Role targets, targetNamespace.
 	existingRRD, err := v.findRestrictedRoleDefinitionTargetNameConflict(ctx, obj)

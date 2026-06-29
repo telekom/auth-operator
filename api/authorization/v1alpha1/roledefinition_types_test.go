@@ -224,6 +224,34 @@ func TestValidateRoleDefinitionSpec(t *testing.T) {
 			wantErr: "matchExpressions are not allowed",
 		},
 		{
+			name: "reject missing target fields",
+			rd: &RoleDefinition{
+				Spec: RoleDefinitionSpec{},
+			},
+			wantErr: "targetRole is required",
+		},
+		{
+			name: "reject invalid targetRole",
+			rd: &RoleDefinition{
+				Spec: RoleDefinitionSpec{
+					TargetRole: "InvalidRole",
+					TargetName: "test-role",
+				},
+			},
+			wantErr: "supported values: \"ClusterRole\", \"Role\"",
+		},
+		{
+			name: "reject invalid targetNamespace",
+			rd: &RoleDefinition{
+				Spec: RoleDefinitionSpec{
+					TargetRole:      DefinitionNamespacedRole,
+					TargetName:      "test-role",
+					TargetNamespace: "Bad/Name",
+				},
+			},
+			wantErr: "spec.targetNamespace",
+		},
+		{
 			name: "reject Role without targetNamespace",
 			rd: &RoleDefinition{
 				Spec: RoleDefinitionSpec{
