@@ -25,7 +25,6 @@ import (
 	"github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/helpers"
 	"github.com/telekom/auth-operator/pkg/metrics"
-	"github.com/telekom/auth-operator/pkg/policy"
 	pkgssa "github.com/telekom/auth-operator/pkg/ssa"
 )
 
@@ -239,21 +238,11 @@ func (r *RoleDefinitionReconciler) removeRoleDefinitionFinalizer(
 
 // buildFinalRules builds the final policy rules from the filtered API resources.
 func (r *RoleDefinitionReconciler) buildFinalRules(
-	roleDefinition *authorizationv1alpha1.RoleDefinition,
 	rulesByAPIGroupAndVerbs map[string]*rbacv1.PolicyRule,
 ) []rbacv1.PolicyRule {
 	finalRules := make([]rbacv1.PolicyRule, 0, len(rulesByAPIGroupAndVerbs))
 	for _, rule := range rulesByAPIGroupAndVerbs {
 		finalRules = append(finalRules, *rule)
-	}
-
-	// Add non-resource URL rule for ClusterRoles only (namespaced Roles cannot have NonResourceURLs)
-	if roleDefinition.Spec.TargetRole == authorizationv1alpha1.DefinitionClusterRole &&
-		!policy.ContainsStringOrWildcard(roleDefinition.Spec.RestrictedVerbs, "get") {
-		finalRules = append(finalRules, rbacv1.PolicyRule{
-			NonResourceURLs: []string{"/metrics"},
-			Verbs:           []string{"get"},
-		})
 	}
 
 	// Sort resources within each rule for deterministic output
