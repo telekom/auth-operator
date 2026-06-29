@@ -4,8 +4,6 @@ This guide provides comprehensive information about running, debugging, and unde
 
 > **📚 Quick Links:**
 > - [Quick Reference Card](QUICKREF.md) - Commands and troubleshooting at a glance
-> - [Analysis Summary](SUMMARY.md) - Test suite assessment and recommendations
-> - [Improvement Guide](IMPROVEMENTS.md) - Detailed code improvement recommendations
 
 ## Table of Contents
 
