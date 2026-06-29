@@ -112,7 +112,7 @@ func (r *RoleDefinitionReconciler) SetupWithManager(ctx context.Context, mgr ctr
 	if r.reader == nil || r.reader == r.client {
 		r.reader = mgr.GetAPIReader()
 	}
-	
+
 	// Channel to watch for CRD events to trigger re-reconcile of all RoleDefinitions
 	crdTrackerChannel := source.Channel(r.trackerEvents, handler.EnqueueRequestsFromMapFunc(r.queueAll()))
 

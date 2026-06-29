@@ -1989,7 +1989,6 @@ func TestEnsureRole_TransitionFromRulesToAggregateFrom(t *testing.T) {
 	g.Expect(cr.AggregationRule.ClusterRoleSelectors).To(HaveLen(1))
 }
 
-
 func TestCheckRoleOwnership_StaleCacheUnownedExistingRoleRejected(t *testing.T) {
 	g := NewWithT(t)
 	ctx := context.Background()
@@ -2015,8 +2014,8 @@ func TestCheckRoleOwnership_StaleCacheUnownedExistingRoleRejected(t *testing.T) 
 					Kind:               "RoleDefinition",
 					Name:               "other-rd",
 					UID:                "other-uid",
-					Controller:         func() *bool { b := true; return &b }() ,
-					BlockOwnerDeletion: func() *bool { b := true; return &b }() ,
+					Controller:         func() *bool { b := true; return &b }(),
+					BlockOwnerDeletion: func() *bool { b := true; return &b }(),
 				},
 			},
 		},
@@ -2024,7 +2023,7 @@ func TestCheckRoleOwnership_StaleCacheUnownedExistingRoleRejected(t *testing.T) 
 
 	// Create a cached client that DOES NOT have the existingRole
 	cachedClient := fake.NewClientBuilder().WithScheme(scheme).Build()
-	
+
 	// Create a reader (API reader) that DOES have the existingRole
 	apiReader := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existingRole).Build()
 
