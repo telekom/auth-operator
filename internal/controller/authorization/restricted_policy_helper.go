@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+//
+// SPDX-License-Identifier: Apache-2.0
+
 package authorization
 
 import (
@@ -107,7 +111,7 @@ func evaluateRestrictedPolicy(
 	}
 
 	cfg.SetPolicyViolations(policy.ViolationStrings(violations))
-	return ctrl.Result{}, violations, false, nil
+	return ctrl.Result{}, violations, true, nil
 }
 
 func handleMissingRestrictedPolicy(
