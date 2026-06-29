@@ -59,6 +59,7 @@ const queueAllTimeout = 10 * time.Second
 // RoleDefinitionReconciler reconciles a RoleDefinition object.
 type RoleDefinitionReconciler struct {
 	client          client.Client
+	reader          client.Reader
 	scheme          *runtime.Scheme
 	recorder        events.EventRecorder
 	resourceTracker *discovery.ResourceTracker
@@ -91,6 +92,7 @@ func NewRoleDefinitionReconciler(cachedClient client.Client, scheme *runtime.Sch
 
 	r := &RoleDefinitionReconciler{
 		client:          cachedClient,
+		reader:          cachedClient,
 		scheme:          scheme,
 		recorder:        recorder,
 		resourceTracker: resourceTracker,
@@ -107,6 +109,10 @@ func NewRoleDefinitionReconciler(cachedClient client.Client, scheme *runtime.Sch
 // Used a predicate to ignore deletes of CRD, as this can be done in a regular
 // reconcile requeue and does not require immediate action from controller.
 func (r *RoleDefinitionReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, concurrency int) error {
+	if r.reader == nil || r.reader == r.client {
+		r.reader = mgr.GetAPIReader()
+	}
+
 	// Channel to watch for CRD events to trigger re-reconcile of all RoleDefinitions
 	crdTrackerChannel := source.Channel(r.trackerEvents, handler.EnqueueRequestsFromMapFunc(r.queueAll()))
 
