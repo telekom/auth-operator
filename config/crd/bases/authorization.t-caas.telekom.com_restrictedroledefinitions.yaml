@@ -256,6 +256,8 @@ spec:
                 description: |-
                   TargetNamespace is the target namespace for the Role.
                   Required when "TargetRole" is "Role".
+                maxLength: 63
+                pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?)?$
                 type: string
               targetRole:
                 description: |-
