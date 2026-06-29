@@ -1,6 +1,6 @@
 {{- if .Values.metrics.serviceMonitor.enabled }}
 {{- if not .Values.metrics.service.enabled }}
-{{- fail "metrics.service.enabled must be true when metrics.serviceMonitor.enabled is true" }}
+{{- fail "metrics.service.enabled=true is required when metrics.serviceMonitor.enabled=true" }}
 {{- end }}
 {{- if and .Values.metrics.auth.enabled (not .Values.metrics.serviceMonitor.tlsConfig.insecureSkipVerify) (empty .Values.metrics.serviceMonitor.tlsConfig.caFile) }}
 {{- fail "metrics.serviceMonitor.tlsConfig.caFile or metrics.serviceMonitor.tlsConfig.insecureSkipVerify=true is required when metrics.auth.enabled=true and metrics.serviceMonitor.enabled=true" }}
