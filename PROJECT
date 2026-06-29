@@ -33,9 +33,46 @@ resources:
     webhookVersion: v1
 - api:
     crdVersion: v1
+  controller: true
   domain: t-caas.telekom.com
   group: authorization
   kind: WebhookAuthorizer
   path: github.com/telekom/auth-operator/api/authorization/v1alpha1
   version: v1alpha1
+  webhooks:
+    validation: true
+    webhookVersion: v1
+- api:
+    crdVersion: v1
+  controller: true
+  domain: t-caas.telekom.com
+  group: authorization
+  kind: RBACPolicy
+  path: github.com/telekom/auth-operator/api/authorization/v1alpha1
+  version: v1alpha1
+  webhooks:
+    validation: true
+    webhookVersion: v1
+- api:
+    crdVersion: v1
+  controller: true
+  domain: t-caas.telekom.com
+  group: authorization
+  kind: RestrictedRoleDefinition
+  path: github.com/telekom/auth-operator/api/authorization/v1alpha1
+  version: v1alpha1
+  webhooks:
+    validation: true
+    webhookVersion: v1
+- api:
+    crdVersion: v1
+  controller: true
+  domain: t-caas.telekom.com
+  group: authorization
+  kind: RestrictedBindDefinition
+  path: github.com/telekom/auth-operator/api/authorization/v1alpha1
+  version: v1alpha1
+  webhooks:
+    validation: true
+    webhookVersion: v1
 version: "3"
