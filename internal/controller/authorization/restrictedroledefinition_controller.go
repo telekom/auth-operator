@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -718,8 +719,8 @@ func (r *RestrictedRoleDefinitionReconciler) rrdNormalizeOwnedClusterRoleMetadat
 
 	patched := existing.DeepCopy()
 	changed := false
-	if !stringMapEqual(patched.Labels, desiredLabels) {
-		patched.Labels = copyStringMap(desiredLabels)
+	if !maps.Equal(patched.Labels, desiredLabels) {
+		patched.Labels = maps.Clone(desiredLabels)
 		changed = true
 	}
 	if patched.AggregationRule != nil {
@@ -733,29 +734,6 @@ func (r *RestrictedRoleDefinitionReconciler) rrdNormalizeOwnedClusterRoleMetadat
 		return fmt.Errorf("normalize owned ClusterRole %s metadata: %w", name, err)
 	}
 	return nil
-}
-
-func stringMapEqual(a, b map[string]string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for key, value := range a {
-		if b[key] != value {
-			return false
-		}
-	}
-	return true
-}
-
-func copyStringMap(in map[string]string) map[string]string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
-	return out
 }
 
 func (r *RestrictedRoleDefinitionReconciler) rrdClearClusterRoleRulesIfEmpty(

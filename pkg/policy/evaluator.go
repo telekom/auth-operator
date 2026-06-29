@@ -7,6 +7,7 @@ package policy
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -399,7 +400,7 @@ func evaluateNamespaceLimits(ctx context.Context, limits *authorizationv1alpha1.
 func checkNamespace(ctx context.Context, limits *authorizationv1alpha1.NamespaceLimits, namespace, fieldPath string, lg LabelGetter) []Violation {
 	var violations []Violation
 
-	if containsString(limits.ForbiddenNamespaces, namespace) {
+	if slices.Contains(limits.ForbiddenNamespaces, namespace) {
 		violations = append(violations, Violation{
 			Field:   fieldPath,
 			Message: fmt.Sprintf("namespace %q is forbidden by policy", namespace),
@@ -443,7 +444,7 @@ func evaluateSubjectLimits(ctx context.Context, limits *authorizationv1alpha1.Su
 		fieldPath := fmt.Sprintf("spec.subjects[%d]", i)
 
 		// Check forbidden kinds (takes precedence).
-		if containsString(limits.ForbiddenKinds, s.Kind) {
+		if slices.Contains(limits.ForbiddenKinds, s.Kind) {
 			violations = append(violations, Violation{
 				Field:   fieldPath + ".kind",
 				Message: fmt.Sprintf("subject kind %q is forbidden by policy", s.Kind),
@@ -452,7 +453,7 @@ func evaluateSubjectLimits(ctx context.Context, limits *authorizationv1alpha1.Su
 		}
 
 		// Check allowed kinds (default-deny: empty list = nothing allowed).
-		if !containsString(limits.AllowedKinds, s.Kind) {
+		if !slices.Contains(limits.AllowedKinds, s.Kind) {
 			violations = append(violations, Violation{
 				Field:   fieldPath + ".kind",
 				Message: fmt.Sprintf("subject kind %q is not allowed by policy", s.Kind),
@@ -485,7 +486,7 @@ func checkNameMatchLimits(limits *authorizationv1alpha1.NameMatchLimits, name, f
 	var violations []Violation
 
 	// Forbidden checks (take precedence).
-	if containsString(limits.ForbiddenNames, name) {
+	if slices.Contains(limits.ForbiddenNames, name) {
 		violations = append(violations, Violation{
 			Field:   fieldPath,
 			Message: fmt.Sprintf("name %q is forbidden by policy", name),
@@ -507,7 +508,7 @@ func checkNameMatchLimits(limits *authorizationv1alpha1.NameMatchLimits, name, f
 	}
 
 	// Allowed checks (must match at least one if specified).
-	if len(limits.AllowedNames) > 0 && !containsString(limits.AllowedNames, name) {
+	if len(limits.AllowedNames) > 0 && !slices.Contains(limits.AllowedNames, name) {
 		violations = append(violations, Violation{
 			Field:   fieldPath,
 			Message: fmt.Sprintf("name %q is not in the allowed list", name),
@@ -539,7 +540,7 @@ func checkServiceAccountLimits(ctx context.Context, limits *authorizationv1alpha
 	var violations []Violation
 
 	// Check forbidden namespaces.
-	if containsString(limits.ForbiddenNamespaces, subject.Namespace) {
+	if slices.Contains(limits.ForbiddenNamespaces, subject.Namespace) {
 		violations = append(violations, Violation{
 			Field:   fieldPath + ".namespace",
 			Message: fmt.Sprintf("ServiceAccount namespace %q is forbidden by policy", subject.Namespace),

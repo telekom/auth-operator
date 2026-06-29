@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -254,7 +255,7 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 						verbStrs = append(verbStrs, v.(string))
 					}
 					// If not wildcard, check exclusions
-					if !containsString(verbStrs, "*") {
+					if !slices.Contains(verbStrs, "*") {
 						for _, excluded := range excludedVerbs {
 							Expect(verbStrs).NotTo(ContainElement(excluded),
 								"Verb %s should be excluded", excluded)
@@ -769,15 +770,6 @@ spec:
 })
 
 // Helper functions
-
-func containsString(slice []string, s string) bool {
-	for _, v := range slice {
-		if v == s {
-			return true
-		}
-	}
-	return false
-}
 
 // countResourceInClusterRole counts how many times a resource name appears
 // across all rules in the given ClusterRole. Returns -1 if the ClusterRole

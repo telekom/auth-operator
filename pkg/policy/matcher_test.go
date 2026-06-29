@@ -77,28 +77,6 @@ func TestMatchesAnyWildcard(t *testing.T) {
 	}
 }
 
-func TestContainsString(t *testing.T) {
-	tests := []struct {
-		name  string
-		slice []string
-		value string
-		want  bool
-	}{
-		{name: "found", slice: []string{"a", "b", "c"}, value: "b", want: true},
-		{name: "not found", slice: []string{"a", "b", "c"}, value: "d", want: false},
-		{name: "empty slice", slice: nil, value: "a", want: false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := containsString(tt.slice, tt.value)
-			if got != tt.want {
-				t.Errorf("containsString(%v, %q) = %v, want %v", tt.slice, tt.value, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestContainsStringOrWildcard(t *testing.T) {
 	tests := []struct {
 		name  string
