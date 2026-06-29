@@ -550,10 +550,8 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 			deniedPrincipals := spec["deniedPrincipals"].([]interface{})
 			Expect(deniedPrincipals).To(HaveLen(3), "Should have 3 deniedPrincipals")
 
-			// Verify namespaceSelector
-			nsSelector := spec["namespaceSelector"].(map[string]interface{})
-			Expect(nsSelector).To(HaveKey("matchLabels"))
-			Expect(nsSelector).To(HaveKey("matchExpressions"))
+			_, hasNamespaceSelector := spec["namespaceSelector"]
+			Expect(hasNamespaceSelector).To(BeFalse(), "NonResourceRules cannot be combined with namespaceSelector")
 		})
 	})
 

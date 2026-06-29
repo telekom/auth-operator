@@ -264,10 +264,30 @@ func TestValidateCreate_NonResourceRuleNoPaths(t *testing.T) {
 	}
 }
 
+func TestValidateCreate_RejectsNamespaceSelectorWithNonResourceRules(t *testing.T) {
+	v := &WebhookAuthorizerValidator{}
+	wa := newTestWebhookAuthorizer(func(wa *WebhookAuthorizer) {
+		wa.Spec.NonResourceRules = []authzv1.NonResourceRule{
+			{Verbs: []string{"get"}, NonResourceURLs: []string{"/logs"}},
+		}
+		wa.Spec.NamespaceSelector = metav1.LabelSelector{
+			MatchLabels: map[string]string{"environment": "prod"},
+		}
+	})
+	_, err := v.ValidateCreate(context.Background(), wa)
+	if err == nil {
+		t.Fatal("expected error for namespaceSelector with nonResourceRules")
+	}
+	if got := err.Error(); !containsAll(got, "namespaceSelector", "nonResourceRules", "no namespace") {
+		t.Fatalf("expected namespaceSelector/nonResourceRules error, got %q", got)
+	}
+}
+
 func TestValidateCreate_WarnsEmptyAllowedPrincipals(t *testing.T) {
 	v := &WebhookAuthorizerValidator{}
 	wa := newTestWebhookAuthorizer(func(wa *WebhookAuthorizer) {
 		wa.Spec.AllowedPrincipals = nil
+		wa.Spec.DeniedPrincipals = []Principal{{User: "blocked-user"}}
 	})
 	warnings, err := v.ValidateCreate(context.Background(), wa)
 	if err != nil {
@@ -275,6 +295,21 @@ func TestValidateCreate_WarnsEmptyAllowedPrincipals(t *testing.T) {
 	}
 	if !hasWarning(warnings, "spec.allowedPrincipals is empty", "no requests will be allowed") {
 		t.Errorf("expected empty-allowedPrincipals warning, got %v", warnings)
+	}
+}
+
+func TestValidateCreate_RejectsNoPrincipals(t *testing.T) {
+	v := &WebhookAuthorizerValidator{}
+	wa := newTestWebhookAuthorizer(func(wa *WebhookAuthorizer) {
+		wa.Spec.AllowedPrincipals = nil
+		wa.Spec.DeniedPrincipals = nil
+	})
+	_, err := v.ValidateCreate(context.Background(), wa)
+	if err == nil {
+		t.Fatal("expected error for missing principals")
+	}
+	if got := err.Error(); !containsAll(got, "allowedPrincipals", "deniedPrincipals", "non-empty") {
+		t.Fatalf("expected missing principals error, got %q", got)
 	}
 }
 

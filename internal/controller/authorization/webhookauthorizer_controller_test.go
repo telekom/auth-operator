@@ -11,8 +11,10 @@ import (
 	"testing"
 
 	"github.com/go-logr/logr"
+	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -48,6 +50,19 @@ func ctxWithLogger() context.Context {
 	return ctrllog.IntoContext(context.Background(), logr.Discard())
 }
 
+func validWebhookAuthorizerSpec() authorizationv1alpha1.WebhookAuthorizerSpec {
+	return authorizationv1alpha1.WebhookAuthorizerSpec{
+		ResourceRules: []authzv1.ResourceRule{{
+			Verbs:     []string{"get"},
+			APIGroups: []string{""},
+			Resources: []string{"pods"},
+		}},
+		AllowedPrincipals: []authorizationv1alpha1.Principal{{
+			User: "admin",
+		}},
+	}
+}
+
 func TestReconcile_NotFound(t *testing.T) {
 	g := gomega.NewWithT(t)
 	r, _ := newWATestReconciler()
@@ -65,7 +80,7 @@ func TestReconcile_EmptySelector_Ready(t *testing.T) {
 			Name:       "test-authorizer",
 			Generation: 1,
 		},
-		Spec: authorizationv1alpha1.WebhookAuthorizerSpec{},
+		Spec: validWebhookAuthorizerSpec(),
 	}
 
 	r, c := newWATestReconciler(wa)
@@ -98,11 +113,10 @@ func TestReconcile_WithMatchLabels_Ready(t *testing.T) {
 			Name:       "label-authorizer",
 			Generation: 2,
 		},
-		Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
-			NamespaceSelector: metav1.LabelSelector{
-				MatchLabels: map[string]string{"env": "dev"},
-			},
-		},
+		Spec: validWebhookAuthorizerSpec(),
+	}
+	wa.Spec.NamespaceSelector = metav1.LabelSelector{
+		MatchLabels: map[string]string{"env": "dev"},
 	}
 
 	r, c := newWATestReconciler(wa, ns)
@@ -132,15 +146,14 @@ func TestReconcile_WithMatchExpressions_Ready(t *testing.T) {
 			Name:       "expr-authorizer",
 			Generation: 1,
 		},
-		Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
-			NamespaceSelector: metav1.LabelSelector{
-				MatchExpressions: []metav1.LabelSelectorRequirement{
-					{
-						Key:      "tier",
-						Operator: metav1.LabelSelectorOpIn,
-						Values:   []string{"frontend", "backend"},
-					},
-				},
+		Spec: validWebhookAuthorizerSpec(),
+	}
+	wa.Spec.NamespaceSelector = metav1.LabelSelector{
+		MatchExpressions: []metav1.LabelSelectorRequirement{
+			{
+				Key:      "tier",
+				Operator: metav1.LabelSelectorOpIn,
+				Values:   []string{"frontend", "backend"},
 			},
 		},
 	}
@@ -165,15 +178,14 @@ func TestReconcile_InvalidMatchExpression_Stalled(t *testing.T) {
 			Name:       "bad-authorizer",
 			Generation: 1,
 		},
-		Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
-			NamespaceSelector: metav1.LabelSelector{
-				MatchExpressions: []metav1.LabelSelectorRequirement{
-					{
-						Key:      "tier",
-						Operator: metav1.LabelSelectorOperator("InvalidOp"),
-						Values:   []string{"frontend"},
-					},
-				},
+		Spec: validWebhookAuthorizerSpec(),
+	}
+	wa.Spec.NamespaceSelector = metav1.LabelSelector{
+		MatchExpressions: []metav1.LabelSelectorRequirement{
+			{
+				Key:      "tier",
+				Operator: metav1.LabelSelectorOperator("InvalidOp"),
+				Values:   []string{"frontend"},
 			},
 		},
 	}
@@ -195,6 +207,142 @@ func TestReconcile_InvalidMatchExpression_Stalled(t *testing.T) {
 	g.Expect(conditions.IsReady(&updated)).To(gomega.BeFalse())
 }
 
+func TestReconcile_InvalidSpec_Stalled(t *testing.T) {
+	tests := []struct {
+		name string
+		spec authorizationv1alpha1.WebhookAuthorizerSpec
+	}{
+		{
+			name: "empty spec",
+			spec: authorizationv1alpha1.WebhookAuthorizerSpec{},
+		},
+		{
+			name: "rules without principals",
+			spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+				ResourceRules: []authzv1.ResourceRule{{
+					Verbs:     []string{"get"},
+					APIGroups: []string{""},
+					Resources: []string{"pods"},
+				}},
+			},
+		},
+		{
+			name: "empty allowed principal",
+			spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+				ResourceRules: []authzv1.ResourceRule{{
+					Verbs:     []string{"get"},
+					APIGroups: []string{""},
+					Resources: []string{"pods"},
+				}},
+				AllowedPrincipals: []authorizationv1alpha1.Principal{{}},
+			},
+		},
+		{
+			name: "resource rule without verbs",
+			spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+				ResourceRules: []authzv1.ResourceRule{{
+					APIGroups: []string{""},
+					Resources: []string{"pods"},
+				}},
+				AllowedPrincipals: []authorizationv1alpha1.Principal{{User: "admin"}},
+			},
+		},
+		{
+			name: "non-resource rule without URLs",
+			spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+				NonResourceRules: []authzv1.NonResourceRule{{
+					Verbs: []string{"get"},
+				}},
+				AllowedPrincipals: []authorizationv1alpha1.Principal{{User: "admin"}},
+			},
+		},
+		{
+			name: "non-resource rule with namespace selector",
+			spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+				NonResourceRules: []authzv1.NonResourceRule{{
+					Verbs:           []string{"get"},
+					NonResourceURLs: []string{"/logs"},
+				}},
+				AllowedPrincipals: []authorizationv1alpha1.Principal{{User: "admin"}},
+				NamespaceSelector: metav1.LabelSelector{
+					MatchLabels: map[string]string{"environment": "prod"},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+
+			wa := &authorizationv1alpha1.WebhookAuthorizer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "invalid-authorizer",
+					Generation: 1,
+				},
+				Spec: tt.spec,
+			}
+
+			r, c := newWATestReconciler(wa)
+
+			result, err := r.Reconcile(ctxWithLogger(), reconcileRequest("invalid-authorizer"))
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			g.Expect(result).To(gomega.Equal(ctrl.Result{}))
+
+			var updated authorizationv1alpha1.WebhookAuthorizer
+			g.Expect(c.Get(ctxWithLogger(), types.NamespacedName{Name: "invalid-authorizer"}, &updated)).To(gomega.Succeed())
+			g.Expect(updated.Status.ObservedGeneration).To(gomega.Equal(int64(1)))
+			g.Expect(updated.Status.AuthorizerConfigured).To(gomega.BeFalse())
+			g.Expect(conditions.IsStalled(&updated)).To(gomega.BeTrue())
+			g.Expect(conditions.IsReady(&updated)).To(gomega.BeFalse())
+			g.Expect(conditions.IsReconciling(&updated)).To(gomega.BeFalse())
+		})
+	}
+}
+
+func TestReconcile_InvalidSpec_StalledWithoutReconcilingApply(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	wa := &authorizationv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "invalid-authorizer",
+			Generation: 1,
+		},
+		Spec: authorizationv1alpha1.WebhookAuthorizerSpec{},
+	}
+
+	scheme := newTestScheme()
+	statusApplyCount := 0
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(wa).
+		WithStatusSubresource(&authorizationv1alpha1.WebhookAuthorizer{}).
+		WithInterceptorFuncs(interceptor.Funcs{
+			SubResourceApply: func(ctx context.Context, cl client.Client, subResourceName string, obj runtime.ApplyConfiguration, opts ...client.SubResourceApplyOption) error {
+				if subResourceName == "status" {
+					statusApplyCount++
+				}
+				return cl.SubResource(subResourceName).Apply(ctx, obj, opts...)
+			},
+		}).
+		Build()
+	recorder := events.NewFakeRecorder(10)
+	r := NewWebhookAuthorizerReconciler(c, scheme, recorder)
+
+	result, err := r.Reconcile(ctxWithLogger(), reconcileRequest("invalid-authorizer"))
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	g.Expect(result).To(gomega.Equal(ctrl.Result{}))
+	g.Expect(statusApplyCount).To(gomega.Equal(1), "invalid specs should skip the intermediate Reconciling status apply")
+
+	var updated authorizationv1alpha1.WebhookAuthorizer
+	g.Expect(c.Get(ctxWithLogger(), types.NamespacedName{Name: "invalid-authorizer"}, &updated)).To(gomega.Succeed())
+	g.Expect(updated.Status.ObservedGeneration).To(gomega.Equal(int64(1)))
+	g.Expect(updated.Status.AuthorizerConfigured).To(gomega.BeFalse())
+	g.Expect(conditions.IsStalled(&updated)).To(gomega.BeTrue())
+	g.Expect(conditions.IsReady(&updated)).To(gomega.BeFalse())
+	g.Expect(conditions.IsReconciling(&updated)).To(gomega.BeFalse())
+}
+
 func TestReconcile_GenerationUpdate(t *testing.T) {
 	g := gomega.NewWithT(t)
 
@@ -203,7 +351,7 @@ func TestReconcile_GenerationUpdate(t *testing.T) {
 			Name:       "gen-authorizer",
 			Generation: 5,
 		},
-		Spec: authorizationv1alpha1.WebhookAuthorizerSpec{},
+		Spec: validWebhookAuthorizerSpec(),
 	}
 
 	r, c := newWATestReconciler(wa)
@@ -226,6 +374,11 @@ func TestReconcile_WithPrincipals_Ready(t *testing.T) {
 			Generation: 1,
 		},
 		Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+			ResourceRules: []authzv1.ResourceRule{{
+				Verbs:     []string{"get"},
+				APIGroups: []string{""},
+				Resources: []string{"pods"},
+			}},
 			AllowedPrincipals: []authorizationv1alpha1.Principal{
 				{User: "admin", Groups: []string{"system:masters"}},
 			},
@@ -256,11 +409,10 @@ func TestReconcile_NoMatchingNamespaces_StillReady(t *testing.T) {
 			Name:       "no-match-authorizer",
 			Generation: 1,
 		},
-		Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
-			NamespaceSelector: metav1.LabelSelector{
-				MatchLabels: map[string]string{"env": "staging"},
-			},
-		},
+		Spec: validWebhookAuthorizerSpec(),
+	}
+	wa.Spec.NamespaceSelector = metav1.LabelSelector{
+		MatchLabels: map[string]string{"env": "staging"},
 	}
 
 	r, c := newWATestReconciler(wa)
@@ -374,11 +526,10 @@ func TestReconcile_TransientNamespaceListError_ReturnsError(t *testing.T) {
 			Name:       "transient-authorizer",
 			Generation: 1,
 		},
-		Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
-			NamespaceSelector: metav1.LabelSelector{
-				MatchLabels: map[string]string{"env": "prod"},
-			},
-		},
+		Spec: validWebhookAuthorizerSpec(),
+	}
+	wa.Spec.NamespaceSelector = metav1.LabelSelector{
+		MatchLabels: map[string]string{"env": "prod"},
 	}
 
 	scheme := newTestScheme()

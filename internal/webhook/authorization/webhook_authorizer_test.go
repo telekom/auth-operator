@@ -27,6 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	authzv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	"github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/indexer"
 	pkgmetrics "github.com/telekom/auth-operator/pkg/metrics"
 )
@@ -2372,5 +2373,86 @@ func TestServeHTTP_NamespaceLabelCacheError_ReturnsDeniedSAR(t *testing.T) {
 	}
 	if resp.Status.Reason != "internal evaluation error" {
 		t.Fatalf("expected generic internal evaluation reason, got %q", resp.Status.Reason)
+	}
+}
+
+func TestServeHTTP_SkipsUnconfiguredAuthorizers(t *testing.T) {
+	scheme := newScheme(t)
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "team-a",
+			Labels: map[string]string{"env": "prod"},
+		},
+	}
+	stalled := &authzv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{Name: "aaa-stalled", Generation: 1},
+		Spec: authzv1alpha1.WebhookAuthorizerSpec{
+			NamespaceSelector: metav1.LabelSelector{
+				MatchExpressions: []metav1.LabelSelectorRequirement{{
+					Key:      "env",
+					Operator: metav1.LabelSelectorOpIn,
+				}},
+			},
+			AllowedPrincipals: []authzv1alpha1.Principal{{User: "alice"}},
+			ResourceRules: []authzv1.ResourceRule{
+				{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods"}},
+			},
+		},
+	}
+	conditions.MarkStalled(stalled, stalled.Generation,
+		authzv1alpha1.StalledReasonError, authzv1alpha1.StalledMessageError)
+	stalled.Status.ObservedGeneration = stalled.Generation
+	stalled.Status.AuthorizerConfigured = false
+
+	configured := &authzv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{Name: "zzz-configured", Generation: 1},
+		Spec: authzv1alpha1.WebhookAuthorizerSpec{
+			NamespaceSelector: metav1.LabelSelector{MatchLabels: map[string]string{"env": "prod"}},
+			AllowedPrincipals: []authzv1alpha1.Principal{{User: "alice"}},
+			ResourceRules: []authzv1.ResourceRule{
+				{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods"}},
+			},
+		},
+	}
+	conditions.MarkReady(configured, configured.Generation,
+		authzv1alpha1.ReadyReasonReconciled, authzv1alpha1.ReadyMessageReconciled)
+	configured.Status.ObservedGeneration = configured.Generation
+	configured.Status.AuthorizerConfigured = true
+
+	handler := &Authorizer{
+		Client: newIndexedClient(scheme, ns, stalled, configured),
+		Log:    logr.Discard(),
+	}
+
+	pkgmetrics.AuthorizerActiveRules.Set(0)
+	sar := authzv1.SubjectAccessReview{
+		Spec: authzv1.SubjectAccessReviewSpec{
+			User: "alice",
+			ResourceAttributes: &authzv1.ResourceAttributes{
+				Namespace: "team-a",
+				Verb:      "get",
+				Resource:  "pods",
+			},
+		},
+	}
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(marshalSAR(t, sar)))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d; body: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+	var resp authzv1.SubjectAccessReview
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if !resp.Status.Allowed {
+		t.Fatalf("expected request to be allowed by configured authorizer, got %+v", resp.Status)
+	}
+	if resp.Status.Reason != "Access granted by WebhookAuthorizer" {
+		t.Fatalf("expected public allow reason, got %q", resp.Status.Reason)
+	}
+	if activeRules := testutil.ToFloat64(pkgmetrics.AuthorizerActiveRules); activeRules != 1 {
+		t.Fatalf("expected AuthorizerActiveRules to count only configured rules, got %v", activeRules)
 	}
 }
