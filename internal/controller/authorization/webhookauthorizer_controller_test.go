@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/go-logr/logr"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -25,6 +26,7 @@ import (
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/pkg/conditions"
+	"github.com/telekom/auth-operator/pkg/metrics"
 
 	"github.com/onsi/gomega"
 )
@@ -72,6 +74,29 @@ func TestReconcile_NotFound(t *testing.T) {
 	g.Expect(result).To(gomega.Equal(ctrl.Result{}))
 }
 
+func TestReconcile_NotFoundRefreshesActiveRulesGauge(t *testing.T) {
+	g := gomega.NewWithT(t)
+	remaining := &authorizationv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{Name: "remaining-authorizer"},
+		Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+			ResourceRules: []authzv1.ResourceRule{
+				{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods"}},
+			},
+			NonResourceRules: []authzv1.NonResourceRule{
+				{Verbs: []string{"get"}, NonResourceURLs: []string{"/healthz"}},
+			},
+		},
+	}
+	r, _ := newWATestReconciler(remaining)
+	metrics.AuthorizerActiveRules.Set(99)
+
+	result, err := r.Reconcile(ctxWithLogger(), reconcileRequest("deleted-authorizer"))
+
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	g.Expect(result).To(gomega.Equal(ctrl.Result{}))
+	g.Expect(testutil.ToFloat64(metrics.AuthorizerActiveRules)).To(gomega.Equal(float64(2)))
+}
+
 func TestReconcile_EmptySelector_Ready(t *testing.T) {
 	g := gomega.NewWithT(t)
 
@@ -97,6 +122,129 @@ func TestReconcile_EmptySelector_Ready(t *testing.T) {
 	g.Expect(conditions.IsReady(&updated)).To(gomega.BeTrue())
 	g.Expect(conditions.IsStalled(&updated)).To(gomega.BeFalse())
 	g.Expect(conditions.IsReconciling(&updated)).To(gomega.BeFalse())
+}
+
+func TestReconcile_RefreshesActiveRulesGauge(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	wa := &authorizationv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "gauge-authorizer",
+			Generation: 1,
+		},
+		Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+			ResourceRules: []authzv1.ResourceRule{
+				{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods"}},
+				{Verbs: []string{"list"}, APIGroups: []string{""}, Resources: []string{"pods"}},
+			},
+			AllowedPrincipals: []authorizationv1alpha1.Principal{{User: "admin"}},
+		},
+	}
+	other := &authorizationv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "other-gauge-authorizer",
+			Generation: 1,
+		},
+		Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+			NonResourceRules: []authzv1.NonResourceRule{
+				{Verbs: []string{"get"}, NonResourceURLs: []string{"/readyz"}},
+			},
+		},
+	}
+
+	r, _ := newWATestReconciler(wa, other)
+	metrics.AuthorizerActiveRules.Set(99)
+
+	result, err := r.Reconcile(ctxWithLogger(), reconcileRequest("gauge-authorizer"))
+
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	g.Expect(result.RequeueAfter).To(gomega.Equal(DefaultRequeueInterval))
+	g.Expect(testutil.ToFloat64(metrics.AuthorizerActiveRules)).To(gomega.Equal(float64(3)))
+}
+
+func TestReconcile_ActiveRulesGaugeExcludesStalledAuthorizersAfterReconcile(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	ready := &authorizationv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "ready-authorizer",
+			Generation: 1,
+		},
+		Spec: validWebhookAuthorizerSpec(),
+	}
+	conditions.MarkReady(ready, ready.Generation,
+		authorizationv1alpha1.ReadyReasonReconciled, authorizationv1alpha1.ReadyMessageReconciled)
+	ready.Status.ObservedGeneration = ready.Generation
+	ready.Status.AuthorizerConfigured = true
+
+	invalid := &authorizationv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "invalid-gauge-authorizer",
+			Generation: 1,
+		},
+		Spec: authorizationv1alpha1.WebhookAuthorizerSpec{
+			ResourceRules: []authzv1.ResourceRule{{
+				Verbs:     []string{"get"},
+				APIGroups: []string{""},
+				Resources: []string{"pods"},
+			}},
+		},
+	}
+
+	r, c := newWATestReconciler(ready, invalid)
+	metrics.AuthorizerActiveRules.Set(99)
+
+	result, err := r.Reconcile(ctxWithLogger(), reconcileRequest("invalid-gauge-authorizer"))
+
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	g.Expect(result).To(gomega.Equal(ctrl.Result{}))
+	g.Expect(testutil.ToFloat64(metrics.AuthorizerActiveRules)).To(gomega.Equal(float64(1)))
+
+	var updated authorizationv1alpha1.WebhookAuthorizer
+	g.Expect(c.Get(ctxWithLogger(), types.NamespacedName{Name: "invalid-gauge-authorizer"}, &updated)).To(gomega.Succeed())
+	g.Expect(updated.Status.AuthorizerConfigured).To(gomega.BeFalse())
+	g.Expect(conditions.IsStalled(&updated)).To(gomega.BeTrue())
+	g.Expect(conditions.IsReady(&updated)).To(gomega.BeFalse())
+}
+
+func TestReconcile_ActiveRulesGaugeRefreshErrorIsBestEffort(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	wa := &authorizationv1alpha1.WebhookAuthorizer{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "best-effort-authorizer",
+			Generation: 1,
+		},
+		Spec: validWebhookAuthorizerSpec(),
+	}
+
+	scheme := newTestScheme()
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(wa).
+		WithStatusSubresource(&authorizationv1alpha1.WebhookAuthorizer{}).
+		WithInterceptorFuncs(interceptor.Funcs{
+			List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+				if _, ok := list.(*authorizationv1alpha1.WebhookAuthorizerList); ok {
+					return errors.New("simulated metric list error")
+				}
+				return cl.List(ctx, list, opts...)
+			},
+		}).
+		Build()
+	recorder := events.NewFakeRecorder(10)
+	r := NewWebhookAuthorizerReconciler(c, scheme, recorder)
+
+	result, err := r.Reconcile(ctxWithLogger(), reconcileRequest("best-effort-authorizer"))
+
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	g.Expect(result.RequeueAfter).To(gomega.Equal(DefaultRequeueInterval))
+
+	var updated authorizationv1alpha1.WebhookAuthorizer
+	g.Expect(c.Get(ctxWithLogger(), types.NamespacedName{Name: "best-effort-authorizer"}, &updated)).To(gomega.Succeed())
+	g.Expect(updated.Status.ObservedGeneration).To(gomega.Equal(int64(1)))
+	g.Expect(updated.Status.AuthorizerConfigured).To(gomega.BeTrue())
+	g.Expect(conditions.IsReady(&updated)).To(gomega.BeTrue())
 }
 
 func TestReconcile_WithMatchLabels_Ready(t *testing.T) {
