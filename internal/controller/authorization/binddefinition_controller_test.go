@@ -1724,7 +1724,7 @@ func TestEnsureServiceAccounts(t *testing.T) {
 
 	t.Run("does not adopt SA when owner ref points to a real but unrelated BindDefinition", func(t *testing.T) {
 		g := NewWithT(t)
-		
+
 		unrelatedBD := &authorizationv1alpha1.BindDefinition{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "unrelated-bd",
