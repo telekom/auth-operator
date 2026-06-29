@@ -717,7 +717,7 @@ func (r *BindDefinitionReconciler) cleanupExternalSAReferences(
 		}
 	}
 	if len(errs) > 0 {
-		return fmt.Errorf("failed to clean up tracking annotations from external ServiceAccounts: %v", errors.Join(errs...))
+		return fmt.Errorf("failed to clean up tracking annotations from external ServiceAccounts: %w", errors.Join(errs...))
 	}
 	return nil
 }
