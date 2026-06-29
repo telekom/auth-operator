@@ -67,7 +67,6 @@ rules:
   - get
   - list
   - patch
-  - update
   - watch
 - apiGroups:
   - authorization.t-caas.telekom.com

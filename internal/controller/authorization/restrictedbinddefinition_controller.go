@@ -45,7 +45,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=restrictedbinddefinitions,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=restrictedbinddefinitions,verbs=get;list;watch;patch
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=restrictedbinddefinitions/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=restrictedbinddefinitions/finalizers,verbs=update
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=rbacpolicies,verbs=get;list;watch
