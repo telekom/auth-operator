@@ -244,6 +244,24 @@ func policyViolationsMetricValue(t *testing.T, controller string) float64 {
 	return readGaugeValue(t, gauge)
 }
 
+func readCounterValue(t *testing.T, counter prometheus.Counter) float64 {
+	t.Helper()
+	metric := &dto.Metric{}
+	if err := counter.(prometheus.Metric).Write(metric); err != nil {
+		t.Fatalf("write counter: %v", err)
+	}
+	return metric.GetCounter().GetValue()
+}
+
+func reconcileErrorCount(t *testing.T, controller string) float64 {
+	t.Helper()
+	counter, err := metrics.ReconcileErrors.GetMetricWithLabelValues(controller, metrics.ErrorTypeAPI)
+	if err != nil {
+		t.Fatalf("get reconcile error counter: %v", err)
+	}
+	return readCounterValue(t, counter)
+}
+
 func rbdPolicyWithDefaultAllowances(policy *authorizationv1alpha1.RBACPolicy) *authorizationv1alpha1.RBACPolicy {
 	if policy.Spec.BindingLimits == nil {
 		policy.Spec.BindingLimits = &authorizationv1alpha1.BindingLimits{AllowClusterRoleBindings: true}
@@ -279,6 +297,85 @@ func TestRBD_Reconcile_NotFound(t *testing.T) {
 	})
 	g.Expect(err).NotTo(gomega.HaveOccurred())
 	g.Expect(result).To(gomega.Equal(ctrl.Result{}))
+}
+
+func TestRBD_Reconcile_FinalizerPatchErrorIncrementsReconcileErrors(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	s := newTestScheme()
+	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "finalizer-error-rbd", Generation: 1},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			PolicyRef:  authorizationv1alpha1.RBACPolicyReference{Name: "policy"},
+			TargetName: "target",
+		},
+	}
+	c := fake.NewClientBuilder().
+		WithScheme(s).
+		WithObjects(rbd).
+		WithStatusSubresource(&authorizationv1alpha1.RestrictedBindDefinition{}).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Patch: func(_ context.Context, _ client.WithWatch, _ client.Object, _ client.Patch, _ ...client.PatchOption) error {
+				return fmt.Errorf("patch failed")
+			},
+		}).
+		Build()
+	r := &RestrictedBindDefinitionReconciler{
+		client:   c,
+		reader:   c,
+		scheme:   s,
+		recorder: events.NewFakeRecorder(10),
+	}
+
+	before := reconcileErrorCount(t, metrics.ControllerRestrictedBindDefinition)
+	_, err := r.Reconcile(rbdCtx(), ctrl.Request{NamespacedName: types.NamespacedName{Name: rbd.Name}})
+	g.Expect(err).To(gomega.HaveOccurred())
+	g.Expect(err.Error()).To(gomega.ContainSubstring("add finalizer"))
+	g.Expect(reconcileErrorCount(t, metrics.ControllerRestrictedBindDefinition)).To(gomega.Equal(before + 1))
+}
+
+func TestRBD_Reconcile_PolicyReadErrorIncrementsReconcileErrors(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	s := newTestScheme()
+	rbd := &authorizationv1alpha1.RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "policy-read-error-rbd",
+			Generation: 1,
+			Finalizers: []string{
+				authorizationv1alpha1.RestrictedBindDefinitionFinalizer,
+			},
+		},
+		Spec: authorizationv1alpha1.RestrictedBindDefinitionSpec{
+			PolicyRef:  authorizationv1alpha1.RBACPolicyReference{Name: "policy"},
+			TargetName: "target",
+		},
+	}
+	c := fake.NewClientBuilder().
+		WithScheme(s).
+		WithObjects(rbd).
+		WithStatusSubresource(&authorizationv1alpha1.RestrictedBindDefinition{}).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if _, ok := obj.(*authorizationv1alpha1.RBACPolicy); ok {
+					return fmt.Errorf("policy read failed")
+				}
+				return cl.Get(ctx, key, obj, opts...)
+			},
+		}).
+		Build()
+	r := &RestrictedBindDefinitionReconciler{
+		client:   c,
+		reader:   c,
+		scheme:   s,
+		recorder: events.NewFakeRecorder(10),
+	}
+
+	before := reconcileErrorCount(t, metrics.ControllerRestrictedBindDefinition)
+	_, err := r.Reconcile(rbdCtx(), ctrl.Request{NamespacedName: types.NamespacedName{Name: rbd.Name}})
+	g.Expect(err).To(gomega.HaveOccurred())
+	g.Expect(err.Error()).To(gomega.ContainSubstring("fetch RBACPolicy"))
+	g.Expect(reconcileErrorCount(t, metrics.ControllerRestrictedBindDefinition)).To(gomega.Equal(before + 1))
 }
 
 func TestRBD_Reconcile_PolicyNotFound(t *testing.T) {
@@ -383,12 +480,14 @@ func TestRBD_Reconcile_PolicyNotFoundReturnsStatusApplyError(t *testing.T) {
 		recorder: events.NewFakeRecorder(10),
 	}
 
+	before := reconcileErrorCount(t, metrics.ControllerRestrictedBindDefinition)
 	_, err := r.Reconcile(rbdCtx(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: rbd.Name},
 	})
 	g.Expect(err).To(gomega.HaveOccurred())
 	g.Expect(err.Error()).To(gomega.ContainSubstring("stalled status"))
 	g.Expect(err.Error()).To(gomega.ContainSubstring("status apply failed"))
+	g.Expect(reconcileErrorCount(t, metrics.ControllerRestrictedBindDefinition)).To(gomega.Equal(before + 1))
 }
 
 func TestRBD_Reconcile_PolicyViolation_Deprovision(t *testing.T) {

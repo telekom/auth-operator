@@ -572,6 +572,7 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 			}
 			r.rbdMarkStalled(ctx, rbd, err)
 			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
+			metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
 			return ctrl.Result{}, fmt.Errorf("add finalizer to RestrictedBindDefinition %s: %w", rbd.Name, err)
 		}
 	}
@@ -677,6 +678,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdFetchPolicy(
 		}
 		r.rbdMarkStalled(ctx, rbd, err)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
 		return nil, ctrl.Result{}, false, fmt.Errorf("fetch RBACPolicy %s: %w", rbd.Spec.PolicyRef.Name, err)
 	}
 	return rbacPolicy, ctrl.Result{}, false, nil
@@ -715,7 +717,10 @@ func (r *RestrictedBindDefinitionReconciler) rbdHandleMissingPolicy(
 	}
 	rbdClearDeprovisionedStatus(rbd)
 	if err := r.rbdApplyStatusAndMarkStalled(ctx, rbd, "policy not found"); err != nil {
-		return ctrl.Result{}, err
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
+		return ctrl.Result{}, fmt.Errorf("apply stalled status for RestrictedBindDefinition %s after missing policy %s: %w",
+			rbd.Name, rbd.Spec.PolicyRef.Name, err)
 	}
 	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultDegraded).Inc()
 	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
@@ -744,7 +749,10 @@ func (r *RestrictedBindDefinitionReconciler) rbdHandleDeletingPolicy(
 	}
 	rbdClearDeprovisionedStatus(rbd)
 	if err := r.rbdApplyStatusAndMarkStalled(ctx, rbd, "policy deleting"); err != nil {
-		return ctrl.Result{}, err
+		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
+		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
+		return ctrl.Result{}, fmt.Errorf("apply stalled status for RestrictedBindDefinition %s after deleting policy %s: %w",
+			rbd.Name, rbacPolicy.Name, err)
 	}
 	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultDegraded).Inc()
 	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
