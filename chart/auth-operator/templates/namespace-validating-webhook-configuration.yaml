@@ -17,7 +17,7 @@ webhooks:
       name: '{{ include "auth-operator.fullname" . }}-webhook-service'
       namespace: '{{ .Release.Namespace }}'
       path: /validate-v1-namespace
-      port: 443
+      port: {{ .Values.webhookServer.service.port | default 443 }}
   failurePolicy: Fail
   matchPolicy: Equivalent
   name: namespace.validating.webhook.auth.t-caas.telekom.de
