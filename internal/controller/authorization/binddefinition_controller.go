@@ -1830,19 +1830,9 @@ func (r *BindDefinitionReconciler) isLegitimatelyOwnedByBindDefinition(ctx conte
 			ownerRef.Name != "" &&
 			ownerRef.UID != "" {
 			
-			// 1. Check if the referenced BindDefinition actually exists with this UID
 			var bd authorizationv1alpha1.BindDefinition
-			if err := r.client.Get(ctx, types.NamespacedName{Name: ownerRef.Name}, &bd); err == nil {
+			if err := r.reader.Get(ctx, types.NamespacedName{Name: ownerRef.Name}, &bd); err == nil {
 				if bd.UID == ownerRef.UID {
-					return true
-				}
-			}
-			
-			// 2. Fallback: check managed fields signal in case the cache is stale
-			// or the BD was just deleted but the SA hasn't been garbage collected.
-			expectedFieldOwner := pkgssa.FieldOwnerFor(ownerRef.Name, authorizationv1alpha1.BindDefinitionKind)
-			for _, field := range sa.ManagedFields {
-				if field.Manager == expectedFieldOwner && field.Operation == metav1.ManagedFieldsOperationApply {
 					return true
 				}
 			}

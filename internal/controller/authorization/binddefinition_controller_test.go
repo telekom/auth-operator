@@ -594,6 +594,7 @@ func TestBindDefinitionDriftDetection(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bindDef).Build()
 		r := &BindDefinitionReconciler{
 			client:   c,
+			reader:   c,
 			scheme:   scheme,
 			recorder: events.NewFakeRecorder(10),
 		}
@@ -1700,7 +1701,7 @@ func TestEnsureServiceAccounts(t *testing.T) {
 				authorizationv1alpha1.GroupVersion.String(), "BindDefinition",
 				"fake-bd", "fake-uid", false, false,
 			))
-		_, applyErr := pkgssa.PatchApplyServiceAccount(ctx, c, spoofedSAAC, "some-other-manager")
+		_, applyErr := pkgssa.PatchApplyServiceAccount(ctx, c, spoofedSAAC, pkgssa.FieldOwnerFor("fake-bd", authorizationv1alpha1.BindDefinitionKind))
 		g.Expect(applyErr).NotTo(HaveOccurred())
 
 		// Run ensureServiceAccounts
