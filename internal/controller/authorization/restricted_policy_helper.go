@@ -75,14 +75,16 @@ type restrictedPolicyLifecycleConfig struct {
 	ControllerLabel string
 	Recorder        events.EventRecorder
 
-	Evaluate                 func(context.Context, *authorizationv1alpha1.RBACPolicy) ([]policy.Violation, error)
-	Deprovision              func(context.Context) error
-	MarkStalled              func(context.Context, error)
+	Evaluate                  func(context.Context, *authorizationv1alpha1.RBACPolicy) ([]policy.Violation, error)
+	Deprovision               func(context.Context) error
+	MarkStalled               func(context.Context, error)
 	ApplyStatusAndMarkStalled func(context.Context, string) error
-	SetPolicyViolations      func([]string)
-	MarkPolicyCompliantFalse func(reason authorizationv1alpha1.AuthZConditionReason, message authorizationv1alpha1.AuthZConditionMessage, arg string)
+	SetPolicyViolations       func([]string)
+	MarkPolicyCompliantFalse  func(reason authorizationv1alpha1.AuthZConditionReason, message authorizationv1alpha1.AuthZConditionMessage, arg string)
 }
 
+// RestrictedPolicyObject combines client.Object and conditions.Setter.
+// Required interface for handling restricted policy conditions.
 type RestrictedPolicyObject interface {
 	client.Object
 	conditions.Setter
@@ -93,8 +95,9 @@ func evaluateRestrictedPolicy(
 	cfg restrictedPolicyLifecycleConfig,
 	obj RestrictedPolicyObject,
 	rbacPolicy *authorizationv1alpha1.RBACPolicy,
-) (ctrl.Result, []policy.Violation, bool, error) {
-	violations, err := cfg.Evaluate(ctx, rbacPolicy)
+) (violations []policy.Violation, handled bool, retErr error) {
+	var err error
+	violations, err = cfg.Evaluate(ctx, rbacPolicy)
 	if err != nil {
 		if deprovisionErr := cfg.Deprovision(ctx); deprovisionErr != nil {
 			err = errors.Join(err, fmt.Errorf("deprovision after policy selector evaluation failure: %w", deprovisionErr))
@@ -103,15 +106,15 @@ func evaluateRestrictedPolicy(
 		cfg.MarkStalled(ctx, err)
 		metrics.ReconcileTotal.WithLabelValues(cfg.ControllerLabel, metrics.ResultError).Inc()
 		metrics.ReconcileErrors.WithLabelValues(cfg.ControllerLabel, metrics.ErrorTypeAPI).Inc()
-		return ctrl.Result{}, nil, true, fmt.Errorf("evaluate policy selectors for %s %s: %w", cfg.ResourceKind, cfg.ResourceName, err)
+		return nil, true, fmt.Errorf("evaluate policy selectors for %s %s: %w", cfg.ResourceKind, cfg.ResourceName, err)
 	}
 
 	if len(violations) == 0 {
-		return ctrl.Result{}, nil, false, nil
+		return nil, false, nil
 	}
 
 	cfg.SetPolicyViolations(policy.ViolationStrings(violations))
-	return ctrl.Result{}, violations, true, nil
+	return violations, true, nil
 }
 
 func handleMissingRestrictedPolicy(
@@ -121,17 +124,17 @@ func handleMissingRestrictedPolicy(
 ) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("referenced RBACPolicy not found", "name", cfg.ResourceName, "policyRef", cfg.PolicyRefName)
-	
+
 	cfg.MarkPolicyCompliantFalse(
 		authorizationv1alpha1.PolicyCompliantReasonPolicyNotFound,
 		authorizationv1alpha1.PolicyCompliantMessagePolicyNotFound,
 		cfg.PolicyRefName,
 	)
-	
+
 	cfg.Recorder.Eventf(obj, nil, corev1.EventTypeWarning,
 		string(authorizationv1alpha1.EventReasonPolicyNotFound), string(authorizationv1alpha1.EventActionReconcile),
 		"Referenced RBACPolicy %q not found", cfg.PolicyRefName)
-		
+
 	cfg.SetPolicyViolations([]string{fmt.Sprintf("policy %q not found", cfg.PolicyRefName)})
 	metrics.SetPolicyViolationsActive(cfg.ControllerLabel, cfg.ResourceName, 1)
 
@@ -158,16 +161,16 @@ func handleDeletingRestrictedPolicy(
 ) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("referenced RBACPolicy is deleting", "name", cfg.ResourceName, "policyRef", cfg.PolicyRefName)
-	
+
 	cfg.MarkPolicyCompliantFalse(
 		authorizationv1alpha1.PolicyCompliantReasonPolicyDeleting,
 		authorizationv1alpha1.PolicyCompliantMessagePolicyDeleting,
 		cfg.PolicyRefName,
 	)
-	
+
 	cfg.SetPolicyViolations([]string{fmt.Sprintf("policy %q is being deleted", cfg.PolicyRefName)})
 	metrics.SetPolicyViolationsActive(cfg.ControllerLabel, cfg.ResourceName, 1)
-	
+
 	cfg.Recorder.Eventf(obj, nil, corev1.EventTypeWarning,
 		string(authorizationv1alpha1.EventReasonPolicyViolation), string(authorizationv1alpha1.EventActionReconcile),
 		"Referenced RBACPolicy %q is being deleted", cfg.PolicyRefName)
@@ -184,7 +187,7 @@ func handleDeletingRestrictedPolicy(
 		metrics.ReconcileErrors.WithLabelValues(cfg.ControllerLabel, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, fmt.Errorf("apply stalled status for %s %s after deleting policy %s: %w", cfg.ResourceKind, cfg.ResourceName, cfg.PolicyRefName, err)
 	}
-	
+
 	metrics.ReconcileTotal.WithLabelValues(cfg.ControllerLabel, metrics.ResultDegraded).Inc()
 	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
 }

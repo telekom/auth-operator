@@ -166,9 +166,9 @@ func (r *RestrictedRoleDefinitionReconciler) rrdEvaluatePolicy(
 	rbacPolicy *authorizationv1alpha1.RBACPolicy,
 ) (result ctrl.Result, handled bool, retErr error) {
 	cfg := r.rrdPolicyLifecycleConfig(rrd)
-	result, violations, handled, err := evaluateRestrictedPolicy(ctx, cfg, rrd, rbacPolicy)
+	violations, handled, err := evaluateRestrictedPolicy(ctx, cfg, rrd, rbacPolicy)
 	if err != nil || !handled {
-		return result, handled, err
+		return ctrl.Result{}, handled, err
 	}
 
 	result, err = handlePolicyViolations(ctx, rrd, rrd.Generation, violations, r.recorder, rrd, ViolationHandlerConfig{
@@ -203,7 +203,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdPolicyLifecycleConfig(rrd *autho
 		},
 		SetPolicyViolations: func(v []string) { rrd.Status.PolicyViolations = v },
 		MarkPolicyCompliantFalse: func(reason authorizationv1alpha1.AuthZConditionReason, message authorizationv1alpha1.AuthZConditionMessage, arg string) {
-			conditions.MarkFalse(rrd, authorizationv1alpha1.PolicyCompliantCondition, rrd.Generation, conditions.ConditionReason(reason), conditions.ConditionMessage(message), arg)
+			conditions.MarkFalse(rrd, authorizationv1alpha1.PolicyCompliantCondition, rrd.Generation, reason, message, arg)
 		},
 	}
 }
@@ -230,7 +230,6 @@ func (r *RestrictedRoleDefinitionReconciler) queueAll() handler.MapFunc {
 // policyToRestrictedRoleDefinitions maps an RBACPolicy event to reconcile requests
 // for all RestrictedRoleDefinitions referencing that policy.
 //
-//nolint:dupl // Restricted bind/role reconcilers keep type-specific event mapping for controller-runtime indexes.
 func (r *RestrictedRoleDefinitionReconciler) policyToRestrictedRoleDefinitions(ctx context.Context, obj client.Object) []reconcile.Request {
 	list := &authorizationv1alpha1.RestrictedRoleDefinitionList{}
 	return mapPolicyToRestrictedRequests(
@@ -376,7 +375,7 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 		return ctrl.Result{}, fmt.Errorf("fetch RBACPolicy %s: %w", rrd.Spec.PolicyRef.Name, err)
 	}
 	if rbacPolicy.GetDeletionTimestamp() != nil {
-		return r.rrdHandleDeletingPolicy(ctx, rrd, rbacPolicy)
+		return r.rrdHandleDeletingPolicy(ctx, rrd)
 	}
 
 	// Step 6: Evaluate policy compliance.
@@ -466,7 +465,6 @@ func (r *RestrictedRoleDefinitionReconciler) rrdHandleMissingPolicy(
 func (r *RestrictedRoleDefinitionReconciler) rrdHandleDeletingPolicy(
 	ctx context.Context,
 	rrd *authorizationv1alpha1.RestrictedRoleDefinition,
-	rbacPolicy *authorizationv1alpha1.RBACPolicy,
 ) (ctrl.Result, error) {
 	return handleDeletingRestrictedPolicy(ctx, r.rrdPolicyLifecycleConfig(rrd), rrd)
 }
