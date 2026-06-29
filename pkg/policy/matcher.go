@@ -6,6 +6,7 @@ package policy
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
@@ -26,9 +27,9 @@ func namespaceInScope(ctx context.Context, scope authorizationv1alpha1.PolicySco
 	if len(scope.Namespaces) == 0 && scope.NamespaceSelector == nil {
 		return false
 	}
-	bareAllNamespaces := containsString(scope.Namespaces, allNamespacesScope) &&
+	bareAllNamespaces := slices.Contains(scope.Namespaces, allNamespacesScope) &&
 		len(scope.Namespaces) == 1 && scope.NamespaceSelector == nil
-	if containsString(scope.Namespaces, namespace) {
+	if slices.Contains(scope.Namespaces, namespace) {
 		return true
 	}
 	if scope.NamespaceSelector == nil || lg == nil {
@@ -45,7 +46,7 @@ func namespaceInScope(ctx context.Context, scope authorizationv1alpha1.PolicySco
 }
 
 func scopeAllowsClusterResources(scope authorizationv1alpha1.PolicyScope) bool {
-	return containsString(scope.Namespaces, allNamespacesScope)
+	return slices.Contains(scope.Namespaces, allNamespacesScope)
 }
 
 // MatchesWildcard checks if value matches a simple wildcard pattern.
@@ -93,16 +94,6 @@ func MatchesWildcard(pattern, value string) bool {
 func matchesAnyWildcard(patterns []string, value string) bool {
 	for _, p := range patterns {
 		if MatchesWildcard(p, value) {
-			return true
-		}
-	}
-	return false
-}
-
-// containsString checks if a string slice contains a specific value.
-func containsString(slice []string, value string) bool {
-	for _, s := range slice {
-		if s == value {
 			return true
 		}
 	}
