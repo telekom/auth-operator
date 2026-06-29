@@ -1988,3 +1988,54 @@ func TestEnsureRole_TransitionFromRulesToAggregateFrom(t *testing.T) {
 	g.Expect(cr.AggregationRule).NotTo(BeNil(), "aggregation rule should be set")
 	g.Expect(cr.AggregationRule.ClusterRoleSelectors).To(HaveLen(1))
 }
+
+
+func TestCheckRoleOwnership_StaleCacheUnownedExistingRoleRejected(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	_ = authorizationv1alpha1.AddToScheme(scheme)
+	_ = rbacv1.AddToScheme(scheme)
+
+	roleDef := &authorizationv1alpha1.RoleDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-rd", UID: "rd-uid"},
+		Spec: authorizationv1alpha1.RoleDefinitionSpec{
+			TargetRole:      authorizationv1alpha1.DefinitionClusterRole,
+			TargetName:      "test-clusterrole",
+			TargetNamespace: "",
+		},
+	}
+
+	existingRole := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-clusterrole",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion:         authorizationv1alpha1.GroupVersion.String(),
+					Kind:               "RoleDefinition",
+					Name:               "other-rd",
+					UID:                "other-uid",
+					Controller:         func() *bool { b := true; return &b }() ,
+					BlockOwnerDeletion: func() *bool { b := true; return &b }() ,
+				},
+			},
+		},
+	}
+
+	// Create a cached client that DOES NOT have the existingRole
+	cachedClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	
+	// Create a reader (API reader) that DOES have the existingRole
+	apiReader := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existingRole).Build()
+
+	r := &RoleDefinitionReconciler{
+		client:   cachedClient, // cache misses
+		reader:   apiReader,    // api reader hits
+		scheme:   scheme,
+		recorder: events.NewFakeRecorder(10),
+	}
+
+	err := r.checkRoleOwnership(ctx, roleDef)
+	g.Expect(err).To(HaveOccurred())
+	g.Expect(err.Error()).To(ContainSubstring("controlled by RoleDefinition/other-rd"))
+}
