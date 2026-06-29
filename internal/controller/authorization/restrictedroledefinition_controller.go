@@ -160,37 +160,53 @@ func (r *RestrictedRoleDefinitionReconciler) rrdResolveApplyClient(
 	)
 }
 
+//nolint:dupl // Both controllers share this common evaluation structure
 func (r *RestrictedRoleDefinitionReconciler) rrdEvaluatePolicy(
 	ctx context.Context,
 	rrd *authorizationv1alpha1.RestrictedRoleDefinition,
 	rbacPolicy *authorizationv1alpha1.RBACPolicy,
 ) (result ctrl.Result, handled bool, retErr error) {
-	labelGetter := newLabelGetter(r.ownershipReader())
-	violations := policy.EvaluateRoleDefinitionWithLabels(ctx, rbacPolicy, rrd, labelGetter)
-	if err := labelGetter.Err(); err != nil {
-		if deprovisionErr := r.rrdDeprovision(ctx, rrd, r.client); deprovisionErr != nil {
-			err = errors.Join(err, fmt.Errorf("deprovision after policy selector evaluation failure: %w", deprovisionErr))
-		}
-		markPolicyEvaluationError(rrd, rrd.Generation, err)
-		r.rrdMarkStalled(ctx, rrd, err)
-		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
-		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
-		return ctrl.Result{}, true, fmt.Errorf("evaluate policy selectors for RestrictedRoleDefinition %s: %w", rrd.Name, err)
-	}
-	if len(violations) == 0 {
-		return ctrl.Result{}, false, nil
+	cfg := r.rrdPolicyLifecycleConfig(rrd)
+	violations, handled, err := evaluateRestrictedPolicy(ctx, cfg, rrd, rbacPolicy)
+	if err != nil || !handled {
+		return ctrl.Result{}, handled, err
 	}
 
-	rrd.Status.PolicyViolations = policy.ViolationStrings(violations)
-	result, err := handlePolicyViolations(ctx, rrd, rrd.Generation, violations, r.recorder, rrd, ViolationHandlerConfig{
+	result, err = handlePolicyViolations(ctx, rrd, rrd.Generation, violations, r.recorder, rrd, ViolationHandlerConfig{
 		ControllerLabel: metrics.ControllerRestrictedRoleDefinition,
 		ResourceKind:    "RestrictedRoleDefinition",
-		Deprovision:     func(ctx context.Context) error { return r.rrdDeprovision(ctx, rrd, r.client) },
-		MarkStalled:     func(ctx context.Context, err error) { r.rrdMarkStalled(ctx, rrd, err) },
+		Deprovision:     cfg.Deprovision,
+		MarkStalled:     cfg.MarkStalled,
 		SetReconciled:   func(v bool) { rrd.Status.RoleReconciled = v },
 		ApplyStatus:     func(ctx context.Context) error { return ssa.ApplyRestrictedRoleDefinitionStatus(ctx, r.client, rrd) },
 	})
 	return result, true, err
+}
+
+func (r *RestrictedRoleDefinitionReconciler) rrdPolicyLifecycleConfig(rrd *authorizationv1alpha1.RestrictedRoleDefinition) restrictedPolicyLifecycleConfig {
+	return restrictedPolicyLifecycleConfig{
+		ResourceName:    rrd.Name,
+		ResourceKind:    "RestrictedRoleDefinition",
+		PolicyRefName:   rrd.Spec.PolicyRef.Name,
+		ControllerLabel: metrics.ControllerRestrictedRoleDefinition,
+		Recorder:        r.recorder,
+		Evaluate: func(ctx context.Context, p *authorizationv1alpha1.RBACPolicy) ([]policy.Violation, error) {
+			labelGetter := newLabelGetter(r.ownershipReader())
+			violations := policy.EvaluateRoleDefinitionWithLabels(ctx, p, rrd, labelGetter)
+			return violations, labelGetter.Err()
+		},
+		Deprovision: func(ctx context.Context) error {
+			return r.rrdDeprovision(ctx, rrd, r.client)
+		},
+		MarkStalled: func(ctx context.Context, err error) { r.rrdMarkStalled(ctx, rrd, err) },
+		ApplyStatusAndMarkStalled: func(ctx context.Context, msg string) error {
+			return r.rrdApplyStatusAndMarkStalled(ctx, rrd, msg)
+		},
+		SetPolicyViolations: func(v []string) { rrd.Status.PolicyViolations = v },
+		MarkPolicyCompliantFalse: func(reason authorizationv1alpha1.AuthZConditionReason, message authorizationv1alpha1.AuthZConditionMessage, arg string) {
+			conditions.MarkFalse(rrd, authorizationv1alpha1.PolicyCompliantCondition, rrd.Generation, reason, message, arg)
+		},
+	}
 }
 
 // queueAll enqueues all RestrictedRoleDefinitions for reconciliation.
@@ -214,37 +230,23 @@ func (r *RestrictedRoleDefinitionReconciler) queueAll() handler.MapFunc {
 
 // policyToRestrictedRoleDefinitions maps an RBACPolicy event to reconcile requests
 // for all RestrictedRoleDefinitions referencing that policy.
-//
-//nolint:dupl // Restricted bind/role reconcilers keep type-specific event mapping for controller-runtime indexes.
 func (r *RestrictedRoleDefinitionReconciler) policyToRestrictedRoleDefinitions(ctx context.Context, obj client.Object) []reconcile.Request {
-	logger := log.FromContext(ctx)
 	list := &authorizationv1alpha1.RestrictedRoleDefinitionList{}
-	listCtx, cancel := context.WithTimeout(ctx, queueAllTimeout)
-	defer cancel()
-	if err := r.client.List(listCtx, list,
-		client.MatchingFields{indexer.RestrictedRoleDefinitionPolicyRefField: obj.GetName()}); err != nil {
-		if helpers.IsMissingFieldIndexError(err) {
-			logger.V(2).Info("policyRef field index unavailable, falling back to full RestrictedRoleDefinition scan", "policy", obj.GetName())
-			if listErr := r.client.List(listCtx, list); listErr != nil {
-				logger.Error(listErr, "failed to list RestrictedRoleDefinitions for policy", "policy", obj.GetName())
-				return nil
-			}
-			requests := make([]reconcile.Request, 0, len(list.Items))
+	return mapPolicyToRestrictedRequests(
+		ctx, r.client, obj, list,
+		indexer.RestrictedRoleDefinitionPolicyRefField,
+		"RestrictedRoleDefinition",
+		func() []client.Object {
+			objs := make([]client.Object, len(list.Items))
 			for i := range list.Items {
-				if list.Items[i].Spec.PolicyRef.Name == obj.GetName() {
-					requests = append(requests, reconcile.Request{NamespacedName: types.NamespacedName{Name: list.Items[i].Name}})
-				}
+				objs[i] = &list.Items[i]
 			}
-			return requests
-		}
-		logger.Error(err, "failed to list RestrictedRoleDefinitions for policy", "policy", obj.GetName())
-		return nil
-	}
-	requests := make([]reconcile.Request, len(list.Items))
-	for i, rrd := range list.Items {
-		requests[i] = reconcile.Request{NamespacedName: types.NamespacedName{Name: rrd.Name}}
-	}
-	return requests
+			return objs
+		},
+		func(obj client.Object) string {
+			return obj.(*authorizationv1alpha1.RestrictedRoleDefinition).Spec.PolicyRef.Name
+		},
+	)
 }
 
 // namespaceToRestrictedRoleDefinitions maps a Namespace event to namespaced
@@ -373,7 +375,7 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 		return ctrl.Result{}, fmt.Errorf("fetch RBACPolicy %s: %w", rrd.Spec.PolicyRef.Name, err)
 	}
 	if rbacPolicy.GetDeletionTimestamp() != nil {
-		return r.rrdHandleDeletingPolicy(ctx, rrd, rbacPolicy)
+		return r.rrdHandleDeletingPolicy(ctx, rrd)
 	}
 
 	// Step 6: Evaluate policy compliance.
@@ -457,60 +459,14 @@ func (r *RestrictedRoleDefinitionReconciler) rrdHandleMissingPolicy(
 	ctx context.Context,
 	rrd *authorizationv1alpha1.RestrictedRoleDefinition,
 ) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-	logger.Info("referenced RBACPolicy not found", "name", rrd.Name, "policyRef", rrd.Spec.PolicyRef.Name)
-	conditions.MarkFalse(rrd, authorizationv1alpha1.PolicyCompliantCondition, rrd.Generation,
-		authorizationv1alpha1.PolicyCompliantReasonPolicyNotFound, authorizationv1alpha1.PolicyCompliantMessagePolicyNotFound, rrd.Spec.PolicyRef.Name)
-	rrd.Status.PolicyViolations = []string{fmt.Sprintf("policy %q not found", rrd.Spec.PolicyRef.Name)}
-	metrics.SetPolicyViolationsActive(metrics.ControllerRestrictedRoleDefinition, rrd.Name, len(rrd.Status.PolicyViolations))
-	r.recorder.Eventf(rrd, nil, corev1.EventTypeWarning,
-		authorizationv1alpha1.EventReasonPolicyNotFound, authorizationv1alpha1.EventActionReconcile,
-		"Referenced RBACPolicy %q not found", rrd.Spec.PolicyRef.Name)
-
-	if err := r.rrdDeprovision(ctx, rrd, r.client); err != nil {
-		r.rrdMarkStalled(ctx, rrd, err)
-		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
-		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
-		return ctrl.Result{}, fmt.Errorf("deprovision RestrictedRoleDefinition %s after missing policy %s: %w", rrd.Name, rrd.Spec.PolicyRef.Name, err)
-	}
-
-	if err := r.rrdApplyStatusAndMarkStalled(ctx, rrd, "policy not found"); err != nil {
-		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
-		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
-		return ctrl.Result{}, fmt.Errorf("apply stalled status for RestrictedRoleDefinition %s after missing policy %s: %w", rrd.Name, rrd.Spec.PolicyRef.Name, err)
-	}
-	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultDegraded).Inc()
-	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
+	return handleMissingRestrictedPolicy(ctx, r.rrdPolicyLifecycleConfig(rrd), rrd)
 }
 
 func (r *RestrictedRoleDefinitionReconciler) rrdHandleDeletingPolicy(
 	ctx context.Context,
 	rrd *authorizationv1alpha1.RestrictedRoleDefinition,
-	rbacPolicy *authorizationv1alpha1.RBACPolicy,
 ) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-	logger.Info("referenced RBACPolicy is deleting", "name", rrd.Name, "policyRef", rbacPolicy.Name)
-	conditions.MarkFalse(rrd, authorizationv1alpha1.PolicyCompliantCondition, rrd.Generation,
-		authorizationv1alpha1.PolicyCompliantReasonPolicyDeleting, authorizationv1alpha1.PolicyCompliantMessagePolicyDeleting, rbacPolicy.Name)
-	rrd.Status.PolicyViolations = []string{fmt.Sprintf("policy %q is being deleted", rbacPolicy.Name)}
-	metrics.SetPolicyViolationsActive(metrics.ControllerRestrictedRoleDefinition, rrd.Name, len(rrd.Status.PolicyViolations))
-	r.recorder.Eventf(rrd, nil, corev1.EventTypeWarning,
-		authorizationv1alpha1.EventReasonPolicyViolation, authorizationv1alpha1.EventActionReconcile,
-		"Referenced RBACPolicy %q is being deleted", rbacPolicy.Name)
-
-	if err := r.rrdDeprovision(ctx, rrd, r.client); err != nil {
-		r.rrdMarkStalled(ctx, rrd, err)
-		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
-		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
-		return ctrl.Result{}, fmt.Errorf("deprovision RestrictedRoleDefinition %s after deleting policy %s: %w", rrd.Name, rbacPolicy.Name, err)
-	}
-	if err := r.rrdApplyStatusAndMarkStalled(ctx, rrd, "policy deleting"); err != nil {
-		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
-		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ErrorTypeAPI).Inc()
-		return ctrl.Result{}, fmt.Errorf("apply stalled status for RestrictedRoleDefinition %s after deleting policy %s: %w", rrd.Name, rbacPolicy.Name, err)
-	}
-	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultDegraded).Inc()
-	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
+	return handleDeletingRestrictedPolicy(ctx, r.rrdPolicyLifecycleConfig(rrd), rrd)
 }
 
 // rrdDiscoverAndFilter discovers API resources and filters based on the spec.

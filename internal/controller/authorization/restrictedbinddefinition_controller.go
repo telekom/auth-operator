@@ -162,33 +162,41 @@ func (r *RestrictedBindDefinitionReconciler) rbdResolveApplyClient(
 	)
 }
 
+//nolint:dupl // Both controllers share this common evaluation structure
 func (r *RestrictedBindDefinitionReconciler) rbdEvaluatePolicy(
 	ctx context.Context,
 	rbd *authorizationv1alpha1.RestrictedBindDefinition,
 	rbacPolicy *authorizationv1alpha1.RBACPolicy,
 ) (result ctrl.Result, handled bool, retErr error) {
-	labelGetter := newLabelGetter(r.ownershipReader())
-	violations := policy.EvaluateBindDefinition(ctx, rbacPolicy, rbd, labelGetter)
-	if err := labelGetter.Err(); err != nil {
-		if deprovisionErr := r.rbdDeprovision(ctx, rbd, r.client); deprovisionErr != nil {
-			err = errors.Join(err, fmt.Errorf("deprovision after policy selector evaluation failure: %w", deprovisionErr))
-		} else {
-			rbdClearDeprovisionedStatus(rbd)
-		}
-		markPolicyEvaluationError(rbd, rbd.Generation, err)
-		r.rbdMarkStalled(ctx, rbd, err)
-		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
-		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
-		return ctrl.Result{}, true, fmt.Errorf("evaluate policy selectors for RestrictedBindDefinition %s: %w", rbd.Name, err)
-	}
-	if len(violations) == 0 {
-		return ctrl.Result{}, false, nil
+	cfg := r.rbdPolicyLifecycleConfig(rbd)
+	violations, handled, err := evaluateRestrictedPolicy(ctx, cfg, rbd, rbacPolicy)
+	if err != nil || !handled {
+		return ctrl.Result{}, handled, err
 	}
 
-	rbd.Status.PolicyViolations = policy.ViolationStrings(violations)
-	result, err := handlePolicyViolations(ctx, rbd, rbd.Generation, violations, r.recorder, rbd, ViolationHandlerConfig{
+	result, err = handlePolicyViolations(ctx, rbd, rbd.Generation, violations, r.recorder, rbd, ViolationHandlerConfig{
 		ControllerLabel: metrics.ControllerRestrictedBindDefinition,
 		ResourceKind:    "RestrictedBindDefinition",
+		Deprovision:     cfg.Deprovision,
+		MarkStalled:     cfg.MarkStalled,
+		SetReconciled:   func(v bool) { rbd.Status.BindReconciled = v },
+		ApplyStatus:     func(ctx context.Context) error { return ssa.ApplyRestrictedBindDefinitionStatus(ctx, r.client, rbd) },
+	})
+	return result, true, err
+}
+
+func (r *RestrictedBindDefinitionReconciler) rbdPolicyLifecycleConfig(rbd *authorizationv1alpha1.RestrictedBindDefinition) restrictedPolicyLifecycleConfig {
+	return restrictedPolicyLifecycleConfig{
+		ResourceName:    rbd.Name,
+		ResourceKind:    "RestrictedBindDefinition",
+		PolicyRefName:   rbd.Spec.PolicyRef.Name,
+		ControllerLabel: metrics.ControllerRestrictedBindDefinition,
+		Recorder:        r.recorder,
+		Evaluate: func(ctx context.Context, p *authorizationv1alpha1.RBACPolicy) ([]policy.Violation, error) {
+			labelGetter := newLabelGetter(r.ownershipReader())
+			violations := policy.EvaluateBindDefinition(ctx, p, rbd, labelGetter)
+			return violations, labelGetter.Err()
+		},
 		Deprovision: func(ctx context.Context) error {
 			if err := r.rbdDeprovision(ctx, rbd, r.client); err != nil {
 				return err
@@ -196,46 +204,36 @@ func (r *RestrictedBindDefinitionReconciler) rbdEvaluatePolicy(
 			rbdClearDeprovisionedStatus(rbd)
 			return nil
 		},
-		MarkStalled:   func(ctx context.Context, err error) { r.rbdMarkStalled(ctx, rbd, err) },
-		SetReconciled: func(v bool) { rbd.Status.BindReconciled = v },
-		ApplyStatus:   func(ctx context.Context) error { return ssa.ApplyRestrictedBindDefinitionStatus(ctx, r.client, rbd) },
-	})
-	return result, true, err
+		MarkStalled: func(ctx context.Context, err error) { r.rbdMarkStalled(ctx, rbd, err) },
+		ApplyStatusAndMarkStalled: func(ctx context.Context, msg string) error {
+			return r.rbdApplyStatusAndMarkStalled(ctx, rbd, msg)
+		},
+		SetPolicyViolations: func(v []string) { rbd.Status.PolicyViolations = v },
+		MarkPolicyCompliantFalse: func(reason authorizationv1alpha1.AuthZConditionReason, message authorizationv1alpha1.AuthZConditionMessage, arg string) {
+			conditions.MarkFalse(rbd, authorizationv1alpha1.PolicyCompliantCondition, rbd.Generation, reason, message, arg)
+		},
+	}
 }
 
 // policyToRestrictedBindDefinitions maps an RBACPolicy event to reconcile requests
 // for all RestrictedBindDefinitions referencing that policy.
-//
-//nolint:dupl // Restricted bind/role reconcilers keep type-specific event mapping for controller-runtime indexes.
 func (r *RestrictedBindDefinitionReconciler) policyToRestrictedBindDefinitions(ctx context.Context, obj client.Object) []reconcile.Request {
-	logger := log.FromContext(ctx)
 	rbdList := &authorizationv1alpha1.RestrictedBindDefinitionList{}
-	listCtx, cancel := context.WithTimeout(ctx, queueAllTimeout)
-	defer cancel()
-	if err := r.client.List(listCtx, rbdList,
-		client.MatchingFields{indexer.RestrictedBindDefinitionPolicyRefField: obj.GetName()}); err != nil {
-		if helpers.IsMissingFieldIndexError(err) {
-			logger.V(2).Info("policyRef field index unavailable, falling back to full RestrictedBindDefinition scan", "policy", obj.GetName())
-			if listErr := r.client.List(listCtx, rbdList); listErr != nil {
-				logger.Error(listErr, "failed to list RestrictedBindDefinitions for policy", "policy", obj.GetName())
-				return nil
-			}
-			requests := make([]reconcile.Request, 0, len(rbdList.Items))
+	return mapPolicyToRestrictedRequests(
+		ctx, r.client, obj, rbdList,
+		indexer.RestrictedBindDefinitionPolicyRefField,
+		"RestrictedBindDefinition",
+		func() []client.Object {
+			objs := make([]client.Object, len(rbdList.Items))
 			for i := range rbdList.Items {
-				if rbdList.Items[i].Spec.PolicyRef.Name == obj.GetName() {
-					requests = append(requests, reconcile.Request{NamespacedName: types.NamespacedName{Name: rbdList.Items[i].Name}})
-				}
+				objs[i] = &rbdList.Items[i]
 			}
-			return requests
-		}
-		logger.Error(err, "failed to list RestrictedBindDefinitions for policy", "policy", obj.GetName())
-		return nil
-	}
-	requests := make([]reconcile.Request, len(rbdList.Items))
-	for i, rbd := range rbdList.Items {
-		requests[i] = reconcile.Request{NamespacedName: types.NamespacedName{Name: rbd.Name}}
-	}
-	return requests
+			return objs
+		},
+		func(obj client.Object) string {
+			return obj.(*authorizationv1alpha1.RestrictedBindDefinition).Spec.PolicyRef.Name
+		},
+	)
 }
 
 func (r *RestrictedBindDefinitionReconciler) clusterRoleToRestrictedBindDefinitions(ctx context.Context, obj client.Object) []reconcile.Request {
@@ -586,7 +584,7 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 		return ctrl.Result{}, err
 	}
 	if rbacPolicy.GetDeletionTimestamp() != nil {
-		return r.rbdHandleDeletingPolicy(ctx, rbd, rbacPolicy)
+		return r.rbdHandleDeletingPolicy(ctx, rbd)
 	}
 
 	// Step 6: Evaluate policy compliance.
@@ -694,68 +692,18 @@ func (r *RestrictedBindDefinitionReconciler) rbdMarkSkippedServiceAccounts(
 		authorizationv1alpha1.EventReasonServiceAccountSkipped, authorizationv1alpha1.EventActionValidate,
 		"ServiceAccount subjects were skipped and not bound: %v", rbd.Status.SkippedServiceAccounts)
 }
-
 func (r *RestrictedBindDefinitionReconciler) rbdHandleMissingPolicy(
 	ctx context.Context,
 	rbd *authorizationv1alpha1.RestrictedBindDefinition,
 ) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-	logger.Info("referenced RBACPolicy not found", "name", rbd.Name, "policyRef", rbd.Spec.PolicyRef.Name)
-	conditions.MarkFalse(rbd, authorizationv1alpha1.PolicyCompliantCondition, rbd.Generation,
-		authorizationv1alpha1.PolicyCompliantReasonPolicyNotFound, authorizationv1alpha1.PolicyCompliantMessagePolicyNotFound, rbd.Spec.PolicyRef.Name)
-	r.recorder.Eventf(rbd, nil, corev1.EventTypeWarning,
-		authorizationv1alpha1.EventReasonPolicyNotFound, authorizationv1alpha1.EventActionReconcile,
-		"Referenced RBACPolicy %q not found", rbd.Spec.PolicyRef.Name)
-	rbd.Status.PolicyViolations = []string{fmt.Sprintf("policy %q not found", rbd.Spec.PolicyRef.Name)}
-	metrics.SetPolicyViolationsActive(metrics.ControllerRestrictedBindDefinition, rbd.Name, len(rbd.Status.PolicyViolations))
-	if err := r.rbdDeprovision(ctx, rbd, r.client); err != nil {
-		r.rbdMarkStalled(ctx, rbd, err)
-		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
-		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
-		return ctrl.Result{}, fmt.Errorf("deprovision RestrictedBindDefinition %s after missing policy %s: %w",
-			rbd.Name, rbd.Spec.PolicyRef.Name, err)
-	}
-	rbdClearDeprovisionedStatus(rbd)
-	if err := r.rbdApplyStatusAndMarkStalled(ctx, rbd, "policy not found"); err != nil {
-		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
-		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
-		return ctrl.Result{}, fmt.Errorf("apply stalled status for RestrictedBindDefinition %s after missing policy %s: %w",
-			rbd.Name, rbd.Spec.PolicyRef.Name, err)
-	}
-	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultDegraded).Inc()
-	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
+	return handleMissingRestrictedPolicy(ctx, r.rbdPolicyLifecycleConfig(rbd), rbd)
 }
 
 func (r *RestrictedBindDefinitionReconciler) rbdHandleDeletingPolicy(
 	ctx context.Context,
 	rbd *authorizationv1alpha1.RestrictedBindDefinition,
-	rbacPolicy *authorizationv1alpha1.RBACPolicy,
 ) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-	logger.Info("referenced RBACPolicy is deleting", "name", rbd.Name, "policyRef", rbacPolicy.Name)
-	conditions.MarkFalse(rbd, authorizationv1alpha1.PolicyCompliantCondition, rbd.Generation,
-		authorizationv1alpha1.PolicyCompliantReasonPolicyDeleting, authorizationv1alpha1.PolicyCompliantMessagePolicyDeleting, rbacPolicy.Name)
-	r.recorder.Eventf(rbd, nil, corev1.EventTypeWarning,
-		authorizationv1alpha1.EventReasonPolicyViolation, authorizationv1alpha1.EventActionReconcile,
-		"Referenced RBACPolicy %q is being deleted", rbacPolicy.Name)
-	rbd.Status.PolicyViolations = []string{fmt.Sprintf("policy %q is being deleted", rbacPolicy.Name)}
-	metrics.SetPolicyViolationsActive(metrics.ControllerRestrictedBindDefinition, rbd.Name, len(rbd.Status.PolicyViolations))
-	if err := r.rbdDeprovision(ctx, rbd, r.client); err != nil {
-		r.rbdMarkStalled(ctx, rbd, err)
-		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
-		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
-		return ctrl.Result{}, fmt.Errorf("deprovision RestrictedBindDefinition %s after deleting policy %s: %w",
-			rbd.Name, rbacPolicy.Name, err)
-	}
-	rbdClearDeprovisionedStatus(rbd)
-	if err := r.rbdApplyStatusAndMarkStalled(ctx, rbd, "policy deleting"); err != nil {
-		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultError).Inc()
-		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ErrorTypeAPI).Inc()
-		return ctrl.Result{}, fmt.Errorf("apply stalled status for RestrictedBindDefinition %s after deleting policy %s: %w",
-			rbd.Name, rbacPolicy.Name, err)
-	}
-	metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultDegraded).Inc()
-	return ctrl.Result{RequeueAfter: DefaultRequeueInterval}, nil
+	return handleDeletingRestrictedPolicy(ctx, r.rbdPolicyLifecycleConfig(rbd), rbd)
 }
 
 func (r *RestrictedBindDefinitionReconciler) rbdHandleSkippedServiceAccounts(
