@@ -319,7 +319,7 @@ spec:
                   This field is immutable after creation; changing it would orphan the generated role and its bindings.
                 maxLength: 253
                 minLength: 1
-                pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                pattern: ^[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?)*$
                 type: string
               targetNamespace:
                 description: TargetNamespace is the target namespace for the Role.
