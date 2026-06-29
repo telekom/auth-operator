@@ -167,14 +167,16 @@ func (r *RoleDefinitionReconciler) handleDeletion(
 	logger.V(2).Info("Attempting to delete role",
 		"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
 
-	if err := r.client.Get(ctx, client.ObjectKeyFromObject(role), role); apierrors.IsNotFound(err) {
+	err := r.client.Get(ctx, client.ObjectKeyFromObject(role), role)
+	switch {
+	case apierrors.IsNotFound(err):
 		logger.V(2).Info("Role not found - removing finalizer",
 			"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
-	} else if err != nil {
+	case err != nil:
 		logger.Error(err, "Failed to get role before deletion",
 			"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
 		return r.markDeletionFailed(ctx, roleDefinition, err)
-	} else if !hasOwnerRef(role, roleDefinition) {
+	case !hasControllerOwnerRef(role, roleDefinition):
 		logger.Info("Skipping deletion of target role because it is not owned by this RoleDefinition",
 			"roleDefinitionName", roleDefinition.Name,
 			"roleName", roleDefinition.Spec.TargetName,
@@ -183,16 +185,18 @@ func (r *RoleDefinitionReconciler) handleDeletion(
 			authorizationv1alpha1.EventReasonOwnership, authorizationv1alpha1.EventActionDelete,
 			"Skipping deletion of target %s %s because it is not owned by RoleDefinition %s (UID: %s)",
 			roleDefinition.Spec.TargetRole, roleDefinition.Spec.TargetName, roleDefinition.GetName(), roleDefinition.GetUID())
-	} else if err := r.client.Delete(ctx, role); apierrors.IsNotFound(err) {
-		logger.V(2).Info("Role disappeared before deletion - removing finalizer",
-			"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
-	} else if err != nil {
-		logger.Error(err, "Failed to delete role",
-			"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
-		return r.markDeletionFailed(ctx, roleDefinition, err)
-	} else {
-		logger.V(2).Info("Requeuing RoleDefinition deletion", "roleDefinitionName", roleDefinition.Name)
-		return ctrl.Result{RequeueAfter: time.Second}, nil
+	default:
+		if err := r.client.Delete(ctx, role); apierrors.IsNotFound(err) {
+			logger.V(2).Info("Role disappeared before deletion - removing finalizer",
+				"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
+		} else if err != nil {
+			logger.Error(err, "Failed to delete role",
+				"roleDefinitionName", roleDefinition.Name, "roleName", roleDefinition.Spec.TargetName)
+			return r.markDeletionFailed(ctx, roleDefinition, err)
+		} else {
+			logger.V(2).Info("Requeuing RoleDefinition deletion", "roleDefinitionName", roleDefinition.Name)
+			return ctrl.Result{RequeueAfter: time.Second}, nil
+		}
 	}
 
 	return r.removeRoleDefinitionFinalizer(ctx, roleDefinition)
@@ -467,7 +471,7 @@ func (r *RoleDefinitionReconciler) checkRoleOwnership(
 		return fmt.Errorf("check existing %s %s: %w", roleDefinition.Spec.TargetRole, key, err)
 	}
 
-	if hasOwnerRef(existing, roleDefinition) {
+	if hasControllerOwnerRef(existing, roleDefinition) {
 		return nil
 	}
 
@@ -512,7 +516,7 @@ func (r *RoleDefinitionReconciler) cleanupInvalidAggregateFromTarget(
 	if err := r.client.Get(ctx, client.ObjectKey{Name: roleDefinition.Spec.TargetName}, existing); err != nil {
 		return client.IgnoreNotFound(err)
 	}
-	if !hasOwnerRef(existing, roleDefinition) {
+	if !hasControllerOwnerRef(existing, roleDefinition) {
 		log.FromContext(ctx).Info("Skipping cleanup of invalid aggregateFrom target because it is not owned by this RoleDefinition",
 			"roleDefinitionName", roleDefinition.Name,
 			"clusterRole", roleDefinition.Spec.TargetName)
@@ -546,7 +550,7 @@ func (r *RoleDefinitionReconciler) clearAggregationRuleIfSet(
 	if err := r.client.Get(ctx, client.ObjectKey{Name: roleDefinition.Spec.TargetName}, existing); err != nil {
 		return client.IgnoreNotFound(err)
 	}
-	if !hasOwnerRef(existing, roleDefinition) {
+	if !hasControllerOwnerRef(existing, roleDefinition) {
 		return nil
 	}
 	if existing.AggregationRule != nil {
@@ -576,7 +580,7 @@ func (r *RoleDefinitionReconciler) clearRulesOnAggregationTransition(
 	if err := r.client.Get(ctx, client.ObjectKey{Name: roleDefinition.Spec.TargetName}, existing); err != nil {
 		return client.IgnoreNotFound(err)
 	}
-	if !hasOwnerRef(existing, roleDefinition) {
+	if !hasControllerOwnerRef(existing, roleDefinition) {
 		return nil
 	}
 	// Only clear if the role currently has rules but no aggregation rule yet
@@ -603,7 +607,7 @@ func (r *RoleDefinitionReconciler) clearClusterRoleRulesIfEmpty(
 	if err := r.client.Get(ctx, client.ObjectKey{Name: roleDefinition.Spec.TargetName}, existing); err != nil {
 		return client.IgnoreNotFound(err)
 	}
-	if !hasOwnerRef(existing, roleDefinition) {
+	if !hasControllerOwnerRef(existing, roleDefinition) {
 		return nil
 	}
 	if len(existing.Rules) == 0 {
@@ -632,7 +636,7 @@ func (r *RoleDefinitionReconciler) clearRoleRulesIfEmpty(
 	if err := r.client.Get(ctx, key, existing); err != nil {
 		return client.IgnoreNotFound(err)
 	}
-	if !hasOwnerRef(existing, roleDefinition) {
+	if !hasControllerOwnerRef(existing, roleDefinition) {
 		return nil
 	}
 	if len(existing.Rules) == 0 {
