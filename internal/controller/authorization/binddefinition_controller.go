@@ -1826,7 +1826,7 @@ func (r *BindDefinitionReconciler) handleMissingTargetNamespaces(
 // isLegitimatelyOwnedByBindDefinition checks whether the given ServiceAccount is
 // legitimately owned by a BindDefinition. It prevents spoofed OwnerReferences
 // from tricking the controller into adopting pre-existing ServiceAccounts.
-func (r *BindDefinitionReconciler) isLegitimatelyOwnedByBindDefinition(ctx context.Context, sa *corev1.ServiceAccount, currentBD *authorizationv1alpha1.BindDefinition) (bool, error) {
+func (r *BindDefinitionReconciler) isLegitimatelyOwnedByBindDefinition(ctx context.Context, sa *corev1.ServiceAccount, _ *authorizationv1alpha1.BindDefinition) (bool, error) {
 	for _, ownerRef := range sa.OwnerReferences {
 		if ownerRef.Kind == authorizationv1alpha1.BindDefinitionKind &&
 			ownerRef.APIVersion == authorizationv1alpha1.GroupVersion.String() &&
