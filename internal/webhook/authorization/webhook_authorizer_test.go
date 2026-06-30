@@ -1804,8 +1804,7 @@ func TestServeHTTP_UsesSingleEvaluationDeadline(t *testing.T) {
 	var deadlines []time.Time
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-			WithIndex(&authzv1alpha1.WebhookAuthorizer{}, indexer.WebhookAuthorizerHasNamespaceSelectorField, indexer.WebhookAuthorizerHasNamespaceSelectorFunc).
-
+		WithIndex(&authzv1alpha1.WebhookAuthorizer{}, indexer.WebhookAuthorizerHasNamespaceSelectorField, indexer.WebhookAuthorizerHasNamespaceSelectorFunc).
 		WithObjects(wa, ns).
 		WithInterceptorFuncs(interceptor.Funcs{
 			List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
