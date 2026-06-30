@@ -456,7 +456,11 @@ uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified 
 	$(KUSTOMIZE) build config/crd | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
 
 .PHONY: deploy
-deploy: manifests kustomize ## Deploy controller using overlay (OVERLAY=dev|default, default: dev).
+deploy: manifests kustomize ## Deploy controller using overlay (OVERLAY=dev|default, default: default).
+	@if [ "$(OVERLAY)" = "default" ] && [ "$(IMG)" = "$(APP):latest" ]; then \
+		echo "ERROR: Refusing to deploy mutable latest tag in default overlay. Please provide a fully qualified image via IMG=..."; \
+		exit 1; \
+	fi
 	cd config/overlays/$(OVERLAY) && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/overlays/$(OVERLAY) | $(KUBECTL) apply -f -
 
