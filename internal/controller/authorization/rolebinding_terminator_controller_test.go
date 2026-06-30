@@ -16,6 +16,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -1079,4 +1080,91 @@ func TestRBTerminatorReconcileUsesLiveReaderForStaleOwnerUID(t *testing.T) {
 	err = staleCache.Get(ctx, types.NamespacedName{Name: "stale-owner-uid-rb", Namespace: "blocked-ns"}, updated)
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(updated.Finalizers).To(ContainElement(authorizationv1alpha1.RoleBindingFinalizer))
+}
+
+func TestRBTerminator_NamespaceHasResources_NetworkRoleBindings(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+	scheme := newTestScheme()
+
+	now := metav1.Now()
+	bdOwnerRef := testBindDefinitionControllerOwnerRef("test-bd", "bd-uid")
+	rb := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "test-rb",
+			Namespace:         "test-ns",
+			OwnerReferences:   []metav1.OwnerReference{bdOwnerRef},
+			DeletionTimestamp: &now,
+			Finalizers:        []string{authorizationv1alpha1.RoleBindingFinalizer},
+		},
+		RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "view"},
+	}
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "test-ns",
+			DeletionTimestamp: &now,
+			Finalizers:        []string{"kubernetes"},
+		},
+		Status: corev1.NamespaceStatus{Phase: corev1.NamespaceTerminating},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(scheme).
+		WithObjects(rb, ns, testBindDefinition()).
+		WithStatusSubresource(ns).
+		Build()
+
+	networkGVR := schema.GroupVersionResource{Group: "network.example.com", Version: "v1", Resource: "networkrolebindings"}
+	dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
+		runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{networkGVR: "NetworkRoleBindingList"},
+	)
+
+	unstructuredList := &unstructured.UnstructuredList{}
+	unstructuredList.SetGroupVersionKind(schema.GroupVersionKind{Group: "network.example.com", Version: "v1", Kind: "NetworkRoleBindingList"})
+	unstructuredList.Items = []unstructured.Unstructured{
+		{
+			Object: map[string]interface{}{
+				"apiVersion": "network.example.com/v1",
+				"kind":       "NetworkRoleBinding",
+				"metadata": map[string]interface{}{
+					"name":      "test-networkrb",
+					"namespace": "test-ns",
+				},
+			},
+		},
+	}
+	dynamicClient.PrependReactor("list", "networkrolebindings", func(_ k8stesting.Action) (bool, runtime.Object, error) {
+		return true, unstructuredList, nil
+	})
+
+	resourceTracker := fakeAPIResourceProvider{
+		resources: discovery.APIResourcesByGroupVersion{
+			"network.example.com/v1": {
+				{
+					Name:       "networkrolebindings",
+					Kind:       "NetworkRoleBinding",
+					Verbs:      []string{"list"},
+					Namespaced: true,
+				},
+			},
+		},
+	}
+
+	r := &RoleBindingTerminator{
+		client:          c,
+		scheme:          scheme,
+		dynamicClient:   dynamicClient,
+		resourceTracker: resourceTracker,
+		recorder:        events.NewFakeRecorder(10),
+	}
+
+	res, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "test-ns", Name: "test-rb"}})
+	g.Expect(err).NotTo(HaveOccurred())
+
+	// We expect termination to be BLOCKED, so the finalizer stays, and RequeueAfter is set.
+	g.Expect(res.RequeueAfter).To(Equal(terminatingNamespaceRequeueInterval), "Termination should be blocked by networkrolebindings")
+
+	var updatedRB rbacv1.RoleBinding
+	g.Expect(c.Get(ctx, types.NamespacedName{Namespace: "test-ns", Name: "test-rb"}, &updatedRB)).To(Succeed())
+	g.Expect(updatedRB.Finalizers).To(ContainElement(authorizationv1alpha1.RoleBindingFinalizer), "Finalizer should not be removed while resources exist")
 }
