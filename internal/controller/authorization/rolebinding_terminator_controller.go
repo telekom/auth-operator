@@ -247,7 +247,7 @@ func namespaceHasResources(ctx context.Context, resourceTracker apiResourceProvi
 				resourcesSkipped.Add(1)
 				continue
 			}
-			if resource.Name == "rolebindings" && gv.Group == "rbac.authorization.k8s.io" {
+			if resource.Name == "rolebindings" && gv.Group == rbacv1.GroupName {
 				// ignore rbac rolebindings
 				logger.V(4).Info("skipping rolebinding", "namespace", namespace, "resource", resource.Name, "groupVersion", groupVersion)
 				resourcesSkipped.Add(1)
