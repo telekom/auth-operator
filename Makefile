@@ -6,7 +6,7 @@ include versions.env
 # Image URL to use all building/pushing image targets
 PROJECT_NAME = "auth-operator"
 APP ?= auth-operator
-IMG ?= $(APP):latest
+IMG ?= ghcr.io/telekom/$(APP):v0.1.0
 NAMESPACE ?= auth-operator-system
 
 # E2E run identifier and deterministic kind cluster name

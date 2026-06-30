@@ -16,7 +16,7 @@ resources:
 images:
 - name: controller
   newName: auth-operator
-  newTag: latest
+  newTag: v0.1.0
 
 # Patches for production configuration
 patches:
