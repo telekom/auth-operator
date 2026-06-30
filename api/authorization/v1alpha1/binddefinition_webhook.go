@@ -493,20 +493,42 @@ func validateNamespaceBindings(kind schema.GroupKind, name string, bindings []Na
 						roleRef)})
 			}
 		}
-		for j, selector := range binding.NamespaceSelector {
-			if isLabelSelectorEmpty(&selector) {
-				continue
+			for j, selector := range binding.NamespaceSelector {
+				if isLabelSelectorEmpty(&selector) {
+					continue
+				}
+				if _, err := metav1.LabelSelectorAsSelector(&selector); err != nil {
+					return apierrors.NewInvalid(
+						kind,
+						name,
+						field.ErrorList{field.Invalid(
+							field.NewPath("spec", "roleBindings").Index(i).Child("namespaceSelector").Index(j),
+							selector,
+							err.Error())})
+				}
+				for key := range selector.MatchLabels {
+					if key != LabelKeyOwner && key != LabelKeyTenant && key != LabelKeyThirdParty && key != corev1.LabelMetadataName {
+						return apierrors.NewInvalid(
+							kind,
+							name,
+							field.ErrorList{field.Invalid(
+								field.NewPath("spec", "roleBindings").Index(i).Child("namespaceSelector").Index(j).Child("matchLabels").Key(key),
+								key,
+								"namespace admission selectors may only use tracked ownership labels ("+LabelKeyOwner+", "+LabelKeyTenant+", "+LabelKeyThirdParty+") or "+corev1.LabelMetadataName)})
+					}
+				}
+				for _, expr := range selector.MatchExpressions {
+					if expr.Key != LabelKeyOwner && expr.Key != LabelKeyTenant && expr.Key != LabelKeyThirdParty && expr.Key != corev1.LabelMetadataName {
+						return apierrors.NewInvalid(
+							kind,
+							name,
+							field.ErrorList{field.Invalid(
+								field.NewPath("spec", "roleBindings").Index(i).Child("namespaceSelector").Index(j).Child("matchExpressions").Key(expr.Key),
+								expr.Key,
+								"namespace admission selectors may only use tracked ownership labels ("+LabelKeyOwner+", "+LabelKeyTenant+", "+LabelKeyThirdParty+") or "+corev1.LabelMetadataName)})
+					}
+				}
 			}
-			if _, err := metav1.LabelSelectorAsSelector(&selector); err != nil {
-				return apierrors.NewInvalid(
-					kind,
-					name,
-					field.ErrorList{field.Invalid(
-						field.NewPath("spec", "roleBindings").Index(i).Child("namespaceSelector").Index(j),
-						selector,
-						err.Error())})
-			}
-		}
 	}
 	return nil
 }
