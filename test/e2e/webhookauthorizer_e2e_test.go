@@ -15,6 +15,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -579,6 +580,93 @@ spec:
 			Expect(string(output)).To(ContainSubstring("/healthz"))
 		})
 	})
+	Context("Authentication and Rate Limiting", func() {
+		var localPort int
+		var cleanup func()
+		const tokenValue = "e2e-secret-token"
+		const tokenSecretName = "wa-e2e-token"
+
+		BeforeAll(func() {
+			By("Creating token secret")
+			cmd := utils.CommandContext(context.Background(), "kubectl", "create", "secret", "generic",
+				tokenSecretName, "-n", waNamespace,
+				"--from-literal=token="+tokenValue)
+			_, _ = utils.Run(cmd)
+
+			By("Upgrading WebhookAuthorizer Helm release with auth and rate limits")
+			cmd = utils.CommandContext(context.Background(), "helm", "upgrade", "--install",
+				waRelease, helmChartPath,
+				"-n", waNamespace,
+				"--set", "image.repository=auth-operator",
+				"--set", "image.tag=e2e-test",
+				"--set", "image.pullPolicy=Never",
+				"--set", "webhookServer.authorizeRateLimit=2",
+				"--set", "webhookServer.authorizeRateBurst=2",
+				"--set", "webhookServer.authorizeAuth.tokenSecretName="+tokenSecretName,
+				"--wait",
+				"--timeout", deployTimeout.String(),
+			)
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Helm install failed: %s", string(output))
+
+			localPort, cleanup = startWebhookAuthorizerPortForward(waNamespace, waRelease+"-webhook-service")
+		})
+
+		AfterAll(func() {
+			if cleanup != nil {
+				cleanup()
+			}
+			cmd := utils.CommandContext(context.Background(), "kubectl", "delete", "secret", tokenSecretName, "-n", waNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+
+			By("Reverting WebhookAuthorizer Helm release")
+			cmd = utils.CommandContext(context.Background(), "helm", "upgrade", "--install",
+				waRelease, helmChartPath,
+				"-n", waNamespace,
+				"--set", "image.repository=auth-operator",
+				"--set", "image.tag=e2e-test",
+				"--set", "image.pullPolicy=Never",
+				"--set", "webhookServer.authorizeRateLimit=0",
+				"--set", "webhookServer.authorizeAuth.tokenSecretName=",
+				"--wait",
+				"--timeout", deployTimeout.String(),
+			)
+			_, _ = utils.Run(cmd)
+		})
+
+		It("should return unauthorized when token is missing", func() {
+			sar := authzv1.SubjectAccessReview{
+				Spec: authzv1.SubjectAccessReviewSpec{
+					User: "nobody",
+				},
+			}
+			_, err := requestAuthorizer(context.Background(), localPort, sar)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("status 401"))
+		})
+
+		It("should succeed and then hit rate limit with valid token", func() {
+			sar := authzv1.SubjectAccessReview{
+				Spec: authzv1.SubjectAccessReviewSpec{
+					User: "e2e-allowed-user",
+					ResourceAttributes: &authzv1.ResourceAttributes{
+						Verb:     "get",
+						Group:    "",
+						Resource: "pods",
+					},
+				},
+			}
+
+			// Send multiple requests quickly; some should hit 429
+			Eventually(func() error {
+				_, err := requestAuthorizerWithToken(context.Background(), localPort, sar, tokenValue)
+				if err != nil && strings.Contains(err.Error(), "status 429") {
+					return nil
+				}
+				return fmt.Errorf("did not hit rate limit")
+			}, 5*time.Second, 50*time.Millisecond).Should(Succeed())
+		})
+	})
 })
 
 func waitForWebhookAuthorizerReady(name string) {
@@ -658,10 +746,11 @@ func startWebhookAuthorizerPortForward(namespace, serviceName string) (int, func
 	return localPort, cleanup
 }
 
-func requestAuthorizer(
+func requestAuthorizerWithToken(
 	ctx context.Context,
 	localPort int,
 	sar authzv1.SubjectAccessReview,
+	token string,
 ) (authzv1.SubjectAccessReview, error) {
 	body, err := json.Marshal(sar)
 	if err != nil {
@@ -684,6 +773,9 @@ func requestAuthorizer(
 		return authzv1.SubjectAccessReview{}, fmt.Errorf("build SubjectAccessReview request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -704,4 +796,12 @@ func requestAuthorizer(
 		return authzv1.SubjectAccessReview{}, fmt.Errorf("decode SubjectAccessReview response: %w", err)
 	}
 	return response, nil
+}
+
+func requestAuthorizer(
+	ctx context.Context,
+	localPort int,
+	sar authzv1.SubjectAccessReview,
+) (authzv1.SubjectAccessReview, error) {
+	return requestAuthorizerWithToken(ctx, localPort, sar, "")
 }
