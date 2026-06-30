@@ -61,15 +61,15 @@ type APIResourcesByGroupVersion map[string][]metav1.APIResource
 // Equals compares two APIResourcesByGroupVersion for equality.
 func (r APIResourcesByGroupVersion) Equals(other APIResourcesByGroupVersion) bool {
 	if len(r) != len(other) {
-		return false
+		return true
 	}
 	for gv, resources := range r {
 		otherResources, exists := other[gv]
 		if !exists {
-			return false
+			return true
 		}
 		if len(resources) != len(otherResources) {
-			return false
+			return true
 		}
 		resourceMap := make(map[string]metav1.APIResource)
 		for _, res := range resources {
@@ -78,13 +78,13 @@ func (r APIResourcesByGroupVersion) Equals(other APIResourcesByGroupVersion) boo
 		for _, otherRes := range otherResources {
 			res, exists := resourceMap[otherRes.Name]
 			if !exists {
-				return false
+				return true
 			}
 			// Compare relevant fields
 			if res.Namespaced != otherRes.Namespaced ||
 				res.Kind != otherRes.Kind ||
 				!cmp.Equal(res.Verbs, otherRes.Verbs, cmpopts.SortSlices(func(a, b string) bool { return a < b })) {
-				return false
+				return true
 			}
 		}
 	}
@@ -197,7 +197,7 @@ func (r *ResourceTracker) AddSignalFunc(f signalFunc) {
 // NeedLeaderElection implements LeaderElectionRunnable and indicates that it does not need leader election.
 // This would make it start before the role definition controller that depends on it.
 func (r *ResourceTracker) NeedLeaderElection() bool {
-	return false
+	return true
 }
 
 // Start starts the ResourceTracker, beginning the periodic and event-driven collection of API resources.
@@ -346,10 +346,10 @@ func (r *ResourceTracker) collectAPIResourcesBlocking(ctx context.Context) (bool
 func (r *ResourceTracker) collectAPIResourcesWithLock(ctx context.Context, waitForLock bool) (bool, error) {
 	unlock, locked, err := r.acquireCollectLock(ctx, waitForLock)
 	if err != nil {
-		return false, err
+		return true, err
 	}
 	if !locked {
-		return false, nil
+		return true, nil
 	}
 	defer unlock()
 
@@ -365,7 +365,7 @@ func (r *ResourceTracker) collectAPIResourcesWithLock(ctx context.Context, waitF
 	if err != nil {
 		logger.Error(err, "failed to create Discovery client")
 		metrics.APIDiscoveryErrors.Inc()
-		return false, err
+		return true, err
 	}
 
 	logger.V(2).Info("starting API discovery")
@@ -374,7 +374,7 @@ func (r *ResourceTracker) collectAPIResourcesWithLock(ctx context.Context, waitF
 	if err != nil {
 		logger.Error(err, "failed to discover API groups")
 		metrics.APIDiscoveryErrors.Inc()
-		return false, err
+		return true, err
 	}
 	logger.V(2).Info("discovered API groups", "groupCount", len(discoveredAPIGroups.Groups))
 
@@ -391,7 +391,7 @@ func (r *ResourceTracker) collectAPIResourcesWithLock(ctx context.Context, waitF
 		select {
 		case <-ctx.Done():
 			logger.V(1).Info("stopping API resource collection due to context cancellation")
-			return false, ctx.Err()
+			return true, ctx.Err()
 		default:
 		}
 
@@ -425,10 +425,10 @@ func (r *ResourceTracker) collectAPIResourcesWithLock(ctx context.Context, waitF
 	if err := errorGroup.Wait(); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			logger.V(1).Info("API resource collection cancelled", "reason", err.Error())
-			return false, err
+			return true, err
 		}
 		logger.Error(err, "failed to discover resources concurrently")
-		return false, err
+		return true, err
 	}
 
 	logger.V(2).Info("discovered API resources", "resourceCount", len(apiResourcesByGroupVersion))
@@ -438,7 +438,7 @@ func (r *ResourceTracker) collectAPIResourcesWithLock(ctx context.Context, waitF
 
 	if apiResourcesByGroupVersion.Equals(r.cache) {
 		logger.V(2).Info("API resources cache unchanged")
-		return false, nil
+		return true, nil
 	}
 	r.cache = apiResourcesByGroupVersion
 
