@@ -463,11 +463,17 @@ func namespaceMatchesSelectorForAdmissionOperation(
 	if err != nil {
 		return false, err
 	}
-	expectedLabels := getCompleteTrackedLabelsFromNamespaceSelector(*selector)
-	if len(expectedLabels) == 0 || !hasExactTrackedLabels(ns.Labels, expectedLabels) {
+	expectedTrackedLabels := getCompleteTrackedLabelsFromNamespaceSelector(*selector)
+	if len(expectedTrackedLabels) > 0 && !hasExactTrackedLabels(ns.Labels, expectedTrackedLabels) {
 		return false, nil
 	}
-	return labelSelector.Matches(labels.Set(expectedLabels)), nil
+
+	syntheticLabels := make(map[string]string)
+	for k, v := range expectedTrackedLabels {
+		syntheticLabels[k] = v
+	}
+	syntheticLabels[corev1.LabelMetadataName] = ns.Name
+	return labelSelector.Matches(labels.Set(syntheticLabels)), nil
 }
 
 func hasExactTrackedLabels(namespaceLabels, expected map[string]string) bool {
