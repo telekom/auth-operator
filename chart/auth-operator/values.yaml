@@ -109,7 +109,7 @@ webhookServer:
   # Allow the capi-operator-manager ServiceAccount to skip BindDefinition
   # authorization for Namespace UPDATE requests. Protected-label validation
   # still runs. Set to "false" to require normal authorization for those updates.
-  capiOperatorUpdateBypass: "true"
+  capiOperatorUpdateBypass: "false"
   # Maximum sustained requests per second for the /authorize endpoint.
   # Disabled by default because rate limiting must only be enabled when
   # authorizeAuth.tokenSecretName is configured for trusted callers.

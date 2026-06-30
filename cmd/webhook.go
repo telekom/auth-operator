@@ -367,7 +367,7 @@ func init() {
 
 	webhookCmd.Flags().BoolVar(&enableTDGMigration, "tdg-migration", false,
 		"If set, the legacy labels and behavior for TDG migration will be enabled.")
-	webhookCmd.Flags().BoolVar(&enableCAPIOperatorUpdateBypass, "capi-operator-update-bypass", true,
+	webhookCmd.Flags().BoolVar(&enableCAPIOperatorUpdateBypass, "capi-operator-update-bypass", false,
 		"If set, the capi-operator-manager ServiceAccount may skip BindDefinition authorization for Namespace UPDATE requests; protected-label validation still runs.")
 	webhookCmd.Flags().Float64Var(&authorizeRateLimit, "authorize-rate-limit", 0,
 		"Maximum sustained requests per second for the /authorize endpoint. Set to 0 to disable rate limiting.")
