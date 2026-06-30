@@ -145,7 +145,8 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var sar authzv1.SubjectAccessReview
 
 	if err := json.NewDecoder(r.Body).Decode(&sar); err != nil {
-		wa.Log.Error(err, "failed to decode SubjectAccessReview request",
+		wa.Log.V(1).Info("failed to decode SubjectAccessReview request",
+			"error", err,
 			"latency", time.Since(start).String())
 		if span := trace.SpanFromContext(ctx); span.IsRecording() {
 			span.RecordError(err)
@@ -479,13 +480,9 @@ func (wa *Authorizer) logDecision(sar *authzv1.SubjectAccessReview, res *evaluat
 		fields = append(fields, "matchedRule", res.matchedRule)
 	}
 
-	switch res.decision {
-	case pkgmetrics.AuthorizerDecisionDenied:
-		wa.Log.Info("authorization decision", fields...)
-	default:
-		// noOpinion and allow are verbose — only visible at V(1).
-		wa.Log.V(1).Info("authorization decision", fields...)
-	}
+	// All decisions (deny, allow, noOpinion) are verbose — only visible at V(1)
+	// to prevent log-volume DoS from unauthenticated /authorize endpoint.
+	wa.Log.V(1).Info("authorization decision", fields...)
 }
 
 // countTotalRules returns the total number of resource and non-resource rules
