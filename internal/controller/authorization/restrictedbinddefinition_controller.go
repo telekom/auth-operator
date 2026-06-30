@@ -534,6 +534,9 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 			metrics.DeletePolicyViolationContribution(metrics.ControllerRestrictedBindDefinition, req.Name)
 			metrics.RoleRefsMissing.DeleteLabelValues(req.Name)
 			metrics.NamespacesActive.DeleteLabelValues(req.Name)
+			metrics.DeleteManagedResourceSeries(metrics.ControllerRestrictedBindDefinition, req.Name)
+			metrics.ExternalSAsReferenced.DeleteLabelValues(req.Name)
+			metrics.ServiceAccountSkippedPreExisting.DeleteLabelValues(req.Name)
 			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResultSkipped).Inc()
 			return ctrl.Result{}, nil
 		}
@@ -825,6 +828,15 @@ func (r *RestrictedBindDefinitionReconciler) rbdReconcileServiceAccounts(
 	if err := r.rbdPruneStaleServiceAccounts(ctx, rbd, desiredSAs, previousGeneratedSAs, r.client); err != nil {
 		return nil, err
 	}
+
+	metrics.ManagedResources.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResourceServiceAccount, rbd.Name).Set(float64(len(desiredSAs)))
+	var extCount int
+	for _, sub := range rbd.Spec.Subjects {
+		if sub.Kind == "ServiceAccount" {
+			extCount++
+		}
+	}
+	metrics.ExternalSAsReferenced.WithLabelValues(rbd.Name).Set(float64(extCount))
 	return effectiveSubjects, nil
 }
 
@@ -900,6 +912,8 @@ func (r *RestrictedBindDefinitionReconciler) rbdReconcileBindings(
 	}
 
 	metrics.NamespacesActive.WithLabelValues(rbd.Name).Set(float64(len(activeNamespaces)))
+	metrics.ManagedResources.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResourceClusterRoleBinding, rbd.Name).Set(float64(len(desiredCRBs)))
+	metrics.ManagedResources.WithLabelValues(metrics.ControllerRestrictedBindDefinition, metrics.ResourceRoleBinding, rbd.Name).Set(float64(len(desiredRBs)))
 
 	// Prune stale owned resources that are no longer in the desired set.
 	pruneAttempted = true
@@ -1299,6 +1313,11 @@ func (r *RestrictedBindDefinitionReconciler) rbdClassifyExistingServiceAccount(
 	if !isOwnedByRestrictedBindDefinition(existing.OwnerReferences) {
 		logger.V(1).Info("skipping pre-existing ServiceAccount",
 			"serviceAccount", subject.Name, "namespace", subject.Namespace)
+		metrics.ServiceAccountSkippedPreExisting.WithLabelValues(rbd.Name).Inc()
+		r.recorder.Eventf(rbd, nil, corev1.EventTypeNormal,
+			authorizationv1alpha1.EventReasonServiceAccountPreExisting, authorizationv1alpha1.EventActionReconcile,
+			"Using pre-existing ServiceAccount %s/%s (not managed by any RestrictedBindDefinition)",
+			subject.Namespace, subject.Name)
 		return true, false, key
 	}
 
@@ -1676,6 +1695,9 @@ func (r *RestrictedBindDefinitionReconciler) reconcileDelete(
 	metrics.DeletePolicyViolationContribution(metrics.ControllerRestrictedBindDefinition, rbd.Name)
 	metrics.RoleRefsMissing.DeleteLabelValues(rbd.Name)
 	metrics.NamespacesActive.DeleteLabelValues(rbd.Name)
+	metrics.DeleteManagedResourceSeries(metrics.ControllerRestrictedBindDefinition, rbd.Name)
+	metrics.ExternalSAsReferenced.DeleteLabelValues(rbd.Name)
+	metrics.ServiceAccountSkippedPreExisting.DeleteLabelValues(rbd.Name)
 
 	// Remove finalizer.
 	old := rbd.DeepCopy()
