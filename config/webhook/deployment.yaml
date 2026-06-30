@@ -51,7 +51,7 @@ spec:
             - name: TDG_MIGRATION
               value: "false"
             - name: CAPI_OPERATOR_UPDATE_BYPASS
-              value: "true"
+              value: "false"
             - name: WEBHOOK_SERVICE_NAME
               value: "webhook-service"
             - name: WEBHOOK_SECRET_NAME
