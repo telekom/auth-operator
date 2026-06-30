@@ -51,6 +51,8 @@ Prometheus needs an SNI or verification name override.
 The `config/prometheus/monitor.yaml` defines a ServiceMonitor. To include it,
 add `../../prometheus` to your overlay's `resources:` list:
 
+> **Note:** The Kustomize `ServiceMonitor` currently hard-codes `scheme: http` and only supports insecure metrics. If you enable `--metrics-secure`, you must patch the ServiceMonitor to use `https` and provide appropriate `tlsConfig`, or use the Helm chart.
+
 ```yaml
 # In config/overlays/dev/kustomization.yaml or config/overlays/production/kustomization.yaml
 resources:

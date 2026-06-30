@@ -13,6 +13,8 @@ spec:
     - path: /metrics
       port: metrics
       scheme: http
+      # Note: This Kustomize ServiceMonitor only supports insecure metrics.
+      # If you enable --metrics-secure, use Helm or patch this to https with TLS config.
   selector:
     matchLabels:
       control-plane: controller-manager
