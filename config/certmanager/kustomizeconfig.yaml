@@ -1,4 +1,3 @@
-# This configuration is for teaching kustomize how to update name ref substitution
 nameReference:
 - kind: Issuer
   group: cert-manager.io
@@ -6,3 +5,8 @@ nameReference:
   - kind: Certificate
     group: cert-manager.io
     path: spec/issuerRef/name
+
+namePrefix:
+- path: spec/secretName
+  kind: Certificate
+  group: cert-manager.io
