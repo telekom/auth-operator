@@ -241,9 +241,15 @@ func namespaceHasResources(ctx context.Context, resourceTracker apiResourceProvi
 		for i := range resourceList {
 			resource := resourceList[i]
 
-			if strings.Contains(resource.Name, "/") || strings.Contains(resource.Name, "rolebindings") {
-				// ignore subresources and rolebinding resources
-				logger.V(4).Info("skipping subresource or rolebinding", "namespace", namespace, "resource", resource.Name, "groupVersion", groupVersion)
+			if strings.Contains(resource.Name, "/") {
+				// ignore subresources
+				logger.V(4).Info("skipping subresource", "namespace", namespace, "resource", resource.Name, "groupVersion", groupVersion)
+				resourcesSkipped.Add(1)
+				continue
+			}
+			if resource.Name == "rolebindings" && gv.Group == rbacv1.GroupName {
+				// ignore rbac rolebindings
+				logger.V(4).Info("skipping rolebinding", "namespace", namespace, "resource", resource.Name, "groupVersion", groupVersion)
 				resourcesSkipped.Add(1)
 				continue
 			}
