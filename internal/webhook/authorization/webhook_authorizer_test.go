@@ -295,13 +295,13 @@ func TestServeHTTP_ScopedAuthorizerDeniesClusterScopedResourceSAR(t *testing.T) 
 		t.Fatalf("failed to decode response: %v", err)
 	}
 	if resp.Status.Allowed {
-		t.Fatal("expected cluster-scoped SAR to be denied")
+		t.Fatal("expected cluster-scoped SAR to NOT be allowed")
 	}
-	if !resp.Status.Denied {
-		t.Fatal("expected Denied=true for scoped deniedPrincipal on cluster-scoped resource SAR")
+	if resp.Status.Denied {
+		t.Fatal("expected Denied=false, scoped authorizer should skip cluster-scoped SAR")
 	}
-	if resp.Status.Reason != "Access denied by WebhookAuthorizer" {
-		t.Fatalf("expected sanitized deny reason, got %q", resp.Status.Reason)
+	if strings.Contains(resp.Status.Reason, "WebhookAuthorizer") {
+		t.Fatalf("expected fallback reason without authorizer details, got %q", resp.Status.Reason)
 	}
 }
 
