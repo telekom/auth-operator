@@ -197,7 +197,7 @@ func (r *ResourceTracker) AddSignalFunc(f signalFunc) {
 // NeedLeaderElection implements LeaderElectionRunnable and indicates that it does not need leader election.
 // This would make it start before the role definition controller that depends on it.
 func (r *ResourceTracker) NeedLeaderElection() bool {
-	return false
+	return true
 }
 
 // Start starts the ResourceTracker, beginning the periodic and event-driven collection of API resources.
