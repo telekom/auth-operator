@@ -68,19 +68,29 @@ func requesterMatchesDefaultAssignment(da *DefaultPolicyAssignment, username str
 }
 
 func resolveDefaultPoliciesForRequester(ctx context.Context, c client.Reader, username string, groups []string) ([]string, error) {
-	policyList := &RBACPolicyList{}
-	if err := c.List(ctx, policyList); err != nil {
-		return nil, fmt.Errorf("list RBACPolicies: %w", err)
-	}
-
 	matchedPolicies := make([]string, 0)
-	for _, policy := range policyList.Items {
-		if policy.Spec.DefaultAssignment == nil {
-			continue
+	continueToken := ""
+
+	for {
+		policyList := &RBACPolicyList{}
+		nextContinueToken, err := listAdmissionPage(ctx, c, policyList, continueToken)
+		if err != nil {
+			return nil, fmt.Errorf("list admission page for RBACPolicies: %w", err)
 		}
-		if requesterMatchesDefaultAssignment(policy.Spec.DefaultAssignment, username, groups) {
-			matchedPolicies = append(matchedPolicies, policy.Name)
+
+		for _, policy := range policyList.Items {
+			if policy.Spec.DefaultAssignment == nil {
+				continue
+			}
+			if requesterMatchesDefaultAssignment(policy.Spec.DefaultAssignment, username, groups) {
+				matchedPolicies = append(matchedPolicies, policy.Name)
+			}
 		}
+
+		if nextContinueToken == "" {
+			break
+		}
+		continueToken = nextContinueToken
 	}
 
 	sort.Strings(matchedPolicies)
