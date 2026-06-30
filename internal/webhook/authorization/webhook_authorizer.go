@@ -199,8 +199,8 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	items := append([]authorizationv1alpha1.WebhookAuthorizer(nil), globalItems...)
 
-		// Scoped authorizers are only evaluated when the SAR targets a specific
-		// namespace. The active-rules gauge still reflects the full set via allRules.
+	// Scoped authorizers are only evaluated when the SAR targets a specific
+	// namespace. The active-rules gauge still reflects the full set via allRules.
 	if sar.Spec.ResourceAttributes != nil && sar.Spec.ResourceAttributes.Namespace != "" {
 		items = append(items, scopedItems...)
 	}
