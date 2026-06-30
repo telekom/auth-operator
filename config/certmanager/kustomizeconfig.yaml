@@ -6,3 +6,10 @@ nameReference:
   - kind: Certificate
     group: cert-manager.io
     path: spec/issuerRef/name
+
+# Instruct kustomize to prefix Certificate's secretName to match the prefixed Deployment volumes
+namePrefix:
+- kind: Certificate
+  group: cert-manager.io
+  fieldSpecs:
+  - path: spec/secretName

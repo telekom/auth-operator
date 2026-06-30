@@ -428,6 +428,9 @@ kubectl get restrictedbinddefinitions,restrictedroledefinitions -o json | \
 kubectl logs -n auth-operator-system -l control-plane=webhook-server | grep -i cert
 
 # Verify certificate secret exists
+# Note: secret name depends on your installation method:
+# - Kustomize: auth-operator-webhook-certs
+# - Helm: <release-name>-webhook-certs (e.g. auth-operator-webhook-certs)
 kubectl get secret -n auth-operator-system auth-operator-webhook-certs
 
 # Check certificate expiry
