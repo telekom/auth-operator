@@ -145,7 +145,7 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var sar authzv1.SubjectAccessReview
 
 	if err := json.NewDecoder(r.Body).Decode(&sar); err != nil {
-		wa.Log.Error(err, "failed to decode SubjectAccessReview request",
+		wa.Log.Info("failed to decode SubjectAccessReview request", "error", err,
 			"latency", time.Since(start).String())
 		if span := trace.SpanFromContext(ctx); span.IsRecording() {
 			span.RecordError(err)
