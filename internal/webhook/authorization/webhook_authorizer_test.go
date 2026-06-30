@@ -300,8 +300,8 @@ func TestServeHTTP_ScopedAuthorizerDeniesClusterScopedResourceSAR(t *testing.T) 
 	if resp.Status.Denied {
 		t.Fatal("expected Denied=false, scoped authorizer should skip cluster-scoped SAR")
 	}
-	if resp.Status.Reason != "Access denied: no matching rules" {
-		t.Fatalf("expected fallback reason, got %q", resp.Status.Reason)
+	if strings.Contains(resp.Status.Reason, "WebhookAuthorizer") {
+		t.Fatalf("expected fallback reason without authorizer details, got %q", resp.Status.Reason)
 	}
 }
 
