@@ -1,4 +1,3 @@
-# This configuration is for teaching kustomize how to update name ref substitution
 nameReference:
 - kind: Issuer
   group: cert-manager.io
@@ -7,9 +6,7 @@ nameReference:
     group: cert-manager.io
     path: spec/issuerRef/name
 
-# Instruct kustomize to prefix Certificate's secretName to match the prefixed Deployment volumes
 namePrefix:
-- kind: Certificate
+- path: spec/secretName
+  kind: Certificate
   group: cert-manager.io
-  fieldSpecs:
-  - path: spec/secretName
