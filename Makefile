@@ -457,6 +457,10 @@ uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified 
 
 .PHONY: deploy
 deploy: manifests kustomize ## Deploy controller using overlay (OVERLAY=dev|default, default: dev).
+	@if [ "$(OVERLAY)" = "default" ] && [ "$(IMG)" = "$(APP):latest" ]; then \
+		echo "ERROR: For the default/production overlay, you MUST specify a qualified IMG (e.g., IMG=ghcr.io/telekom/auth-operator:v1.0.0)"; \
+		exit 1; \
+	fi
 	cd config/overlays/$(OVERLAY) && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/overlays/$(OVERLAY) | $(KUBECTL) apply -f -
 
