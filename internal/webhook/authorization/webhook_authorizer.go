@@ -507,11 +507,36 @@ func (wa *Authorizer) listAuthorizersByIndex(ctx context.Context, hasNamespaceSe
 	listCtx, cancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
 	defer cancel()
 	var allAuth authorizationv1alpha1.WebhookAuthorizerList
+
+	useFallback := false
 	if err := wa.Client.List(listCtx, &allAuth, client.MatchingFields{indexer.WebhookAuthorizerHasNamespaceSelectorField: hasNamespaceSelector}); err != nil {
-		return nil, fmt.Errorf("list WebhookAuthorizers by index %q: %w", hasNamespaceSelector, err)
+		if strings.Contains(err.Error(), "field label not supported") || strings.Contains(err.Error(), "Index with name") || strings.Contains(err.Error(), "does not support field selectors") {
+			useFallback = true
+		} else {
+			return nil, fmt.Errorf("list WebhookAuthorizers by index %q: %w", hasNamespaceSelector, err)
+		}
 	}
+
+	if useFallback {
+		if err := wa.Client.List(listCtx, &allAuth); err != nil {
+			return nil, fmt.Errorf("fallback list WebhookAuthorizers: %w", err)
+		}
+	}
+
 	items := make([]authorizationv1alpha1.WebhookAuthorizer, 0, len(allAuth.Items))
 	for _, item := range allAuth.Items {
+		if useFallback {
+			matches := ""
+			if helpers.IsLabelSelectorEmpty(&item.Spec.NamespaceSelector) {
+				matches = indexer.WebhookAuthorizerHasNamespaceSelectorFalse
+			} else {
+				matches = indexer.WebhookAuthorizerHasNamespaceSelectorTrue
+			}
+			if matches != hasNamespaceSelector {
+				continue
+			}
+		}
+
 		if !authorizerReadyForEvaluation(item) {
 			wa.Log.V(2).Info("skipping unconfigured WebhookAuthorizer",
 				"authorizer", item.Name,

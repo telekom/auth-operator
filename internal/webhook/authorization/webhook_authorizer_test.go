@@ -1849,12 +1849,14 @@ func TestServeHTTP_UsesSingleEvaluationDeadline(t *testing.T) {
 	if len(deadlines) < 2 {
 		t.Fatalf("expected authorizer list and namespace get deadlines, got %d", len(deadlines))
 	}
-	diff := deadlines[len(deadlines)-1].Sub(deadlines[0])
-	if diff < 0 {
-		diff = -diff
-	}
-	if diff > 10*time.Millisecond {
-		t.Fatalf("expected list and namespace get calls to share an evaluation deadline, got difference %s", diff)
+	for i := 1; i < len(deadlines); i++ {
+		diff := deadlines[i].Sub(deadlines[0])
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff > 10*time.Millisecond {
+			t.Fatalf("expected all external calls to share an evaluation deadline, got difference %s at index %d", diff, i)
+		}
 	}
 }
 
