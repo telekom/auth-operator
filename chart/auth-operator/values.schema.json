@@ -181,7 +181,7 @@
             "enabled": {
               "type": "boolean",
               "description": "Create ServiceAccount impersonation RBAC grants for the controller.",
-              "default": false
+              "default": true
             },
             "clusterWide": {
               "type": "boolean",

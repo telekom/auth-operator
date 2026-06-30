@@ -132,37 +132,15 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract trace context and start a tracing span only when tracing is
-	// enabled (non-nil Tracer). When disabled, this avoids header parsing and
-	// noop span creation on every request — true zero overhead.
-	if wa.Tracer != nil {
-		ctx = otel.GetTextMapPropagator().Extract(ctx, propagation.HeaderCarrier(r.Header))
-		var span trace.Span
-		ctx, span = wa.Tracer.Start(ctx, "webhook.SubjectAccessReview")
-		defer span.End()
-	}
+	ctx, endSpan := wa.startSubjectAccessReviewSpan(ctx, r)
+	defer endSpan()
 
-	var sar authzv1.SubjectAccessReview
-
-	if err := json.NewDecoder(r.Body).Decode(&sar); err != nil {
-		wa.Log.Error(err, "failed to decode SubjectAccessReview request",
-			"latency", time.Since(start).String())
-		if span := trace.SpanFromContext(ctx); span.IsRecording() {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, "invalid request body")
-		}
-		wa.recordErrorMetrics(start)
-		wa.writeDeniedResponse(w, "invalid request body")
+	sar, ok := wa.decodeSubjectAccessReview(ctx, w, r, start)
+	if !ok {
 		return
 	}
 
-	if reason := validateSAR(&sar); reason != "" {
-		wa.Log.V(1).Info("rejecting malformed SubjectAccessReview",
-			"reason", reason,
-			"user", sar.Spec.User,
-			"latency", time.Since(start).String())
-		wa.recordRejectedMetrics(start)
-		wa.writeDeniedResponse(w, reason)
+	if !wa.validateSubjectAccessReview(w, &sar, start) {
 		return
 	}
 
@@ -182,31 +160,8 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	evalCtx, evalCancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
 	defer evalCancel()
 
-	globalItems, err := wa.listAuthorizersByIndex(evalCtx, indexer.WebhookAuthorizerHasNamespaceSelectorFalse)
-	if err != nil {
-		wa.Log.Error(err, "failed to list global WebhookAuthorizers",
-			"user", sar.Spec.User,
-			"latency", time.Since(start).String())
-		if span := trace.SpanFromContext(ctx); span.IsRecording() {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, "failed to list global WebhookAuthorizers")
-		}
-		wa.recordErrorMetrics(start)
-		wa.writeDeniedResponse(w, reasonInternalEvaluationError)
-		return
-	}
-
-	scopedItems, err := wa.listAuthorizersByIndex(evalCtx, indexer.WebhookAuthorizerHasNamespaceSelectorTrue)
-	if err != nil {
-		wa.Log.Error(err, "failed to list scoped WebhookAuthorizers",
-			"user", sar.Spec.User,
-			"latency", time.Since(start).String())
-		if span := trace.SpanFromContext(ctx); span.IsRecording() {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, "failed to list scoped WebhookAuthorizers")
-		}
-		wa.recordErrorMetrics(start)
-		wa.writeDeniedResponse(w, reasonInternalEvaluationError)
+	globalItems, scopedItems, ok := wa.listAuthorizersForRequest(ctx, evalCtx, w, &sar, start)
+	if !ok {
 		return
 	}
 	allRules := countTotalRules(globalItems) + countTotalRules(scopedItems)
@@ -226,17 +181,8 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return strings.Compare(a.Name, b.Name)
 	})
 
-	result, err := wa.evaluateSAR(evalCtx, &sar, items)
-	if err != nil {
-		wa.Log.Error(err, "failed to evaluate SubjectAccessReview",
-			"user", sar.Spec.User,
-			"latency", time.Since(start).String())
-		if span := trace.SpanFromContext(ctx); span.IsRecording() {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, "failed to evaluate SubjectAccessReview")
-		}
-		wa.recordErrorMetrics(start)
-		wa.writeDeniedResponse(w, reasonInternalEvaluationError)
+	result, ok := wa.evaluateSubjectAccessReview(ctx, evalCtx, w, &sar, items, start)
+	if !ok {
 		return
 	}
 
@@ -262,16 +208,8 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// are not recorded when serialization fails. Note: metrics are recorded
 	// after successful marshal but before w.Write — a late write failure
 	// (e.g. client disconnect) will still have metrics emitted.
-	respBytes, err := json.Marshal(response)
-	if err != nil {
-		wa.Log.Error(err, "failed to encode SubjectAccessReview response",
-			"latency", time.Since(start).String())
-		if span := trace.SpanFromContext(ctx); span.IsRecording() {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, "failed to encode response")
-		}
-		wa.recordErrorMetrics(start)
-		http.Error(w, "internal evaluation error", http.StatusInternalServerError)
+	respBytes, ok := wa.marshalSubjectAccessReviewResponse(ctx, w, response, start)
+	if !ok {
 		return
 	}
 
@@ -294,6 +232,102 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		wa.Log.Error(err, "failed to write SubjectAccessReview response",
 			"latency", time.Since(start).String())
 	}
+}
+
+func (wa *Authorizer) startSubjectAccessReviewSpan(ctx context.Context, r *http.Request) (spanCtx context.Context, end func()) {
+	// Extract trace context and start a tracing span only when tracing is
+	// enabled (non-nil Tracer). When disabled, this avoids header parsing and
+	// noop span creation on every request — true zero overhead.
+	if wa.Tracer == nil {
+		return ctx, func() {}
+	}
+
+	ctx = otel.GetTextMapPropagator().Extract(ctx, propagation.HeaderCarrier(r.Header))
+	ctx, span := wa.Tracer.Start(ctx, "webhook.SubjectAccessReview")
+	return ctx, func() { span.End() }
+}
+
+func (wa *Authorizer) decodeSubjectAccessReview(ctx context.Context, w http.ResponseWriter, r *http.Request, start time.Time) (authzv1.SubjectAccessReview, bool) {
+	var sar authzv1.SubjectAccessReview
+	if err := json.NewDecoder(r.Body).Decode(&sar); err != nil {
+		wa.Log.Error(err, "failed to decode SubjectAccessReview request",
+			"latency", time.Since(start).String())
+		if span := trace.SpanFromContext(ctx); span.IsRecording() {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "invalid request body")
+		}
+		wa.recordErrorMetrics(start)
+		wa.writeDeniedResponse(w, "invalid request body")
+		return authzv1.SubjectAccessReview{}, false
+	}
+	return sar, true
+}
+
+func (wa *Authorizer) validateSubjectAccessReview(w http.ResponseWriter, sar *authzv1.SubjectAccessReview, start time.Time) bool {
+	if reason := validateSAR(sar); reason != "" {
+		wa.Log.V(1).Info("rejecting malformed SubjectAccessReview",
+			"reason", reason,
+			"user", sar.Spec.User,
+			"latency", time.Since(start).String())
+		wa.recordRejectedMetrics(start)
+		wa.writeDeniedResponse(w, reason)
+		return false
+	}
+	return true
+}
+
+func (wa *Authorizer) listAuthorizersForRequest(ctx, evalCtx context.Context, w http.ResponseWriter, sar *authzv1.SubjectAccessReview, start time.Time) (globalItems, scopedItems []authorizationv1alpha1.WebhookAuthorizer, ok bool) {
+	var err error
+	globalItems, err = wa.listAuthorizersByIndex(evalCtx, indexer.WebhookAuthorizerHasNamespaceSelectorFalse)
+	if err != nil {
+		wa.handleAuthorizerEvaluationError(ctx, w, sar, start, err, "failed to list global WebhookAuthorizers")
+		return nil, nil, false
+	}
+
+	scopedItems, err = wa.listAuthorizersByIndex(evalCtx, indexer.WebhookAuthorizerHasNamespaceSelectorTrue)
+	if err != nil {
+		wa.handleAuthorizerEvaluationError(ctx, w, sar, start, err, "failed to list scoped WebhookAuthorizers")
+		return nil, nil, false
+	}
+
+	return globalItems, scopedItems, true
+}
+
+func (wa *Authorizer) evaluateSubjectAccessReview(ctx, evalCtx context.Context, w http.ResponseWriter, sar *authzv1.SubjectAccessReview, items []authorizationv1alpha1.WebhookAuthorizer, start time.Time) (evaluationResult, bool) {
+	result, err := wa.evaluateSAR(evalCtx, sar, items)
+	if err != nil {
+		wa.handleAuthorizerEvaluationError(ctx, w, sar, start, err, "failed to evaluate SubjectAccessReview")
+		return evaluationResult{}, false
+	}
+	return result, true
+}
+
+func (wa *Authorizer) handleAuthorizerEvaluationError(ctx context.Context, w http.ResponseWriter, sar *authzv1.SubjectAccessReview, start time.Time, err error, message string) {
+	wa.Log.Error(err, message,
+		"user", sar.Spec.User,
+		"latency", time.Since(start).String())
+	if span := trace.SpanFromContext(ctx); span.IsRecording() {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, message)
+	}
+	wa.recordErrorMetrics(start)
+	wa.writeDeniedResponse(w, reasonInternalEvaluationError)
+}
+
+func (wa *Authorizer) marshalSubjectAccessReviewResponse(ctx context.Context, w http.ResponseWriter, response authzv1.SubjectAccessReview, start time.Time) ([]byte, bool) {
+	respBytes, err := json.Marshal(response)
+	if err != nil {
+		wa.Log.Error(err, "failed to encode SubjectAccessReview response",
+			"latency", time.Since(start).String())
+		if span := trace.SpanFromContext(ctx); span.IsRecording() {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "failed to encode response")
+		}
+		wa.recordErrorMetrics(start)
+		http.Error(w, "internal evaluation error", http.StatusInternalServerError)
+		return nil, false
+	}
+	return respBytes, true
 }
 
 func publicAuthorizerReason(result evaluationResult) string {

@@ -20,6 +20,8 @@ The Helm chart ships a **metrics Service** (enabled by default) and an optional
 ```yaml
 # values.yaml
 metrics:
+  auth:
+    enabled: true    # Secure-by-default HTTPS metrics with Kubernetes authn/authz
   service:
     enabled: true   # Dedicated ClusterIP Service on port 8080
     port: 8080
@@ -36,15 +38,17 @@ Enable the ServiceMonitor:
 
 ```bash
 helm upgrade auth-operator chart/auth-operator \
-  --set metrics.serviceMonitor.enabled=true
+  --set metrics.serviceMonitor.enabled=true \
+  --set metrics.serviceMonitor.tlsConfig.insecureSkipVerify=true
 ```
 
-When `metrics.auth.enabled=true`, the ServiceMonitor scrapes over HTTPS and TLS
-verification stays enabled by default. Helm rendering fails unless you set
-`metrics.serviceMonitor.tlsConfig.caFile` for the metrics serving certificate,
-or explicitly opt into `insecureSkipVerify=true` only for an accepted
-self-signed endpoint. Set `metrics.serviceMonitor.tlsConfig.serverName` when
-Prometheus needs an SNI or verification name override.
+Helm installs set `metrics.auth.enabled=true` by default. The ServiceMonitor
+therefore scrapes over HTTPS, and TLS verification stays enabled by default.
+Helm rendering fails unless you set `metrics.serviceMonitor.tlsConfig.caFile`
+for the metrics serving certificate, or explicitly opt into
+`insecureSkipVerify=true` only for an accepted self-signed endpoint. Set
+`metrics.serviceMonitor.tlsConfig.serverName` when Prometheus needs an SNI or
+verification name override.
 
 ### Kustomize
 
