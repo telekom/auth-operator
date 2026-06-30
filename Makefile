@@ -444,8 +444,8 @@ ifndef ignore-not-found
   ignore-not-found = false
 endif
 
-# OVERLAY can be 'dev' or 'production' (default: dev)
-OVERLAY ?= dev
+# OVERLAY can be 'dev' or 'default' (default: default)
+OVERLAY ?= default
 
 .PHONY: install
 install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
@@ -456,7 +456,7 @@ uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified 
 	$(KUSTOMIZE) build config/crd | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
 
 .PHONY: deploy
-deploy: manifests kustomize ## Deploy controller using overlay (OVERLAY=dev|production, default: dev).
+deploy: manifests kustomize ## Deploy controller using overlay (OVERLAY=dev|default, default: dev).
 	cd config/overlays/$(OVERLAY) && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/overlays/$(OVERLAY) | $(KUBECTL) apply -f -
 
@@ -465,8 +465,8 @@ deploy-dev: ## Deploy controller with dev overlay (debug logging enabled).
 	$(MAKE) deploy OVERLAY=dev
 
 .PHONY: deploy-production
-deploy-production: ## Deploy controller with production overlay (optimized for production).
-	$(MAKE) deploy OVERLAY=production
+deploy-default: ## Deploy controller with production overlay (optimized for default usage).
+	$(MAKE) deploy OVERLAY=default
 
 .PHONY: undeploy
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
