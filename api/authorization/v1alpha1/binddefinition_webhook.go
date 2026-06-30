@@ -230,16 +230,27 @@ func (v *BindDefinitionValidator) validateBindDefinitionSpec(ctx context.Context
 					// Unreachable: syntax was pre-validated, but guard defensively.
 					return warnings, apierrors.NewBadRequest(fmt.Sprintf("invalid namespaceSelector: %v", err))
 				}
-				namespaceList := &corev1.NamespaceList{}
-				listOptions := &client.ListOptions{
-					LabelSelector: selector,
-				}
-				if err := v.reader().List(ctx, namespaceList, listOptions); err != nil {
-					logger.Error(err, "failed to list namespaces", "selector", selector.String())
-					return warnings, apierrors.NewInternalError(errors.New("unable to list namespaces"))
-				}
-				for _, ns := range namespaceList.Items {
-					namespaceSet[ns.Name] = ns
+				continueToken := ""
+				for {
+					namespaceList := &corev1.NamespaceList{}
+					nextContinueToken, err := listAdmissionPage(
+						ctx,
+						v.reader(),
+						namespaceList,
+						continueToken,
+						client.MatchingLabelsSelector{Selector: selector},
+					)
+					if err != nil {
+						logger.Error(err, "failed to list namespaces", "selector", selector.String())
+						return warnings, apierrors.NewInternalError(errors.New("unable to list namespaces"))
+					}
+					for _, ns := range namespaceList.Items {
+						namespaceSet[ns.Name] = ns
+					}
+					if nextContinueToken == "" {
+						break
+					}
+					continueToken = nextContinueToken
 				}
 			}
 
