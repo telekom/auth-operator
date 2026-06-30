@@ -8,3 +8,5 @@ metadata:
     env: staging
     managed-by: auth-operator
     environment: staging
+    t-caas.telekom.com/owner: tenant
+    t-caas.telekom.com/tenant: complex-beta

@@ -15,4 +15,4 @@ spec:
         - golden-cluster-reader
       namespaceSelector:
         - matchLabels:
-            golden-test: "true"
+            kubernetes.io/metadata.name: auth-operator-golden-test

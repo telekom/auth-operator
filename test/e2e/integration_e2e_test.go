@@ -50,19 +50,25 @@ var _ = Describe("Integration Tests - Complex Multi-CRD Scenarios", Ordered, Lab
 
 		By("Creating test namespaces with different labels")
 		createNamespaceIfNotExists(testNS1, map[string]string{
-			"integration-test": "true",
-			"env":              "dev",
-			"team":             "alpha",
+			"integration-test":          "true",
+			"env":                       "dev",
+			"team":                      "alpha",
+			"t-caas.telekom.com/owner":  "tenant",
+			"t-caas.telekom.com/tenant": "integration-alpha",
 		})
 		createNamespaceIfNotExists(testNS2, map[string]string{
-			"integration-test": "true",
-			"env":              "staging",
-			"team":             "beta",
+			"integration-test":          "true",
+			"env":                       "staging",
+			"team":                      "beta",
+			"t-caas.telekom.com/owner":  "tenant",
+			"t-caas.telekom.com/tenant": "integration-beta",
 		})
 		createNamespaceIfNotExists(testNS3, map[string]string{
-			"integration-test": "true",
-			"env":              "prod",
-			"team":             "gamma",
+			"integration-test":          "true",
+			"env":                       "prod",
+			"team":                      "gamma",
+			"t-caas.telekom.com/owner":  "tenant",
+			"t-caas.telekom.com/tenant": "integration-gamma",
 		})
 
 		By("Installing auth-operator via Helm")
@@ -310,7 +316,7 @@ spec:
         - int-cluster-secret-reader
       namespaceSelector:
         - matchLabels:
-            integration-test: "true"
+            t-caas.telekom.com/owner: tenant
 `
 			applyYAML(bindDefYAML)
 
@@ -346,9 +352,9 @@ spec:
         - int-cluster-pod-reader
       namespaceSelector:
         - matchLabels:
-            env: dev
+            t-caas.telekom.com/tenant: integration-alpha
         - matchLabels:
-            env: staging
+            t-caas.telekom.com/tenant: integration-beta
 `
 			applyYAML(bindDefYAML)
 

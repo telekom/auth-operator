@@ -128,11 +128,9 @@ spec:
         - t-caas-namespace-developer
       namespaceSelector:
         - matchLabels:
-            t-caas.telekom.com/tenant: alpha
-            t-caas.telekom.com/environment: development
+            kubernetes.io/metadata.name: tenant-alpha
         - matchLabels:
-            t-caas.telekom.com/tenant: alpha
-            t-caas.telekom.com/environment: staging
+            kubernetes.io/metadata.name: tenant-alpha-staging
     # Read-only access to production namespaces
     - clusterRoleRefs:
         - view
@@ -140,8 +138,7 @@ spec:
         - t-caas-namespace-viewer
       namespaceSelector:
         - matchLabels:
-            t-caas.telekom.com/tenant: alpha
-            t-caas.telekom.com/environment: production
+            kubernetes.io/metadata.name: tenant-alpha-prod
     # Full access to CI/CD namespaces only
     - clusterRoleRefs:
         - admin
@@ -151,12 +148,10 @@ spec:
               operator: In
               values:
                 - alpha
-            - key: t-caas.telekom.com/purpose
+            - key: kubernetes.io/metadata.name
               operator: In
               values:
-                - cicd
-                - gitops
-                - build
+                - tenant-alpha-cicd
 
 ---
 # -----------------------------------------------------------------------------
@@ -211,7 +206,7 @@ spec:
         - secret-reader
       namespaceSelector:
         - matchLabels:
-            t-caas.telekom.com/compliance-scope: pci-dss
+            t-caas.telekom.com/tenant: compliance
 
 ---
 # -----------------------------------------------------------------------------
@@ -261,11 +256,10 @@ spec:
         - view
       namespaceSelector:
         - matchExpressions:
-            - key: t-caas.telekom.com/monitoring
+            - key: kubernetes.io/metadata.name
               operator: In
               values:
-                - enabled
-                - required
+                - t-caas-monitoring
     # Special access to kube-system for cluster metrics (specific namespace, not selector)
     - clusterRoleRefs:
         - view
@@ -319,11 +313,15 @@ spec:
         - admin
       namespaceSelector:
         - matchExpressions:
-            - key: argocd.argoproj.io/managed-by
-              operator: Exists
+            - key: kubernetes.io/metadata.name
+              operator: In
+              values:
+                - argocd
         - matchExpressions:
-            - key: kustomize.toolkit.fluxcd.io/managed-by
-              operator: Exists
+            - key: kubernetes.io/metadata.name
+              operator: In
+              values:
+                - flux-system
     # Read access to argocd namespace (uses specific namespace, not selector)
     - clusterRoleRefs:
         - view
@@ -516,12 +514,12 @@ spec:
         - view
       namespaceSelector:
         - matchExpressions:
-            - key: t-caas.telekom.com/environment
+            - key: t-caas.telekom.com/tenant
               operator: In
               values:
-                - development
-                - staging
-                - production
+                - alpha
+                - beta
+                - compliance
     # Test Exists operator
     - clusterRoleRefs:
         - view
@@ -536,10 +534,10 @@ spec:
         - matchLabels:
             t-caas.telekom.com/owner: tenant
           matchExpressions:
-            - key: t-caas.telekom.com/environment
+            - key: t-caas.telekom.com/tenant
               operator: In
               values:
-                - development
+                - alpha
 
 ---
 # -----------------------------------------------------------------------------
@@ -568,7 +566,7 @@ spec:
       name: overlap-test-users@example.com
   roleBindings:
     # Single roleBinding entry with MULTIPLE namespaceSelector terms that OVERLAP
-    # Term 1: matches namespaces with environment=development (tenant-alpha)
+    # Term 1: matches tenant-alpha by metadata.name
     # Term 2: matches namespaces with tenant=alpha (tenant-alpha, tenant-alpha-staging, tenant-alpha-prod)
     # OVERLAP: tenant-alpha namespace matches BOTH terms
     - clusterRoleRefs:
@@ -576,7 +574,7 @@ spec:
       namespaceSelector:
         # Term 1: Development environments only
         - matchLabels:
-            t-caas.telekom.com/environment: development
+            kubernetes.io/metadata.name: tenant-alpha
         # Term 2: All tenant-alpha namespaces (overlaps with term 1 on tenant-alpha namespace)
         - matchLabels:
             t-caas.telekom.com/tenant: alpha
@@ -590,8 +588,8 @@ spec:
 # Tests that non-overlapping selector terms all contribute unique namespaces
 # This should create RoleBindings in:
 # - Platform namespaces (owner=platform): t-caas-system, t-caas-monitoring, t-caas-logging
-# - GitOps namespaces (gitops-source=true): argocd, flux-system
-# - Compliance namespaces (compliance-scope exists): compliance-pci
+# - GitOps namespaces by metadata.name: argocd, flux-system
+# - Compliance namespaces by tenant label: compliance-pci
 # No namespace should match multiple terms (no overlap)
 # -----------------------------------------------------------------------------
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
@@ -618,12 +616,18 @@ spec:
         - matchLabels:
             t-caas.telekom.com/owner: platform
         # Term 2: GitOps source namespaces (disjoint from platform)
-        - matchLabels:
-            t-caas.telekom.com/gitops-source: "true"
+        - matchExpressions:
+            - key: kubernetes.io/metadata.name
+              operator: In
+              values:
+                - argocd
+                - flux-system
         # Term 3: Compliance namespaces (disjoint from both)
         - matchExpressions:
-            - key: t-caas.telekom.com/compliance-scope
-              operator: Exists
+            - key: t-caas.telekom.com/tenant
+              operator: In
+              values:
+                - compliance
 
 ---
 # -----------------------------------------------------------------------------
@@ -664,7 +668,7 @@ spec:
         - t-caas-namespace-viewer
       namespaceSelector:
         - matchLabels:
-            t-caas.telekom.com/environment: staging
+            kubernetes.io/metadata.name: tenant-beta
         - matchLabels:
             t-caas.telekom.com/tenant: beta
     # Entry 4: Complex selector with matchLabels + matchExpressions combined
@@ -674,11 +678,10 @@ spec:
         - matchLabels:
             t-caas.telekom.com/owner: tenant
           matchExpressions:
-            - key: t-caas.telekom.com/purpose
+            - key: t-caas.telekom.com/tenant
               operator: In
               values:
-                - application
-                - cicd
+                - alpha
 
 # #############################################################################
 #  EDGE-CASE / CONFLICT SCENARIOS

@@ -1528,7 +1528,6 @@ func deleteBindDefinitionMetricSeries(name string) {
 	metrics.ManagedResources.DeleteLabelValues(metrics.ControllerBindDefinition, metrics.ResourceClusterRoleBinding, name)
 	metrics.ManagedResources.DeleteLabelValues(metrics.ControllerBindDefinition, metrics.ResourceRoleBinding, name)
 	metrics.ManagedResources.DeleteLabelValues(metrics.ControllerBindDefinition, metrics.ResourceServiceAccount, name)
-
 }
 
 // deleteSubjectServiceAccounts deletes ServiceAccounts specified in current

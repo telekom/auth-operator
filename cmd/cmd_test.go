@@ -402,7 +402,7 @@ func TestFlagDefaults(t *testing.T) {
 		{"webhook", "enable-http2", "false"},
 		{"webhook", "disable-cert-rotation", "false"},
 		{"webhook", "tdg-migration", "false"},
-		{"webhook", "capi-operator-update-bypass", "true"},
+		{"webhook", "capi-operator-update-bypass", "false"},
 		{"webhook", "authorize-rate-limit", "0"},
 		{"webhook", "authorize-rate-burst", "200"},
 		{"webhook", "authorize-auth-token-file", ""},

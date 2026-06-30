@@ -60,7 +60,7 @@ var _ = Describe("Helm Chart E2E", Ordered, Label("helm"), func() {
 
 		// Label the test namespace
 		cmd = utils.CommandContext(context.Background(), "kubectl", "label", "ns", helmTestNamespace, // #nosec G204
-			"e2e-helm-test=true", "--overwrite")
+			"t-caas.telekom.com/owner=tenant", "t-caas.telekom.com/tenant=e2e-helm", "--overwrite")
 		_, _ = utils.Run(cmd)
 
 		By("Building the operator image")
@@ -135,6 +135,7 @@ var _ = Describe("Helm Chart E2E", Ordered, Label("helm"), func() {
 				"--set", "webhookServer.replicas=2",
 				"--set", "webhookServer.podDisruptionBudget.enabled=true",
 				"--set", "metrics.serviceMonitor.enabled=true",
+				"--set", "metrics.serviceMonitor.tlsConfig.insecureSkipVerify=true",
 				"--set", "namespaceAdmission.enabled=true",
 			)
 			cmd := utils.CommandContext(context.Background(), "helm", templateArgs...) // #nosec G204
@@ -151,7 +152,7 @@ var _ = Describe("Helm Chart E2E", Ordered, Label("helm"), func() {
 			saveOutput("helm-template-all-features.yaml", output)
 		})
 
-		It("should template metrics authentication only when explicitly enabled", func() {
+		It("should template metrics authentication by default and allow explicit opt-out", func() {
 			By("Rendering the default chart")
 			defaultArgs := append([]string{"template", helmReleaseName, helmChartPath,
 				"-n", helmNamespace},
@@ -160,17 +161,31 @@ var _ = Describe("Helm Chart E2E", Ordered, Label("helm"), func() {
 			cmd := utils.CommandContext(context.Background(), "helm", defaultArgs...) // #nosec G204
 			defaultOutput, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "default helm template failed: %s", string(defaultOutput))
-			Expect(string(defaultOutput)).NotTo(ContainSubstring("--metrics-secure"))
-			Expect(string(defaultOutput)).NotTo(ContainSubstring("system:auth-delegator"))
+			Expect(string(defaultOutput)).To(ContainSubstring("--metrics-secure"))
+			Expect(string(defaultOutput)).To(ContainSubstring("system:auth-delegator"))
 			Expect(string(defaultOutput)).NotTo(ContainSubstring("auth-operator-e2e-metrics-reader"))
 
-			By("Rendering the chart with metrics authentication enabled")
+			By("Rendering the chart with metrics authentication disabled")
+			optOutArgs := append([]string{"template", helmReleaseName, helmChartPath,
+				"-n", helmNamespace},
+				imageSetArgs()...,
+			)
+			optOutArgs = append(optOutArgs,
+				"--set", "metrics.auth.enabled=false",
+			)
+			cmd = utils.CommandContext(context.Background(), "helm", optOutArgs...) // #nosec G204
+			optOutOutput, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "metrics auth opt-out helm template failed: %s", string(optOutOutput))
+			Expect(string(optOutOutput)).NotTo(ContainSubstring("--metrics-secure"))
+			Expect(string(optOutOutput)).NotTo(ContainSubstring("system:auth-delegator"))
+			Expect(string(optOutOutput)).NotTo(ContainSubstring("auth-operator-e2e-metrics-reader"))
+
+			By("Rendering the chart with ServiceMonitor enabled")
 			authArgs := append([]string{"template", helmReleaseName, helmChartPath,
 				"-n", helmNamespace},
 				imageSetArgs()...,
 			)
 			authArgs = append(authArgs,
-				"--set", "metrics.auth.enabled=true",
 				"--set", "metrics.serviceMonitor.enabled=true",
 				"--set", "metrics.serviceMonitor.scraperRBAC.create=true",
 				"--set", "metrics.serviceMonitor.scraperRBAC.serviceAccount.name=e2e-metrics-scraper",
@@ -332,34 +347,80 @@ var _ = Describe("Helm Chart E2E", Ordered, Label("helm"), func() {
 	})
 
 	Context("Metrics Authentication", func() {
-		It("should serve unauthenticated HTTP metrics by default", func() {
-			By("Verifying deployments do not include --metrics-secure")
+		It("should require authenticated HTTPS metrics by default and support explicit opt-out", func() {
+			By("Verifying deployments include --metrics-secure by default")
 			args := helmDeploymentArgs("controller-manager")
-			Expect(args).NotTo(ContainSubstring("--metrics-secure"))
+			Expect(args).To(ContainSubstring("--metrics-secure"))
 			args = helmDeploymentArgs("webhook-server")
-			Expect(args).NotTo(ContainSubstring("--metrics-secure"))
+			Expect(args).To(ContainSubstring("--metrics-secure"))
 
-			By("Port-forwarding the metrics service")
+			By("Port-forwarding the secure metrics service")
 			stopForward := startMetricsPortForward(18080)
-			defer stopForward()
+			defer func() {
+				if stopForward != nil {
+					stopForward()
+				}
+			}()
 
-			By("Reading metrics without a bearer token")
+			By("Rejecting anonymous metrics requests by default")
 			Eventually(func() error {
-				status, body, err := requestMetrics(context.Background(), "http", 18080, "")
+				status, body, err := requestMetrics(context.Background(), "https", 18080, "")
+				if err != nil {
+					return err
+				}
+				if status != http.StatusUnauthorized {
+					return fmt.Errorf("anonymous metrics returned HTTP %d: %s", status, body)
+				}
+				return nil
+			}, shortTimeout, pollingInterval).Should(Succeed())
+			stopForward()
+			stopForward = nil
+
+			By("Disabling metrics authentication explicitly")
+			upgradeArgs := append([]string{"upgrade", helmReleaseName, helmChartPath,
+				"-n", helmNamespace},
+				imageSetArgs()...,
+			)
+			upgradeArgs = append(upgradeArgs,
+				"--set", "controller.replicas=1",
+				"--set", "webhookServer.replicas=1",
+				"--set", "metrics.auth.enabled=false",
+				"--wait",
+				"--timeout", "5m",
+			)
+			cmd := utils.CommandContext(context.Background(), "helm", upgradeArgs...) // #nosec G204
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Helm metrics auth opt-out upgrade failed: %s", string(output))
+
+			By("Waiting for metrics auth opt-out rollout")
+			Eventually(func() error {
+				return utils.WaitForDeploymentAvailable("control-plane=controller-manager", helmNamespace, deployTimeout)
+			}, deployTimeout, pollingInterval).Should(Succeed())
+			Eventually(func() error {
+				return utils.WaitForDeploymentAvailable("control-plane=webhook-server", helmNamespace, deployTimeout)
+			}, deployTimeout, pollingInterval).Should(Succeed())
+			Expect(helmDeploymentArgs("controller-manager")).NotTo(ContainSubstring("--metrics-secure"))
+			Expect(helmDeploymentArgs("webhook-server")).NotTo(ContainSubstring("--metrics-secure"))
+
+			By("Reading opt-out HTTP metrics without a bearer token")
+			stopForward = startMetricsPortForward(18082)
+			defer stopForward()
+			Eventually(func() error {
+				status, body, err := requestMetrics(context.Background(), "http", 18082, "")
 				if err != nil {
 					return err
 				}
 				if status != http.StatusOK {
-					return fmt.Errorf("metrics returned HTTP %d: %s", status, body)
+					return fmt.Errorf("opt-out metrics returned HTTP %d: %s", status, body)
 				}
 				if !strings.Contains(body, "# HELP") {
-					return fmt.Errorf("metrics response did not contain Prometheus HELP text")
+					return fmt.Errorf("opt-out metrics response did not contain Prometheus HELP text")
 				}
 				return nil
 			}, shortTimeout, pollingInterval).Should(Succeed())
 		})
 
-		It("should require authentication when metrics auth is enabled", func() {
+		It("should allow authenticated scraping when metrics auth is enabled", func() {
 			By("Creating the metrics scraper ServiceAccount")
 			scraperYAML := fmt.Sprintf(`
 apiVersion: v1
@@ -570,7 +631,7 @@ spec:
         - helm-e2e-generated-clusterrole
       namespaceSelector:
         - matchLabels:
-            e2e-helm-test: "true"
+            t-caas.telekom.com/tenant: e2e-helm
 `
 			cmd := utils.CommandContext(context.Background(), "kubectl", "apply", "-f", "-") // #nosec G204
 			cmd.Stdin = strings.NewReader(bindDefYAML)

@@ -22,4 +22,4 @@ spec:
         - e2e-namespaced-reader
       namespaceSelector:
         - matchLabels:
-            e2e-test: "true"
+            kubernetes.io/metadata.name: e2e-test-ns

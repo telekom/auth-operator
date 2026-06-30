@@ -9,3 +9,5 @@ metadata:
     managed-by: auth-operator
     environment: development
     authorization.t-caas.telekom.com/managed: "true"
+    t-caas.telekom.com/owner: tenant
+    t-caas.telekom.com/tenant: complex-alpha
