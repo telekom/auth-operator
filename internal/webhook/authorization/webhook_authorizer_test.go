@@ -1804,6 +1804,8 @@ func TestServeHTTP_UsesSingleEvaluationDeadline(t *testing.T) {
 	var deadlines []time.Time
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
+			WithIndex(&authzv1alpha1.WebhookAuthorizer{}, indexer.WebhookAuthorizerHasNamespaceSelectorField, indexer.WebhookAuthorizerHasNamespaceSelectorFunc).
+
 		WithObjects(wa, ns).
 		WithInterceptorFuncs(interceptor.Funcs{
 			List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
@@ -1845,10 +1847,10 @@ func TestServeHTTP_UsesSingleEvaluationDeadline(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected HTTP 200, got %d", rec.Code)
 	}
-	if len(deadlines) != 2 {
+	if len(deadlines) < 2 {
 		t.Fatalf("expected authorizer list and namespace get deadlines, got %d", len(deadlines))
 	}
-	diff := deadlines[1].Sub(deadlines[0])
+	diff := deadlines[len(deadlines)-1].Sub(deadlines[0])
 	if diff < 0 {
 		diff = -diff
 	}

@@ -25,6 +25,7 @@ import (
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/helpers"
+	"github.com/telekom/auth-operator/pkg/indexer"
 	pkgmetrics "github.com/telekom/auth-operator/pkg/metrics"
 	"github.com/telekom/auth-operator/pkg/tracing"
 
@@ -181,20 +182,33 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	evalCtx, evalCancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
 	defer evalCancel()
 
-	allItems, err := wa.listAllAuthorizers(evalCtx)
+	globalItems, err := wa.listAuthorizersByIndex(evalCtx, indexer.WebhookAuthorizerHasNamespaceSelectorFalse)
 	if err != nil {
-		wa.Log.Error(err, "failed to list WebhookAuthorizers",
+		wa.Log.Error(err, "failed to list global WebhookAuthorizers",
 			"user", sar.Spec.User,
 			"latency", time.Since(start).String())
 		if span := trace.SpanFromContext(ctx); span.IsRecording() {
 			span.RecordError(err)
-			span.SetStatus(codes.Error, "failed to list WebhookAuthorizers")
+			span.SetStatus(codes.Error, "failed to list global WebhookAuthorizers")
 		}
 		wa.recordErrorMetrics(start)
 		wa.writeDeniedResponse(w, reasonInternalEvaluationError)
 		return
 	}
-	globalItems, scopedItems := splitAuthorizers(allItems)
+
+	scopedItems, err := wa.listAuthorizersByIndex(evalCtx, indexer.WebhookAuthorizerHasNamespaceSelectorTrue)
+	if err != nil {
+		wa.Log.Error(err, "failed to list scoped WebhookAuthorizers",
+			"user", sar.Spec.User,
+			"latency", time.Since(start).String())
+		if span := trace.SpanFromContext(ctx); span.IsRecording() {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "failed to list scoped WebhookAuthorizers")
+		}
+		wa.recordErrorMetrics(start)
+		wa.writeDeniedResponse(w, reasonInternalEvaluationError)
+		return
+	}
 	allRules := countTotalRules(globalItems) + countTotalRules(scopedItems)
 
 	items := append([]authorizationv1alpha1.WebhookAuthorizer(nil), globalItems...)
@@ -489,28 +503,12 @@ func countTotalRules(authorizers []authorizationv1alpha1.WebhookAuthorizer) int 
 	return total
 }
 
-func splitAuthorizers(
-	all []authorizationv1alpha1.WebhookAuthorizer,
-) (globalItems, scopedItems []authorizationv1alpha1.WebhookAuthorizer) {
-	globalItems = make([]authorizationv1alpha1.WebhookAuthorizer, 0, len(all))
-	scopedItems = make([]authorizationv1alpha1.WebhookAuthorizer, 0, len(all))
-	for _, candidate := range all {
-		if helpers.IsLabelSelectorEmpty(&candidate.Spec.NamespaceSelector) {
-			globalItems = append(globalItems, candidate)
-		} else {
-			scopedItems = append(scopedItems, candidate)
-		}
-	}
-
-	return globalItems, scopedItems
-}
-
-func (wa *Authorizer) listAllAuthorizers(ctx context.Context) ([]authorizationv1alpha1.WebhookAuthorizer, error) {
+func (wa *Authorizer) listAuthorizersByIndex(ctx context.Context, hasNamespaceSelector string) ([]authorizationv1alpha1.WebhookAuthorizer, error) {
 	listCtx, cancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
 	defer cancel()
 	var allAuth authorizationv1alpha1.WebhookAuthorizerList
-	if err := wa.Client.List(listCtx, &allAuth); err != nil {
-		return nil, fmt.Errorf("list WebhookAuthorizers: %w", err)
+	if err := wa.Client.List(listCtx, &allAuth, client.MatchingFields{indexer.WebhookAuthorizerHasNamespaceSelectorField: hasNamespaceSelector}); err != nil {
+		return nil, fmt.Errorf("list WebhookAuthorizers by index %q: %w", hasNamespaceSelector, err)
 	}
 	items := make([]authorizationv1alpha1.WebhookAuthorizer, 0, len(allAuth.Items))
 	for _, item := range allAuth.Items {
