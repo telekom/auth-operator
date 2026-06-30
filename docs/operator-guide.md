@@ -54,7 +54,9 @@ helm install auth-operator oci://ghcr.io/telekom/charts/auth-operator \
 ```bash
 git clone https://github.com/telekom/auth-operator.git
 cd auth-operator
-make deploy OVERLAY=production
+make deploy OVERLAY=default
+
+> **⚠️ WARNING:** The Kustomize `default` overlay provides a basic installation but does **not** include the production-hardening primitives (split ServiceAccounts, NetworkPolicies, PodDisruptionBudgets, secure-metrics) provided by the Helm chart. For production environments, the Helm chart is the **only** recommended and fully hardened installation path.
 ```
 
 ### Verify Installation

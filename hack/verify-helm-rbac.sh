@@ -28,7 +28,7 @@ helm template auth-operator "${CHART_DIR}" \
 	--set namespaceAdmission.enabled=true >"${namespace_admission_render}"
 go run "${ROOT_DIR}/hack/verify-rendered-rbac.go" --impersonation=none "${namespace_admission_render}"
 
-"${KUSTOMIZE}" build "${ROOT_DIR}/config/overlays/production" >"${production_render}"
+"${KUSTOMIZE}" build "${ROOT_DIR}/config/overlays/default" >"${production_render}"
 go run "${ROOT_DIR}/hack/verify-rendered-rbac.go" --impersonation=none "${production_render}"
 
 helm template auth-operator "${CHART_DIR}" \
