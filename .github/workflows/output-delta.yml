@@ -53,6 +53,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Checkout PR sample corpus
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: sample-branch
+          persist-credentials: false
+
       - name: Load trusted tool versions
         run: |
           set -euo pipefail
@@ -265,6 +273,9 @@ jobs:
         id: main-output
         run: |
           set -euo pipefail
+          workspace="${GITHUB_WORKSPACE:?}"
+          sample_dir="$workspace/sample-branch/config/samples"
+          broken_sample_dir="$sample_dir/broken"
           cd main-branch
 
           make docker-build IMG=auth-operator:main
@@ -279,12 +290,14 @@ jobs:
             echo "::notice::Webhook server not found or not ready on main, continuing"
           sleep 5
 
-          /tmp/apply-output-delta-samples.sh config/samples
+          # Use the PR sample corpus for baseline and candidate so output
+          # differences reflect operator behavior, not stale sample fixtures.
+          /tmp/apply-output-delta-samples.sh "$sample_dir"
 
-          if [ -f config/samples/broken/kustomization.yaml ]; then
-            /tmp/apply-output-delta-samples.sh config/samples/broken
+          if [ -f "$broken_sample_dir/kustomization.yaml" ]; then
+            /tmp/apply-output-delta-samples.sh "$broken_sample_dir"
           else
-            echo "::notice::No config/samples/broken set on main, skipping broken-sample apply"
+            echo "::notice::No config/samples/broken set on PR sample corpus, skipping broken-sample apply"
           fi
 
           wait_ready() {
@@ -323,8 +336,8 @@ jobs:
             kubectl logs -n "$ns" -l control-plane=webhook-server > "/tmp/controller-logs/main-${ns}-webhook.log" 2>/dev/null || true
           done
 
-          kubectl delete -k config/samples/broken/ --ignore-not-found --timeout=60s 2>/dev/null || true
-          kubectl delete -k config/samples/ --ignore-not-found --timeout=60s 2>/dev/null || true
+          kubectl delete -k "$broken_sample_dir" --ignore-not-found --timeout=60s 2>/dev/null || true
+          kubectl delete -k "$sample_dir" --ignore-not-found --timeout=60s 2>/dev/null || true
           kubectl wait --for=delete roledefinition --all --timeout=60s 2>/dev/null || true
           kubectl wait --for=delete binddefinition --all --timeout=60s 2>/dev/null || true
           kubectl wait --for=delete webhookauthorizer --all --timeout=60s 2>/dev/null || true
@@ -366,6 +379,9 @@ jobs:
         continue-on-error: true
         run: |
           set -euo pipefail
+          workspace="${GITHUB_WORKSPACE:?}"
+          sample_dir="$workspace/sample-branch/config/samples"
+          broken_sample_dir="$sample_dir/broken"
           cd tag-branch
 
           echo "tag_success=false" >> "$GITHUB_OUTPUT"
@@ -381,15 +397,15 @@ jobs:
             echo "::notice::Webhook server not found or not ready for tag, continuing"
           sleep 5
 
-          if ! /tmp/apply-output-delta-samples.sh config/samples; then
-            echo "::warning::Tag samples failed to apply; skipping tag comparison"
+          if ! /tmp/apply-output-delta-samples.sh "$sample_dir"; then
+            echo "::warning::PR sample corpus failed to apply to latest tag; skipping tag comparison"
             exit 0
           fi
 
-          if [ -d config/samples/broken/ ]; then
-            /tmp/apply-output-delta-samples.sh config/samples/broken
+          if [ -d "$broken_sample_dir" ]; then
+            /tmp/apply-output-delta-samples.sh "$broken_sample_dir"
           else
-            echo "::notice::No config/samples/broken set on tag, skipping broken-sample apply"
+            echo "::notice::No config/samples/broken set on PR sample corpus, skipping broken-sample apply"
           fi
 
           kubectl wait --for=condition=Ready roledefinition --all --timeout=180s 2>/dev/null || true
