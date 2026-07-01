@@ -61,15 +61,15 @@ type APIResourcesByGroupVersion map[string][]metav1.APIResource
 // Equals compares two APIResourcesByGroupVersion for equality.
 func (r APIResourcesByGroupVersion) Equals(other APIResourcesByGroupVersion) bool {
 	if len(r) != len(other) {
-		return true
+		return false
 	}
 	for gv, resources := range r {
 		otherResources, exists := other[gv]
 		if !exists {
-			return true
+			return false
 		}
 		if len(resources) != len(otherResources) {
-			return true
+			return false
 		}
 		resourceMap := make(map[string]metav1.APIResource)
 		for _, res := range resources {
@@ -78,13 +78,13 @@ func (r APIResourcesByGroupVersion) Equals(other APIResourcesByGroupVersion) boo
 		for _, otherRes := range otherResources {
 			res, exists := resourceMap[otherRes.Name]
 			if !exists {
-				return true
+				return false
 			}
 			// Compare relevant fields
 			if res.Namespaced != otherRes.Namespaced ||
 				res.Kind != otherRes.Kind ||
 				!cmp.Equal(res.Verbs, otherRes.Verbs, cmpopts.SortSlices(func(a, b string) bool { return a < b })) {
-				return true
+				return false
 			}
 		}
 	}
@@ -386,6 +386,26 @@ func (r *ResourceTracker) collectAPIResourcesWithLock(ctx context.Context, waitF
 
 	apiResourcesByGroupVersion := make(APIResourcesByGroupVersion)
 	mutex := sync.Mutex{}
+
+	coreGV := metav1.GroupVersion{Version: "v1"}
+	errorGroup.Go(func() error {
+		select {
+		case <-groupCtx.Done():
+			return groupCtx.Err()
+		default:
+		}
+
+		resources, err := r.collectAPIResourcesForGroupVersion(discoveryClient, coreGV.Group, coreGV.Version)
+		if err != nil {
+			logger.Error(err, "failed to discover API resources for core group version",
+				"group", coreGV.Group, "version", coreGV.Version)
+			return err
+		}
+		mutex.Lock()
+		apiResourcesByGroupVersion[coreGV.String()] = append(apiResourcesByGroupVersion[coreGV.String()], resources...)
+		mutex.Unlock()
+		return nil
+	})
 
 	for _, apiGroup := range discoveredAPIGroups.Groups {
 		select {

@@ -307,7 +307,7 @@ webhookServer:
 # Metrics and monitoring
 metrics:
   auth:
-    enabled: false  # Require auth for /metrics endpoint
+    enabled: true   # Require auth for /metrics endpoint by default
   service:
     enabled: true
     port: 8080
@@ -380,9 +380,11 @@ controller:
 
 ### Prometheus Metrics
 
-The operator exposes metrics at `:8080/metrics`. When `metrics.auth.enabled`
-is set to `true` in the Helm values, the endpoint requires a valid Kubernetes
-bearer token with permission to GET the non-resource URL `/metrics`.
+The operator exposes metrics at `:8080/metrics`. Helm installs set
+`metrics.auth.enabled=true` by default, so the endpoint requires a valid
+Kubernetes bearer token with permission to GET the non-resource URL `/metrics`.
+Set `metrics.auth.enabled=false` only for trusted opt-out environments that
+require unauthenticated HTTP metrics.
 
 **RBAC prerequisites**: The operator pods use `WithAuthenticationAndAuthorization`
 to validate metrics requests via the Kubernetes API. This requires both the
@@ -447,6 +449,7 @@ when `metrics.auth.enabled` is set.
 ```bash
 helm upgrade auth-operator oci://ghcr.io/telekom/charts/auth-operator \
   --set metrics.serviceMonitor.enabled=true \
+  --set metrics.serviceMonitor.tlsConfig.insecureSkipVerify=true \
   --set metrics.serviceMonitor.additionalLabels.release=prometheus
 ```
 

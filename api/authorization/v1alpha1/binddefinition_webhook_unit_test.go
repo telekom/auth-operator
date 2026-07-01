@@ -45,7 +45,7 @@ func TestBindDefinitionValidatorSanitizesInternalErrors(t *testing.T) {
 	}
 	selectorRoleBinding := NamespaceBinding{
 		NamespaceSelector: []metav1.LabelSelector{{
-			MatchLabels: map[string]string{"team": "a"},
+			MatchLabels: map[string]string{LabelKeyOwner: "team-a"},
 		}},
 		RoleRefs: []string{"reader"},
 	}

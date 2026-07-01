@@ -362,7 +362,7 @@
           "type": ["string", "boolean"],
           "description": "Allow capi-operator-manager to skip BindDefinition authorization for Namespace UPDATE requests; protected-label validation still runs.",
           "enum": ["true", "false", true, false],
-          "default": "true"
+          "default": "false"
         },
         "authorizeRateLimit": {
           "type": "number",
@@ -535,7 +535,7 @@
             "enabled": {
               "type": "boolean",
               "description": "Require authentication and authorization for the /metrics endpoint and serve metrics over HTTPS.",
-              "default": false
+              "default": true
             }
           }
         },

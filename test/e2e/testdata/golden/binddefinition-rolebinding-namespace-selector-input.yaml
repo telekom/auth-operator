@@ -13,7 +13,7 @@ spec:
   roleBindings:
     - clusterRoleRefs:
         - view
-      # Select namespaces with the label team=golden-test
+      # Select the golden test namespace by Kubernetes metadata name
       namespaceSelector:
         - matchLabels:
-            team: golden-test
+            kubernetes.io/metadata.name: auth-operator-golden-test

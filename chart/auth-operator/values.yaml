@@ -174,9 +174,10 @@ namespaceAdmission:
 
 metrics:
   # Require authentication and authorization for the /metrics endpoint.
-  # Disabled by default for backwards compatibility. When enabled, TokenReview
-  # and SubjectAccessReview protect the metrics endpoint and auth-delegator
-  # ClusterRoleBinding is created.
+  # Enabled by default for secure Helm installs. TokenReview and
+  # SubjectAccessReview protect the metrics endpoint and auth-delegator
+  # ClusterRoleBinding is created. Set to false only for trusted opt-out
+  # environments that require unauthenticated HTTP metrics.
   auth:
     enabled: true
   service:

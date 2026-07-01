@@ -930,4 +930,3 @@ func (r *RestrictedRoleDefinitionReconciler) rrdLogApplyIdentity(
 	trace.SpanFromContext(ctx).SetAttributes(tracing.AttrUser.String(impersonatedUser))
 	logger.V(2).Info("using impersonated apply identity", "name", resourceName, "impersonatedUser", impersonatedUser, "policy", policyName)
 }
-// Fixes issue #393

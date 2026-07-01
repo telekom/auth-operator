@@ -7,3 +7,5 @@ metadata:
     team: alpha
     env: dev
     managed-by: auth-operator
+    t-caas.telekom.com/owner: tenant
+    t-caas.telekom.com/tenant: complex-alpha

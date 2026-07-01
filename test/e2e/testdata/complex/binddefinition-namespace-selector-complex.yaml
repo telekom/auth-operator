@@ -15,18 +15,17 @@ spec:
         - admin
       namespaceSelector:
         - matchLabels:
-            managed-by: auth-operator
+            t-caas.telekom.com/owner: tenant
           matchExpressions:
-            - key: environment
+            - key: t-caas.telekom.com/tenant
               operator: In
               values:
-                - production
-                - staging
-            - key: tenant
+                - complex-beta
+            - key: t-caas.telekom.com/tenant
               operator: NotIn
               values:
                 - restricted
                 - legacy
         # Second selector - OR with first
         - matchLabels:
-            special-access: "true"
+            kubernetes.io/metadata.name: complex-e2e-ns-team-b

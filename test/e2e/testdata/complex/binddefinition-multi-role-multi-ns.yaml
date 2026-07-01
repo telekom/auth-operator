@@ -33,18 +33,18 @@ spec:
       - view
   # Multiple namespace-scoped bindings
   roleBindings:
-    # Bind view ClusterRole in namespaces with team=alpha label
+    # Bind view ClusterRole in namespaces owned by the complex-alpha tenant
     - clusterRoleRefs:
         - view
       namespaceSelector:
         - matchLabels:
-            team: alpha
-    # Bind edit ClusterRole in namespaces with env=dev label
+            t-caas.telekom.com/tenant: complex-alpha
+    # Bind edit ClusterRole in namespaces owned by the complex-alpha tenant
     - clusterRoleRefs:
         - edit
       namespaceSelector:
         - matchLabels:
-            env: dev
+            t-caas.telekom.com/tenant: complex-alpha
     # Bind specific role in explicit namespace
     - roleRefs:
         - complex-ns-filtered-role
