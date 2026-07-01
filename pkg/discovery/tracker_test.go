@@ -191,6 +191,31 @@ var _ = Describe("ResourceTracker CRD Deletion Handling", func() {
 			By("deleting the test CRD")
 			Expect(k8sClient.Delete(ctx, testCRD)).To(Succeed())
 
+			By("waiting for CRD to enter terminating state")
+			Eventually(func() bool {
+				crd := &apiextensionsv1.CustomResourceDefinition{}
+				if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(testCRD), crd); err != nil {
+					return false
+				}
+				return crd.DeletionTimestamp != nil
+			}, "30s", "1s").Should(BeTrue(), "CRD should enter terminating state")
+
+			By("releasing envtest CRD finalizers")
+			Eventually(func() bool {
+				crd := &apiextensionsv1.CustomResourceDefinition{}
+				if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(testCRD), crd); err != nil {
+					return apierrors.IsNotFound(err)
+				}
+				if crd.DeletionTimestamp == nil {
+					return false
+				}
+				if len(crd.Finalizers) == 0 {
+					return true
+				}
+				crd.Finalizers = nil
+				return k8sClient.Update(ctx, crd) == nil
+			}, "30s", "1s").Should(BeTrue(), "CRD finalizers should be released after deletion starts")
+
 			By("waiting for CRD to be fully deleted")
 			Eventually(func() bool {
 				err := k8sClient.Get(ctx, client.ObjectKeyFromObject(testCRD), &apiextensionsv1.CustomResourceDefinition{})
