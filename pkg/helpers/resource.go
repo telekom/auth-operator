@@ -173,8 +173,9 @@ func IsLabelSelectorEmpty(selector *metav1.LabelSelector) bool {
 }
 
 // IsMissingFieldIndexError reports whether err is a controller-runtime error
-// indicating that a required field index has not been registered.
-// Callers should treat this as transient and retry rather than failing hard.
+// or API-server error indicating that a required field index/selector is not
+// available. Callers should treat this as transient and retry rather than
+// failing hard.
 func IsMissingFieldIndexError(err error) bool {
 	if err == nil {
 		return false
@@ -187,6 +188,9 @@ func IsMissingFieldIndexError(err error) bool {
 		return true
 	}
 	if strings.Contains(msg, "index with name") && strings.Contains(msg, "has been registered") {
+		return true
+	}
+	if strings.Contains(msg, "field label not supported") {
 		return true
 	}
 	return false

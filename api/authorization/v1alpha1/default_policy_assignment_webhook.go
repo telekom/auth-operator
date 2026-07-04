@@ -19,6 +19,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
+
+	"github.com/telekom/auth-operator/pkg/helpers"
 )
 
 type requesterServiceAccount struct {
@@ -69,22 +71,51 @@ func requesterMatchesDefaultAssignment(da *DefaultPolicyAssignment, username str
 
 func resolveDefaultPoliciesForRequester(ctx context.Context, c client.Reader, username string, groups []string) ([]string, error) {
 	matchedPolicies := make([]string, 0)
+
+	policies, err := listPoliciesWithDefaultAssignment(ctx, c, true)
+	if err != nil {
+		if !helpers.IsMissingFieldIndexError(err) {
+			return nil, fmt.Errorf("list indexed RBACPolicies with defaultAssignment: %w", err)
+		}
+		policies, err = listPoliciesWithDefaultAssignment(ctx, c, false)
+		if err != nil {
+			return nil, fmt.Errorf("list admission page for RBACPolicies: %w", err)
+		}
+	}
+
+	for _, policy := range policies {
+		if policy.Spec.DefaultAssignment == nil {
+			continue
+		}
+		if requesterMatchesDefaultAssignment(policy.Spec.DefaultAssignment, username, groups) {
+			matchedPolicies = append(matchedPolicies, policy.Name)
+		}
+	}
+
+	sort.Strings(matchedPolicies)
+	return matchedPolicies, nil
+}
+
+func listPoliciesWithDefaultAssignment(ctx context.Context, c client.Reader, useIndex bool) ([]RBACPolicy, error) {
+	policies := make([]RBACPolicy, 0)
 	continueToken := ""
 
 	for {
 		policyList := &RBACPolicyList{}
-		nextContinueToken, err := listAdmissionPage(ctx, c, policyList, continueToken)
-		if err != nil {
-			return nil, fmt.Errorf("list admission page for RBACPolicies: %w", err)
+		listOpts := make([]client.ListOption, 0, 1)
+		if useIndex {
+			listOpts = append(listOpts, client.MatchingFields{HasDefaultAssignmentField: "true"})
 		}
 
+		nextContinueToken, err := listAdmissionPage(ctx, c, policyList, continueToken, listOpts...)
+		if err != nil {
+			return nil, err
+		}
 		for _, policy := range policyList.Items {
 			if policy.Spec.DefaultAssignment == nil {
 				continue
 			}
-			if requesterMatchesDefaultAssignment(policy.Spec.DefaultAssignment, username, groups) {
-				matchedPolicies = append(matchedPolicies, policy.Name)
-			}
+			policies = append(policies, policy)
 		}
 
 		if nextContinueToken == "" {
@@ -93,8 +124,7 @@ func resolveDefaultPoliciesForRequester(ctx context.Context, c client.Reader, us
 		continueToken = nextContinueToken
 	}
 
-	sort.Strings(matchedPolicies)
-	return matchedPolicies, nil
+	return policies, nil
 }
 
 func selectedPolicyAssignment(ctx context.Context, c client.Reader, selectedPolicy, username string, groups []string) (matchesRequester, hasDefaultAssignment, deleting bool, retErr error) {

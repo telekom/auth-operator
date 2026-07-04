@@ -82,6 +82,14 @@ const (
 	// namespaceSelector entry.
 	RestrictedBindDefinitionHasNamespaceSelectorField = ".spec.hasNamespaceSelector"
 
+	// RestrictedBindDefinitionHasNamespaceSelectorTrue is the index value for
+	// RestrictedBindDefinitions that define at least one namespace selector.
+	RestrictedBindDefinitionHasNamespaceSelectorTrue = WebhookAuthorizerHasNamespaceSelectorTrue
+
+	// RestrictedBindDefinitionHasNamespaceSelectorFalse is the index value for
+	// RestrictedBindDefinitions that do not define namespace selectors.
+	RestrictedBindDefinitionHasNamespaceSelectorFalse = WebhookAuthorizerHasNamespaceSelectorFalse
+
 	// RestrictedBindDefinitionServiceAccountSubjectField indexes
 	// RestrictedBindDefinition resources by ServiceAccount subject namespace/name.
 	RestrictedBindDefinitionServiceAccountSubjectField = ".spec.subjects.serviceAccount"
@@ -110,6 +118,14 @@ const (
 	// RBACPolicyHasDefaultAssignmentField indexes RBACPolicy resources by whether
 	// defaultAssignment is configured.
 	RBACPolicyHasDefaultAssignmentField = authorizationv1alpha1.HasDefaultAssignmentField
+
+	// RBACPolicyHasDefaultAssignmentTrue is the index value for RBACPolicies
+	// that define defaultAssignment.
+	RBACPolicyHasDefaultAssignmentTrue = WebhookAuthorizerHasNamespaceSelectorTrue
+
+	// RBACPolicyHasDefaultAssignmentFalse is the index value for RBACPolicies
+	// that do not define defaultAssignment.
+	RBACPolicyHasDefaultAssignmentFalse = WebhookAuthorizerHasNamespaceSelectorFalse
 )
 
 // SetupBaseIndexes registers field indexes for legacy controller/webhook types.
@@ -466,11 +482,11 @@ func RestrictedBindDefinitionHasNamespaceSelectorFunc(obj client.Object) []strin
 
 	for _, rb := range rbd.Spec.RoleBindings {
 		if len(rb.NamespaceSelector) > 0 {
-			return []string{"true"}
+			return []string{RestrictedBindDefinitionHasNamespaceSelectorTrue}
 		}
 	}
 
-	return []string{"false"}
+	return []string{RestrictedBindDefinitionHasNamespaceSelectorFalse}
 }
 
 // RestrictedBindDefinitionServiceAccountSubjectFunc extracts ServiceAccount
@@ -605,7 +621,7 @@ func RBACPolicyHasDefaultAssignmentFunc(obj client.Object) []string {
 		return nil
 	}
 	if policy.Spec.DefaultAssignment == nil {
-		return []string{"false"}
+		return []string{RBACPolicyHasDefaultAssignmentFalse}
 	}
-	return []string{"true"}
+	return []string{RBACPolicyHasDefaultAssignmentTrue}
 }

@@ -6,6 +6,7 @@ package v1alpha1
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -21,6 +22,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
+
+	"github.com/telekom/auth-operator/pkg/helpers"
 )
 
 func TestParseRequesterServiceAccount(t *testing.T) {
@@ -81,7 +84,19 @@ func newAdmissionIndexedClient(t *testing.T, scheme *runtime.Scheme, objs ...cli
 		WithIndex(&RoleDefinition{}, TargetNamespaceField, func(obj client.Object) []string {
 			return []string{obj.(*RoleDefinition).Spec.TargetNamespace}
 		}).
+		WithIndex(&RBACPolicy{}, HasDefaultAssignmentField, rbacPolicyDefaultAssignmentIndexFunc).
 		Build()
+}
+
+func rbacPolicyDefaultAssignmentIndexFunc(obj client.Object) []string {
+	policy, ok := obj.(*RBACPolicy)
+	if !ok {
+		return nil
+	}
+	if policy.Spec.DefaultAssignment == nil {
+		return []string{"false"}
+	}
+	return []string{"true"}
 }
 
 func TestRestrictedValidatorsUseReaderForDefaultPolicyAssignment(t *testing.T) {
@@ -134,6 +149,7 @@ func TestRestrictedValidatorsUseReaderForDefaultPolicyAssignment(t *testing.T) {
 			WithIndex(&RoleDefinition{}, TargetNamespaceField, func(obj client.Object) []string {
 				return []string{obj.(*RoleDefinition).Spec.TargetNamespace}
 			}).
+			WithIndex(&RBACPolicy{}, HasDefaultAssignmentField, rbacPolicyDefaultAssignmentIndexFunc).
 			Build()
 	}
 
@@ -834,6 +850,159 @@ func TestRequesterMatchesDefaultAssignment(t *testing.T) {
 
 	if requesterMatchesDefaultAssignment(da, "system:serviceaccount:team-b:rbac-applier", nil) {
 		t.Fatal("expected non-matching serviceaccount to be false")
+	}
+}
+
+type defaultPolicyTrackingReader struct {
+	t           *testing.T
+	policies    []RBACPolicy
+	usedIndexed bool
+}
+
+func (r *defaultPolicyTrackingReader) Get(context.Context, client.ObjectKey, client.Object, ...client.GetOption) error {
+	return apierrors.NewNotFound(schema.GroupResource{Group: GroupVersion.Group, Resource: "rbacpolicies"}, "")
+}
+
+func (r *defaultPolicyTrackingReader) List(_ context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	listOpts := (&client.ListOptions{}).ApplyOptions(opts)
+	if listOpts.FieldSelector == nil || listOpts.FieldSelector.String() != HasDefaultAssignmentField+"=true" {
+		r.t.Fatalf("expected indexed defaultAssignment list, got field selector %v", listOpts.FieldSelector)
+	}
+	r.usedIndexed = true
+
+	policyList, ok := list.(*RBACPolicyList)
+	if !ok {
+		r.t.Fatalf("expected RBACPolicyList, got %T", list)
+	}
+	for _, policy := range r.policies {
+		if policy.Spec.DefaultAssignment != nil {
+			policyList.Items = append(policyList.Items, *policy.DeepCopy())
+		}
+	}
+	return nil
+}
+
+func TestResolveDefaultPoliciesForRequesterUsesDefaultAssignmentIndex(t *testing.T) {
+	reader := &defaultPolicyTrackingReader{
+		t: t,
+		policies: []RBACPolicy{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "ignored-without-default-assignment"},
+				Spec:       RBACPolicySpec{AppliesTo: PolicyScope{Namespaces: []string{"default"}}},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "team-b"},
+				Spec: RBACPolicySpec{
+					DefaultAssignment: &DefaultPolicyAssignment{Groups: []string{"oidc:team-b"}},
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "team-a"},
+				Spec: RBACPolicySpec{
+					DefaultAssignment: &DefaultPolicyAssignment{Groups: []string{"oidc:team-a"}},
+				},
+			},
+		},
+	}
+
+	matches, err := resolveDefaultPoliciesForRequester(context.Background(), reader, "alice", []string{"oidc:team-a"})
+	if err != nil {
+		t.Fatalf("resolve default policies: %v", err)
+	}
+	if !reader.usedIndexed {
+		t.Fatal("expected resolver to use defaultAssignment field index")
+	}
+	if !reflect.DeepEqual(matches, []string{"team-a"}) {
+		t.Fatalf("expected sorted matching policies [team-a], got %v", matches)
+	}
+}
+
+func TestResolveDefaultPoliciesForRequesterFallsBackWithoutDefaultAssignmentIndex(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := AddToScheme(scheme); err != nil {
+		t.Fatalf("add scheme: %v", err)
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(
+			&RBACPolicy{
+				ObjectMeta: metav1.ObjectMeta{Name: "without-default-assignment"},
+				Spec:       RBACPolicySpec{AppliesTo: PolicyScope{Namespaces: []string{"default"}}},
+			},
+			&RBACPolicy{
+				ObjectMeta: metav1.ObjectMeta{Name: "team-b"},
+				Spec: RBACPolicySpec{
+					DefaultAssignment: &DefaultPolicyAssignment{Groups: []string{"oidc:team-b"}},
+				},
+			},
+			&RBACPolicy{
+				ObjectMeta: metav1.ObjectMeta{Name: "team-a"},
+				Spec: RBACPolicySpec{
+					DefaultAssignment: &DefaultPolicyAssignment{Groups: []string{"oidc:team-a"}},
+				},
+			},
+		).
+		Build()
+
+	matches, err := resolveDefaultPoliciesForRequester(context.Background(), fakeClient, "alice", []string{"oidc:team-a"})
+	if err != nil {
+		t.Fatalf("resolve default policies with missing index fallback: %v", err)
+	}
+	if !reflect.DeepEqual(matches, []string{"team-a"}) {
+		t.Fatalf("expected sorted matching policies [team-a], got %v", matches)
+	}
+}
+
+func TestListPoliciesWithDefaultAssignmentFiltersDuringPagination(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := AddToScheme(scheme); err != nil {
+		t.Fatalf("add scheme: %v", err)
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(
+			&RBACPolicy{
+				ObjectMeta: metav1.ObjectMeta{Name: "without-default-assignment"},
+				Spec:       RBACPolicySpec{AppliesTo: PolicyScope{Namespaces: []string{"default"}}},
+			},
+			&RBACPolicy{
+				ObjectMeta: metav1.ObjectMeta{Name: "with-default-assignment"},
+				Spec: RBACPolicySpec{
+					DefaultAssignment: &DefaultPolicyAssignment{Groups: []string{"oidc:team-a"}},
+				},
+			},
+		).
+		Build()
+
+	policies, err := listPoliciesWithDefaultAssignment(context.Background(), fakeClient, false)
+	if err != nil {
+		t.Fatalf("list policies with default assignment: %v", err)
+	}
+	if len(policies) != 1 || policies[0].Name != "with-default-assignment" {
+		t.Fatalf("expected only policy with defaultAssignment, got %#v", policies)
+	}
+}
+
+func TestDefaultPolicyMissingFieldIndexError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", want: false},
+		{name: "fake client missing index", err: fmt.Errorf("no index with name %q", HasDefaultAssignmentField), want: true},
+		{name: "api server unsupported field label", err: fmt.Errorf("field label not supported: %s", HasDefaultAssignmentField), want: true},
+		{name: "other error", err: fmt.Errorf("connection refused"), want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := helpers.IsMissingFieldIndexError(tt.err); got != tt.want {
+				t.Fatalf("helpers.IsMissingFieldIndexError() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
