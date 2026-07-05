@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -53,6 +54,9 @@ const (
 	verbList     = "list"
 	verbUpdate   = "update"
 	verbWatch    = "watch"
+
+	rbacResourceClusterRoles = "clusterroles"
+	rbacResourceRoles        = "roles"
 )
 
 // APIResourcesByGroupVersion maps GroupVersion strings to their corresponding API resources.
@@ -702,21 +706,7 @@ func (r *ResourceTracker) collectAPIResourcesForGroupVersion(
 			resource.Verbs = append(resource.Verbs, verbList, verbWatch)
 		}
 
-		// for roles and rolebindings in rbac.authorization.k8s.io/v1,
-		// we need to add the bind verb explicitly, as they are not part of the API discovery
-		requiresExplicitBind := group == rbacv1.GroupName && version == "v1" &&
-			(resource.Name == "roles" || resource.Name == "rolebindings")
-		if requiresExplicitBind {
-			resource.Verbs = append(resource.Verbs, verbBind)
-		}
-
-		// for roles in rbac.authorization.k8s.io/v1,
-		// we need to add the escalate verb explicitly, as it is not part of the API discovery
-		requiresExplicitEscalate := group == rbacv1.GroupName && version == "v1" &&
-			resource.Name == "roles"
-		if requiresExplicitEscalate {
-			resource.Verbs = append(resource.Verbs, verbEscalate)
-		}
+		resource = withExplicitRBACVerbs(group, version, resource)
 
 		// send the resource to the channel
 		result = append(result, resource)
@@ -745,4 +735,23 @@ func (r *ResourceTracker) collectAPIResourcesForGroupVersion(
 		}
 	}
 	return result, nil
+}
+
+func withExplicitRBACVerbs(group, version string, resource metav1.APIResource) metav1.APIResource {
+	if group != rbacv1.GroupName || version != "v1" {
+		return resource
+	}
+
+	switch resource.Name {
+	case rbacResourceClusterRoles, rbacResourceRoles:
+		// Kubernetes discovery omits the special RBAC verbs required to manage
+		// privilege escalation and role binding for role resources.
+		for _, verb := range []string{verbBind, verbEscalate} {
+			if !slices.Contains(resource.Verbs, verb) {
+				resource.Verbs = append(resource.Verbs, verb)
+			}
+		}
+	}
+
+	return resource
 }
