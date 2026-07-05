@@ -678,7 +678,7 @@ func waitForWebhookAuthorizerReady(name string) {
 		if err != nil {
 			return ""
 		}
-		return string(output)
+		return strings.TrimSpace(string(output))
 	}, 30*time.Second, 3*time.Second).Should(Equal(statusTrue))
 }
 
@@ -691,7 +691,7 @@ func waitForWebhookAuthorizerConfigured(name string) {
 		if err != nil {
 			return ""
 		}
-		return string(output)
+		return strings.TrimSpace(string(output))
 	}, 30*time.Second, 3*time.Second).Should(Equal("true"))
 }
 

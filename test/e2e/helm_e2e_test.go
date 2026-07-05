@@ -1120,7 +1120,7 @@ func waitForHelmWebhookAuthorizerConfigured(name string) {
 		if err != nil {
 			return ""
 		}
-		return string(output)
+		return strings.TrimSpace(string(output))
 	}, reconcileTimeout, pollingInterval).Should(Equal("true"))
 }
 

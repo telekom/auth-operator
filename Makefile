@@ -343,12 +343,12 @@ ci-checks: verify helm-lint ## Run all CI checks locally before pushing.
 .PHONY: verify-generated
 verify-generated: ## Verify generated manifests, Helm chart, and API docs are up to date.
 	@echo "Checking generated manifests, code, Helm chart, and docs are up to date..."
+	@git diff --cached --quiet || (echo "ERROR: Refusing to verify generated files with pre-existing staged changes." && exit 1)
 	@$(MAKE) manifests
 	@$(MAKE) generate
 	@$(MAKE) helm
 	@$(MAKE) docs
 	@git diff --exit-code || (echo "ERROR: Generated files out of date. Run 'make manifests generate helm docs' and commit changes." && exit 1)
-	@git diff --cached --exit-code || (echo "ERROR: There are staged changes after generation." && exit 1)
 
 .PHONY: helm-lint
 helm-lint: ## Lint Helm chart.
