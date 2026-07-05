@@ -245,6 +245,7 @@ the assignment.
 | `--authorize-rate-limit` | Per-pod sustained requests/second for authorize endpoint | `0` |
 | `--authorize-rate-burst` | Burst size for authorize endpoint rate limiter | `200` |
 | `--authorize-auth-token-file` | Bearer-token file required by `/authorize` callers | `""` |
+| `--allow-unauthenticated-authorize` | Explicit insecure opt-out for unauthenticated `/authorize` callers when no token file is configured | `false` |
 
 ### Helm Values
 
@@ -275,6 +276,7 @@ webhookServer:
   tdgMigration: "false"  # Enable for T-DDI to T-CaaS migration
   authorizeRateLimit: 0     # Per-pod sustained requests/second; 0 disables
   authorizeRateBurst: 200   # Burst size for rate limiter
+  allowUnauthenticatedAuthorize: false
   authorizeAuth:
     tokenSecretName: ""     # Existing Secret with the /authorize bearer token
     tokenSecretKey: token
@@ -527,12 +529,18 @@ webhookServer:
   authorizeAuth:
     tokenSecretName: auth-operator-authorize-token
     tokenSecretKey: token
+  allowUnauthenticatedAuthorize: false
   authorizeRateLimit: 100   # sustained requests per second per pod
   authorizeRateBurst: 200   # burst capacity
 ```
 
 When `authorizeAuth.tokenSecretName` is set, requests to `/authorize` must
 include `Authorization: Bearer <token>` before the request body is decoded.
+When it is empty, `/authorize` callers are denied by default. Existing local or
+development installations that intentionally relied on unauthenticated callers
+must set `webhookServer.allowUnauthenticatedAuthorize: true` while they migrate
+the API server authorization webhook kubeconfig to send a bearer token. Keep the
+opt-out disabled in production.
 Setting `authorizeRateLimit` above zero without `authorizeAuth.tokenSecretName`
 causes the webhook server to fail startup.
 

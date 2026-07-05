@@ -344,6 +344,7 @@ func TestWebhookCmdFlags(t *testing.T) {
 		"authorize-rate-limit",
 		"authorize-rate-burst",
 		"authorize-auth-token-file",
+		"allow-unauthenticated-authorize",
 	}
 
 	for _, name := range expectedFlags {
@@ -406,6 +407,7 @@ func TestFlagDefaults(t *testing.T) {
 		{"webhook", "authorize-rate-limit", "0"},
 		{"webhook", "authorize-rate-burst", "200"},
 		{"webhook", "authorize-auth-token-file", ""},
+		{"webhook", "allow-unauthenticated-authorize", "false"},
 	}
 
 	for _, tt := range tests {

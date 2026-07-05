@@ -47,6 +47,7 @@ var (
 	authorizeRateLimit             float64
 	authorizeRateBurst             int
 	authorizeAuthTokenFile         string
+	allowUnauthenticatedAuthorize  bool
 	webhookLeaderElect             bool
 )
 
@@ -267,6 +268,10 @@ func configureWebhooks(mgr manager.Manager, tp *tracing.Provider) error {
 	}
 	authorizer.BearerToken = token
 	authorizer.BearerTokenFile = authorizeAuthTokenFile
+	authorizer.AllowUnauthenticatedAuthorize = allowUnauthenticatedAuthorize
+	if allowUnauthenticatedAuthorize && authorizeAuthTokenFile == "" {
+		log.Info("allowing unauthenticated /authorize requests; configure --authorize-auth-token-file for production")
+	}
 	if authorizeRateLimit > 0 {
 		authorizer.Limiter = rate.NewLimiter(rate.Limit(authorizeRateLimit), authorizeRateBurst)
 		log.Info("rate limiting enabled for /authorize",
@@ -377,6 +382,9 @@ func init() {
 	webhookCmd.Flags().StringVar(&authorizeAuthTokenFile, "authorize-auth-token-file", "",
 		"Path to a file containing the bearer token required for /authorize requests. "+
 			"Required when /authorize rate limiting is enabled.")
+	webhookCmd.Flags().BoolVar(&allowUnauthenticatedAuthorize, "allow-unauthenticated-authorize", false,
+		"Allow /authorize requests without a bearer token when no authorize auth token file is configured. "+
+			"Insecure; use only for development or temporary migration.")
 
 	webhookCmd.Flags().BoolVar(&webhookLeaderElect, "leader-elect", false,
 		"Enable leader election for the webhook manager. Required when running "+

@@ -335,6 +335,7 @@ Do not pass raw logger instances across helper boundaries when `ctx` is availabl
 | `--authorize-rate-limit` | Per-pod sustained requests/second for authorize endpoint | `0` |
 | `--authorize-rate-burst` | Burst size for authorize endpoint rate limiter | `200` |
 | `--authorize-auth-token-file` | Bearer-token file required by `/authorize` callers | `""` |
+| `--allow-unauthenticated-authorize` | Explicit insecure opt-out for unauthenticated `/authorize` callers when no token file is configured | `false` |
 
 ## Common Issues & Workarounds
 

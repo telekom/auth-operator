@@ -64,8 +64,9 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 	BeforeEach(func() {
 		ctx = context.Background()
 		authorizer = &webhooks.Authorizer{
-			Client: envClient,
-			Log:    zap.New(zap.WriteTo(io.Discard)),
+			AllowUnauthenticatedAuthorize: true,
+			Client:                        envClient,
+			Log:                           zap.New(zap.WriteTo(io.Discard)),
 		}
 	})
 

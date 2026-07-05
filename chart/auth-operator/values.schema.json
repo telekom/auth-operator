@@ -376,6 +376,11 @@
           "minimum": 0,
           "default": 200
         },
+        "allowUnauthenticatedAuthorize": {
+          "type": "boolean",
+          "description": "Explicit insecure opt-out that allows /authorize requests without bearer-token authentication when no token Secret is configured. Keep false for production.",
+          "default": false
+        },
         "authorizeAuth": {
           "type": "object",
           "description": "Optional bearer-token authentication for /authorize callers.",
@@ -383,7 +388,7 @@
           "properties": {
             "tokenSecretName": {
               "type": "string",
-              "description": "Existing Secret name containing the bearer token required for /authorize requests. Leave empty to disable caller authentication.",
+              "description": "Existing Secret name containing the bearer token required for /authorize requests. Leave empty only when allowUnauthenticatedAuthorize is explicitly true for development or temporary migration.",
               "default": ""
             },
             "tokenSecretKey": {
