@@ -600,7 +600,7 @@ func (r *RoleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request)
 		authorizationv1alpha1.NamespaceTerminationAllowedMessage,
 	)
 	if err := r.applyNamespaceTerminationStatus(ctx, &namespace); err != nil {
-		logger.Error(err, "failed to update Namespace status with blocking resources information", "namespace", namespace.Name)
+		logger.Error(err, "failed to clear Namespace termination blocked status", "namespace", namespace.Name)
 		metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleBindingTerminator, metrics.ResultError).Inc()
 		metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleBindingTerminator, metrics.ErrorTypeAPI).Inc()
 		return ctrl.Result{}, err
