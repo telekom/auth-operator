@@ -75,7 +75,8 @@ Image reference precedence: `digest` > `tag` > `Chart.AppVersion`
 | `controller.startupProbe.failureThreshold` | Startup probe consecutive failures before restart | `30` |
 | `controller.startupProbe.periodSeconds` | How often to perform the startup probe | `2` |
 | `controller.podDisruptionBudget.enabled` | Enable PDB | `false` |
-| `controller.podDisruptionBudget.minAvailable` | Minimum available pods | `1` |
+| `controller.podDisruptionBudget.minAvailable` | Minimum available pods. Omit when using `maxUnavailable`. | `1` |
+| `controller.podDisruptionBudget.maxUnavailable` | Maximum unavailable pods. Mutually exclusive with `minAvailable`. | `""` |
 | `controller.bindDefinitionConcurrency` | Max concurrent BindDefinition reconciliations | `10` |
 | `controller.roleDefinitionConcurrency` | Max concurrent RoleDefinition reconciliations | `10` |
 | `controller.webhookAuthorizerConcurrency` | Max concurrent WebhookAuthorizer reconciliations | `1` |
@@ -109,7 +110,8 @@ Image reference precedence: `digest` > `tag` > `Chart.AppVersion`
 | `webhookServer.affinity` | Pod affinity rules (overrides global `affinity`) | Pod anti-affinity across nodes |
 | `webhookServer.service.port` | Service port | `443` |
 | `webhookServer.podDisruptionBudget.enabled` | Enable PDB | `true` |
-| `webhookServer.podDisruptionBudget.minAvailable` | Minimum available pods | `1` |
+| `webhookServer.podDisruptionBudget.minAvailable` | Minimum available pods. Omit when using `maxUnavailable`. | `1` |
+| `webhookServer.podDisruptionBudget.maxUnavailable` | Maximum unavailable pods. Mutually exclusive with `minAvailable`. | `""` |
 
 ### Namespace Admission
 
@@ -188,7 +190,8 @@ The webhook server defaults to 2 replicas with pod anti-affinity and PDB enabled
 When multiple replicas are deployed, leader election is automatically enabled so
 that only one replica drives certificate rotation. Non-leader replicas detect the
 TLS certificate via the Secret volume mount and become ready independently, so all
-replicas serve admission webhook traffic. To also enable HA for the controller:
+replicas serve admission webhook traffic. PDBs default to `minAvailable: 1` when
+neither `minAvailable` nor `maxUnavailable` is set. To also enable HA for the controller:
 
 ```bash
 helm install auth-operator oci://ghcr.io/telekom/charts/auth-operator \

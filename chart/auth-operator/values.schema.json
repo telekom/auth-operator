@@ -271,7 +271,7 @@
                 { "type": "integer", "minimum": 0 },
                 { "type": "string", "pattern": "^[0-9]+%$" }
               ],
-              "description": "Minimum number (or percentage) of pods that must be available during disruption.",
+              "description": "Minimum number (or percentage) of pods that must be available during disruption. Omit this field when using maxUnavailable.",
               "default": 1
             },
             "maxUnavailable": {
@@ -279,7 +279,7 @@
                 { "type": "integer", "minimum": 1 },
                 { "type": "string", "pattern": "^[0-9]+%$" }
               ],
-              "description": "Maximum number (or percentage) of pods that can be unavailable during disruption."
+              "description": "Maximum number (or percentage) of pods that can be unavailable during disruption. Set this without minAvailable; the chart defaults to minAvailable=1 only when neither field is set."
             }
           },
           "not": {
@@ -409,7 +409,7 @@
                 { "type": "integer", "minimum": 0 },
                 { "type": "string", "pattern": "^[0-9]+%$" }
               ],
-              "description": "Minimum number (or percentage) of pods that must be available during disruption.",
+              "description": "Minimum number (or percentage) of pods that must be available during disruption. Omit this field when using maxUnavailable.",
               "default": 1
             },
             "maxUnavailable": {
@@ -417,7 +417,7 @@
                 { "type": "integer", "minimum": 1 },
                 { "type": "string", "pattern": "^[0-9]+%$" }
               ],
-              "description": "Maximum number (or percentage) of pods that can be unavailable during disruption."
+              "description": "Maximum number (or percentage) of pods that can be unavailable during disruption. Set this without minAvailable; the chart defaults to minAvailable=1 only when neither field is set."
             }
           },
           "not": {

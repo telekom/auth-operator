@@ -242,6 +242,7 @@ jobs:
       - name: Cleanup cluster
         if: always()
         run: |
+          kind delete cluster --name auth-operator-e2e-ha-multi || true
           kind delete cluster --name auth-operator-e2e-ha || true
 
   e2e-full-chain:

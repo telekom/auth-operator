@@ -486,9 +486,7 @@ spec:
 			_, _ = utils.Run(cmd)
 		})
 
-		It("should report status conditions", func() {
-			// The controller (if running) should update conditions.
-			// This test verifies the CRD supports the status subresource.
+		It("should report configured status and Ready condition", func() {
 			Eventually(func() bool {
 				cmd := utils.CommandContext(context.Background(), "kubectl", "get",
 					"webhookauthorizer", "wa-e2e-status", "-o", "json")
@@ -503,6 +501,8 @@ spec:
 				_, hasStatus := result["status"]
 				return hasStatus
 			}, reconcileWait, pollingInt).Should(BeTrue(), "Expected status field to be present")
+			waitForWebhookAuthorizerReady("wa-e2e-status")
+			waitForWebhookAuthorizerConfigured("wa-e2e-status")
 		})
 	})
 
@@ -680,6 +680,19 @@ func waitForWebhookAuthorizerReady(name string) {
 		}
 		return string(output)
 	}, 30*time.Second, 3*time.Second).Should(Equal(statusTrue))
+}
+
+func waitForWebhookAuthorizerConfigured(name string) {
+	Eventually(func() string {
+		cmd := utils.CommandContext(context.Background(), "kubectl", "get",
+			"webhookauthorizer", name,
+			"-o", "jsonpath={.status.authorizerConfigured}")
+		output, err := utils.Run(cmd)
+		if err != nil {
+			return ""
+		}
+		return string(output)
+	}, 30*time.Second, 3*time.Second).Should(Equal("true"))
 }
 
 func resourceSAR(user string, groups []string, verb, resource, namespace string) authzv1.SubjectAccessReview {
