@@ -945,7 +945,7 @@ func (wa *Authorizer) authenticateRequest(w http.ResponseWriter, r *http.Request
 			wa.Log.V(1).Info("allowing unauthenticated SubjectAccessReview request")
 			return true
 		}
-		wa.Log.V(1).Info("rejecting unauthorized SubjectAccessReview request because no bearer token is configured")
+		wa.Log.V(1).Info("rejecting unauthenticated SubjectAccessReview request because no bearer token is configured")
 		wa.writeDeniedResponse(w, reasonUnauthorized)
 		return false
 	}

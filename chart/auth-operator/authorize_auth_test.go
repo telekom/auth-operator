@@ -26,8 +26,9 @@ func TestValuesSchemaDocumentsSecureAuthorizeDefault(t *testing.T) {
 	if got := prop["type"]; got != "boolean" {
 		t.Fatalf("allowUnauthenticatedAuthorize type = %v, want boolean", got)
 	}
-	if got := prop["default"]; got != false {
-		t.Fatalf("allowUnauthenticatedAuthorize default = %v, want false", got)
+	defaultValue, ok := prop["default"].(bool)
+	if !ok || defaultValue {
+		t.Fatalf("allowUnauthenticatedAuthorize default = %v, want false", prop["default"])
 	}
 	description, ok := prop["description"].(string)
 	if !ok || !strings.Contains(description, "insecure opt-out") {
@@ -56,7 +57,7 @@ func TestWebhookDeploymentAuthorizeAuthRendering(t *testing.T) {
 func helmTemplate(t *testing.T, args ...string) string {
 	t.Helper()
 	allArgs := append([]string{"template", "auth-operator", ".", "--namespace", "auth-operator-system"}, args...)
-	cmd := exec.Command("helm", allArgs...) // #nosec G204
+	cmd := exec.CommandContext(t.Context(), "helm", allArgs...) // #nosec G204
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("helm template failed: %v\n%s", err, string(output))
