@@ -235,13 +235,11 @@ var _ = Describe("BindDefinition Controller", func() {
 					ResourceType: "pods",
 					APIGroup:     "",
 					Count:        1,
-					Names:        []string{"test-pod"},
 				},
 			}
 
 			message := formatBlockingResourcesMessage(blockingResources)
-			Expect(message).To(ContainSubstring("pods"))
-			Expect(message).To(ContainSubstring("test-pod"))
+			Expect(message).To(Equal("pods=1"))
 		})
 
 		It("should correctly format blocking resources message for multiple resource types", func() {
@@ -250,21 +248,18 @@ var _ = Describe("BindDefinition Controller", func() {
 					ResourceType: "pods",
 					APIGroup:     "",
 					Count:        2,
-					Names:        []string{"frontend", "backend"},
 				},
 				{
 					ResourceType: "persistentvolumeclaims",
 					APIGroup:     "",
 					Count:        1,
-					Names:        []string{"storage-pvc"},
 				},
 			}
 
 			message := formatBlockingResourcesMessage(blockingResources)
-			Expect(message).To(ContainSubstring("pods"))
-			Expect(message).To(ContainSubstring("frontend"))
-			Expect(message).To(ContainSubstring("persistentvolumeclaims"))
-			Expect(message).To(ContainSubstring("storage-pvc"))
+			Expect(message).To(Equal("persistentvolumeclaims=1; pods=2"))
+			Expect(message).NotTo(ContainSubstring("frontend"))
+			Expect(message).NotTo(ContainSubstring("storage-pvc"))
 		})
 
 		It("should include API group in resource type when present", func() {
@@ -273,40 +268,34 @@ var _ = Describe("BindDefinition Controller", func() {
 					ResourceType: "deployments",
 					APIGroup:     "apps",
 					Count:        1,
-					Names:        []string{"my-deployment"},
 				},
 			}
 
 			message := formatBlockingResourcesMessage(blockingResources)
-			Expect(message).To(ContainSubstring("deployments (apps)"))
+			Expect(message).To(Equal("deployments.apps=1"))
 		})
 	})
 
 	Context("ResourceBlocking type", func() {
-		It("should create ResourceBlocking with correct fields", func() {
+		It("should create ResourceBlocking with correct summary fields", func() {
 			rb := namespaceDeletionResourceBlocking{
 				ResourceType: "pods",
 				APIGroup:     "core",
 				Count:        3,
-				Names:        []string{"pod1", "pod2", "pod3"},
 			}
 
 			Expect(rb.ResourceType).To(Equal("pods"))
 			Expect(rb.APIGroup).To(Equal("core"))
 			Expect(rb.Count).To(Equal(3))
-			Expect(rb.Names).To(HaveLen(3))
-			Expect(rb.Names).To(ContainElements("pod1", "pod2", "pod3"))
 		})
 
-		It("should handle empty Names slice", func() {
+		It("should handle zero count", func() {
 			rb := namespaceDeletionResourceBlocking{
 				ResourceType: "pods",
 				APIGroup:     "",
 				Count:        0,
-				Names:        []string{},
 			}
 
-			Expect(rb.Names).To(BeEmpty())
 			Expect(rb.Count).To(Equal(0))
 		})
 
@@ -315,7 +304,6 @@ var _ = Describe("BindDefinition Controller", func() {
 				ResourceType: "pods",
 				APIGroup:     "",
 				Count:        1,
-				Names:        []string{"test-pod"},
 			}
 
 			Expect(rb.APIGroup).To(BeEmpty())
@@ -327,7 +315,6 @@ var _ = Describe("BindDefinition Controller", func() {
 				ResourceType: "customresources",
 				APIGroup:     "custom.example.com",
 				Count:        2,
-				Names:        []string{"resource1", "resource2"},
 			}
 
 			Expect(rb.APIGroup).To(Equal("custom.example.com"))
@@ -336,38 +323,30 @@ var _ = Describe("BindDefinition Controller", func() {
 	})
 
 	Context("Message formatting edge cases", func() {
-		It("should handle large resource names", func() {
+		It("should omit object names from message", func() {
 			blockingResources := []namespaceDeletionResourceBlocking{
 				{
 					ResourceType: "pods",
 					APIGroup:     "",
 					Count:        1,
-					Names:        []string{"very-long-pod-name-with-many-characters-123456789"},
 				},
 			}
 
 			message := formatBlockingResourcesMessage(blockingResources)
-			Expect(message).To(ContainSubstring("very-long-pod-name-with-many-characters-123456789"))
+			Expect(message).To(Equal("pods=1"))
 		})
 
 		It("should format many resources of same type", func() {
-			names := make([]string, 0, 10)
-			for i := range 10 {
-				names = append(names, fmt.Sprintf("pod-%d", i))
-			}
-
 			blockingResources := []namespaceDeletionResourceBlocking{
 				{
 					ResourceType: "pods",
 					APIGroup:     "",
 					Count:        10,
-					Names:        names,
 				},
 			}
 
 			message := formatBlockingResourcesMessage(blockingResources)
-			Expect(message).To(ContainSubstring("pods"))
-			Expect(message).To(ContainSubstring("10"))
+			Expect(message).To(Equal("pods=10"))
 		})
 
 		It("should format many different resource types", func() {
@@ -376,33 +355,26 @@ var _ = Describe("BindDefinition Controller", func() {
 					ResourceType: "pods",
 					APIGroup:     "",
 					Count:        2,
-					Names:        []string{"pod1", "pod2"},
 				},
 				{
 					ResourceType: "services",
 					APIGroup:     "",
 					Count:        1,
-					Names:        []string{"service1"},
 				},
 				{
 					ResourceType: "deployments",
 					APIGroup:     "apps",
 					Count:        1,
-					Names:        []string{"deploy1"},
 				},
 				{
 					ResourceType: "statefulsets",
 					APIGroup:     "apps",
 					Count:        3,
-					Names:        []string{"stateful1", "stateful2", "stateful3"},
 				},
 			}
 
 			message := formatBlockingResourcesMessage(blockingResources)
-			Expect(message).To(ContainSubstring("pods"))
-			Expect(message).To(ContainSubstring("services"))
-			Expect(message).To(ContainSubstring("deployments (apps)"))
-			Expect(message).To(ContainSubstring("statefulsets (apps)"))
+			Expect(message).To(Equal("deployments.apps=1; pods=2; services=1; statefulsets.apps=3"))
 		})
 
 		It("should handle single resource in many types", func() {
@@ -411,19 +383,16 @@ var _ = Describe("BindDefinition Controller", func() {
 					ResourceType: "pod",
 					APIGroup:     "",
 					Count:        1,
-					Names:        []string{"single-pod"},
 				},
 				{
 					ResourceType: "service",
 					APIGroup:     "",
 					Count:        1,
-					Names:        []string{"single-service"},
 				},
 			}
 
 			message := formatBlockingResourcesMessage(blockingResources)
-			Expect(message).To(ContainSubstring("pod"))
-			Expect(message).To(ContainSubstring("service"))
+			Expect(message).To(Equal("pod=1; service=1"))
 		})
 
 		It("should include count in message", func() {
@@ -432,26 +401,24 @@ var _ = Describe("BindDefinition Controller", func() {
 					ResourceType: "pods",
 					APIGroup:     "",
 					Count:        5,
-					Names:        []string{"pod1", "pod2", "pod3", "pod4", "pod5"},
 				},
 			}
 
 			message := formatBlockingResourcesMessage(blockingResources)
-			Expect(message).To(ContainSubstring("5"))
+			Expect(message).To(Equal("pods=5"))
 		})
 
-		It("should handle special characters in resource names", func() {
+		It("should handle API groups with dots", func() {
 			blockingResources := []namespaceDeletionResourceBlocking{
 				{
-					ResourceType: "pods",
-					APIGroup:     "",
+					ResourceType: "widgets",
+					APIGroup:     "custom.example.com",
 					Count:        1,
-					Names:        []string{"pod-with-dashes-and_underscores.123"},
 				},
 			}
 
 			message := formatBlockingResourcesMessage(blockingResources)
-			Expect(message).To(ContainSubstring("pod-with-dashes-and_underscores.123"))
+			Expect(message).To(Equal("widgets.custom.example.com=1"))
 		})
 	})
 
@@ -461,14 +428,12 @@ var _ = Describe("BindDefinition Controller", func() {
 				ResourceType: "pods",
 				APIGroup:     "",
 				Count:        1,
-				Names:        []string{"test-pod"},
 			}
 
 			rb2 := namespaceDeletionResourceBlocking{
 				ResourceType: "pods",
 				APIGroup:     "",
 				Count:        1,
-				Names:        []string{"test-pod"},
 			}
 
 			Expect(rb1.ResourceType).To(Equal(rb2.ResourceType))
@@ -481,14 +446,12 @@ var _ = Describe("BindDefinition Controller", func() {
 				ResourceType: "pods",
 				APIGroup:     "",
 				Count:        1,
-				Names:        []string{"test"},
 			}
 
 			rb2 := namespaceDeletionResourceBlocking{
 				ResourceType: "services",
 				APIGroup:     "",
 				Count:        1,
-				Names:        []string{"test"},
 			}
 
 			Expect(rb1.ResourceType).NotTo(Equal(rb2.ResourceType))
@@ -499,14 +462,12 @@ var _ = Describe("BindDefinition Controller", func() {
 				ResourceType: "pods",
 				APIGroup:     "",
 				Count:        1,
-				Names:        []string{"test"},
 			}
 
 			rb2 := namespaceDeletionResourceBlocking{
 				ResourceType: "pods",
 				APIGroup:     "apps",
 				Count:        1,
-				Names:        []string{"test"},
 			}
 
 			Expect(rb1.APIGroup).NotTo(Equal(rb2.APIGroup))
@@ -517,14 +478,12 @@ var _ = Describe("BindDefinition Controller", func() {
 				ResourceType: "pods",
 				APIGroup:     "",
 				Count:        1,
-				Names:        []string{"test"},
 			}
 
 			rb2 := namespaceDeletionResourceBlocking{
 				ResourceType: "pods",
 				APIGroup:     "",
 				Count:        5,
-				Names:        []string{"test"},
 			}
 
 			Expect(rb1.Count).NotTo(Equal(rb2.Count))
@@ -545,12 +504,12 @@ func TestSummarizeNamespaceNames(t *testing.T) {
 }
 
 // TestReconcileTerminatingNamespaces verifies that the controller properly handles terminating namespaces
-// and logs blocking resources with detailed information.
+// and logs blocking resources with count-only information.
 //
 // Test Coverage:
-// 1. formatBlockingResourcesMessage() - Converts ResourceBlocking data to human-readable messages
-// 2. ResourceBlocking type - Captures resource details for logging
-// 3. Logging of blocking resources - Structured logs with namespace, resource type, count, and names
+// 1. formatBlockingResourcesMessage() - Converts ResourceBlocking data to count-only messages
+// 2. ResourceBlocking type - Captures resource type and count details for logging
+// 3. Logging of blocking resources - Structured logs with namespace, resource type, and count
 //
 // To run these tests:
 //   go test -v ./internal/controller/authorization/...
