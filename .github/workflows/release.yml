@@ -41,7 +41,7 @@ jobs:
           persist-credentials: false
 
       - name: Guard release tag provenance
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
@@ -109,14 +109,14 @@ jobs:
           cache: true
 
       - name: Generate third-party license notices
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         run: |
           go install github.com/google/go-licenses/v2@v2.0.1
           go-licenses save ./... --save_path=/tmp/third-party-notices --force
           tar --sort=name --mtime='1970-01-01' --owner=0 --group=0 --numeric-owner -cf - -C /tmp third-party-notices | gzip -n > third-party-notices.tar.gz
 
       - name: Generate install manifest
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         run: |
           make kustomize
           # Set image at config/default level so it applies to ALL deployments
@@ -133,13 +133,13 @@ jobs:
           fi
 
       - name: Generate CRDs-only manifest
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         run: |
           bin/kustomize build config/crd > crds.yaml
           echo "Generated crds.yaml with $(wc -l < crds.yaml) lines"
 
       - name: Upload prepare artifacts
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: prepare-artifacts
@@ -221,7 +221,7 @@ jobs:
   build-image:
     name: Build Image (${{ matrix.arch }})
     needs: [prepare, test]
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -238,7 +238,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.sha }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
@@ -269,7 +269,7 @@ jobs:
           sbom: true
           build-args: |
             VERSION=${{ needs.prepare.outputs.version }}
-            COMMIT=${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+            COMMIT=${{ github.sha }}
             REPOSITORY=https://github.com/${{ github.repository }}
 
       - name: Set digest artifact name
@@ -298,7 +298,7 @@ jobs:
   assemble:
     name: Assemble Multi-Arch Manifest
     needs: [prepare, build-image]
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: read
       packages: write
@@ -334,11 +334,9 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=semver,pattern={{version}},enable=${{ github.event_name != 'pull_request' }}
-            type=semver,pattern={{major}}.{{minor}},enable=${{ github.event_name != 'pull_request' }}
-            type=semver,pattern={{major}},enable=${{ github.event_name != 'pull_request' }}
-            type=raw,value=${{ needs.prepare.outputs.image_tag }},enable=${{ github.event_name == 'pull_request' }}
-            type=raw,value=${{ needs.prepare.outputs.image_tag_sha }},enable=${{ github.event_name == 'pull_request' && needs.prepare.outputs.image_tag_sha != '' }}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
             type=sha
           labels: |
             org.opencontainers.image.title=auth-operator
@@ -346,7 +344,7 @@ jobs:
             org.opencontainers.image.vendor=Deutsche Telekom AG
             org.opencontainers.image.licenses=Apache-2.0
             org.opencontainers.image.documentation=https://github.com/${{ github.repository }}/blob/main/docs/operator-guide.md
-            org.opencontainers.image.revision=${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+            org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.base.name=gcr.io/distroless/static-debian12
             io.artifacthub.package.readme-url=https://raw.githubusercontent.com/${{ github.repository }}/main/README.md
             io.artifacthub.package.maintainers=[{"name":"T-CaaS Team","email":"t-caas@telekom.de"}]
@@ -428,7 +426,7 @@ jobs:
 
       # Release-only steps (scanning, signing, attestation)
       - name: Scan image for vulnerabilities
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.inspect.outputs.digest }}
@@ -438,14 +436,14 @@ jobs:
           exit-code: '1'
 
       - name: Upload Trivy scan results to GitHub Security
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         uses: github/codeql-action/upload-sarif@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a # v4.36.3
         with:
           sarif_file: 'trivy-results.sarif'
         continue-on-error: true
 
       - name: Generate SBOM (SPDX)
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
           image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.inspect.outputs.digest }}
@@ -454,21 +452,21 @@ jobs:
           upload-release-assets: false
 
       - name: Install cosign
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       - name: Sign container image (keyless)
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         run: |
           cosign sign --yes ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.inspect.outputs.digest }}
 
       - name: Attest SBOM (keyless)
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         run: |
           cosign attest --yes --type spdxjson --predicate sbom.spdx.json ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.inspect.outputs.digest }}
 
       - name: Attest container image provenance (GitHub)
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
@@ -476,7 +474,7 @@ jobs:
           push-to-registry: true
 
       - name: Upload SBOM artifact
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sbom
@@ -489,7 +487,7 @@ jobs:
   artifactory:
     name: Push to Artifactory
     needs: [prepare, assemble]
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     continue-on-error: true  # Artifactory mirror is best-effort; must not block releases
     permissions:
       packages: read
@@ -575,7 +573,7 @@ jobs:
     # NOTE: Does not depend on `artifactory` intentionally — Artifactory is a
     # best-effort mirror and should not block GitHub Release creation.
     needs: [prepare, assemble]
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
       attestations: write
@@ -765,7 +763,8 @@ jobs:
     needs: [prepare, assemble, release]
     # Publish charts only for release tags after release artifact creation succeeds.
     if: >-
-      github.event_name != 'pull_request'
+      github.event_name == 'push'
+      && startsWith(github.ref, 'refs/tags/v')
       && !cancelled()
       && needs.prepare.result == 'success'
       && needs.assemble.result == 'success'
@@ -802,7 +801,7 @@ jobs:
           version: ${{ env.HELM_VERSION }}
 
       - name: Install cosign
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       - name: Log in to Container Registry
@@ -818,11 +817,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
-          
+
           # Find previous tag for changelog diff
           PREV_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]' | head -2 | tail -1)
           echo "Generating changelog: ${PREV_TAG:-initial}..${VERSION}"
-          
+
           if [[ -n "${PREV_TAG}" ]]; then
             # Use GitHub API to generate release notes from merged PRs
             NOTES=$(gh api repos/${{ github.repository }}/releases/generate-notes \
@@ -832,7 +831,7 @@ jobs:
           else
             NOTES=""
           fi
-          
+
           # Parse PR titles into Artifact Hub changelog format
           # Convention: feat: -> added, fix: -> fixed, everything else -> changed
           CHANGES=""
@@ -841,7 +840,7 @@ jobs:
               # Extract PR title from "* description by @user in URL" format
               TITLE=$(echo "${line}" | sed -n 's/^\* \(.*\) by @.*/\1/p')
               [[ -z "${TITLE}" ]] && continue
-              
+
               # Determine kind from conventional commit prefix
               KIND="changed"
               if echo "${TITLE}" | grep -qiE '^feat(\(.*\))?[!]?:'; then
@@ -851,25 +850,25 @@ jobs:
               elif echo "${TITLE}" | grep -qiE '^(security|vuln)(\(.*\))?[!]?:'; then
                 KIND="security"
               fi
-              
+
               # Clean up: remove conventional commit prefix for cleaner display
               CLEAN_TITLE=$(echo "${TITLE}" | sed -E 's/^(feat|fix|chore|docs|ci|refactor|perf|test|build|style|security|vuln)(\([^)]*\))?[!]?:[[:space:]]*//')
               [[ -z "${CLEAN_TITLE}" ]] && CLEAN_TITLE="${TITLE}"
-              
+
               # YAML-escape: double-quote the description to handle special chars (: # " \)
               ESCAPED_TITLE=$(echo "${CLEAN_TITLE}" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
               CHANGES="${CHANGES}    - kind: ${KIND}\n      description: \"${ESCAPED_TITLE}\"\n"
             done <<< "${NOTES}"
           fi
-          
+
           # Fallback if no changes were parsed
           if [[ -z "${CHANGES}" ]]; then
             CHANGES="    - kind: changed\n      description: \"Release ${VERSION}\"\n"
           fi
-          
+
           echo "Generated changelog:"
           echo -e "${CHANGES}"
-          
+
           # Write to file for use in next step
           echo -e "${CHANGES}" > changelog-entries.yaml
 
@@ -879,27 +878,26 @@ jobs:
           CHART_VERSION="${{ needs.prepare.outputs.chart_version }}"
           DIGEST="${{ needs.assemble.outputs.digest }}"
           IS_PRERELEASE="${{ needs.prepare.outputs.is_prerelease }}"
-          
+
           echo "Setting chart version to: ${CHART_VERSION}"
           echo "Setting appVersion to: ${VERSION}"
           echo "Setting image digest to: ${DIGEST}"
           echo "Is pre-release: ${IS_PRERELEASE}"
-          
+
           # Update Chart.yaml with version (chart version must be semver)
           sed -i "s/^version:.*/version: ${CHART_VERSION}/" chart/auth-operator/Chart.yaml
           sed -i "s/^appVersion:.*/appVersion: \"${VERSION}\"/" chart/auth-operator/Chart.yaml
-          
+
           # Update OCI revision annotation with actual source commit SHA
-          # For PRs, use the head SHA (matches the actually-built source); for tags, use github.sha
-          REVISION_SHA="${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+          REVISION_SHA="${{ github.sha }}"
           sed -i "s|org.opencontainers.image.revision:.*|org.opencontainers.image.revision: ${REVISION_SHA}|" chart/auth-operator/Chart.yaml
-          
+
           # Update artifacthub.io/images with actual version
           sed -i "s|image: ghcr.io/telekom/auth-operator:.*|image: ghcr.io/telekom/auth-operator:${VERSION}|" chart/auth-operator/Chart.yaml
-          
+
           # Update artifacthub.io/prerelease annotation
           sed -i "s|artifacthub.io/prerelease:.*|artifacthub.io/prerelease: \"${IS_PRERELEASE}\"|" chart/auth-operator/Chart.yaml
-          
+
           # Update artifacthub.io/changes from generated changelog
           CHANGELOG=$(cat changelog-entries.yaml)
           awk -v changes="${CHANGELOG}" '
@@ -913,10 +911,10 @@ jobs:
             !skip { print }
           ' chart/auth-operator/Chart.yaml > Chart.yaml.tmp
           mv Chart.yaml.tmp chart/auth-operator/Chart.yaml
-          
+
           # Update values.yaml with digest reference for immutable deployments
           sed -i 's/^  digest:.*/  digest: "'"${DIGEST}"'"/' chart/auth-operator/values.yaml
-          
+
           echo "Updated Chart.yaml:"
           cat chart/auth-operator/Chart.yaml
           echo ""
@@ -935,23 +933,23 @@ jobs:
           ls -la auth-operator-*.tgz
 
       - name: Push Helm chart to OCI registry
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         id: helm-push
         run: |
           CHART_FILE=$(ls auth-operator-*.tgz)
           helm push "${CHART_FILE}" oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts
-          
+
           CHART_VERSION="${{ needs.prepare.outputs.chart_version }}"
           echo "chart_ref=oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/auth-operator:${CHART_VERSION}" >> "$GITHUB_OUTPUT"
           echo "Pushed chart to: oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/auth-operator:${CHART_VERSION}"
 
       - name: Push Helm chart with SHA tag
-        if: needs.prepare.outputs.chart_version_sha != '' && github.event_name != 'pull_request'
+        if: needs.prepare.outputs.chart_version_sha != '' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         run: |
           CHART_VERSION="${{ needs.prepare.outputs.chart_version }}"
           CHART_VERSION_SHA="${{ needs.prepare.outputs.chart_version_sha }}"
           OCI_BASE="${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/auth-operator"
-          
+
           # Re-tag the chart we just pushed with the SHA-suffixed version
           docker buildx imagetools create \
             --tag "${OCI_BASE}:${CHART_VERSION_SHA}" \
@@ -959,7 +957,7 @@ jobs:
           echo "Also tagged chart as: ${OCI_BASE}:${CHART_VERSION_SHA}"
 
       - name: Sign Helm chart (keyless)
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         run: |
           CHART_VERSION="${{ needs.prepare.outputs.chart_version }}"
           CHART_REF="${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/auth-operator:${CHART_VERSION}"
@@ -967,7 +965,7 @@ jobs:
           cosign sign --yes "${CHART_REF}"
 
       - name: Upload Helm chart to release
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
