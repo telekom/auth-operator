@@ -26,6 +26,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -465,6 +466,52 @@ var _ = Describe("ResourceTracker APIResourcesByGroupVersion", func() {
 			}
 			Expect(a.Equals(b)).To(BeFalse())
 		})
+	})
+})
+
+var _ = Describe("ResourceTracker explicit RBAC verbs", func() {
+	It("adds bind and escalate for clusterroles", func() {
+		resource := withExplicitRBACVerbs(rbacv1.GroupName, "v1", metav1.APIResource{
+			Name:       rbacResourceClusterRoles,
+			Namespaced: false,
+			Kind:       "ClusterRole",
+			Verbs:      metav1.Verbs{verbGet, verbList},
+		})
+
+		Expect(resource.Verbs).To(ConsistOf(verbGet, verbList, verbBind, verbEscalate))
+	})
+
+	It("adds bind and escalate for roles", func() {
+		resource := withExplicitRBACVerbs(rbacv1.GroupName, "v1", metav1.APIResource{
+			Name:       rbacResourceRoles,
+			Namespaced: true,
+			Kind:       "Role",
+			Verbs:      metav1.Verbs{verbGet, verbList},
+		})
+
+		Expect(resource.Verbs).To(ConsistOf(verbGet, verbList, verbBind, verbEscalate))
+	})
+
+	It("does not duplicate existing explicit verbs", func() {
+		resource := withExplicitRBACVerbs(rbacv1.GroupName, "v1", metav1.APIResource{
+			Name:       rbacResourceClusterRoles,
+			Namespaced: false,
+			Kind:       "ClusterRole",
+			Verbs:      metav1.Verbs{verbGet, verbBind, verbEscalate},
+		})
+
+		Expect(resource.Verbs).To(Equal(metav1.Verbs{verbGet, verbBind, verbEscalate}))
+	})
+
+	It("does not add bind to rolebindings", func() {
+		resource := withExplicitRBACVerbs(rbacv1.GroupName, "v1", metav1.APIResource{
+			Name:       "rolebindings",
+			Namespaced: true,
+			Kind:       "RoleBinding",
+			Verbs:      metav1.Verbs{verbGet, verbList},
+		})
+
+		Expect(resource.Verbs).To(ConsistOf(verbGet, verbList))
 	})
 })
 

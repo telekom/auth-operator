@@ -457,6 +457,17 @@ func rulesContainVerb(rules map[string]*rbacv1.PolicyRule, verb string) bool {
 	return false
 }
 
+func policyRuleForResource(rules map[string]*rbacv1.PolicyRule, resource string) *rbacv1.PolicyRule {
+	for _, rule := range rules {
+		for _, res := range rule.Resources {
+			if res == resource {
+				return rule
+			}
+		}
+	}
+	return nil
+}
+
 // TestFilterAPIResourcesForRoleDefinition tests the filterAPIResourcesForRoleDefinition function
 func TestFilterAPIResourcesForRoleDefinition(t *testing.T) {
 	s := scheme.Scheme
@@ -573,6 +584,84 @@ func TestFilterAPIResourcesForRoleDefinition(t *testing.T) {
 		if rulesContainResource(rules, "nodes") {
 			t.Error("cluster-scoped resource 'nodes' should be filtered when ScopeNamespaced=true")
 		}
+	})
+
+	t.Run("should keep special verbs for clusterroles", func(t *testing.T) {
+		g := NewWithT(t)
+		rd := &authorizationv1alpha1.RoleDefinition{
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				TargetRole:      authorizationv1alpha1.DefinitionClusterRole,
+				ScopeNamespaced: false,
+			},
+		}
+
+		apiResources := discovery.APIResourcesByGroupVersion{
+			rbacv1.SchemeGroupVersion.String(): {
+				{
+					Name:       "clusterroles",
+					Group:      rbacv1.GroupName,
+					Verbs:      metav1.Verbs{"get", "list", "bind", "escalate"},
+					Namespaced: false,
+				},
+			},
+		}
+
+		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(policyRuleForResource(rules, "clusterroles")).NotTo(BeNil())
+		g.Expect(policyRuleForResource(rules, "clusterroles").Verbs).To(ConsistOf("get", "list", "bind", "escalate"))
+	})
+
+	t.Run("should keep special verbs for namespaced roles", func(t *testing.T) {
+		g := NewWithT(t)
+		rd := &authorizationv1alpha1.RoleDefinition{
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
+				ScopeNamespaced: true,
+			},
+		}
+
+		apiResources := discovery.APIResourcesByGroupVersion{
+			rbacv1.SchemeGroupVersion.String(): {
+				{
+					Name:       "roles",
+					Group:      rbacv1.GroupName,
+					Verbs:      metav1.Verbs{"get", "list", "bind", "escalate"},
+					Namespaced: true,
+				},
+			},
+		}
+
+		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(policyRuleForResource(rules, "roles")).NotTo(BeNil())
+		g.Expect(policyRuleForResource(rules, "roles").Verbs).To(ConsistOf("get", "list", "bind", "escalate"))
+	})
+
+	t.Run("should not add bind for rolebindings", func(t *testing.T) {
+		g := NewWithT(t)
+		rd := &authorizationv1alpha1.RoleDefinition{
+			Spec: authorizationv1alpha1.RoleDefinitionSpec{
+				TargetRole:      authorizationv1alpha1.DefinitionNamespacedRole,
+				ScopeNamespaced: true,
+			},
+		}
+
+		apiResources := discovery.APIResourcesByGroupVersion{
+			rbacv1.SchemeGroupVersion.String(): {
+				{
+					Name:       "rolebindings",
+					Group:      rbacv1.GroupName,
+					Verbs:      metav1.Verbs{"get", "list"},
+					Namespaced: true,
+				},
+			},
+		}
+
+		rules, err := r.filterAPIResourcesForRoleDefinition(ctx, rd, apiResources)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(policyRuleForResource(rules, "rolebindings")).NotTo(BeNil())
+		g.Expect(policyRuleForResource(rules, "rolebindings").Verbs).To(ConsistOf("get", "list"))
 	})
 
 	t.Run("should filter restricted verbs", func(t *testing.T) {
