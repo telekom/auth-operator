@@ -567,6 +567,10 @@ var schemaYAML = typed.YAMLObject(`types:
       type:
         scalar: boolean
       default: false
+    - name: metricsAccessAllowed
+      type:
+        scalar: boolean
+      default: false
     - name: restrictedApis
       type:
         list:

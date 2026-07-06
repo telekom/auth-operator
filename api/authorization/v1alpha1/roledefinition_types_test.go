@@ -40,6 +40,16 @@ func TestValidateRoleDefinitionSpec(t *testing.T) {
 			},
 		},
 		{
+			name: "valid ClusterRole with metrics access",
+			rd: &RoleDefinition{
+				Spec: RoleDefinitionSpec{
+					TargetRole:           DefinitionClusterRole,
+					TargetName:           "test-role",
+					MetricsAccessAllowed: true,
+				},
+			},
+		},
+		{
 			name: "valid ClusterRole with RFC1123 subdomain targetName",
 			rd: &RoleDefinition{
 				Spec: RoleDefinitionSpec{
@@ -87,6 +97,18 @@ func TestValidateRoleDefinitionSpec(t *testing.T) {
 				},
 			},
 			wantErr: "aggregationLabels can only be used when targetRole is 'ClusterRole'",
+		},
+		{
+			name: "reject metrics access on Role",
+			rd: &RoleDefinition{
+				Spec: RoleDefinitionSpec{
+					TargetRole:           DefinitionNamespacedRole,
+					TargetName:           "test-role",
+					TargetNamespace:      "default",
+					MetricsAccessAllowed: true,
+				},
+			},
+			wantErr: "metricsAccessAllowed may only be set when targetRole is 'ClusterRole'",
 		},
 		{
 			name: "reject metadata aggregation label on Role",
@@ -168,6 +190,22 @@ func TestValidateRoleDefinitionSpec(t *testing.T) {
 				},
 			},
 			wantErr: "aggregateFrom is mutually exclusive",
+		},
+		{
+			name: "reject aggregateFrom with metrics access",
+			rd: &RoleDefinition{
+				Spec: RoleDefinitionSpec{
+					TargetRole: DefinitionClusterRole,
+					TargetName: "test-role",
+					AggregateFrom: &rbacv1.AggregationRule{
+						ClusterRoleSelectors: []metav1.LabelSelector{
+							{MatchLabels: safeAggregateFromSelectorLabels()},
+						},
+					},
+					MetricsAccessAllowed: true,
+				},
+			},
+			wantErr: "aggregateFrom is mutually exclusive with metricsAccessAllowed",
 		},
 		{
 			name: "reject aggregateFrom with empty selectors",
