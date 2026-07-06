@@ -92,11 +92,7 @@ jobs:
             esac
           done < <(grep -Ev '^(#|$)' main-branch/versions.env)
 
-          if [ -z "$yq_version" ] && [ -z "$yq_linux_amd64_sha256" ]; then
-            yq_version="v4.53.3"
-            yq_linux_amd64_sha256="fa52a4e758c63d38299163fbdd1edfb4c4963247918bf9c1c5d31d84789eded4"
-            echo "::notice::main versions.env does not define yq; using pinned bootstrap ${yq_version}"
-          elif [ -z "$yq_version" ] || [ -z "$yq_linux_amd64_sha256" ]; then
+          if [ -z "$yq_version" ] || [ -z "$yq_linux_amd64_sha256" ]; then
             echo "main versions.env must define both YQ_VERSION and YQ_LINUX_AMD64_SHA256" >&2
             exit 1
           fi
@@ -523,11 +519,7 @@ jobs:
             esac
           done < <(grep -Ev '^(#|$)' main-branch/versions.env)
 
-          if [ -z "$yq_version" ] && [ -z "$yq_linux_amd64_sha256" ]; then
-            yq_version="v4.53.3"
-            yq_linux_amd64_sha256="fa52a4e758c63d38299163fbdd1edfb4c4963247918bf9c1c5d31d84789eded4"
-            echo "::notice::main versions.env does not define yq; using pinned bootstrap ${yq_version}"
-          elif [ -z "$yq_version" ] || [ -z "$yq_linux_amd64_sha256" ]; then
+          if [ -z "$yq_version" ] || [ -z "$yq_linux_amd64_sha256" ]; then
             echo "main versions.env must define both YQ_VERSION and YQ_LINUX_AMD64_SHA256" >&2
             exit 1
           fi
