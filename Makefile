@@ -303,8 +303,16 @@ test-e2e-collect-artifacts: ## Collect e2e test artifacts (logs, resources).
 			kubectl logs -n "$$ns" -l app.kubernetes.io/component=webhook --tail=1000 > "test/e2e/output/$${ns}-webhook-logs.txt" 2>&1 || true; \
 		fi; \
 	done
-	@echo "Collecting CRDs..."
-	kubectl get roledefinitions,binddefinitions,webhookauthorizers -A -o yaml > test/e2e/output/crds.yaml 2>&1 || true
+	@echo "Collecting RBAC custom resources..."
+	@: > test/e2e/output/crds.yaml
+	@for resource in roledefinitions binddefinitions webhookauthorizers rbacpolicies restrictedroledefinitions restrictedbinddefinitions; do \
+		{ \
+			printf '%s\n' "---"; \
+			printf '%s\n' "# $$resource custom resources"; \
+			kubectl get "$$resource" -A -o yaml 2>&1 || true; \
+			printf '\n'; \
+		} >> test/e2e/output/crds.yaml; \
+	done
 	@echo "Artifacts collected in test/e2e/output/"
 
 ##@ Linting
