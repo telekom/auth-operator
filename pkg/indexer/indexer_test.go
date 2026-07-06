@@ -41,6 +41,10 @@ func TestIndexerConstants(t *testing.T) {
 		t.Errorf("RestrictedBindDefinitionServiceAccountSubjectNamespaceField = %q, want %q",
 			RestrictedBindDefinitionServiceAccountSubjectNamespaceField, ".spec.subjects.serviceAccountNamespace")
 	}
+	if RBACPolicyHasDefaultAssignmentField != ".spec.hasDefaultAssignment" {
+		t.Errorf("RBACPolicyHasDefaultAssignmentField = %q, want %q",
+			RBACPolicyHasDefaultAssignmentField, ".spec.hasDefaultAssignment")
+	}
 }
 
 // indexExtractorTest represents a test case for index extractor functions
@@ -560,6 +564,89 @@ func TestBindDefinitionHasRoleBindingsFunc(t *testing.T) {
 	}
 
 	runIndexExtractorTests(t, tests)
+}
+
+func TestRBACPolicyHasDefaultAssignmentFunc(t *testing.T) {
+	tests := []indexExtractorTest{
+		{
+			name: "policy with defaultAssignment returns true",
+			object: &authorizationv1alpha1.RBACPolicy{
+				ObjectMeta: metav1.ObjectMeta{Name: "policy-with-default"},
+				Spec: authorizationv1alpha1.RBACPolicySpec{
+					DefaultAssignment: &authorizationv1alpha1.DefaultPolicyAssignment{
+						Groups: []string{"oidc:team-a"},
+					},
+				},
+			},
+			indexFunc:  RBACPolicyHasDefaultAssignmentFunc,
+			wantValues: []string{"true"},
+		},
+		{
+			name: "policy without defaultAssignment returns false",
+			object: &authorizationv1alpha1.RBACPolicy{
+				ObjectMeta: metav1.ObjectMeta{Name: "policy-without-default"},
+			},
+			indexFunc:  RBACPolicyHasDefaultAssignmentFunc,
+			wantValues: []string{"false"},
+		},
+		{
+			name:       "wrong object type returns nil",
+			object:     &authorizationv1alpha1.RoleDefinition{ObjectMeta: metav1.ObjectMeta{Name: "rd"}},
+			indexFunc:  RBACPolicyHasDefaultAssignmentFunc,
+			wantValues: nil,
+		},
+	}
+
+	runIndexExtractorTests(t, tests)
+}
+
+func TestRBACPolicyHasDefaultAssignmentIndexWithFakeClient(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := authorizationv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add scheme: %v", err)
+	}
+
+	withDefault := &authorizationv1alpha1.RBACPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "with-default"},
+		Spec: authorizationv1alpha1.RBACPolicySpec{
+			DefaultAssignment: &authorizationv1alpha1.DefaultPolicyAssignment{
+				Groups: []string{"oidc:team-a"},
+			},
+		},
+	}
+	withoutDefault := &authorizationv1alpha1.RBACPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "without-default"},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(withDefault, withoutDefault).
+		WithIndex(
+			&authorizationv1alpha1.RBACPolicy{},
+			RBACPolicyHasDefaultAssignmentField,
+			RBACPolicyHasDefaultAssignmentFunc,
+		).
+		Build()
+
+	var withDefaultList authorizationv1alpha1.RBACPolicyList
+	if err := fakeClient.List(context.Background(), &withDefaultList, client.MatchingFields{
+		RBACPolicyHasDefaultAssignmentField: "true",
+	}); err != nil {
+		t.Fatalf("failed to list RBACPolicies with defaultAssignment: %v", err)
+	}
+	if len(withDefaultList.Items) != 1 || withDefaultList.Items[0].Name != "with-default" {
+		t.Fatalf("expected only with-default, got %#v", withDefaultList.Items)
+	}
+
+	var withoutDefaultList authorizationv1alpha1.RBACPolicyList
+	if err := fakeClient.List(context.Background(), &withoutDefaultList, client.MatchingFields{
+		RBACPolicyHasDefaultAssignmentField: "false",
+	}); err != nil {
+		t.Fatalf("failed to list RBACPolicies without defaultAssignment: %v", err)
+	}
+	if len(withoutDefaultList.Items) != 1 || withoutDefaultList.Items[0].Name != "without-default" {
+		t.Fatalf("expected only without-default, got %#v", withoutDefaultList.Items)
+	}
 }
 
 func TestRestrictedBindDefinitionPolicyRefFunc(t *testing.T) {
