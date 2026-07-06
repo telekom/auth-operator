@@ -119,6 +119,13 @@ type RoleDefinitionSpec struct {
 	// +kubebuilder:default=false
 	BreakglassAllowed bool `json:"breakglassAllowed,omitempty"`
 
+	// MetricsAccessAllowed adds get access to the /metrics non-resource URL
+	// on generated ClusterRoles. Only applicable when TargetRole is ClusterRole
+	// and get is not restricted by RestrictedVerbs. Defaults to false.
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:default=false
+	MetricsAccessAllowed bool `json:"metricsAccessAllowed,omitempty"`
+
 	// AggregationLabels are additional labels applied to the generated ClusterRole.
 	// Kubernetes RBAC aggregation labels such as rbac.authorization.k8s.io/aggregate-to-view
 	// are rejected because generated roles must not feed built-in or externally managed

@@ -38,6 +38,22 @@ var _ = Describe("RoleDefinition Webhook", func() {
 			Expect(k8sClient.Delete(ctx, rd)).To(Succeed())
 		})
 
+		It("Should admit metrics access on a ClusterRole RoleDefinition", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-valid-metrics-clusterrole",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:           DefinitionClusterRole,
+					TargetName:           "test-valid-metrics-clusterrole",
+					ScopeNamespaced:      false,
+					MetricsAccessAllowed: true,
+				},
+			}
+			Expect(k8sClient.Create(ctx, rd)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, rd)).To(Succeed())
+		})
+
 		It("Should admit a valid namespaced Role RoleDefinition", func() {
 			rd := &RoleDefinition{
 				ObjectMeta: metav1.ObjectMeta{
@@ -54,6 +70,24 @@ var _ = Describe("RoleDefinition Webhook", func() {
 
 			// Cleanup
 			Expect(k8sClient.Delete(ctx, rd)).To(Succeed())
+		})
+
+		It("Should deny metrics access on a namespaced Role", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-metrics-role",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole:           DefinitionNamespacedRole,
+					TargetName:           "test-metrics-role",
+					TargetNamespace:      "default",
+					ScopeNamespaced:      true,
+					MetricsAccessAllowed: true,
+				},
+			}
+			err := k8sClient.Create(ctx, rd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("metricsAccessAllowed may only be set when targetRole is 'ClusterRole'"))
 		})
 
 		It("Should deny when targetRole is Role but targetNamespace is empty", func() {
@@ -300,6 +334,27 @@ var _ = Describe("RoleDefinition Webhook", func() {
 			err := k8sClient.Create(ctx, rd)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("aggregateFrom is mutually exclusive"))
+		})
+
+		It("Should deny aggregateFrom with metrics access", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-agg-metrics-access",
+				},
+				Spec: RoleDefinitionSpec{
+					TargetRole: DefinitionClusterRole,
+					TargetName: "test-agg-metrics-access",
+					AggregateFrom: &rbacv1.AggregationRule{
+						ClusterRoleSelectors: []metav1.LabelSelector{
+							{MatchLabels: safeAggregateFromSelectorLabels()},
+						},
+					},
+					MetricsAccessAllowed: true,
+				},
+			}
+			err := k8sClient.Create(ctx, rd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("aggregateFrom is mutually exclusive with metricsAccessAllowed"))
 		})
 
 		It("Should deny aggregateFrom with empty selectors", func() {

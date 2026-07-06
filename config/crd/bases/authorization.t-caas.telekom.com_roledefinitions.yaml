@@ -152,6 +152,13 @@ spec:
                   or "false" based on this field's value.
                   Only applicable when TargetRole is ClusterRole. Defaults to false.
                 type: boolean
+              metricsAccessAllowed:
+                default: false
+                description: |-
+                  MetricsAccessAllowed adds get access to the /metrics non-resource URL
+                  on generated ClusterRoles. Only applicable when TargetRole is ClusterRole
+                  and get is not restricted by RestrictedVerbs. Defaults to false.
+                type: boolean
               restrictedApis:
                 description: |-
                   RestrictedAPIs defines API group-level restrictions for the generated role.

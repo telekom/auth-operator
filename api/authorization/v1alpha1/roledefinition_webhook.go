@@ -295,6 +295,12 @@ func validateRoleDefinitionSpec(obj *RoleDefinition) error {
 		return apierrors.NewBadRequest("breakglassAllowed may only be set when targetRole is 'ClusterRole'")
 	}
 
+	// metricsAccessAllowed adds a non-resource URL rule, which is only valid
+	// on ClusterRoles.
+	if obj.Spec.MetricsAccessAllowed && obj.Spec.TargetRole == DefinitionNamespacedRole {
+		return apierrors.NewBadRequest("metricsAccessAllowed may only be set when targetRole is 'ClusterRole'")
+	}
+
 	// Validate version format in RestrictedAPIs.
 	if err := validateRestrictedAPIsVersions(obj); err != nil {
 		return apierrors.NewBadRequest(err.Error())
@@ -424,6 +430,9 @@ func ValidateRoleDefinitionAggregateFrom(obj *RoleDefinition) error {
 		return apierrors.NewBadRequest(
 			"aggregateFrom is mutually exclusive with restrictedApis, restrictedResources, and restrictedVerbs",
 		)
+	}
+	if obj.Spec.MetricsAccessAllowed {
+		return apierrors.NewBadRequest("aggregateFrom is mutually exclusive with metricsAccessAllowed")
 	}
 	if len(obj.Spec.AggregateFrom.ClusterRoleSelectors) == 0 {
 		return apierrors.NewBadRequest("aggregateFrom must have at least one clusterRoleSelector")

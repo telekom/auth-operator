@@ -65,6 +65,10 @@ type RoleDefinitionSpecApplyConfiguration struct {
 	// or "false" based on this field's value.
 	// Only applicable when TargetRole is ClusterRole. Defaults to false.
 	BreakglassAllowed *bool `json:"breakglassAllowed,omitempty"`
+	// MetricsAccessAllowed adds get access to the /metrics non-resource URL
+	// on generated ClusterRoles. Only applicable when TargetRole is ClusterRole
+	// and get is not restricted by RestrictedVerbs. Defaults to false.
+	MetricsAccessAllowed *bool `json:"metricsAccessAllowed,omitempty"`
 	// AggregationLabels are additional labels applied to the generated ClusterRole.
 	// Kubernetes RBAC aggregation labels such as rbac.authorization.k8s.io/aggregate-to-view
 	// are rejected because generated roles must not feed built-in or externally managed
@@ -157,6 +161,14 @@ func (b *RoleDefinitionSpecApplyConfiguration) WithRestrictedVerbs(values ...str
 // If called multiple times, the BreakglassAllowed field is set to the value of the last call.
 func (b *RoleDefinitionSpecApplyConfiguration) WithBreakglassAllowed(value bool) *RoleDefinitionSpecApplyConfiguration {
 	b.BreakglassAllowed = &value
+	return b
+}
+
+// WithMetricsAccessAllowed sets the MetricsAccessAllowed field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the MetricsAccessAllowed field is set to the value of the last call.
+func (b *RoleDefinitionSpecApplyConfiguration) WithMetricsAccessAllowed(value bool) *RoleDefinitionSpecApplyConfiguration {
+	b.MetricsAccessAllowed = &value
 	return b
 }
 

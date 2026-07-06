@@ -16,6 +16,7 @@
 # - Resource restrictions (pods, secrets, networkpolicies)
 # - Verb restrictions (create, update, delete, patch)
 # - Namespaced vs cluster-scoped resources
+# - Optional /metrics access for ClusterRole personas
 # =============================================================================
 
 ---
@@ -36,6 +37,7 @@ spec:
   targetRole: ClusterRole
   targetName: t-caas-platform-admin-reader
   scopeNamespaced: false
+  metricsAccessAllowed: true
   # Restrict backup solution APIs - admins should not access backup data directly
   restrictedApis:
     - name: velero.io
@@ -102,6 +104,7 @@ spec:
   targetRole: ClusterRole
   targetName: t-caas-tenant-operator
   scopeNamespaced: false
+  metricsAccessAllowed: true
   restrictedApis:
     # Block all backup APIs
     - name: velero.io
@@ -276,6 +279,7 @@ spec:
   targetRole: ClusterRole
   targetName: t-caas-security-auditor
   scopeNamespaced: false
+  metricsAccessAllowed: true
   restrictedApis:
     # Block backup access
     - name: velero.io
@@ -332,6 +336,7 @@ spec:
   targetRole: ClusterRole
   targetName: t-caas-full-access-admin
   scopeNamespaced: false
+  metricsAccessAllowed: true
   # Empty restrictions = full access to all discovered APIs
   restrictedApis: []
   restrictedResources: []
@@ -449,6 +454,7 @@ spec:
   targetRole: ClusterRole
   targetName: t-caas-minimal-viewer
   scopeNamespaced: false
+  metricsAccessAllowed: true
   # No API restrictions
   restrictedApis: []
   # No resource restrictions
@@ -482,6 +488,7 @@ spec:
   targetRole: ClusterRole
   targetName: t-caas-poweruser-self-contained
   scopeNamespaced: false
+  metricsAccessAllowed: true
   restrictedApis:
     # Fully block backup APIs - no access at all
     - name: velero.io
@@ -536,6 +543,7 @@ spec:
   targetName: t-caas-breakglass-aggregate-view
   scopeNamespaced: false
   breakglassAllowed: true
+  metricsAccessAllowed: true
   aggregationLabels:
     custom.example.com/aggregate-to-monitoring: "true"
   restrictedApis: []

@@ -279,6 +279,11 @@ jobs:
 
           make install
           make deploy IMG=auth-operator:main
+          # Baselines intentionally use the PR sample corpus. Install the PR CRD
+          # schemas as data so samples that exercise newly added API fields can
+          # still apply while controller behavior remains from trusted main.
+          kubectl apply --server-side --force-conflicts -f "$workspace/sample-branch/config/crd/bases"
+          kubectl wait --for=condition=Established crd --all --timeout=60s
           bash ../main-branch/hack/ci/apply-sample-impersonation-rbac.sh
 
           kubectl rollout status deployment/auth-operator-controller-manager -n auth-operator-system --timeout=180s
@@ -386,6 +391,10 @@ jobs:
 
           make install 2>/dev/null || true
           make deploy IMG=auth-operator:tag
+          # Use the PR CRD schemas with the PR sample corpus for the same reason
+          # as the trusted main baseline above.
+          kubectl apply --server-side --force-conflicts -f "$workspace/sample-branch/config/crd/bases"
+          kubectl wait --for=condition=Established crd --all --timeout=60s
           bash ../main-branch/hack/ci/apply-sample-impersonation-rbac.sh
 
           kubectl rollout status deployment/auth-operator-controller-manager -n auth-operator-system --timeout=180s 2>/dev/null || true

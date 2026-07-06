@@ -432,7 +432,7 @@ func (r *RoleDefinitionReconciler) discoverAndFilterResources(
 	}
 
 	// Build sorted final rules
-	finalRules := r.buildFinalRules(rulesByAPIGroupAndVerbs)
+	finalRules := r.buildFinalRules(roleDefinition, rulesByAPIGroupAndVerbs)
 
 	// Mark discovery and filtering conditions as complete
 	conditions.MarkTrue(roleDefinition, authorizationv1alpha1.APIFilteredCondition, roleDefinition.Generation,
