@@ -95,6 +95,7 @@ Image reference precedence: `digest` > `tag` > `Chart.AppVersion`
 | `webhookServer.capiOperatorUpdateBypass` | Allow capi-operator-manager to skip BindDefinition authorization for Namespace UPDATE requests; protected-label validation still runs | `"false"` |
 | `webhookServer.authorizeRateLimit` | Max sustained requests/sec for /authorize endpoint (per pod, 0 to disable; requires caller auth when >0) | `0` |
 | `webhookServer.authorizeRateBurst` | Max burst size for /authorize rate limiter | `200` |
+| `webhookServer.allowUnauthenticatedAuthorize` | Explicit insecure opt-out for unauthenticated /authorize callers when no token Secret is configured | `false` |
 | `webhookServer.authorizeAuth.tokenSecretName` | Existing Secret with bearer token for /authorize caller authentication | `""` |
 | `webhookServer.authorizeAuth.tokenSecretKey` | Secret key containing the /authorize bearer token | `token` |
 | `webhookServer.resources.limits.cpu` | CPU limit | `150m` |
@@ -110,6 +111,12 @@ Image reference precedence: `digest` > `tag` > `Chart.AppVersion`
 | `webhookServer.service.port` | Service port | `443` |
 | `webhookServer.podDisruptionBudget.enabled` | Enable PDB | `true` |
 | `webhookServer.podDisruptionBudget.minAvailable` | Minimum available pods | `1` |
+
+By default, `/authorize` rejects callers unless
+`webhookServer.authorizeAuth.tokenSecretName` is configured. Existing local or
+development installs that intentionally need unauthenticated callers can set
+`webhookServer.allowUnauthenticatedAuthorize=true` while migrating clients to a
+shared bearer token. Keep this opt-out disabled in production.
 
 ### Namespace Admission
 

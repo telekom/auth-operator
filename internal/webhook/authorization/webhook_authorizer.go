@@ -96,6 +96,10 @@ type Authorizer struct {
 	// file for each request so projected Secret rotations take effect without
 	// restarting the webhook pod.
 	BearerTokenFile string
+	// AllowUnauthenticatedAuthorize allows /authorize requests when no bearer
+	// token is configured. This is insecure and intended only for explicit
+	// development or migration opt-outs.
+	AllowUnauthenticatedAuthorize bool
 	// Limiter is used as a per-subject limiter template. Each SAR subject gets
 	// an independent token bucket with this limit and burst, preventing one
 	// identity from consuming another identity's authorization budget.
@@ -937,7 +941,13 @@ func (wa *Authorizer) authenticateRequest(w http.ResponseWriter, r *http.Request
 		return false
 	}
 	if expectedToken == "" {
-		return true
+		if wa.AllowUnauthenticatedAuthorize {
+			wa.Log.V(1).Info("allowing unauthenticated SubjectAccessReview request")
+			return true
+		}
+		wa.Log.V(1).Info("rejecting unauthenticated SubjectAccessReview request because no bearer token is configured")
+		wa.writeDeniedResponse(w, reasonUnauthorized)
+		return false
 	}
 	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !ok || token == "" || !constantTimeTokenEqual(token, expectedToken) {

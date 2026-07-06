@@ -119,9 +119,15 @@ webhookServer:
   # Maximum burst size for the /authorize rate limiter.
   # Must be >= 1 when rate limiting is enabled.
   authorizeRateBurst: 200
+  # Explicit insecure opt-out for installations that intentionally allow
+  # /authorize callers without bearer-token authentication. Keep false in
+  # production; when false and no authorizeAuth.tokenSecretName is set,
+  # /authorize requests are denied before their body is decoded.
+  allowUnauthenticatedAuthorize: false
   authorizeAuth:
     # Optional existing Secret containing the bearer token required for
-    # /authorize requests. Keep empty to leave caller authentication disabled.
+    # /authorize requests. Keep empty only with allowUnauthenticatedAuthorize
+    # set to true for local development or temporary migration.
     # When authorizeRateLimit is > 0, this Secret must be configured and the
     # API server authorization webhook kubeconfig must use the same token.
     tokenSecretName: ""

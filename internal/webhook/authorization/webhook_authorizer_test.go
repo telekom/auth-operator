@@ -172,8 +172,9 @@ func TestServeHTTP_EvaluatesMatchingAuthorizersByName(t *testing.T) {
 				objs = append(objs, &tt.authorizer[i])
 			}
 			handler := &Authorizer{
-				Client: newIndexedClient(scheme, objs...),
-				Log:    logr.Discard(),
+				AllowUnauthenticatedAuthorize: true,
+				Client:                        newIndexedClient(scheme, objs...),
+				Log:                           logr.Discard(),
 			}
 
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(marshalSAR(t, sar)))
@@ -214,8 +215,9 @@ func TestServeHTTP_AuthorizerRulesUseLiveClient(t *testing.T) {
 		},
 	}
 	handler := &Authorizer{
-		Client: newIndexedClient(scheme, freshDeny),
-		Log:    logr.Discard(),
+		AllowUnauthenticatedAuthorize: true,
+		Client:                        newIndexedClient(scheme, freshDeny),
+		Log:                           logr.Discard(),
 	}
 	sar := authzv1.SubjectAccessReview{
 		Spec: authzv1.SubjectAccessReviewSpec{
@@ -267,8 +269,9 @@ func TestServeHTTP_ScopedAuthorizerDeniesClusterScopedResourceSAR(t *testing.T) 
 		},
 	}
 	handler := &Authorizer{
-		Client: newIndexedClient(scheme, scopedDeny),
-		Log:    logr.Discard(),
+		AllowUnauthenticatedAuthorize: true,
+		Client:                        newIndexedClient(scheme, scopedDeny),
+		Log:                           logr.Discard(),
 	}
 	sar := authzv1.SubjectAccessReview{
 		Spec: authzv1.SubjectAccessReviewSpec{
@@ -320,7 +323,8 @@ func TestAuditLog_DenyDecisionAtV0(t *testing.T) {
 		},
 	}
 	cl := newIndexedClient(scheme, &wa)
-	handler := &Authorizer{Client: cl, Log: logger}
+	handler := &Authorizer{
+		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logger}
 
 	sar := authzv1.SubjectAccessReview{
 		Spec: authzv1.SubjectAccessReviewSpec{
@@ -383,7 +387,8 @@ func TestAuditLog_AllowDecisionAtV1(t *testing.T) {
 	}
 	body := marshalSAR(t, sar)
 
-	handler0 := &Authorizer{Client: cl, Log: logger0}
+	handler0 := &Authorizer{
+		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logger0}
 	req0 := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
 	rec0 := httptest.NewRecorder()
 	handler0.ServeHTTP(rec0, req0)
@@ -399,7 +404,8 @@ func TestAuditLog_AllowDecisionAtV1(t *testing.T) {
 	// With verbosity=1 the allow decision SHOULD appear.
 	var buf1 strings.Builder
 	logger1 := capturingLogger(&buf1, 1)
-	handler1 := &Authorizer{Client: cl, Log: logger1}
+	handler1 := &Authorizer{
+		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logger1}
 	body = marshalSAR(t, sar)
 	req1 := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
 	rec1 := httptest.NewRecorder()
@@ -432,7 +438,8 @@ func TestAuditLog_NoOpinionDecisionAtV1(t *testing.T) {
 	// reduce noise at V(0).
 	var buf0 strings.Builder
 	logger0 := capturingLogger(&buf0, 0)
-	handler0 := &Authorizer{Client: cl, Log: logger0}
+	handler0 := &Authorizer{
+		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logger0}
 
 	sar := authzv1.SubjectAccessReview{
 		Spec: authzv1.SubjectAccessReviewSpec{
@@ -456,7 +463,8 @@ func TestAuditLog_NoOpinionDecisionAtV1(t *testing.T) {
 	// At V(1) no-opinion should appear.
 	var buf1 strings.Builder
 	logger1 := capturingLogger(&buf1, 1)
-	handler1 := &Authorizer{Client: cl, Log: logger1}
+	handler1 := &Authorizer{
+		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logger1}
 	body = marshalSAR(t, sar)
 	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
 	rec = httptest.NewRecorder()
@@ -488,7 +496,8 @@ func TestAuditLog_V2TraceLogs(t *testing.T) {
 		},
 	}
 	cl := newIndexedClient(scheme, &wa)
-	handler := &Authorizer{Client: cl, Log: logger}
+	handler := &Authorizer{
+		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logger}
 
 	sar := authzv1.SubjectAccessReview{
 		Spec: authzv1.SubjectAccessReviewSpec{
@@ -520,7 +529,8 @@ func TestAuditLog_DecodeError(t *testing.T) {
 	scheme := newScheme(t)
 
 	cl := newIndexedClient(scheme)
-	handler := &Authorizer{Client: cl, Log: logger}
+	handler := &Authorizer{
+		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logger}
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader([]byte("not-json")))
 	rec := httptest.NewRecorder()
@@ -552,7 +562,8 @@ func TestAuditLog_NonResourceAttributes(t *testing.T) {
 		},
 	}
 	cl := newIndexedClient(scheme, &wa)
-	handler := &Authorizer{Client: cl, Log: logger}
+	handler := &Authorizer{
+		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logger}
 
 	sar := authzv1.SubjectAccessReview{
 		Spec: authzv1.SubjectAccessReviewSpec{
@@ -584,7 +595,8 @@ func TestAuditLog_NonResourceAttributes(t *testing.T) {
 func TestEvaluateSAR_ResultFields(t *testing.T) {
 	scheme := newScheme(t)
 	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
-	handler := &Authorizer{Client: cl, Log: logr.Discard()}
+	handler := &Authorizer{
+		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logr.Discard()}
 
 	wa := authzv1alpha1.WebhookAuthorizer{
 		ObjectMeta: metav1.ObjectMeta{Name: "eval-wa"},
@@ -716,7 +728,8 @@ func TestEvaluateSAR_NamespaceGetError(t *testing.T) {
 
 	// The fake client does NOT have the namespace "missing-ns" — Get will return NotFound.
 	cl := newIndexedClient(s, wa)
-	handler := &Authorizer{Client: cl, Log: logr.Discard()}
+	handler := &Authorizer{
+		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logr.Discard()}
 
 	sar := &authzv1.SubjectAccessReview{
 		Spec: authzv1.SubjectAccessReviewSpec{
@@ -761,7 +774,8 @@ func TestServeHTTP_NamespaceGetError_ReturnsDeniedSAR(t *testing.T) {
 	// Use an indexed client (matching real manager setup) with the WA but without
 	// the "missing-ns" Namespace object — Get will return NotFound.
 	cl := newIndexedClient(s, wa)
-	handler := &Authorizer{Client: cl, Log: logr.Discard()}
+	handler := &Authorizer{
+		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logr.Discard()}
 
 	sar := authzv1.SubjectAccessReview{
 		Spec: authzv1.SubjectAccessReviewSpec{
@@ -800,7 +814,8 @@ func TestServeHTTP_OversizedBody(t *testing.T) {
 	scheme := newScheme(t)
 
 	cl := newIndexedClient(scheme)
-	handler := &Authorizer{Client: cl, Log: logger}
+	handler := &Authorizer{
+		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logger}
 
 	// Create a body larger than 1MB
 	oversizedBody := make([]byte, 1<<20+1)
@@ -837,7 +852,8 @@ func TestServeHTTP_InvalidJSON(t *testing.T) {
 	scheme := newScheme(t)
 
 	cl := newIndexedClient(scheme)
-	handler := &Authorizer{Client: cl, Log: logger}
+	handler := &Authorizer{
+		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logger}
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", strings.NewReader("{invalid json"))
 	rec := httptest.NewRecorder()
@@ -900,7 +916,8 @@ func TestAuditLog_StructuredFieldsComprehensive(t *testing.T) {
 
 	var buf strings.Builder
 	logger := capturingLogger(&buf, 0)
-	handler := &Authorizer{Client: cl, Log: logger}
+	handler := &Authorizer{
+		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logger}
 
 	body := marshalSAR(t, sar)
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
@@ -987,7 +1004,8 @@ func TestMetrics_RecordedAfterServeHTTP(t *testing.T) {
 	pkgmetrics.AuthorizerActiveRules.Set(0)
 
 	// --- Deny decision ---
-	handler := &Authorizer{Client: cl, Log: logr.Discard()}
+	handler := &Authorizer{
+		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logr.Discard()}
 	denySAR := authzv1.SubjectAccessReview{
 		Spec: authzv1.SubjectAccessReviewSpec{
 			User:               "blocked",
@@ -1143,8 +1161,9 @@ func TestMetrics_ActiveRulesCountsMixedGlobalAndScopedAuthorizers(t *testing.T) 
 		},
 	}
 	handler := &Authorizer{
-		Client: newIndexedClient(scheme, ns, &global, &scoped),
-		Log:    logr.Discard(),
+		AllowUnauthenticatedAuthorize: true,
+		Client:                        newIndexedClient(scheme, ns, &global, &scoped),
+		Log:                           logr.Discard(),
 	}
 
 	pkgmetrics.AuthorizerActiveRules.Set(0)
@@ -1212,9 +1231,10 @@ func TestServeHTTP_RateLimiting(t *testing.T) {
 
 	// Limiter with burst=1: first request allowed, second rejected.
 	handler := &Authorizer{
-		Client:  cl,
-		Log:     logger,
-		Limiter: rate.NewLimiter(rate.Limit(0), 1), // 0 rps, burst 1
+		AllowUnauthenticatedAuthorize: true,
+		Client:                        cl,
+		Log:                           logger,
+		Limiter:                       rate.NewLimiter(rate.Limit(0), 1), // 0 rps, burst 1
 	}
 
 	sar := authzv1.SubjectAccessReview{
@@ -1284,10 +1304,11 @@ func TestServeHTTP_BearerTokenRequiredBeforeRateLimit(t *testing.T) {
 	scheme := newScheme(t)
 	cl := newIndexedClient(scheme)
 	handler := &Authorizer{
-		Client:      cl,
-		Log:         logr.Discard(),
-		BearerToken: "shared-token",
-		Limiter:     rate.NewLimiter(rate.Limit(0), 1),
+		AllowUnauthenticatedAuthorize: true,
+		Client:                        cl,
+		Log:                           logr.Discard(),
+		BearerToken:                   "shared-token",
+		Limiter:                       rate.NewLimiter(rate.Limit(0), 1),
 	}
 
 	sar := authzv1.SubjectAccessReview{
@@ -1361,6 +1382,64 @@ func TestServeHTTP_BearerTokenRequiredBeforeRateLimit(t *testing.T) {
 	}
 }
 
+func TestAuthenticateRequest_DeniesEmptyExpectedTokenByDefault(t *testing.T) {
+	handler := &Authorizer{
+		Log: logr.Discard(),
+	}
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", nil)
+	rec := httptest.NewRecorder()
+	if handler.authenticateRequest(rec, req) {
+		t.Fatal("request should not authenticate when no bearer token is configured")
+	}
+	assertUnauthorizedSARResponse(t, rec)
+}
+
+func TestAuthenticateRequest_AllowsEmptyExpectedTokenWithExplicitOptOut(t *testing.T) {
+	handler := &Authorizer{
+		Log:                           logr.Discard(),
+		AllowUnauthenticatedAuthorize: true,
+	}
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", nil)
+	if !handler.authenticateRequest(httptest.NewRecorder(), req) {
+		t.Fatal("request should authenticate when unauthenticated authorize is explicitly allowed")
+	}
+}
+
+func TestAuthenticateRequest_AcceptsConfiguredBearerToken(t *testing.T) {
+	handler := &Authorizer{
+		Log:         logr.Discard(),
+		BearerToken: "shared-token",
+	}
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", nil)
+	req.Header.Set("Authorization", "Bearer shared-token")
+	if !handler.authenticateRequest(httptest.NewRecorder(), req) {
+		t.Fatal("request should authenticate with the configured bearer token")
+	}
+}
+
+func assertUnauthorizedSARResponse(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected denied SAR response to return %d, got %d", http.StatusOK, rec.Code)
+	}
+	var response authzv1.SubjectAccessReview
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode denied response: %v", err)
+	}
+	if response.Status.Allowed {
+		t.Fatal("response should have Allowed=false")
+	}
+	if !response.Status.Denied {
+		t.Fatal("response should have Denied=true")
+	}
+	if response.Status.Reason != reasonUnauthorized {
+		t.Fatalf("expected reason %q, got %q", reasonUnauthorized, response.Status.Reason)
+	}
+}
+
 func TestAuthenticateRequest_ReloadsBearerTokenFile(t *testing.T) {
 	tokenFile := t.TempDir() + "/authorize-token"
 	if err := os.WriteFile(tokenFile, []byte("old-token\n"), 0o600); err != nil {
@@ -1368,8 +1447,9 @@ func TestAuthenticateRequest_ReloadsBearerTokenFile(t *testing.T) {
 	}
 
 	handler := &Authorizer{
-		Log:             logr.Discard(),
-		BearerTokenFile: tokenFile,
+		AllowUnauthenticatedAuthorize: true,
+		Log:                           logr.Discard(),
+		BearerTokenFile:               tokenFile,
 	}
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", nil)
@@ -1430,8 +1510,9 @@ func TestAuthenticateRequest_DeniesWhenBearerTokenFileUnavailable(t *testing.T) 
 		t.Run(tc.name, func(t *testing.T) {
 			tokenFile := tc.setup(t)
 			handler := &Authorizer{
-				Log:             logr.Discard(),
-				BearerTokenFile: tokenFile,
+				AllowUnauthenticatedAuthorize: true,
+				Log:                           logr.Discard(),
+				BearerTokenFile:               tokenFile,
 			}
 
 			if _, err := handler.expectedBearerToken(); err == nil {
@@ -1470,9 +1551,10 @@ func TestServeHTTP_RateLimitingIsPerSubject(t *testing.T) {
 	scheme := newScheme(t)
 	cl := newIndexedClient(scheme)
 	handler := &Authorizer{
-		Client:  cl,
-		Log:     logr.Discard(),
-		Limiter: rate.NewLimiter(rate.Limit(0), 1),
+		AllowUnauthenticatedAuthorize: true,
+		Client:                        cl,
+		Log:                           logr.Discard(),
+		Limiter:                       rate.NewLimiter(rate.Limit(0), 1),
 	}
 
 	sarFor := func(user string, groups ...string) []byte {
@@ -1522,10 +1604,11 @@ func TestServeHTTP_RateLimitingIsPerSubject(t *testing.T) {
 
 func TestSubjectLimiterCacheIsBounded(t *testing.T) {
 	handler := &Authorizer{
-		Log:                     logr.Discard(),
-		Limiter:                 rate.NewLimiter(rate.Limit(1), 1),
-		subjectLimiters:         make(map[string]*subjectLimiterEntry, maxSubjectLimiters),
-		subjectLimiterCleanupAt: time.Now().Add(time.Hour),
+		AllowUnauthenticatedAuthorize: true,
+		Log:                           logr.Discard(),
+		Limiter:                       rate.NewLimiter(rate.Limit(1), 1),
+		subjectLimiters:               make(map[string]*subjectLimiterEntry, maxSubjectLimiters),
+		subjectLimiterCleanupAt:       time.Now().Add(time.Hour),
 	}
 	for i := range maxSubjectLimiters {
 		handler.subjectLimiters[rateLimitSubjectKey(&authzv1.SubjectAccessReview{Spec: authzv1.SubjectAccessReviewSpec{User: "user-" + strconv.Itoa(i)}})] = &subjectLimiterEntry{
@@ -1554,8 +1637,9 @@ func TestServeHTTP_NoRateLimiter(t *testing.T) {
 
 	// No Limiter set — rate limiting should be disabled.
 	handler := &Authorizer{
-		Client: cl,
-		Log:    logger,
+		AllowUnauthenticatedAuthorize: true,
+		Client:                        cl,
+		Log:                           logger,
 	}
 
 	sar := authzv1.SubjectAccessReview{
@@ -1589,7 +1673,8 @@ func TestServeHTTP_RejectsEmptyIdentity(t *testing.T) {
 	scheme := newScheme(t)
 	cl := newIndexedClient(scheme)
 
-	handler := &Authorizer{Client: cl, Log: logger}
+	handler := &Authorizer{
+		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logger}
 
 	sar := authzv1.SubjectAccessReview{
 		Spec: authzv1.SubjectAccessReviewSpec{
@@ -1638,7 +1723,8 @@ func TestServeHTTP_AcceptsEmptyUserWithGroups(t *testing.T) {
 	scheme := newScheme(t)
 	cl := newIndexedClient(scheme)
 
-	handler := &Authorizer{Client: cl, Log: logr.Discard()}
+	handler := &Authorizer{
+		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logr.Discard()}
 
 	sar := authzv1.SubjectAccessReview{
 		Spec: authzv1.SubjectAccessReviewSpec{
@@ -1674,7 +1760,8 @@ func TestServeHTTP_RejectsNoAttributes(t *testing.T) {
 	scheme := newScheme(t)
 	cl := newIndexedClient(scheme)
 
-	handler := &Authorizer{Client: cl, Log: logger}
+	handler := &Authorizer{
+		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logger}
 
 	sar := authzv1.SubjectAccessReview{
 		Spec: authzv1.SubjectAccessReviewSpec{
@@ -1714,7 +1801,8 @@ func TestServeHTTP_RejectsBothResourceAndNonResourceAttributes(t *testing.T) {
 	scheme := newScheme(t)
 	cl := newIndexedClient(scheme)
 
-	handler := &Authorizer{Client: cl, Log: logger}
+	handler := &Authorizer{
+		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logger}
 
 	sar := authzv1.SubjectAccessReview{
 		Spec: authzv1.SubjectAccessReviewSpec{
@@ -1754,7 +1842,8 @@ func TestServeHTTP_AcceptsNonResourceAttributes(t *testing.T) {
 	scheme := newScheme(t)
 	cl := newIndexedClient(scheme)
 
-	handler := &Authorizer{Client: cl, Log: logr.Discard()}
+	handler := &Authorizer{
+		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logr.Discard()}
 
 	sar := authzv1.SubjectAccessReview{
 		Spec: authzv1.SubjectAccessReviewSpec{
@@ -1826,7 +1915,8 @@ func TestServeHTTP_UsesSingleEvaluationDeadline(t *testing.T) {
 			},
 		}).
 		Build()
-	handler := &Authorizer{Client: cl, Log: logr.Discard()}
+	handler := &Authorizer{
+		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logr.Discard()}
 
 	sar := authzv1.SubjectAccessReview{
 		Spec: authzv1.SubjectAccessReviewSpec{
@@ -1873,7 +1963,8 @@ func TestServeHTTP_DeniedResponseSetsDeniedTrue(t *testing.T) {
 		},
 	}
 	cl := newIndexedClient(scheme, &wa)
-	handler := &Authorizer{Client: cl, Log: logr.Discard()}
+	handler := &Authorizer{
+		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logr.Discard()}
 
 	sar := authzv1.SubjectAccessReview{
 		Spec: authzv1.SubjectAccessReviewSpec{
@@ -1911,7 +2002,8 @@ func TestServeHTTP_NoOpinionResponseDoesNotSetDeniedTrue(t *testing.T) {
 	// the next authorizer.
 	scheme := newScheme(t)
 	cl := newIndexedClient(scheme) // no authorizers
-	handler := &Authorizer{Client: cl, Log: logr.Discard()}
+	handler := &Authorizer{
+		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logr.Discard()}
 
 	sar := authzv1.SubjectAccessReview{
 		Spec: authzv1.SubjectAccessReviewSpec{
@@ -1946,9 +2038,10 @@ func TestServeHTTP_RateLimitResponseSetsDeniedTrue(t *testing.T) {
 
 	// Limiter with burst=0: every request is rate-limited.
 	handler := &Authorizer{
-		Client:  cl,
-		Log:     logr.Discard(),
-		Limiter: rate.NewLimiter(rate.Limit(0), 0),
+		AllowUnauthenticatedAuthorize: true,
+		Client:                        cl,
+		Log:                           logr.Discard(),
+		Limiter:                       rate.NewLimiter(rate.Limit(0), 0),
 	}
 
 	sar := authzv1.SubjectAccessReview{
@@ -1979,7 +2072,8 @@ func TestServeHTTP_RateLimitResponseSetsDeniedTrue(t *testing.T) {
 }
 
 func TestPrincipalMatches_ServiceAccountNamespaceScope(t *testing.T) {
-	handler := &Authorizer{Log: logr.Discard()}
+	handler := &Authorizer{
+		AllowUnauthenticatedAuthorize: true, Log: logr.Discard()}
 
 	tests := []struct {
 		name       string
@@ -2052,7 +2146,8 @@ func TestPrincipalMatches_ServiceAccountNamespaceScope(t *testing.T) {
 func TestResourceRuleIndex_SubresourceMatching(t *testing.T) {
 	scheme := newScheme(t)
 	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
-	handler := &Authorizer{Client: cl, Log: logr.Discard()}
+	handler := &Authorizer{
+		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logr.Discard()}
 
 	rules := []authzv1.ResourceRule{
 		// Rule 0: allows "pods" but NOT "pods/log"
@@ -2089,7 +2184,8 @@ func TestResourceRuleIndex_SubresourceMatching(t *testing.T) {
 func TestResourceRuleIndex_ResourceNamesMatching(t *testing.T) {
 	scheme := newScheme(t)
 	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
-	handler := &Authorizer{Client: cl, Log: logr.Discard()}
+	handler := &Authorizer{
+		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logr.Discard()}
 
 	rules := []authzv1.ResourceRule{
 		// Rule 0: allows only specific-pod by name
@@ -2137,7 +2233,8 @@ func TestResourceRuleIndex_ResourceNamesMatching(t *testing.T) {
 func TestResourceRuleIndex_KubernetesWildcardSemantics(t *testing.T) {
 	scheme := newScheme(t)
 	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
-	handler := &Authorizer{Client: cl, Log: logr.Discard()}
+	handler := &Authorizer{
+		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logr.Discard()}
 
 	tests := []struct {
 		name string
@@ -2187,7 +2284,8 @@ func TestResourceRuleIndex_KubernetesWildcardSemantics(t *testing.T) {
 func TestNonResourceRuleIndex_SuffixWildcardMatching(t *testing.T) {
 	scheme := newScheme(t)
 	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
-	handler := &Authorizer{Client: cl, Log: logr.Discard()}
+	handler := &Authorizer{
+		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logr.Discard()}
 
 	rules := []authzv1.NonResourceRule{
 		{Verbs: []string{"get"}, NonResourceURLs: []string{"/api/*"}},
@@ -2281,7 +2379,8 @@ func TestEvaluateSAR_NamespaceLabelCache_SingleGetPerNamespace(t *testing.T) {
 		base := newIndexedClient(scheme, ns, &wa1, &wa2, &wa3)
 
 		counter := &namespaceGetCountingClient{Client: base}
-		handler := &Authorizer{Client: counter, Log: logr.Discard()}
+		handler := &Authorizer{
+			AllowUnauthenticatedAuthorize: true, Client: counter, Log: logr.Discard()}
 
 		sar := &authzv1.SubjectAccessReview{
 			Spec: authzv1.SubjectAccessReviewSpec{
@@ -2307,7 +2406,8 @@ func TestEvaluateSAR_NamespaceLabelCache_SingleGetPerNamespace(t *testing.T) {
 		base := newIndexedClient(scheme)
 
 		counter := &namespaceGetCountingClient{Client: base}
-		handler := &Authorizer{Client: counter, Log: logr.Discard()}
+		handler := &Authorizer{
+			AllowUnauthenticatedAuthorize: true, Client: counter, Log: logr.Discard()}
 
 		cache := make(map[string]namespaceLabelCacheEntry)
 		selector := &wa1.Spec.NamespaceSelector
@@ -2343,7 +2443,8 @@ func TestServeHTTP_NamespaceLabelCacheError_ReturnsDeniedSAR(t *testing.T) {
 		},
 	}
 	cl := newIndexedClient(scheme, wa)
-	handler := &Authorizer{Client: cl, Log: logr.Discard()}
+	handler := &Authorizer{
+		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logr.Discard()}
 
 	sar := authzv1.SubjectAccessReview{
 		Spec: authzv1.SubjectAccessReviewSpec{
@@ -2423,8 +2524,9 @@ func TestServeHTTP_SkipsUnconfiguredAuthorizers(t *testing.T) {
 	configured.Status.AuthorizerConfigured = true
 
 	handler := &Authorizer{
-		Client: newIndexedClient(scheme, ns, stalled, configured),
-		Log:    logr.Discard(),
+		AllowUnauthenticatedAuthorize: true,
+		Client:                        newIndexedClient(scheme, ns, stalled, configured),
+		Log:                           logr.Discard(),
 	}
 
 	pkgmetrics.AuthorizerActiveRules.Set(0)
