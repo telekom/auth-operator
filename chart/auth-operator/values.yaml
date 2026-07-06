@@ -95,8 +95,9 @@ controller:
   podDisruptionBudget:
     # Enable PodDisruptionBudget for high availability
     enabled: false
-    # Minimum number of pods that must be available during disruption
-    minAvailable: 1
+    # Minimum number of pods that must be available during disruption.
+    # Defaults to 1 when neither minAvailable nor maxUnavailable is set.
+    # minAvailable: 1
     # Maximum number of pods that can be unavailable during disruption
     # (mutually exclusive with minAvailable)
     # maxUnavailable: 1
@@ -135,8 +136,9 @@ webhookServer:
   podDisruptionBudget:
     # Enable PodDisruptionBudget for high availability
     enabled: true
-    # Minimum number of pods that must be available during disruption
-    minAvailable: 1
+    # Minimum number of pods that must be available during disruption.
+    # Defaults to 1 when neither minAvailable nor maxUnavailable is set.
+    # minAvailable: 1
     # Maximum number of pods that can be unavailable during disruption
     # (mutually exclusive with minAvailable)
     # maxUnavailable: 1

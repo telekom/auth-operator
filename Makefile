@@ -343,12 +343,20 @@ ci-checks: verify helm-lint ## Run all CI checks locally before pushing.
 	@echo "Checking go.mod is tidy..."
 	@go mod tidy
 	@git diff --exit-code go.mod go.sum || (echo "ERROR: go.mod/go.sum not tidy" && exit 1)
-	@echo "Checking generated code is up to date..."
-	@$(MAKE) generate manifests
-	@git diff --exit-code || (echo "ERROR: Generated code out of date" && exit 1)
+	@$(MAKE) verify-generated
 	@echo "Linting YAML files..."
 	@command -v yamllint >/dev/null 2>&1 && yamllint -c .yamllint.yml . || echo "yamllint not installed, skipping"
 	@echo "All CI checks passed!"
+
+.PHONY: verify-generated
+verify-generated: ## Verify generated manifests, Helm chart, and API docs are up to date.
+	@echo "Checking generated manifests, code, Helm chart, and docs are up to date..."
+	@git diff --cached --quiet || (echo "ERROR: Refusing to verify generated files with pre-existing staged changes." && exit 1)
+	@$(MAKE) manifests
+	@$(MAKE) generate
+	@$(MAKE) helm
+	@$(MAKE) docs
+	@git diff --exit-code || (echo "ERROR: Generated files out of date. Run 'make manifests generate helm docs' and commit changes." && exit 1)
 
 .PHONY: helm-lint
 helm-lint: ## Lint Helm chart.

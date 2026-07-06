@@ -152,6 +152,28 @@ var _ = Describe("Helm Chart E2E", Ordered, Label("helm"), func() {
 			saveOutput("helm-template-all-features.yaml", output)
 		})
 
+		It("should template PodDisruptionBudgets with maxUnavailable overrides", func() {
+			By("Running helm template with maxUnavailable PDBs")
+			templateArgs := append([]string{"template", helmReleaseName, helmChartPath,
+				"-n", helmNamespace},
+				imageSetArgs()...,
+			)
+			templateArgs = append(templateArgs,
+				"--set", "controller.replicas=2",
+				"--set", "controller.podDisruptionBudget.enabled=true",
+				"--set", "controller.podDisruptionBudget.maxUnavailable=1",
+				"--set", "webhookServer.replicas=2",
+				"--set", "webhookServer.podDisruptionBudget.enabled=true",
+				"--set", "webhookServer.podDisruptionBudget.maxUnavailable=1",
+			)
+			cmd := utils.CommandContext(context.Background(), "helm", templateArgs...) // #nosec G204
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Helm template with maxUnavailable PDBs failed: %s", string(output))
+			rendered := string(output)
+			Expect(strings.Count(rendered, "maxUnavailable: 1")).To(Equal(2))
+			Expect(rendered).NotTo(ContainSubstring("minAvailable: 1"))
+		})
+
 		It("should template metrics authentication by default and allow explicit opt-out", func() {
 			By("Rendering the default chart")
 			defaultArgs := append([]string{"template", helmReleaseName, helmChartPath,
@@ -816,7 +838,7 @@ spec:
 			Eventually(func() error {
 				return checkResourceExists("webhookauthorizer", "helm-e2e-authorizer", "")
 			}, reconcileTimeout, pollingInterval).Should(Succeed())
-			// Note: .status.authorizerConfigured is not implemented in the controller
+			waitForHelmWebhookAuthorizerConfigured("helm-e2e-authorizer")
 		})
 
 		It("should create WebhookAuthorizer with denied principals", func() {
@@ -848,7 +870,7 @@ spec:
 			Eventually(func() error {
 				return checkResourceExists("webhookauthorizer", "helm-e2e-authorizer-deny", "")
 			}, reconcileTimeout, pollingInterval).Should(Succeed())
-			// Note: .status.authorizerConfigured is not implemented in the controller
+			waitForHelmWebhookAuthorizerConfigured("helm-e2e-authorizer-deny")
 		})
 
 		It("should create WebhookAuthorizer with non-resource rules", func() {
@@ -879,7 +901,7 @@ spec:
 			Eventually(func() error {
 				return checkResourceExists("webhookauthorizer", "helm-e2e-authorizer-nonresource", "")
 			}, reconcileTimeout, pollingInterval).Should(Succeed())
-			// Note: .status.authorizerConfigured is not implemented in the controller
+			waitForHelmWebhookAuthorizerConfigured("helm-e2e-authorizer-nonresource")
 		})
 	})
 
@@ -1086,6 +1108,20 @@ func saveOutput(filename string, content []byte) {
 	} else {
 		_, _ = fmt.Fprintf(GinkgoWriter, "Saved output to %s\n", fp)
 	}
+}
+
+func waitForHelmWebhookAuthorizerConfigured(name string) {
+	By("Verifying WebhookAuthorizer reports authorizerConfigured=true")
+	Eventually(func() string {
+		cmd := utils.CommandContext(context.Background(), "kubectl", "get",
+			"webhookauthorizer", name,
+			"-o", "jsonpath={.status.authorizerConfigured}") // #nosec G204
+		output, err := utils.Run(cmd)
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(output))
+	}, reconcileTimeout, pollingInterval).Should(Equal("true"))
 }
 
 func dumpAllGeneratedResources() {
