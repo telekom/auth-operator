@@ -72,6 +72,15 @@ func (f fakeAPIResourceProvider) GetAPIResources() (discovery.APIResourcesByGrou
 	return f.resources, f.err
 }
 
+func namespaceCondition(ns *corev1.Namespace, condType authorizationv1alpha1.AuthZConditionType) *corev1.NamespaceCondition {
+	for i := range ns.Status.Conditions {
+		if string(ns.Status.Conditions[i].Type) == string(condType) {
+			return &ns.Status.Conditions[i]
+		}
+	}
+	return nil
+}
+
 func TestIsOwnedByBindDefinition(t *testing.T) {
 	t.Run("empty owner references returns false", func(t *testing.T) {
 		g := NewWithT(t)
@@ -158,52 +167,51 @@ func TestSupportsList(t *testing.T) {
 }
 
 func TestFormatBlockingResourcesMessage(t *testing.T) {
-	t.Run("single resource with name", func(t *testing.T) {
+	t.Run("single resource", func(t *testing.T) {
 		g := NewWithT(t)
 		resources := []namespaceDeletionResourceBlocking{
-			{ResourceType: "pods", APIGroup: "", Count: 1, Names: []string{"my-pod"}},
+			{ResourceType: "pods", APIGroup: "", Count: 1},
 		}
 		msg := formatBlockingResourcesMessage(resources)
-		g.Expect(msg).To(Equal("pods: my-pod"))
+		g.Expect(msg).To(Equal("pods=1"))
 	})
 
 	t.Run("resource with API group", func(t *testing.T) {
 		g := NewWithT(t)
 		resources := []namespaceDeletionResourceBlocking{
-			{ResourceType: "deployments", APIGroup: "apps", Count: 2, Names: []string{"dep1", "dep2"}},
+			{ResourceType: "deployments", APIGroup: "apps", Count: 2},
 		}
 		msg := formatBlockingResourcesMessage(resources)
-		g.Expect(msg).To(ContainSubstring("deployments (apps)"))
-		g.Expect(msg).To(ContainSubstring("dep1"))
+		g.Expect(msg).To(Equal("deployments.apps=2"))
 	})
 
 	t.Run("multiple resources combined", func(t *testing.T) {
 		g := NewWithT(t)
 		resources := []namespaceDeletionResourceBlocking{
-			{ResourceType: "pods", APIGroup: "", Count: 1, Names: []string{"pod1"}},
-			{ResourceType: "services", APIGroup: "", Count: 1, Names: []string{"svc1"}},
+			{ResourceType: "pods", APIGroup: "", Count: 1},
+			{ResourceType: "services", APIGroup: "", Count: 1},
 		}
 		msg := formatBlockingResourcesMessage(resources)
-		g.Expect(msg).To(ContainSubstring("pods: pod1"))
-		g.Expect(msg).To(ContainSubstring("services: svc1"))
+		g.Expect(msg).To(Equal("pods=1; services=1"))
 	})
 
-	t.Run("resource with many names truncated", func(t *testing.T) {
+	t.Run("resource names are omitted", func(t *testing.T) {
 		g := NewWithT(t)
 		resources := []namespaceDeletionResourceBlocking{
-			{ResourceType: "pods", APIGroup: "", Count: 5, Names: []string{"p1", "p2", "p3", "p4", "p5"}},
+			{ResourceType: "pods", APIGroup: "", Count: 5},
 		}
 		msg := formatBlockingResourcesMessage(resources)
-		g.Expect(msg).To(ContainSubstring("+2 more"))
+		g.Expect(msg).To(Equal("pods=5"))
+		g.Expect(msg).NotTo(ContainSubstring("p1"))
 	})
 
 	t.Run("resource with no names", func(t *testing.T) {
 		g := NewWithT(t)
 		resources := []namespaceDeletionResourceBlocking{
-			{ResourceType: "configmaps", APIGroup: "", Count: 3, Names: nil},
+			{ResourceType: "configmaps", APIGroup: "", Count: 3},
 		}
 		msg := formatBlockingResourcesMessage(resources)
-		g.Expect(msg).To(Equal("configmaps (3)"))
+		g.Expect(msg).To(Equal("configmaps=3"))
 	})
 }
 
@@ -488,7 +496,7 @@ func TestRBTerminatorReconcileTerminatingNamespaceWithBlockingResources(t *testi
 	// Burn the first rate limiter call so subsequent Do() won't re-execute.
 	cacheEntry := &namespaceTerminationStatus{
 		blockingResources: []namespaceDeletionResourceBlocking{
-			{ResourceType: "pods", APIGroup: "", Count: 3, Names: []string{"pod-a", "pod-b", "pod-c"}},
+			{ResourceType: "pods", APIGroup: "", Count: 3},
 		},
 		rateLimiter: rate.Sometimes{},
 	}
@@ -504,6 +512,71 @@ func TestRBTerminatorReconcileTerminatingNamespaceWithBlockingResources(t *testi
 	// Verify finalizer was NOT removed
 	updated := &rbacv1.RoleBinding{}
 	g.Expect(c.Get(ctx, types.NamespacedName{Name: "term-rb", Namespace: "terminating-ns"}, updated)).To(Succeed())
+	g.Expect(updated.Finalizers).To(ContainElement(authorizationv1alpha1.RoleBindingFinalizer))
+
+	updatedNS := &corev1.Namespace{}
+	g.Expect(c.Get(ctx, types.NamespacedName{Name: "terminating-ns"}, updatedNS)).To(Succeed())
+	condition := namespaceCondition(updatedNS, authorizationv1alpha1.NamespaceTerminationBlockedCondition)
+	g.Expect(condition).NotTo(BeNil())
+	g.Expect(condition.Message).To(ContainSubstring("pods=3"))
+	g.Expect(condition.Message).NotTo(ContainSubstring("pod-a"))
+}
+
+func TestRBTerminatorReconcileBlockedNamespaceStatusApplyError(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+	scheme := newTestScheme()
+
+	now := metav1.Now()
+	bdOwnerRef := testBindDefinitionControllerOwnerRef("test-bd", "bd-uid")
+	rb := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "term-rb-status-error",
+			Namespace:         "blocked-status-error-ns",
+			OwnerReferences:   []metav1.OwnerReference{bdOwnerRef},
+			DeletionTimestamp: &now,
+			Finalizers:        []string{authorizationv1alpha1.RoleBindingFinalizer},
+		},
+		RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "view"},
+	}
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "blocked-status-error-ns",
+			DeletionTimestamp: &now,
+			Finalizers:        []string{"kubernetes"},
+		},
+		Status: corev1.NamespaceStatus{Phase: corev1.NamespaceTerminating},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(scheme).
+		WithObjects(rb, ns, testBindDefinition()).
+		WithStatusSubresource(ns).
+		WithInterceptorFuncs(interceptor.Funcs{
+			SubResourceApply: func(_ context.Context, _ client.Client, _ string, _ runtime.ApplyConfiguration, _ ...client.SubResourceApplyOption) error {
+				return fmt.Errorf("injected namespace status apply error")
+			},
+		}).
+		Build()
+	r := &RoleBindingTerminator{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
+
+	cacheEntry := &namespaceTerminationStatus{
+		blockingResources: []namespaceDeletionResourceBlocking{
+			{ResourceType: "pods", APIGroup: "", Count: 3},
+		},
+		rateLimiter: rate.Sometimes{},
+	}
+	cacheEntry.rateLimiter.Do(func() {})
+	r.namespaceTerminationResourcesCache.Store("blocked-status-error-ns", cacheEntry)
+
+	result, err := r.Reconcile(ctx, reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: "term-rb-status-error", Namespace: "blocked-status-error-ns"},
+	})
+	g.Expect(err).To(HaveOccurred())
+	g.Expect(err.Error()).To(ContainSubstring("injected namespace status apply error"))
+	g.Expect(result).To(Equal(reconcile.Result{}))
+
+	updated := &rbacv1.RoleBinding{}
+	g.Expect(c.Get(ctx, types.NamespacedName{Name: "term-rb-status-error", Namespace: "blocked-status-error-ns"}, updated)).To(Succeed())
 	g.Expect(updated.Finalizers).To(ContainElement(authorizationv1alpha1.RoleBindingFinalizer))
 }
 
@@ -573,6 +646,74 @@ func TestRBTerminatorReconcileTerminatingNamespaceNoBlockingResources(t *testing
 	// data is stale.
 	_, loaded := r.namespaceTerminationResourcesCache.Load("clean-term-ns")
 	g.Expect(loaded).To(BeFalse(), "cache entry should be evicted after finalizer removal in terminating namespace")
+}
+
+func TestRBTerminatorReconcileFinalizationNamespaceStatusApplyError(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+	scheme := newTestScheme()
+
+	now := metav1.Now()
+	bd := &authorizationv1alpha1.BindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-bd", UID: "bd-uid"},
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
+			TargetName: "test-target",
+			Subjects: []rbacv1.Subject{
+				{Kind: "User", Name: "test-user", APIGroup: rbacv1.GroupName},
+			},
+		},
+	}
+	bdOwnerRef := testBindDefinitionControllerOwnerRef("test-bd", "bd-uid")
+	rb := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "term-rb-clean-status-error",
+			Namespace:         "clean-status-error-ns",
+			OwnerReferences:   []metav1.OwnerReference{bdOwnerRef},
+			DeletionTimestamp: &now,
+			Finalizers:        []string{authorizationv1alpha1.RoleBindingFinalizer},
+		},
+		RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "view"},
+	}
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "clean-status-error-ns",
+			DeletionTimestamp: &now,
+			Finalizers:        []string{"kubernetes"},
+		},
+		Status: corev1.NamespaceStatus{Phase: corev1.NamespaceTerminating},
+	}
+
+	c := fake.NewClientBuilder().WithScheme(scheme).
+		WithObjects(rb, ns, bd).
+		WithStatusSubresource(ns, bd).
+		WithInterceptorFuncs(interceptor.Funcs{
+			SubResourceApply: func(_ context.Context, _ client.Client, _ string, _ runtime.ApplyConfiguration, _ ...client.SubResourceApplyOption) error {
+				return fmt.Errorf("injected namespace status apply error")
+			},
+		}).
+		Build()
+	r := &RoleBindingTerminator{client: c, scheme: scheme, recorder: events.NewFakeRecorder(10)}
+
+	cacheEntry := &namespaceTerminationStatus{
+		blockingResources: nil,
+		rateLimiter:       rate.Sometimes{},
+	}
+	cacheEntry.rateLimiter.Do(func() {})
+	r.namespaceTerminationResourcesCache.Store("clean-status-error-ns", cacheEntry)
+
+	result, err := r.Reconcile(ctx, reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: "term-rb-clean-status-error", Namespace: "clean-status-error-ns"},
+	})
+	g.Expect(err).To(HaveOccurred())
+	g.Expect(err.Error()).To(ContainSubstring("injected namespace status apply error"))
+	g.Expect(result).To(Equal(reconcile.Result{}))
+
+	updated := &rbacv1.RoleBinding{}
+	g.Expect(c.Get(ctx, types.NamespacedName{Name: "term-rb-clean-status-error", Namespace: "clean-status-error-ns"}, updated)).To(Succeed())
+	g.Expect(updated.Finalizers).To(ContainElement(authorizationv1alpha1.RoleBindingFinalizer))
+
+	_, loaded := r.namespaceTerminationResourcesCache.Load("clean-status-error-ns")
+	g.Expect(loaded).To(BeTrue(), "cache entry should be retained when namespace status clearing fails")
 }
 
 func TestRBTerminatorCacheEvictionOnNonTerminatingNamespace(t *testing.T) {
@@ -1003,7 +1144,7 @@ func TestRBTerminatorReconcileUsesLiveReaderForStaleOwnerCache(t *testing.T) {
 
 	cacheEntry := &namespaceTerminationStatus{
 		blockingResources: []namespaceDeletionResourceBlocking{
-			{ResourceType: "pods", Count: 1, Names: []string{"still-running"}},
+			{ResourceType: "pods", Count: 1},
 		},
 		rateLimiter: rate.Sometimes{},
 	}
@@ -1063,7 +1204,7 @@ func TestRBTerminatorReconcileUsesLiveReaderForStaleOwnerUID(t *testing.T) {
 
 	cacheEntry := &namespaceTerminationStatus{
 		blockingResources: []namespaceDeletionResourceBlocking{
-			{ResourceType: "pods", Count: 1, Names: []string{"still-running"}},
+			{ResourceType: "pods", Count: 1},
 		},
 		rateLimiter: rate.Sometimes{},
 	}
@@ -1167,4 +1308,11 @@ func TestRBTerminator_NamespaceHasResources_NetworkRoleBindings(t *testing.T) {
 	var updatedRB rbacv1.RoleBinding
 	g.Expect(c.Get(ctx, types.NamespacedName{Namespace: "test-ns", Name: "test-rb"}, &updatedRB)).To(Succeed())
 	g.Expect(updatedRB.Finalizers).To(ContainElement(authorizationv1alpha1.RoleBindingFinalizer), "Finalizer should not be removed while resources exist")
+
+	updatedNS := &corev1.Namespace{}
+	g.Expect(c.Get(ctx, types.NamespacedName{Name: "test-ns"}, updatedNS)).To(Succeed())
+	condition := namespaceCondition(updatedNS, authorizationv1alpha1.NamespaceTerminationBlockedCondition)
+	g.Expect(condition).NotTo(BeNil())
+	g.Expect(condition.Message).To(ContainSubstring("networkrolebindings.network.example.com=1"))
+	g.Expect(condition.Message).NotTo(ContainSubstring("test-networkrb"))
 }
