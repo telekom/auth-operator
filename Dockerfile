@@ -34,7 +34,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
 # Runtime stage (distroless)
 # Digest pinned for supply-chain integrity; update with:
 #   docker buildx imagetools inspect gcr.io/distroless/static-debian12
-FROM gcr.io/distroless/static-debian12@sha256:22fd79fd75eab2372585b44517f8a094349938919dc613aafc37e4bdc9967c82
+FROM gcr.io/distroless/static-debian12@sha256:61b7ccecebc7c474a531717de80a94709d20547cdcdaf740c25876f2a8e38b44
 
 # OCI image labels (may be overridden by docker/metadata-action in CI)
 LABEL org.opencontainers.image.title="auth-operator" \
