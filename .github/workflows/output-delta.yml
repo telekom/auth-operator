@@ -46,7 +46,7 @@ jobs:
       tag_success: ${{ steps.tag-output.outputs.tag_success }}
     steps:
       - name: Checkout main branch
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           path: main-branch
@@ -54,7 +54,7 @@ jobs:
           persist-credentials: false
 
       - name: Checkout PR sample corpus
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -368,7 +368,7 @@ jobs:
 
       - name: Checkout latest tag
         if: steps.latest-tag.outputs.has_tag == 'true'
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ steps.latest-tag.outputs.tag }}
           path: tag-branch
@@ -482,7 +482,7 @@ jobs:
       has_errors: ${{ steps.extract-errors.outputs.has_errors }}
     steps:
       - name: Checkout PR branch
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -491,7 +491,7 @@ jobs:
           persist-credentials: false
 
       - name: Checkout trusted main branch
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           path: main-branch
