@@ -110,11 +110,11 @@ jobs:
 
       - name: Run Trivy vulnerability scanner (filesystem)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        continue-on-error: true
         with:
           scan-type: 'fs'
           scan-ref: '.'
-          format: 'table'
+          format: 'sarif'
+          output: 'trivy-fs-results.sarif'
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
 
