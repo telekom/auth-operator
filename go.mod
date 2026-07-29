@@ -1,6 +1,6 @@
 module github.com/telekom/auth-operator
 
-go 1.26.0
+go 1.26.5
 
 toolchain go1.26.5
 
