@@ -230,6 +230,9 @@ jobs:
           output: 'trivy-fs-results.sarif'
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
+          # Disable the action's DB cache: a restored-then-overlaid vuln DB can
+          # produce an inconsistent state that flags already-fixed advisories.
+          cache: 'false'
 
       - name: Upload Trivy scan results
         uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # v4.37.1
