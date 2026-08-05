@@ -374,7 +374,7 @@ _Appears in:_
 | --- | --- |
 | `RequireExplicitVerb` | ImpersonationVerbPolicyRequireExplicitVerb (the default) means a constrained<br />impersonation verb only matches a rule that lists it literally. A rule with<br />verbs: ["*"] does NOT match `impersonate:user-info`. This is fail-safe and<br />keeps existing wildcard rules from silently widening.<br /> |
 | `AllowWildcard` | ImpersonationVerbPolicyAllowWildcard restores plain Kubernetes RBAC<br />semantics, where verbs: ["*"] matches constrained impersonation verbs too.<br />Only use this on authorizers whose rules are known to be narrow.<br /> |
-| `Deny` | ImpersonationVerbPolicyDeny makes this authorizer return an explicit deny for<br />any request carrying a constrained impersonation verb that matches its rules,<br />regardless of the allowed principals. Use it as a cluster-wide kill switch for<br />constrained impersonation.<br /> |
+| `Deny` | ImpersonationVerbPolicyDeny makes this authorizer return an explicit deny for<br />any request carrying a constrained impersonation verb that matches its rules,<br />regardless of the allowed principals. Use it as a cluster-wide kill switch for<br />constrained impersonation.<br />Rule matching uses plain RBAC semantics, so verbs: ["*"] DOES match every<br />impersonation verb here. This differs from RequireExplicitVerb on purpose:<br />ignoring "*" is fail-safe when granting but fail-open when denying, and a kill<br />switch written as verbs: ["*"] must not silently match nothing.<br /> |
 
 
 

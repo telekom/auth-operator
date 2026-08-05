@@ -1106,18 +1106,26 @@ func (wa *Authorizer) recordRejectedMetrics(start time.Time) {
 //   - RequireExplicitVerb (default): only a literal match counts. "*" is ignored,
 //     so an existing broad rule cannot silently authorize impersonation.
 //   - AllowWildcard: plain RBAC semantics, "*" matches.
-//   - Deny: never matches for allow evaluation; the caller turns a rule hit into an
+//   - Deny: plain RBAC semantics, "*" matches. The caller turns a rule hit into an
 //     explicit deny before allowed-principal evaluation runs.
+//
+// The asymmetry between RequireExplicitVerb and Deny is deliberate and follows the
+// direction the wildcard fails in. Ignoring "*" while GRANTING is fail-safe: a
+// pre-existing broad allow rule cannot silently start authorizing impersonation.
+// Ignoring "*" while DENYING would be fail-open, and Deny is documented as a
+// cluster-wide kill switch: an operator who writes verbs: ["*"] to shut
+// impersonation off must not end up with a kill switch that matches nothing.
 func matchesVerb(patterns []string, verb string, verbPolicy authorizationv1alpha1.ImpersonationVerbPolicy) bool {
 	if !authorizationv1alpha1.IsImpersonationVerb(verb) {
 		return matchesExactOrAll(patterns, verb)
 	}
 	switch verbPolicy {
-	case authorizationv1alpha1.ImpersonationVerbPolicyAllowWildcard:
+	case authorizationv1alpha1.ImpersonationVerbPolicyAllowWildcard,
+		authorizationv1alpha1.ImpersonationVerbPolicyDeny:
 		return matchesExactOrAll(patterns, verb)
 	default:
-		// RequireExplicitVerb and Deny both require a literal verb match. Deny uses
-		// it to decide whether the rule applies at all.
+		// RequireExplicitVerb, and any unset or unrecognised value, stay fail-safe:
+		// only a literal verb may widen an allow decision.
 		return slices.Contains(patterns, verb)
 	}
 }

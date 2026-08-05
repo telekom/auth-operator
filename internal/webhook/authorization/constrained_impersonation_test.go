@@ -143,13 +143,21 @@ func TestMatchesVerb(t *testing.T) {
 			policy:   authzv1alpha1.ImpersonationVerbPolicyAllowWildcard,
 			want:     true,
 		},
-		// Deny requires a literal match to decide the rule applies at all.
+		// Deny uses plain RBAC semantics: ignoring "*" is fail-safe when granting but
+		// fail-open when denying, and Deny is documented as a kill switch.
 		{
-			name:     "Deny: wildcard does not select the rule",
+			name:     "Deny: wildcard DOES select the rule so the kill switch fires",
 			patterns: []string{rbacv1.VerbAll},
 			verb:     "impersonate:user-info",
 			policy:   authzv1alpha1.ImpersonationVerbPolicyDeny,
-			want:     false,
+			want:     true,
+		},
+		{
+			name:     "Deny: wildcard selects an action verb too",
+			patterns: []string{rbacv1.VerbAll},
+			verb:     "impersonate-on:serviceaccount:get",
+			policy:   authzv1alpha1.ImpersonationVerbPolicyDeny,
+			want:     true,
 		},
 		{
 			name:     "Deny: literal verb selects the rule",
@@ -157,6 +165,29 @@ func TestMatchesVerb(t *testing.T) {
 			verb:     "impersonate:user-info",
 			policy:   authzv1alpha1.ImpersonationVerbPolicyDeny,
 			want:     true,
+		},
+		{
+			name:     "Deny: an unrelated verb list still does not select the rule",
+			patterns: []string{"get", "list"},
+			verb:     "impersonate:user-info",
+			policy:   authzv1alpha1.ImpersonationVerbPolicyDeny,
+			want:     false,
+		},
+		// An unset or unrecognised policy must fall back to the fail-safe behaviour
+		// rather than the permissive branch.
+		{
+			name:     "unset policy is fail-safe: wildcard does not match",
+			patterns: []string{rbacv1.VerbAll},
+			verb:     "impersonate:user-info",
+			policy:   "",
+			want:     false,
+		},
+		{
+			name:     "unrecognised policy is fail-safe: wildcard does not match",
+			patterns: []string{rbacv1.VerbAll},
+			verb:     "impersonate:user-info",
+			policy:   authzv1alpha1.ImpersonationVerbPolicy("SomethingNew"),
+			want:     false,
 		},
 	}
 
@@ -519,6 +550,28 @@ func TestEvaluateSARImpersonationVerbs(t *testing.T) {
 					AllowedPrincipals: []authzv1alpha1.Principal{{User: "someone-else"}},
 					ResourceRules: []authzv1.ResourceRule{{
 						Verbs:     []string{"impersonate:user-info"},
+						APIGroups: []string{rbacv1.APIGroupAll},
+						Resources: []string{rbacv1.ResourceAll},
+					}},
+				},
+				Status: readyStatus,
+			}},
+			sar:          impersonationSAR,
+			wantDecision: pkgmetrics.AuthorizerDecisionDenied,
+		},
+		{
+			// This is the kill-switch case Copilot flagged on #513: an operator shuts
+			// impersonation off with verbs: ["*"] rather than enumerating every
+			// impersonate:<mode> and impersonate-on:<mode>:<verb> combination. Before the
+			// fix matchesVerb required a literal verb under Deny, so this rule matched
+			// nothing and the request fell through to NoOpinion.
+			name: "Deny policy with a wildcard verb still fires the kill switch",
+			authorizers: []authzv1alpha1.WebhookAuthorizer{{
+				Spec: authzv1alpha1.WebhookAuthorizerSpec{
+					ImpersonationVerbPolicy: authzv1alpha1.ImpersonationVerbPolicyDeny,
+					AllowedPrincipals:       []authzv1alpha1.Principal{{User: "someone-else"}},
+					ResourceRules: []authzv1.ResourceRule{{
+						Verbs:     []string{rbacv1.VerbAll},
 						APIGroups: []string{rbacv1.APIGroupAll},
 						Resources: []string{rbacv1.ResourceAll},
 					}},

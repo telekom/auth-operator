@@ -142,6 +142,11 @@ const (
 	// any request carrying a constrained impersonation verb that matches its rules,
 	// regardless of the allowed principals. Use it as a cluster-wide kill switch for
 	// constrained impersonation.
+	//
+	// Rule matching uses plain RBAC semantics, so verbs: ["*"] DOES match every
+	// impersonation verb here. This differs from RequireExplicitVerb on purpose:
+	// ignoring "*" is fail-safe when granting but fail-open when denying, and a kill
+	// switch written as verbs: ["*"] must not silently match nothing.
 	ImpersonationVerbPolicyDeny ImpersonationVerbPolicy = "Deny"
 )
 
