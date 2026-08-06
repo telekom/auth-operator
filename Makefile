@@ -94,10 +94,6 @@ KIND_CONFIG_MULTI ?= test/e2e/kind-config-multi.yaml
 # Same single-node topology but with the ConstrainedImpersonation (KEP-5284)
 # feature gate explicitly disabled, used to verify graceful degradation.
 KIND_CONFIG_SINGLE_NO_CI ?= test/e2e/kind-config-single-no-constrained-impersonation.yaml
-# Flux tenant-RBAC suite: adds a local OCI registry mirror so OCIRepository and
-# HelmRepository sources can be served in-cluster without an external git host.
-KIND_CONFIG_FLUX ?= test/e2e/kind-config-single-flux.yaml
-KIND_CONFIG_FLUX_NO_CI ?= test/e2e/kind-config-single-flux-no-constrained-impersonation.yaml
 
 .PHONY: kind-create
 kind-create: ## Create a single-node kind cluster for e2e testing.
@@ -125,7 +121,7 @@ kind-delete: ## Delete the kind cluster(s).
 
 .PHONY: kind-delete-all
 kind-delete-all: ## Delete all deterministic e2e kind clusters.
-	@for c in auth-operator-e2e auth-operator-e2e-dev auth-operator-e2e-helm auth-operator-e2e-complex auth-operator-e2e-integration auth-operator-e2e-golden auth-operator-e2e-ha auth-operator-e2e-all auth-operator-e2e-flux auth-operator-e2e-flux-noci auth-operator-e2e-flux-mgmt; do \
+	@for c in auth-operator-e2e auth-operator-e2e-dev auth-operator-e2e-helm auth-operator-e2e-complex auth-operator-e2e-integration auth-operator-e2e-golden auth-operator-e2e-ha auth-operator-e2e-all; do \
 		kind delete cluster --name $$c 2>/dev/null || true; \
 		kind delete cluster --name $$c-multi 2>/dev/null || true; \
 	done
@@ -158,7 +154,7 @@ test-e2e-setup-multi: kind-create-multi kind-load-image-multi install ## Set up 
 
 .PHONY: test-e2e
 test-e2e: ## Run base e2e tests against existing kind cluster.
-	KIND_CLUSTER=$(KIND_CLUSTER_NAME) IMG=$(E2E_IMG) go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="!helm && !complex && !integration && !golden && !ha && !leader-election && !dev && !flux-rbac" -timeout 30m
+	KIND_CLUSTER=$(KIND_CLUSTER_NAME) IMG=$(E2E_IMG) go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="!helm && !complex && !integration && !golden && !ha && !leader-election && !dev" -timeout 30m
 
 .PHONY: test-e2e-compile
 test-e2e-compile: ## Compile e2e tests without creating a kind cluster.
@@ -281,7 +277,7 @@ test-e2e-all: ## Run non-Helm/non-complex e2e tests on multi-node cluster.
 	@set -e; \
 	if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-all; fi; \
 	$(MAKE) test-e2e-setup-multi KIND_CLUSTER_NAME=auth-operator-e2e-all; \
-	if KIND_CLUSTER=auth-operator-e2e-all-multi IMG=$(E2E_IMG) go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="!helm && !complex && !flux-rbac" -timeout 60m; then \
+	if KIND_CLUSTER=auth-operator-e2e-all-multi IMG=$(E2E_IMG) go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="!helm && !complex" -timeout 60m; then \
 		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-all; fi; \
 	else \
 		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-all; fi; exit 1; \
@@ -311,51 +307,6 @@ test-e2e-constrained-impersonation-disabled: ## Run constrained impersonation e2
 		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-noci; fi; \
 	else \
 		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-noci; fi; exit 1; \
-	fi
-
-.PHONY: test-e2e-flux-rbac
-test-e2e-flux-rbac: ## Run Flux tenant-RBAC e2e tests in the WORKLOAD topology (tenant clusters).
-	@set -e; \
-	if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-flux; fi; \
-	$(MAKE) kind-create KIND_CLUSTER_NAME=auth-operator-e2e-flux KIND_CONFIG_SINGLE=$(KIND_CONFIG_FLUX); \
-	$(MAKE) kind-load-image KIND_CLUSTER_NAME=auth-operator-e2e-flux; \
-	KIND_CLUSTER_NAME=auth-operator-e2e-flux E2E_FLUX_MODE=workload bash hack/ci/setup-kind-flux.sh; \
-	if KIND_CLUSTER=auth-operator-e2e-flux IMG=$(E2E_IMG) \
-		E2E_FLUX_MODE=workload E2E_CONSTRAINED_IMPERSONATION=enabled \
-		go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="flux-rbac" -timeout 45m; then \
-		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-flux; fi; \
-	else \
-		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-flux; fi; exit 1; \
-	fi
-
-.PHONY: test-e2e-flux-rbac-management
-test-e2e-flux-rbac-management: ## Run Flux RBAC e2e tests in the MANAGEMENT topology.
-	@set -e; \
-	if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-flux-mgmt; fi; \
-	$(MAKE) kind-create KIND_CLUSTER_NAME=auth-operator-e2e-flux-mgmt KIND_CONFIG_SINGLE=$(KIND_CONFIG_FLUX); \
-	$(MAKE) kind-load-image KIND_CLUSTER_NAME=auth-operator-e2e-flux-mgmt; \
-	KIND_CLUSTER_NAME=auth-operator-e2e-flux-mgmt E2E_FLUX_MODE=management bash hack/ci/setup-kind-flux.sh; \
-	if KIND_CLUSTER=auth-operator-e2e-flux-mgmt IMG=$(E2E_IMG) \
-		E2E_FLUX_MODE=management E2E_CONSTRAINED_IMPERSONATION=enabled \
-		go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="flux-rbac" -timeout 45m; then \
-		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-flux-mgmt; fi; \
-	else \
-		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-flux-mgmt; fi; exit 1; \
-	fi
-
-.PHONY: test-e2e-flux-rbac-no-constrained-impersonation
-test-e2e-flux-rbac-no-constrained-impersonation: ## Run the WORKLOAD Flux RBAC tests with ConstrainedImpersonation DISABLED.
-	@set -e; \
-	if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-flux-noci; fi; \
-	$(MAKE) kind-create KIND_CLUSTER_NAME=auth-operator-e2e-flux-noci KIND_CONFIG_SINGLE=$(KIND_CONFIG_FLUX_NO_CI); \
-	$(MAKE) kind-load-image KIND_CLUSTER_NAME=auth-operator-e2e-flux-noci; \
-	KIND_CLUSTER_NAME=auth-operator-e2e-flux-noci E2E_FLUX_MODE=workload bash hack/ci/setup-kind-flux.sh; \
-	if KIND_CLUSTER=auth-operator-e2e-flux-noci IMG=$(E2E_IMG) \
-		E2E_FLUX_MODE=workload E2E_CONSTRAINED_IMPERSONATION=disabled \
-		go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="flux-rbac" -timeout 45m; then \
-		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-flux-noci; fi; \
-	else \
-		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-flux-noci; fi; exit 1; \
 	fi
 
 .PHONY: test-envtest-constrained-impersonation-disabled

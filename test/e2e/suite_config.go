@@ -135,34 +135,6 @@ var ClusterMapping = map[string]TestSuiteConfig{
 		ReconcileTimeout: "3m",
 		PollingInterval:  "5s",
 	},
-	// Workload/tenant topology, mirroring the TDG t5g cluster: the Flux controllers
-	// run as the tenant m2m ServiceAccount in t-caas-controllers (the only namespace
-	// where it exists), tenant Flux objects live in schiff-tenant, and two further
-	// namespaces exercise the cross-tenant and unlabelled-namespace paths.
-	"flux-rbac": {
-		SuiteName:        "flux-rbac",
-		ClusterName:      "auth-operator-e2e-flux",
-		InstallMethod:    InstallMethodHelm,
-		Namespace:        "auth-operator-system",
-		TestNamespaces:   []string{"t-caas-controllers", "schiff-tenant", "other-tenant", "unlabelled-tenant"},
-		Labels:           []string{"flux-rbac"},
-		DeployTimeout:    "5m",
-		ReconcileTimeout: "5m",
-		PollingInterval:  "5s",
-	},
-	// Management topology: per-controller local ServiceAccounts, extraObjects empty,
-	// so no tenant RBAC and no tenant namespaces exist.
-	"flux-rbac-management": {
-		SuiteName:        "flux-rbac-management",
-		ClusterName:      "auth-operator-e2e-flux-mgmt",
-		InstallMethod:    InstallMethodHelm,
-		Namespace:        "auth-operator-system",
-		TestNamespaces:   []string{"t-caas-controllers"},
-		Labels:           []string{"flux-rbac"},
-		DeployTimeout:    "5m",
-		ReconcileTimeout: "5m",
-		PollingInterval:  "5s",
-	},
 	"kustomize": {
 		SuiteName:        "kustomize",
 		ClusterName:      "", // No cluster needed - build-only tests
