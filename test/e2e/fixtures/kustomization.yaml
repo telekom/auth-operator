@@ -11,6 +11,7 @@ resources:
   - webhookauthorizer_allow.yaml
   - webhookauthorizer_deny.yaml
   - webhookauthorizer_nonresource.yaml
+  - webhookauthorizer_flux_discovery.yaml
   # Restricted CRDs — policy must be created before restricted definitions
   - rbacpolicy.yaml
   - rbacpolicy_restrictive.yaml
