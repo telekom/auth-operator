@@ -21,6 +21,7 @@ on:
           - helm
           - complex
           - ha
+          - flux-rbac
           - all
 
 permissions:
@@ -294,3 +295,101 @@ jobs:
         if: always()
         run: |
           kind delete cluster --name auth-operator-e2e || true
+
+  e2e-flux-rbac:
+    name: E2E Flux RBAC (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    needs: e2e-compile
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'flux-rbac' || github.event.inputs.test_suite == 'all'
+    strategy:
+      fail-fast: false
+      matrix:
+        # ConstrainedImpersonation (KEP-5284) is beta and default-on from
+        # Kubernetes 1.36. Both the legacy and the constrained impersonation
+        # filter append system:authenticated to the impersonated identity, so
+        # tenant reconciliation must behave identically on both. Running the same
+        # specs against both gate states is what proves that.
+        include:
+          # Workload/tenant topology: controllers run as the tenant m2m
+          # ServiceAccount, tenant Flux objects set spec.serviceAccountName.
+          - name: workload
+            target: test-e2e-flux-rbac
+            cluster: auth-operator-e2e-flux
+          # Management topology: per-controller local ServiceAccounts, extraObjects
+          # is empty, so no tenant RBAC may be present.
+          - name: management
+            target: test-e2e-flux-rbac-management
+            cluster: auth-operator-e2e-flux-mgmt
+          # Workload topology again, with the gate off, to prove the impersonation
+          # code path does not change the outcome.
+          - name: workload-no-constrained-impersonation
+            target: test-e2e-flux-rbac-no-constrained-impersonation
+            cluster: auth-operator-e2e-flux-noci
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Load versions from versions.env
+        run: grep -v '^#' versions.env | grep -v '^$' >> "$GITHUB_ENV"
+
+      - name: Setup Go Environment
+        uses: ./.github/actions/setup-go-env
+        with:
+          install-kind: 'true'
+          kind-version: ${{ env.KIND_VERSION }}
+          install-helm: 'true'
+          helm-version: ${{ env.HELM_VERSION }}
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@829323503d1be3d00ca8346e5391ca0b07a9ab0d # v5.1.0
+        with:
+          version: v1.36.2
+
+      # The suite sources exclusively from OCI artifacts, so the Flux CLI is
+      # needed to push the kustomize artifact to the in-cluster registry.
+      - name: Install Flux CLI
+        run: |
+          curl -sSfL https://fluxcd.io/install.sh | sudo FLUX_VERSION="${E2E_FLUX_VERSION#v}" bash
+          flux --version
+
+      - name: Run Flux tenant RBAC E2E tests
+        run: make ${{ matrix.target }}
+        env:
+          E2E_RECREATE_CLUSTER: "true"
+          SKIP_E2E_CLEANUP: "true"
+
+      - name: Collect debug info on failure
+        if: failure()
+        run: |
+          chmod +x hack/ci/collect-debug-info.sh
+          ./hack/ci/collect-debug-info.sh /tmp/e2e-debug t-caas-controllers
+
+      - name: Collect Flux state on failure
+        if: failure()
+        run: |
+          mkdir -p /tmp/e2e-debug/flux
+          for kind in ocirepositories helmrepositories kustomizations helmreleases; do
+            kubectl get "$kind" -A -o yaml > "/tmp/e2e-debug/flux/${kind}.yaml" 2>&1 || true
+          done
+          kubectl get clusterrolebindings -o yaml > /tmp/e2e-debug/flux/clusterrolebindings.yaml 2>&1 || true
+          kubectl get serviceaccounts -A -o yaml > /tmp/e2e-debug/flux/serviceaccounts.yaml 2>&1 || true
+          for deploy in source-controller kustomize-controller helm-controller; do
+            kubectl -n t-caas-controllers logs "deployment/${deploy}" --tail=300 \
+              > "/tmp/e2e-debug/flux/${deploy}.log" 2>&1 || true
+          done
+
+      - name: Upload test artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-flux-rbac-${{ matrix.name }}-logs
+          path: |
+            /tmp/e2e-*.log
+            /tmp/e2e-debug-report-*.txt
+            /tmp/e2e-debug/
+
+      - name: Cleanup cluster
+        if: always()
+        run: |
+          kind delete cluster --name ${{ matrix.cluster }} || true
+          docker rm -f kind-registry || true
