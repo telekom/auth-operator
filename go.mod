@@ -5,7 +5,7 @@ go 1.26.5
 require (
 	github.com/evanphx/json-patch v5.9.11+incompatible // indirect
 	github.com/go-logr/logr v1.4.4
-	github.com/onsi/ginkgo/v2 v2.32.0
+	github.com/onsi/ginkgo/v2 v2.32.1
 	github.com/onsi/gomega v1.42.1
 	github.com/open-policy-agent/cert-controller v0.16.0
 	github.com/spf13/cobra v1.10.2
@@ -28,7 +28,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.45.0
 	golang.org/x/sync v0.22.0
 	golang.org/x/time v0.15.0
-	k8s.io/utils v0.0.0-20260617174310-a95e086a2553
+	k8s.io/utils v0.0.0-20260707023825-cf1189d6abe3
 	sigs.k8s.io/structured-merge-diff/v6 v6.4.2
 	sigs.k8s.io/yaml v1.6.0
 )
