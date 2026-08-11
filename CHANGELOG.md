@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Forced the remaining transitive Go dependencies (grpc, k8s.io/apiserver-adjacent
+  packages, OPA/cert-controller-adjacent packages, golang.org/x/{crypto,exp,telemetry},
+  go.etcd.io/*, go.opentelemetry.io/contrib/*, and others) to their latest published
+  releases via `replace` directives, since upstream modules still declare older
+  minimum versions in their own `go.mod`. None of these packages are imported by
+  this module directly; `go list -m -u all` now reports zero outdated modules.
+
 ## [0.5.0-rc.4] — Pre-release
 
 ### Changed
