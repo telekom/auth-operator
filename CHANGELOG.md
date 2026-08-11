@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0-rc.4] — Pre-release
+
+### Changed
+
+- Refreshed direct Go modules, Helm, security scanners, and E2E fixture
+  dependencies to their latest available releases (#519).
+
 ## [0.5.0-rc.3] — Pre-release
 
 ### Changed
@@ -146,7 +153,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - CI release workflows for SBOM attestation and image signature verification
 
-[Unreleased]: https://github.com/telekom/auth-operator/compare/v0.5.0-rc.3...HEAD
+[Unreleased]: https://github.com/telekom/auth-operator/compare/v0.5.0-rc.4...HEAD
+[0.5.0-rc.4]: https://github.com/telekom/auth-operator/compare/v0.5.0-rc.3...v0.5.0-rc.4
 [0.5.0-rc.3]: https://github.com/telekom/auth-operator/compare/v0.5.0-rc.2...v0.5.0-rc.3
 [0.5.0-rc.2]: https://github.com/telekom/auth-operator/compare/v0.5.0-rc.1...v0.5.0-rc.2
 [0.4.0-rc.12]: https://github.com/telekom/auth-operator/compare/v0.4.0-rc.5...v0.4.0-rc.12
