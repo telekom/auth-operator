@@ -410,6 +410,34 @@ var _ = Describe("Auth Operator E2E", Ordered, Label("basic", "crd"), func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(string(output)).To(ContainSubstring("/healthz"))
 		})
+
+		It("should configure the Flux discovery example authorizer from docs/flux-impersonation-rbac.md", func() {
+			By("Applying the generic Flux discovery WebhookAuthorizer example")
+			applyFixture("webhookauthorizer_flux_discovery.yaml")
+
+			By("Verifying WebhookAuthorizer was created")
+			Eventually(func() error {
+				return checkResourceExists("webhookauthorizer", "e2e-test-authorizer-flux-discovery", "")
+			}, reconcileTimeout, pollingInterval).Should(Succeed())
+
+			By("Verifying WebhookAuthorizer status is configured")
+			Eventually(func() bool {
+				return checkWebhookAuthorizerConfigured("e2e-test-authorizer-flux-discovery")
+			}, reconcileTimeout, pollingInterval).Should(BeTrue())
+
+			By("Verifying the discovery nonResourceURLs and reconciler principal are present")
+			cmd := utils.CommandContext(context.Background(), "kubectl", "get", "webhookauthorizer", "e2e-test-authorizer-flux-discovery",
+				"-o", "jsonpath={.spec.nonResourceRules}")
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(output)).To(ContainSubstring("/apis/*"))
+
+			cmd = utils.CommandContext(context.Background(), "kubectl", "get", "webhookauthorizer", "e2e-test-authorizer-flux-discovery",
+				"-o", "jsonpath={.spec.allowedPrincipals}")
+			output, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(output)).To(ContainSubstring("system:serviceaccount:flux-system:flux-tenant-reconciler"))
+		})
 	})
 
 	Context("CRD Cleanup", func() {

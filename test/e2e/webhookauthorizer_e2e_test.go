@@ -580,6 +580,106 @@ spec:
 			Expect(string(output)).To(ContainSubstring("/healthz"))
 		})
 	})
+	// A GitOps reconciler impersonated by a Flux controller needs Kubernetes API
+	// discovery before it can build a RESTMapper, and discovery is authorized via
+	// nonResourceURLs rather than resource rules. See
+	// docs/flux-impersonation-rbac.md for why a namespaced Role cannot convey this
+	// and why an explicit webhook deny short-circuits the implicit
+	// system:discovery binding.
+	Context("API discovery for an impersonated GitOps reconciler", func() {
+		const reconcilerUser = "system:serviceaccount:flux-system:flux-tenant-reconciler"
+
+		const waFluxDiscoveryYAML = `
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: WebhookAuthorizer
+metadata:
+  name: wa-e2e-flux-discovery
+spec:
+  allowedPrincipals:
+    - user: system:serviceaccount:flux-system:flux-tenant-reconciler
+  nonResourceRules:
+    - verbs: ["get"]
+      nonResourceURLs: ["/api", "/apis", "/apis/*"]
+`
+
+		BeforeAll(func() {
+			By("Creating WebhookAuthorizer granting discovery nonResourceURLs")
+			applyYAML(waFluxDiscoveryYAML)
+			waitForWebhookAuthorizerReady("wa-e2e-flux-discovery")
+		})
+
+		AfterAll(func() {
+			cmd := utils.CommandContext(context.Background(), "kubectl", "delete",
+				"webhookauthorizer", "wa-e2e-flux-discovery", "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+		})
+
+		It("should allow listed discovery paths and not allow unlisted ones", func() {
+			localPort, cleanup := startWebhookAuthorizerPortForward(waNamespace, waRelease+"-webhook-service")
+			defer cleanup()
+
+			cases := []struct {
+				name    string
+				path    string
+				allowed bool
+				reason  string
+			}{
+				{
+					name:    "root API discovery is allowed",
+					path:    "/api",
+					allowed: true,
+					reason:  "Access granted by WebhookAuthorizer",
+				},
+				{
+					name:    "aggregated group discovery is allowed",
+					path:    "/apis",
+					allowed: true,
+					reason:  "Access granted by WebhookAuthorizer",
+				},
+				{
+					// "/apis/*" matches by prefix, so a concrete group/version
+					// resolves through the same rule.
+					name:    "a concrete group/version under /apis is allowed",
+					path:    "/apis/apps/v1",
+					allowed: true,
+					reason:  "Access granted by WebhookAuthorizer",
+				},
+				{
+					// Not covered by any listed URL: no opinion, never an allow.
+					name:    "an unlisted path is not allowed",
+					path:    "/healthz",
+					allowed: false,
+					reason:  "Access denied: no matching rules",
+				},
+				{
+					// "/apis/*" is a prefix match on "/apis/", so a sibling
+					// top-level path is not covered by it.
+					name:    "an unlisted sibling top-level path is not allowed",
+					path:    "/openapi/v3",
+					allowed: false,
+					reason:  "Access denied: no matching rules",
+				},
+			}
+
+			for _, tc := range cases {
+				By("Checking discovery decision: " + tc.name)
+				Eventually(func() (authzv1.SubjectAccessReviewStatus, error) {
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					response, err := requestAuthorizer(ctx, localPort,
+						nonResourceSAR(reconcilerUser, nil, "get", tc.path))
+					return response.Status, err
+				}, reconcileWait, pollingInt).Should(And(
+					HaveField("Allowed", tc.allowed),
+					// A non-match must be "no opinion" so other authorizers in the
+					// chain can still decide, never an explicit deny.
+					HaveField("Denied", false),
+					HaveField("Reason", Equal(tc.reason)),
+				))
+			}
+		})
+	})
+
 	Context("Authentication and Rate Limiting", func() {
 		var localPort int
 		var cleanup func()

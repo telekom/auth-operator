@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+
+- Added `docs/flux-impersonation-rbac.md`, documenting the RBAC an authorization
+  layer must grant a Flux `Kustomization`/`HelmRelease` reconciling under an
+  impersonated ServiceAccount, the `nonResourceURLs` API-discovery requirement a
+  namespaced `Role` cannot express, and the opaque `failed to get server groups:
+  unknown` failure mode when a grant is missing.
+
 ## [0.5.0-rc.5] — Pre-release
 
 ### Changed

@@ -1,0 +1,27 @@
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: WebhookAuthorizer
+metadata:
+  name: e2e-test-authorizer-flux-discovery
+  labels:
+    app.kubernetes.io/name: auth-operator
+    app.kubernetes.io/component: e2e-test
+    app.kubernetes.io/created-by: auth-operator
+spec:
+  # A GitOps reconciler that is impersonated by a Flux controller needs Kubernetes
+  # API discovery before it can build a RESTMapper. Discovery is authorized via
+  # nonResourceURLs, which a namespaced Role cannot express, so the grant has to
+  # come from a cluster-scoped source such as this authorizer or the built-in
+  # system:discovery ClusterRole.
+  nonResourceRules:
+    - verbs:
+        - get
+      nonResourceURLs:
+        - /api
+        - /api/*
+        - /apis
+        - /apis/*
+        - /openapi/v2
+        - /openapi/v3
+        - /version
+  allowedPrincipals:
+    - user: system:serviceaccount:flux-system:flux-tenant-reconciler
