@@ -1,6 +1,6 @@
 module github.com/telekom/auth-operator
 
-go 1.26.5
+go 1.26.6
 
 require (
 	github.com/evanphx/json-patch v5.9.11+incompatible // indirect
