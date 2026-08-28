@@ -60,9 +60,16 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 
 	// Deletion protection runs BEFORE CheckBypass so that no principal,
 	// including kubernetes-admin/system:masters, can bypass it.
-	if req.Operation == admissionv1.Delete && v.DeletionProtection {
-		if resp := v.checkDeletionProtection(logger, req); resp != nil {
-			return *resp
+	if v.DeletionProtection {
+		switch req.Operation {
+		case admissionv1.Delete:
+			if resp := v.checkDeletionProtection(ctx, req); resp != nil {
+				return *resp
+			}
+		case admissionv1.Update:
+			if resp := v.checkProtectionDowngrade(ctx, req); resp != nil {
+				return *resp
+			}
 		}
 	}
 

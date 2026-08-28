@@ -51,6 +51,29 @@ func namespaceWith(name string, labels, annotations map[string]string) *corev1.N
 	}
 }
 
+// updateRequest builds a namespace UPDATE admission request with the previous
+// state in OldObject and the new state in Object.
+func updateRequest(t *testing.T, oldNs, newNs *corev1.Namespace, username string, groups ...string) crAdmission.Request {
+	t.Helper()
+	return crAdmission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Kind:      metav1.GroupVersionKind{Kind: "Namespace"},
+			Name:      newNs.Name,
+			Operation: admissionv1.Update,
+			UserInfo: authenticationv1.UserInfo{
+				Username: username,
+				Groups:   groups,
+			},
+			Object: runtime.RawExtension{
+				Raw: mustMarshalJSON(t, newNs),
+			},
+			OldObject: runtime.RawExtension{
+				Raw: mustMarshalJSON(t, oldNs),
+			},
+		},
+	}
+}
+
 func TestNamespaceValidatorDeletionProtection(t *testing.T) {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
@@ -265,6 +288,80 @@ func TestNamespaceValidatorDeletionProtection(t *testing.T) {
 			},
 			deletionProtection: true,
 			expectedAllow:      false,
+		},
+		{
+			name: "deny stripping the opt-in label without annotation",
+			request: updateRequest(t,
+				namespaceWith("tenant-ns", map[string]string{
+					authorizationv1alpha1.LabelKeyOwner:              authorizationv1alpha1.OwnerTenant,
+					authorizationv1alpha1.LabelKeyTenant:             "tenant-a",
+					authorizationv1alpha1.LabelKeyDeletionProtection: authorizationv1alpha1.DeletionProtectionEnabled,
+				}, nil),
+				namespaceWith("tenant-ns", map[string]string{
+					authorizationv1alpha1.LabelKeyOwner:  authorizationv1alpha1.OwnerTenant,
+					authorizationv1alpha1.LabelKeyTenant: "tenant-a",
+				}, nil),
+				"kubernetes-admin"),
+			deletionProtection:  true,
+			expectedAllow:       false,
+			expectedMessagePart: "removing protection labels",
+		},
+		{
+			name: "deny stripping the platform owner label without annotation",
+			request: updateRequest(t,
+				namespaceWith("platform-ns", platformLabels, nil),
+				namespaceWith("platform-ns", map[string]string{
+					authorizationv1alpha1.LabelKeyOwner:  authorizationv1alpha1.OwnerTenant,
+					authorizationv1alpha1.LabelKeyTenant: "tenant-a",
+				}, nil),
+				"cluster-admin-user", "system:masters"),
+			deletionProtection:  true,
+			expectedAllow:       false,
+			expectedMessagePart: "removing protection labels",
+		},
+		{
+			name: "allow stripping the opt-in label with allow-deletion annotation",
+			request: updateRequest(t,
+				namespaceWith("tenant-ns", map[string]string{
+					authorizationv1alpha1.LabelKeyOwner:              authorizationv1alpha1.OwnerTenant,
+					authorizationv1alpha1.LabelKeyTenant:             "tenant-a",
+					authorizationv1alpha1.LabelKeyDeletionProtection: authorizationv1alpha1.DeletionProtectionEnabled,
+				}, nil),
+				namespaceWith("tenant-ns", map[string]string{
+					authorizationv1alpha1.LabelKeyOwner:  authorizationv1alpha1.OwnerTenant,
+					authorizationv1alpha1.LabelKeyTenant: "tenant-a",
+				}, allowDeletion),
+				"kubernetes-admin"),
+			deletionProtection: true,
+			expectedAllow:      true,
+		},
+		{
+			name: "allow update that keeps the namespace protected",
+			request: updateRequest(t,
+				namespaceWith("platform-ns", platformLabels, nil),
+				namespaceWith("platform-ns", map[string]string{
+					authorizationv1alpha1.LabelKeyOwner: authorizationv1alpha1.OwnerPlatform,
+					"team":                              "platform-team",
+				}, nil),
+				"kubernetes-admin"),
+			deletionProtection: true,
+			expectedAllow:      true,
+		},
+		{
+			name: "allow stripping the opt-in label when deletion protection is disabled",
+			request: updateRequest(t,
+				namespaceWith("tenant-ns", map[string]string{
+					authorizationv1alpha1.LabelKeyOwner:              authorizationv1alpha1.OwnerTenant,
+					authorizationv1alpha1.LabelKeyTenant:             "tenant-a",
+					authorizationv1alpha1.LabelKeyDeletionProtection: authorizationv1alpha1.DeletionProtectionEnabled,
+				}, nil),
+				namespaceWith("tenant-ns", map[string]string{
+					authorizationv1alpha1.LabelKeyOwner:  authorizationv1alpha1.OwnerTenant,
+					authorizationv1alpha1.LabelKeyTenant: "tenant-a",
+				}, nil),
+				"kubernetes-admin"),
+			deletionProtection: false,
+			expectedAllow:      true,
 		},
 	}
 

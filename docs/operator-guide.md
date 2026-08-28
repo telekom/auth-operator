@@ -284,6 +284,11 @@ kubectl delete namespace my-protected-ns
 The annotation only lifts *protection* — normal BindDefinition DELETE
 authorization still applies afterwards.
 
+Protection cannot be sidestepped by stripping the labels: removing the
+protection labels (including the platform owner label) from a protected
+namespace is denied unless the same allow-deletion annotation is present on
+the updated namespace.
+
 **There is no admin bypass.** Unlike the other namespace webhook checks,
 deletion protection binds `kubernetes-admin`, `system:masters`, and all
 hardcoded bypass ServiceAccounts as well. Break-glass for system namespaces is

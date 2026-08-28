@@ -59,6 +59,13 @@ const (
 	// Kept in sync with the ValidatingAdmissionPolicy in
 	// chart/auth-operator/templates/namespace-deletion-protection-vap.yaml.
 	DenialProtectedNamespaceDeletionFmt = "Namespace %s is deletion-protected; annotate it with %s=\"true\" and retry to confirm deletion"
+
+	// DenialProtectionRemovalFmt is a format string returned when an update
+	// strips the deletion-protection labels from a protected namespace without
+	// the allow-deletion escape hatch. Parameters: namespace name, annotation key.
+	// Kept in sync with the ValidatingAdmissionPolicy in
+	// chart/auth-operator/templates/namespace-deletion-protection-vap.yaml.
+	DenialProtectionRemovalFmt = "Namespace %s is deletion-protected; removing protection labels requires the %s=\"true\" annotation"
 )
 
 // ErrNamespaceWebhookInternal hides internal API and selector details from

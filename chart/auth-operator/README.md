@@ -136,7 +136,8 @@ default. Enable them only after the bootstrap `BindDefinition` and
 Protects critical namespaces from accidental deletion. Platform-owned
 namespaces (`t-caas.telekom.com/owner=platform`) and namespaces labeled
 `t-caas.telekom.com/deletion-protection=enabled` can only be deleted after
-annotating them with `t-caas.telekom.com/allow-deletion="true"`. The system
+annotating them with `t-caas.telekom.com/allow-deletion="true"`; removing
+those protection labels requires the same annotation. The system
 namespaces `kube-system`, `kube-public`, `kube-node-lease`, and `default` are
 never deletable while protection is enabled. There is **no admin bypass** —
 even `system:masters` must set the annotation; disabling

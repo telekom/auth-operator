@@ -1,12 +1,13 @@
 package webhooks
 
 import (
+	"context"
 	"fmt"
 
-	"github.com/go-logr/logr"
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/pkg/metrics"
 	corev1 "k8s.io/api/core/v1"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -54,6 +55,12 @@ func isDeletionProtected(ns *corev1.Namespace, tdgMigration bool) bool {
 	return ns.Labels[authorizationv1alpha1.LabelKeyDeletionProtection] == authorizationv1alpha1.DeletionProtectionEnabled
 }
 
+// allowsDeletion reports whether the namespace carries the allow-deletion
+// escape-hatch annotation.
+func allowsDeletion(ns *corev1.Namespace) bool {
+	return ns.Annotations[authorizationv1alpha1.AnnotationKeyAllowDeletion] == authorizationv1alpha1.AllowDeletionTrue
+}
+
 // checkDeletionProtection enforces namespace deletion protection for DELETE
 // requests. It returns a non-nil response when the request must be denied (or
 // errored); nil means the namespace is not protected or has been explicitly
@@ -63,7 +70,9 @@ func isDeletionProtected(ns *corev1.Namespace, tdgMigration bool) bool {
 // It MUST run before CheckBypass: deletion protection intentionally has no
 // admin or automation bypass, so even kubernetes-admin/system:masters must set
 // the allow-deletion annotation first.
-func (v *NamespaceValidator) checkDeletionProtection(logger logr.Logger, req admission.Request) *admission.Response {
+func (v *NamespaceValidator) checkDeletionProtection(ctx context.Context, req admission.Request) *admission.Response {
+	logger := logf.FromContext(ctx).WithName("namespace-validator")
+
 	if isHardProtectedNamespace(req.Name, v.ExtraProtectedNamespaces) {
 		logger.Info("AUDIT: deletion of protected system namespace denied",
 			"namespace", req.Name, "username", req.UserInfo.Username)
@@ -81,7 +90,7 @@ func (v *NamespaceValidator) checkDeletionProtection(logger logr.Logger, req adm
 		return nil
 	}
 
-	if ns.Annotations[authorizationv1alpha1.AnnotationKeyAllowDeletion] == authorizationv1alpha1.AllowDeletionTrue {
+	if allowsDeletion(&ns) {
 		logger.Info("AUDIT: deletion protection lifted via allow-deletion annotation",
 			"namespace", req.Name, "username", req.UserInfo.Username)
 		return nil
@@ -91,5 +100,36 @@ func (v *NamespaceValidator) checkDeletionProtection(logger logr.Logger, req adm
 		"namespace", req.Name, "username", req.UserInfo.Username)
 	metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultDenied).Inc()
 	resp := admission.Denied(fmt.Sprintf(DenialProtectedNamespaceDeletionFmt, req.Name, authorizationv1alpha1.AnnotationKeyAllowDeletion))
+	return &resp
+}
+
+// checkProtectionDowngrade enforces deletion protection for UPDATE requests:
+// stripping the protection labels from a protected namespace requires the same
+// allow-deletion annotation as deleting it, so protection cannot be sidestepped
+// by removing the label first and deleting afterwards.
+//
+// Like checkDeletionProtection, it MUST run before CheckBypass.
+func (v *NamespaceValidator) checkProtectionDowngrade(ctx context.Context, req admission.Request) *admission.Response {
+	logger := logf.FromContext(ctx).WithName("namespace-validator")
+
+	ns, oldNs, errResp := v.decodeNamespaces(logger, req)
+	if errResp != nil {
+		return errResp
+	}
+
+	if !isDeletionProtected(&oldNs, v.TDGMigration) || isDeletionProtected(&ns, v.TDGMigration) {
+		return nil
+	}
+
+	if allowsDeletion(&ns) {
+		logger.Info("AUDIT: protection label removal permitted via allow-deletion annotation",
+			"namespace", req.Name, "username", req.UserInfo.Username)
+		return nil
+	}
+
+	logger.Info("AUDIT: removal of deletion-protection labels denied",
+		"namespace", req.Name, "username", req.UserInfo.Username)
+	metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultDenied).Inc()
+	resp := admission.Denied(fmt.Sprintf(DenialProtectionRemovalFmt, req.Name, authorizationv1alpha1.AnnotationKeyAllowDeletion))
 	return &resp
 }
