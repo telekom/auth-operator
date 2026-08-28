@@ -32,6 +32,11 @@ const (
 	// This annotation is added to external (pre-existing) ServiceAccounts when a BindDefinition
 	// references them, and removed when no BindDefinitions reference them anymore.
 	AnnotationKeyReferencedBy = "authorization.t-caas.telekom.com/referenced-by"
+
+	// AnnotationKeyExternalFieldManagers records the SSA managers whose label
+	// ownership caused auth-operator to relinquish ServiceAccount lifecycle ownership.
+	// The value is a sorted, comma-separated list of field manager names.
+	AnnotationKeyExternalFieldManagers = "authorization.t-caas.telekom.com/external-field-managers"
 )
 
 // Owner label values.

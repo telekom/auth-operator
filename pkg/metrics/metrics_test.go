@@ -36,6 +36,7 @@ func TestMetricRegistration(t *testing.T) {
 		{"ManagedResources", ManagedResources},
 		{"WebhookRequestsTotal", WebhookRequestsTotal},
 		{"ServiceAccountSkippedPreExisting", ServiceAccountSkippedPreExisting},
+		{"ServiceAccountOwnershipTakeovers", ServiceAccountOwnershipTakeovers},
 		{"ExternalSAsReferenced", ExternalSAsReferenced},
 		{"AuthorizerRateLimitedTotal", AuthorizerRateLimitedTotal},
 		{"NamespaceFanoutSkipped", NamespaceFanoutSkipped},
@@ -274,6 +275,20 @@ func TestServiceAccountSkippedCounter(t *testing.T) {
 	counter.Inc()
 	after := getCounterValue(t, counter)
 
+	if after != before+1 {
+		t.Errorf("expected counter to increment by 1, got delta %f", after-before)
+	}
+}
+
+func TestServiceAccountOwnershipTakeoversCounter(t *testing.T) {
+	counter, err := ServiceAccountOwnershipTakeovers.GetMetricWithLabelValues("test-bd")
+	if err != nil {
+		t.Fatalf("failed to get metric: %v", err)
+	}
+
+	before := getCounterValue(t, counter)
+	counter.Inc()
+	after := getCounterValue(t, counter)
 	if after != before+1 {
 		t.Errorf("expected counter to increment by 1, got delta %f", after-before)
 	}

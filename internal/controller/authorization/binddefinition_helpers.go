@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -189,6 +190,46 @@ const (
 	deleteResultNotFound                       // resource was already gone.
 	deleteResultNoOwnerRef                     // resource exists but is not owned by this BindDefinition.
 )
+
+var errServiceAccountSSAConflict = errors.New("serviceaccount server-side apply ownership conflict")
+
+var fieldManagerConflictPattern = regexp.MustCompile(`conflicts? with "([^"]+)"`)
+
+func serviceAccountSSAConflictDetails(err error) ([]string, bool) {
+	var statusErr *apierrors.StatusError
+	if !errors.As(err, &statusErr) || statusErr.ErrStatus.Details == nil {
+		return nil, false
+	}
+
+	managerSet := make(map[string]struct{})
+	conflictCount := 0
+	for _, cause := range statusErr.ErrStatus.Details.Causes {
+		if string(cause.Type) != "FieldManagerConflict" {
+			continue
+		}
+		conflictCount++
+		if !strings.Contains(cause.Field, "metadata.labels") {
+			return nil, false
+		}
+		matches := fieldManagerConflictPattern.FindStringSubmatch(cause.Message)
+		if len(matches) == 2 {
+			managerSet[matches[1]] = struct{}{}
+		}
+	}
+	if conflictCount == 0 {
+		return nil, false
+	}
+
+	managers := make([]string, 0, len(managerSet))
+	for manager := range managerSet {
+		managers = append(managers, manager)
+	}
+	if len(managers) == 0 {
+		managers = append(managers, "unknown")
+	}
+	slices.Sort(managers)
+	return managers, true
+}
 
 // deleteServiceAccount attempts to delete a service account if it has an ownerReference.
 // Returns the result of the deletion and any error encountered.
@@ -534,9 +575,8 @@ func (r *BindDefinitionReconciler) addExternalSAReference(
 }
 
 // detachServiceAccountFromBindDefinition removes only this BindDefinition's
-// historical ownership and source metadata. It is used when an existing
-// ServiceAccount is explicitly delegated to another controller. Provider-owned
-// labels, annotations, and managed fields are intentionally untouched.
+// historical ownership and source metadata. Provider-owned labels, annotations,
+// and managed fields are intentionally untouched.
 func (r *BindDefinitionReconciler) detachServiceAccountFromBindDefinition(
 	ctx context.Context,
 	sa *corev1.ServiceAccount,
@@ -580,6 +620,50 @@ func (r *BindDefinitionReconciler) detachServiceAccountFromBindDefinition(
 		}
 
 		return r.client.Patch(ctx, fresh, sigs_client.MergeFromWithOptions(orig, sigs_client.MergeFromWithOptimisticLock{}))
+	})
+}
+
+// reclassifyServiceAccountAsExternal drops this BindDefinition's historical
+// management metadata after another field manager rejects its SSA update. The
+// ServiceAccount remains available to bindings, but is no longer eligible for
+// pruning or garbage collection through this BindDefinition.
+func (r *BindDefinitionReconciler) reclassifyServiceAccountAsExternal(
+	ctx context.Context,
+	saNamespace, saName string,
+	bindDef *authorizationv1alpha1.BindDefinition,
+	fieldManagers []string,
+) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		fresh := &corev1.ServiceAccount{}
+		if err := r.client.Get(ctx, types.NamespacedName{Name: saName, Namespace: saNamespace}, fresh); err != nil {
+			return err
+		}
+
+		original := fresh.DeepCopy()
+		removeOwnerRef(fresh, bindDef)
+		if fresh.Annotations == nil {
+			fresh.Annotations = make(map[string]string)
+		}
+
+		remainingSources := helpers.RemoveSourceName(fresh.Annotations[helpers.SourceNamesAnnotation], bindDef.Name)
+		if remainingSources == "" {
+			delete(fresh.Annotations, helpers.SourceNamesAnnotation)
+			if fresh.Annotations[helpers.SourceKindAnnotation] == authorizationv1alpha1.BindDefinitionKind {
+				delete(fresh.Annotations, helpers.SourceKindAnnotation)
+			}
+		} else {
+			fresh.Annotations[helpers.SourceNamesAnnotation] = remainingSources
+		}
+
+		refs := parseReferencedBy(fresh.Annotations[authorizationv1alpha1.AnnotationKeyReferencedBy])
+		if !slices.Contains(refs, bindDef.Name) {
+			refs = append(refs, bindDef.Name)
+			slices.Sort(refs)
+			fresh.Annotations[authorizationv1alpha1.AnnotationKeyReferencedBy] = strings.Join(refs, ",")
+		}
+		fresh.Annotations[authorizationv1alpha1.AnnotationKeyExternalFieldManagers] = strings.Join(fieldManagers, ",")
+
+		return r.client.Patch(ctx, fresh, sigs_client.MergeFromWithOptions(original, sigs_client.MergeFromWithOptimisticLock{}))
 	})
 }
 
@@ -680,6 +764,10 @@ func (r *BindDefinitionReconciler) removeExternalSAReference(
 	old := sa.DeepCopy()
 	if len(newRefs) == 0 {
 		delete(sa.Annotations, authorizationv1alpha1.AnnotationKeyReferencedBy)
+		// The field-manager provenance is meaningful only while this SA is
+		// tracked as externally referenced. Remove it with the final reference
+		// so a later BindDefinition cannot misattribute an old takeover.
+		delete(sa.Annotations, authorizationv1alpha1.AnnotationKeyExternalFieldManagers)
 	} else {
 		slices.Sort(newRefs)
 		sa.Annotations[authorizationv1alpha1.AnnotationKeyReferencedBy] = strings.Join(newRefs, ",")

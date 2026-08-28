@@ -3,22 +3,28 @@ package authorization
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	corev1ac "k8s.io/client-go/applyconfigurations/core/v1"
 	"k8s.io/client-go/tools/events"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	"github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/helpers"
 	pkgssa "github.com/telekom/auth-operator/pkg/ssa"
 )
@@ -40,6 +46,223 @@ func TestBuildBindingName(t *testing.T) {
 			if got != tt.want {
 				t.Errorf("helpers.BuildBindingName(%q, %q) = %q, want %q",
 					tt.targetName, tt.roleRef, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestServiceAccountSSAConflictDetails(t *testing.T) {
+	t.Parallel()
+
+	t.Run("extracts managers from label-only conflicts", func(t *testing.T) {
+		t.Parallel()
+		err := &apierrors.StatusError{ErrStatus: metav1.Status{
+			Reason: metav1.StatusReasonConflict,
+			Details: &metav1.StatusDetails{Causes: []metav1.StatusCause{
+				{Type: metav1.CauseType("FieldManagerConflict"), Field: ".metadata.labels.app.kubernetes.io/managed-by", Message: `conflicts with "helm-controller" using v1`},
+				{Type: metav1.CauseType("FieldManagerConflict"), Field: ".metadata.labels.helm.toolkit.fluxcd.io/name", Message: `conflicts with "helm-controller" using v1`},
+			}},
+		}}
+
+		managers, labelOnly := serviceAccountSSAConflictDetails(err)
+		if !labelOnly {
+			t.Fatal("expected label-only conflict")
+		}
+		if len(managers) != 1 || managers[0] != "helm-controller" {
+			t.Fatalf("unexpected managers: %v", managers)
+		}
+	})
+
+	t.Run("rejects non-label conflicts", func(t *testing.T) {
+		t.Parallel()
+		err := &apierrors.StatusError{ErrStatus: metav1.Status{
+			Reason: metav1.StatusReasonConflict,
+			Details: &metav1.StatusDetails{Causes: []metav1.StatusCause{
+				{Type: metav1.CauseType("FieldManagerConflict"), Field: ".automountServiceAccountToken", Message: `conflict with "workload-controller"`},
+			}},
+		}}
+
+		if managers, labelOnly := serviceAccountSSAConflictDetails(err); labelOnly || managers != nil {
+			t.Fatalf("non-label conflict must remain fatal, got managers=%v labelOnly=%v", managers, labelOnly)
+		}
+	})
+
+	t.Run("rejects mixed label and non-label conflicts", func(t *testing.T) {
+		t.Parallel()
+		err := &apierrors.StatusError{ErrStatus: metav1.Status{
+			Reason: metav1.StatusReasonConflict,
+			Details: &metav1.StatusDetails{Causes: []metav1.StatusCause{
+				{Type: metav1.CauseType("FieldManagerConflict"), Field: ".metadata.labels.app.kubernetes.io/managed-by", Message: `conflict with "helm-controller"`},
+				{Type: metav1.CauseType("FieldManagerConflict"), Field: ".automountServiceAccountToken", Message: `conflict with "workload-controller"`},
+			}},
+		}}
+
+		if managers, labelOnly := serviceAccountSSAConflictDetails(err); labelOnly || managers != nil {
+			t.Fatalf("mixed conflicts must remain fatal, got managers=%v labelOnly=%v", managers, labelOnly)
+		}
+	})
+
+	t.Run("sorts multiple managers", func(t *testing.T) {
+		t.Parallel()
+		err := &apierrors.StatusError{ErrStatus: metav1.Status{
+			Reason: metav1.StatusReasonConflict,
+			Details: &metav1.StatusDetails{Causes: []metav1.StatusCause{
+				{Type: metav1.CauseType("FieldManagerConflict"), Field: ".metadata.labels.first", Message: `conflict with "z-controller"`},
+				{Type: metav1.CauseType("FieldManagerConflict"), Field: ".metadata.labels.second", Message: `conflict with "a-controller"`},
+			}},
+		}}
+
+		managers, labelOnly := serviceAccountSSAConflictDetails(err)
+		if !labelOnly || len(managers) != 2 || managers[0] != "a-controller" || managers[1] != "z-controller" {
+			t.Fatalf("unexpected details: managers=%v labelOnly=%v", managers, labelOnly)
+		}
+	})
+
+	t.Run("reports unknown when the API omits a manager", func(t *testing.T) {
+		t.Parallel()
+		err := &apierrors.StatusError{ErrStatus: metav1.Status{
+			Reason: metav1.StatusReasonConflict,
+			Details: &metav1.StatusDetails{Causes: []metav1.StatusCause{
+				{Type: metav1.CauseType("FieldManagerConflict"), Field: ".metadata.labels.shared", Message: "field ownership conflict"},
+			}},
+		}}
+
+		managers, labelOnly := serviceAccountSSAConflictDetails(err)
+		if !labelOnly || len(managers) != 1 || managers[0] != "unknown" {
+			t.Fatalf("unexpected details: managers=%v labelOnly=%v", managers, labelOnly)
+		}
+	})
+}
+
+//nolint:gocyclo // table-driven coverage exercises each ownership outcome.
+func TestEnsureServiceAccountsReportsExternalFieldManager(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		conflictMessage string
+		conflictField   string
+		wantManager     string
+		wantTransfer    bool
+	}{
+		{name: "named controller", conflictMessage: `conflict with "custom-release-controller"`, conflictField: ".metadata.labels.app.kubernetes.io/managed-by", wantManager: "custom-release-controller", wantTransfer: true},
+		{name: "unknown controller", conflictMessage: "field ownership conflict", conflictField: ".metadata.labels.app.kubernetes.io/managed-by", wantManager: "unknown", wantTransfer: true},
+		{name: "non-label conflict remains fatal", conflictMessage: `conflict with "workload-controller"`, conflictField: ".automountServiceAccountToken", wantManager: "workload-controller", wantTransfer: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			s := runtime.NewScheme()
+			if err := authorizationv1alpha1.AddToScheme(s); err != nil {
+				t.Fatal(err)
+			}
+			if err := corev1.AddToScheme(s); err != nil {
+				t.Fatal(err)
+			}
+
+			bindDef := &authorizationv1alpha1.BindDefinition{
+				ObjectMeta: metav1.ObjectMeta{Name: "controller-reporting-bd", UID: "controller-reporting-uid"},
+				Spec: authorizationv1alpha1.BindDefinitionSpec{
+					Subjects: []rbacv1.Subject{{Kind: rbacv1.ServiceAccountKind, Name: "shared-sa", Namespace: "workload"}},
+				},
+				Status: authorizationv1alpha1.BindDefinitionStatus{
+					GeneratedServiceAccounts: []rbacv1.Subject{{Kind: rbacv1.ServiceAccountKind, Name: "shared-sa", Namespace: "workload"}},
+				},
+			}
+			peerBindDef := &authorizationv1alpha1.BindDefinition{
+				ObjectMeta: metav1.ObjectMeta{Name: "peer-bd", UID: "peer-bd-uid"},
+			}
+			sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{
+				Name: "shared-sa", Namespace: "workload",
+				Labels:      map[string]string{helpers.ManagedByLabelStandard: "external"},
+				Annotations: helpers.BuildManagedSAAnnotations(helpers.MergeSourceNames(bindDef.Name, peerBindDef.Name)),
+				OwnerReferences: []metav1.OwnerReference{{
+					APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: authorizationv1alpha1.BindDefinitionKind,
+					Name: bindDef.Name, UID: bindDef.UID,
+				}, {
+					APIVersion: authorizationv1alpha1.GroupVersion.String(), Kind: authorizationv1alpha1.BindDefinitionKind,
+					Name: peerBindDef.Name, UID: peerBindDef.UID,
+				}},
+			}}
+			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "workload"}, Status: corev1.NamespaceStatus{Phase: corev1.NamespaceActive}}
+			conflict := &apierrors.StatusError{ErrStatus: metav1.Status{
+				Reason: metav1.StatusReasonConflict,
+				Details: &metav1.StatusDetails{Causes: []metav1.StatusCause{{
+					Type: metav1.CauseType("FieldManagerConflict"), Field: tt.conflictField, Message: tt.conflictMessage,
+				}}},
+			}}
+
+			c := fake.NewClientBuilder().WithScheme(s).WithObjects(bindDef, sa, ns).
+				WithInterceptorFuncs(interceptor.Funcs{
+					Apply: func(_ context.Context, _ client.WithWatch, _ runtime.ApplyConfiguration, _ ...client.ApplyOption) error {
+						return conflict
+					},
+				}).Build()
+			recorder := events.NewFakeRecorder(10)
+			r := &BindDefinitionReconciler{client: c, scheme: s, recorder: recorder}
+
+			generated, external, err := r.ensureServiceAccounts(ctx, bindDef)
+			if !tt.wantTransfer {
+				if err == nil {
+					t.Fatal("expected non-label SSA conflict to remain fatal")
+				}
+				updated := &corev1.ServiceAccount{}
+				if getErr := c.Get(ctx, client.ObjectKey{Name: "shared-sa", Namespace: "workload"}, updated); getErr != nil {
+					t.Fatal(getErr)
+				}
+				if !hasOwnerRef(updated, bindDef) {
+					t.Fatal("fatal non-label conflict removed the BindDefinition owner reference")
+				}
+				if updated.Annotations[authorizationv1alpha1.AnnotationKeyReferencedBy] != "" {
+					t.Fatalf("fatal non-label conflict reclassified the ServiceAccount: %v", updated.Annotations)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ensureServiceAccounts returned error: %v", err)
+			}
+			if len(generated) != 0 || len(external) != 1 || external[0] != "workload/shared-sa" {
+				t.Fatalf("unexpected classification: generated=%v external=%v", generated, external)
+			}
+			condition := conditions.Get(bindDef, authorizationv1alpha1.ServiceAccountOwnershipTransferredCondition)
+			if condition == nil || !strings.Contains(condition.Message, tt.wantManager) {
+				t.Fatalf("manager %q not reported in condition: %#v", tt.wantManager, condition)
+			}
+			event := <-recorder.Events
+			if !strings.Contains(event, corev1.EventTypeWarning) ||
+				!strings.Contains(event, authorizationv1alpha1.EventReasonServiceAccountOwnershipTransferred) ||
+				!strings.Contains(event, tt.wantManager) {
+				t.Fatalf("manager takeover not reported in warning event: %q", event)
+			}
+
+			updated := &corev1.ServiceAccount{}
+			if err := c.Get(ctx, client.ObjectKey{Name: "shared-sa", Namespace: "workload"}, updated); err != nil {
+				t.Fatal(err)
+			}
+			if hasOwnerRef(updated, bindDef) {
+				t.Fatal("BindDefinition owner reference was not removed")
+			}
+			if !hasOwnerRef(updated, peerBindDef) {
+				t.Fatal("peer BindDefinition owner reference was not preserved")
+			}
+			if updated.Annotations[helpers.SourceNamesAnnotation] != peerBindDef.Name {
+				t.Fatalf("peer source name was not preserved: %v", updated.Annotations)
+			}
+			if updated.Annotations[authorizationv1alpha1.AnnotationKeyReferencedBy] != bindDef.Name {
+				t.Fatalf("external reference not recorded: %v", updated.Annotations)
+			}
+			if updated.Annotations[authorizationv1alpha1.AnnotationKeyExternalFieldManagers] != tt.wantManager {
+				t.Fatalf("external field manager not recorded: %v", updated.Annotations)
+			}
+
+			bindDef.Spec.Subjects = nil
+			if _, _, err := r.ensureServiceAccounts(ctx, bindDef); err != nil {
+				t.Fatalf("ensureServiceAccounts after subject removal returned error: %v", err)
+			}
+			if condition := conditions.Get(bindDef, authorizationv1alpha1.ServiceAccountOwnershipTransferredCondition); condition != nil {
+				t.Fatalf("stale takeover condition was not cleared: %#v", condition)
 			}
 		})
 	}
@@ -591,6 +814,126 @@ var _ = Describe("BindDefinition Helpers", func() {
 	})
 
 	Describe("ensureServiceAccounts update scenarios", func() {
+		It("keeps a Helm-owned ServiceAccount and reaches Ready after SSA label conflicts", func() {
+			const (
+				namespaceName        = "sa-ssa-coexistence-test"
+				serviceAccountName   = "kustomize-controller"
+				bindDefinitionName   = "platform-serviceaccounts-ssa-coexistence"
+				clusterRoleName      = "sa-ssa-coexistence-role"
+				helmReleaseNameLabel = "helm.toolkit.fluxcd.io/name"
+			)
+			key := client.ObjectKey{Name: serviceAccountName, Namespace: namespaceName}
+
+			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespaceName}}
+			Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+			clusterRole := &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: clusterRoleName}}
+			Expect(k8sClient.Create(ctx, clusterRole)).To(Succeed())
+
+			bindDef := &authorizationv1alpha1.BindDefinition{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       bindDefinitionName,
+					Finalizers: []string{authorizationv1alpha1.BindDefinitionFinalizer},
+					Labels: map[string]string{
+						helpers.ManagedByLabelStandard: "Helm",
+						helmReleaseNameLabel:           "authn-authz-crs",
+					},
+				},
+				Spec: authorizationv1alpha1.BindDefinitionSpec{
+					TargetName: "platform-serviceaccounts",
+					ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+						ClusterRoleRefs: []string{clusterRoleName},
+					},
+					Subjects: []rbacv1.Subject{{
+						Kind: rbacv1.ServiceAccountKind, Name: serviceAccountName, Namespace: namespaceName,
+					}},
+				},
+			}
+			Expect(k8sClient.Create(ctx, bindDef)).To(Succeed())
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(bindDef), bindDef)).To(Succeed())
+			bindDef.Status.GeneratedServiceAccounts = append([]rbacv1.Subject(nil), bindDef.Spec.Subjects...)
+			Expect(k8sClient.Status().Update(ctx, bindDef)).To(Succeed())
+
+			helmLabels := map[string]string{
+				helpers.ManagedByLabelStandard: "Helm",
+				helmReleaseNameLabel:           "flux",
+			}
+			helmSA := corev1ac.ServiceAccount(serviceAccountName, namespaceName).WithLabels(helmLabels)
+			Expect(k8sClient.Apply(ctx, helmSA, client.FieldOwner("helm-controller"))).To(Succeed())
+
+			// Reproduce the historical state: auth-operator recorded and owned the SA,
+			// while Helm retained SSA ownership of its identifying labels.
+			legacyAuthMetadata := corev1ac.ServiceAccount(serviceAccountName, namespaceName).
+				WithOwnerReferences(saOwnerRefForBindDefinition(bindDef)).
+				WithAnnotations(helpers.BuildManagedSAAnnotations(bindDef.Name))
+			Expect(k8sClient.Apply(ctx, legacyAuthMetadata,
+				client.FieldOwner(pkgssa.FieldOwnerFor(bindDef.Name, authorizationv1alpha1.BindDefinitionKind)))).To(Succeed())
+
+			takeoverRecorder := events.NewFakeRecorder(20)
+			reconciler := &BindDefinitionReconciler{
+				client: k8sClient, scheme: k8sClient.Scheme(), recorder: takeoverRecorder,
+			}
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: bindDef.Name},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(func() bool {
+				for {
+					select {
+					case event := <-takeoverRecorder.Events:
+						if strings.Contains(event, authorizationv1alpha1.EventReasonServiceAccountOwnershipTransferred) &&
+							strings.Contains(event, "helm-controller") {
+							return true
+						}
+					default:
+						return false
+					}
+				}
+			}).Should(BeTrue(), "expected takeover warning event with helm-controller")
+
+			updatedBindDef := &authorizationv1alpha1.BindDefinition{}
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(bindDef), updatedBindDef)).To(Succeed())
+			Expect(updatedBindDef.Status.BindReconciled).To(BeTrue())
+			Expect(conditions.IsReady(updatedBindDef)).To(BeTrue())
+			Expect(updatedBindDef.Status.GeneratedServiceAccounts).NotTo(BeNil())
+			Expect(updatedBindDef.Status.GeneratedServiceAccounts).To(BeEmpty())
+			Expect(updatedBindDef.Status.ExternalServiceAccounts).To(ConsistOf(namespaceName + "/" + serviceAccountName))
+			takeoverCondition := conditions.Get(updatedBindDef, authorizationv1alpha1.ServiceAccountOwnershipTransferredCondition)
+			Expect(takeoverCondition).NotTo(BeNil())
+			Expect(takeoverCondition.Status).To(Equal(metav1.ConditionTrue))
+			Expect(takeoverCondition.Reason).To(Equal(string(authorizationv1alpha1.ServiceAccountOwnershipTransferredReason)))
+			Expect(takeoverCondition.Message).To(ContainSubstring(namespaceName + "/" + serviceAccountName))
+			Expect(takeoverCondition.Message).To(ContainSubstring("helm-controller"))
+
+			updatedSA := &corev1.ServiceAccount{}
+			Expect(k8sClient.Get(ctx, key, updatedSA)).To(Succeed())
+			Expect(updatedSA.Labels).To(Equal(helmLabels))
+			Expect(hasOwnerRef(updatedSA, bindDef)).To(BeFalse())
+			Expect(updatedSA.Annotations).To(HaveKeyWithValue(
+				authorizationv1alpha1.AnnotationKeyReferencedBy, bindDef.Name))
+			Expect(updatedSA.Annotations).To(HaveKeyWithValue(
+				authorizationv1alpha1.AnnotationKeyExternalFieldManagers, "helm-controller"))
+			Expect(updatedSA.Annotations).NotTo(HaveKey(helpers.SourceNamesAnnotation))
+
+			var helmManagedFields string
+			for _, managedField := range updatedSA.ManagedFields {
+				if managedField.Manager == "helm-controller" && managedField.FieldsV1 != nil {
+					helmManagedFields = managedField.FieldsV1.GetRawString()
+				}
+			}
+			Expect(helmManagedFields).To(ContainSubstring("f:app.kubernetes.io/managed-by"))
+			Expect(helmManagedFields).To(ContainSubstring("f:helm.toolkit.fluxcd.io/name"))
+
+			updatedBindDef.Finalizers = nil
+			Expect(k8sClient.Update(ctx, updatedBindDef)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, updatedBindDef)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{
+				Name: helpers.BuildBindingName(bindDef.Spec.TargetName, clusterRoleName),
+			}})).To(Succeed())
+			Expect(k8sClient.Delete(ctx, clusterRole)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, updatedSA)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, ns)).To(Succeed())
+		})
+
 		It("should update ServiceAccount automountServiceAccountToken when value changes from false to true", func() {
 			// Create BindDefinition first with automountServiceAccountToken=false
 			bindDef := &authorizationv1alpha1.BindDefinition{

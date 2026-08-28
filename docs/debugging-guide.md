@@ -316,6 +316,55 @@ curl -s http://localhost:8080/metrics | grep auth_operator_role_refs_missing
 1. Create the missing role (e.g., via RoleDefinition)
 2. Or remove the reference from the BindDefinition
 
+### ServiceAccount Ownership Transferred to an External Controller
+
+This can happen after a namespace is deleted and recreated. Auth-operator may
+recreate a ServiceAccount from a BindDefinition before Flux reconciles the Helm
+release. When an external controller subsequently owns labels on that ServiceAccount,
+auth-operator does not force an SSA takeover or fail the BindDefinition. It
+removes only its own owner reference, records the ServiceAccount as external,
+and leaves the BindDefinition Ready.
+
+The expected recovery sequence is: namespace deletion, auth-operator SA
+creation, Flux/Helm label apply, label ownership conflict, removal of the
+BindDefinition owner reference, and external-SA status tracking. No manual
+takeover or forced apply is required.
+
+**Signals:**
+
+- `ServiceAccountOwnershipTransferred=True` on the BindDefinition; its message
+  includes the ServiceAccount and external field manager.
+- Warning event reason `ServiceAccountOwnershipTransferred`.
+- `auth_operator_serviceaccount_ownership_takeovers_total` increments with the
+  `binddefinition` label. Inspect the condition or event for the exact manager.
+
+```bash
+# Show the transfer, including the external manager (for example helm-controller)
+kubectl get binddefinition <name> \
+  -o jsonpath='{.status.conditions[?(@.type=="ServiceAccountOwnershipTransferred")]}' | jq .
+
+# Confirm the SA is external and the BindDefinition remains Ready
+kubectl get binddefinition <name> \
+  -o jsonpath='{.status.externalServiceAccounts}{"\n"}{.status.conditions[?(@.type=="Ready")]}{"\n"}'
+
+# Inspect ownership and SSA managers without changing the object
+kubectl get serviceaccount <sa> -n <namespace> -o yaml
+kubectl events --for binddefinition/<name> --types=Warning
+```
+
+Do not restore the BindDefinition owner reference while an external controller
+manages the ServiceAccount. Doing so makes the ServiceAccount eligible for garbage
+collection or pruning when the BindDefinition is removed.
+
+If the reported manager is unexpected, identify the workload applying the
+listed labels before changing the object. Once the expected controller owns the
+ServiceAccount, trigger a normal reconciliation by annotating the
+BindDefinition; do not use server-side apply with force ownership:
+
+```bash
+kubectl annotate binddefinition <name> auth-operator.t-caas.telekom.com/reconcile-at="$(date +%s)" --overwrite
+```
+
 ### Namespace Selector Issues
 
 **Symptoms:**

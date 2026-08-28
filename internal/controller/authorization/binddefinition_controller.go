@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -16,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/events"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -1365,6 +1367,10 @@ func (r *BindDefinitionReconciler) applyServiceAccount(
 	if patchErr != nil {
 		logger.Error(patchErr, "Failed to apply ServiceAccount",
 			"bindDefinitionName", bindDef.Name, "serviceAccount", subject.Name)
+		if apierrors.IsConflict(patchErr) {
+			return fmt.Errorf("%w: apply ServiceAccount %s/%s: %w",
+				errServiceAccountSSAConflict, subject.Namespace, subject.Name, patchErr)
+		}
 		return fmt.Errorf("apply ServiceAccount %s/%s: %w", subject.Namespace, subject.Name, patchErr)
 	}
 
@@ -1395,6 +1401,8 @@ func (r *BindDefinitionReconciler) applyServiceAccount(
 // SAs already owned by another BindDefinition ARE updated via SSA to add this BD's
 // ownerRef, enabling shared ownership so that the SA survives individual BD deletions.
 // Returns the list of generated/managed SAs and the list of external (pre-existing) SAs.
+//
+//nolint:gocyclo // service-account classification and ownership transitions are one atomic workflow.
 func (r *BindDefinitionReconciler) ensureServiceAccounts(
 	ctx context.Context,
 	bindDef *authorizationv1alpha1.BindDefinition,
@@ -1407,6 +1415,7 @@ func (r *BindDefinitionReconciler) ensureServiceAccounts(
 	for _, ref := range bindDef.Spec.ExternalServiceAccountRefs {
 		externalRefs[ref.Namespace+"/"+ref.Name] = struct{}{}
 	}
+	var ownershipTakeovers []string
 
 	// Use the configured value from spec, defaulting to true for backward compatibility
 	automountToken := ptr.Deref(bindDef.Spec.AutomountServiceAccountToken, true)
@@ -1464,6 +1473,9 @@ func (r *BindDefinitionReconciler) ensureServiceAccounts(
 			// SA exists but is not owned by any BD — do not adopt it.
 			saRef := fmt.Sprintf("%s/%s", subject.Namespace, subject.Name)
 			externalSAs = append(externalSAs, saRef)
+			if managers := existing.Annotations[authorizationv1alpha1.AnnotationKeyExternalFieldManagers]; managers != "" {
+				ownershipTakeovers = append(ownershipTakeovers, fmt.Sprintf("%s -> %s", saRef, managers))
+			}
 			logger.V(1).Info("Skipping pre-existing ServiceAccount (not owned by any BindDefinition)",
 				"bindDefinitionName", bindDef.Name,
 				"serviceAccount", subject.Name, "namespace", subject.Namespace)
@@ -1494,12 +1506,40 @@ func (r *BindDefinitionReconciler) ensureServiceAccounts(
 
 		// Apply ServiceAccount via SSA — creates or updates declaratively
 		if err := r.applyServiceAccount(ctx, bindDef, subject, automountToken); err != nil {
+			managers, labelConflict := serviceAccountSSAConflictDetails(err)
+			if saExists && errors.Is(err, errServiceAccountSSAConflict) && labelConflict {
+				saRef := fmt.Sprintf("%s/%s", subject.Namespace, subject.Name)
+				if reclassifyErr := r.reclassifyServiceAccountAsExternal(ctx, subject.Namespace, subject.Name, bindDef, managers); reclassifyErr != nil {
+					return nil, nil, fmt.Errorf("reclassify conflicting ServiceAccount %s as external: %w", saRef, reclassifyErr)
+				}
+				externalSAs = append(externalSAs, saRef)
+				managerNames := strings.Join(managers, ",")
+				ownershipTakeovers = append(ownershipTakeovers, fmt.Sprintf("%s -> %s", saRef, managerNames))
+				logger.Info("Using externally managed ServiceAccount after SSA ownership conflict",
+					"bindDefinitionName", bindDef.Name,
+					"serviceAccount", subject.Name, "namespace", subject.Namespace,
+					"fieldManagers", managers)
+				metrics.ServiceAccountOwnershipTakeovers.WithLabelValues(bindDef.Name).Inc()
+				r.recorder.Eventf(bindDef, nil, corev1.EventTypeWarning,
+					authorizationv1alpha1.EventReasonServiceAccountOwnershipTransferred, authorizationv1alpha1.EventActionReconcile,
+					"Relinquished lifecycle ownership of ServiceAccount %s/%s; external field manager(s) %s retained label ownership",
+					subject.Namespace, subject.Name, managerNames)
+				continue
+			}
 			return nil, nil, err
 		}
 
 		if !helpers.SubjectExists(generatedSAs, subject) {
 			generatedSAs = append(generatedSAs, subject)
 		}
+	}
+
+	if len(ownershipTakeovers) > 0 {
+		conditions.MarkTrue(bindDef, authorizationv1alpha1.ServiceAccountOwnershipTransferredCondition, bindDef.Generation,
+			authorizationv1alpha1.ServiceAccountOwnershipTransferredReason,
+			authorizationv1alpha1.ServiceAccountOwnershipTransferredMessage, ownershipTakeovers)
+	} else {
+		conditions.Delete(bindDef, authorizationv1alpha1.ServiceAccountOwnershipTransferredCondition)
 	}
 
 	logger.V(1).Info("ServiceAccount reconciliation complete",
@@ -1565,10 +1605,49 @@ func (r *BindDefinitionReconciler) applyStatus(ctx context.Context, bindDefiniti
 	if err != nil {
 		return err
 	}
+	// GeneratedServiceAccounts is represented as a slice in generated apply
+	// configurations. controller-gen adds omitempty, so an empty slice is absent
+	// from the SSA payload and cannot clear stale generated-SA status. Follow the
+	// normal status apply with an optimistic merge patch only when a populated
+	// live list must become empty.
+	if len(bindDefinition.Status.GeneratedServiceAccounts) == 0 {
+		if err := r.clearGeneratedServiceAccountsStatus(ctx, bindDefinition); err != nil {
+			return err
+		}
+	}
 	if result == pkgssa.PatchApplyResultSkipped {
 		metrics.StatusResourcesSkipped.WithLabelValues("BindDefinition").Inc()
 	}
 	return nil
+}
+
+func (r *BindDefinitionReconciler) clearGeneratedServiceAccountsStatus(
+	ctx context.Context,
+	bindDefinition *authorizationv1alpha1.BindDefinition,
+) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		fresh := &authorizationv1alpha1.BindDefinition{}
+		if err := r.ownershipReader().Get(ctx, types.NamespacedName{Name: bindDefinition.Name, Namespace: bindDefinition.Namespace}, fresh); err != nil {
+			// The live reader may legitimately observe the BindDefinition after it
+			// has already been removed from the API. Status cleanup is then moot,
+			// and must not turn a successful deletion/cache-race reconcile into an
+			// error.
+			if apierrors.IsNotFound(err) {
+				return nil
+			}
+			return err
+		}
+		if len(fresh.Status.GeneratedServiceAccounts) == 0 {
+			return nil
+		}
+		original := fresh.DeepCopy()
+		// Use a non-nil empty slice so the merge patch serializes `[]`, not
+		// `null`/field deletion. This keeps the status shape valid for the CRD's
+		// non-nullable array field.
+		fresh.Status.GeneratedServiceAccounts = make([]rbacv1.Subject, 0)
+		return r.client.Status().Patch(ctx, fresh,
+			client.MergeFromWithOptions(original, client.MergeFromWithOptimisticLock{}))
+	})
 }
 
 //nolint:unparam // result is intentionally always nil - requeue via error propagation
@@ -1649,6 +1728,7 @@ func deleteBindDefinitionMetricSeries(name string) {
 	metrics.NamespacesActive.DeleteLabelValues(name)
 	metrics.ExternalSAsReferenced.DeleteLabelValues(name)
 	metrics.ServiceAccountSkippedPreExisting.DeleteLabelValues(name)
+	metrics.ServiceAccountOwnershipTakeovers.DeleteLabelValues(name)
 	metrics.ManagedResources.DeleteLabelValues(metrics.ControllerBindDefinition, metrics.ResourceClusterRoleBinding, name)
 	metrics.ManagedResources.DeleteLabelValues(metrics.ControllerBindDefinition, metrics.ResourceRoleBinding, name)
 	metrics.ManagedResources.DeleteLabelValues(metrics.ControllerBindDefinition, metrics.ResourceServiceAccount, name)

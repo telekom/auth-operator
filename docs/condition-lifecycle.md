@@ -202,6 +202,18 @@ no bindings are created until the missing roles are resolved. When the policy
 is set to `ignore`, validation is skipped entirely and the condition is set
 to `Unknown`.
 
+### ServiceAccountOwnershipTransferred
+
+An abnormal-true condition recording that a generated ServiceAccount was
+handed over after an external SSA manager took ownership of one or more label
+fields. The condition message lists each `namespace/name` and the reported
+field manager. The ServiceAccount remains usable as an external reference, so
+the BindDefinition can still become `Ready=True`.
+
+| Status | Reason | Message |
+|--------|--------|---------|
+| `True` | `ExternalManagerTakeover` | ServiceAccount lifecycle ownership relinquished after external managers retained label fields: `[<namespace/name -> manager>]` |
+
 ### Reconciliation Sequence (BindDefinition)
 
 ```
@@ -452,6 +464,7 @@ from the API error and apply the resource again.
 |-----------|----------|-------------------|
 | `Stalled` | Persistent error | Read the condition's `message` field for error details; fix the root cause and the operator will retry |
 | `Reconciling` | Active reconciliation | Normal — wait for completion; if stuck for >5 minutes, check controller logs |
+| `ServiceAccountOwnershipTransferred` | A generated ServiceAccount is now externally managed | Verify the named field manager is expected; do not restore the BindDefinition owner reference while that manager owns the account |
 
 ### Monitoring Conditions via Metrics
 

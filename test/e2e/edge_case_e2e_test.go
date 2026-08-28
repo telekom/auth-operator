@@ -11,6 +11,8 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"time"
 
@@ -39,6 +41,9 @@ var _ = Describe("Edge Case - Deletion and Shared Resources", Ordered, Label("co
 		healingClusterRole = "e2e-edge-healing-role"
 		preExistingSAName  = "e2e-preexisting-sa"
 		bdPreExistingSA    = "e2e-edge-preexisting-sa-bd"
+		ownershipBD        = "e2e-edge-sa-ownership-transfer"
+		ownershipHelmSA    = "e2e-edge-helm-owned-sa"
+		ownershipUnknownSA = "e2e-edge-unknown-owned-sa"
 	)
 
 	BeforeAll(func() {
@@ -66,6 +71,9 @@ var _ = Describe("Edge Case - Deletion and Shared Resources", Ordered, Label("co
 			"--set", fmt.Sprintf("image.tag=%s", imageTag),
 			"--set", "controller.replicas=1",
 			"--set", "webhookServer.replicas=1",
+			// This suite reads the takeover counter through the in-cluster metrics
+			// Service. Authentication is covered by the dedicated Helm E2E suite.
+			"--set", "metrics.auth.enabled=false",
 			"--wait",
 			"--timeout", "5m",
 		)
@@ -105,7 +113,7 @@ var _ = Describe("Edge Case - Deletion and Shared Resources", Ordered, Label("co
 
 		By("Cleaning up edge-case test resources")
 
-		for _, name := range []string{bdSharedA, bdSharedB, bdMissingRef, bdPreExistingSA} {
+		for _, name := range []string{bdSharedA, bdSharedB, bdMissingRef, bdPreExistingSA, ownershipBD} {
 			cmd := utils.CommandContext(context.Background(), "kubectl", "delete", "binddefinition", name, "--ignore-not-found=true")
 			_, _ = utils.Run(cmd)
 		}
@@ -118,6 +126,10 @@ var _ = Describe("Edge Case - Deletion and Shared Resources", Ordered, Label("co
 
 		cmd = utils.CommandContext(context.Background(), "kubectl", "delete", "sa", preExistingSAName, "-n", edgeCaseNS, "--ignore-not-found=true")
 		_, _ = utils.Run(cmd)
+		for _, name := range []string{ownershipHelmSA, ownershipUnknownSA} {
+			cmd = utils.CommandContext(context.Background(), "kubectl", "delete", "sa", name, "-n", edgeCaseNS, "--ignore-not-found=true")
+			_, _ = utils.Run(cmd)
+		}
 
 		cmd = utils.CommandContext(context.Background(), "kubectl", "delete", "clusterrole", healingClusterRole, "--ignore-not-found=true")
 		_, _ = utils.Run(cmd)
@@ -314,6 +326,227 @@ spec:
 		})
 	})
 
+	Context("ServiceAccount SSA ownership transfer", func() {
+		It("keeps Helm and unknown-controller SAs usable and reports the transfer", func() {
+			By("Creating a BindDefinition that generates the ServiceAccounts")
+			bdYAML := fmt.Sprintf(`
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: %s
+spec:
+  targetName: e2e-ownership-transfer
+  subjects:
+    - kind: ServiceAccount
+      name: %s
+      namespace: %s
+    - kind: ServiceAccount
+      name: %s
+      namespace: %s
+  clusterRoleBindings:
+    clusterRoleRefs:
+      - view
+`, ownershipBD, ownershipHelmSA, edgeCaseNS, ownershipUnknownSA, edgeCaseNS)
+			applyYAML(bdYAML)
+
+			By("Waiting for auth-operator to create both ServiceAccounts and reach Ready")
+			Eventually(func() bool {
+				cmd := utils.CommandContext(context.Background(), "kubectl", "get", "binddefinition", ownershipBD,
+					"-o", "jsonpath={.status.conditions[?(@.type=='Ready')].status}")
+				output, err := utils.Run(cmd)
+				return err == nil && strings.TrimSpace(string(output)) == statusTrue
+			}, reconcileTimeout, pollInterval).Should(BeTrue(), "ownership-transfer BindDefinition should become Ready")
+			for _, name := range []string{ownershipHelmSA, ownershipUnknownSA} {
+				Eventually(func() error {
+					return checkResourceExists("serviceaccount", name, edgeCaseNS)
+				}, reconcileTimeout, pollInterval).Should(Succeed(), "auth-operator should create %s", name)
+			}
+			By("Verifying the initial generated ServiceAccount status before external takeover")
+			Eventually(func() bool {
+				cmd := utils.CommandContext(context.Background(), "kubectl", "get", "binddefinition", ownershipBD,
+					"-o", "jsonpath={.status.generatedServiceAccounts}")
+				output, err := utils.Run(cmd)
+				if err != nil {
+					return false
+				}
+				status := string(output)
+				return strings.Contains(status, ownershipHelmSA) && strings.Contains(status, ownershipUnknownSA)
+			}, reconcileTimeout, pollInterval).Should(BeTrue(), "initial status should report both generated ServiceAccounts")
+
+			By("Transferring the auth-owned label fields to Helm and another controller")
+			applyServerSideFieldManager(fmt.Sprintf(`
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: %s
+  namespace: %s
+  labels:
+    app.kubernetes.io/managed-by: Helm
+    helm.toolkit.fluxcd.io/name: authn-authz-crs
+`, ownershipHelmSA, edgeCaseNS), "helm-controller", true)
+			applyServerSideFieldManager(fmt.Sprintf(`
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: %s
+  namespace: %s
+  labels:
+    app.kubernetes.io/managed-by: ExternalController
+`, ownershipUnknownSA, edgeCaseNS), "unknown-controller", true)
+
+			By("Waiting for the owner watch to report both transfers without stalling")
+			Eventually(func() bool {
+				cmd := utils.CommandContext(context.Background(), "kubectl", "get", "binddefinition", ownershipBD,
+					"-o", "jsonpath={.status.externalServiceAccounts}")
+				output, err := utils.Run(cmd)
+				if err != nil {
+					return false
+				}
+				status := string(output)
+				return strings.Contains(status, ownershipHelmSA) && strings.Contains(status, ownershipUnknownSA)
+			}, reconcileTimeout, pollInterval).Should(BeTrue(), "owner watch should report both external ServiceAccounts")
+
+			By("Checking status, condition, and external references for both recipients")
+			cmd := utils.CommandContext(context.Background(), "kubectl", "get", "binddefinition", ownershipBD,
+				"-o", "jsonpath={.status.externalServiceAccounts}")
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(output)).To(ContainSubstring(ownershipHelmSA))
+			Expect(string(output)).To(ContainSubstring(ownershipUnknownSA))
+
+			cmd = utils.CommandContext(context.Background(), "kubectl", "get", "binddefinition", ownershipBD,
+				"-o", "jsonpath={.status.conditions[?(@.type=='ServiceAccountOwnershipTransferred')].message}")
+			output, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(output)).To(ContainSubstring("helm-controller"))
+			Expect(string(output)).To(ContainSubstring("unknown-controller"))
+
+			cmd = utils.CommandContext(context.Background(), "kubectl", "get", "binddefinition", ownershipBD,
+				"-o", "jsonpath={.status.conditions[?(@.type=='Stalled')].status}")
+			output, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(strings.TrimSpace(string(output))).NotTo(Equal(statusTrue), "ownership conflict must not mark the BindDefinition Stalled")
+
+			By("Verifying owner references were removed while external managers retain labels")
+			for _, name := range []string{ownershipHelmSA, ownershipUnknownSA} {
+				expectedManager := map[string]string{ownershipHelmSA: "helm-controller", ownershipUnknownSA: "unknown-controller"}[name]
+				expectedManagedBy := map[string]string{ownershipHelmSA: "Helm", ownershipUnknownSA: "ExternalController"}[name]
+				cmd = utils.CommandContext(context.Background(), "kubectl", "get", "sa", name, "-n", edgeCaseNS,
+					"-o", "jsonpath={.metadata.ownerReferences}")
+				output, err = utils.Run(cmd)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(string(output)).NotTo(ContainSubstring(ownershipBD))
+				cmd = utils.CommandContext(context.Background(), "kubectl", "get", "sa", name, "-n", edgeCaseNS,
+					"-o", "jsonpath={.metadata.labels.app\\.kubernetes\\.io/managed-by}")
+				output, err = utils.Run(cmd)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(strings.TrimSpace(string(output))).To(Equal(expectedManagedBy))
+				cmd = utils.CommandContext(context.Background(), "kubectl", "get", "sa", name, "-n", edgeCaseNS,
+					"-o", "jsonpath={.metadata.managedFields[*].manager}")
+				output, err = utils.Run(cmd)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(string(output)).To(ContainSubstring(expectedManager))
+				cmd = utils.CommandContext(context.Background(), "kubectl", "get", "sa", name, "-n", edgeCaseNS,
+					"-o", "jsonpath={.metadata.annotations.authorization\\.t-caas\\.telekom\\.com/external-field-managers}")
+				output, err = utils.Run(cmd)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(string(output)).To(ContainSubstring(expectedManager))
+			}
+
+			By("Verifying the generated binding still contains both ServiceAccount subjects")
+			cmd = utils.CommandContext(context.Background(), "kubectl", "get", "clusterrolebinding",
+				"e2e-ownership-transfer-view-binding", "-o", "jsonpath={.subjects[*].name}")
+			output, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(output)).To(ContainSubstring(ownershipHelmSA))
+			Expect(string(output)).To(ContainSubstring(ownershipUnknownSA))
+
+			By("Letting the external manager update its label after the transfer")
+			applyServerSideFieldManager(fmt.Sprintf(`
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: %s
+  namespace: %s
+  labels:
+    app.kubernetes.io/managed-by: Helm
+    helm.toolkit.fluxcd.io/name: authn-authz-crs-updated
+`, ownershipHelmSA, edgeCaseNS), "helm-controller", false)
+			Eventually(func() bool {
+				cmd := utils.CommandContext(context.Background(), "kubectl", "get", "sa", ownershipHelmSA, "-n", edgeCaseNS,
+					"-o", "jsonpath={.metadata.labels.helm\\.toolkit\\.fluxcd\\.io/name}")
+				output, err := utils.Run(cmd)
+				return err == nil && strings.TrimSpace(string(output)) == "authn-authz-crs-updated"
+			}, reconcileTimeout, pollInterval).Should(BeTrue(), "external manager must retain normal SSA ownership after transfer")
+
+			By("Checking the takeover metric and warning event include the recipients")
+			cleanupPortForward := startEdgeMetricsPortForward(edgeCaseOperatorNS, edgeCaseRelease, 18081)
+			defer cleanupPortForward()
+			Eventually(func() error {
+				resp, getErr := http.Get("http://127.0.0.1:18081/metrics") // #nosec G107 -- local test endpoint.
+				if getErr != nil {
+					return getErr
+				}
+				defer resp.Body.Close()
+				body, readErr := io.ReadAll(resp.Body)
+				if readErr != nil {
+					return readErr
+				}
+				metric := fmt.Sprintf("auth_operator_serviceaccount_ownership_takeovers_total{binddefinition=\"%s\"}", ownershipBD)
+				if !strings.Contains(string(body), metric) {
+					return fmt.Errorf("metric %s not present", metric)
+				}
+				return nil
+			}, reconcileTimeout, pollInterval).Should(Succeed())
+
+			// Kubernetes aggregates Events with the same regarding object, reason,
+			// and action.  The condition above is the durable record of every
+			// transferred ServiceAccount; the Event API may retain only one of
+			// those warning notes.  Query by reason and assert the stable event
+			// contract for one retained transfer.  Either transfer may be retained.
+			Eventually(func() bool {
+				cmd := utils.CommandContext(context.Background(), "kubectl", "get", "events.events.k8s.io", "-A",
+					"--field-selector=reason=ServiceAccountOwnershipTransferred,regarding.name="+ownershipBD,
+					"-o", "jsonpath={range .items[*]}{.type}{\"|\"}{.reason}{\"|\"}{.note}{\"\\n\"}{end}")
+				output, err := utils.Run(cmd)
+				if err != nil {
+					return false
+				}
+				events := string(output)
+				if !strings.Contains(events, "Warning|ServiceAccountOwnershipTransferred|") {
+					return false
+				}
+				helmEvent := strings.Contains(events, ownershipHelmSA) && strings.Contains(events, "helm-controller")
+				unknownEvent := strings.Contains(events, ownershipUnknownSA) && strings.Contains(events, "unknown-controller")
+				return helmEvent || unknownEvent
+			}, reconcileTimeout, pollInterval).Should(BeTrue(), "takeover warning event should report the transferred ServiceAccount and field manager")
+
+			By("Deleting the BindDefinition and proving transferred SAs are not deleted")
+			cmd = utils.CommandContext(context.Background(), "kubectl", "delete", "binddefinition", ownershipBD)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(func() error {
+				cmd := utils.CommandContext(context.Background(), "kubectl", "get", "binddefinition", ownershipBD)
+				_, err := utils.Run(cmd)
+				if err != nil {
+					return nil
+				}
+				return fmt.Errorf("BindDefinition %s still exists", ownershipBD)
+			}, reconcileTimeout, pollInterval).Should(Succeed())
+			for _, name := range []string{ownershipHelmSA, ownershipUnknownSA} {
+				Consistently(func() error {
+					return checkResourceExists("serviceaccount", name, edgeCaseNS)
+				}, 15*time.Second, pollInterval).Should(Succeed(), "transferred ServiceAccount %s must survive BindDefinition deletion", name)
+				cmd = utils.CommandContext(context.Background(), "kubectl", "get", "sa", name, "-n", edgeCaseNS,
+					"-o", "jsonpath={.metadata.annotations}")
+				output, err = utils.Run(cmd)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(string(output)).NotTo(ContainSubstring("referenced-by"))
+				Expect(string(output)).NotTo(ContainSubstring("external-field-managers"))
+			}
+		})
+	})
+
 	Context("RoleRefsValid Condition Self-Healing", func() {
 		It("should transition RoleRefsValid from False to True when missing role is created", func() {
 			By("Creating a BindDefinition that references a non-existent ClusterRole")
@@ -388,3 +621,31 @@ spec:
 		})
 	})
 })
+
+func applyServerSideFieldManager(manifest, manager string, force bool) {
+	args := []string{"apply", "--server-side", "--field-manager=" + manager}
+	if force {
+		args = append(args, "--force-conflicts")
+	}
+	args = append(args, "-f", "-")
+	cmd := utils.CommandContext(context.Background(), "kubectl", args...)
+	cmd.Stdin = strings.NewReader(manifest)
+	output, err := utils.Run(cmd)
+	ExpectWithOffset(2, err).NotTo(HaveOccurred(), "Failed to apply SSA manifest: %s\nOutput: %s", manifest, string(output))
+}
+
+func startEdgeMetricsPortForward(namespace, service string, localPort int) func() {
+	ctx, cancel := context.WithCancel(context.Background())
+	cmd := utils.CommandContext(ctx, "kubectl", "port-forward", "-n", namespace,
+		fmt.Sprintf("svc/%s-metrics", service), fmt.Sprintf("%d:8080", localPort))
+	cmd.Stdout = GinkgoWriter
+	cmd.Stderr = GinkgoWriter
+	ExpectWithOffset(1, cmd.Start()).To(Succeed())
+	return func() {
+		cancel()
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		}
+	}
+}

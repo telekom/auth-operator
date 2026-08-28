@@ -191,6 +191,17 @@ var (
 		[]string{labelBindDefinition},
 	)
 
+	// ServiceAccountOwnershipTakeovers counts generated ServiceAccounts that
+	// auth-operator reclassified as external after an SSA ownership conflict.
+	ServiceAccountOwnershipTakeovers = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: Namespace,
+			Name:      "serviceaccount_ownership_takeovers_total",
+			Help:      "Total number of generated ServiceAccounts transferred to external SSA managers per BindDefinition",
+		},
+		[]string{labelBindDefinition},
+	)
+
 	// ExternalSAsReferenced tracks the number of external (pre-existing) ServiceAccounts
 	// referenced by each BindDefinition. These SAs are used but not managed by the operator.
 	ExternalSAsReferenced = prometheus.NewGaugeVec(
@@ -329,6 +340,7 @@ func allCollectors() []prometheus.Collector {
 		ManagedResources,
 		WebhookRequestsTotal,
 		ServiceAccountSkippedPreExisting,
+		ServiceAccountOwnershipTakeovers,
 		ExternalSAsReferenced,
 		AuthorizerRequestsTotal,
 		AuthorizerRequestDuration,

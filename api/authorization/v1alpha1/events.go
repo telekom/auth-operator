@@ -54,6 +54,10 @@ const (
 	// because other BindDefinitions still reference it.
 	EventReasonServiceAccountRetained = "ServiceAccountRetained"
 
+	// EventReasonServiceAccountOwnershipTransferred indicates auth-operator
+	// relinquished a generated ServiceAccount after an external SSA takeover.
+	EventReasonServiceAccountOwnershipTransferred = "ServiceAccountOwnershipTransferred"
+
 	// EventReasonReconciled indicates a resource was successfully reconciled.
 	EventReasonReconciled = "Reconciled"
 

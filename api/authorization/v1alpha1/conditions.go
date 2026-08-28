@@ -190,6 +190,16 @@ const (
 	ServiceAccountRefsSkippedReason AuthZConditionReason = "ServiceAccountRefsSkipped"
 	// ServiceAccountRefsSkippedMessage is the format string for skipped ServiceAccounts.
 	ServiceAccountRefsSkippedMessage AuthZConditionMessage = "Skipped ServiceAccount subjects: %v"
+
+	// ServiceAccountOwnershipTransferredCondition records that auth-operator
+	// relinquished a generated ServiceAccount after an external SSA manager took
+	// ownership of fields on it. The BindDefinition can remain Ready because the
+	// ServiceAccount is retained and treated as an external reference.
+	ServiceAccountOwnershipTransferredCondition AuthZConditionType = "ServiceAccountOwnershipTransferred"
+	// ServiceAccountOwnershipTransferredReason identifies an SSA-driven takeover.
+	ServiceAccountOwnershipTransferredReason AuthZConditionReason = "ExternalManagerTakeover"
+	// ServiceAccountOwnershipTransferredMessage lists the transferred ServiceAccounts.
+	ServiceAccountOwnershipTransferredMessage AuthZConditionMessage = "ServiceAccount lifecycle ownership relinquished after external managers retained label fields: %v"
 )
 
 // ReadyCondition is the generic Ready condition type shared by all CRD controllers.

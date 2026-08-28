@@ -102,6 +102,7 @@ resources:
 | `auth_operator_role_refs_missing` | Gauge | `binddefinition` | Number of referenced Roles/ClusterRoles that do not exist for a BindDefinition or RestrictedBindDefinition. Non-zero triggers a faster 10 s requeue. |
 | `auth_operator_namespaces_active` | Gauge | `binddefinition` | Number of active (non-terminating) namespaces matching selectors. |
 | `auth_operator_serviceaccount_skipped_preexisting_total` | Counter | `binddefinition` | Pre-existing ServiceAccounts that were intentionally not adopted (no OwnerRef added). |
+| `auth_operator_serviceaccount_ownership_takeovers_total` | Counter | `binddefinition` | Generated ServiceAccounts externalized after label ownership conflicts. The exact manager is recorded in the condition, event, and controller log. |
 | `auth_operator_external_serviceaccounts_referenced` | Gauge | `binddefinition` | External pre-existing ServiceAccounts referenced by each BindDefinition. These ServiceAccounts are used but not managed by the operator. |
 | `auth_operator_namespace_fanout_skipped_total` | Counter | — | BindDefinitions filtered out during namespace-event fan-out because no namespace field or selector matched. |
 | `auth_operator_namespace_fanout_enqueued_total` | Counter | — | BindDefinitions enqueued during namespace-event fan-out because namespace routing matched. |
@@ -177,6 +178,23 @@ thresholds and `for` durations to your environment.
     severity: warning
   annotations:
     summary: "Auth-operator {{ $labels.controller }} p99 latency >10 s"
+```
+
+### ServiceAccount Ownership Takeover
+
+Alert immediately when a generated ServiceAccount is transferred to an
+external manager. This is expected during recovery races such as a recreated
+namespace where auth-operator creates the account before Helm, but it should be
+reviewed because future lifecycle ownership has changed.
+
+```yaml
+- alert: AuthOperatorServiceAccountOwnershipTransferred
+  expr: increase(auth_operator_serviceaccount_ownership_takeovers_total[10m]) > 0
+  labels:
+    severity: warning
+  annotations:
+    summary: "BindDefinition {{ $labels.binddefinition }} relinquished ServiceAccount lifecycle ownership"
+    description: "Inspect the ServiceAccountOwnershipTransferred condition or warning event for the external SSA manager."
 ```
 
 ### Missing Role References
