@@ -13,6 +13,7 @@ A Kubernetes operator for managing dynamic RBAC through Custom Resource Definiti
 - 🔄 **Auto-Discovery** — Automatically discovers new CRDs and updates roles accordingly
 - 🛡️ **Drift Protection** — Periodically reconciles to prevent unauthorized manual changes
 - 📜 **Self-Signed TLS** — No cert-manager required; uses [cert-controller](https://github.com/open-policy-agent/cert-controller) for automatic certificate rotation
+- 🚫 **Namespace Deletion Protection** — Platform and opted-in namespaces require an explicit allow-deletion annotation before deletion; system namespaces are never deletable, with no admin bypass (ValidatingAdmissionPolicy + webhook fallback)
 
 ---
 

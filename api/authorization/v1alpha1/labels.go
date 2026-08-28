@@ -23,6 +23,13 @@ const (
 
 	// LabelKeyThirdParty identifies the specific third party that owns the namespace.
 	LabelKeyThirdParty = "t-caas.telekom.com/thirdparty"
+
+	// LabelKeyDeletionProtection opts a namespace into deletion protection.
+	// Namespaces carrying this label with the value DeletionProtectionEnabled
+	// can only be deleted after the AnnotationKeyAllowDeletion escape hatch
+	// has been set. Platform-owned namespaces are protected implicitly and
+	// do not need this label.
+	LabelKeyDeletionProtection = "t-caas.telekom.com/deletion-protection"
 )
 
 // Annotation keys used by the auth-operator.
@@ -37,6 +44,12 @@ const (
 	// ownership caused auth-operator to relinquish ServiceAccount lifecycle ownership.
 	// The value is a sorted, comma-separated list of field manager names.
 	AnnotationKeyExternalFieldManagers = "authorization.t-caas.telekom.com/external-field-managers"
+
+	// AnnotationKeyAllowDeletion is the explicit escape hatch that permits
+	// deletion of a deletion-protected namespace. It must be set to
+	// AllowDeletionTrue on the namespace before the DELETE request; it never
+	// unlocks hard-protected system namespaces (kube-system and friends).
+	AnnotationKeyAllowDeletion = "t-caas.telekom.com/allow-deletion"
 )
 
 // Owner label values.
@@ -49,4 +62,15 @@ const (
 
 	// OwnerThirdParty indicates the namespace is owned by a third party.
 	OwnerThirdParty = "thirdparty"
+)
+
+// Deletion protection label and annotation values.
+const (
+	// DeletionProtectionEnabled is the only LabelKeyDeletionProtection value
+	// that opts a namespace into deletion protection.
+	DeletionProtectionEnabled = "enabled"
+
+	// AllowDeletionTrue is the only AnnotationKeyAllowDeletion value that
+	// lifts deletion protection for a protected namespace.
+	AllowDeletionTrue = "true"
 )

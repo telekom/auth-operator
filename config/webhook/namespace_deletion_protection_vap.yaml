@@ -1,0 +1,64 @@
+# Standalone namespace deletion protection via ValidatingAdmissionPolicy.
+#
+# Works on ANY Kubernetes >= 1.30 cluster - no auth-operator installation
+# required: kubectl apply -f namespace-deletion-protection-vap.yaml
+#
+# Semantics (identical to the auth-operator Helm chart with default values;
+# see chart/auth-operator/templates/namespace-deletion-protection-vap.yaml for
+# the templated variant with extra protected namespaces and legacy TDG labels):
+#   - kube-system, kube-public, kube-node-lease and default can never be
+#     deleted; no annotation unlocks them.
+#   - Namespaces labeled t-caas.telekom.com/owner=platform or
+#     t-caas.telekom.com/deletion-protection=enabled can only be deleted after
+#     annotating them with t-caas.telekom.com/allow-deletion="true".
+#   - There is NO admin bypass: the policy applies to every principal,
+#     including system:masters.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: namespace-deletion-protection
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["DELETE"]
+        resources: ["namespaces"]
+        scope: "Cluster"
+  variables:
+    # DELETE requests carry the namespace in oldObject; object is null.
+    - name: nsLabels
+      expression: >-
+        has(oldObject.metadata.labels) ? oldObject.metadata.labels : {}
+    - name: hardProtected
+      expression: >-
+        oldObject.metadata.name in ['kube-system', 'kube-public', 'kube-node-lease', 'default']
+    - name: protectedByLabel
+      expression: >-
+        ('t-caas.telekom.com/owner' in variables.nsLabels && variables.nsLabels['t-caas.telekom.com/owner'] == 'platform')
+        || ('t-caas.telekom.com/deletion-protection' in variables.nsLabels && variables.nsLabels['t-caas.telekom.com/deletion-protection'] == 'enabled')
+    - name: allowDeletion
+      expression: >-
+        has(oldObject.metadata.annotations)
+        && 't-caas.telekom.com/allow-deletion' in oldObject.metadata.annotations
+        && oldObject.metadata.annotations['t-caas.telekom.com/allow-deletion'] == 'true'
+  validations:
+    # Hard-protected system namespaces: no annotation can unlock them.
+    - expression: "!variables.hardProtected"
+      messageExpression: >-
+        'Namespace ' + oldObject.metadata.name + ' is a protected system namespace and cannot be deleted'
+      reason: Forbidden
+    # Protected namespaces require the allow-deletion escape hatch.
+    - expression: "!variables.protectedByLabel || variables.allowDeletion"
+      messageExpression: >-
+        'Namespace ' + oldObject.metadata.name + ' is deletion-protected; annotate it with t-caas.telekom.com/allow-deletion="true" and retry to confirm deletion'
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: namespace-deletion-protection
+spec:
+  policyName: namespace-deletion-protection
+  validationActions: ["Deny"]

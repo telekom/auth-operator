@@ -257,6 +257,58 @@ the assignment.
 | `--authorize-rate-burst` | Burst size for authorize endpoint rate limiter | `200` |
 | `--authorize-auth-token-file` | Bearer-token file required by `/authorize` callers | `""` |
 | `--allow-unauthenticated-authorize` | Explicit insecure opt-out for unauthenticated `/authorize` callers when no token file is configured | `false` |
+| `--namespace-deletion-protection` | Enable namespace deletion protection (no admin bypass; see [Namespace Deletion Protection](#namespace-deletion-protection)) | `true` |
+| `--protected-namespaces` | Additional namespace names unconditionally protected from deletion, on top of `kube-system`, `kube-public`, `kube-node-lease`, `default` | `[]` |
+
+### Namespace Deletion Protection
+
+Protects critical namespaces from accidental deletion. Three protection tiers:
+
+1. **System namespaces** — `kube-system`, `kube-public`, `kube-node-lease`,
+   `default`, plus any names listed in `--protected-namespaces` /
+   `namespaceDeletionProtection.extraProtectedNamespaces` — can **never** be
+   deleted while the feature is enabled. No annotation unlocks them.
+2. **Platform namespaces** — carrying `t-caas.telekom.com/owner=platform` (or,
+   with `--tdg-migration`, legacy `schiff.telekom.de/owner` in
+   `platform`/`schiff`) — are protected by default.
+3. **Opt-in namespaces** — any other namespace can opt in with the label
+   `t-caas.telekom.com/deletion-protection=enabled`.
+
+Deleting a tier-2/3 namespace is a deliberate two-step operation:
+
+```bash
+kubectl annotate namespace my-protected-ns t-caas.telekom.com/allow-deletion="true"
+kubectl delete namespace my-protected-ns
+```
+
+The annotation only lifts *protection* — normal BindDefinition DELETE
+authorization still applies afterwards.
+
+**There is no admin bypass.** Unlike the other namespace webhook checks,
+deletion protection binds `kubernetes-admin`, `system:masters`, and all
+hardcoded bypass ServiceAccounts as well. Break-glass for system namespaces is
+deploying with `namespaceDeletionProtection.enabled=false`
+(`--namespace-deletion-protection=false`).
+
+Enforcement is layered:
+
+- **ValidatingAdmissionPolicy** (primary, Kubernetes ≥ 1.30): rendered by the
+  Helm chart (`namespaceDeletionProtection.vap: auto|enabled|disabled`), runs
+  in-process in the API server with no webhook availability dependency.
+- **Namespace validating webhook** (fallback): enforces the same rules on
+  clusters without VAP support; requires `namespaceAdmission.enabled=true`.
+
+Note: admission runs before deletion starts; it cannot rescue a namespace that
+is already in `Terminating` phase.
+
+#### Standalone usage on any cluster
+
+The protection also ships as a self-contained manifest that works on any
+Kubernetes ≥ 1.30 cluster without installing auth-operator:
+
+```bash
+kubectl apply -f docs/examples/namespace-deletion-protection-vap.yaml
+```
 
 ### Helm Values
 

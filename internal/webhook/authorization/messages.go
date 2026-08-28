@@ -45,6 +45,20 @@ const (
 	// NamespaceWebhookInternalError is returned to admission clients when the
 	// namespace webhook hits an internal API, selector, or serialization error.
 	NamespaceWebhookInternalError = "internal namespace admission error"
+
+	// DenialSystemNamespaceDeletionFmt is a format string returned when a
+	// hard-protected system namespace is being deleted. No annotation can lift
+	// this protection. Parameter: namespace name.
+	// Kept in sync with the ValidatingAdmissionPolicy in
+	// chart/auth-operator/templates/namespace-deletion-protection-vap.yaml.
+	DenialSystemNamespaceDeletionFmt = "Namespace %s is a protected system namespace and cannot be deleted"
+
+	// DenialProtectedNamespaceDeletionFmt is a format string returned when a
+	// deletion-protected namespace is being deleted without the allow-deletion
+	// escape hatch. Parameters: namespace name, annotation key.
+	// Kept in sync with the ValidatingAdmissionPolicy in
+	// chart/auth-operator/templates/namespace-deletion-protection-vap.yaml.
+	DenialProtectedNamespaceDeletionFmt = "Namespace %s is deletion-protected; annotate it with %s=\"true\" and retry to confirm deletion"
 )
 
 // ErrNamespaceWebhookInternal hides internal API and selector details from

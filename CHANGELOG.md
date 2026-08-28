@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Namespace deletion protection: platform-owned namespaces
+  (`t-caas.telekom.com/owner=platform`) and namespaces opted in via the
+  `t-caas.telekom.com/deletion-protection=enabled` label can only be deleted
+  after setting the `t-caas.telekom.com/allow-deletion="true"` annotation
+  (deliberate two-step). `kube-system`, `kube-public`, `kube-node-lease`,
+  `default`, and any names in `namespaceDeletionProtection.extraProtectedNamespaces`
+  are never deletable. Enforced by a ValidatingAdmissionPolicy (Kubernetes
+  >= 1.30, primary) and the namespace validating webhook (fallback), plus a
+  standalone manifest at `docs/examples/namespace-deletion-protection-vap.yaml`
+  for clusters without auth-operator. **Behavior change:** bypass principals
+  (`kubernetes-admin`, `system:masters`, bypass ServiceAccounts) can no longer
+  delete protected namespaces without the annotation, and the annotation never
+  unlocks system namespaces; disable via
+  `namespaceDeletionProtection.enabled=false` for emergency rollback.
+
 ## [0.5.0-rc.7] — Pre-release
 
 ### CI
