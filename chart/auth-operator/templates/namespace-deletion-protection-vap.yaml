@@ -1,0 +1,107 @@
+{{- /*
+Namespace deletion protection via ValidatingAdmissionPolicy (Kubernetes >= 1.30).
+
+Primary enforcement path: runs in-process in the API server, before validating
+webhooks, and applies to ALL principals including system:masters. The namespace
+validating webhook implements the same rules as fallback for clusters without
+VAP support — keep the CEL below in sync with
+internal/webhook/authorization/namespace_deletion_protection.go.
+
+Rules:
+  - DELETE of a hard-protected system namespace is always denied.
+  - DELETE of a label-protected namespace requires the allow-deletion annotation.
+  - UPDATE that strips the protection labels from a protected namespace requires
+    the same annotation, so protection cannot be sidestepped by removing the
+    label first and deleting afterwards.
+*/}}
+{{- $vapMode := .Values.namespaceDeletionProtection.vap | default "auto" }}
+{{- if not (has $vapMode (list "auto" "enabled" "disabled")) }}
+{{- fail (printf "namespaceDeletionProtection.vap must be one of auto, enabled, disabled (got %q)" $vapMode) }}
+{{- end }}
+{{- $vapSupported := .Capabilities.APIVersions.Has "admissionregistration.k8s.io/v1/ValidatingAdmissionPolicy" }}
+{{- if and .Values.namespaceDeletionProtection.enabled (or (eq $vapMode "enabled") (and (eq $vapMode "auto") $vapSupported)) }}
+{{- /* toJson keeps arbitrary user-supplied names CEL-safe: a JSON string/list literal is valid CEL. */}}
+{{- $hardProtected := concat (list "kube-system" "kube-public" "kube-node-lease" "default") .Values.namespaceDeletionProtection.extraProtectedNamespaces }}
+{{- $tdgMigration := eq (toString .Values.webhookServer.tdgMigration) "true" }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ include "auth-operator.fullname" . }}-namespace-deletion-protection
+  labels:
+  {{- include "auth-operator.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["DELETE", "UPDATE"]
+        resources: ["namespaces"]
+        scope: "Cluster"
+  variables:
+    # DELETE requests carry the namespace in oldObject; object is null.
+    # UPDATE requests carry the previous state in oldObject and the new one in object.
+    - name: oldLabels
+      expression: >-
+        has(oldObject.metadata.labels) ? oldObject.metadata.labels : {}
+    - name: newLabels
+      expression: >-
+        object != null && has(object.metadata.labels) ? object.metadata.labels : {}
+    - name: hardProtected
+      expression: >-
+        oldObject.metadata.name in {{ $hardProtected | toJson }}
+    - name: oldProtected
+      expression: >-
+        ('t-caas.telekom.com/owner' in variables.oldLabels && variables.oldLabels['t-caas.telekom.com/owner'] == 'platform')
+        {{- if $tdgMigration }}
+        || ('schiff.telekom.de/owner' in variables.oldLabels && variables.oldLabels['schiff.telekom.de/owner'] in ['platform', 'schiff'])
+        {{- end }}
+        || ('t-caas.telekom.com/deletion-protection' in variables.oldLabels && variables.oldLabels['t-caas.telekom.com/deletion-protection'] == 'enabled')
+    - name: newProtected
+      expression: >-
+        ('t-caas.telekom.com/owner' in variables.newLabels && variables.newLabels['t-caas.telekom.com/owner'] == 'platform')
+        {{- if $tdgMigration }}
+        || ('schiff.telekom.de/owner' in variables.newLabels && variables.newLabels['schiff.telekom.de/owner'] in ['platform', 'schiff'])
+        {{- end }}
+        || ('t-caas.telekom.com/deletion-protection' in variables.newLabels && variables.newLabels['t-caas.telekom.com/deletion-protection'] == 'enabled')
+    - name: allowDeletionOld
+      expression: >-
+        has(oldObject.metadata.annotations)
+        && 't-caas.telekom.com/allow-deletion' in oldObject.metadata.annotations
+        && oldObject.metadata.annotations['t-caas.telekom.com/allow-deletion'] == 'true'
+    - name: allowDeletionNew
+      expression: >-
+        object != null && has(object.metadata.annotations)
+        && 't-caas.telekom.com/allow-deletion' in object.metadata.annotations
+        && object.metadata.annotations['t-caas.telekom.com/allow-deletion'] == 'true'
+  validations:
+    # Hard-protected system namespaces: no annotation can unlock them.
+    # Message kept in sync with DenialSystemNamespaceDeletionFmt.
+    - expression: "request.operation != 'DELETE' || !variables.hardProtected"
+      messageExpression: >-
+        'Namespace ' + oldObject.metadata.name + ' is a protected system namespace and cannot be deleted'
+      reason: Forbidden
+    # Protected namespaces require the allow-deletion escape hatch.
+    # Message kept in sync with DenialProtectedNamespaceDeletionFmt.
+    - expression: "request.operation != 'DELETE' || !variables.oldProtected || variables.allowDeletionOld"
+      messageExpression: >-
+        'Namespace ' + oldObject.metadata.name + ' is deletion-protected; annotate it with t-caas.telekom.com/allow-deletion="true" and retry to confirm deletion'
+      reason: Forbidden
+    # Stripping the protection labels requires the same escape hatch, so an
+    # UPDATE cannot sidestep deletion protection.
+    # Message kept in sync with DenialProtectionRemovalFmt.
+    - expression: "request.operation != 'UPDATE' || !variables.oldProtected || variables.newProtected || variables.allowDeletionNew"
+      messageExpression: >-
+        'Namespace ' + oldObject.metadata.name + ' is deletion-protected; removing protection labels requires the t-caas.telekom.com/allow-deletion="true" annotation'
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ include "auth-operator.fullname" . }}-namespace-deletion-protection
+  labels:
+  {{- include "auth-operator.labels" . | nindent 4 }}
+spec:
+  policyName: {{ include "auth-operator.fullname" . }}-namespace-deletion-protection
+  validationActions: ["Deny"]
+{{- end }}

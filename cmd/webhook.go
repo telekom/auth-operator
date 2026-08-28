@@ -50,6 +50,8 @@ var (
 	allowUnauthenticatedAuthorize              bool
 	webhookLeaderElect                         bool
 	bindDefinitionNamespaceSelectorLabelGroups []string
+	namespaceDeletionProtection                bool
+	protectedNamespaces                        []string
 )
 
 // webhookCmd represents the webhook command.
@@ -318,6 +320,8 @@ func configureWebhooks(mgr manager.Manager, tp *tracing.Provider) error {
 		Decoder:                         decoder,
 		TDGMigration:                    enableTDGMigration,
 		DisableCAPIOperatorUpdateBypass: !enableCAPIOperatorUpdateBypass,
+		DeletionProtection:              namespaceDeletionProtection,
+		ExtraProtectedNamespaces:        protectedNamespaces,
 	}
 	mgr.GetWebhookServer().Register("/validate-v1-namespace", &webhook.Admission{Handler: namespaceValidator})
 
@@ -393,6 +397,13 @@ func init() {
 	webhookCmd.Flags().StringSliceVar(&bindDefinitionNamespaceSelectorLabelGroups, "binddefinition-namespace-selector-label-group",
 		[]string{authorizationv1alpha1.DefaultNamespaceAdmissionSelectorLabelGroup},
 		"DNS label group allowed in BindDefinition namespace admission selectors; repeat or comma-separate to allow multiple groups")
+	webhookCmd.Flags().BoolVar(&namespaceDeletionProtection, "namespace-deletion-protection", true,
+		"Enable namespace deletion protection: platform-owned and opted-in namespaces can only be deleted "+
+			"after the allow-deletion annotation is set, and system namespaces (kube-system, kube-public, "+
+			"kube-node-lease, default) are never deletable. There is no admin bypass; disable only for emergency rollback.")
+	webhookCmd.Flags().StringSliceVar(&protectedNamespaces, "protected-namespaces", []string{},
+		"Additional namespace names that are unconditionally protected from deletion, "+
+			"on top of the built-in system namespaces; repeat or comma-separate for multiple names")
 
 	webhookCmd.Flags().BoolVar(&webhookLeaderElect, "leader-elect", false,
 		"Enable leader election for the webhook manager. Required when running "+

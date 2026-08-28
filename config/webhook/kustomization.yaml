@@ -12,6 +12,11 @@ resources:
 # Namespace admission webhooks are intentionally not installed by default.
 # Opt-in overlays must add namespace_webhooks.yaml and matching cert-rotation
 # flags for the namespace webhook configuration names.
+#
+# Namespace deletion protection via ValidatingAdmissionPolicy (K8s >= 1.30) is
+# likewise opt-in: overlays add namespace_deletion_protection_vap.yaml. The
+# namespace validating webhook enforces the same rules as fallback when the
+# cluster has no VAP support.
 
 configurations:
 - kustomizeconfig.yaml

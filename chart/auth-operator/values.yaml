@@ -203,6 +203,32 @@ namespaceAdmission:
   # enforce T-CaaS namespace ownership before bootstrap policies exist.
   enabled: false
 
+namespaceDeletionProtection:
+  # Protect namespaces from accidental deletion. Platform-owned namespaces
+  # (t-caas.telekom.com/owner=platform) and namespaces labeled
+  # t-caas.telekom.com/deletion-protection=enabled can only be deleted after
+  # the t-caas.telekom.com/allow-deletion="true" annotation is set. System
+  # namespaces (kube-system, kube-public, kube-node-lease, default) are never
+  # deletable. There is intentionally NO admin bypass: even system:masters
+  # must set the annotation first. Disabling this value is the only break-glass
+  # for system namespaces.
+  # Enforced twice: by a ValidatingAdmissionPolicy (primary, in-process in the
+  # API server) and by the namespace validating webhook (fallback for clusters
+  # without VAP support; requires namespaceAdmission.enabled).
+  enabled: true
+  # Additional namespace names that are unconditionally protected from
+  # deletion, on top of the built-in system namespaces.
+  extraProtectedNamespaces: []
+  # ValidatingAdmissionPolicy rendering mode:
+  #   auto     - render when the cluster supports admissionregistration.k8s.io/v1
+  #              ValidatingAdmissionPolicy (Kubernetes >= 1.30). Note: offline
+  #              `helm template` only renders the VAP when
+  #              `--api-versions admissionregistration.k8s.io/v1/ValidatingAdmissionPolicy`
+  #              is passed.
+  #   enabled  - always render (install fails visibly on clusters without VAP).
+  #   disabled - never render; webhook-only enforcement.
+  vap: auto
+
 metrics:
   # Require authentication and authorization for the /metrics endpoint.
   # Enabled by default for secure Helm installs. TokenReview and

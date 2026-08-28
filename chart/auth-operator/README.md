@@ -131,6 +131,29 @@ default. Enable them only after the bootstrap `BindDefinition` and
 |-----------|-------------|---------|
 | `namespaceAdmission.enabled` | Install namespace create/update/delete admission webhooks | `false` |
 
+### Namespace Deletion Protection
+
+Protects critical namespaces from accidental deletion. Platform-owned
+namespaces (`t-caas.telekom.com/owner=platform`) and namespaces labeled
+`t-caas.telekom.com/deletion-protection=enabled` can only be deleted after
+annotating them with `t-caas.telekom.com/allow-deletion="true"`; removing
+those protection labels requires the same annotation. The system
+namespaces `kube-system`, `kube-public`, `kube-node-lease`, and `default` are
+never deletable while protection is enabled. There is **no admin bypass** —
+even `system:masters` must set the annotation; disabling
+`namespaceDeletionProtection.enabled` is the only break-glass for system
+namespaces.
+
+Primary enforcement is a `ValidatingAdmissionPolicy` (Kubernetes ≥ 1.30); the
+namespace validating webhook (`namespaceAdmission.enabled`) enforces the same
+rules as fallback on clusters without VAP support.
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `namespaceDeletionProtection.enabled` | Enable namespace deletion protection (VAP + webhook fallback) | `true` |
+| `namespaceDeletionProtection.extraProtectedNamespaces` | Additional namespace names unconditionally protected from deletion | `[]` |
+| `namespaceDeletionProtection.vap` | VAP rendering mode: `auto` (render when the cluster supports it), `enabled`, or `disabled`. With `auto`, offline `helm template` needs `--api-versions admissionregistration.k8s.io/v1/ValidatingAdmissionPolicy` to render the VAP | `auto` |
+
 ### Service Account Configuration
 
 The controller and webhook server use separate ServiceAccounts with dedicated

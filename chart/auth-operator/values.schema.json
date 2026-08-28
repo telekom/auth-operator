@@ -548,6 +548,32 @@
         }
       }
     },
+    "namespaceDeletionProtection": {
+      "type": "object",
+      "description": "Namespace deletion protection configuration. Platform-owned and opted-in namespaces require the allow-deletion annotation before deletion; system namespaces are never deletable. No admin bypass.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable namespace deletion protection (ValidatingAdmissionPolicy plus webhook fallback).",
+          "default": true
+        },
+        "extraProtectedNamespaces": {
+          "type": "array",
+          "description": "Additional namespace names that are unconditionally protected from deletion, on top of the built-in system namespaces.",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "vap": {
+          "type": "string",
+          "description": "ValidatingAdmissionPolicy rendering mode: auto (render when the cluster supports it), enabled (always render), or disabled (webhook-only enforcement).",
+          "enum": ["auto", "enabled", "disabled"],
+          "default": "auto"
+        }
+      }
+    },
     "metrics": {
       "type": "object",
       "description": "Metrics and monitoring configuration.",

@@ -32,6 +32,15 @@ type NamespaceValidator struct {
 	Decoder                         admission.Decoder
 	TDGMigration                    bool
 	DisableCAPIOperatorUpdateBypass bool
+
+	// DeletionProtection enables namespace deletion protection: platform and
+	// opted-in namespaces require the allow-deletion annotation, and system
+	// namespaces are never deletable. There is intentionally no admin bypass.
+	DeletionProtection bool
+	// ExtraProtectedNamespaces are additional namespace names that are
+	// unconditionally protected from deletion, on top of the built-in
+	// hard-protected system namespaces.
+	ExtraProtectedNamespaces []string
 }
 
 // Handle validates namespace operations based on BindDefinition configurations.
@@ -48,6 +57,21 @@ func (v *NamespaceValidator) Handle(ctx context.Context, req admission.Request) 
 
 	logger.V(2).Info("namespace validator webhook triggered",
 		"namespace", req.Name, "operation", req.Operation, "username", req.UserInfo.Username)
+
+	// Deletion protection runs BEFORE CheckBypass so that no principal,
+	// including kubernetes-admin/system:masters, can bypass it.
+	if v.DeletionProtection {
+		switch req.Operation {
+		case admissionv1.Delete:
+			if resp := v.checkDeletionProtection(ctx, req); resp != nil {
+				return *resp
+			}
+		case admissionv1.Update:
+			if resp := v.checkProtectionDowngrade(ctx, req); resp != nil {
+				return *resp
+			}
+		}
+	}
 
 	// Check for bypass conditions
 	bypassResult := CheckBypass(
