@@ -45,16 +45,26 @@ for command in docker flock go helm kind kubectl readlink stat timeout; do
 	fi
 done
 
+umask 077
+lock_uid=$(id -u)
+if [[ ! -e "$lock_file" && ! -L "$lock_file" ]]; then
+	# noclobber makes creation atomic and refuses a file that appeared after the
+	# existence check. Never use touch here: it follows a symlink and can block
+	# forever when an attacker pre-creates a FIFO at the fixed path.
+	if ! (set -C; : >"$lock_file") 2>/dev/null; then
+		echo "unable to create fixed creator tracking lock file: $lock_file" >&2
+		exit 1
+	fi
+fi
 if [[ -L "$lock_file" ]]; then
 	echo "refusing symbolic-link lock file: $lock_file" >&2
 	exit 1
 fi
-umask 077
-touch "$lock_file"
-chmod 0600 "$lock_file"
-lock_mode=$(stat -c %a "$lock_file")
-if [[ $lock_mode != 600 ]]; then
-	echo "creator tracking lock mode is $lock_mode, want 600" >&2
+lock_type=$(stat -c %F "$lock_file" 2>/dev/null || true)
+lock_owner=$(stat -c %u "$lock_file" 2>/dev/null || true)
+lock_mode=$(stat -c %a "$lock_file" 2>/dev/null || true)
+if [[ $lock_type != "regular file" || $lock_owner != "$lock_uid" || $lock_mode != 600 ]]; then
+	echo "creator tracking lock must be an owned regular file with mode 600: $lock_file" >&2
 	exit 1
 fi
 exec 9<>"$lock_file"
