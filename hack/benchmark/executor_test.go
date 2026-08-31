@@ -42,10 +42,10 @@ func TestCleanupCellUsesOwnedLabel(t *testing.T) {
 
 func TestObjectForUsesCanonicalKindsAndServiceAccountSubjects(t *testing.T) {
 	for resource, wantKind := range map[string]string{
-		resourceServiceAccount:     "ServiceAccount",
-		resourceRoleBinding:        "RoleBinding",
-		resourceClusterRoleBinding: "ClusterRoleBinding",
-		resourceBindDefinition:     "BindDefinition",
+		resourceServiceAccount:     kindServiceAccount,
+		resourceRoleBinding:        kindRoleBinding,
+		resourceClusterRoleBinding: kindClusterRoleBinding,
+		resourceBindDefinition:     kindBindDefinition,
 	} {
 		cell := Cell{Engine: engineMap, Tier: "t1", Mode: modeProtect, RunID: fallbackRunID, Phase: phaseCreate, Kind: resource}
 		s, err := specFor(resource)
@@ -79,16 +79,16 @@ func TestObjectForUsesCanonicalKindsAndServiceAccountSubjects(t *testing.T) {
 
 func TestObjectForUsesCanonicalKinds(t *testing.T) {
 	want := map[string]string{
-		resourceNamespace:          "Namespace",
-		resourceServiceAccount:     "ServiceAccount",
-		resourceSecret:             "Secret",
-		resourceRole:               "Role",
-		resourceRoleBinding:        "RoleBinding",
-		resourceClusterRole:        "ClusterRole",
-		resourceClusterRoleBinding: "ClusterRoleBinding",
-		resourceRoleDefinition:     "RoleDefinition",
-		resourceBindDefinition:     "BindDefinition",
-		resourceRBACPolicy:         "RBACPolicy",
+		resourceNamespace:          kindNamespace,
+		resourceServiceAccount:     kindServiceAccount,
+		resourceSecret:             kindSecret,
+		resourceRole:               kindRole,
+		resourceRoleBinding:        kindRoleBinding,
+		resourceClusterRole:        kindClusterRole,
+		resourceClusterRoleBinding: kindClusterRoleBinding,
+		resourceRoleDefinition:     kindRoleDefinition,
+		resourceBindDefinition:     kindBindDefinition,
+		resourceRBACPolicy:         kindRBACPolicy,
 	}
 	for resource, expectedKind := range want {
 		t.Run(resource, func(t *testing.T) {
