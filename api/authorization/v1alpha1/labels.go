@@ -50,6 +50,18 @@ const (
 	// AllowDeletionTrue on the namespace before the DELETE request; it never
 	// unlocks hard-protected system namespaces (kube-system and friends).
 	AnnotationKeyAllowDeletion = "t-caas.telekom.com/allow-deletion"
+
+	// AnnotationKeyCreatedBy records the best-effort effective request username
+	// observed when a resource was created.
+	AnnotationKeyCreatedBy = "t-caas.telekom.com/created-by"
+
+	// AnnotationKeyCreatedByGroups records the encoded effective request groups
+	// observed when a resource was created.
+	AnnotationKeyCreatedByGroups = "t-caas.telekom.com/created-by-groups"
+
+	// AnnotationKeyUpdatedBy records best-effort encoded effective request
+	// usernames observed on resource updates.
+	AnnotationKeyUpdatedBy = "t-caas.telekom.com/updated-by"
 )
 
 // Owner label values.
