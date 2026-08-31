@@ -86,7 +86,12 @@ type CommandRunner interface {
 }
 type OSCommandRunner struct{}
 
-const linuxCPUInfoProbe = `/^[Mm]odel([[:space:]]+name)?[[:space:]]*:/ {print $2; found=1; exit} /^((Hardware)|(Processor))[[:space:]]*:/ {if (!found) hardware=$2} /^CPU implementer[[:space:]]*:/ {implementer=$2} /^CPU part[[:space:]]*:/ {part=$2} END {if (!found) {if (hardware != "") print hardware; else if (implementer != "") {printf "ARM implementer %s", implementer; if (part != "") printf ", part %s", part; print ""}}}`
+const linuxCPUInfoProbe = `/^[Mm]odel([[:space:]]+name)?[[:space:]]*:/ {print $2; found=1; exit}` +
+	` /^((Hardware)|(Processor))[[:space:]]*:/ {if (!found) hardware=$2}` +
+	` /^CPU implementer[[:space:]]*:/ {implementer=$2}` +
+	` /^CPU part[[:space:]]*:/ {part=$2}` +
+	` END {if (!found) {if (hardware != "") print hardware; else if (implementer != "") {` +
+	`printf "ARM implementer %s", implementer; if (part != "") printf ", part %s", part; print ""}}}`
 
 func (OSCommandRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
 	if filepath.Base(name) != name {
@@ -224,7 +229,7 @@ func CollectEnvironment(parent context.Context, runner CommandRunner, values map
 			e.HostCPUModel = probeVersion("awk", "-F:[[:space:]]*", linuxCPUInfoProbe, "/proc/cpuinfo")
 		}
 		if e.HostCPUModel != "" {
-			e.Evidence["host_cpu_model"] = "live /proc/cpuinfo"
+			e.Evidence[fieldHostCPUModel] = evidenceLiveCPUInfo
 		}
 	}
 	if e.HostMemory == "" {

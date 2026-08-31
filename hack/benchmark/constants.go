@@ -78,6 +78,7 @@ const (
 
 	envBenchCPUs        = "BENCH_CPUS"
 	evidenceLiveMeminfo = "live /proc/meminfo"
+	evidenceLiveCPUInfo = "live /proc/cpuinfo"
 
 	headerChartVersion      = "chart_version"
 	headerErrors429         = "errors_429"
