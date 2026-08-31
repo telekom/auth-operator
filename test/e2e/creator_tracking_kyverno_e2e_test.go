@@ -58,6 +58,30 @@ func decodeKyvernoWhoAmI(data []byte) (kyvernoUserInfo, error) {
 	return response.Status.UserInfo, nil
 }
 
+func kyvernoNestedValue(object map[string]interface{}, path ...string) string {
+	var current interface{} = object
+	for _, key := range path {
+		if index, err := strconv.Atoi(key); err == nil {
+			items, ok := current.([]interface{})
+			if !ok || index < 0 || index >= len(items) || items[index] == nil {
+				return ""
+			}
+			current = items[index]
+			continue
+		}
+		m, ok := current.(map[string]interface{})
+		if !ok {
+			return ""
+		}
+		next, found := m[key]
+		if !found || next == nil {
+			return ""
+		}
+		current = next
+	}
+	return fmt.Sprint(current)
+}
+
 func TestDecodeKyvernoWhoAmI(t *testing.T) {
 	t.Parallel()
 	identity, err := decodeKyvernoWhoAmI([]byte(`{"status":{"userInfo":{"username":"e2e-user%,comma","groups":["system:authenticated","e2e-creator-group"]}}}`))
@@ -69,6 +93,34 @@ func TestDecodeKyvernoWhoAmI(t *testing.T) {
 	}
 	if strings.Join(identity.Groups, ",") != "system:authenticated,e2e-creator-group" {
 		t.Fatalf("groups = %q", identity.Groups)
+	}
+}
+
+func TestKyvernoNestedValue(t *testing.T) {
+	t.Parallel()
+	object := map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"annotations": map[string]interface{}{"present": "value", "nil": nil},
+		},
+		"items": []interface{}{map[string]interface{}{"name": "first"}},
+	}
+	for name, tc := range map[string]struct {
+		path []string
+		want string
+	}{
+		"present":            {path: []string{"metadata", "annotations", "present"}, want: "value"},
+		"missing terminal":   {path: []string{"metadata", "annotations", "missing"}, want: ""},
+		"missing parent":     {path: []string{"status", "ready"}, want: ""},
+		"nil terminal":       {path: []string{"metadata", "annotations", "nil"}, want: ""},
+		"indexed":            {path: []string{"items", "0", "name"}, want: "first"},
+		"index out of range": {path: []string{"items", "1", "name"}, want: ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if got := kyvernoNestedValue(object, tc.path...); got != tc.want {
+				t.Fatalf("value = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -111,25 +163,7 @@ var _ = Describe("Creator Tracking Kyverno", Label("creator-tracking-kyverno"), 
 		}
 		return object, nil
 	}
-	value := func(object map[string]interface{}, path ...string) string {
-		var current interface{} = object
-		for _, key := range path {
-			if index, err := strconv.Atoi(key); err == nil {
-				items, ok := current.([]interface{})
-				if !ok || index < 0 || index >= len(items) {
-					return ""
-				}
-				current = items[index]
-				continue
-			}
-			m, ok := current.(map[string]interface{})
-			if !ok {
-				return ""
-			}
-			current = m[key]
-		}
-		return fmt.Sprint(current)
-	}
+	value := kyvernoNestedValue
 	mustGet := func(ctx context.Context, resource, name string) map[string]interface{} {
 		object, err := get(ctx, resource, name, "-o", "json")
 		ExpectWithOffset(1, err).NotTo(HaveOccurred())
