@@ -93,6 +93,13 @@ func TestInputHash(t *testing.T) {
 	}
 }
 
+func TestValidateOptionsRequiresWarmup(t *testing.T) {
+	o := options{engine: engineBaseline, tier: "t1", mode: modeProtect, ops: 1, churn: 1, identities: 10, sustained: time.Second}
+	if err := validateOptions(o); err == nil {
+		t.Fatal("expected zero warmup to be rejected")
+	}
+}
+
 func TestValidateRunID(t *testing.T) {
 	tests := []struct {
 		name  string
