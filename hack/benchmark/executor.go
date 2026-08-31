@@ -305,7 +305,7 @@ func namespaceFor(runID string) string {
 	return "creator-bench-" + strings.ToLower(strings.ReplaceAll(runID, "_", "-"))
 }
 func ownedLabels(runID string) map[string]interface{} {
-	return map[string]interface{}{"t-caas.telekom.com/benchmark": benchmarkLabelValue, "t-caas.telekom.com/benchmark-run": runID}
+	return map[string]interface{}{benchmarkLabelKey: benchmarkLabelValue, "t-caas.telekom.com/benchmark-run": runID}
 }
 
 // canonicalKind translates the benchmark's internal resource keys to the
@@ -830,7 +830,7 @@ func collectDefinitionUIDsWithClient(ctx context.Context, cl dynamic.Interface, 
 			return nil, fmt.Errorf("list %s resources: %w", kind, err)
 		}
 		for _, u := range list.Items {
-			if u.GetLabels()["t-caas.telekom.com/benchmark"] == benchmarkLabelValue &&
+			if u.GetLabels()[benchmarkLabelKey] == benchmarkLabelValue &&
 				(cell == "" || u.GetLabels()["t-caas.telekom.com/benchmark-cell"] == cell) && u.GetUID() != "" {
 				out = append(out, u.GetUID())
 			}
@@ -942,14 +942,6 @@ func cellFilename(runID string, c Cell, phase string) string {
 	return fmt.Sprintf("cell-%s-%s-%s-%s-%s-%d.json",
 		parts[0], parts[1], parts[2], parts[3], parts[4], c.Concurrency)
 }
-func failedCellRun(c Cell, inputHash, runID, envID string, env Environment, workloadHash, configHash string, err error) CellRun {
-	return CellRun{
-		Cell: c, InputHash: inputHash, RunID: runID, EnvironmentID: envID,
-		Environment: env, WorkloadHash: workloadHash, ConfigHash: configHash,
-		Status: statusFailed, Error: err.Error(),
-		StartedAt: time.Now().UTC().Format(time.RFC3339Nano),
-	}
-}
 func runFailure(r CellRun) error {
 	return fmt.Errorf("benchmark phase %s failed: %s", r.Cell.Phase, r.Error)
 }
@@ -972,7 +964,7 @@ func ensureNamespace(ctx context.Context, base *rest.Config, name, runID string)
 		return getErr
 	}
 	labels := existing.GetLabels()
-	if labels["t-caas.telekom.com/benchmark-run"] != runID || labels["t-caas.telekom.com/benchmark"] != benchmarkLabelValue {
+	if labels["t-caas.telekom.com/benchmark-run"] != runID || labels[benchmarkLabelKey] != benchmarkLabelValue {
 		return fmt.Errorf("refusing to use preexisting namespace %q without exact benchmark ownership", name)
 	}
 	return nil
@@ -1035,7 +1027,7 @@ func deleteOwnedNamespace(ctx context.Context, base *rest.Config, name, runID st
 		return err
 	}
 	labels := u.GetLabels()
-	if labels["t-caas.telekom.com/benchmark-run"] != runID || labels["t-caas.telekom.com/benchmark"] != benchmarkLabelValue {
+	if labels["t-caas.telekom.com/benchmark-run"] != runID || labels[benchmarkLabelKey] != benchmarkLabelValue {
 		return fmt.Errorf("refusing to delete namespace %q without ownership labels", name)
 	}
 	err = r.Delete(ctx, name, metav1.DeleteOptions{})
@@ -1161,25 +1153,6 @@ func deleteOwnedCollection(ctx context.Context, r dynamic.ResourceInterface, sel
 		case <-ctx.Done():
 			return fmt.Errorf("cleanup: %w", ctx.Err())
 		case <-time.After(50 * time.Millisecond):
-		}
-	}
-}
-
-func waitResourceDeleted(ctx context.Context, r dynamic.ResourceInterface, name string) error {
-	ticker := time.NewTicker(25 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		_, err := r.Get(ctx, name, metav1.GetOptions{})
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("verify deletion of %q: %w", name, err)
-		}
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("verify deletion of %q: %w", name, ctx.Err())
-		case <-ticker.C:
 		}
 	}
 }
