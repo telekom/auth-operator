@@ -22,6 +22,7 @@ on:
           - complex
           - ha
           - creator-tracking
+          - kyverno
           - all
 
 permissions:
@@ -465,3 +466,24 @@ jobs:
         if: always()
         run: |
           kind delete cluster --name auth-operator-e2e || true
+
+  e2e-creator-tracking-kyverno:
+    name: E2E Creator Tracking Kyverno
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: e2e-compile
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'kyverno' || github.event.inputs.test_suite == 'all'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Load versions from versions.env
+        run: grep -v '^#' versions.env | grep -v '^$' >> "$GITHUB_ENV"
+      - name: Setup Go, Kind, and Helm
+        uses: ./.github/actions/setup-go-env
+        with:
+          install-kind: 'true'
+          kind-version: ${{ env.KIND_VERSION }}
+          install-helm: 'true'
+          helm-version: ${{ env.HELM_VERSION }}
+      - name: Run isolated Kyverno E2E
+        run: make test-e2e-creator-tracking-kyverno

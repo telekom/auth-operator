@@ -326,3 +326,13 @@ e2e-tests:
 ---
 
 **Need help?** Check the [Full Documentation](README.md) or open an issue.
+
+### Kyverno creator tracking
+
+```bash
+make test-e2e-creator-tracking-kyverno
+```
+
+The isolated target owns a private kubeconfig and fixed cluster name. It
+serializes runs with a lock, rejects stale cluster adoption, and cleans up
+while preserving the test exit status.
