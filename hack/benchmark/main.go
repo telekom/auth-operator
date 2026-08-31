@@ -381,8 +381,8 @@ func validateOptions(o options) error {
 	if !map[string]bool{modeCreateOnly: true, modeProtect: true, modeContributors: true}[o.mode] {
 		return fmt.Errorf("invalid mode %q", o.mode)
 	}
-	if o.ops < 1 || o.churn < 1 || o.identities != 10 || o.warmup < 0 || o.sustained <= 0 {
-		return fmt.Errorf("ops and churn-rounds must be positive, identities must be exactly 10, and sustained-duration must be positive")
+	if o.ops < 1 || o.churn < 1 || o.identities != 10 || o.warmup < 1 || o.sustained <= 0 {
+		return fmt.Errorf("ops, churn-rounds, and warmup must be positive, identities must be exactly 10, and sustained-duration must be positive")
 	}
 	if o.kubeconfig == "" && !o.report {
 		return fmt.Errorf("kubeconfig is required")
