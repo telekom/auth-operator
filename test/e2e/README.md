@@ -956,3 +956,18 @@ make test-e2e-<suite>
 make kind-delete-all
 make test-e2e-cleanup
 ```
+
+### Creator-tracking Kyverno
+
+The isolated Kyverno suite uses the `creator-tracking-kyverno` label, a private
+kubeconfig, and the fixed `auth-operator-e2e-kyverno` cluster. It is separate
+from the normal Helm suite. The runner pins Kyverno application v1.19.0 and
+chart 3.9.0, verifies the archive SHA256, and always cleans up its exact
+cluster.
+
+```bash
+make test-e2e-creator-tracking-kyverno
+```
+
+The target requires Kind, Helm, Docker, and network access for the pinned chart
+archive.
