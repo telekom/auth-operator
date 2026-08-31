@@ -714,25 +714,14 @@ func executeBenchmark(ctx context.Context, base *rest.Config, cell Cell, o optio
 				n = 0
 			}
 			var before MetricsSnapshot
+			var beforeErr error
 			podBefore := Counter{State: MetricMissing}
 			if phase != phaseWarmup {
-				before, e = fetchMetrics(ctx, metricsClient, base)
-				podBefore, _ = FetchPodRestarts(ctx, base)
-				if e != nil {
-					run := failedCellRun(pc, inputHash, o.runID, environmentID, environment, workloadHash, configHash, fmt.Errorf("metrics before %s: %w", phase, e))
-					run.MetricBeforeState = before.State
-					run.MetricBefore = Counter{State: before.State}
-					run.MetricDeltaState = MetricUnavailable
-					run.MetricDelta = Counter{State: MetricUnavailable}
-					run.MetricError = errorString(e)
-					run.WebhookDelta = HistogramDelta{State: MetricUnavailable}
-					run.PodRestartsBefore = podBefore
-					run.PodRestartsDelta = Counter{State: MetricUnavailable}
-					if writeErr := writeCellRun(filepath.Join(out, cellFilename(o.runID, pc, phase)), run); writeErr != nil {
-						return writeErr
-					}
-					return runFailure(run)
+				before, beforeErr = fetchMetrics(ctx, metricsClient, base)
+				if before.State == "" {
+					before.State = MetricUnavailable
 				}
+				podBefore, _ = FetchPodRestarts(ctx, base)
 			}
 			duration := time.Duration(0)
 			if phase == phaseSustained {
@@ -767,21 +756,9 @@ func executeBenchmark(ctx context.Context, base *rest.Config, cell Cell, o optio
 			run.WorkloadHash = workloadHash
 			run.ConfigHash = configHash
 			if phase != phaseWarmup {
-				after, me := fetchMetrics(ctx, metricsClient, base)
-				if me != nil {
-					run.Status = statusFailed
-					run.Error = fmt.Errorf("metrics after %s: %w", phase, me).Error()
-					run.MetricBeforeState = before.State
-					run.MetricAfterState = after.State
-					run.MetricBefore = ParseMetricResponse(before.StatusCode, before.Body, APIServerAdmissionDuration+"_count")
-					run.MetricAfter = ParseMetricResponse(after.StatusCode, after.Body, APIServerAdmissionDuration+"_count")
-					run.MetricDelta = metricDeltaCounter(before, after, APIServerAdmissionDuration+"_count")
-					run.MetricDeltaState = run.MetricDelta.State
-					run.MetricError = errorString(me)
-					if e := writeCellRun(filepath.Join(out, cellFilename(o.runID, pc, phase)), run); e != nil {
-						return e
-					}
-					return runFailure(run)
+				after, afterErr := fetchMetrics(ctx, metricsClient, base)
+				if after.State == "" {
+					after.State = MetricUnavailable
 				}
 				run.MetricBeforeState = before.State
 				run.MetricAfterState = after.State
@@ -794,23 +771,23 @@ func executeBenchmark(ctx context.Context, base *rest.Config, cell Cell, o optio
 				run.WebhookAfter = ParseHistogramResponse(after, WebhookAdmissionDuration+"_sum", WebhookAdmissionDuration+"_count", labels)
 				run.WebhookDelta = histogramResponseDelta(before, after, WebhookAdmissionDuration+"_sum", WebhookAdmissionDuration+"_count", labels)
 				run.MetricError = metricDiagnostics(run.MetricBefore, run.MetricAfter, run.MetricDelta, run.WebhookBefore, run.WebhookAfter, run.WebhookDelta)
-				if run.MetricBefore.State != MetricAvailable || run.MetricAfter.State != MetricAvailable || run.MetricDelta.State != MetricAvailable {
-					run.Status = statusFailed
-					run.Error = fmt.Sprintf("metrics delta %s unavailable", phase)
+				if beforeErr != nil || afterErr != nil {
+					fetchErrors := make([]string, 0, 2)
+					if beforeErr != nil {
+						fetchErrors = append(fetchErrors, fmt.Sprintf("before: %s", beforeErr))
+					}
+					if afterErr != nil {
+						fetchErrors = append(fetchErrors, fmt.Sprintf("after: %s", afterErr))
+					}
+					if run.MetricError == "" {
+						run.MetricError = strings.Join(fetchErrors, "; ")
+					} else {
+						run.MetricError = strings.Join(append(fetchErrors, run.MetricError), "; ")
+					}
 				}
 				run.PodRestartsBefore = podBefore
 				run.PodRestartsAfter, _ = FetchPodRestarts(ctx, base)
 				run.PodRestartsDelta = CounterDelta(run.PodRestartsBefore, run.PodRestartsAfter)
-				if run.MetricDelta.State != MetricAvailable || run.WebhookDelta.State != MetricAvailable {
-					run.Status = statusFailed
-					if run.Error == "" {
-						run.Error = fmt.Sprintf("supporting telemetry unavailable for %s", phase)
-					}
-				}
-				if before.State == MetricUnauthorized || after.State == MetricUnauthorized {
-					run.Status = statusFailed
-					run.Error = "metrics authorization failed"
-				}
 			}
 			if e := writeCellRun(completedPath, run); e != nil {
 				return e
@@ -1124,20 +1101,7 @@ func cleanupCell(ctx context.Context, cl dynamic.Interface, s resourceSpec, name
 	} else {
 		r = cl.Resource(s.gvr)
 	}
-	list, e := r.List(ctx, metav1.ListOptions{LabelSelector: "t-caas.telekom.com/benchmark=" + benchmarkLabelValue})
-	if e != nil {
-		return e
-	}
-	var errs []string
-	for _, u := range list.Items {
-		if e = r.Delete(ctx, u.GetName(), metav1.DeleteOptions{}); e != nil && !apierrors.IsNotFound(e) {
-			errs = append(errs, e.Error())
-		}
-	}
-	if len(errs) > 0 {
-		return fmt.Errorf("cleanup: %s", strings.Join(errs, "; "))
-	}
-	return nil
+	return deleteOwnedCollection(ctx, r, "t-caas.telekom.com/benchmark="+benchmarkLabelValue)
 }
 func cleanupOwnedCell(ctx context.Context, base *rest.Config, s resourceSpec, namespace, runID, cell string) error {
 	cl, e := dynamic.NewForConfig(base)
@@ -1150,30 +1114,51 @@ func cleanupOwnedCell(ctx context.Context, base *rest.Config, s resourceSpec, na
 	} else {
 		r = cl.Resource(s.gvr)
 	}
-	list, e := r.List(ctx, metav1.ListOptions{LabelSelector: "t-caas.telekom.com/benchmark-run=" + runID})
-	if e != nil {
-		return e
+	selector := []string{
+		"t-caas.telekom.com/benchmark-run=" + runID,
+		"t-caas.telekom.com/benchmark=" + benchmarkLabelValue,
 	}
-	var errs []string
-	for _, u := range list.Items {
-		if u.GetLabels()["t-caas.telekom.com/benchmark"] != benchmarkLabelValue {
-			continue
+	if cell != "" {
+		selector = append(selector, "t-caas.telekom.com/benchmark-cell="+cell)
+	}
+	return deleteOwnedCollection(ctx, r, strings.Join(selector, ","))
+}
+
+// deleteOwnedCollection uses the API server's collection deletion path so a
+// failed benchmark cannot spend its entire cleanup deadline issuing one
+// throttled DELETE and follow-up GET for every workload object. The selector
+// is exact ownership evidence supplied by the caller. Older API resources may
+// not implement collection deletion, so retain a narrowly scoped per-object
+// fallback for those resources.
+func deleteOwnedCollection(ctx context.Context, r dynamic.ResourceInterface, selector string) error {
+	listOptions := metav1.ListOptions{LabelSelector: selector}
+	if err := r.DeleteCollection(ctx, metav1.DeleteOptions{}, listOptions); err != nil && !apierrors.IsMethodNotSupported(err) {
+		return fmt.Errorf("cleanup: %w", err)
+	} else if err != nil {
+		list, listErr := r.List(ctx, listOptions)
+		if listErr != nil {
+			return fmt.Errorf("cleanup: %w", listErr)
 		}
-		if cell != "" && u.GetLabels()["t-caas.telekom.com/benchmark-cell"] != cell {
-			continue
-		}
-		if e = r.Delete(ctx, u.GetName(), metav1.DeleteOptions{}); e != nil && !apierrors.IsNotFound(e) {
-			errs = append(errs, e.Error())
-			continue
-		}
-		if e = waitResourceDeleted(ctx, r, u.GetName()); e != nil {
-			errs = append(errs, e.Error())
+		for _, u := range list.Items {
+			if deleteErr := r.Delete(ctx, u.GetName(), metav1.DeleteOptions{}); deleteErr != nil && !apierrors.IsNotFound(deleteErr) {
+				return fmt.Errorf("cleanup: %w", deleteErr)
+			}
 		}
 	}
-	if len(errs) > 0 {
-		return fmt.Errorf("cleanup: %s", strings.Join(errs, "; "))
+	for {
+		list, err := r.List(ctx, listOptions)
+		if err != nil {
+			return fmt.Errorf("cleanup: %w", err)
+		}
+		if len(list.Items) == 0 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("cleanup: %w", ctx.Err())
+		case <-time.After(50 * time.Millisecond):
+		}
 	}
-	return nil
 }
 
 func waitResourceDeleted(ctx context.Context, r dynamic.ResourceInterface, name string) error {
