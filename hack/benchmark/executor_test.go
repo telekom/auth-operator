@@ -92,9 +92,9 @@ func TestObjectForAnnotatesIsolationScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	u := objectFor(Cell{Engine: engineMap, Tier: "iso-rbac-group", Mode: modeProtect, Kind: resourceRole}, "object", "", s)
+	u := objectFor(Cell{Engine: engineMap, Tier: "iso-" + isolationRBACGroup, Mode: modeProtect, Kind: resourceRole}, "object", "", s)
 	got, _, err := unstructured.NestedString(u.Object, metadataField, annotationsField, "t-caas.telekom.com/benchmark-scope")
-	if err != nil || got != "rbac-group" {
+	if err != nil || got != isolationRBACGroup {
 		t.Fatalf("isolation scope = %q, err %v", got, err)
 	}
 }
