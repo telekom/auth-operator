@@ -16,6 +16,7 @@ of the auth-operator in production Kubernetes environments.
 - [Installation](#installation)
 - [Architecture Overview](#architecture-overview)
 - [Configuration](#configuration)
+- [Creator Tracking](#creator-tracking)
 - [High Availability](#high-availability)
 - [Monitoring](#monitoring)
 - [Security Considerations](#security-considerations)
@@ -314,6 +315,26 @@ Kubernetes ≥ 1.30 cluster without installing auth-operator:
 ```bash
 kubectl apply -f docs/examples/namespace-deletion-protection-vap.yaml
 ```
+
+### Creator Tracking
+
+Creator tracking records the effective Kubernetes request identity as object
+annotations through native `MutatingAdmissionPolicy` resources. It is disabled
+by default. See the [Creator Tracking guide](creator-tracking.md) for the
+annotation semantics, modes, API-version requirements, and Kyverno
+alternatives. The [Helm chart README](../chart/auth-operator/README.md) lists
+the available values.
+
+Creator tracking is best-effort operational context. It does not prove the
+original caller when impersonation is used, and `failurePolicy: Ignore` plus
+the Kubernetes annotation-size limit can leave an object unstamped or without
+restored protection.
+
+When disabling or uninstalling the feature, first remove or disable the
+creator and contributor policies and verify that their policy resources and
+bindings are gone. Existing annotations remain on objects after policy removal;
+clean them only after admission is inactive. Changes to mode, resource scope,
+and exclusions apply only to future matching requests.
 
 ### Helm Values
 

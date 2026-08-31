@@ -14,6 +14,7 @@ A Kubernetes operator for managing dynamic RBAC through Custom Resource Definiti
 - 🛡️ **Drift Protection** — Periodically reconciles to prevent unauthorized manual changes
 - 📜 **Self-Signed TLS** — No cert-manager required; uses [cert-controller](https://github.com/open-policy-agent/cert-controller) for automatic certificate rotation
 - 🚫 **Namespace Deletion Protection** — Platform and opted-in namespaces require an explicit allow-deletion annotation before deletion; system namespaces are never deletable, with no admin bypass (ValidatingAdmissionPolicy + webhook fallback)
+- 🧾 **Creator Tracking** — Optionally records effective creator and contributor identities with Kubernetes MutatingAdmissionPolicy; see the [creator tracking guide](./docs/creator-tracking.md)
 
 ---
 
@@ -340,6 +341,7 @@ For detailed development instructions, see [CONTRIBUTING.md](CONTRIBUTING.md).
 - **[API Reference](./docs/api-reference/authorization.t-caas.telekom.com.md)** — Full CRD specification
 - **[Constrained Impersonation](./docs/constrained-impersonation.md)** — Kubernetes KEP-5284 support: typed API, modes, guardrails, and the version compatibility matrix
 - **[Flux Impersonation and API Discovery RBAC](./docs/flux-impersonation-rbac.md)** — what Flux needs from an authorization layer, the nonResourceURLs discovery trap, and the opaque `failed to get server groups` failure
+- **[Creator Tracking](./docs/creator-tracking.md)** — Native creator/contributor annotations, modes, trust boundaries, API availability, and benchmark status
 - **[SSA Architecture](./docs/ssa-architecture.md)** — Server-Side Apply patterns, field ownership, and conflict resolution
 - **[Condition Lifecycle](./docs/condition-lifecycle.md)** — Condition types, state transitions, and kstatus compliance
 - **[Helm Chart](./chart/auth-operator/README.md)** — Helm installation and configuration
