@@ -12,6 +12,7 @@ const (
 	annotationGroups            = "t-caas.telekom.com/created-by-groups"
 	annotationUpdated           = "t-caas.telekom.com/updated-by"
 	annotationEditor            = "t-caas.telekom.com/benchmark-editor"
+	benchmarkLabelKey           = "t-caas.telekom.com/benchmark"
 	spoofedCreator              = "creator-bench-spoofed"
 	spoofedGroups               = "creator-bench-spoofed-group"
 	benchmarkLabelValue         = "creator-tracking"

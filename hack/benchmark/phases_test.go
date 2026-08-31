@@ -327,7 +327,7 @@ func TestObjectForSeedsComparableTrackingAnnotationsWithoutClobberingLabels(t *t
 	if got := u.GetAnnotations()[annotationGroups]; got != spoofedGroups {
 		t.Fatalf("group spoof annotation = %q, want %q", got, spoofedGroups)
 	}
-	if got := u.GetLabels()["t-caas.telekom.com/benchmark"]; got != benchmarkLabelValue {
+	if got := u.GetLabels()[benchmarkLabelKey]; got != benchmarkLabelValue {
 		t.Fatalf("ownership label = %q, want %q", got, benchmarkLabelValue)
 	}
 	if len(u.GetLabels()) < 2 {
