@@ -183,11 +183,11 @@ var _ = Describe("Creator Tracking Kyverno", Label("creator-tracking-kyverno"), 
 					return nil
 				}
 			}
-			status, err := json.Marshal(object["status"])
+			statusJSON, err := json.Marshal(object["status"])
 			if err != nil {
 				return fmt.Errorf("encode MutatingPolicy %s status: %w", name, err)
 			}
-			return fmt.Errorf("MutatingPolicy %s is not ready: %s", name, status)
+			return fmt.Errorf("MutatingPolicy %s is not ready: %s", name, statusJSON)
 		}, 2*time.Minute, 2*time.Second).Should(Succeed())
 	}
 	annotations := func(ctx context.Context, resource, name string, namespace ...string) map[string]string {
