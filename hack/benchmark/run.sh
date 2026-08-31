@@ -377,11 +377,13 @@ capture_input_material() {
 uninstall_engines() {
   phase helm uninstall auth-operator --namespace "$operator_namespace" --ignore-not-found
   phase helm uninstall kyverno --namespace "$kyverno_namespace" --ignore-not-found
-  local release
+  local release available_resources
   release=$(phase helm list -A --filter '^(auth-operator|kyverno)$' --short)
   [[ -z "$release" ]] || die "Helm release teardown was not confirmed: $release"
+  available_resources=$(phase kubectl api-resources -o name)
   delete_policy() {
     local resource=$1 name=$2 existing
+    grep -Fxq "$resource" <<<"$available_resources" || return 0
     existing=$(phase kubectl get "$resource" "$name" --ignore-not-found -o name)
     [[ -z "$existing" ]] && return 0
     phase kubectl delete "$resource" "$name" --wait=true
@@ -390,18 +392,18 @@ uninstall_engines() {
       die "policy teardown was not confirmed: $resource/$name"
     fi
   }
-  delete_policy clusterpolicy creator-tracking
-  delete_policy clusterpolicy creator-tracking-benign-label
-  delete_policy mutatingpolicy creator-tracking
-  delete_policy mutatingpolicy contributor-tracking
-  delete_policy mutatingadmissionpolicy auth-operator-creator-tracking
-  delete_policy mutatingadmissionpolicy auth-operator-contributor-tracking
-  delete_policy mutatingadmissionpolicy mpol-creator-tracking
-  delete_policy mutatingadmissionpolicy mpol-contributor-tracking
-  delete_policy mutatingadmissionpolicybinding auth-operator-creator-tracking
-  delete_policy mutatingadmissionpolicybinding auth-operator-contributor-tracking
-  delete_policy mutatingadmissionpolicybinding mpol-creator-tracking-binding
-  delete_policy mutatingadmissionpolicybinding mpol-contributor-tracking-binding
+  delete_policy clusterpolicies.kyverno.io creator-tracking
+  delete_policy clusterpolicies.kyverno.io creator-tracking-benign-label
+  delete_policy mutatingpolicies.policies.kyverno.io creator-tracking
+  delete_policy mutatingpolicies.policies.kyverno.io contributor-tracking
+  delete_policy mutatingadmissionpolicies.admissionregistration.k8s.io auth-operator-creator-tracking
+  delete_policy mutatingadmissionpolicies.admissionregistration.k8s.io auth-operator-contributor-tracking
+  delete_policy mutatingadmissionpolicies.admissionregistration.k8s.io mpol-creator-tracking
+  delete_policy mutatingadmissionpolicies.admissionregistration.k8s.io mpol-contributor-tracking
+  delete_policy mutatingadmissionpolicybindings.admissionregistration.k8s.io auth-operator-creator-tracking
+  delete_policy mutatingadmissionpolicybindings.admissionregistration.k8s.io auth-operator-contributor-tracking
+  delete_policy mutatingadmissionpolicybindings.admissionregistration.k8s.io mpol-creator-tracking-binding
+  delete_policy mutatingadmissionpolicybindings.admissionregistration.k8s.io mpol-contributor-tracking-binding
 }
 apply_engine() {
   local engine=$1 mode=$2

@@ -74,6 +74,10 @@ grep -Fq 'policy teardown was not confirmed' "$runner"
 grep -Fq 'Helm release teardown was not confirmed' "$runner"
 grep -Fq "helm list -A --filter '^(auth-operator|kyverno)$' --short" "$runner"
 ! grep -Fq -- '--output name' "$runner"
+grep -Fq 'available_resources=$(phase kubectl api-resources -o name)' "$runner"
+grep -Fq 'grep -Fxq "$resource" <<<"$available_resources" || return 0' "$runner"
+grep -Fq 'clusterpolicies.kyverno.io' "$runner"
+grep -Fq 'mutatingpolicies.policies.kyverno.io' "$runner"
 if grep -Fq 'helm uninstall kyverno --namespace "$kyverno_namespace" --ignore-not-found || true' "$runner"; then
   echo 'Kyverno teardown must not ignore failures' >&2
   exit 1
