@@ -42,6 +42,8 @@ test/e2e/
 ├── e2e_test.go                 # Basic setup/prerequisite tests
 ├── crd_e2e_test.go             # CRD functionality (dev/kustomize)
 ├── helm_e2e_test.go            # Helm chart installation
+├── creator_tracking_e2e_test.go # Native creator and contributor tracking
+├── creator_tracking_support_test.go # Test webhook and exact cleanup
 ├── dev_e2e_test.go             # Dev overlay deployment
 ├── complex_e2e_test.go         # Complex multi-CRD scenarios
 ├── integration_e2e_test.go     # Multi-CRD integration tests
@@ -51,6 +53,8 @@ test/e2e/
 ├── fixtures/                    # Test manifests (dev/kustomize)
 ├── testdata/                    # Golden files and test data
 ├── kind-config-single.yaml     # Single-node cluster config
+├── kind-config-creator-tracking-stable.yaml # Kubernetes 1.36 stable and beta APIs
+├── kind-config-creator-tracking-beta.yaml # Kubernetes 1.34.3 beta API
 ├── kind-config-multi.yaml      # Multi-node cluster config
 └── output/                      # Generated test artifacts
 ```
@@ -65,6 +69,7 @@ Tests are organized using Ginkgo labels for selective execution:
 | `api` | API version validation | Any |
 | `debug` | Debug information collection | Any |
 | `helm` | Helm installation tests | Dedicated (auth-operator-e2e-helm) |
+| `creator-tracking` | Creator annotations on stable and beta Kubernetes APIs | Dedicated (auth-operator-e2e-creator-tracking) |
 | `dev` | Dev/kustomize deployment | Dedicated (auth-operator-e2e-dev) |
 | `complex` | Complex multi-CRD scenarios | Dedicated (auth-operator-e2e-complex) |
 | `integration` | Integration tests | Dedicated (auth-operator-e2e-integration) |
@@ -86,6 +91,13 @@ Before running e2e tests, ensure you have:
 - **Helm**: v3.17.0 or later
 - **kustomize**: v5.0.0 or later (optional, can be installed via Make)
 
+The creator-tracking full targets run on Linux, including an OrbStack Linux
+machine. They require Docker 20.10 or newer, Kind 0.32, GNU `flock`, GNU
+`readlink`, GNU `timeout`, Helm 4.2.3, and a `kubectl` version matching the
+selected Kubernetes cluster. The stable target uses
+`kind-config-creator-tracking-stable.yaml`; the beta target uses
+`kind-config-creator-tracking-beta.yaml`.
+
 **Verify Prerequisites:**
 ```bash
 make test-e2e-quick
@@ -106,6 +118,8 @@ make test-e2e-ha            # HA tests
 make test-e2e-dev           # Dev deployment tests
 make test-e2e-integration   # Integration tests
 make test-e2e-golden        # Golden file tests
+make test-e2e-creator-tracking-full # Kubernetes 1.36 v1
+make test-e2e-creator-tracking-full E2E_CREATOR_TRACKING_VARIANT=beta # Kubernetes 1.34.3 v1beta1
 ```
 
 ### Run Individual Test Suites
@@ -207,7 +221,33 @@ make test-e2e-helm-full
 
 ---
 
-### 4. Dev Deployment (`dev_e2e_test.go`)
+### 4. Creator Tracking (`creator_tracking_e2e_test.go`)
+**Labels:** `creator-tracking`
+**Cluster:** `auth-operator-e2e-creator-tracking` (Helm install)
+**Purpose:** Run live creator annotation behavior against the stable v1 and beta v1beta1 Kubernetes admission policy APIs.
+
+**Tests:**
+- Creator and group stamps, protect and create-only modes
+- ServiceAccount impersonation with separate requester and target permissions
+- Server-side apply field ownership, annotation limits, and BindDefinition interoperability
+- A later test webhook removes creator data and Kubernetes restores it in the same request
+- Helm upgrades the same policy release from v1beta1 to v1 without changing resource identity
+- Contributor ordering and repair
+
+**Run:**
+```bash
+make test-e2e-creator-tracking-full
+make test-e2e-creator-tracking-full E2E_CREATOR_TRACKING_VARIANT=beta
+```
+
+The suite uses a fixed cluster name and dedicated image tags. A persistent file
+lock rejects another creator-tracking target before it can delete or replace
+those resources. The lock does not protect against `make kind-delete-all`; do
+not run the dedicated target concurrently with global cleanup.
+
+---
+
+### 5. Dev Deployment (`dev_e2e_test.go`)
 **Labels:** `dev`  
 **Cluster:** `auth-operator-e2e-dev` (kustomize/make deploy)  
 **Purpose:** Validate standard Kubernetes manifests
@@ -225,7 +265,7 @@ make test-e2e-dev
 
 ---
 
-### 5. Complex Scenarios (`complex_e2e_test.go`)
+### 6. Complex Scenarios (`complex_e2e_test.go`)
 **Labels:** `complex`  
 **Cluster:** `auth-operator-e2e-complex` (Helm install)  
 **Purpose:** Test complex multi-CRD interactions
@@ -243,7 +283,7 @@ make test-e2e-complex
 
 ---
 
-### 6. Integration Tests (`integration_e2e_test.go`)
+### 7. Integration Tests (`integration_e2e_test.go`)
 **Labels:** `integration`  
 **Cluster:** `auth-operator-e2e-integration` (Helm install)  
 **Purpose:** Multi-CRD integration scenarios
@@ -261,7 +301,7 @@ make test-e2e-integration
 
 ---
 
-### 7. Golden File Tests (`golden_e2e_test.go`)
+### 8. Golden File Tests (`golden_e2e_test.go`)
 **Labels:** `golden`  
 **Cluster:** `auth-operator-e2e-golden` (Helm install)  
 **Purpose:** Validate generated RBAC against expected output
@@ -281,7 +321,7 @@ make test-e2e-golden
 
 ---
 
-### 8. HA & Leader Election (`ha_e2e_test.go`)
+### 9. HA & Leader Election (`ha_e2e_test.go`)
 **Labels:** `ha`, `leader-election`  
 **Cluster:** `auth-operator-e2e-ha-multi` (multi-node)  
 **Purpose:** High availability and leader election
@@ -300,7 +340,7 @@ make test-e2e-ha
 
 ---
 
-### 9. Kustomize Validation (`kustomize_e2e_test.go`)
+### 10. Kustomize Validation (`kustomize_e2e_test.go`)
 **Labels:** `kustomize`  
 **Cluster:** None (build-only tests)  
 **Purpose:** Validate kustomize overlays build correctly
@@ -378,11 +418,11 @@ export RUN_ID=$(date +%s)
 ```bash
 # Run specific test by name
 go test -tags e2e ./test/e2e/ -v -ginkgo.v \
-  -ginkgo.focus="should create ClusterRole from RoleDefinition"
+  -ginkgo.label-filter="!creator-tracking" -ginkgo.focus="should create ClusterRole from RoleDefinition"
 
 # Run tests with specific labels
 go test -tags e2e ./test/e2e/ -v -ginkgo.v \
-  -ginkgo.label-filter="helm && !complex"
+  -ginkgo.label-filter="helm && !complex && !creator-tracking"
 
 # Parallel execution (for independent suites in separate terminals)
 make test-e2e-helm & make test-e2e-complex & wait
@@ -464,6 +504,7 @@ Each test suite runs in its own Kind cluster to ensure complete isolation:
 |------------|--------------|----------------|-------|
 | Base/CRD | `auth-operator-e2e` | Dev/Kustomize | 1 |
 | Helm | `auth-operator-e2e-helm` | Helm | 1 |
+| Creator tracking | `auth-operator-e2e-creator-tracking` | Helm | 1 |
 | Dev | `auth-operator-e2e-dev` | Kustomize | 1 |
 | Complex | `auth-operator-e2e-complex` | Helm | 1 |
 | Integration | `auth-operator-e2e-integration` | Helm | 1 |
@@ -647,7 +688,7 @@ Timed out after 300s
 **Solutions:**
 ```bash
 # Increase timeout
-go test -tags e2e ./test/e2e/ -timeout 60m
+go test -tags e2e ./test/e2e/ -ginkgo.label-filter="!creator-tracking" -timeout 60m
 
 # Check controller logs for errors
 kubectl logs -n auth-operator-system -l control-plane=controller-manager --tail=100
@@ -865,10 +906,10 @@ export SKIP_E2E_CLEANUP=true
 export IMG=auth-operator:e2e-test
 
 # Run specific test
-go test -tags e2e ./test/e2e/ -v -ginkgo.focus="my specific test"
+go test -tags e2e ./test/e2e/ -v -ginkgo.label-filter="!creator-tracking" -ginkgo.focus="my specific test"
 
 # Skip slow tests
-go test -tags e2e ./test/e2e/ -v -ginkgo.skip="slow|integration"
+go test -tags e2e ./test/e2e/ -v -ginkgo.label-filter="!creator-tracking" -ginkgo.skip="slow|integration"
 ```
 
 ### Parallel Execution

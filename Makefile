@@ -95,6 +95,21 @@ KIND_CONFIG_MULTI ?= test/e2e/kind-config-multi.yaml
 # feature gate explicitly disabled, used to verify graceful degradation.
 KIND_CONFIG_SINGLE_NO_CI ?= test/e2e/kind-config-single-no-constrained-impersonation.yaml
 
+# Creator tracking runs in a dedicated cluster. Beta exercises the Kubernetes
+# 1.34.3 v1beta1 API; stable uses the normal Kubernetes 1.36 configuration.
+E2E_CREATOR_TRACKING_VARIANT ?= stable
+ifeq ($(E2E_CREATOR_TRACKING_VARIANT),beta)
+E2E_CREATOR_TRACKING_NODE_IMAGE ?= $(E2E_CREATOR_TRACKING_BETA_NODE_IMAGE)
+E2E_CREATOR_TRACKING_KIND_CONFIG ?= test/e2e/kind-config-creator-tracking-beta.yaml
+E2E_CREATOR_TRACKING_API_VERSION ?= admissionregistration.k8s.io/v1beta1
+else ifeq ($(E2E_CREATOR_TRACKING_VARIANT),stable)
+E2E_CREATOR_TRACKING_NODE_IMAGE ?= $(E2E_CREATOR_TRACKING_STABLE_NODE_IMAGE)
+E2E_CREATOR_TRACKING_KIND_CONFIG ?= test/e2e/kind-config-creator-tracking-stable.yaml
+E2E_CREATOR_TRACKING_API_VERSION ?= admissionregistration.k8s.io/v1
+else
+$(error E2E_CREATOR_TRACKING_VARIANT must be stable or beta)
+endif
+
 .PHONY: kind-create
 kind-create: ## Create a single-node kind cluster for e2e testing.
 	@if [ "$(E2E_RECREATE_CLUSTER)" = "true" ]; then \
@@ -154,7 +169,7 @@ test-e2e-setup-multi: kind-create-multi kind-load-image-multi install ## Set up 
 
 .PHONY: test-e2e
 test-e2e: ## Run base e2e tests against existing kind cluster.
-	KIND_CLUSTER=$(KIND_CLUSTER_NAME) IMG=$(E2E_IMG) go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="!helm && !complex && !integration && !golden && !ha && !leader-election && !dev" -timeout 30m
+	KIND_CLUSTER=$(KIND_CLUSTER_NAME) IMG=$(E2E_IMG) go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="!helm && !complex && !integration && !golden && !ha && !leader-election && !dev && !creator-tracking" -timeout 30m
 
 .PHONY: test-e2e-compile
 test-e2e-compile: ## Compile e2e tests without creating a kind cluster.
@@ -202,7 +217,7 @@ test-e2e-cleanup: ## Clean up e2e test resources.
 
 .PHONY: test-e2e-helm
 test-e2e-helm: kind-create kind-load-image ## Run Helm e2e tests (installs via Helm chart).
-	KIND_CLUSTER=$(KIND_CLUSTER_NAME) IMG=$(E2E_IMG) go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="helm" -timeout 30m
+	KIND_CLUSTER=$(KIND_CLUSTER_NAME) IMG=$(E2E_IMG) go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="helm && !creator-tracking" -timeout 30m
 
 .PHONY: test-e2e-dev
 test-e2e-dev: ## Run dev e2e tests (kustomize deploy) on a dedicated cluster.
@@ -277,11 +292,19 @@ test-e2e-all: ## Run non-Helm/non-complex e2e tests on multi-node cluster.
 	@set -e; \
 	if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-all; fi; \
 	$(MAKE) test-e2e-setup-multi KIND_CLUSTER_NAME=auth-operator-e2e-all; \
-	if KIND_CLUSTER=auth-operator-e2e-all-multi IMG=$(E2E_IMG) go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="!helm && !complex" -timeout 60m; then \
+	if KIND_CLUSTER=auth-operator-e2e-all-multi IMG=$(E2E_IMG) go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="!helm && !complex && !creator-tracking" -timeout 60m; then \
 		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-all; fi; \
 	else \
 		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-all; fi; exit 1; \
 	fi
+
+.PHONY: test-e2e-creator-tracking
+test-e2e-creator-tracking: ## Run creator tracking in a newly-created dedicated cluster.
+	@$(MAKE) test-e2e-creator-tracking-full
+
+.PHONY: test-e2e-creator-tracking-full
+test-e2e-creator-tracking-full: ## Create, run, and optionally delete the dedicated creator tracking cluster.
+	@E2E_CREATOR_TRACKING_NODE_IMAGE="$(E2E_CREATOR_TRACKING_NODE_IMAGE)" E2E_CREATOR_TRACKING_KIND_CONFIG="$(E2E_CREATOR_TRACKING_KIND_CONFIG)" E2E_CREATOR_TRACKING_API_VERSION="$(E2E_CREATOR_TRACKING_API_VERSION)" E2E_CREATOR_TRACKING_HELM_VERSION="$(HELM_VERSION)" ./hack/run-creator-tracking-e2e.sh full
 
 .PHONY: test-e2e-constrained-impersonation
 test-e2e-constrained-impersonation: ## Run constrained impersonation e2e tests with the feature gate ENABLED.
