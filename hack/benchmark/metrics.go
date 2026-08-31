@@ -338,15 +338,21 @@ type HistogramDelta struct {
 	State       MetricState
 }
 
-func histogramSamples(before, after, sumName, countName string, labels map[string]string) (MetricSample, MetricSample, MetricSample, MetricSample, bool, bool) {
+type histogramSampleSet struct {
+	beforeSum, afterSum     MetricSample
+	beforeCount, afterCount MetricSample
+	found, unavailable      bool
+}
+
+func histogramSamples(before, after, sumName, countName string, labels map[string]string) histogramSampleSet {
 	bs, bok, beforeSumErr := matchingMetricSample(before, sumName, labels)
 	as, aok, afterSumErr := matchingMetricSample(after, sumName, labels)
 	bc, bcok, beforeCountErr := matchingMetricSample(before, countName, labels)
 	ac, acok, afterCountErr := matchingMetricSample(after, countName, labels)
 	if beforeSumErr != nil || afterSumErr != nil || beforeCountErr != nil || afterCountErr != nil {
-		return MetricSample{}, MetricSample{}, MetricSample{}, MetricSample{}, false, true
+		return histogramSampleSet{unavailable: true}
 	}
-	return bs, as, bc, ac, bok && aok && bcok && acok, false
+	return histogramSampleSet{beforeSum: bs, afterSum: as, beforeCount: bc, afterCount: ac, found: bok && aok && bcok && acok}
 }
 
 func validHistogramSamples(bs, as, bc, ac MetricSample) bool {
@@ -376,15 +382,15 @@ func histogramCounterDelta(bs, as, bc, ac MetricSample) HistogramDelta {
 
 // ParseHistogramDelta selects matching sum/count series, preserving reset state.
 func ParseHistogramDelta(before, after, sumName, countName string, labels map[string]string) HistogramDelta {
-	bs, as, bc, ac, samplesOK, unavailable := histogramSamples(before, after, sumName, countName, labels)
-	if unavailable {
+	samples := histogramSamples(before, after, sumName, countName, labels)
+	if samples.unavailable {
 		return HistogramDelta{State: MetricUnavailable}
 	}
-	if !samplesOK {
+	if !samples.found {
 		return HistogramDelta{State: MetricMissing}
 	}
-	if !validHistogramSamples(bs, as, bc, ac) {
+	if !validHistogramSamples(samples.beforeSum, samples.afterSum, samples.beforeCount, samples.afterCount) {
 		return HistogramDelta{State: MetricUnavailable}
 	}
-	return histogramCounterDelta(bs, as, bc, ac)
+	return histogramCounterDelta(samples.beforeSum, samples.afterSum, samples.beforeCount, samples.afterCount)
 }
