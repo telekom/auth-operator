@@ -461,7 +461,11 @@ func runMixedSustained(
 ) CellRun {
 	started := time.Now()
 	deadline := started.Add(duration)
-	phaseCtx, cancel := context.WithDeadline(ctx, deadline)
+	// Workers stop scheduling new operations at the workload deadline, but
+	// requests already in flight need a short grace period to finish. Without
+	// it, the normal sustained-phase boundary cancels those requests and turns
+	// otherwise valid latency samples into context-deadline failures.
+	phaseCtx, cancel := context.WithDeadline(ctx, deadline.Add(5*time.Second))
 	defer cancel()
 	out := CellRun{Cell: cell, Status: statusComplete, StartedAt: started.UTC().Format(time.RFC3339Nano), InputHash: InputHash(cell, canonical(cell))}
 	var wg sync.WaitGroup
