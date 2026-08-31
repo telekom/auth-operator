@@ -50,6 +50,7 @@ grep -Fq 'terminate_bounded' "$runner"
 grep -Fq 'setsid "$timeout_bin"' "$runner"
 grep -Fq 'kill -TERM -- "-$pid"' "$runner"
 grep -Fq 'wait "$pid"' "$runner"
+grep -Fq 'bounded env DOCKER_BUILDKIT=1 docker build' "$runner"
 grep -Fq 'validate_owned_tree "$results_dir"' "$runner"
 grep -Fq 'validate_owned_tree "$run_dir"' "$runner"
 cleanup_source=$(sed -n '/^cleanup_owned()/,/^finish()/p' "$runner")
