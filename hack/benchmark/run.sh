@@ -251,7 +251,7 @@ trap 'terminate_bounded 130' INT
 trap 'terminate_bounded 143' TERM
 
 if [[ "$requested_mode" == fresh ]]; then
-  bounded docker build --label "t-caas.telekom.com/benchmark-run=$run_id" --tag "$operator_image" .
+  bounded env DOCKER_BUILDKIT=1 docker build --label "t-caas.telekom.com/benchmark-run=$run_id" --tag "$operator_image" .
   bounded kind create cluster --name "$cluster" --kubeconfig "$kubeconfig" --config test/e2e/kind-config-single.yaml --image "$kind_node_image" --wait 5m
   chmod 600 "$kubeconfig"; export KUBECONFIG="$kubeconfig"
   bounded kind load docker-image "$operator_image" --name "$cluster"
