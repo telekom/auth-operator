@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+# SPDX-License-Identifier: Apache-2.0
+
+# Kubernetes 1.36 prefers the stable admission-policy API. The beta API stays
+# enabled in this test cluster so the suite can verify in-place API migration.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: auth-operator-e2e-creator-tracking-stable
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+      - |
+        kind: ClusterConfiguration
+        apiServer:
+          extraArgs:
+            feature-gates: "ConstrainedImpersonation=true,MutatingAdmissionPolicy=true"
+            runtime-config: "admissionregistration.k8s.io/v1=true,admissionregistration.k8s.io/v1beta1=true"
+networking:
+  podSubnet: "10.244.0.0/16"
+  serviceSubnet: "10.96.0.0/12"

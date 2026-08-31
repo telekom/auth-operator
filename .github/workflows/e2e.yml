@@ -21,6 +21,7 @@ on:
           - helm
           - complex
           - ha
+          - creator-tracking
           - all
 
 permissions:
@@ -28,7 +29,7 @@ permissions:
 
 # Cancel in-progress runs when a new run is triggered for the same branch/PR
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -58,6 +59,9 @@ jobs:
 
       - name: Compile E2E tests
         run: make test-e2e-compile
+
+      - name: Test creator reinvocation webhook
+        run: go test -tags=e2e ./test/e2e/testserver/creator-reinvocation-webhook -count=1
 
   e2e-basic:
     name: E2E Basic Tests
@@ -150,6 +154,154 @@ jobs:
         if: always()
         run: |
           kind delete cluster --name auth-operator-e2e-helm || true
+
+  e2e-creator-tracking:
+    name: E2E Creator Tracking (${{ matrix.variant }})
+    runs-on: ubuntu-latest
+    needs: e2e-compile
+    timeout-minutes: 75
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'creator-tracking' || github.event.inputs.test_suite == 'all'
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        variant: [stable, beta]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Load versions from versions.env
+        run: grep -v '^#' versions.env | grep -v '^$' >> "$GITHUB_ENV"
+
+      - name: Setup Go, Kind, and Helm
+        uses: ./.github/actions/setup-go-env
+        with:
+          install-kind: 'true'
+          kind-version: ${{ env.KIND_VERSION }}
+          install-helm: 'true'
+          helm-version: ${{ env.HELM_VERSION }}
+
+      - name: Install matching kubectl
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          set -euo pipefail
+          if [[ "$VARIANT" == "beta" ]]; then
+            version="$E2E_CREATOR_TRACKING_BETA_K8S_VERSION"
+          else
+            version="$KIND_K8S_VERSION"
+          fi
+          case "$(uname -m)" in
+            x86_64) arch=amd64 ;;
+            aarch64|arm64) arch=arm64 ;;
+            *) echo "unsupported runner architecture" >&2; exit 1 ;;
+          esac
+          temp_dir=$(mktemp -d)
+          trap 'rm -rf "$temp_dir"' EXIT
+          curl -fsSLo "$temp_dir/kubectl" "https://dl.k8s.io/release/${version}/bin/linux/${arch}/kubectl"
+          checksum=$(curl -fsSL "https://dl.k8s.io/release/${version}/bin/linux/${arch}/kubectl.sha256")
+          printf '%s  %s\n' "$checksum" "$temp_dir/kubectl" | sha256sum --check
+          sudo install -m 0755 "$temp_dir/kubectl" /usr/local/bin/kubectl
+          kubectl version --client
+
+      - name: Run creator tracking E2E
+        timeout-minutes: 45
+        run: make test-e2e-creator-tracking-full E2E_CREATOR_TRACKING_VARIANT=${{ matrix.variant }}
+        env:
+          E2E_CREATOR_TRACKING_RUN_DIR: /tmp/auth-operator-creator-tracking-ci-${{ matrix.variant }}
+
+      - name: Verify creator tracking cleanup
+        if: failure()
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          test "$(kind get clusters 2>/dev/null | grep -Fx auth-operator-e2e-creator-tracking || true)" = ""
+          test -z "$(docker ps -a --filter name=^auth-operator-e2e-creator-tracking-control-plane$ --format '{{.Names}}')"
+
+      - name: Upload creator tracking artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-creator-tracking-${{ matrix.variant }}
+          if-no-files-found: warn
+          path: |
+            test/e2e/output/
+            /tmp/e2e-*.log
+            /tmp/e2e-debug-report-*.txt
+
+      - name: Final creator tracking fallback cleanup
+        if: always()
+        timeout-minutes: 3
+        run: |
+          set +e
+          failed=0
+          lock_file=/tmp/auth-operator-e2e-creator-tracking.lock
+          umask 077
+          if [ -L "$lock_file" ]; then echo "refusing symbolic-link creator lock" >&2; exit 1; fi
+          touch "$lock_file" || exit 1
+          chmod 0600 "$lock_file" || exit 1
+          exec 9<>"$lock_file"
+          if ! flock -n 9; then echo "creator tracking cleanup lock is busy; refusing fallback mutation" >&2; exit 1; fi
+          run_dir="/tmp/auth-operator-creator-tracking-ci-${{ matrix.variant }}"
+          owned_run=false
+          if [ -d "$run_dir" ] && [ "$(stat -c %a "$run_dir" 2>/dev/null)" = 700 ] && [ "$(stat -c %a "$run_dir/provenance" 2>/dev/null)" = 600 ] && [ ! -L "$run_dir/provenance" ] && [ "$(tr -d '\\n' < "$run_dir/provenance" 2>/dev/null)" = auth-operator-e2e-creator-tracking ]; then
+            owned_run=true
+          fi
+          if [ ! -e "$run_dir" ]; then
+            echo "creator tracking runner already removed its private run directory; fallback has nothing authorized to clean"
+            exit 0
+          fi
+          if [ "$owned_run" != true ]; then
+            echo "creator tracking fallback found no authenticated private run directory; refusing external cleanup" >&2
+            exit 1
+          fi
+          marker_authorized() {
+            [ -f "$1" ] && [ ! -L "$1" ] && [ "$(stat -c %a "$1" 2>/dev/null)" = 600 ]
+          }
+          for marker in cluster-authorized operator-image-authorized webhook-image-authorized; do
+            if { [ -e "$run_dir/$marker" ] || [ -L "$run_dir/$marker" ]; } && ! marker_authorized "$run_dir/$marker"; then
+              echo "invalid creator tracking authorization marker $run_dir/$marker; refusing cleanup" >&2
+              exit 1
+            fi
+          done
+          cluster_authorized=false
+          operator_image_authorized=false
+          webhook_image_authorized=false
+          marker_authorized "$run_dir/cluster-authorized" && cluster_authorized=true
+          marker_authorized "$run_dir/operator-image-authorized" && operator_image_authorized=true
+          marker_authorized "$run_dir/webhook-image-authorized" && webhook_image_authorized=true
+          cluster_output=$(timeout --signal=TERM --kill-after=5s 15s kind get clusters 2>&1); cluster_status=$?
+          if [ "$cluster_status" -ne 0 ]; then echo "$cluster_output" >&2; failed=1
+          elif [ "$cluster_authorized" = true ] && printf "%s\n" "$cluster_output" | grep -Fx auth-operator-e2e-creator-tracking >/dev/null; then
+            timeout --signal=TERM --kill-after=10s 2m kind delete cluster --name auth-operator-e2e-creator-tracking || failed=1
+          fi
+          container_output=$(timeout --signal=TERM --kill-after=5s 15s docker container inspect auth-operator-e2e-creator-tracking-control-plane 2>&1); container_status=$?
+          if [ "$container_status" -eq 0 ]; then
+            if [ "$cluster_authorized" = true ]; then timeout --signal=TERM --kill-after=5s 30s docker rm -f -v auth-operator-e2e-creator-tracking-control-plane || failed=1
+            else echo "preserving unowned creator tracking container" >&2; fi
+          elif ! printf "%s" "$container_output" | grep -Eiq "no such object|no such container|not found"; then echo "$container_output" >&2; failed=1; fi
+          for image in auth-operator/creator-reinvocation-webhook:e2e auth-operator:creator-tracking-e2e; do
+            image_output=$(timeout --signal=TERM --kill-after=5s 15s docker image inspect "$image" 2>&1); image_status=$?
+            if [ "$image_status" -eq 0 ]; then
+              if { [ "$image" = auth-operator/creator-reinvocation-webhook:e2e ] && [ "$webhook_image_authorized" = true ] || [ "$image" = auth-operator:creator-tracking-e2e ] && [ "$operator_image_authorized" = true ]; }; then timeout --signal=TERM --kill-after=5s 30s docker image rm "$image" || failed=1
+              else echo "preserving unowned creator tracking image $image" >&2; fi
+            elif ! printf "%s" "$image_output" | grep -Eiq "no such image|no such object|not found"; then echo "$image_output" >&2; failed=1; fi
+          done
+          rm -rf "$run_dir" || failed=1
+          if ! cluster_output=$(timeout --signal=TERM --kill-after=5s 15s kind get clusters 2>&1); then echo "$cluster_output" >&2; failed=1
+          elif [ "$cluster_authorized" = true ] && printf "%s\n" "$cluster_output" | grep -Fx auth-operator-e2e-creator-tracking >/dev/null; then failed=1; fi
+          container_output=$(timeout --signal=TERM --kill-after=5s 15s docker container inspect auth-operator-e2e-creator-tracking-control-plane 2>&1); container_status=$?
+          if [ "$container_status" -ne 0 ]; then if ! printf "%s" "$container_output" | grep -Eiq "no such object|no such container|not found"; then echo "$container_output" >&2; failed=1; fi
+          elif [ "$cluster_authorized" = true ]; then failed=1; fi
+          for image in auth-operator:creator-tracking-e2e auth-operator/creator-reinvocation-webhook:e2e; do
+            image_output=$(timeout --signal=TERM --kill-after=5s 15s docker image inspect "$image" 2>&1); image_status=$?
+            if [ "$image_status" -ne 0 ]; then if ! printf "%s" "$image_output" | grep -Eiq "no such image|no such object|not found"; then echo "$image_output" >&2; failed=1; fi
+            elif { [ "$image" = auth-operator/creator-reinvocation-webhook:e2e ] && [ "$webhook_image_authorized" = true ] || [ "$image" = auth-operator:creator-tracking-e2e ] && [ "$operator_image_authorized" = true ]; }; then failed=1; fi
+          done
+          test ! -e "/tmp/auth-operator-creator-tracking-ci-${{ matrix.variant }}" || failed=1
+          exit "$failed"
 
   e2e-complex:
     name: E2E Complex Tests

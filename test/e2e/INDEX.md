@@ -63,6 +63,8 @@ test/e2e/
 │   ├── e2e_suite_test.go   # Ginkgo suite setup + BeforeSuite/AfterSuite
 │   ├── e2e_test.go         # [setup] Prerequisites & debug utilities
 │   ├── helm_e2e_test.go    # [helm] Helm chart installation tests
+│   ├── creator_tracking_e2e_test.go # [creator-tracking] Native identity tracking
+│   ├── creator_tracking_support_test.go # Dedicated webhook and cleanup support
 │   ├── dev_e2e_test.go     # [dev] Kustomize/make deploy tests
 │   ├── crd_e2e_test.go     # [default] Core CRD functionality
 │   ├── complex_e2e_test.go # [complex] Multi-CRD combinations
@@ -88,6 +90,8 @@ test/e2e/
 │
 ├── ⚙️ Configuration
 │   ├── kind-config-single.yaml  # Single-node cluster
+│   ├── kind-config-creator-tracking-stable.yaml # Kubernetes 1.36 stable + beta APIs
+│   ├── kind-config-creator-tracking-beta.yaml # Kubernetes 1.34.3 beta API
 │   └── kind-config-multi.yaml   # Multi-node cluster (HA)
 │
 └── 📂 Output (generated)
@@ -104,6 +108,7 @@ Each label corresponds to a dedicated Kind cluster:
 |-------|--------------|----------------|---------|
 | `setup` | `auth-operator-e2e` | Dev | Prerequisites |
 | `helm` | `auth-operator-e2e-helm` | Helm | Chart validation |
+| `creator-tracking` | `auth-operator-e2e-creator-tracking` | Helm | Creator and contributor annotations on stable and beta Kubernetes APIs |
 | `dev` | `auth-operator-e2e-dev` | Kustomize | Manifest validation |
 | `complex` | `auth-operator-e2e-complex` | Helm | Multi-CRD scenarios |
 | `integration` | `auth-operator-e2e-integration` | Helm | Cross-CRD tests |
@@ -178,6 +183,7 @@ PrintSuiteConfig(config)
 
 ## 📁 Test Files
 - `helm_e2e_test.go` - Helm chart tests
+- `creator_tracking_e2e_test.go` - Dedicated identity tracking on stable and beta Kubernetes APIs
 - `dev_e2e_test.go` - Dev/kustomize deployment
 - `complex_e2e_test.go` - Complex scenarios
 - `integration_e2e_test.go` - Integration tests

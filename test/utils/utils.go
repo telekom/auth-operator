@@ -1290,6 +1290,7 @@ func CollectAndSaveAllDebugInfo(testContext string) {
 	operatorNamespaces := []string{
 		"auth-operator-system",
 		"auth-operator-helm",
+		"auth-operator-creator-e2e",
 		"auth-operator-ha",
 		"auth-operator-integration-test",
 	}
