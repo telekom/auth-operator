@@ -154,6 +154,100 @@ rules as fallback on clusters without VAP support.
 | `namespaceDeletionProtection.extraProtectedNamespaces` | Additional namespace names unconditionally protected from deletion | `[]` |
 | `namespaceDeletionProtection.vap` | VAP rendering mode: `auto` (render when the cluster supports it), `enabled`, or `disabled`. With `auto`, offline `helm template` needs `--api-versions admissionregistration.k8s.io/v1/ValidatingAdmissionPolicy` to render the VAP | `auto` |
 
+### Creator Tracking
+
+Creator tracking is opt-in until performance tests are complete. Set
+`creatorTracking.enabled=true` to enable it. Use either the Helm resources or
+the standalone examples, never both at the same time.
+
+The policies are cluster-wide and have no namespace selector. They match these
+default kinds in every namespace:
+
+| API | Default kinds |
+|-----|---------------|
+| Core `v1` | `Namespace`, `ServiceAccount`, `Secret` |
+| RBAC `v1` | `Role`, `RoleBinding`, `ClusterRole`, `ClusterRoleBinding` |
+| Auth operator `v1alpha1` | `RoleDefinition`, `BindDefinition`, `RBACPolicy`, `RestrictedRoleDefinition`, `RestrictedBindDefinition`, `WebhookAuthorizer` |
+
+Tracking values are plain annotations. Anyone who can read an object, including
+a Secret, can read its creator identity and creation-time groups.
+
+| Mode | Behavior |
+|------|----------|
+| `create-only` | Stamp creator username and groups on CREATE. On parent UPDATE, remove a forged `updated-by`; creator values are not restored. |
+| `protect` | Stamp on CREATE and restore creator values on parent UPDATE. Remove `updated-by` on parent UPDATE. |
+| `contributors` | Protect creator values and record distinct effective usernames on parent UPDATE in first-edit order. The creator appears only after a later UPDATE. |
+
+Only CREATE and parent UPDATE requests are tracked. DELETE and subresources,
+including `status`, are not tracked. The annotations do not contain timestamps,
+a full change history, or request details. A no-op UPDATE or a controller UPDATE
+can add a contributor because it is still an admitted parent UPDATE.
+
+`created-by` contains the literal effective username. Each group or contributor
+component escapes `%` as `%25` and then `,` as `%2C` before comma joining. To
+decode a list, split on commas, replace `%2C` with `,`, then replace `%25` with
+`%` in each component.
+
+These annotations record the effective `request.userInfo` identity seen by the
+API server. An authorized impersonator controls that identity; the original
+caller is not recorded. The policies use `failurePolicy: Ignore`, preserve old
+values, and can skip or remove values at Kubernetes's 262144-byte annotation
+limit. The annotations are best-effort operational context, not forensic or
+cryptographic proof. Values from an activation or fail-open gap cannot later be
+proven authentic.
+
+The policies run in the API server and continue while auth-operator pods are
+stopped. Disabling the feature, setting `map: disabled`, rolling back, or
+uninstalling removes policy resources but leaves existing annotations. Mode,
+resource, and exclusion changes are not retroactive. Re-enabling does not
+backfill old objects. Protect mode preserves an old creator value if it exists,
+even if that value changed while policies were inactive. Changing from
+contributors to protect removes `updated-by` only on the next matching UPDATE.
+
+Remove or disable policies first and verify that their policies and bindings
+are gone before cleaning retained annotations. For example:
+
+```bash
+kubectl get mutatingadmissionpolicies,mutatingadmissionpolicybindings -o name \
+  | grep -E 'creator-tracking|contributor-tracking' || true
+```
+
+The command must print nothing before annotation cleanup starts.
+
+This implementation supports Kubernetes 1.34 and newer. Kubernetes 1.32 and
+1.33 exposed alpha versions of this upstream feature, but the chart and
+standalone examples intentionally support only the beta and stable APIs. With
+`map: auto`, the chart emits no policy when a supported API is absent.
+`map: enabled` forces stable v1 rendering but does not enable the API or its
+feature gate. Kubernetes 1.34 and 1.35 require
+`MutatingAdmissionPolicy=true` and
+`admissionregistration.k8s.io/v1beta1=true`; the complete Kind example is
+`test/e2e/kind-config-creator-tracking-beta.yaml`. Kubernetes 1.36 serves v1,
+and the chart prefers v1 when both versions are available. For an upgrade,
+keep both endpoints served while Helm upgrades the release through v1. The v1
+and v1beta1 endpoints show the same persisted policies and bindings. Verify
+them through v1, then stop serving the v1beta1 endpoint.
+
+After installation, verify activation with a disposable Namespace dry-run. The
+command must return both creator annotations; it does not create the Namespace.
+
+```bash
+kubectl create namespace creator-tracking-check --dry-run=server -o json \
+  | jq -e '.metadata.annotations["t-caas.telekom.com/created-by"] and .metadata.annotations["t-caas.telekom.com/created-by-groups"]'
+```
+
+Helm-created resources admitted before policy activation remain unstamped. See
+`docs/examples/creator-tracking-map.yaml` for standalone protect mode and
+`docs/examples/creator-tracking-map-contributors.yaml` for contributor mode.
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `creatorTracking.enabled` | Enable creator and contributor tracking | `false` |
+| `creatorTracking.mode` | `create-only`, `protect`, or `contributors` | `protect` |
+| `creatorTracking.map` | `auto`, `enabled`, or `disabled`. Offline `helm template` with `auto` needs the matching MAP `--api-versions` value | `auto` |
+| `creatorTracking.resources` | Resource rules with explicit API groups, versions, and resources | Core, RBAC v1, and auth-operator v1alpha1 resources |
+| `creatorTracking.excludedUsernames` | Usernames omitted from new stamps and contributor appends; restoration is still attempted | `[]` |
+
 ### Service Account Configuration
 
 The controller and webhook server use separate ServiceAccounts with dedicated
