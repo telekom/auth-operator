@@ -32,7 +32,6 @@ readonly phase_timeout=${BENCHMARK_PHASE_TIMEOUT:-30m}
 readonly quick=${QUICK:-false}
 readonly requested_mode=${BENCHMARK_MODE:-fresh}
 
-command -v flock >/dev/null 2>&1 || die 'flock is required'
 [[ -z "${BENCHMARK_LOCK:-}" ]] || die 'BENCHMARK_LOCK is not supported; the lock path is fixed'
 
 for forbidden in KUBECONFIG KIND_CLUSTER_NAME CLUSTER_NAME BENCHMARK_CLUSTER; do
@@ -40,8 +39,23 @@ for forbidden in KUBECONFIG KIND_CLUSTER_NAME CLUSTER_NAME BENCHMARK_CLUSTER; do
 done
 case "$requested_mode" in fresh|resume) ;; *) die 'BENCHMARK_MODE must be fresh or resume' ;; esac
 command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1 || die 'timeout or gtimeout is required'
-command -v setsid >/dev/null 2>&1 || die 'setsid is required'
 if command -v timeout >/dev/null 2>&1; then readonly timeout_bin=timeout; else readonly timeout_bin=gtimeout; fi
+if command -v flock >/dev/null 2>&1; then
+  lock_with_flock() { flock -n 9; }
+else
+  command -v perl >/dev/null 2>&1 || die 'flock or perl is required'
+  lock_with_flock() {
+    perl -MFcntl -e 'open(my $fh, "<&=9") or exit 2; exit flock($fh, LOCK_EX | LOCK_NB) ? 0 : 1;' --
+  }
+fi
+if command -v setsid >/dev/null 2>&1; then
+  start_session() { setsid "$@"; }
+else
+  command -v perl >/dev/null 2>&1 || die 'setsid or perl is required'
+  start_session() {
+    perl -MPOSIX=setsid -e 'setsid() or die "setsid: $!"; exec @ARGV or die "exec: $!";' -- "$@"
+  }
+fi
 bounded_pid=''
 terminate_bounded() {
   local status=$1 pid=$bounded_pid
@@ -53,7 +67,7 @@ terminate_bounded() {
   exit "$status"
 }
 bounded() {
-  setsid "$timeout_bin" --signal=TERM --kill-after=30s "$phase_timeout" "$@" &
+  start_session "$timeout_bin" --signal=TERM --kill-after=30s "$phase_timeout" "$@" &
   bounded_pid=$!
   local status
   if wait "$bounded_pid"; then status=0; else status=$?; fi
@@ -74,10 +88,26 @@ readonly private_tmp_root
 system_tmp_root=$(cd -P -- /tmp && pwd -P)
 readonly system_tmp_root
 current_uid=$(id -u)
+stat_mode() {
+  local path=$1 mode
+  if mode=$(stat -c '%a' "$path" 2>/dev/null); then
+    printf '%s' "$mode"
+  else
+    stat -f '%Lp' "$path"
+  fi
+}
+stat_mode_with_special_bits() {
+  local path=$1 mode
+  if mode=$(stat -c '%a' "$path" 2>/dev/null); then
+    printf '%s' "$mode"
+  else
+    stat -f '%p' "$path"
+  fi
+}
 validate_temp_root() {
   local path=$1 label=$2 mode uid numeric
   [[ -d "$path" && ! -L "$path" ]] || die "$label is not a real directory: $path"
-  mode=$(stat -c '%a' "$path" 2>/dev/null || stat -f '%Lp' "$path")
+  mode=$(stat_mode_with_special_bits "$path")
   uid=$(stat -c '%u' "$path" 2>/dev/null || stat -f '%u' "$path")
   [[ "$uid" == "$current_uid" || "$uid" == 0 ]] || die "$label is owned by an untrusted user: $path"
   numeric=$((8#$mode))
@@ -120,16 +150,18 @@ chmod 600 "$lock_file"
 lock_owner=$(stat -c '%u' "$lock_file" 2>/dev/null || stat -f '%u' "$lock_file")
 [[ "$lock_owner" == "$current_uid" ]] || die "private lock file is not owned by the current user: $lock_file"
 exec 9>>"$lock_file"
-flock -n 9 || die "benchmark already running (lock: $lock_file)"
+lock_with_flock || die "benchmark already running (lock: $lock_file)"
 
 validate_owned_tree() {
-  local root=$1 path mode expected
+  local root=$1 allow_root_mode=${2:-false} path mode expected
   while IFS= read -r -d '' path; do
     [[ ! -L "$path" ]] || die "owned artifact is a symlink: $path"
     if [[ -d "$path" ]]; then expected=700; else expected=600; fi
     [[ -f "$path" || -d "$path" ]] || die "owned artifact is not a file or directory: $path"
-    mode=$(stat -c '%a' "$path" 2>/dev/null || stat -f '%Lp' "$path")
-    [[ "$mode" == "$expected" ]] || die "owned artifact has mode $mode, want $expected: $path"
+    mode=$(stat_mode "$path")
+    if [[ "$allow_root_mode" != true || "$path" != "$root" ]]; then
+      [[ "$mode" == "$expected" ]] || die "owned artifact has mode $mode, want $expected: $path"
+    fi
     [[ "$(stat -c '%u' "$path" 2>/dev/null || stat -f '%u' "$path")" == "$current_uid" ]] || die "owned artifact is not owned by the current user: $path"
   done < <(find "$root" -mindepth 0 -print0)
 }
@@ -157,7 +189,10 @@ canonical_child_path() {
       mkdir -- "$current" || die "cannot create benchmark path parent: $current"
       chmod 700 "$current" || die "cannot protect benchmark path parent: $current"
     else
-      die "benchmark path parent does not exist: $current"
+      # The caller is only validating a candidate. Do not create any part of
+      # a rejected RESULTS_DIR before its policy and ownership checks finish.
+      printf '%s' "$candidate"
+      return
     fi
   done
   parent_canonical=$(cd -P -- "$parent" && pwd -P) || die "cannot canonicalize benchmark path parent: $parent"
@@ -209,8 +244,7 @@ requested_results_dir=${RESULTS_DIR:-$repo_root/benchmarks/data/$run_id}
 if [[ "$requested_results_dir" != /* ]]; then
   requested_results_dir="$repo_root/$requested_results_dir"
 fi
-results_dir=$(canonical_child_path "$requested_results_dir")
-readonly results_dir
+results_dir=$(canonical_child_path "$requested_results_dir" false)
 [[ "$results_dir" == "$requested_results_dir" ]] || die 'RESULTS_DIR must be canonical'
 case "$results_dir" in
   "$repo_root"/*|"$private_tmp_root"/*) ;;
@@ -229,9 +263,19 @@ fi
 if [[ "$requested_mode" == resume ]]; then
   [[ -d "$results_dir" ]] || die "resume results directory is missing: $results_dir"
 else
+  # Create output parents only after every rejection-only check above. This
+  # keeps an invalid RESULTS_DIR side-effect free.
+  results_dir=$(canonical_child_path "$requested_results_dir")
+  [[ "$results_dir" == "$requested_results_dir" ]] || die 'RESULTS_DIR must be canonical'
+  if [[ -d "$results_dir" ]]; then
+    # Preserve an existing empty directory's mode until all child checks pass;
+    # a later chmod then hardens the accepted output root.
+    validate_owned_tree "$results_dir" true
+  fi
   mkdir -p "$results_dir" || die "cannot create results directory: $results_dir"
   chmod 700 "$results_dir" || die "cannot protect results directory: $results_dir"
 fi
+readonly results_dir
 validate_owned_tree "$results_dir"
 if [[ "$requested_mode" == resume ]]; then
   validate_owned_tree "$run_dir"
