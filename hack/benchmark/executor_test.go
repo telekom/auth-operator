@@ -45,7 +45,7 @@ func TestObjectForUsesCanonicalKindsAndServiceAccountSubjects(t *testing.T) {
 		resourceClusterRoleBinding: "ClusterRoleBinding",
 		resourceBindDefinition:     "BindDefinition",
 	} {
-		cell := Cell{Engine: engineMap, Tier: "t1", Mode: modeProtect, RunID: "run", Phase: phaseCreate, Kind: resource}
+		cell := Cell{Engine: engineMap, Tier: "t1", Mode: modeProtect, RunID: fallbackRunID, Phase: phaseCreate, Kind: resource}
 		s, err := specFor(resource)
 		if err != nil {
 			t.Fatal(err)
@@ -55,13 +55,14 @@ func TestObjectForUsesCanonicalKindsAndServiceAccountSubjects(t *testing.T) {
 			t.Fatalf("%s kind = %q, want %q", resource, got, wantKind)
 		}
 		var subject map[string]interface{}
-		if resource == resourceRoleBinding || resource == resourceClusterRoleBinding {
+		switch resource {
+		case resourceRoleBinding, resourceClusterRoleBinding:
 			subjects, _, err := unstructured.NestedSlice(u.Object, "subjects")
 			if err != nil || len(subjects) != 1 {
 				t.Fatalf("%s subjects = %#v, err %v", resource, subjects, err)
 			}
 			subject, _ = subjects[0].(map[string]interface{})
-		} else if resource == resourceBindDefinition {
+		case resourceBindDefinition:
 			subjects, _, err := unstructured.NestedSlice(u.Object, "spec", "subjects")
 			if err != nil || len(subjects) != 1 {
 				t.Fatalf("BindDefinition subjects = %#v, err %v", subjects, err)

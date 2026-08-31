@@ -181,11 +181,11 @@ func TestComparisonEnvironmentIDIgnoresEngineSpecificMetadata(t *testing.T) {
 		KyvernoChartSHA: "chart-a", Evidence: map[string]string{fieldPolicyHash: "native"},
 	}
 	other := base
-	other.PolicyHash = "kyverno"
+	other.PolicyHash = kyvernoCommand
 	other.KyvernoVersion = "v1.19.1"
 	other.KyvernoChart = "3.9.1"
 	other.KyvernoChartSHA = "chart-b"
-	other.Evidence = map[string]string{fieldPolicyHash: "kyverno"}
+	other.Evidence = map[string]string{fieldPolicyHash: kyvernoCommand}
 	if comparisonEnvironmentID(base) != comparisonEnvironmentID(other) {
 		t.Fatal("engine-specific provenance changed comparison identity")
 	}

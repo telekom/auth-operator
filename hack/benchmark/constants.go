@@ -10,7 +10,9 @@ const (
 	annotationsField    = "annotations"
 	benchmarkLabelValue = "creator-tracking"
 	booleanTrue         = "true"
+	fallbackRunID       = "run"
 	kindField           = "kind"
+	kindClusterRole     = "ClusterRole"
 	labelsField         = "labels"
 	metadataField       = "metadata"
 	nameField           = "name"
@@ -18,6 +20,7 @@ const (
 	engineBaseline    = "baseline"
 	engineEnvironment = "environment"
 	engineMap         = "map"
+	kyvernoCommand    = "kyverno"
 
 	modeContributors = "contributors"
 	modeCreateOnly   = "create-only"

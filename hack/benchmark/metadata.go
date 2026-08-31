@@ -91,7 +91,7 @@ func (OSCommandRunner) Run(ctx context.Context, name string, args ...string) ([]
 		return nil, fmt.Errorf("command path is not allowed: %q", name)
 	}
 	switch name {
-	case "awk", "docker", "getconf", "go", "helm", "kubectl", "kind", "kyverno", "sysctl":
+	case "awk", "docker", "getconf", "go", "helm", "kubectl", "kind", kyvernoCommand, "sysctl":
 	default:
 		return nil, fmt.Errorf("command is not allowlisted: %q", name)
 	}
@@ -134,7 +134,7 @@ func CollectEnvironment(parent context.Context, runner CommandRunner, values map
 		e.HelmVersion = commandVersion(ctx, runner, "helm", "version", "--short")
 	}
 	if e.KyvernoVersion == "" {
-		e.KyvernoVersion = commandVersion(ctx, runner, "kyverno", "version")
+		e.KyvernoVersion = commandVersion(ctx, runner, kyvernoCommand, "version")
 	}
 	if e.KubernetesVersion == "" {
 		e.KubernetesVersion = kubernetesVersion(ctx, runner)
