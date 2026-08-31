@@ -63,16 +63,22 @@ func TestReportFormatsPreserveProvenanceAndTelemetry(t *testing.T) {
 			}
 		}
 	}
-	var md, aggregateMarkdown strings.Builder
+	var md, aggregateMD strings.Builder
 	if err := WriteMarkdown(&md, []Result{r}); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteReportMarkdown(&aggregateMarkdown, rows); err != nil {
+	if err := WriteReportMarkdown(&aggregateMD, rows); err != nil {
 		t.Fatal(err)
 	}
+	if md.Len() == 0 || aggregateMD.Len() == 0 {
+		t.Fatalf("Markdown output is empty: raw=%d aggregate=%d", md.Len(), aggregateMD.Len())
+	}
 	for _, value := range []string{"run-7", "input-7", "work-7", "config-7", "env-7", "architecture", "metric_before_state", "webhook_before_sum", "pod_restarts_delta"} {
-		if !strings.Contains(md.String(), value) || !strings.Contains(aggregateMarkdown.String(), value) {
-			t.Errorf("Markdown missing %q", value)
+		if !strings.Contains(md.String(), value) {
+			t.Errorf("raw Markdown missing %q", value)
+		}
+		if !strings.Contains(aggregateMD.String(), value) {
+			t.Errorf("aggregate Markdown missing %q", value)
 		}
 	}
 }

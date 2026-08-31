@@ -14,7 +14,6 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/dynamic"
 )
 
@@ -79,10 +78,41 @@ func statusFor(verb string, e error) int {
 		}
 		return 0
 	}
+	// Warmup is a create-only phase even though its name is not an API verb.
 	if verb == phaseCreate || verb == phaseWarmup {
 		return 201
 	}
 	return 200
+}
+
+func copyAnnotations(in map[string]string) map[string]string {
+	out := make(map[string]string, len(in)+1)
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func trackingAnnotationsEqual(a, b map[string]string) bool {
+	return a[annotationCreator] == b[annotationCreator] &&
+		a[annotationGroups] == b[annotationGroups]
+}
+
+func contributorCount(annotations map[string]string, editor string) int {
+	count := 0
+	for _, candidate := range strings.Split(annotations[annotationUpdated], ",") {
+		if candidate == editor {
+			count++
+		}
+	}
+	if annotations[annotationUpdated] == "" {
+		return 0
+	}
+	return count
+}
+
+func enabledTrackingEngine(engine string) bool {
+	return engine != engineBaseline
 }
 
 //nolint:gocyclo // The benchmark operation loop keeps mode-specific mutation semantics together.
@@ -93,6 +123,16 @@ func runPhaseWithClientsProgressOffset(
 ) CellRun {
 	started := time.Now()
 	out := CellRun{Cell: cell, Status: statusRunning, StartedAt: started.UTC().Format(time.RFC3339Nano), InputHash: InputHash(cell, canonical(cell))}
+	if len(resources) == 0 {
+		out.Status = statusFailed
+		out.Error = "at least one dynamic resource client is required"
+		return out
+	}
+	if workers < 1 {
+		out.Status = statusFailed
+		out.Error = "at least one worker is required"
+		return out
+	}
 	if len(ids) == 0 {
 		ids = []string{defaultEditorIdentity}
 	}
@@ -137,27 +177,35 @@ func runPhaseWithClientsProgressOffset(
 				default:
 				}
 				verb := cell.Phase
-				objects := cell.Objects
-				if objects < 1 {
-					objects = 1
-				}
+				mode := operationalMode(cell.Mode)
 				name := deterministicName(cell, i)
+				clientIndex := i % len(resources)
 				if cell.Phase == phaseChurn {
 					verb = verbUpdate
-					if cell.Mode == modeCreateOnly {
-						verb = phaseCreate
-						name = deterministicName(cell, i)
-					} else {
-						name = deterministicName(Cell{RunID: cell.RunID, Engine: cell.Engine, Tier: cell.Tier, Mode: cell.Mode, Phase: phaseCreate}, i%objects)
+					objects := cell.Objects
+					if objects < 1 {
+						objects = 1
+					}
+					name = deterministicName(Cell{RunID: cell.RunID, Engine: cell.Engine, Tier: cell.Tier, Mode: cell.Mode, Phase: phaseCreate}, i%objects)
+					if mode == modeContributors {
+						clientIndex = (i / objects / 2) % len(resources)
 					}
 				}
-				if cell.Phase == phaseSustained && i%2 == 1 {
-					if cell.Mode == modeCreateOnly {
+				if cell.Phase == phaseSustained {
+					objects := cell.Objects
+					if objects < 1 {
+						objects = 1
+					}
+					if i%2 == 0 {
 						verb = phaseCreate
-						name = deterministicName(cell, i)
+						name = deterministicName(Cell{RunID: cell.RunID, Engine: cell.Engine, Tier: cell.Tier, Mode: cell.Mode, Phase: phaseSustained}, i/2)
 					} else {
 						verb = verbUpdate
-						name = deterministicName(Cell{RunID: cell.RunID, Engine: cell.Engine, Tier: cell.Tier, Mode: cell.Mode, Phase: phaseCreate}, (i/2)%objects)
+						ordinal := i / 2
+						name = deterministicName(Cell{RunID: cell.RunID, Engine: cell.Engine, Tier: cell.Tier, Mode: cell.Mode, Phase: phaseCreate}, ordinal%objects)
+						if mode == modeContributors {
+							clientIndex = (ordinal / objects / 2) % len(resources)
+						}
 					}
 				}
 				s, e := specFor(cell.Kind)
@@ -165,96 +213,86 @@ func runPhaseWithClientsProgressOffset(
 					rec(Operation{Verb: verb, Error: e.Error()})
 					continue
 				}
-				r := resources[i%len(resources)]
+				r := resources[clientIndex]
 				obj := objectFor(cell, name, namespace, s)
-				st := time.Now()
 				var err error
-				// create-only is intentionally a pure create workload. Protect
-				// exercises the admission restoration path by forging labels before
-				// restoring the protected object; contributors rotate identities on
-				// every request through the resource slice above.
-				if cell.Mode == modeCreateOnly {
-					verb = phaseCreate
-				}
+				var trace *MutationTrace
 				if verb == verbUpdate {
 					old, getErr := r.Get(ctx, name, metav1.GetOptions{})
 					if getErr != nil {
 						err = getErr
 					} else {
-						restoredByContributor := false
-						switch cell.Mode {
+						request := old.DeepCopy()
+						requestAnnotations := copyAnnotations(old.GetAnnotations())
+						requestAnnotations[annotationEditor] = ids[clientIndex%len(ids)]
+						request.SetAnnotations(requestAnnotations)
+						st := time.Now()
+						switch mode {
 						case modeProtect:
-							forged := old.DeepCopy()
-							forged.SetLabels(map[string]string{"t-caas.telekom.com/benchmark-forged": booleanTrue})
-							// A protected webhook may reject the forged update; that is the
-							// expected outcome. Always issue the restoration update.
-							_, _ = r.Update(ctx, forged, metav1.UpdateOptions{})
-							if refreshed, refreshErr := r.Get(ctx, name, metav1.GetOptions{}); refreshErr == nil {
-								old = refreshed
-							}
+							// Forge both managed creator annotations. Protect mode must
+							// restore them in the same admission request while preserving
+							// the unrelated benchmark editor annotation.
+							requestAnnotations[annotationCreator] = spoofedCreator + "-tampered"
+							requestAnnotations[annotationGroups] = spoofedGroups + "-tampered"
+							request.SetAnnotations(requestAnnotations)
+							_, err = r.Update(ctx, request, metav1.UpdateOptions{})
 						case modeContributors:
-							// Exercise the same editor twice, then attempt a forged
-							// replacement/removal and verify the managed labels return.
-							editor := ids[i%len(ids)]
-							first := old.DeepCopy()
-							annotations := first.GetAnnotations()
-							if annotations == nil {
-								annotations = map[string]string{}
-							}
-							annotations["t-caas.telekom.com/benchmark-editor"] = editor
-							first.SetAnnotations(annotations)
-							var updated *unstructured.Unstructured
-							repeatedOK := false
-							updated, err = r.Update(ctx, first, metav1.UpdateOptions{})
-							if err == nil {
-								first = updated
-							}
-							if err == nil {
-								updated, err = r.Update(ctx, first.DeepCopy(), metav1.UpdateOptions{})
-								if err == nil {
-									first = updated
-									repeatedOK = true
+							// One measured UPDATE per operation. Rotating the
+							// impersonated client by round exercises both append and
+							// deduplication without hiding extra requests in latency.
+							_, err = r.Update(ctx, request, metav1.UpdateOptions{})
+						case modeCreateOnly:
+							_, err = r.Update(ctx, request, metav1.UpdateOptions{})
+						default:
+							_, err = r.Update(ctx, request, metav1.UpdateOptions{})
+						}
+						latency := time.Since(st).Microseconds()
+						if err == nil && enabledTrackingEngine(cell.Engine) {
+							observed, observeErr := r.Get(ctx, name, metav1.GetOptions{})
+							if observeErr != nil {
+								err = fmt.Errorf("verify tracking annotations: %w", observeErr)
+							} else {
+								switch mode {
+								case modeProtect:
+									restored := trackingAnnotationsEqual(old.GetAnnotations(), observed.GetAnnotations())
+									trace = &MutationTrace{Editor: ids[clientIndex%len(ids)], Object: name, TamperTested: true, Restored: restored}
+									if !restored {
+										err = fmt.Errorf("creator annotations were not restored")
+									}
+								case modeContributors:
+									editor := ids[clientIndex%len(ids)]
+									count := contributorCount(observed.GetAnnotations(), editor)
+									trace = &MutationTrace{Editor: editor, Object: name, Deduplicated: contributorCount(old.GetAnnotations(), editor) > 0, Restored: count == 1}
+									if count != 1 {
+										err = fmt.Errorf("contributor annotation contains editor %q %d times", editor, count)
+									}
 								}
 							}
-							forged := first.DeepCopy()
-							forged.SetLabels(map[string]string{"t-caas.telekom.com/benchmark-forged": booleanTrue})
-							if forgedResult, forgeErr := r.Update(ctx, forged, metav1.UpdateOptions{}); forgeErr == nil {
-								forged = forgedResult
-							}
-							old = forged
-							old.SetLabels(obj.GetLabels())
-							restored, restoreErr := r.Update(ctx, old, metav1.UpdateOptions{})
-							if restoreErr != nil && err == nil {
-								err = restoreErr
-							}
-							if restoreErr == nil {
-								old = restored
-							}
-							observed, getErr := r.Get(ctx, name, metav1.GetOptions{})
-							addTrace(MutationTrace{
-								Editor: editor, Object: name, Repeated: true,
-								Deduplicated: repeatedOK, TamperTested: true,
-								Restored: getErr == nil && labelsEqual(
-									observed.GetLabels(), obj.GetLabels(),
-								),
-							})
-							restoredByContributor = true
-						default:
-							// Other modes use the common restoration path below.
 						}
-						if !restoredByContributor {
-							old.SetLabels(obj.GetLabels())
-							_, err = r.Update(ctx, old, metav1.UpdateOptions{})
+						if trace != nil {
+							addTrace(*trace)
 						}
+						op := Operation{Verb: verb, LatencyMicros: latency, Status: statusFor(verb, err)}
+						if err != nil {
+							op.Error = err.Error()
+						}
+						rec(op)
+						continue
 					}
-				} else {
-					_, err = r.Create(ctx, obj, metav1.CreateOptions{})
+					op := Operation{Verb: verb, Status: statusFor(verb, err)}
+					op.Error = err.Error()
+					rec(op)
+					continue
 				}
-				op := Operation{Verb: verb, LatencyMicros: time.Since(st).Microseconds(), Status: statusFor(verb, err)}
+				st := time.Now()
+				_, err = r.Create(ctx, obj, metav1.CreateOptions{})
+				latency := time.Since(st).Microseconds()
+				op := Operation{Verb: verb, LatencyMicros: latency, Status: statusFor(verb, err)}
 				if err != nil {
 					op.Error = err.Error()
 				}
 				rec(op)
+				continue
 			}
 		}()
 	}
@@ -283,18 +321,6 @@ func runPhaseWithClientsProgressOffset(
 	return out
 }
 
-func labelsEqual(a, b map[string]string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for k, v := range a {
-		if b[k] != v {
-			return false
-		}
-	}
-	return true
-}
-
 // runMixedPhase executes the ordered tier resource mix. Each identity gets a
 // client for every resource and the work is partitioned across resources, so
 // tier annotations cannot accidentally stand in for real API traffic.
@@ -312,7 +338,7 @@ func runMixedPhaseWithOffset(
 		return runMixedSustained(ctx, clients, kinds, cell, workers, ids, namespace, duration, offset, progress)
 	}
 	consumed := 0
-	for ri, kind := range kinds {
+	for _, kind := range kinds {
 		s, err := specFor(kind)
 		if err != nil {
 			out.Status = statusFailed
@@ -327,9 +353,13 @@ func runMixedPhaseWithOffset(
 				targets[i] = cl.Resource(s.gvr)
 			}
 		}
-		count := ops / len(kinds)
-		if ri < ops%len(kinds) {
-			count++
+		// The workload contract is ops objects per matched kind. Keeping a
+		// per-kind object pool avoids UPDATE requests targeting names that were
+		// never created in mixed tiers.
+		count := ops
+		objectCount := cell.Objects
+		if objectCount < 1 {
+			objectCount = count
 		}
 		localOffset := offset - consumed
 		if localOffset < 0 {
@@ -342,7 +372,7 @@ func runMixedPhaseWithOffset(
 			Engine: cell.Engine, Tier: cell.Tier, Mode: cell.Mode, Phase: cell.Phase,
 			Concurrency: cell.Concurrency, Kind: kind, Verb: cell.Verb,
 			Variant: cell.Variant, Sustained: cell.Sustained, RunID: cell.RunID,
-			Objects: cell.Objects,
+			Objects: objectCount,
 		}
 		part := runPhaseWithClientsProgressOffset(ctx, targets, partCell, count,
 			workers, ids, namespace, 0, localOffset, func(n int) error {

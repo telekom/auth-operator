@@ -64,3 +64,27 @@ func TestValidateCompletedResultRejectsInvalidResult(t *testing.T) {
 		t.Fatal("invalid completed result was accepted")
 	}
 }
+
+func TestValidateResultIdentityAllowsExactFailedResultForRetry(t *testing.T) {
+	expected := Cell{
+		Engine: engineMap, Tier: "t1", Mode: modeProtect, Phase: phaseChurn,
+		Concurrency: 8, Kind: resourceRoleDefinition, Verb: verbMixed,
+		Variant: variantEnabled, RunID: "run-1", Objects: 2,
+	}
+	failed := Result{
+		Cell: expected, RunID: "run-1", InputHash: "input",
+		EnvironmentID: "environment", WorkloadHash: "workload",
+		ConfigHash: "config", Status: statusFailed, Error: "interrupted",
+	}
+	if err := validateResultIdentity(failed, expected, "input", "environment", "workload", "config"); err != nil {
+		t.Fatalf("exact failed result cannot be retried: %v", err)
+	}
+	if err := validateCompletedResult(failed, expected, "input", "environment", "workload", "config"); err == nil {
+		t.Fatal("failed result was accepted as a completed checkpoint")
+	}
+
+	failed.ConfigHash = "other"
+	if err := validateResultIdentity(failed, expected, "input", "environment", "workload", "config"); err == nil {
+		t.Fatal("mismatched failed result was accepted for retry")
+	}
+}
