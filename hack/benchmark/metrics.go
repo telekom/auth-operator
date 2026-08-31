@@ -60,6 +60,11 @@ func ParseMetricResponse(status int, text, name string) Counter {
 }
 func CounterDelta(a, b Counter) Counter {
 	if a.State != MetricAvailable || b.State != MetricAvailable {
+		for _, state := range []MetricState{MetricUnauthorized, MetricUnavailable, MetricMissing} {
+			if a.State == state || b.State == state {
+				return Counter{State: state}
+			}
+		}
 		return Counter{State: MetricMissing}
 	}
 	if b.Value < a.Value {
