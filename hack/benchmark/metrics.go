@@ -198,13 +198,11 @@ func ParseAdmissionMetrics(before, after string, labels map[string]string) (Coun
 }
 
 func ParseHistogramSnapshot(text, sumName, countName string, labels map[string]string) HistogramDelta {
-	sumSamples, sumErr := metricSamples(text, sumName)
-	countSamples, countErr := metricSamples(text, countName)
+	sum, sumOK, sumErr := matchingMetricSample(text, sumName, labels)
+	count, countOK, countErr := matchingMetricSample(text, countName, labels)
 	if sumErr != nil || countErr != nil {
 		return HistogramDelta{State: MetricUnavailable}
 	}
-	sum, sumOK := matchingSample(sumSamples, labels)
-	count, countOK := matchingSample(countSamples, labels)
 	if !sumOK || !countOK {
 		return HistogramDelta{State: MetricMissing}
 	}
@@ -325,6 +323,15 @@ func matchingSample(samples []MetricSample, labels map[string]string) (MetricSam
 	return MetricSample{}, false
 }
 
+func matchingMetricSample(text, name string, labels map[string]string) (MetricSample, bool, error) {
+	samples, err := metricSamples(text, name)
+	if err != nil {
+		return MetricSample{}, false, err
+	}
+	sample, ok := matchingSample(samples, labels)
+	return sample, ok, nil
+}
+
 type HistogramDelta struct {
 	Sum, Count  Counter
 	MeanSeconds float64
@@ -333,17 +340,13 @@ type HistogramDelta struct {
 
 // ParseHistogramDelta selects matching sum/count series, preserving reset state.
 func ParseHistogramDelta(before, after, sumName, countName string, labels map[string]string) HistogramDelta {
-	beforeSum, beforeSumErr := metricSamples(before, sumName)
-	afterSum, afterSumErr := metricSamples(after, sumName)
-	beforeCount, beforeCountErr := metricSamples(before, countName)
-	afterCount, afterCountErr := metricSamples(after, countName)
+	bs, bok, beforeSumErr := matchingMetricSample(before, sumName, labels)
+	as, aok, afterSumErr := matchingMetricSample(after, sumName, labels)
+	bc, bcok, beforeCountErr := matchingMetricSample(before, countName, labels)
+	ac, acok, afterCountErr := matchingMetricSample(after, countName, labels)
 	if beforeSumErr != nil || afterSumErr != nil || beforeCountErr != nil || afterCountErr != nil {
 		return HistogramDelta{State: MetricUnavailable}
 	}
-	bs, bok := matchingSample(beforeSum, labels)
-	as, aok := matchingSample(afterSum, labels)
-	bc, bcok := matchingSample(beforeCount, labels)
-	ac, acok := matchingSample(afterCount, labels)
 	if !bok || !aok || !bcok || !acok {
 		return HistogramDelta{State: MetricMissing}
 	}
