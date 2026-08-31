@@ -55,7 +55,11 @@ jobs:
           helm-version: ${{ env.HELM_VERSION }}
       - name: Run benchmark in an isolated owned cluster
         env:
-          BENCHMARK_QUICK: ${{ github.event_name != 'workflow_dispatch' || inputs.benchmark_mode == 'quick' }}
+          # Pull requests run the bounded smoke by default. Adding the
+          # creator-tracking-full-benchmark label opts this draft PR into the
+          # exact full matrix without requiring the workflow to exist on the
+          # default branch for workflow_dispatch discovery.
+          BENCHMARK_QUICK: ${{ (github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'creator-tracking-full-benchmark')) || (github.event_name == 'workflow_dispatch' && inputs.benchmark_mode == 'quick') }}
         run: |
           set +e
           make benchmark-creator-tracking 2>&1 | tee /tmp/creator-tracking-benchmark.log
@@ -65,6 +69,34 @@ jobs:
             echo "::error title=creator-tracking benchmark failure::$detail"
           fi
           exit "$status"
+      - name: Summarize benchmark evidence
+        if: always()
+        env:
+          BENCHMARK_QUICK: ${{ (github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'creator-tracking-full-benchmark')) || (github.event_name == 'workflow_dispatch' && inputs.benchmark_mode == 'quick') }}
+        run: |
+          result_root=benchmarks/data
+          result_count=0
+          complete_count=0
+          failed_count=0
+          if [ -d "$result_root" ]; then
+            result_count=$(find "$result_root" -type f -name 'cell-*.json' -print | wc -l | tr -d ' ')
+            complete_count=$(find "$result_root" -type f -name 'cell-*.json' -print0 | xargs -0r jq -r '.status' | grep -c '^complete$' || true)
+            failed_count=$(find "$result_root" -type f -name 'cell-*.json' -print0 | xargs -0r jq -r '.status' | grep -c '^failed$' || true)
+          fi
+          {
+            echo '### Creator-tracking benchmark evidence'
+            echo "- Requested mode: ${BENCHMARK_QUICK:-unknown} (quick=true is smoke; quick=false is full)"
+            echo "- Phase result files: $result_count"
+            echo "- Complete: $complete_count"
+            echo "- Failed: $failed_count"
+            if [ "$result_count" -gt 0 ]; then
+              echo '- Telemetry states:'
+              find "$result_root" -type f -name 'cell-*.json' -print0 | xargs -0r jq -r '.metric_delta_state // "unset"' | sort | uniq -c | sed 's/^/  - /'
+              echo '- Raw result files are attached to the benchmark artifact.'
+            else
+              echo '- No phase result files were produced.'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload raw benchmark results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
