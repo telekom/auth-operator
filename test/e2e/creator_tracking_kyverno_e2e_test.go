@@ -175,8 +175,13 @@ var _ = Describe("Creator Tracking Kyverno", Label("creator-tracking-kyverno"), 
 			if err != nil {
 				return fmt.Errorf("get MutatingPolicy %s: %w", name, err)
 			}
-			if value(object, "status", "conditionStatus", "ready") == "true" {
-				return nil
+			status, _ := object["status"].(map[string]interface{})
+			conditions, _ := status["conditions"].([]interface{})
+			for _, raw := range conditions {
+				condition, _ := raw.(map[string]interface{})
+				if fmt.Sprint(condition["type"]) == "Ready" && fmt.Sprint(condition["status"]) == "True" {
+					return nil
+				}
 			}
 			status, err := json.Marshal(object["status"])
 			if err != nil {
