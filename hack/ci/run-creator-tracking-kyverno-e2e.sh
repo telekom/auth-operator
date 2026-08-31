@@ -25,8 +25,21 @@ case "$mode" in full|cleanup-only|debug) ;; *) echo "usage: $0 [full|cleanup-onl
 command -v flock >/dev/null
 command -v timeout >/dev/null
 [[ ! -L "$lock" ]] || { echo "refusing symlink lock $lock" >&2; exit 1; }
-exec 9>"$lock"
-chmod 600 "$lock"
+if [[ ! -e "$lock" ]]; then
+  if ! (set -C; : >"$lock") 2>/dev/null; then
+    echo "unable to create Kyverno E2E lock $lock" >&2
+    exit 1
+  fi
+fi
+[[ ! -L "$lock" ]] || { echo "refusing symlink lock $lock" >&2; exit 1; }
+lock_type=$(stat -c %F "$lock" 2>/dev/null || true)
+lock_owner=$(stat -c %u "$lock" 2>/dev/null || true)
+lock_mode=$(stat -c %a "$lock" 2>/dev/null || true)
+[[ "$lock_type" == 'regular file' && "$lock_owner" == "$(id -u)" && "$lock_mode" == 600 ]] || {
+  echo "Kyverno E2E lock must be an owned regular file with mode 600: $lock" >&2
+  exit 1
+}
+exec 9<>"$lock"
 flock -n 9 || { echo "Kyverno E2E already running" >&2; exit 1; }
 
 die() { echo "creator-tracking Kyverno E2E: $*" >&2; exit 1; }
@@ -57,7 +70,15 @@ assert_regular_absent() {
   [[ ! -L "$path" ]] || die "refusing symlink artifact $path"
   [[ ! -e "$path" ]] || die "refusing to overwrite existing artifact $path"
 }
-marker_owned() { [[ -f "$marker" && ! -L "$marker" ]] || return 1; [[ "$(<"$marker")" == "$owner" ]]; }
+marker_owned() {
+  [[ -f "$marker" && ! -L "$marker" ]] || return 1
+  local marker_type marker_owner marker_mode
+  marker_type=$(stat -c %F "$marker" 2>/dev/null || true)
+  marker_owner=$(stat -c %u "$marker" 2>/dev/null || true)
+  marker_mode=$(stat -c %a "$marker" 2>/dev/null || true)
+  [[ "$marker_type" == 'regular file' && "$marker_owner" == "$(id -u)" && "$marker_mode" == 600 ]] || return 1
+  [[ "$(<"$marker")" == "$owner" ]]
+}
 artifact_owned() {
   [[ -d "$artifact_dir" && ! -L "$artifact_dir" ]] || return 1
   [[ -f "$artifact_dir/.owner" && ! -L "$artifact_dir/.owner" ]] || return 1
@@ -161,8 +182,11 @@ source versions.env
 set +a
 : "${E2E_CREATOR_TRACKING_STABLE_NODE_IMAGE:?versions.env must define E2E_CREATOR_TRACKING_STABLE_NODE_IMAGE}"
 readonly kind_image=$E2E_CREATOR_TRACKING_STABLE_NODE_IMAGE
-printf '%s\n' "$owner" > "$marker"
+if ! (set -C; printf '%s\n' "$owner" >"$marker") 2>/dev/null; then
+  die "unable to create ownership marker $marker"
+fi
 chmod 600 "$marker"
+marker_owned || die "ownership marker is not a private file owned by this user"
 status=0
 cleanup() {
   status=$?
