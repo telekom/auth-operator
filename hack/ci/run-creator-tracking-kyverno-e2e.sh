@@ -106,10 +106,19 @@ cleanup_owned() {
   if ((${#failures[@]})); then printf 'cleanup failures: %s\n' "${failures[*]}" >&2; return 1; fi
 }
 
-write_safe_debug() {
-  mkdir -p "$artifact_dir"
+prepare_debug_dir() {
+  if [[ -e "$artifact_dir" || -L "$artifact_dir" ]]; then
+    artifact_owned || { echo "refusing unsafe debug artifact path $artifact_dir" >&2; return 1; }
+    return 0
+  fi
+  mkdir -- "$artifact_dir" || { echo "cannot create debug artifact directory $artifact_dir" >&2; return 1; }
+  chmod 700 "$artifact_dir"
   printf '%s\n' "$owner" >"$artifact_dir/.owner"
   chmod 600 "$artifact_dir/.owner"
+}
+
+write_safe_debug() {
+  prepare_debug_dir || return 1
   {
     echo "cluster=$cluster"
     echo "kind_image=$kind_image"
