@@ -49,7 +49,7 @@ fi
 flock -n 9 || { echo "Kyverno E2E already running" >&2; exit 1; }
 
 die() { echo "creator-tracking Kyverno E2E: $*" >&2; exit 1; }
-is_known_absent() { case "$1" in *'No such image'*|*'No such container'*|*'not found'*|*'does not exist'*) return 0;; *) return 1;; esac; }
+is_known_absent() { case "$1" in *'No such image'*|*'No such container'*|*'No such object'*|*'not found'*|*'does not exist'*) return 0;; *) return 1;; esac; }
 bounded() { timeout --signal=TERM --kill-after=30s 30m "$@"; }
 assert_image_absent() {
   local image=$1 output rc
