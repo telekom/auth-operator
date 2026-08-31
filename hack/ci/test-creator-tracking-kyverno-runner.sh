@@ -5,7 +5,24 @@ set -euo pipefail
 
 runner=hack/ci/run-creator-tracking-kyverno-e2e.sh
 installer=hack/ci/install-kyverno.sh
+creator_runner=hack/run-creator-tracking-e2e.sh
+workflow=.github/workflows/e2e.yml
 bash -n "$runner" "$installer"
+bash -n "$creator_runner"
+
+# GNU stat reports an empty regular file as "regular empty file", while BSD
+# stat reports "Regular File". All lock guards accept both spellings, retain
+# owner/mode checks, and repair only an owned empty stale lock.
+for guarded in "$creator_runner" "$runner"; do
+  grep -Fq 'regular empty file' "$guarded"
+  grep -Fq 'Regular File' "$guarded"
+  grep -Fq 'stat -f %HT' "$guarded"
+  grep -Fq '! -s' "$guarded"
+done
+grep -Fq 'regular empty file' "$workflow"
+grep -Fq 'Regular File' "$workflow"
+grep -Fq 'stat -f %HT' "$workflow"
+grep -Fq '[ ! -s "$lock_file" ]' "$workflow"
 
 # A composite name must brace the variable when nounset is enabled.
 braced="assert_container_absent \"\${cluster}-control-plane\""
