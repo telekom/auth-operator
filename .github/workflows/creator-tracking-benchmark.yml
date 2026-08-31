@@ -1,0 +1,48 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+# SPDX-License-Identifier: Apache-2.0
+name: Creator tracking benchmark
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    name: Benchmark lifecycle static checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Load versions
+        run: grep -v '^#' versions.env | grep -v '^$' >> "$GITHUB_ENV"
+      - uses: ./.github/actions/setup-go-env
+        with:
+          go-version-file: go.mod
+      - run: make benchmark-creator-tracking-static
+
+  benchmark:
+    name: Creator tracking quick benchmark
+    needs: static
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Load versions
+        run: grep -v '^#' versions.env | grep -v '^$' >> "$GITHUB_ENV"
+      - uses: ./.github/actions/setup-go-env
+        with:
+          go-version-file: go.mod
+          install-kind: 'true'
+          kind-version: ${{ env.KIND_VERSION }}
+          install-helm: 'true'
+          helm-version: ${{ env.HELM_VERSION }}
+      - name: Run benchmark in an isolated owned cluster
+        run: make benchmark-creator-tracking-quick
+      - name: Upload raw benchmark results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: creator-tracking-benchmark-${{ github.run_id }}
+          path: benchmarks/data/
+          if-no-files-found: ignore
