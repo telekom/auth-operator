@@ -147,3 +147,15 @@ path = ["test/e2e/kind-config-*.yaml"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
 SPDX-License-Identifier = "CC0-1.0"
+
+[[annotations]]
+path = ["hack/benchmark/**/*.go", "hack/benchmark/**/*.yaml", "hack/benchmark/README.md"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = ["docs/benchmarks/**/*.md", "docs/benchmarks/data/**/*.csv", "benchmarks/**/*.csv", "benchmarks/**/*.json", "benchmarks/**/*.md", "benchmarks/**/*.yaml"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Deutsche Telekom AG"
+SPDX-License-Identifier = "CC0-1.0"

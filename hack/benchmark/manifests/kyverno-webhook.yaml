@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+# SPDX-License-Identifier: Apache-2.0
+# Executable compatibility fixture; the full policy is sourced from
+# docs/examples/creator-tracking-kyverno-clusterpolicy.yaml.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: creator-tracking-benchmark-webhook
+spec:
+  background: false
+  failurePolicy: Ignore
+  rules:
+    - name: mark-benchmark-resource
+      match:
+        any:
+          - resources:
+              kinds: [ConfigMap]
+              operations: [CREATE]
+      mutate:
+        patchStrategicMerge:
+          metadata:
+            labels:
+              creator-tracking-benchmark: webhook
