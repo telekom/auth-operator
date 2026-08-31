@@ -82,6 +82,15 @@ marker_owned() {
 artifact_owned() {
   [[ -d "$artifact_dir" && ! -L "$artifact_dir" ]] || return 1
   [[ -f "$artifact_dir/.owner" && ! -L "$artifact_dir/.owner" ]] || return 1
+  local dir_type dir_owner dir_mode marker_type marker_owner marker_mode
+  dir_type=$(stat -c %F "$artifact_dir" 2>/dev/null || true)
+  dir_owner=$(stat -c %u "$artifact_dir" 2>/dev/null || true)
+  dir_mode=$(stat -c %a "$artifact_dir" 2>/dev/null || true)
+  marker_type=$(stat -c %F "$artifact_dir/.owner" 2>/dev/null || true)
+  marker_owner=$(stat -c %u "$artifact_dir/.owner" 2>/dev/null || true)
+  marker_mode=$(stat -c %a "$artifact_dir/.owner" 2>/dev/null || true)
+  [[ "$dir_type" == directory && "$dir_owner" == "$(id -u)" && "$dir_mode" == 700 ]] || return 1
+  [[ "$marker_type" == 'regular file' && "$marker_owner" == "$(id -u)" && "$marker_mode" == 600 ]] || return 1
   [[ "$(<"$artifact_dir/.owner")" == "$owner" ]]
 }
 owned_remove_file() {
