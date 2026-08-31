@@ -275,7 +275,7 @@ var _ = Describe("Creator Tracking Kyverno", Label("creator-tracking-kyverno"), 
 				if err == nil {
 					return fmt.Errorf("%s/%s still exists", resource, name)
 				}
-				if !strings.Contains(strings.ToLower(string(output)), "not found") {
+				if !creatorIsAbsentError(output, err) {
 					return fmt.Errorf("checking %s/%s: %w (%s)", resource, name, err, output)
 				}
 				return nil
@@ -665,7 +665,7 @@ spec:
 			if err == nil {
 				return fmt.Errorf("serviceaccount/%s still exists: %s", kyvernoSA, output)
 			}
-			if !strings.Contains(strings.ToLower(string(output)), "not found") {
+			if !creatorIsAbsentError(output, err) {
 				return fmt.Errorf("checking serviceaccount/%s: %w (%s)", kyvernoSA, err, output)
 			}
 			return nil
