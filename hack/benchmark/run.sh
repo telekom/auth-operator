@@ -192,11 +192,11 @@ if [[ "$requested_mode" == resume ]]; then
 else
   nonce=$(random_suffix); readonly nonce
   run_id="$(sanitize "$requested_run")-$nonce"; readonly run_id
+  # Install the preflight cleanup immediately after creating the run directory.
+  # Keep the expansion nounset-safe if an early setup failure leaves it unset.
   run_dir="$(mktemp -d "$private_tmp_root/auth-operator-benchmark.${run_id}.XXXXXX")"; readonly run_dir
+  trap 'if [[ -n "${run_dir:-}" ]]; then rm -rf -- "$run_dir"; fi' EXIT
   chmod 700 "$run_dir"
-  # Install the preflight cleanup immediately. Path validation below can fail
-  # before the ownership-aware lifecycle handler is available.
-  trap 'rm -rf -- "$run_dir"' EXIT
   cluster_base=$(sanitize "$run_id"); cluster="auth-operator-bench-${cluster_base:0:40}"; readonly cluster
   kubeconfig="$run_dir/kubeconfig"; readonly kubeconfig
   printf 'run_id=%s\ncluster=%s\nkubeconfig=%s\n' "$run_id" "$cluster" "$kubeconfig" >"$run_dir/identity"
