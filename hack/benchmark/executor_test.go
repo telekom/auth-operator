@@ -5,10 +5,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
 
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -75,6 +77,114 @@ func TestObjectForUsesCanonicalKindsAndServiceAccountSubjects(t *testing.T) {
 	}
 }
 
+func TestObjectForUsesCanonicalKinds(t *testing.T) {
+	want := map[string]string{
+		resourceNamespace:          "Namespace",
+		resourceServiceAccount:     "ServiceAccount",
+		resourceSecret:             "Secret",
+		resourceRole:               "Role",
+		resourceRoleBinding:        "RoleBinding",
+		resourceClusterRole:        "ClusterRole",
+		resourceClusterRoleBinding: "ClusterRoleBinding",
+		resourceRoleDefinition:     "RoleDefinition",
+		resourceBindDefinition:     "BindDefinition",
+		resourceRBACPolicy:         "RBACPolicy",
+	}
+	for resource, expectedKind := range want {
+		t.Run(resource, func(t *testing.T) {
+			s, err := specFor(resource)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cell := Cell{Engine: engineMap, Tier: "t4", Mode: modeProtect, RunID: "run-1", Kind: resource}
+			if got := objectFor(cell, "object", "bench", s).GetKind(); got != expectedKind {
+				t.Fatalf("generated kind = %q, want %q", got, expectedKind)
+			}
+		})
+	}
+}
+
+func TestRBACSubjectAPIGroupSemantics(t *testing.T) {
+	for _, resource := range []string{resourceRoleBinding, resourceClusterRoleBinding} {
+		t.Run(resource, func(t *testing.T) {
+			s, err := specFor(resource)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cell := Cell{Engine: engineMap, Tier: "t4", Mode: modeProtect, RunID: "run-1", Kind: resource}
+			subjects, found, err := unstructured.NestedSlice(objectFor(cell, "object", "bench", s).Object, "subjects")
+			if err != nil || !found || len(subjects) != 1 {
+				t.Fatalf("subjects = %#v, found=%t, err=%v", subjects, found, err)
+			}
+			subject, ok := subjects[0].(map[string]interface{})
+			if !ok {
+				t.Fatalf("subject has unexpected type %T", subjects[0])
+			}
+			if _, found := subject[apiGroupField]; found {
+				t.Fatalf("ServiceAccount subject unexpectedly has apiGroup: %#v", subject)
+			}
+		})
+	}
+	t.Run(resourceBindDefinition, func(t *testing.T) {
+		s, err := specFor(resourceBindDefinition)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cell := Cell{Engine: engineMap, Tier: "t4", Mode: modeProtect, RunID: "run-1", Kind: resourceBindDefinition}
+		subjects, found, err := unstructured.NestedSlice(objectFor(cell, "object", "bench", s).Object, "spec", "subjects")
+		if err != nil || !found || len(subjects) != 1 {
+			t.Fatalf("subjects = %#v, found=%t, err=%v", subjects, found, err)
+		}
+		subject, ok := subjects[0].(map[string]interface{})
+		if !ok {
+			t.Fatalf("subject has unexpected type %T", subjects[0])
+		}
+		if _, found := subject[apiGroupField]; found {
+			t.Fatalf("BindDefinition ServiceAccount subject unexpectedly has apiGroup: %#v", subject)
+		}
+	})
+	for _, kind := range []string{"User", "Group"} {
+		t.Run(kind, func(t *testing.T) {
+			subject := subjectFor(kind, "subject", "bench")
+			if got := subject[apiGroupField]; got != rbacv1.GroupName {
+				t.Fatalf("apiGroup = %#v, want %q", got, rbacv1.GroupName)
+			}
+			if _, found := subject[resourceNamespace]; found {
+				t.Fatalf("%s subject unexpectedly has namespace: %#v", kind, subject)
+			}
+		})
+	}
+}
+
+func TestMetricDeltaCounterPreservesTelemetryState(t *testing.T) {
+	metricName := "benchmark_counter"
+	for _, test := range []struct {
+		name  string
+		state MetricState
+		code  int
+	}{
+		{name: "unauthorized", state: MetricUnauthorized, code: 403},
+		{name: "unavailable", state: MetricUnavailable, code: 500},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			before := MetricsSnapshot{StatusCode: http.StatusOK, State: MetricAvailable, Body: metricName + " 4\n"}
+			after := MetricsSnapshot{StatusCode: test.code, State: test.state}
+			got := metricDeltaCounter(before, after, metricName)
+			if got.State != test.state || got.Value != 0 {
+				t.Fatalf("delta = %#v, want state=%q and zero value", got, test.state)
+			}
+		})
+	}
+	reset := metricDeltaCounter(
+		MetricsSnapshot{StatusCode: http.StatusOK, State: MetricAvailable, Body: metricName + " 10\n"},
+		MetricsSnapshot{StatusCode: http.StatusOK, State: MetricAvailable, Body: metricName + " 2\n"},
+		metricName,
+	)
+	if reset.State != MetricReset || reset.Value != 0 {
+		t.Fatalf("reset delta = %#v, want reset with zero value", reset)
+	}
+}
+
 func TestCleanupResourceKindsIncludesSelectedIsolationResource(t *testing.T) {
 	selected := resourceRoleDefinition
 	got := cleanupResourceKinds(nil, selected)
@@ -96,6 +206,18 @@ func TestObjectForAnnotatesIsolationScope(t *testing.T) {
 	got, _, err := unstructured.NestedString(u.Object, metadataField, annotationsField, "t-caas.telekom.com/benchmark-scope")
 	if err != nil || got != isolationRBACGroup {
 		t.Fatalf("isolation scope = %q, err %v", got, err)
+	}
+}
+
+func TestArtifactBaseNameIncludesCellDiscriminators(t *testing.T) {
+	core := Cell{Engine: engineMap, Tier: "t1", Mode: modeProtect, Variant: variantEnabled}
+	excluded := core
+	excluded.Variant = variantExcluded
+	if artifactBaseName(core) == artifactBaseName(excluded) {
+		t.Fatalf("core and excluded artifacts collide: %q", artifactBaseName(core))
+	}
+	if want := "map-t1-protect-enabled"; artifactBaseName(core) != want {
+		t.Fatalf("artifact base name = %q, want %q", artifactBaseName(core), want)
 	}
 }
 

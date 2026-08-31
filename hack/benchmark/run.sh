@@ -28,25 +28,12 @@ export BENCH_KYVERNO_CHART="$kyverno_chart_version"
 export BENCH_KYVERNO_CHART_SHA256="$kyverno_chart_sha256"
 export BENCH_KYVERNO_VERSION="$kyverno_version"
 readonly owner='auth-operator-creator-tracking-benchmark/v1'
-readonly lock_file=/tmp/auth-operator-creator-tracking-benchmark.lock
 readonly phase_timeout=${BENCHMARK_PHASE_TIMEOUT:-30m}
 readonly quick=${QUICK:-false}
 readonly requested_mode=${BENCHMARK_MODE:-fresh}
 
 command -v flock >/dev/null 2>&1 || die 'flock is required'
 [[ -z "${BENCHMARK_LOCK:-}" ]] || die 'BENCHMARK_LOCK is not supported; the lock path is fixed'
-[[ ! -L "$lock_file" ]] || die "refusing symlink lock $lock_file"
-if [[ ! -e "$lock_file" ]]; then
-  (set -C; : >"$lock_file") 2>/dev/null || die "cannot create fixed lock $lock_file"
-fi
-[[ ! -L "$lock_file" ]] || die "refusing symlink lock $lock_file"
-lock_type=$(stat -c '%F' "$lock_file" 2>/dev/null || stat -f '%HT' "$lock_file")
-lock_mode=$(stat -c '%a' "$lock_file" 2>/dev/null || stat -f '%Lp' "$lock_file")
-lock_owner=$(stat -c '%u' "$lock_file" 2>/dev/null || stat -f '%u' "$lock_file")
-[[ "$lock_type" == 'regular file' || "$lock_type" == 'Regular File' ]] || die "fixed lock must be an owned regular file with mode 600: $lock_file"
-[[ "$lock_mode" == 600 && "$lock_owner" == "$(id -u)" ]] || die "fixed lock must be an owned regular file with mode 600: $lock_file"
-exec 9<>"$lock_file"
-flock -n 9 || die "benchmark already running (lock: $lock_file)"
 
 for forbidden in KUBECONFIG KIND_CLUSTER_NAME CLUSTER_NAME BENCHMARK_CLUSTER; do
   [[ -z "${!forbidden:-}" ]] || die "$forbidden is not supported; the runner owns its target"
@@ -84,7 +71,54 @@ random_suffix() {
 }
 private_tmp_root=$(cd -P -- "${TMPDIR:-/tmp}" && pwd -P)
 readonly private_tmp_root
+system_tmp_root=$(cd -P -- /tmp && pwd -P)
+readonly system_tmp_root
 current_uid=$(id -u)
+validate_temp_root() {
+  local path=$1 label=$2 mode uid numeric
+  [[ -d "$path" && ! -L "$path" ]] || die "$label is not a real directory: $path"
+  mode=$(stat -c '%a' "$path" 2>/dev/null || stat -f '%Lp' "$path")
+  uid=$(stat -c '%u' "$path" 2>/dev/null || stat -f '%u' "$path")
+  [[ "$uid" == "$current_uid" || "$uid" == 0 ]] || die "$label is owned by an untrusted user: $path"
+  numeric=$((8#$mode))
+  if (( (numeric & 0022) != 0 && (numeric & 01000) == 0 )); then
+    die "$label is writable by another user without the sticky bit: $path"
+  fi
+}
+validate_temp_root "$private_tmp_root" 'benchmark temporary root'
+validate_temp_root "$system_tmp_root" 'system temporary root'
+
+# Keep the lock in a stable mode-700 directory below the operating system's
+# sticky temporary root. It must not follow TMPDIR: otherwise two callers could
+# select different temporary roots and bypass the singleton guard. The
+# directory is intentionally retained because removing a locked file while a
+# contender has it open would allow a later process to create a second inode.
+readonly lock_dir="$system_tmp_root/auth-operator-creator-tracking-benchmark.lock.$current_uid.d"
+readonly lock_file="$lock_dir/lock"
+if [[ -L "$lock_dir" || ( -e "$lock_dir" && ! -d "$lock_dir" ) ]]; then
+  die "refusing non-directory lock path $lock_dir"
+fi
+if [[ ! -e "$lock_dir" ]]; then
+  mkdir -m 700 -- "$lock_dir" || die "cannot create private lock directory $lock_dir"
+fi
+[[ -d "$lock_dir" && ! -L "$lock_dir" ]] || die "private lock directory is not a directory: $lock_dir"
+lock_mode=$(stat -c '%a' "$lock_dir" 2>/dev/null || stat -f '%Lp' "$lock_dir")
+[[ "$lock_mode" == 700 ]] || die "private lock directory has mode $lock_mode, want 700: $lock_dir"
+[[ "$(stat -c '%u' "$lock_dir" 2>/dev/null || stat -f '%u' "$lock_dir")" == "$current_uid" ]] || die "private lock directory is not owned by the current user: $lock_dir"
+if [[ -L "$lock_file" || ( -e "$lock_file" && ! -f "$lock_file" ) ]]; then
+  die "refusing non-regular lock file $lock_file"
+fi
+if [[ ! -e "$lock_file" ]]; then
+  # noclobber makes this an O_CREAT|O_EXCL operation, so a symlink cannot be
+  # followed or truncated even if it appears after mkdir.
+  (set -o noclobber; : >"$lock_file") 2>/dev/null || die "cannot create private lock file $lock_file"
+fi
+[[ -f "$lock_file" && ! -L "$lock_file" ]] || die "private lock file is not regular: $lock_file"
+chmod 600 "$lock_file"
+[[ "$(stat -c '%u' "$lock_file" 2>/dev/null || stat -f '%u' "$lock_file")" == "$current_uid" ]] || die "private lock file is not owned by the current user: $lock_file"
+exec 9>>"$lock_file"
+flock -n 9 || die "benchmark already running (lock: $lock_file)"
+
 validate_owned_tree() {
   local root=$1 path mode expected
   while IFS= read -r -d '' path; do
@@ -157,6 +191,9 @@ else
   run_id="$(sanitize "$requested_run")-$nonce"; readonly run_id
   run_dir="$(mktemp -d "$private_tmp_root/auth-operator-benchmark.${run_id}.XXXXXX")"; readonly run_dir
   chmod 700 "$run_dir"
+  # Install the preflight cleanup immediately. Path validation below can fail
+  # before the ownership-aware lifecycle handler is available.
+  trap 'rm -rf -- "$run_dir"' EXIT
   cluster_base=$(sanitize "$run_id"); cluster="auth-operator-bench-${cluster_base:0:40}"; readonly cluster
   kubeconfig="$run_dir/kubeconfig"; readonly kubeconfig
   printf 'run_id=%s\ncluster=%s\nkubeconfig=%s\n' "$run_id" "$cluster" "$kubeconfig" >"$run_dir/identity"
@@ -179,15 +216,13 @@ esac
 readonly operator_image="auth-operator:creator-tracking-benchmark-$run_id"
 readonly kyverno_namespace=kyverno
 readonly operator_namespace=auth-operator-system
-# Until the full ownership-aware EXIT handler is installed below, a fresh
-# preflight failure may only remove the just-created private run directory.
-if [[ "$requested_mode" == fresh ]]; then
-  trap 'rm -rf -- "$run_dir"' EXIT
-fi
 [[ ! -L "$run_dir" ]] || die 'run directory is a symlink'
 expected_owner=$(printf 'owner=%s\nrun_id=%s\ncluster=%s\nkubeconfig=%s\noperator_image=%s' "$owner" "$run_id" "$cluster" "$kubeconfig" "$operator_image")
 [[ -f "$run_dir/owner" && ! -L "$run_dir/owner" && "$(<"$run_dir/owner")" == "$expected_owner" ]] || die 'run ownership proof is missing or does not match identity'
 [[ ! -L "$results_dir" ]] || die 'results directory is a symlink'
+if [[ "$requested_mode" == fresh && -d "$results_dir" && -n "$(find "$results_dir" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]; then
+  die "refusing to overwrite non-empty results directory $results_dir"
+fi
 if [[ "$requested_mode" == resume ]]; then
   [[ -d "$results_dir" ]] || die "resume results directory is missing: $results_dir"
 else
@@ -197,9 +232,6 @@ fi
 validate_owned_tree "$results_dir"
 if [[ "$requested_mode" == resume ]]; then
   validate_owned_tree "$run_dir"
-fi
-if [[ "$requested_mode" == fresh && -n "$(find "$results_dir" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]; then
-  die "refusing to overwrite non-empty results directory $results_dir"
 fi
 
 kind_clusters() { bounded kind get clusters; }
@@ -269,7 +301,10 @@ cleanup_owned() {
 }
 finish() {
   local status=$?
-  trap - EXIT INT TERM
+  trap - EXIT
+  # Do not allow a second ordinary signal to interrupt provenance-checked
+  # cleanup halfway through and strand only part of the owned lifecycle.
+  trap '' INT TERM
   cleanup_owned "$status" || cleanup_status=$?
   [[ "$status" -eq 0 && "$cleanup_status" -ne 0 ]] && status=$cleanup_status
   exit "$status"
@@ -289,15 +324,23 @@ else export KUBECONFIG="$kubeconfig"; fi
 
 phase() { echo "benchmark phase: $*" >&2; bounded "$@"; }
 helm_operator() {
-  local enabled=$1 mode=$2
-  phase helm upgrade --install auth-operator chart/auth-operator --namespace "$operator_namespace" --create-namespace --set image.repository=auth-operator --set image.tag="creator-tracking-benchmark-$run_id" --set image.pullPolicy=Never --set creatorTracking.enabled="$enabled" --set creatorTracking.mode="$mode" --wait --timeout 10m
+  local enabled=$1 mode=$2 excluded=${3:-false}
+  local -a args=(upgrade --install auth-operator chart/auth-operator --namespace "$operator_namespace" --create-namespace --set image.repository=auth-operator --set image.tag="creator-tracking-benchmark-$run_id" --set image.pullPolicy=Never --set creatorTracking.enabled="$enabled" --set creatorTracking.mode="$mode")
+  if [[ "$excluded" == true ]]; then
+    args+=(--set-json 'creatorTracking.excludedUsernames=["creator-bench-excluded"]')
+  fi
+  phase helm "${args[@]}" --wait --timeout 10m
   phase kubectl wait --for=condition=Available deployment -l app.kubernetes.io/name=auth-operator --namespace "$operator_namespace" --timeout=10m
 }
 helm_kyverno() {
   local archive="$run_dir/kyverno-${kyverno_chart_version}.tgz"
   [[ ! -L "$archive" ]] || die 'refusing symlink Kyverno chart archive'
   if [[ ! -f "$archive" ]]; then
-    phase curl --fail --location --max-time 5m --output "$archive" "$kyverno_chart_url"
+    local archive_tmp
+    archive_tmp=$(mktemp "${archive}.tmp.XXXXXX")
+    phase curl --fail --location --max-time 5m --output "$archive_tmp" "$kyverno_chart_url"
+    chmod 600 "$archive_tmp"
+    mv -- "$archive_tmp" "$archive"
   fi
   [[ ! -L "$archive" && -f "$archive" ]] || die 'Kyverno chart archive is not a regular file'
   phase shasum -a 256 -c - <<<"$kyverno_chart_sha256  $archive"
@@ -353,7 +396,14 @@ label_policy_mode() {
 semantic_activate() {
   local engine=$1
   case "$engine" in
-    map) phase kubectl wait --for=create mutatingadmissionpolicy/auth-operator-creator-tracking --timeout=10m; phase kubectl wait --for=create mutatingadmissionpolicybinding/auth-operator-creator-tracking --timeout=10m ;;
+    map)
+      phase kubectl wait --for=create mutatingadmissionpolicy/auth-operator-creator-tracking --timeout=10m
+      phase kubectl wait --for=create mutatingadmissionpolicybinding/auth-operator-creator-tracking --timeout=10m
+      if [[ "$active_mode" == contributors || "$active_mode" == component-contrib ]]; then
+        phase kubectl wait --for=create mutatingadmissionpolicy/auth-operator-contributor-tracking --timeout=10m
+        phase kubectl wait --for=create mutatingadmissionpolicybinding/auth-operator-contributor-tracking --timeout=10m
+      fi
+      ;;
     kyverno-map)
       phase kubectl wait --for=create mutatingadmissionpolicy/mpol-creator-tracking --timeout=10m
       phase kubectl wait --for=create mutatingadmissionpolicybinding/mpol-creator-tracking-binding --timeout=10m
@@ -363,14 +413,28 @@ semantic_activate() {
       fi
       ;;
     kyverno-webhook) phase kubectl wait --for=create clusterpolicy/creator-tracking --timeout=10m ;;
-    coexist) phase kubectl wait --for=create mutatingadmissionpolicy/auth-operator-creator-tracking --timeout=10m; phase kubectl wait --for=create clusterpolicy/creator-tracking --timeout=10m ;;
+    coexist)
+      phase kubectl wait --for=create mutatingadmissionpolicy/auth-operator-creator-tracking --timeout=10m
+      phase kubectl wait --for=create mutatingadmissionpolicybinding/auth-operator-creator-tracking --timeout=10m
+      if [[ "$active_mode" == contributors ]]; then
+        phase kubectl wait --for=create mutatingadmissionpolicy/auth-operator-contributor-tracking --timeout=10m
+        phase kubectl wait --for=create mutatingadmissionpolicybinding/auth-operator-contributor-tracking --timeout=10m
+      fi
+      phase kubectl wait --for=create clusterpolicy/creator-tracking --timeout=10m
+      ;;
     baseline) phase kubectl apply -f hack/benchmark/manifests/baseline.yaml; phase kubectl get configmap creator-tracking-benchmark-baseline -o name ;;
   esac
   phase kubectl get --raw=/readyz
   [[ "$engine" == baseline ]] || probe_admission "$engine" "$active_mode"
 }
 capture_input_material() {
-  local material="$run_dir/input-material-${engine}-${active_mode}.yaml"
+  local material="$run_dir/input-material-${active_scope}-${engine}-${active_mode}-${active_variant}.yaml"
+  local -a native_policies=(auth-operator-creator-tracking)
+  local -a native_bindings=(auth-operator-creator-tracking)
+  if [[ "$active_mode" == contributors || "$active_mode" == component-contrib ]]; then
+    native_policies+=(auth-operator-contributor-tracking)
+    native_bindings+=(auth-operator-contributor-tracking)
+  fi
   if [[ "$requested_mode" == resume ]]; then
     [[ -f "$material" && ! -L "$material" ]] || die "resume input material is missing: $material"
     BENCHMARK_INPUT_MATERIAL="$material"
@@ -378,13 +442,15 @@ capture_input_material() {
     export BENCHMARK_INPUT_MATERIAL BENCH_POLICY_PATH
     return
   fi
+  local material_tmp
+  material_tmp=$(mktemp "${material}.tmp.XXXXXX")
   {
-    printf 'engine: %s\nmode: %s\n' "$engine" "$active_mode"
+    printf 'scope: %s\nengine: %s\nmode: %s\n' "$active_scope" "$engine" "$active_mode"
     case "$engine" in
       baseline) cat hack/benchmark/manifests/baseline.yaml ;;
       map|coexist)
-        KUBECONFIG="$kubeconfig" bounded kubectl get mutatingadmissionpolicy auth-operator-creator-tracking -o yaml --ignore-not-found
-        KUBECONFIG="$kubeconfig" bounded kubectl get mutatingadmissionpolicybinding auth-operator-creator-tracking -o yaml --ignore-not-found
+        KUBECONFIG="$kubeconfig" bounded kubectl get mutatingadmissionpolicy "${native_policies[@]}" -o yaml
+        KUBECONFIG="$kubeconfig" bounded kubectl get mutatingadmissionpolicybinding "${native_bindings[@]}" -o yaml
         ;;
     esac
     case "$engine" in
@@ -397,7 +463,9 @@ capture_input_material() {
         KUBECONFIG="$kubeconfig" bounded kubectl get mutatingadmissionpolicybinding mpol-creator-tracking-binding mpol-contributor-tracking-binding -o yaml --ignore-not-found
         ;;
     esac
-  } >"$material"
+  } >"$material_tmp"
+  chmod 600 "$material_tmp"
+  mv -- "$material_tmp" "$material"
   BENCHMARK_INPUT_MATERIAL="$material"
   BENCH_POLICY_PATH="$material"
   export BENCHMARK_INPUT_MATERIAL BENCH_POLICY_PATH
@@ -434,15 +502,24 @@ uninstall_engines() {
   delete_policy mutatingadmissionpolicybindings.admissionregistration.k8s.io mpol-contributor-tracking-binding
 }
 apply_engine() {
-  local engine=$1 mode=$2
+  local engine=$1 mode=$2 excluded=${3:-false} policy_mode=$2
+  case "$mode" in
+    component-stamp) policy_mode=create-only ;;
+    component-restore) policy_mode=protect ;;
+    component-contrib) policy_mode=contributors ;;
+  esac
   active_mode=$mode
+  active_variant=enabled
+  if [[ "$excluded" == true ]]; then
+    active_variant='excluded-usernames'
+  fi
   uninstall_engines
   case "$engine" in
-    baseline) helm_operator false "$mode" ;;
-    map) helm_operator true "$mode" ;;
-    kyverno-webhook) helm_operator false "$mode"; helm_kyverno; phase kubectl apply -f docs/examples/creator-tracking-kyverno-clusterpolicy.yaml ;;
+    baseline) helm_operator false "$policy_mode" "$excluded" ;;
+    map) helm_operator true "$policy_mode" "$excluded" ;;
+    kyverno-webhook) helm_operator false "$policy_mode" "$excluded"; helm_kyverno; phase kubectl apply -f docs/examples/creator-tracking-kyverno-clusterpolicy.yaml ;;
     kyverno-map)
-      helm_operator false "$mode"; helm_kyverno
+      helm_operator false "$policy_mode" "$excluded"; helm_kyverno
       local kyverno_policy="$run_dir/kyverno-mutatingpolicy.yaml"
       if [[ "$mode" == contributors ]]; then
         phase kubectl apply -f docs/examples/creator-tracking-kyverno-mutatingpolicy.yaml
@@ -455,18 +532,24 @@ apply_engine() {
       fi
       label_policy_mode "$engine" "$mode"
       ;;
-    coexist) helm_operator true "$mode"; helm_kyverno; phase kubectl apply -f docs/examples/creator-tracking-kyverno-clusterpolicy.yaml; label_policy_mode "$engine" "$mode" ;;
+    coexist) helm_operator true "$policy_mode" "$excluded"; helm_kyverno; phase kubectl apply -f docs/examples/creator-tracking-kyverno-clusterpolicy.yaml; label_policy_mode "$engine" "$mode" ;;
     *) die "unknown engine $engine" ;;
   esac
   semantic_activate "$engine"
 }
 run_cell() {
-  local engine=$1 tier=$2 mode=$3
+  local engine=$1 tier=$2 mode=$3 ops=${4:-} excluded=${5:-false}
   local -a args=(-out "$results_dir" -run-id "$run_id" -resume -identities 10 -engine "$engine" -tier "$tier" -mode "$mode")
-  [[ "$quick" == true ]] && args+=(-quick -ops 500)
+  if [[ "$quick" == true ]]; then
+    args+=(-quick -ops 500)
+  elif [[ -n "$ops" ]]; then
+    args+=(-ops "$ops")
+  fi
+  [[ "$excluded" == true ]] && args+=(-excluded-usernames-bench)
   phase go run ./hack/benchmark "${args[@]}"
 }
 
+active_scope=core
 if [[ "$quick" == true ]]; then engines=(baseline map); tiers=(t1 t2); modes=(protect); else engines=(baseline map kyverno-webhook kyverno-map coexist); tiers=(t1 t2 t3 t4); modes=(create-only protect contributors); fi
 for engine in "${engines[@]}"; do
   for mode in "${modes[@]}"; do
@@ -475,5 +558,26 @@ for engine in "${engines[@]}"; do
     for tier in "${tiers[@]}"; do run_cell "$engine" "$tier" "$mode"; done
   done
 done
+if [[ "$quick" != true ]]; then
+  active_scope=isolation
+  isolation_tiers=(iso-namespaces iso-serviceaccounts iso-secrets iso-rbac-group iso-crd-group)
+  for engine in map kyverno-webhook kyverno-map coexist; do
+    apply_engine "$engine" protect
+    capture_input_material
+    isolation_ops=''
+    [[ "$engine" != map ]] && isolation_ops=1000
+    for tier in "${isolation_tiers[@]}"; do run_cell "$engine" "$tier" protect "$isolation_ops"; done
+  done
+  active_scope=component
+  for mode in component-stamp component-restore component-contrib; do
+    apply_engine map "$mode"
+    capture_input_material
+    run_cell map t1 "$mode"
+  done
+  active_scope=exclusion
+  apply_engine map protect true
+  capture_input_material
+  run_cell map t1 protect '' true
+fi
 phase go run ./hack/benchmark -out "$results_dir" -run-id "$run_id" -resume -report
 echo "benchmark completed: run_id=$run_id results=$results_dir" >&2

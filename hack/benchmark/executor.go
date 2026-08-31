@@ -157,33 +157,43 @@ func resumeStartOffset() int {
 	return 0
 }
 
-// validateCompletedResult verifies that an existing phase result belongs to
-// the exact phase currently being resumed. A result with a valid status but a
-// different cell or input must not be silently skipped or overwritten.
-func validateCompletedResult(prior Result, expected Cell, inputHash, environmentID, workloadHash, configHash string) error {
+// validateResultIdentity verifies that an existing phase result belongs to
+// the exact phase currently being resumed. A result with a different cell or
+// input must not be silently skipped or overwritten, regardless of whether it
+// completed or failed.
+func validateResultIdentity(prior Result, expected Cell, inputHash, environmentID, workloadHash, configHash string) error {
 	if err := prior.Validate(); err != nil {
+		return fmt.Errorf("invalid result: %w", err)
+	}
+	if prior.Cell != expected {
+		return fmt.Errorf("result cell does not match expected cell")
+	}
+	if prior.RunID != expected.RunID {
+		return fmt.Errorf("result run ID does not match expected run")
+	}
+	if prior.InputHash != inputHash {
+		return fmt.Errorf("result input hash does not match expected input")
+	}
+	if prior.EnvironmentID != environmentID {
+		return fmt.Errorf("result environment ID does not match expected environment")
+	}
+	if prior.WorkloadHash != workloadHash {
+		return fmt.Errorf("result workload hash does not match expected workload")
+	}
+	if prior.ConfigHash != configHash {
+		return fmt.Errorf("result config hash does not match expected configuration")
+	}
+	return nil
+}
+
+// validateCompletedResult accepts only an exact, successful result that can be
+// skipped during resume.
+func validateCompletedResult(prior Result, expected Cell, inputHash, environmentID, workloadHash, configHash string) error {
+	if err := validateResultIdentity(prior, expected, inputHash, environmentID, workloadHash, configHash); err != nil {
 		return fmt.Errorf("invalid completed result: %w", err)
 	}
 	if prior.Status != statusComplete {
 		return fmt.Errorf("completed result has status %q", prior.Status)
-	}
-	if prior.Cell != expected {
-		return fmt.Errorf("completed result cell does not match expected cell")
-	}
-	if prior.RunID != expected.RunID {
-		return fmt.Errorf("completed result run ID does not match expected run")
-	}
-	if prior.InputHash != inputHash {
-		return fmt.Errorf("completed result input hash does not match expected input")
-	}
-	if prior.EnvironmentID != environmentID {
-		return fmt.Errorf("completed result environment ID does not match expected environment")
-	}
-	if prior.WorkloadHash != workloadHash {
-		return fmt.Errorf("completed result workload hash does not match expected workload")
-	}
-	if prior.ConfigHash != configHash {
-		return fmt.Errorf("completed result config hash does not match expected configuration")
 	}
 	return nil
 }
@@ -204,21 +214,6 @@ type resourceSpec struct {
 	gvr        schema.GroupVersionResource
 	namespaced bool
 	apiVersion string
-}
-
-func resourceKind(resource string) string {
-	return map[string]string{
-		resourceNamespace:          "Namespace",
-		resourceServiceAccount:     "ServiceAccount",
-		resourceSecret:             "Secret",
-		resourceRole:               "Role",
-		resourceRoleBinding:        "RoleBinding",
-		resourceClusterRole:        kindClusterRole,
-		resourceClusterRoleBinding: "ClusterRoleBinding",
-		resourceRoleDefinition:     "RoleDefinition",
-		resourceBindDefinition:     "BindDefinition",
-		resourceRBACPolicy:         "RBACPolicy",
-	}[resource]
 }
 
 var resourceSpecs = map[string]resourceSpec{
@@ -299,6 +294,78 @@ func namespaceFor(runID string) string {
 func ownedLabels(runID string) map[string]interface{} {
 	return map[string]interface{}{"t-caas.telekom.com/benchmark": benchmarkLabelValue, "t-caas.telekom.com/benchmark-run": runID}
 }
+
+// canonicalKind translates the benchmark's internal resource keys to the
+// Kubernetes Kind used in the generated object's type metadata.
+func canonicalKind(resource string) string {
+	switch resource {
+	case resourceNamespace:
+		return kindNamespace
+	case resourceServiceAccount:
+		return "ServiceAccount"
+	case resourceSecret:
+		return "Secret"
+	case resourceRole:
+		return kindRole
+	case resourceRoleBinding:
+		return "RoleBinding"
+	case resourceClusterRole:
+		return kindClusterRole
+	case resourceClusterRoleBinding:
+		return "ClusterRoleBinding"
+	case resourceRoleDefinition:
+		return "RoleDefinition"
+	case resourceBindDefinition:
+		return "BindDefinition"
+	case resourceRBACPolicy:
+		return "RBACPolicy"
+	default:
+		return resource
+	}
+}
+
+// subjectFor returns the fields expected by the RBAC Subject API. Service
+// accounts are core resources and therefore omit apiGroup; users and groups
+// belong to the RBAC API group.
+func subjectFor(kind, name, namespace string) map[string]interface{} {
+	subject := map[string]interface{}{kindField: kind, nameField: name}
+	switch kind {
+	case kindServiceAccount:
+		subject[resourceNamespace] = namespace
+	case "User", "Group":
+		subject[apiGroupField] = rbacv1.GroupName
+	}
+	return subject
+}
+
+// metricDeltaCounter combines parsed metric counters with the authenticated
+// snapshot states. CounterDelta intentionally returns missing for any
+// non-available counter, so apply the more useful unauthorized/unavailable
+// snapshot state before persisting the benchmark result.
+func metricDeltaCounter(before, after MetricsSnapshot, name string) Counter {
+	beforeCounter := ParseMetricResponse(before.StatusCode, before.Body, name)
+	afterCounter := ParseMetricResponse(after.StatusCode, after.Body, name)
+	delta := CounterDelta(beforeCounter, afterCounter)
+	state := metricDeltaState(before, after)
+	if state == MetricAvailable {
+		switch {
+		case beforeCounter.State == MetricUnauthorized || afterCounter.State == MetricUnauthorized:
+			state = MetricUnauthorized
+		case beforeCounter.State == MetricUnavailable || afterCounter.State == MetricUnavailable:
+			state = MetricUnavailable
+		case beforeCounter.State != MetricAvailable || afterCounter.State != MetricAvailable:
+			state = MetricMissing
+		default:
+			state = delta.State
+		}
+	}
+	delta.State = state
+	if state != MetricAvailable {
+		delta.Value = 0
+	}
+	return delta
+}
+
 func objectFor(cell Cell, name, namespace string, s resourceSpec) *unstructured.Unstructured {
 	runID := cell.RunID
 	if runID == "" {
@@ -310,9 +377,11 @@ func objectFor(cell Cell, name, namespace string, s resourceSpec) *unstructured.
 		"t-caas.telekom.com/benchmark-run":   runID,
 		"t-caas.telekom.com/benchmark-tier":  cell.Tier,
 		"t-caas.telekom.com/benchmark-scope": strings.Join(tierScope(cell.Tier), ","),
+		annotationCreator:                    spoofedCreator,
+		annotationGroups:                     spoofedGroups,
 	}
 	u := &unstructured.Unstructured{Object: map[string]interface{}{
-		apiVersionField: s.apiVersion, kindField: resourceKind(cell.Kind),
+		apiVersionField: s.apiVersion, kindField: canonicalKind(cell.Kind),
 		metadataField: map[string]interface{}{
 			nameField: name, labelsField: labels, annotationsField: annotations,
 		},
@@ -327,28 +396,17 @@ func objectFor(cell Cell, name, namespace string, s resourceSpec) *unstructured.
 	case resourceRole, resourceClusterRole:
 		u.Object["rules"] = []interface{}{map[string]interface{}{"apiGroups": []interface{}{""}, "resources": []interface{}{resourcePods}, "verbs": []interface{}{"get", "list"}}}
 	case resourceRoleBinding:
-		u.Object["roleRef"] = map[string]interface{}{apiGroupField: rbacv1.GroupName, kindField: "Role", nameField: dependencyName(cell)}
-		u.Object["subjects"] = []interface{}{map[string]interface{}{
-			kindField:         kindServiceAccount,
-			nameField:         dependencyName(cell),
-			resourceNamespace: namespace,
-		}}
+		u.Object["roleRef"] = map[string]interface{}{apiGroupField: rbacv1.GroupName, kindField: kindRole, nameField: dependencyName(cell)}
+		u.Object["subjects"] = []interface{}{subjectFor(kindServiceAccount, dependencyName(cell), namespace)}
 	case resourceClusterRoleBinding:
 		u.Object["roleRef"] = map[string]interface{}{apiGroupField: rbacv1.GroupName, kindField: kindClusterRole, nameField: dependencyName(cell)}
-		u.Object["subjects"] = []interface{}{map[string]interface{}{
-			kindField:         kindServiceAccount,
-			nameField:         dependencyName(cell),
-			resourceNamespace: namespace,
-		}}
+		u.Object["subjects"] = []interface{}{subjectFor(kindServiceAccount, dependencyName(cell), namespace)}
 	case resourceRoleDefinition:
 		u.Object["spec"] = map[string]interface{}{"targetRole": kindClusterRole, "targetName": "creator-bench-generated-role", "scopeNamespaced": false}
 	case resourceBindDefinition:
 		u.Object["spec"] = map[string]interface{}{
 			"targetName": "creator-bench-generated-binding",
-			"subjects": []interface{}{map[string]interface{}{
-				kindField: kindServiceAccount,
-				nameField: dependencyName(cell), resourceNamespace: namespace,
-			}},
+			"subjects":   []interface{}{subjectFor(kindServiceAccount, dependencyName(cell), namespace)},
 			"clusterRoleBindings": map[string]interface{}{
 				"clusterRoleRefs": []interface{}{dependencyName(cell)},
 			},
@@ -366,21 +424,14 @@ func dependencyName(cell Cell) string {
 	return deterministicName(c, 0)
 }
 
+func artifactBaseName(cell Cell) string {
+	return sanitizeName(strings.Join([]string{cell.Engine, cell.Tier, cell.Mode, cell.Variant}, "-"))
+}
+
 //nolint:gocyclo // the benchmark lifecycle intentionally keeps phase ordering visible.
 func executeBenchmark(ctx context.Context, base *rest.Config, cell Cell, o options, out string) (retErr error) {
-	if resource, isolationErr := IsolationResource(o.tier); isolationErr == nil {
-		mapped := map[string]string{
-			resourceNamespaces:      resourceNamespace,
-			resourceServiceAccounts: resourceServiceAccount,
-			resourceSecrets:         resourceSecret,
-			isolationRBACGroup:      resourceRole,
-			isolationCRDGroup:       resourceRoleDefinition,
-		}
-		var ok bool
-		cell.Kind, ok = mapped[resource]
-		if !ok {
-			return fmt.Errorf("unsupported isolation resource %q", resource)
-		}
+	if isolationKind, isolationErr := IsolationKind(o.tier); isolationErr == nil {
+		cell.Kind = isolationKind
 	}
 	s, e := specFor(cell.Kind)
 	if e != nil {
@@ -454,16 +505,19 @@ func executeBenchmark(ctx context.Context, base *rest.Config, cell Cell, o optio
 			}
 		}
 	}
+	cleanupOnReturn := true
 	var finalizeJournal func()
 	defer func() {
-		cleanup()
+		if cleanupOnReturn {
+			cleanup()
+		}
 		if finalizeJournal != nil {
 			finalizeJournal()
 		}
 	}()
-	// Excluded-usernames is a warmup-only probe; measured traffic always has
-	// exactly ten identities and therefore remains comparable across cells.
-	ids := syntheticIdentities(10)
+	// The excluded-usernames comparison uses a configured non-matching identity.
+	// Measured traffic always has exactly ten identities and remains comparable.
+	ids := syntheticIdentities()
 	inputHash := o.inputHash
 	if inputHash == "" {
 		inputHash = cellInputHash(cell)
@@ -481,7 +535,7 @@ func executeBenchmark(ctx context.Context, base *rest.Config, cell Cell, o optio
 	if materialErr != nil {
 		return fmt.Errorf("read benchmark input material: %w", materialErr)
 	}
-	baseName := sanitizeName(cell.Engine + "-" + cell.Mode)
+	baseName := artifactBaseName(cell)
 	if err := WriteEnvironment(filepath.Join(out, "environment-"+baseName+".json"), environment); err != nil {
 		return fmt.Errorf("write environment manifest: %w", err)
 	}
@@ -497,6 +551,7 @@ func executeBenchmark(ctx context.Context, base *rest.Config, cell Cell, o optio
 		Excluded                       bool
 	}{mix, cell.Mode, o.ops, o.churn, 10, o.warmup, o.concurrency, o.sustained, o.excluded}))
 	journal := filepath.Join(out, "journals", cellFilename(o.runID, cell, "cell")+".journal.json")
+	restartCell := false
 	currentPhase := ""
 	currentProgress := 0
 	started := time.Now().UTC().Format(time.RFC3339Nano)
@@ -514,10 +569,30 @@ func executeBenchmark(ctx context.Context, base *rest.Config, cell Cell, o optio
 				return fmt.Errorf("resume journal does not match run or input hash")
 			}
 			if previous.State == statusComplete {
+				// Completed cells were already cleaned by their original run. Do
+				// not delete the shared workload namespace here: it can contain
+				// the retained state of a later interrupted cell.
+				cleanupOnReturn = false
 				return nil
 			}
 			if previous.State != statusRunning && previous.State != statusFailed {
 				return fmt.Errorf("resume journal has invalid state %q", previous.State)
+			}
+			// An interrupted phase is replayed from zero. Its journal offset is
+			// not a statistically complete sample and must not be appended to.
+			// Restart the whole cell so deterministic CREATE names and the
+			// state required by later UPDATE phases are both reconstructed.
+			restartCell = true
+		}
+	}
+	if restartCell {
+		cleanup()
+		if retErr != nil {
+			return retErr
+		}
+		if s.namespaced {
+			if e = ensureNamespace(ctx, base, ns, o.runID); e != nil {
+				return fmt.Errorf("recreate benchmark namespace: %w", e)
 			}
 		}
 	}
@@ -568,10 +643,26 @@ func executeBenchmark(ctx context.Context, base *rest.Config, cell Cell, o optio
 					if jsonErr := json.Unmarshal(b, &prior); jsonErr != nil {
 						return fmt.Errorf("decode existing phase result %s: %w", completedPath, jsonErr)
 					}
-					if validationErr := validateCompletedResult(prior, pc, inputHash, environmentID, workloadHash, configHash); validationErr != nil {
-						return fmt.Errorf("refusing existing phase result %s: %w", completedPath, validationErr)
+					if prior.Status == statusComplete {
+						if validationErr := validateCompletedResult(prior, pc, inputHash, environmentID, workloadHash, configHash); validationErr != nil {
+							return fmt.Errorf("refusing existing phase result %s: %w", completedPath, validationErr)
+						}
+						if !restartCell {
+							continue
+						}
+					} else {
+						if prior.Status != statusFailed {
+							return fmt.Errorf("refusing existing phase result %s with state %q", completedPath, prior.Status)
+						}
+						if validationErr := validateResultIdentity(prior, pc, inputHash, environmentID, workloadHash, configHash); validationErr != nil {
+							return fmt.Errorf("refusing failed phase result %s: %w", completedPath, validationErr)
+						}
+						if !restartCell {
+							return fmt.Errorf("refusing failed phase result %s without a retryable cell journal", completedPath)
+						}
 					}
-					continue
+					// A retryable journal causes every exact prior result to be
+					// replaced as the cell is reconstructed from its first phase.
 				} else if !errors.Is(readErr, os.ErrNotExist) {
 					return fmt.Errorf("read existing phase result %s: %w", completedPath, readErr)
 				}
@@ -657,7 +748,10 @@ func executeBenchmark(ctx context.Context, base *rest.Config, cell Cell, o optio
 					run.Error = fmt.Errorf("metrics after %s: %w", phase, me).Error()
 					run.MetricBeforeState = before.State
 					run.MetricAfterState = after.State
-					run.MetricDeltaState = metricDeltaState(before, after)
+					run.MetricBefore = ParseMetricResponse(before.StatusCode, before.Body, APIServerAdmissionDuration+"_count")
+					run.MetricAfter = ParseMetricResponse(after.StatusCode, after.Body, APIServerAdmissionDuration+"_count")
+					run.MetricDelta = metricDeltaCounter(before, after, APIServerAdmissionDuration+"_count")
+					run.MetricDeltaState = run.MetricDelta.State
 					run.MetricError = errorString(me)
 					if e := writeCellRun(filepath.Join(out, cellFilename(o.runID, pc, phase)), run); e != nil {
 						return e
@@ -668,8 +762,8 @@ func executeBenchmark(ctx context.Context, base *rest.Config, cell Cell, o optio
 				run.MetricAfterState = after.State
 				run.MetricBefore = ParseMetricResponse(before.StatusCode, before.Body, APIServerAdmissionDuration+"_count")
 				run.MetricAfter = ParseMetricResponse(after.StatusCode, after.Body, APIServerAdmissionDuration+"_count")
-				run.MetricDelta = CounterDelta(run.MetricBefore, run.MetricAfter)
-				run.MetricDeltaState = metricDeltaState(before, after)
+				run.MetricDelta = metricDeltaCounter(before, after, APIServerAdmissionDuration+"_count")
+				run.MetricDeltaState = run.MetricDelta.State
 				labels := map[string]string{"type": "mutating"}
 				run.WebhookBefore = ParseHistogramResponse(before, WebhookAdmissionDuration+"_sum", WebhookAdmissionDuration+"_count", labels)
 				run.WebhookAfter = ParseHistogramResponse(after, WebhookAdmissionDuration+"_sum", WebhookAdmissionDuration+"_count", labels)
@@ -859,7 +953,7 @@ func ensureNamespace(ctx context.Context, base *rest.Config, name, runID string)
 		return e
 	}
 	u := &unstructured.Unstructured{Object: map[string]interface{}{
-		apiVersionField: "v1", kindField: "Namespace",
+		apiVersionField: "v1", kindField: kindNamespace,
 		metadataField: map[string]interface{}{nameField: name, labelsField: ownedLabels(runID)},
 	}}
 	r := cl.Resource(schema.GroupVersionResource{Version: "v1", Resource: "namespaces"})
