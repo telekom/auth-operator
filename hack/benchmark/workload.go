@@ -56,3 +56,63 @@ func IsolationResource(tier string) (string, error) {
 		return "", fmt.Errorf("unsupported isolation tier %q", tier)
 	}
 }
+
+// IsolationKind returns the benchmark resource kind selected by an isolation
+// tier. Planning and execution share this mapping so the planned result keys
+// exactly match the emitted cells.
+func IsolationKind(tier string) (string, error) {
+	resource, err := IsolationResource(tier)
+	if err != nil {
+		return "", err
+	}
+	switch resource {
+	case resourceNamespaces:
+		return resourceNamespace, nil
+	case resourceServiceAccounts:
+		return resourceServiceAccount, nil
+	case resourceSecrets:
+		return resourceSecret, nil
+	case "rbac-group":
+		return resourceRole, nil
+	case "crd-group":
+		return resourceRoleDefinition, nil
+	default:
+		return "", fmt.Errorf("unsupported isolation resource %q", resource)
+	}
+}
+
+// operationalMode maps component-only measurements to the corresponding
+// policy mode. The component name remains part of the Cell identity so these
+// measurements are reported separately from the core mode matrix.
+func operationalMode(mode string) string {
+	switch mode {
+	case modeComponentStamp:
+		return modeCreateOnly
+	case modeComponentRestore:
+		return modeProtect
+	case modeComponentContrib:
+		return modeContributors
+	default:
+		return mode
+	}
+}
+
+func validBenchmarkMode(mode string) bool {
+	switch mode {
+	case modeCreateOnly, modeProtect, modeContributors,
+		modeComponentStamp, modeComponentRestore, modeComponentContrib:
+		return true
+	default:
+		return false
+	}
+}
+
+func isolationTiers() []string {
+	return []string{
+		"iso-" + resourceNamespaces,
+		"iso-" + resourceServiceAccount + "s",
+		"iso-" + resourceSecret + "s",
+		"iso-rbac-group",
+		"iso-crd-group",
+	}
+}
