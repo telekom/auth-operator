@@ -4,10 +4,50 @@ package main
 
 import (
 	"bytes"
+	"flag"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestParseOptionsUsesPrivateFlagSet(t *testing.T) {
+	originalCommandLine := flag.CommandLine
+	flag.CommandLine = flag.NewFlagSet("global-test", flag.ContinueOnError)
+	t.Cleanup(func() { flag.CommandLine = originalCommandLine })
+	flag.CommandLine.String("kubeconfig", "global-kubeconfig", "flag registered by the caller")
+
+	o, err := parseOptions([]string{
+		"-engine", "map",
+		"-tier", "t2",
+		"-mode", "contributors",
+		"-ops", "42",
+		"-churn-rounds", "3",
+		"-identities", "10",
+		"-concurrency", "4,8",
+		"-warmup", "5",
+		"-sustained-duration", "2s",
+		"-out", t.TempDir(),
+		"-kubeconfig", "explicit-kubeconfig",
+		"-run-id", "run-1",
+		"-input-hash", "expected-hash",
+	})
+	if err != nil {
+		t.Fatalf("parseOptions() error = %v", err)
+	}
+	if o.engine != engineMap || o.tier != "t2" || o.mode != modeContributors {
+		t.Fatalf("parsed identity options = %#v", o)
+	}
+	if o.ops != 42 || o.churn != 3 || o.identities != 10 || o.warmup != 5 {
+		t.Fatalf("parsed workload options = %#v", o)
+	}
+	if !reflect.DeepEqual(o.concurrency, []int{4, 8}) {
+		t.Fatalf("parsed concurrency = %#v", o.concurrency)
+	}
+	if o.sustained != 2*time.Second || o.kubeconfig != "explicit-kubeconfig" || o.runID != "run-1" || o.inputHash != "expected-hash" {
+		t.Fatalf("parsed output options = %#v", o)
+	}
+}
 
 func TestCellsQuickShape(t *testing.T) {
 	if len(Cells(true)) != 8 {
@@ -23,6 +63,91 @@ func TestPlannedCellsHasSharedBaselines(t *testing.T) {
 		if planned[i].Engine != engineBaseline || planned[i].Variant != engineBaseline {
 			t.Fatalf("not shared baseline: %#v", planned[i])
 		}
+	}
+}
+
+func TestPlannedAuxiliaryCellsCoverIsolationComponentsAndExclusion(t *testing.T) {
+	aux := PlannedAuxiliaryCells()
+	if len(aux) != 24 {
+		t.Fatalf("auxiliary logical cells = %d, want 24", len(aux))
+	}
+	if got := len(PlannedFullCells(false)); got != 84 {
+		t.Fatalf("full logical cells = %d, want 84", got)
+	}
+	seen := map[string]bool{}
+	for _, c := range aux {
+		key := plannedKey(c)
+		if seen[key] {
+			t.Fatalf("duplicate auxiliary cell %#v", c)
+		}
+		seen[key] = true
+	}
+	for _, tier := range isolationTiers() {
+		count := 0
+		wantKind, err := IsolationKind(tier)
+		if err != nil {
+			t.Fatalf("isolation kind for %q: %v", tier, err)
+		}
+		for _, c := range aux {
+			if c.Tier == tier {
+				count++
+				if c.Kind != wantKind {
+					t.Fatalf("isolation tier %q planned kind = %q, want %q", tier, c.Kind, wantKind)
+				}
+			}
+		}
+		if count != 4 {
+			t.Fatalf("isolation tier %q has %d cells, want 4", tier, count)
+		}
+	}
+	for _, mode := range []string{modeComponentStamp, modeComponentRestore, modeComponentContrib} {
+		count := 0
+		for _, c := range aux {
+			if c.Mode == mode {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Fatalf("component mode %q has %d cells, want 1", mode, count)
+		}
+	}
+}
+
+func TestPlannedFullExecutionPreservesCoreAndAddsAuxiliaryResults(t *testing.T) {
+	concurrency := []int{8, 32, 64}
+	if got := len(PlannedExecutionCells(false, concurrency)); got != 720 {
+		t.Fatalf("core execution cells = %d, want 720", got)
+	}
+	if got := len(PlannedAuxiliaryExecutionCells(false, concurrency)); got != 288 {
+		t.Fatalf("auxiliary execution cells = %d, want 288", got)
+	}
+	if got := len(PlannedFullExecutionCells(false, concurrency)); got != 1008 {
+		t.Fatalf("full execution cells = %d, want 1008", got)
+	}
+	if got := len(PlannedFullExecutionCells(true, []int{8})); got != 16 {
+		t.Fatalf("quick execution cells = %d, want 16", got)
+	}
+}
+
+func TestComponentModesAreAcceptedByBenchmarkValidation(t *testing.T) {
+	for _, mode := range []string{modeComponentStamp, modeComponentRestore, modeComponentContrib} {
+		if !validBenchmarkMode(mode) {
+			t.Errorf("component mode %q was rejected", mode)
+		}
+	}
+	if validBenchmarkMode("component-unknown") {
+		t.Fatal("unknown component mode was accepted")
+	}
+}
+
+func TestExecutionCellUsesExcludedVariant(t *testing.T) {
+	o := options{engine: engineMap, tier: "t1", mode: modeProtect, concurrency: []int{8}, excluded: true}
+	c := executionCell(o)
+	if c.Variant != variantExcluded {
+		t.Fatalf("excluded execution variant = %q, want %q", c.Variant, variantExcluded)
+	}
+	if c.Engine != engineMap || c.Tier != "t1" || c.Mode != modeProtect {
+		t.Fatalf("execution cell identity = %#v", c)
 	}
 }
 

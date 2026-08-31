@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -147,7 +148,7 @@ func cellInputMaterial(c Cell) ([]byte, error) {
 }
 func ProductionCoreCells() []Cell {
 	out := make([]Cell, 0, 48)
-	for _, e := range []string{engineMap, "kyverno-webhook", "kyverno-map", "coexist"} {
+	for _, e := range []string{engineMap, engineKyvernoWebhook, engineKyvernoMAP, engineCoexist} {
 		for _, t := range []string{"t1", "t2", "t3", "t4"} {
 			for _, m := range []string{modeCreateOnly, modeProtect, modeContributors} {
 				out = append(out, Cell{Engine: e, Tier: t, Mode: m, Phase: phaseCore, Concurrency: 1, Kind: resourceServiceAccount, Verb: verbMixed, Variant: variantEnabled})
@@ -191,6 +192,56 @@ func PlannedCells(q bool) []Cell {
 	return out
 }
 
+// PlannedAuxiliaryCells contains the measurements required by the benchmark
+// plan in addition to the authoritative 60-cell core. They are deliberately
+// kept out of PlannedCells so the core and quick contracts remain stable.
+// Isolation cells run each enabled engine against one resource family at a
+// time. Component cells isolate the native MAP's stamp, restore, and
+// contributor paths; the exclusion toggle covers the map t1/protect path.
+func PlannedAuxiliaryCells() []Cell {
+	const componentTier = "t1"
+	engines := []string{engineMap, engineKyvernoWebhook, engineKyvernoMAP, engineCoexist}
+	out := make([]Cell, 0, len(engines)*len(isolationTiers())+4)
+	for _, engine := range engines {
+		for _, tier := range isolationTiers() {
+			kind, err := IsolationKind(tier)
+			if err != nil {
+				panic(err)
+			}
+			out = append(out, Cell{
+				Engine: engine, Tier: tier, Mode: modeProtect, Phase: phaseCore,
+				Concurrency: 1, Kind: kind, Verb: verbMixed,
+				Variant: variantEnabled,
+			})
+		}
+	}
+	for _, mode := range []string{modeComponentStamp, modeComponentRestore, modeComponentContrib} {
+		out = append(out, Cell{
+			Engine: engineMap, Tier: componentTier, Mode: mode, Phase: phaseCore,
+			Concurrency: 1, Kind: resourceServiceAccount, Verb: verbMixed,
+			Variant: variantEnabled,
+		})
+	}
+	out = append(out, Cell{
+		Engine: engineMap, Tier: componentTier, Mode: modeProtect, Phase: phaseCore,
+		Concurrency: 1, Kind: resourceServiceAccount, Verb: verbMixed,
+		Variant: variantExcluded,
+	})
+	return out
+}
+
+// PlannedFullCells is the complete logical plan. The 60 core cells are
+// followed by the explicitly named isolation/component and exclusion cells.
+func PlannedFullCells(q bool) []Cell {
+	core := PlannedCells(q)
+	if q {
+		return core
+	}
+	out := make([]Cell, 0, len(core)+len(PlannedAuxiliaryCells()))
+	out = append(out, core...)
+	return append(out, PlannedAuxiliaryCells()...)
+}
+
 // PlannedExecutionCells expands the logical matrix into the exact result
 // keys emitted by executeBenchmark. Baselines are deliberately shared: one
 // disabled cell per tier/mode is compared with all four enabled engines.
@@ -211,6 +262,41 @@ func PlannedExecutionCells(q bool, concurrency []int) []Cell {
 		}
 	}
 	return out
+}
+
+// PlannedAuxiliaryExecutionCells expands only the non-core plan. Keeping this
+// separate makes it possible for callers and reports to state core and
+// auxiliary counts without changing the established 720-result contract.
+func PlannedAuxiliaryExecutionCells(q bool, concurrency []int) []Cell {
+	logical := PlannedAuxiliaryCells()
+	if q {
+		return nil
+	}
+	if len(concurrency) == 0 {
+		concurrency = ConcurrencySweep(q)
+	}
+	out := make([]Cell, 0, len(logical)*len(BenchmarkPhases())*len(concurrency))
+	for _, c := range logical {
+		for _, n := range concurrency {
+			for _, phase := range BenchmarkPhases() {
+				p := c
+				p.Phase, p.Concurrency, p.RunID = phase, n, ""
+				p.Sustained = phase == phaseSustained
+				out = append(out, p)
+			}
+		}
+	}
+	return out
+}
+
+// PlannedFullExecutionCells is the set written to a full run's plan file.
+// Quick mode intentionally remains the existing 16-result smoke matrix.
+func PlannedFullExecutionCells(q bool, concurrency []int) []Cell {
+	if q {
+		return PlannedExecutionCells(true, concurrency)
+	}
+	core := PlannedExecutionCells(false, concurrency)
+	return append(core, PlannedAuxiliaryExecutionCells(false, concurrency)...)
 }
 func resultPath(d string, c Cell) string {
 	prefix := ""
@@ -255,6 +341,21 @@ func validateRunID(runID string) error {
 
 func defaultRunID(now time.Time) string {
 	return strings.ToLower(now.UTC().Format("20060102T150405Z"))
+}
+
+func executionCell(o options) Cell {
+	variant := variantEnabled
+	if o.engine == engineBaseline {
+		variant = engineBaseline
+	}
+	if o.excluded {
+		variant = variantExcluded
+	}
+	return Cell{
+		Engine: o.engine, Tier: o.tier, Mode: o.mode, Phase: phaseSustained,
+		Concurrency: o.concurrency[len(o.concurrency)-1], Kind: resourceServiceAccount,
+		Verb: verbMixed, Variant: variant, Sustained: true,
+	}
 }
 
 func writeResult(p string, r Result) error {
@@ -305,7 +406,8 @@ func ConcurrencySweep(q bool) []int {
 	}
 	return []int{8, 32, 64}
 }
-func syntheticIdentities(n int) []string {
+func syntheticIdentities() []string {
+	const n = 10
 	o := make([]string, n)
 	for i := range o {
 		o[i] = fmt.Sprintf("creator-bench-%03d", i)
@@ -322,27 +424,31 @@ type options struct {
 	report                                                      bool
 }
 
-func parseOptions() (options, error) {
+func parseOptions(args []string) (options, error) {
 	var o options
 	var cs string
-	flag.StringVar(&o.engine, "engine", engineBaseline, "engine: baseline|map|kyverno-webhook|kyverno-map|coexist")
-	flag.StringVar(&o.tier, "tier", "t1", "tier t1..t4 or iso-...")
-	flag.StringVar(&o.mode, "mode", "protect", "mode create-only|protect|contributors|component-*")
-	flag.IntVar(&o.ops, "ops", 5000, "measured operations")
-	flag.IntVar(&o.churn, "churn-rounds", 10, "update rounds")
-	flag.IntVar(&o.identities, "identities", 10, "exactly ten synthetic identities")
-	flag.StringVar(&cs, "concurrency", "8,32,64", "comma-separated concurrency levels")
-	flag.IntVar(&o.warmup, "warmup", 200, "warmup operations")
-	flag.BoolVar(&o.excluded, "excluded-usernames-bench", false, "include excluded-usernames warmup")
-	flag.DurationVar(&o.sustained, "sustained-duration", 5*time.Minute, "sustained phase duration")
-	flag.StringVar(&o.out, "out", "benchmarks/data/result", "CSV/JSON result prefix")
-	flag.StringVar(&o.kubeconfig, "kubeconfig", os.Getenv("KUBECONFIG"), "kubeconfig")
-	flag.StringVar(&o.runID, "run-id", "", "run identifier")
-	flag.StringVar(&o.inputHash, "input-hash", "", "expected input hash")
-	flag.BoolVar(&o.quick, "quick", false, "explicitly reduce operations and duration")
-	flag.BoolVar(&o.report, "report", false, "validate planned cell results and write deterministic reports")
-	flag.BoolVar(&o.resume, "resume", false, "resume a matching incomplete cell journal")
-	flag.Parse()
+	fs := flag.NewFlagSet("creator-tracking-benchmark", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.StringVar(&o.engine, "engine", engineBaseline, "engine: baseline|map|kyverno-webhook|kyverno-map|coexist")
+	fs.StringVar(&o.tier, "tier", "t1", "tier t1..t4 or iso-...")
+	fs.StringVar(&o.mode, "mode", "protect", "mode create-only|protect|contributors|component-*")
+	fs.IntVar(&o.ops, "ops", 5000, "measured operations")
+	fs.IntVar(&o.churn, "churn-rounds", 10, "update rounds")
+	fs.IntVar(&o.identities, "identities", 10, "exactly ten synthetic identities")
+	fs.StringVar(&cs, "concurrency", "8,32,64", "comma-separated concurrency levels")
+	fs.IntVar(&o.warmup, "warmup", 200, "warmup operations")
+	fs.BoolVar(&o.excluded, "excluded-usernames-bench", false, "mark the populated excluded-usernames comparison")
+	fs.DurationVar(&o.sustained, "sustained-duration", 5*time.Minute, "sustained phase duration")
+	fs.StringVar(&o.out, "out", "benchmarks/data/result", "CSV/JSON result prefix")
+	fs.StringVar(&o.kubeconfig, "kubeconfig", os.Getenv("KUBECONFIG"), "kubeconfig")
+	fs.StringVar(&o.runID, "run-id", "", "run identifier")
+	fs.StringVar(&o.inputHash, "input-hash", "", "expected input hash")
+	fs.BoolVar(&o.quick, "quick", false, "explicitly reduce operations and duration")
+	fs.BoolVar(&o.report, "report", false, "validate planned cell results and write deterministic reports")
+	fs.BoolVar(&o.resume, "resume", false, "resume a matching incomplete cell journal")
+	if err := fs.Parse(args); err != nil {
+		return o, fmt.Errorf("parse options: %w", err)
+	}
 	for _, s := range strings.Split(cs, ",") {
 		var n int
 		if _, e := fmt.Sscanf(strings.TrimSpace(s), "%d", &n); e != nil || n < 1 {
@@ -367,7 +473,7 @@ func validateOptions(o options) error {
 			return err
 		}
 	}
-	if !map[string]bool{engineBaseline: true, engineMap: true, "kyverno-webhook": true, "kyverno-map": true, "coexist": true}[o.engine] {
+	if !map[string]bool{engineBaseline: true, engineMap: true, engineKyvernoWebhook: true, engineKyvernoMAP: true, engineCoexist: true}[o.engine] {
 		return fmt.Errorf("invalid engine %q", o.engine)
 	}
 	if o.tier == "" || o.mode == "" {
@@ -378,7 +484,7 @@ func validateOptions(o options) error {
 			return fmt.Errorf("invalid tier %q: %w", o.tier, err)
 		}
 	}
-	if !map[string]bool{modeCreateOnly: true, modeProtect: true, modeContributors: true}[o.mode] {
+	if !validBenchmarkMode(o.mode) {
 		return fmt.Errorf("invalid mode %q", o.mode)
 	}
 	if o.ops < 1 || o.churn < 1 || o.identities != 10 || o.warmup < 1 || o.sustained <= 0 {
@@ -390,11 +496,11 @@ func validateOptions(o options) error {
 	return nil
 }
 func main() {
-	os.Exit(runMain())
+	os.Exit(runMain(os.Args[1:]))
 }
 
-func runMain() int {
-	o, e := parseOptions()
+func runMain(args []string) int {
+	o, e := parseOptions(args)
 	if e != nil {
 		fmt.Fprintln(os.Stderr, e)
 		return 2
@@ -426,7 +532,7 @@ func runMain() int {
 	}
 	planPath := filepath.Join(filepath.Clean(o.out), "plan.json")
 	if _, statErr := os.Stat(planPath); os.IsNotExist(statErr) {
-		if e = writePlan(filepath.Clean(o.out), PlannedExecutionCells(o.quick, o.concurrency)); e != nil {
+		if e = writePlan(filepath.Clean(o.out), PlannedFullExecutionCells(o.quick, o.concurrency)); e != nil {
 			fmt.Fprintln(os.Stderr, e)
 			return 1
 		}
@@ -440,14 +546,7 @@ func runMain() int {
 		return 1
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), o.sustained+30*time.Minute)
-	c := Cell{
-		Engine: o.engine, Tier: o.tier, Mode: o.mode, Phase: phaseSustained,
-		Concurrency: o.concurrency[len(o.concurrency)-1], Kind: resourceServiceAccount,
-		Verb: verbMixed, Variant: variantEnabled, Sustained: true,
-	}
-	if o.engine == engineBaseline {
-		c.Variant = engineBaseline
-	}
+	c := executionCell(o)
 	if o.inputHash != "" && o.inputHash != cellInputHash(c) {
 		fmt.Fprintln(os.Stderr, "input hash mismatch")
 		cancel()
