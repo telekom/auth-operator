@@ -200,7 +200,7 @@ func creatorPrivateRunDir() (string, error) {
 	}
 	markerPath := filepath.Join(runDir, "provenance")
 	markerInfo, markerErr := os.Lstat(markerPath)
-	if markerErr != nil || !markerInfo.Mode().IsRegular() || markerInfo.Mode().Perm() != 0o600 {
+	if markerErr != nil || markerInfo == nil || !markerInfo.Mode().IsRegular() || markerInfo.Mode().Perm() != 0o600 {
 		return "", fmt.Errorf("creator run provenance marker is missing or not private")
 	}
 	marker, markerErr := os.ReadFile(markerPath)
