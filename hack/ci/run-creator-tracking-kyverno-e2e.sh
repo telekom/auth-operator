@@ -12,7 +12,6 @@ readonly run_dir=/tmp/auth-operator-e2e-kyverno-run
 # Failure diagnostics are sanitized readiness/version summaries and remain
 # local-only; this runner intentionally does not upload cluster metadata.
 readonly artifact_dir=/tmp/creator-tracking-kyverno-debug
-readonly kind_image='kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5'
 readonly source_image='auth-operator:creator-tracking-kyverno-source'
 readonly e2e_image='auth-operator:creator-tracking-kyverno-e2e'
 readonly owner='auth-operator-creator-tracking-kyverno/v1'
@@ -151,6 +150,8 @@ set -a
 # shellcheck disable=SC1091
 source versions.env
 set +a
+: "${E2E_CREATOR_TRACKING_STABLE_NODE_IMAGE:?versions.env must define E2E_CREATOR_TRACKING_STABLE_NODE_IMAGE}"
+readonly kind_image=$E2E_CREATOR_TRACKING_STABLE_NODE_IMAGE
 printf '%s\n' "$owner" > "$marker"
 chmod 600 "$marker"
 status=0
