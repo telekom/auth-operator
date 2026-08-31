@@ -27,12 +27,12 @@ func TestCleanupCellUsesOwnedLabel(t *testing.T) {
 		apiVersionField: "v1", kindField: kindServiceAccount,
 		metadataField: map[string]interface{}{
 			"name": "owned", "namespace": "bench",
-			labelsField: map[string]interface{}{"t-caas.telekom.com/benchmark": benchmarkLabelValue},
+			labelsField: map[string]interface{}{benchmarkLabelKey: benchmarkLabelValue},
 		},
 	}}
 	foreign := u.DeepCopy()
 	foreign.SetName("foreign")
-	foreign.SetLabels(map[string]string{"t-caas.telekom.com/benchmark": "other"})
+	foreign.SetLabels(map[string]string{benchmarkLabelKey: "other"})
 	cl := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{s.gvr: "ServiceAccountList"})
 	_, _ = cl.Resource(s.gvr).Namespace("bench").Create(context.Background(), u, metav1.CreateOptions{})
 	_, _ = cl.Resource(s.gvr).Namespace("bench").Create(context.Background(), foreign, metav1.CreateOptions{})
