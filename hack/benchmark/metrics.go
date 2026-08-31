@@ -224,14 +224,14 @@ func splitMetricLine(line string) (metric, value string, ok bool) {
 	if pos <= 0 || pos == len(line)-1 {
 		return "", "", false
 	}
-	rest := strings.TrimSpace(line[pos:])
-	if rest == "" {
+	remaining := strings.TrimSpace(line[pos:])
+	if remaining == "" {
 		return "", "", false
 	}
-	if end := strings.IndexAny(rest, " \t"); end >= 0 {
-		rest = rest[:end]
+	if end := strings.IndexAny(remaining, " \t"); end >= 0 {
+		remaining = remaining[:end]
 	}
-	return line[:pos], rest, true
+	return line[:pos], remaining, true
 }
 func parseMetricName(metric string) (metricName string, labels map[string]string) {
 	start := strings.IndexByte(metric, '{')

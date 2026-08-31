@@ -230,7 +230,7 @@ func sanitizeName(value string) string {
 	}
 	s := strings.Trim(b.String(), "-")
 	if s == "" {
-		return "run"
+		return fallbackRunID
 	}
 	return s
 }
