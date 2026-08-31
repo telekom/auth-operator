@@ -24,7 +24,7 @@ func LoadResults(dir string) ([]Result, error) {
 		if !cellResultName.MatchString(filepath.Base(p)) {
 			continue
 		}
-		b, e := os.ReadFile(p)
+		b, e := readBenchmarkFile(p)
 		if e != nil {
 			return nil, e
 		}
@@ -54,7 +54,7 @@ func plannedKey(c Cell) string {
 }
 
 func LoadPlannedResults(dir string) ([]Result, error) {
-	planBytes, err := os.ReadFile(filepath.Join(dir, "plan.json"))
+	planBytes, err := readBenchmarkFile(filepath.Join(dir, "plan.json"))
 	if err != nil {
 		return nil, fmt.Errorf("read plan: %w", err)
 	}
