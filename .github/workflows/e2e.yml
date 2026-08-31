@@ -252,6 +252,11 @@ jobs:
             exit 1
           fi
           exec 9<>"$lock_file"
+          if [ "$(readlink -f /proc/$$/fd/9 2>/dev/null || true)" != "$lock_file" ]; then
+            exec 9>&-
+            echo "creator tracking cleanup lock changed while opening; refusing fallback mutation" >&2
+            exit 1
+          fi
           if ! flock -n 9; then echo "creator tracking cleanup lock is busy; refusing fallback mutation" >&2; exit 1; fi
           run_dir="/tmp/auth-operator-creator-tracking-ci-${{ matrix.variant }}"
           owned_run=false
