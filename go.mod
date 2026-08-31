@@ -111,7 +111,7 @@ require (
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	k8s.io/apiserver v0.37.0 // indirect
 	k8s.io/component-base v0.37.0 // indirect
-	k8s.io/kube-aggregator v0.36.2 // indirect
+	k8s.io/kube-aggregator v0.37.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20260721132016-d427ff9ee9ad // indirect
 	k8s.io/streaming v0.37.0 // indirect
 	sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.36.0 // indirect
@@ -200,4 +200,4 @@ replace golang.org/x/telemetry => golang.org/x/telemetry v0.0.0-20260811152509-e
 
 replace k8s.io/gengo/v2 => k8s.io/gengo/v2 v2.0.0-20260408192533-25e2208e0dc3
 
-replace k8s.io/kube-aggregator => k8s.io/kube-aggregator v0.36.3
+replace k8s.io/kube-aggregator => k8s.io/kube-aggregator v0.37.0
