@@ -38,6 +38,7 @@ grep -Fq 'for mode in component-stamp component-restore component-contrib' "$run
 grep -Fq "args+=(--set-json 'creatorTracking.excludedUsernames=[\"creator-bench-excluded\"]')" "$runner"
 grep -Fq "[[ \"\$engine\" != map ]] && isolation_ops=1000" "$runner"
 grep -Fq 'input-material-${active_scope}-${engine}-${active_mode}-${active_variant}.yaml' "$runner"
+grep -Fq "run_id: %s\\nscope: %s\\nengine: %s\\nmode: %s\\nvariant: %s" "$runner"
 grep -Fq 'material_tmp=$(mktemp "${material}.tmp.XXXXXX")' "$runner"
 grep -Fq 'mv -- "$material_tmp" "$material"' "$runner"
 grep -Fq 'archive_tmp=$(mktemp "${archive}.tmp.XXXXXX")' "$runner"
@@ -106,6 +107,7 @@ if grep -Fq 'helm uninstall kyverno --namespace "$kyverno_namespace" --ignore-no
   exit 1
 fi
 grep -Fq 'phase go run ./hack/benchmark' "$runner"
+grep -Fq '[[ "$requested_mode" == resume ]] && args+=(-resume)' "$runner"
 for manifest in baseline map kyverno-webhook kyverno-map coexist; do
   test -s "$root/hack/benchmark/manifests/$manifest.yaml"
   grep -Eq '^apiVersion:' "$root/hack/benchmark/manifests/$manifest.yaml"

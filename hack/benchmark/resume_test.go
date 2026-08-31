@@ -79,6 +79,9 @@ func TestValidateResultIdentityAllowsExactFailedResultForRetry(t *testing.T) {
 	if err := validateResultIdentity(failed, expected, "input", "environment", "workload", "config"); err != nil {
 		t.Fatalf("exact failed result cannot be retried: %v", err)
 	}
+	if err := validateRetryableResult(failed, expected, "input", "environment", "workload", "config"); err != nil {
+		t.Fatalf("exact failed result was not accepted as retryable: %v", err)
+	}
 	if err := validateCompletedResult(failed, expected, "input", "environment", "workload", "config"); err == nil {
 		t.Fatal("failed result was accepted as a completed checkpoint")
 	}
@@ -86,5 +89,37 @@ func TestValidateResultIdentityAllowsExactFailedResultForRetry(t *testing.T) {
 	failed.ConfigHash = "other"
 	if err := validateResultIdentity(failed, expected, "input", "environment", "workload", "config"); err == nil {
 		t.Fatal("mismatched failed result was accepted for retry")
+	}
+}
+
+func TestValidateResultIdentityRejectsFailedResultWithoutError(t *testing.T) {
+	expected := Cell{
+		Engine: engineMap, Tier: "t1", Mode: modeProtect, Phase: phaseCreate,
+		Concurrency: 8, Kind: resourceServiceAccount, Verb: verbMixed,
+		Variant: variantEnabled, RunID: "run-1", Objects: 2,
+	}
+	failed := Result{
+		Cell: expected, RunID: "run-1", InputHash: "input",
+		EnvironmentID: "environment", WorkloadHash: "workload",
+		ConfigHash: "config", Status: statusFailed,
+	}
+	if err := validateResultIdentity(failed, expected, "input", "environment", "workload", "config"); err == nil {
+		t.Fatal("failed result without an error was accepted for retry")
+	}
+}
+
+func TestValidateRetryableResultRejectsCompletedCheckpoint(t *testing.T) {
+	expected := Cell{
+		Engine: engineMap, Tier: "t1", Mode: modeProtect, Phase: phaseCreate,
+		Concurrency: 8, Kind: resourceServiceAccount, Verb: verbMixed,
+		Variant: variantEnabled, RunID: "run-1", Objects: 2,
+	}
+	completed := Result{
+		Cell: expected, RunID: "run-1", InputHash: "input",
+		EnvironmentID: "environment", WorkloadHash: "workload",
+		ConfigHash: "config", Status: statusComplete, Samples: 1,
+	}
+	if err := validateRetryableResult(completed, expected, "input", "environment", "workload", "config"); err == nil {
+		t.Fatal("completed result was accepted as retryable")
 	}
 }
