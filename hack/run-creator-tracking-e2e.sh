@@ -63,6 +63,10 @@ fi
 lock_type=$(stat -c %F "$lock_file" 2>/dev/null || true)
 lock_owner=$(stat -c %u "$lock_file" 2>/dev/null || true)
 lock_mode=$(stat -c %a "$lock_file" 2>/dev/null || true)
+if [[ $lock_type == "regular file" && $lock_owner == "$lock_uid" && $lock_mode != 600 && ! -s "$lock_file" ]]; then
+	chmod 600 "$lock_file"
+	lock_mode=$(stat -c %a "$lock_file" 2>/dev/null || true)
+fi
 if [[ $lock_type != "regular file" || $lock_owner != "$lock_uid" || $lock_mode != 600 ]]; then
 	echo "creator tracking lock must be an owned regular file with mode 600: $lock_file" >&2
 	exit 1
