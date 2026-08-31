@@ -756,6 +756,10 @@ func executeBenchmark(ctx context.Context, base *rest.Config, cell Cell, o optio
 			run.WorkloadHash = workloadHash
 			run.ConfigHash = configHash
 			if phase != phaseWarmup {
+				// Client-observed workload results are authoritative. API-server,
+				// webhook, and pod-restart snapshots are supporting evidence, so
+				// transport/authentication/series gaps are retained in the result
+				// without discarding an otherwise successful latency sample.
 				after, afterErr := fetchMetrics(ctx, metricsClient, base)
 				if after.State == "" {
 					after.State = MetricUnavailable
