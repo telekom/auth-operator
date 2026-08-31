@@ -198,6 +198,19 @@ func validateCompletedResult(prior Result, expected Cell, inputHash, environment
 	return nil
 }
 
+// validateRetryableResult accepts only an exact failed result. Failed phase
+// files are checkpoints to replace after a cell journal proves that the cell
+// may be replayed; they must never be mistaken for completed measurements.
+func validateRetryableResult(prior Result, expected Cell, inputHash, environmentID, workloadHash, configHash string) error {
+	if prior.Status != statusFailed {
+		return fmt.Errorf("retryable result has status %q", prior.Status)
+	}
+	if err := validateResultIdentity(prior, expected, inputHash, environmentID, workloadHash, configHash); err != nil {
+		return fmt.Errorf("invalid retryable result: %w", err)
+	}
+	return nil
+}
+
 // comparisonEnvironmentID identifies the execution substrate shared by all
 // engine variants. Policy and engine-specific versions are retained in each
 // result's full Environment, but must not prevent baseline joins.
@@ -584,6 +597,10 @@ func executeBenchmark(ctx context.Context, base *rest.Config, cell Cell, o optio
 			// Restart the whole cell so deterministic CREATE names and the
 			// state required by later UPDATE phases are both reconstructed.
 			restartCell = true
+		} else if errors.Is(readErr, os.ErrNotExist) {
+			return fmt.Errorf("resume journal is missing: %s", journal)
+		} else {
+			return fmt.Errorf("read resume journal: %w", readErr)
 		}
 	}
 	if restartCell {
@@ -652,10 +669,7 @@ func executeBenchmark(ctx context.Context, base *rest.Config, cell Cell, o optio
 							continue
 						}
 					} else {
-						if prior.Status != statusFailed {
-							return fmt.Errorf("refusing existing phase result %s with state %q", completedPath, prior.Status)
-						}
-						if validationErr := validateResultIdentity(prior, pc, inputHash, environmentID, workloadHash, configHash); validationErr != nil {
+						if validationErr := validateRetryableResult(prior, pc, inputHash, environmentID, workloadHash, configHash); validationErr != nil {
 							return fmt.Errorf("refusing failed phase result %s: %w", completedPath, validationErr)
 						}
 						if !restartCell {
