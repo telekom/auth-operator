@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -86,7 +87,15 @@ type CommandRunner interface {
 type OSCommandRunner struct{}
 
 func (OSCommandRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
-	//nolint:gosec // benchmark commands are selected by the trusted runner setup
+	if filepath.Base(name) != name {
+		return nil, fmt.Errorf("command path is not allowed: %q", name)
+	}
+	switch name {
+	case "awk", "docker", "getconf", "go", "helm", "kubectl", "kind", "kyverno", "sysctl":
+	default:
+		return nil, fmt.Errorf("command is not allowlisted: %q", name)
+	}
+	// #nosec G204 -- executable names are restricted to the fixed allowlist above.
 	return exec.CommandContext(ctx, name, args...).Output()
 }
 
@@ -241,7 +250,10 @@ func openBenchmarkArtifact(path string) (*os.File, error) {
 	if !filepath.IsAbs(path) {
 		return nil, fmt.Errorf("path must be absolute")
 	}
-	//nolint:gosec // path is constrained to an absolute, private regular file below.
+	if filepath.Clean(path) != path {
+		return nil, fmt.Errorf("path is not canonical")
+	}
+	// #nosec G304,G703 -- canonical path and private ownership are checked before opening.
 	info, err := os.Lstat(path)
 	if err != nil {
 		return nil, fmt.Errorf("stat path: %w", err)
@@ -252,7 +264,7 @@ func openBenchmarkArtifact(path string) (*os.File, error) {
 	if err := validateBenchmarkArtifactParent(filepath.Dir(path)); err != nil {
 		return nil, err
 	}
-	//nolint:gosec // identity, ownership, type, and mode are checked on the opened descriptor below.
+	// #nosec G304,G703 -- identity, ownership, type, and mode are checked on the opened descriptor below.
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open path: %w", err)
@@ -283,15 +295,24 @@ func validateBenchmarkArtifactFileInfo(info os.FileInfo) error {
 	if info.Sys() == nil {
 		return fmt.Errorf("file ownership is unavailable")
 	}
-	//nolint:gosec // filesystem UIDs are uint32 on supported Unix platforms.
-	if stat, ok := info.Sys().(*syscall.Stat_t); !ok || stat.Uid != uint32(os.Getuid()) {
+	if stat, ok := info.Sys().(*syscall.Stat_t); !ok || strconv.FormatUint(uint64(stat.Uid), 10) != strconv.Itoa(os.Getuid()) {
 		return fmt.Errorf("file is not owned by the current user")
 	}
 	return nil
 }
 
 func validateBenchmarkArtifactParent(parent string) error {
-	//nolint:gosec // parent is derived only after validating the artifact path.
+	if filepath.Clean(parent) != parent {
+		return fmt.Errorf("parent is not canonical")
+	}
+	canonical, err := filepath.EvalSymlinks(parent)
+	if err != nil {
+		return fmt.Errorf("resolve parent: %w", err)
+	}
+	if canonical != parent {
+		return fmt.Errorf("parent contains a symlink")
+	}
+	// #nosec G304,G703 -- parent is canonicalized and checked for private ownership below.
 	parentInfo, err := os.Lstat(parent)
 	if err != nil {
 		return fmt.Errorf("stat parent: %w", err)
@@ -302,8 +323,7 @@ func validateBenchmarkArtifactParent(parent string) error {
 	if parentInfo.Mode().Perm() != 0o700 {
 		return fmt.Errorf("parent mode is %04o, want 0700", parentInfo.Mode().Perm())
 	}
-	//nolint:gosec // filesystem UIDs are uint32 on supported Unix platforms.
-	if stat, ok := parentInfo.Sys().(*syscall.Stat_t); !ok || stat.Uid != uint32(os.Getuid()) {
+	if stat, ok := parentInfo.Sys().(*syscall.Stat_t); !ok || strconv.FormatUint(uint64(stat.Uid), 10) != strconv.Itoa(os.Getuid()) {
 		return fmt.Errorf("parent is not owned by the current user")
 	}
 	return nil
@@ -334,6 +354,16 @@ func readBenchmarkArtifact(path string) ([]byte, error) {
 		return nil, fmt.Errorf("close validated path: %w", closeErr)
 	}
 	return contents, nil
+}
+
+// readBenchmarkFile makes caller-provided relative paths absolute before
+// routing them through the ownership, mode, type, and identity checks above.
+func readBenchmarkFile(path string) ([]byte, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve path: %w", err)
+	}
+	return readBenchmarkArtifact(absolute)
 }
 func commandVersion(ctx context.Context, runner CommandRunner, name string, args ...string) string {
 	b, err := runner.Run(ctx, name, args...)

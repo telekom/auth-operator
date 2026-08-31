@@ -79,7 +79,7 @@ func statusFor(verb string, e error) int {
 		}
 		return 0
 	}
-	if verb == phaseCreate {
+	if verb == phaseCreate || verb == phaseWarmup {
 		return 201
 	}
 	return 200

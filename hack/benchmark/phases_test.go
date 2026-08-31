@@ -15,6 +15,15 @@ import (
 	testingclient "k8s.io/client-go/testing"
 )
 
+func TestStatusForWarmupCreate(t *testing.T) {
+	if got := statusFor(phaseWarmup, nil); got != 201 {
+		t.Fatalf("warmup status = %d, want 201", got)
+	}
+	if got := statusFor(phaseCreate, nil); got != 201 {
+		t.Fatalf("create status = %d, want 201", got)
+	}
+}
+
 func TestMixedWorkerCountsUseTotalBudget(t *testing.T) {
 	for _, tc := range []struct {
 		workers int

@@ -9,7 +9,10 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 runner="$root/hack/benchmark/run.sh"
 test_tmp_root=$(cd -P -- "${TMPDIR:-/tmp}" && pwd -P)
 grep -Fq "flock -n 9" "$runner"
-grep -Fq "chmod 600 \"\$lock_file\"" "$runner"
+grep -Fq 'lock_type=$(stat' "$runner"
+grep -Fq 'lock_owner=$(stat' "$runner"
+grep -Fq 'lock_mode=$(stat' "$runner"
+grep -Fq "fixed lock must be an owned regular file with mode 600" "$runner"
 grep -Fq 'source "$repo_root/versions.env"' "$runner"
 grep -Fq 'readonly kind_node_image=$E2E_CREATOR_TRACKING_STABLE_NODE_IMAGE' "$runner"
 grep -Fq 'readonly kyverno_chart_url=$KYVERNO_CHART_URL' "$runner"
@@ -95,6 +98,11 @@ done
 probe_dir=$(mktemp -d "$test_tmp_root/auth-operator-benchmark.test.XXXXXX")
 trap 'rm -rf -- "$probe_dir"' EXIT
 mkdir -p "$probe_dir/bin"
+printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"$probe_dir/bin/flock"
+printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"$probe_dir/bin/setsid"
+printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"$probe_dir/bin/timeout"
+chmod 700 "$probe_dir/bin/flock"
+chmod 700 "$probe_dir/bin/setsid" "$probe_dir/bin/timeout"
 
 # The repository Makefile exports its generic E2E cluster name. Benchmark
 # targets must scrub every caller-controlled cluster selector before invoking
@@ -103,6 +111,7 @@ mkdir -p "$probe_dir/bin"
 for target in benchmark-creator-tracking benchmark-creator-tracking-quick; do
   make_error="$probe_dir/$target.error"
   if KUBECONFIG=foreign KIND_CLUSTER_NAME=foreign CLUSTER_NAME=foreign BENCHMARK_CLUSTER=foreign \
+    PATH="$probe_dir/bin:$PATH" \
     BENCHMARK_MODE=invalid make -s -C "$root" "$target" >/dev/null 2>"$make_error"; then
     echo "$target unexpectedly accepted an invalid benchmark mode" >&2
     exit 1
@@ -110,8 +119,6 @@ for target in benchmark-creator-tracking benchmark-creator-tracking-quick; do
   grep -Fq 'BENCHMARK_MODE must be fresh or resume' "$make_error"
 done
 
-printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"$probe_dir/bin/flock"
-chmod 700 "$probe_dir/bin/flock"
 printf '%s\n' 'not-the-benchmark-owner' >"$probe_dir/owner"
 if env -u KUBECONFIG -u KIND_CLUSTER_NAME -u CLUSTER_NAME -u BENCHMARK_CLUSTER PATH="$probe_dir/bin:$PATH" BENCHMARK_MODE=resume BENCHMARK_RUN_DIR="$probe_dir" bash "$runner" >/dev/null 2>"$probe_dir/error"; then
   echo 'resume accepted an invalid ownership marker' >&2
@@ -143,6 +150,7 @@ signal_bin="$signal_dir/bin"
 mkdir -p "$signal_bin"
 printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"$signal_bin/flock"
 printf '%s\n' '#!/usr/bin/env bash' 'shift 3; exec "$@"' >"$signal_bin/timeout"
+printf '%s\n' '#!/usr/bin/env bash' 'exec "$@"' >"$signal_bin/setsid"
 # shellcheck disable=SC2016
 printf '%s\n' '#!/usr/bin/env bash' 'case "${1:-}" in info) exit 0;; container) exit 1;; image) exit 1;; build) touch "${SIGNAL_BUILD_MARKER:?}"; sleep 30 & child=$!; printf "%s\n" "$child" >"${SIGNAL_CHILD_PID:?}"; wait "$child";; *) exit 0;; esac' >"$signal_bin/docker"
 # shellcheck disable=SC2016

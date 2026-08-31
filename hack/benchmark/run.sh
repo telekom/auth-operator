@@ -36,8 +36,16 @@ readonly requested_mode=${BENCHMARK_MODE:-fresh}
 command -v flock >/dev/null 2>&1 || die 'flock is required'
 [[ -z "${BENCHMARK_LOCK:-}" ]] || die 'BENCHMARK_LOCK is not supported; the lock path is fixed'
 [[ ! -L "$lock_file" ]] || die "refusing symlink lock $lock_file"
-exec 9>"$lock_file"
-chmod 600 "$lock_file"
+if [[ ! -e "$lock_file" ]]; then
+  (set -C; : >"$lock_file") 2>/dev/null || die "cannot create fixed lock $lock_file"
+fi
+[[ ! -L "$lock_file" ]] || die "refusing symlink lock $lock_file"
+lock_type=$(stat -c '%F' "$lock_file" 2>/dev/null || stat -f '%HT' "$lock_file")
+lock_mode=$(stat -c '%a' "$lock_file" 2>/dev/null || stat -f '%Lp' "$lock_file")
+lock_owner=$(stat -c '%u' "$lock_file" 2>/dev/null || stat -f '%u' "$lock_file")
+[[ "$lock_type" == 'regular file' || "$lock_type" == 'Regular File' ]] || die "fixed lock must be an owned regular file with mode 600: $lock_file"
+[[ "$lock_mode" == 600 && "$lock_owner" == "$(id -u)" ]] || die "fixed lock must be an owned regular file with mode 600: $lock_file"
+exec 9<>"$lock_file"
 flock -n 9 || die "benchmark already running (lock: $lock_file)"
 
 for forbidden in KUBECONFIG KIND_CLUSTER_NAME CLUSTER_NAME BENCHMARK_CLUSTER; do
@@ -89,12 +97,32 @@ validate_owned_tree() {
   done < <(find "$root" -mindepth 0 -print0)
 }
 canonical_child_path() {
-  local candidate=$1 parent base parent_canonical
+  local candidate=$1 create_parent=${2:-true} parent base parent_canonical root relative current component
   [[ "$candidate" = /* ]] || die 'benchmark paths must be absolute after expansion'
+  [[ "$candidate" != */../* && "$candidate" != */./* && "$candidate" != */. && "$candidate" != */.. ]] || die "benchmark path is not canonical: $candidate"
   parent=$(dirname -- "$candidate")
   base=$(basename -- "$candidate")
-  mkdir -p -- "$parent"
-  [[ ! -L "$parent" ]] || die "benchmark path parent is a symlink: $parent"
+  case "$candidate" in
+    "$repo_root"/*) root=$repo_root ;;
+    "$private_tmp_root"/*) root=$private_tmp_root ;;
+    *) die 'benchmark path is outside the repository or private benchmark temporary area' ;;
+  esac
+  if [[ "$parent" == "$root" ]]; then relative=''; else relative=${parent#"$root"/}; fi
+  current=$root
+  while [[ -n "$relative" ]]; do
+    component=${relative%%/*}
+    [[ "$component" != "$relative" ]] && relative=${relative#*/} || relative=''
+    current="$current/$component"
+    if [[ -L "$current" ]]; then die "benchmark path parent is a symlink: $current"; fi
+    if [[ -e "$current" ]]; then
+      [[ -d "$current" ]] || die "benchmark path parent is not a directory: $current"
+    elif [[ "$create_parent" == true ]]; then
+      mkdir -- "$current" || die "cannot create benchmark path parent: $current"
+      chmod 700 "$current" || die "cannot protect benchmark path parent: $current"
+    else
+      die "benchmark path parent does not exist: $current"
+    fi
+  done
   parent_canonical=$(cd -P -- "$parent" && pwd -P) || die "cannot canonicalize benchmark path parent: $parent"
   [[ "$parent" == "$parent_canonical" ]] || die "benchmark path is not canonical: $candidate"
   printf '%s/%s' "$parent_canonical" "$base"
@@ -104,7 +132,7 @@ requested_run=${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}
 if [[ "$requested_mode" == resume ]]; then
   [[ -n "${BENCHMARK_RUN_DIR:-}" ]] || die 'BENCHMARK_RUN_DIR is required for resume'
   [[ "$BENCHMARK_RUN_DIR" = /* ]] || die 'resume run directory must be absolute and canonical'
-  run_dir=$(canonical_child_path "$BENCHMARK_RUN_DIR")
+  run_dir=$(canonical_child_path "$BENCHMARK_RUN_DIR" false)
   readonly run_dir
   [[ "$run_dir" == "$BENCHMARK_RUN_DIR" ]] || die 'resume run directory must be canonical'
   [[ -d "$run_dir" && ! -L "$run_dir" ]] || die "resume run directory is not owned: $run_dir"

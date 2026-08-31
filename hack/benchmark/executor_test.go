@@ -25,13 +25,52 @@ func TestCleanupCellUsesOwnedLabel(t *testing.T) {
 		apiVersionField: "v1", kindField: kindServiceAccount,
 		metadataField: map[string]interface{}{
 			"name": "owned", "namespace": "bench",
-			labelsField: map[string]interface{}{"auth-operator.telekom.com/benchmark": benchmarkLabelValue},
+			labelsField: map[string]interface{}{"t-caas.telekom.com/benchmark": benchmarkLabelValue},
 		},
 	}}
 	cl := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{s.gvr: "ServiceAccountList"})
 	_, _ = cl.Resource(s.gvr).Namespace("bench").Create(context.Background(), u, metav1.CreateOptions{})
 	if e := cleanupCell(context.Background(), cl, s, "bench"); e != nil {
 		t.Fatal(e)
+	}
+	if _, e := cl.Resource(s.gvr).Namespace("bench").Get(context.Background(), "owned", metav1.GetOptions{}); !apierrors.IsNotFound(e) {
+		t.Fatalf("owned object remains after cleanup: %v", e)
+	}
+}
+
+func TestObjectForUsesCanonicalKindsAndServiceAccountSubjects(t *testing.T) {
+	for resource, wantKind := range map[string]string{
+		resourceServiceAccount:     "ServiceAccount",
+		resourceRoleBinding:        "RoleBinding",
+		resourceClusterRoleBinding: "ClusterRoleBinding",
+		resourceBindDefinition:     "BindDefinition",
+	} {
+		cell := Cell{Engine: engineMap, Tier: "t1", Mode: modeProtect, RunID: "run", Phase: phaseCreate, Kind: resource}
+		s, err := specFor(resource)
+		if err != nil {
+			t.Fatal(err)
+		}
+		u := objectFor(cell, "object", "bench", s)
+		if got := u.GetKind(); got != wantKind {
+			t.Fatalf("%s kind = %q, want %q", resource, got, wantKind)
+		}
+		var subject map[string]interface{}
+		if resource == resourceRoleBinding || resource == resourceClusterRoleBinding {
+			subjects, _, err := unstructured.NestedSlice(u.Object, "subjects")
+			if err != nil || len(subjects) != 1 {
+				t.Fatalf("%s subjects = %#v, err %v", resource, subjects, err)
+			}
+			subject, _ = subjects[0].(map[string]interface{})
+		} else if resource == resourceBindDefinition {
+			subjects, _, err := unstructured.NestedSlice(u.Object, "spec", "subjects")
+			if err != nil || len(subjects) != 1 {
+				t.Fatalf("BindDefinition subjects = %#v, err %v", subjects, err)
+			}
+			subject, _ = subjects[0].(map[string]interface{})
+		}
+		if _, found := subject[apiGroupField]; found {
+			t.Fatalf("%s ServiceAccount subject has apiGroup", resource)
+		}
 	}
 }
 
