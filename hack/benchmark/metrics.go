@@ -338,21 +338,23 @@ type HistogramDelta struct {
 	State       MetricState
 }
 
-// ParseHistogramDelta selects matching sum/count series, preserving reset state.
-func ParseHistogramDelta(before, after, sumName, countName string, labels map[string]string) HistogramDelta {
+func histogramSamples(before, after, sumName, countName string, labels map[string]string) (MetricSample, MetricSample, MetricSample, MetricSample, bool, bool) {
 	bs, bok, beforeSumErr := matchingMetricSample(before, sumName, labels)
 	as, aok, afterSumErr := matchingMetricSample(after, sumName, labels)
 	bc, bcok, beforeCountErr := matchingMetricSample(before, countName, labels)
 	ac, acok, afterCountErr := matchingMetricSample(after, countName, labels)
 	if beforeSumErr != nil || afterSumErr != nil || beforeCountErr != nil || afterCountErr != nil {
-		return HistogramDelta{State: MetricUnavailable}
+		return MetricSample{}, MetricSample{}, MetricSample{}, MetricSample{}, false, true
 	}
-	if !bok || !aok || !bcok || !acok {
-		return HistogramDelta{State: MetricMissing}
-	}
-	if bs.Value < 0 || as.Value < 0 || bc.Value < 0 || ac.Value < 0 || math.Trunc(bc.Value) != bc.Value || math.Trunc(ac.Value) != ac.Value {
-		return HistogramDelta{State: MetricUnavailable}
-	}
+	return bs, as, bc, ac, bok && aok && bcok && acok, false
+}
+
+func validHistogramSamples(bs, as, bc, ac MetricSample) bool {
+	return bs.Value >= 0 && as.Value >= 0 && bc.Value >= 0 && ac.Value >= 0 &&
+		math.Trunc(bc.Value) == bc.Value && math.Trunc(ac.Value) == ac.Value
+}
+
+func histogramCounterDelta(bs, as, bc, ac MetricSample) HistogramDelta {
 	sum := CounterDelta(Counter{bs.Value, MetricAvailable}, Counter{as.Value, MetricAvailable})
 	count := CounterDelta(Counter{bc.Value, MetricAvailable}, Counter{ac.Value, MetricAvailable})
 	if sum.State != MetricAvailable || count.State != MetricAvailable {
@@ -370,4 +372,19 @@ func ParseHistogramDelta(before, after, sumName, countName string, labels map[st
 		return HistogramDelta{Sum: sum, Count: count, State: MetricUnavailable}
 	}
 	return HistogramDelta{Sum: sum, Count: count, MeanSeconds: mean, State: MetricAvailable}
+}
+
+// ParseHistogramDelta selects matching sum/count series, preserving reset state.
+func ParseHistogramDelta(before, after, sumName, countName string, labels map[string]string) HistogramDelta {
+	bs, as, bc, ac, samplesOK, unavailable := histogramSamples(before, after, sumName, countName, labels)
+	if unavailable {
+		return HistogramDelta{State: MetricUnavailable}
+	}
+	if !samplesOK {
+		return HistogramDelta{State: MetricMissing}
+	}
+	if !validHistogramSamples(bs, as, bc, ac) {
+		return HistogramDelta{State: MetricUnavailable}
+	}
+	return histogramCounterDelta(bs, as, bc, ac)
 }
