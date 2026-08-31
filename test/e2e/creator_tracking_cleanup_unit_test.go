@@ -96,6 +96,29 @@ func TestCreatorDockerImageKnownAbsent(t *testing.T) {
 	}
 }
 
+func TestCreatorRunnerUsesOwnedRegularLock(t *testing.T) {
+	runner, err := os.ReadFile("../../hack/run-creator-tracking-e2e.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(runner)
+	for _, required := range []string{
+		"set -C; : >\"$lock_file\"",
+		"lock_type=$(stat -c %F",
+		"lock_owner=$(stat -c %u",
+		"lock_mode=$(stat -c %a",
+		"$lock_type != \"regular file\"",
+		"$lock_owner != \"$lock_uid\"",
+	} {
+		if !strings.Contains(script, required) {
+			t.Fatalf("runner lock check is missing %q", required)
+		}
+	}
+	if strings.Contains(script, "touch \"$lock_file\"") {
+		t.Fatal("runner must not touch the fixed lock path")
+	}
+}
+
 func TestCreatorManagedFieldAnnotationOwnership(t *testing.T) {
 	fields := map[string]any{"f:metadata": map[string]any{"f:annotations": map[string]any{
 		creatorManagedFieldKey(createdByAnnotation):       map[string]any{},
