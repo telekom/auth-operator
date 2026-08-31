@@ -46,6 +46,20 @@ nameReference:
   - kind: ClusterRole
     group: rbac.authorization.k8s.io
     path: rules/resourceNames
+- kind: MutatingAdmissionPolicy
+  group: admissionregistration.k8s.io
+  version: v1
+  fieldSpecs:
+  - kind: MutatingAdmissionPolicyBinding
+    group: admissionregistration.k8s.io
+    path: spec/policyName
+- kind: MutatingAdmissionPolicy
+  group: admissionregistration.k8s.io
+  version: v1beta1
+  fieldSpecs:
+  - kind: MutatingAdmissionPolicyBinding
+    group: admissionregistration.k8s.io
+    path: spec/policyName
 
 namespace:
 - kind: MutatingWebhookConfiguration
