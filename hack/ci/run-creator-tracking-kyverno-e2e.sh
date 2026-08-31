@@ -22,8 +22,9 @@ case "$mode" in full|cleanup-only|debug) ;; *) echo "usage: $0 [full|cleanup-onl
   echo 'KYVERNO_E2E_CLUSTER, KYVERNO_E2E_LOCK, and KYVERNO_E2E_KUBECONFIG are not supported' >&2
   exit 2
 }
-command -v flock >/dev/null
-command -v timeout >/dev/null
+for command in flock readlink stat timeout; do
+  command -v "$command" >/dev/null || { echo "$command is required" >&2; exit 1; }
+done
 [[ ! -L "$lock" ]] || { echo "refusing symlink lock $lock" >&2; exit 1; }
 if [[ ! -e "$lock" ]]; then
   if ! (set -C; : >"$lock") 2>/dev/null; then
@@ -40,6 +41,11 @@ lock_mode=$(stat -c %a "$lock" 2>/dev/null || true)
   exit 1
 }
 exec 9<>"$lock"
+if [[ "$(readlink -f /proc/$$/fd/9 2>/dev/null || true)" != "$lock" ]]; then
+  exec 9>&-
+  echo "Kyverno E2E lock descriptor points to the wrong file" >&2
+  exit 1
+fi
 flock -n 9 || { echo "Kyverno E2E already running" >&2; exit 1; }
 
 die() { echo "creator-tracking Kyverno E2E: $*" >&2; exit 1; }
