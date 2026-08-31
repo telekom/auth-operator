@@ -49,6 +49,19 @@ func TestParseOptionsUsesPrivateFlagSet(t *testing.T) {
 	}
 }
 
+func TestQuickOptionsHonorRunnerOperationBudget(t *testing.T) {
+	o, err := parseOptions([]string{"-quick", "-kubeconfig", "quick-kubeconfig"})
+	if err != nil {
+		t.Fatalf("parseOptions() error = %v", err)
+	}
+	if o.ops != 500 {
+		t.Fatalf("quick operations = %d, want runner budget 500", o.ops)
+	}
+	if o.warmup != 10 || o.churn != 2 || o.sustained != 10*time.Second {
+		t.Fatalf("quick reductions = ops %d warmup %d churn %d sustained %s", o.ops, o.warmup, o.churn, o.sustained)
+	}
+}
+
 func TestCellsQuickShape(t *testing.T) {
 	if len(Cells(true)) != 8 {
 		t.Fatal(len(Cells(true)))
