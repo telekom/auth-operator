@@ -35,6 +35,16 @@ func TierResources(tier string) ([]string, error) {
 	return append([]string(nil), v...), nil
 }
 
+func tierScope(tier string) []string {
+	if scopes, ok := tierScopes[tier]; ok {
+		return scopes
+	}
+	if resource, err := IsolationResource(tier); err == nil {
+		return []string{resource}
+	}
+	return nil
+}
+
 func IsolationResource(tier string) (string, error) {
 	if len(tier) < 4 || tier[:4] != "iso-" {
 		return "", fmt.Errorf("not an isolation tier")

@@ -77,6 +77,15 @@ func TestReportFormatsPreserveProvenanceAndTelemetry(t *testing.T) {
 	}
 }
 
+func TestReportMetricStatePreservesParsedReset(t *testing.T) {
+	if got := reportMetricState(MetricAvailable, Counter{State: MetricReset}); got != MetricReset {
+		t.Fatalf("metric state = %q, want reset", got)
+	}
+	if got := reportMetricState(MetricUnavailable, Counter{State: MetricAvailable}); got != MetricUnavailable {
+		t.Fatalf("transport state = %q, want unavailable", got)
+	}
+}
+
 func TestAggregateReportSameCellBaselineAndEscaping(t *testing.T) {
 	rs := []Result{
 		{
