@@ -216,7 +216,7 @@ func TestResultValidationAllowsUnavailableSupportingTelemetry(t *testing.T) {
 	r := Result{
 		Cell: Cell{
 			Engine: engineBaseline, Tier: "t1", Mode: modeProtect, Phase: phaseCreate,
-			Verb: verbCreate, Concurrency: 8,
+			Verb: verbMixed, Concurrency: 8,
 		},
 		RunID: fallbackRunID, InputHash: "input", EnvironmentID: "env",
 		Status: statusComplete, Samples: 1,
