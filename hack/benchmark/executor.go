@@ -151,7 +151,7 @@ func comparisonConfigHash(o options) string {
 	}{o.tier, o.mode, o.kind, o.out, o.kubeconfig, o.runID, o.ops, o.churn, o.identities, o.warmup, o.concurrency, o.excluded, o.quick, o.resume, o.report, o.sustained}))
 }
 
-func resumeStartOffset(resume bool, phase, resumePhase string) int {
+func resumeStartOffset() int {
 	// A partial phase is never statistically complete. Replay it from zero
 	// instead of mixing a retained prefix with a fresh suffix.
 	return 0
@@ -309,7 +309,7 @@ func objectFor(cell Cell, name, namespace string, s resourceSpec) *unstructured.
 	annotations := map[string]interface{}{
 		"t-caas.telekom.com/benchmark-run":   runID,
 		"t-caas.telekom.com/benchmark-tier":  cell.Tier,
-		"t-caas.telekom.com/benchmark-scope": strings.Join(tierScopes[cell.Tier], ","),
+		"t-caas.telekom.com/benchmark-scope": strings.Join(tierScope(cell.Tier), ","),
 	}
 	u := &unstructured.Unstructured{Object: map[string]interface{}{
 		apiVersionField: s.apiVersion, kindField: resourceKind(cell.Kind),
@@ -497,7 +497,6 @@ func executeBenchmark(ctx context.Context, base *rest.Config, cell Cell, o optio
 		Excluded                       bool
 	}{mix, cell.Mode, o.ops, o.churn, 10, o.warmup, o.concurrency, o.sustained, o.excluded}))
 	journal := filepath.Join(out, "journals", cellFilename(o.runID, cell, "cell")+".journal.json")
-	resumePhase := ""
 	currentPhase := ""
 	currentProgress := 0
 	started := time.Now().UTC().Format(time.RFC3339Nano)
@@ -520,9 +519,6 @@ func executeBenchmark(ctx context.Context, base *rest.Config, cell Cell, o optio
 			if previous.State != statusRunning && previous.State != statusFailed {
 				return fmt.Errorf("resume journal has invalid state %q", previous.State)
 			}
-			// An interrupted phase is replayed from zero. Its journal offset is
-			// not a statistically complete sample and must not be appended to.
-			resumePhase = previous.Phase
 		}
 	}
 	if e = writeJournal(journal, CellJournal{
@@ -626,7 +622,7 @@ func executeBenchmark(ctx context.Context, base *rest.Config, cell Cell, o optio
 			if phase == phaseSustained {
 				duration = o.sustained
 			}
-			startOffset := resumeStartOffset(o.resume, phase, resumePhase)
+			startOffset := resumeStartOffset()
 			currentProgress = startOffset
 			run := runMixedPhaseWithOffset(ctx, clients, mix, pc, n, c, ids, ns, duration, startOffset, func(done int) error {
 				currentProgress = done
