@@ -88,6 +88,21 @@ done
 probe_dir=$(mktemp -d "$test_tmp_root/auth-operator-benchmark.test.XXXXXX")
 trap 'rm -rf -- "$probe_dir"' EXIT
 mkdir -p "$probe_dir/bin"
+
+# The repository Makefile exports its generic E2E cluster name. Benchmark
+# targets must scrub every caller-controlled cluster selector before invoking
+# the ownership-guarded runner. An invalid mode proves execution reached the
+# mode check after all four selector checks.
+for target in benchmark-creator-tracking benchmark-creator-tracking-quick; do
+  make_error="$probe_dir/$target.error"
+  if KUBECONFIG=foreign KIND_CLUSTER_NAME=foreign CLUSTER_NAME=foreign BENCHMARK_CLUSTER=foreign \
+    BENCHMARK_MODE=invalid make -s -C "$root" "$target" >/dev/null 2>"$make_error"; then
+    echo "$target unexpectedly accepted an invalid benchmark mode" >&2
+    exit 1
+  fi
+  grep -Fq 'BENCHMARK_MODE must be fresh or resume' "$make_error"
+done
+
 printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"$probe_dir/bin/flock"
 chmod 700 "$probe_dir/bin/flock"
 printf '%s\n' 'not-the-benchmark-owner' >"$probe_dir/owner"
