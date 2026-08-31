@@ -458,7 +458,7 @@ func parseOptions(args []string) (options, error) {
 	}
 	if o.quick {
 		o.concurrency = []int{8}
-		o.ops = min(o.ops, 100)
+		o.ops = min(o.ops, 500)
 		o.warmup = min(o.warmup, 10)
 		o.churn = min(o.churn, 2)
 		if o.sustained > 10*time.Second {
