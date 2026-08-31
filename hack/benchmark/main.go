@@ -468,6 +468,9 @@ func parseOptions(args []string) (options, error) {
 	return o, validateOptions(o)
 }
 func validateOptions(o options) error {
+	if o.resume && !o.report && o.runID == "" {
+		return fmt.Errorf("-resume requires -run-id")
+	}
 	if o.runID != "" {
 		if err := validateRunID(o.runID); err != nil {
 			return err
