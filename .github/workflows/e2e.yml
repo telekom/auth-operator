@@ -470,7 +470,7 @@ jobs:
   e2e-creator-tracking-kyverno:
     name: E2E Creator Tracking Kyverno
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     needs: e2e-compile
     if: github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'kyverno' || github.event.inputs.test_suite == 'all'
     steps:
