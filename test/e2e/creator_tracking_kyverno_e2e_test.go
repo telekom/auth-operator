@@ -176,6 +176,15 @@ var _ = Describe("Creator Tracking Kyverno", Label("creator-tracking-kyverno"), 
 				return fmt.Errorf("get MutatingPolicy %s: %w", name, err)
 			}
 			status, _ := object["status"].(map[string]interface{})
+			// Kyverno 1.19 reports the aggregate readiness under
+			// status.conditionStatus.ready instead of exposing a conventional
+			// Ready entry in status.conditions. Accept that authoritative
+			// representation while retaining the condition-based check for
+			// older releases.
+			conditionStatus, _ := status["conditionStatus"].(map[string]interface{})
+			if ready, ok := conditionStatus["ready"].(bool); ok && ready {
+				return nil
+			}
 			conditions, _ := status["conditions"].([]interface{})
 			for _, raw := range conditions {
 				condition, _ := raw.(map[string]interface{})
