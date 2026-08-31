@@ -34,6 +34,14 @@ if grep -Fq 'mutatingpolicybindings.policies.kyverno.io' "$installer"; then
   exit 1
 fi
 
+# Debug and chart artifacts must be created atomically below validated paths;
+# neither runner may follow a caller-controlled directory symlink.
+grep -Fq 'mkdir -- "$artifact_dir"' "$runner"
+! grep -Fq 'mkdir -p "$artifact_dir"' "$runner"
+grep -Fq '[[ -d "$archive_root" && ! -L "$archive_root" ]]' "$installer"
+grep -Fq 'mktemp -d -- "${archive_root%/}/auth-operator-kyverno.XXXXXX"' "$installer"
+! grep -Fq 'mkdir -p "$archive_dir"' "$installer"
+
 # An empty Kind inventory is a successful preflight state. Exercise the runner
 # with bounded fakes and prove that it reaches Docker readiness instead of
 # silently exiting on the expected failed cluster-name match under `set -e`.
