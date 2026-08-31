@@ -115,6 +115,20 @@ func enabledTrackingEngine(engine string) bool {
 	return engine != engineBaseline
 }
 
+// contributorClientIndex rotates the impersonated editor once per object
+// round. A churn round touches each object exactly once, so this exercises
+// both appends (new rounds) and deduplication (when an identity recurs) while
+// keeping the request identity aligned with the annotation we send.
+func contributorClientIndex(operationIndex, objects, clients int) int {
+	if clients < 1 {
+		return 0
+	}
+	if objects < 1 {
+		objects = 1
+	}
+	return (operationIndex / objects) % clients
+}
+
 //nolint:gocyclo // The benchmark operation loop keeps mode-specific mutation semantics together.
 func runPhaseWithClientsProgressOffset(
 	ctx context.Context, resources []dynamic.ResourceInterface, cell Cell,
@@ -188,7 +202,7 @@ func runPhaseWithClientsProgressOffset(
 					}
 					name = deterministicName(Cell{RunID: cell.RunID, Engine: cell.Engine, Tier: cell.Tier, Mode: cell.Mode, Phase: phaseCreate}, i%objects)
 					if mode == modeContributors {
-						clientIndex = (i / objects / 2) % len(resources)
+						clientIndex = contributorClientIndex(i, objects, len(resources))
 					}
 				}
 				if cell.Phase == phaseSustained {
@@ -204,7 +218,7 @@ func runPhaseWithClientsProgressOffset(
 						ordinal := i / 2
 						name = deterministicName(Cell{RunID: cell.RunID, Engine: cell.Engine, Tier: cell.Tier, Mode: cell.Mode, Phase: phaseCreate}, ordinal%objects)
 						if mode == modeContributors {
-							clientIndex = (ordinal / objects / 2) % len(resources)
+							clientIndex = contributorClientIndex(ordinal, objects, len(resources))
 						}
 					}
 				}
