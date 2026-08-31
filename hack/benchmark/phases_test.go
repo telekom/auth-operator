@@ -107,7 +107,16 @@ func TestCreateOnlyChurnRemainsAnUpdateWorkload(t *testing.T) {
 	}
 	r := client.Resource(s.gvr).Namespace("bench")
 	for i := range 4 {
-		if _, err := r.Create(context.Background(), objectFor(createCell, deterministicName(createCell, i), "bench", s), metav1.CreateOptions{}); err != nil {
+		seed := objectFor(createCell, deterministicName(createCell, i), "bench", s)
+		if i == 0 {
+			labels := seed.GetLabels()
+			labels["example.com/foreign-label"] = "keep"
+			seed.SetLabels(labels)
+			annotations := seed.GetAnnotations()
+			annotations["example.com/foreign-annotation"] = "keep"
+			seed.SetAnnotations(annotations)
+		}
+		if _, err := r.Create(context.Background(), seed, metav1.CreateOptions{}); err != nil {
 			t.Fatalf("seed object %d: %v", i, err)
 		}
 	}
@@ -131,6 +140,22 @@ func TestCreateOnlyChurnRemainsAnUpdateWorkload(t *testing.T) {
 		if action.GetVerb() != "update" && action.GetVerb() != "get" {
 			t.Fatalf("create-only churn issued %s instead of update/get", action.GetVerb())
 		}
+	}
+	var update *unstructured.Unstructured
+	for _, action := range client.Actions()[4:] {
+		if action.GetVerb() == "update" {
+			update = action.(testingclient.UpdateAction).GetObject().(*unstructured.Unstructured)
+			break
+		}
+	}
+	if update == nil {
+		t.Fatal("create-only churn did not issue an update")
+	}
+	if got := update.GetLabels()["example.com/foreign-label"]; got != "keep" {
+		t.Fatalf("foreign label after annotation update = %q, want keep", got)
+	}
+	if got := update.GetAnnotations()["example.com/foreign-annotation"]; got != "keep" {
+		t.Fatalf("foreign annotation after annotation update = %q, want keep", got)
 	}
 }
 
@@ -214,8 +239,33 @@ func TestContributorEditorsRotateByObjectRound(t *testing.T) {
 		t.Fatalf("contributors status = %q, error = %q", run.Status, run.Error)
 	}
 	identities := syntheticIdentities()
-	if seen[identities[0]] != 2 || seen[identities[1]] != 2 || len(seen) != 2 {
-		t.Fatalf("contributors editor rotation = %#v, want first two editors twice", seen)
+	for _, identity := range identities[:4] {
+		if seen[identity] != 1 {
+			t.Fatalf("contributors editor rotation = %#v, want one request for %q", seen, identity)
+		}
+	}
+	if len(seen) != 4 {
+		t.Fatalf("contributors editor rotation = %#v, want four identities", seen)
+	}
+}
+
+func TestContributorClientIndexRotatesOncePerObjectRound(t *testing.T) {
+	tests := []struct {
+		name    string
+		objects int
+		indices []int
+	}{
+		{name: "churn", objects: 3, indices: []int{0, 0, 0, 1, 1, 1, 2, 2, 2, 3}},
+		{name: "single object", objects: 1, indices: []int{0, 1, 2, 3}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			for i, want := range tc.indices {
+				if got := contributorClientIndex(i, tc.objects, 10); got != want {
+					t.Fatalf("contributorClientIndex(%d, %d, 10) = %d, want %d", i, tc.objects, got, want)
+				}
+			}
+		})
 	}
 }
 
