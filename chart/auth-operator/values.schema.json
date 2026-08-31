@@ -575,7 +575,7 @@
       }
     },
     "creatorTracking": {
-      "type": "object",
+      "type": ["object", "null"],
       "description": "Creator and contributor annotation tracking through MutatingAdmissionPolicy.",
       "additionalProperties": false,
       "properties": {
