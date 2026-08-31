@@ -30,8 +30,14 @@ type Counter struct {
 	State MetricState
 }
 
+const (
+	metricScannerInitialBuffer = 64 * 1024
+	metricScannerMaxTokenSize  = 1024 * 1024
+)
+
 func ParseMetric(text, name string) Counter {
 	s := bufio.NewScanner(strings.NewReader(text))
+	s.Buffer(make([]byte, metricScannerInitialBuffer), metricScannerMaxTokenSize)
 	for s.Scan() {
 		l := strings.TrimSpace(s.Text())
 		if strings.HasPrefix(l, "#") || l == "" {
@@ -46,6 +52,9 @@ func ParseMetric(text, name string) Counter {
 				return Counter{State: MetricUnavailable}
 			}
 		}
+	}
+	if err := s.Err(); err != nil {
+		return Counter{State: MetricUnavailable}
 	}
 	return Counter{State: MetricMissing}
 }
@@ -142,9 +151,10 @@ type MetricSample struct {
 	Value  float64
 }
 
-func metricSamples(text, name string) []MetricSample {
+func metricSamples(text, name string) ([]MetricSample, error) {
 	var out []MetricSample
 	s := bufio.NewScanner(strings.NewReader(text))
+	s.Buffer(make([]byte, metricScannerInitialBuffer), metricScannerMaxTokenSize)
 	for s.Scan() {
 		line := strings.TrimSpace(s.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -167,7 +177,10 @@ func metricSamples(text, name string) []MetricSample {
 			out = append(out, MetricSample{Labels: labels, Value: value})
 		}
 	}
-	return out
+	if err := s.Err(); err != nil {
+		return nil, fmt.Errorf("scan metrics: %w", err)
+	}
+	return out, nil
 }
 
 const (
@@ -185,8 +198,13 @@ func ParseAdmissionMetrics(before, after string, labels map[string]string) (Coun
 }
 
 func ParseHistogramSnapshot(text, sumName, countName string, labels map[string]string) HistogramDelta {
-	sum, sumOK := matchingSample(metricSamples(text, sumName), labels)
-	count, countOK := matchingSample(metricSamples(text, countName), labels)
+	sumSamples, sumErr := metricSamples(text, sumName)
+	countSamples, countErr := metricSamples(text, countName)
+	if sumErr != nil || countErr != nil {
+		return HistogramDelta{State: MetricUnavailable}
+	}
+	sum, sumOK := matchingSample(sumSamples, labels)
+	count, countOK := matchingSample(countSamples, labels)
 	if !sumOK || !countOK {
 		return HistogramDelta{State: MetricMissing}
 	}
@@ -315,10 +333,17 @@ type HistogramDelta struct {
 
 // ParseHistogramDelta selects matching sum/count series, preserving reset state.
 func ParseHistogramDelta(before, after, sumName, countName string, labels map[string]string) HistogramDelta {
-	bs, bok := matchingSample(metricSamples(before, sumName), labels)
-	as, aok := matchingSample(metricSamples(after, sumName), labels)
-	bc, bcok := matchingSample(metricSamples(before, countName), labels)
-	ac, acok := matchingSample(metricSamples(after, countName), labels)
+	beforeSum, beforeSumErr := metricSamples(before, sumName)
+	afterSum, afterSumErr := metricSamples(after, sumName)
+	beforeCount, beforeCountErr := metricSamples(before, countName)
+	afterCount, afterCountErr := metricSamples(after, countName)
+	if beforeSumErr != nil || afterSumErr != nil || beforeCountErr != nil || afterCountErr != nil {
+		return HistogramDelta{State: MetricUnavailable}
+	}
+	bs, bok := matchingSample(beforeSum, labels)
+	as, aok := matchingSample(afterSum, labels)
+	bc, bcok := matchingSample(beforeCount, labels)
+	ac, acok := matchingSample(afterCount, labels)
 	if !bok || !aok || !bcok || !acok {
 		return HistogramDelta{State: MetricMissing}
 	}
