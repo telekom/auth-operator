@@ -5,7 +5,7 @@
 # feature gate and beta runtime API are enabled.
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
-name: auth-operator-e2e-creator-tracking-beta
+name: auth-operator-e2e-creator-tracking
 nodes:
   - role: control-plane
     kubeadmConfigPatches:
