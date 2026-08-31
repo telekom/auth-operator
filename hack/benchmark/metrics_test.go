@@ -22,6 +22,15 @@ func TestParseMetricUsesValueBeforeOptionalTimestamp(t *testing.T) {
 		t.Fatalf("metric = %#v, want value 4", got)
 	}
 }
+
+func TestCounterDeltaPreservesUnavailableState(t *testing.T) {
+	if got := CounterDelta(Counter{State: MetricUnavailable}, Counter{State: MetricAvailable}); got.State != MetricUnavailable {
+		t.Fatalf("delta state = %q, want unavailable", got.State)
+	}
+	if got := CounterDelta(Counter{State: MetricUnauthorized}, Counter{State: MetricMissing}); got.State != MetricUnauthorized {
+		t.Fatalf("delta state = %q, want unauthorized", got.State)
+	}
+}
 func TestMetricReset(t *testing.T) {
 	if CounterDelta(Counter{10, MetricAvailable}, Counter{2, MetricAvailable}).State != MetricReset {
 		t.Fatal("reset")
