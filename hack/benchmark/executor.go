@@ -298,7 +298,7 @@ func clientFor(base *rest.Config, identity string) (dynamic.Interface, error) {
 	}
 	c := rest.CopyConfig(base)
 	c.Impersonate.UserName = identity
-	c.Impersonate.Groups = []string{"system:authenticated"}
+	c.Impersonate.Groups = []string{"system:authenticated", benchmarkImpersonationGroup}
 	return dynamic.NewForConfig(c)
 }
 func namespaceFor(runID string) string {
@@ -408,7 +408,17 @@ func objectFor(cell Cell, name, namespace string, s resourceSpec) *unstructured.
 		u.Object["type"] = "Opaque"
 		u.Object["stringData"] = map[string]interface{}{"benchmark": booleanTrue}
 	case resourceRole, resourceClusterRole:
-		u.Object["rules"] = []interface{}{map[string]interface{}{"apiGroups": []interface{}{""}, "resources": []interface{}{resourcePods}, "verbs": []interface{}{"get", "list"}}}
+		// Keep the generated role within the benchmark runner group's existing
+		// permissions. That lets identities create RoleBindings and
+		// ClusterRoleBindings without granting the ephemeral group bind or
+		// escalate privileges.
+		u.Object["rules"] = []interface{}{
+			map[string]interface{}{
+				"apiGroups": []interface{}{""},
+				"resources": []interface{}{resourceServiceAccounts},
+				"verbs":     []interface{}{"get"},
+			},
+		}
 	case resourceRoleBinding:
 		u.Object["roleRef"] = map[string]interface{}{apiGroupField: rbacv1.GroupName, kindField: kindRole, nameField: dependencyName(cell)}
 		u.Object["subjects"] = []interface{}{subjectFor(kindServiceAccount, dependencyName(cell), namespace)}
