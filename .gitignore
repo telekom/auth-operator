@@ -48,3 +48,6 @@ test/e2e/output/
 **/.DS_Store
 .DS_Store
 ci-log/**
+
+# Creator tracking benchmark runtime output (curated results live in docs/benchmarks/data/)
+benchmarks/data/

@@ -1,0 +1,145 @@
+// SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+// SPDX-License-Identifier: Apache-2.0
+package main
+
+import (
+	"bytes"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestCellsQuickShape(t *testing.T) {
+	if len(Cells(true)) != 8 {
+		t.Fatal(len(Cells(true)))
+	}
+}
+func TestPlannedCellsHasSharedBaselines(t *testing.T) {
+	planned := PlannedCells(false)
+	if len(planned) != 60 {
+		t.Fatalf("planned cells = %d", len(planned))
+	}
+	for i := range 12 {
+		if planned[i].Engine != engineBaseline || planned[i].Variant != engineBaseline {
+			t.Fatalf("not shared baseline: %#v", planned[i])
+		}
+	}
+}
+
+func TestPlannedExecutionCellsMatchesProductionContract(t *testing.T) {
+	got := PlannedExecutionCells(false, []int{8})
+	if len(got) != (12+48)*len(BenchmarkPhases()) {
+		t.Fatalf("planned execution cells = %d", len(got))
+	}
+	for _, c := range got {
+		if c.Phase == phaseCore || c.Concurrency != 8 || c.Verb != verbMixed {
+			t.Fatalf("invalid executable cell: %#v", c)
+		}
+	}
+}
+
+func TestQuickPlanMatchesRunnerContract(t *testing.T) {
+	logical := PlannedCells(true)
+	if len(logical) != 4 {
+		t.Fatalf("quick logical cells = %d", len(logical))
+	}
+	if len(PlannedExecutionCells(true, []int{8})) != 16 {
+		t.Fatalf("quick executable cells = %d", len(PlannedExecutionCells(true, []int{8})))
+	}
+	for _, c := range logical {
+		if c.Mode != modeProtect || (c.Engine != engineBaseline && c.Engine != engineMap) || (c.Tier != "t1" && c.Tier != "t2") {
+			t.Fatalf("unexpected quick cell %#v", c)
+		}
+	}
+}
+
+func TestContributorTraceContract(t *testing.T) {
+	r := Result{
+		Cell:  Cell{Engine: engineMap, Tier: "t1", Mode: modeContributors, Phase: phaseChurn, Verb: verbUpdate, Concurrency: 8},
+		RunID: "run", InputHash: "input", EnvironmentID: "env", Status: "complete", Samples: 1,
+		Trace: []MutationTrace{{Editor: "creator-bench-000", Object: "object", Repeated: true, Deduplicated: true, TamperTested: true, Restored: true}},
+	}
+	if err := r.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Trace) != 1 || !r.Trace[0].Repeated || !r.Trace[0].Deduplicated || !r.Trace[0].TamperTested || !r.Trace[0].Restored {
+		t.Fatalf("trace %#v", r.Trace)
+	}
+}
+
+func TestComparisonConfigHashExcludesEngineOnly(t *testing.T) {
+	a := options{engine: engineBaseline, tier: "t1", mode: modeProtect, ops: 10, churn: 2, identities: 10, warmup: 1, sustained: time.Second, concurrency: []int{8}}
+	b := a
+	b.engine = engineMap
+	if comparisonConfigHash(a) != comparisonConfigHash(b) {
+		t.Fatal("engine must not affect comparison hash")
+	}
+	b.ops++
+	if comparisonConfigHash(a) == comparisonConfigHash(b) {
+		t.Fatal("workload config must affect comparison hash")
+	}
+	b.ops = a.ops
+	b.inputHash = "engine-specific-input"
+	if comparisonConfigHash(a) != comparisonConfigHash(b) {
+		t.Fatal("engine-specific input hash must not affect comparison hash")
+	}
+}
+func TestInputHash(t *testing.T) {
+	a := Cell{Engine: engineMap}
+	b := a
+	b.Mode = "protect"
+	if InputHash(a, nil) == InputHash(b, nil) {
+		t.Fatal("hash unchanged")
+	}
+}
+
+func TestValidateRunID(t *testing.T) {
+	tests := []struct {
+		name  string
+		runID string
+		want  bool
+	}{
+		{name: "shell generated", runID: "20260831t120000z-0123456789abcdef", want: true},
+		{name: "single character", runID: "a", want: true},
+		{name: "maximum namespace-safe length", runID: strings.Repeat("a", 49), want: true},
+		{name: "empty", runID: "", want: false},
+		{name: "uppercase", runID: "Run-1", want: false},
+		{name: "leading hyphen", runID: "-run", want: false},
+		{name: "trailing hyphen", runID: "run-", want: false},
+		{name: "path separator", runID: "run/1", want: false},
+		{name: "namespace-overflow", runID: strings.Repeat("a", 50), want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateRunID(test.runID)
+			if (err == nil) != test.want {
+				t.Fatalf("validateRunID(%q) error = %v, want valid = %t", test.runID, err, test.want)
+			}
+		})
+	}
+}
+
+func TestDefaultRunIDIsDNSLabel(t *testing.T) {
+	runID := defaultRunID(time.Date(2026, time.August, 31, 12, 34, 56, 0, time.UTC))
+	if runID != "20260831t123456z" {
+		t.Fatalf("defaultRunID() = %q", runID)
+	}
+	if err := validateRunID(runID); err != nil {
+		t.Fatalf("defaultRunID() is invalid: %v", err)
+	}
+}
+
+func TestCounterDelta(t *testing.T) {
+	if CounterDelta(Counter{10, MetricAvailable}, Counter{2, MetricAvailable}).State != MetricReset {
+		t.Fatal("reset")
+	}
+}
+func TestReportDeterministic(t *testing.T) {
+	rs := []Result{{Cell: Cell{Engine: "z"}}, {Cell: Cell{Engine: "a"}}}
+	var a, b bytes.Buffer
+	WriteCSV(&a, rs)
+	WriteCSV(&b, rs)
+	if a.String() != b.String() {
+		t.Fatal("nondeterministic")
+	}
+}
