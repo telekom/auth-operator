@@ -40,6 +40,12 @@ grep -Fq "[[ \"\$engine\" != map ]] && isolation_ops=1000" "$runner"
 grep -Fq 'input-material-${active_scope}-${engine}-${active_mode}-${active_variant}.yaml' "$runner"
 grep -Fq 'material_tmp=$(mktemp "${material}.tmp.XXXXXX")' "$runner"
 grep -Fq 'mv -- "$material_tmp" "$material"' "$runner"
+grep -Fq 'archive_tmp=$(mktemp "${archive}.tmp.XXXXXX")' "$runner"
+grep -Fq 'mv -- "$archive_tmp" "$archive"' "$runner"
+grep -Fq 'trap '\''if [[ -n "${run_dir:-}" ]]; then rm -rf -- "$run_dir"; fi'\'' EXIT' "$runner"
+trap_line=$(grep -nF 'trap '\''if [[ -n "${run_dir:-}" ]]; then rm -rf -- "$run_dir"; fi'\'' EXIT' "$runner" | cut -d: -f1)
+mktemp_line=$(grep -nF 'run_dir="$(mktemp -d "$private_tmp_root/auth-operator-benchmark.${run_id}.XXXXXX")"' "$runner" | cut -d: -f1)
+[[ -n "$trap_line" && -n "$mktemp_line" && "$trap_line" -eq $((mktemp_line + 1)) ]]
 for scope in core isolation component exclusion; do
   grep -Fq "active_scope=$scope" "$runner"
 done
