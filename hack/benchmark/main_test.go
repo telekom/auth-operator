@@ -212,6 +212,23 @@ func TestContributorTraceContract(t *testing.T) {
 	}
 }
 
+func TestResultValidationAllowsUnavailableSupportingTelemetry(t *testing.T) {
+	r := Result{
+		Cell: Cell{
+			Engine: engineBaseline, Tier: "t1", Mode: modeProtect, Phase: phaseCreate,
+			Verb: verbCreate, Concurrency: 8,
+		},
+		RunID: fallbackRunID, InputHash: "input", EnvironmentID: "env",
+		Status: statusComplete, Samples: 1,
+		MetricBeforeState: MetricUnavailable, MetricAfterState: MetricUnauthorized,
+		MetricDeltaState: MetricUnavailable, MetricDelta: Counter{State: MetricUnavailable},
+		WebhookDelta: HistogramDelta{State: MetricMissing},
+	}
+	if err := r.Validate(); err != nil {
+		t.Fatalf("supporting telemetry state must not invalidate latency result: %v", err)
+	}
+}
+
 func TestComparisonConfigHashExcludesEngineOnly(t *testing.T) {
 	a := options{engine: engineBaseline, tier: "t1", mode: modeProtect, ops: 10, churn: 2, identities: 10, warmup: 1, sustained: time.Second, concurrency: []int{8}}
 	b := a
