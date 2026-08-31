@@ -186,6 +186,8 @@ PrintSuiteConfig(config)
 
 ## 📁 Test Files
 - `helm_e2e_test.go` - Helm chart tests
+- `creator_tracking_e2e_test.go` - Dedicated identity tracking on stable and beta Kubernetes APIs
+- `creator_tracking_kyverno_e2e_test.go` - Kyverno policy parity and interoperability
 - `dev_e2e_test.go` - Dev/kustomize deployment
 - `complex_e2e_test.go` - Complex scenarios
 - `integration_e2e_test.go` - Integration tests
