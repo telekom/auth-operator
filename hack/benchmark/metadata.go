@@ -397,47 +397,6 @@ func readBenchmarkFile(path string) ([]byte, error) {
 	}
 	return readBenchmarkArtifact(absolute)
 }
-func commandVersion(ctx context.Context, runner CommandRunner, name string, args ...string) string {
-	b, err := runner.Run(ctx, name, args...)
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(b))
-}
-func kubernetesVersion(ctx context.Context, runner CommandRunner) string {
-	b, err := runner.Run(ctx, "kubectl", "version", "-o", "json")
-	if err != nil {
-		return ""
-	}
-	var v struct {
-		ServerVersion struct {
-			GitVersion string `json:"gitVersion"`
-		} `json:"serverVersion"`
-	}
-	if json.Unmarshal(b, &v) != nil {
-		return ""
-	}
-	return v.ServerVersion.GitVersion
-}
-func nodeVersion(ctx context.Context, runner CommandRunner) string {
-	b, err := runner.Run(ctx, "kubectl", "get", "nodes", "-o", "json")
-	if err != nil {
-		return ""
-	}
-	var n struct {
-		Items []struct {
-			Status struct {
-				NodeInfo struct {
-					KubeletVersion string `json:"kubeletVersion"`
-				} `json:"nodeInfo"`
-			} `json:"status"`
-		} `json:"items"`
-	}
-	if json.Unmarshal(b, &n) != nil || len(n.Items) == 0 {
-		return ""
-	}
-	return n.Items[0].Status.NodeInfo.KubeletVersion
-}
 func (e Environment) ValidateEvidence() error {
 	if e.Architecture == "" {
 		return fmt.Errorf("architecture evidence missing")

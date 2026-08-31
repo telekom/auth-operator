@@ -373,8 +373,8 @@ func executeBenchmark(ctx context.Context, base *rest.Config, cell Cell, o optio
 			resourceNamespaces:      resourceNamespace,
 			resourceServiceAccounts: resourceServiceAccount,
 			resourceSecrets:         resourceSecret,
-			"rbac-group":            resourceRole,
-			"crd-group":             resourceRoleDefinition,
+			isolationRBACGroup:      resourceRole,
+			isolationCRDGroup:       resourceRoleDefinition,
 		}
 		var ok bool
 		cell.Kind, ok = mapped[resource]

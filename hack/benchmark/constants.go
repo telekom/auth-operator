@@ -55,6 +55,8 @@ const (
 	resourceServiceAccount     = "serviceaccount"
 	resourceServiceAccounts    = "serviceaccounts"
 	resourceRoles              = "roles"
+	isolationRBACGroup         = "rbac-group"
+	isolationCRDGroup          = "crd-group"
 
 	kindServiceAccount    = "ServiceAccount"
 	defaultEditorIdentity = "creator-bench-000"
