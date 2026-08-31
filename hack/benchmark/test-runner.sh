@@ -72,6 +72,8 @@ grep -Fq '"$original" == 130 || "$original" == 143' "$runner"
 grep -Fq -- '--ignore-not-found --wait=true' "$runner"
 grep -Fq 'policy teardown was not confirmed' "$runner"
 grep -Fq 'Helm release teardown was not confirmed' "$runner"
+grep -Fq "helm list -A --filter '^(auth-operator|kyverno)$' --short" "$runner"
+! grep -Fq -- '--output name' "$runner"
 if grep -Fq 'helm uninstall kyverno --namespace "$kyverno_namespace" --ignore-not-found || true' "$runner"; then
   echo 'Kyverno teardown must not ignore failures' >&2
   exit 1
