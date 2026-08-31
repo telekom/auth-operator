@@ -220,11 +220,18 @@ func metricDiagnostics(before, after, delta Counter, webhookBefore, webhookAfter
 	)
 }
 func splitMetricLine(line string) (metric, value string, ok bool) {
-	pos := strings.LastIndexAny(line, " \t")
+	pos := strings.IndexAny(line, " \t")
 	if pos <= 0 || pos == len(line)-1 {
 		return "", "", false
 	}
-	return line[:pos], strings.TrimSpace(line[pos:]), true
+	rest := strings.TrimSpace(line[pos:])
+	if rest == "" {
+		return "", "", false
+	}
+	if end := strings.IndexAny(rest, " \t"); end >= 0 {
+		rest = rest[:end]
+	}
+	return line[:pos], rest, true
 }
 func parseMetricName(metric string) (metricName string, labels map[string]string) {
 	start := strings.IndexByte(metric, '{')
