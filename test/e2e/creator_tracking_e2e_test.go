@@ -1502,7 +1502,7 @@ spec:
 	})
 })
 
-var _ = Describe("Creator Tracking Cleanup", Label("creator-tracking-cleanup"), func() {
+var _ = Describe("Creator Tracking Cleanup", Label("creator-tracking", "creator-tracking-cleanup"), func() {
 	It("removes only the exact creator-tracking resources", func(ctx SpecContext) {
 		Expect(creatorValidateIsolation(ctx)).To(Succeed())
 		cleanupErrors := creatorCleanup(true)

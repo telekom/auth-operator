@@ -5,6 +5,10 @@
 
 set -euo pipefail
 
+repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck disable=SC1091 # Repository-owned version pins.
+source "$repo_root/versions.env"
+
 mode=${1:-}
 case "$mode" in
 full) ;;
@@ -192,10 +196,10 @@ if [[ $mode == full ]]; then
 	kind_config=${E2E_CREATOR_TRACKING_KIND_CONFIG:?E2E_CREATOR_TRACKING_KIND_CONFIG is required for a full run}
 	case "$api_version" in
 	admissionregistration.k8s.io/v1)
-		expected_node_image=kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5
+		expected_node_image=$E2E_CREATOR_TRACKING_STABLE_NODE_IMAGE
 		expected_kind_config=test/e2e/kind-config-creator-tracking-stable.yaml ;;
 	admissionregistration.k8s.io/v1beta1)
-		expected_node_image=kindest/node:v1.34.3@sha256:08497ee19eace7b4b5348db5c6a1591d7752b164530a36f855cb0f2bdcbadd48
+		expected_node_image=$E2E_CREATOR_TRACKING_BETA_NODE_IMAGE
 		expected_kind_config=test/e2e/kind-config-creator-tracking-beta.yaml ;;
 	*) echo "unsupported creator tracking API version: $api_version" >&2; exit 1 ;;
 	esac

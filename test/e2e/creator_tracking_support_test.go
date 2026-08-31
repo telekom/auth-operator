@@ -752,7 +752,7 @@ func creatorManagedFieldKey(key string) string {
 }
 
 func creatorValidateManagedFields(object creatorObject, expected []creatorExpectedManagedField) error {
-	entries := make(map[string]creatorManagedField, len(object.Metadata.ManagedFields))
+	entries := make(map[string][]creatorManagedField, len(object.Metadata.ManagedFields))
 	for _, entry := range object.Metadata.ManagedFields {
 		fields, err := creatorManagedFieldMap(entry)
 		if err != nil {
@@ -763,24 +763,36 @@ func creatorValidateManagedFields(object creatorObject, expected []creatorExpect
 				return fmt.Errorf("manager %s owns tracking annotation %s", entry.Manager, key)
 			}
 		}
-		entries[entry.Manager] = entry
+		entries[entry.Manager] = append(entries[entry.Manager], entry)
 	}
 	for _, want := range expected {
-		entry, ok := entries[want.Manager]
-		if !ok {
+		candidates := entries[want.Manager]
+		if len(candidates) == 0 {
 			return fmt.Errorf("managedFields does not contain manager %s", want.Manager)
 		}
-		if entry.Operation != want.Operation {
-			return fmt.Errorf("manager %s operation = %s, want %s", want.Manager, entry.Operation, want.Operation)
-		}
-		fields, err := creatorManagedFieldMap(entry)
-		if err != nil {
-			return err
-		}
-		for _, path := range want.Paths {
-			if !creatorFieldPathExists(fields, path...) {
-				return fmt.Errorf("manager %s does not own path %s", want.Manager, strings.Join(path, "/"))
+		matched := false
+		for _, entry := range candidates {
+			if entry.Operation != want.Operation {
+				continue
 			}
+			fields, err := creatorManagedFieldMap(entry)
+			if err != nil {
+				return err
+			}
+			ownsAll := true
+			for _, path := range want.Paths {
+				if !creatorFieldPathExists(fields, path...) {
+					ownsAll = false
+					break
+				}
+			}
+			if ownsAll {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return fmt.Errorf("manager %s has no %s entry owning every expected path", want.Manager, want.Operation)
 		}
 	}
 	return nil

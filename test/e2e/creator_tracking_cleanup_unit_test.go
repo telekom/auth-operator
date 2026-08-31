@@ -115,6 +115,59 @@ func TestCreatorManagedFieldAnnotationOwnership(t *testing.T) {
 	}
 }
 
+func TestCreatorManagedFieldsDuplicateManagerEntries(t *testing.T) {
+	unrelated, err := json.Marshal(map[string]any{"f:metadata": map[string]any{"f:labels": map[string]any{}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wanted, err := json.Marshal(map[string]any{"f:spec": map[string]any{"f:subjects": map[string]any{}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	object := creatorObject{}
+	object.Metadata.ManagedFields = []creatorManagedField{
+		{Manager: "repeated-manager", Operation: "Update", FieldsV1: unrelated},
+		{Manager: "repeated-manager", Operation: "Apply", FieldsV1: unrelated},
+		{Manager: "repeated-manager", Operation: "Apply", FieldsV1: wanted},
+	}
+	expected := []creatorExpectedManagedField{{
+		Manager:   "repeated-manager",
+		Operation: "Apply",
+		Paths:     [][]string{{"f:spec", "f:subjects"}},
+	}}
+	if err := creatorValidateManagedFields(object, expected); err != nil {
+		t.Fatalf("duplicate manager entries: %v", err)
+	}
+}
+
+func TestCreatorManagedFieldsDuplicateManagerAnnotationOwnership(t *testing.T) {
+	wanted, err := json.Marshal(map[string]any{"f:spec": map[string]any{"f:subjects": map[string]any{}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	forbidden, err := json.Marshal(map[string]any{"f:metadata": map[string]any{"f:annotations": map[string]any{
+		creatorManagedFieldKey(updatedByAnnotation): map[string]any{},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	object := creatorObject{}
+	object.Metadata.ManagedFields = []creatorManagedField{
+		{Manager: "repeated-manager", Operation: "Apply", FieldsV1: wanted},
+		{Manager: "repeated-manager", Operation: "Update", FieldsV1: forbidden},
+	}
+	expected := []creatorExpectedManagedField{{
+		Manager:   "repeated-manager",
+		Operation: "Apply",
+		Paths:     [][]string{{"f:spec", "f:subjects"}},
+	}}
+	if err := creatorValidateManagedFields(object, expected); err == nil {
+		t.Fatal("expected creator annotation ownership in a duplicate entry to be rejected")
+	} else if !strings.Contains(err.Error(), updatedByAnnotation) {
+		t.Fatalf("error = %v, want updated-by annotation path", err)
+	}
+}
+
 func TestCreatorCleanupUnrelatedFinalizerPreserved(t *testing.T) {
 	got := creatorRemoveExactFinalizer([]string{authorizationv1alpha1.BindDefinitionFinalizer, "example.com/keep"}, authorizationv1alpha1.BindDefinitionFinalizer)
 	want := []string{"example.com/keep"}
