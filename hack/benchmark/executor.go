@@ -393,6 +393,9 @@ func executeBenchmark(ctx context.Context, base *rest.Config, cell Cell, o optio
 	}
 	ns := namespaceFor(o.runID)
 	mix, _ := TierResources(o.tier)
+	if len(mix) == 0 {
+		mix = []string{cell.Kind}
+	}
 	cleanupKinds := cleanupResourceKinds(mix, cell.Kind)
 	if s.namespaced {
 		if e := ensureNamespace(ctx, base, ns, o.runID); e != nil {
