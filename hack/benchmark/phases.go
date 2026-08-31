@@ -137,13 +137,13 @@ func runPhaseWithClientsProgressOffset(
 				default:
 				}
 				verb := cell.Phase
+				objects := cell.Objects
+				if objects < 1 {
+					objects = 1
+				}
 				name := deterministicName(cell, i)
 				if cell.Phase == phaseChurn {
 					verb = verbUpdate
-					objects := cell.Objects
-					if objects < 1 {
-						objects = 1
-					}
 					if cell.Mode == modeCreateOnly {
 						verb = phaseCreate
 						name = deterministicName(cell, i)
@@ -157,7 +157,7 @@ func runPhaseWithClientsProgressOffset(
 						name = deterministicName(cell, i)
 					} else {
 						verb = verbUpdate
-						name = deterministicName(Cell{RunID: cell.RunID, Engine: cell.Engine, Tier: cell.Tier, Mode: cell.Mode, Phase: phaseCreate}, i/2)
+						name = deterministicName(Cell{RunID: cell.RunID, Engine: cell.Engine, Tier: cell.Tier, Mode: cell.Mode, Phase: phaseCreate}, (i/2)%objects)
 					}
 				}
 				s, e := specFor(cell.Kind)
