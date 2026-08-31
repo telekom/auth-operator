@@ -60,14 +60,14 @@ if [[ -L "$lock_file" ]]; then
 	echo "refusing symbolic-link lock file: $lock_file" >&2
 	exit 1
 fi
-lock_type=$(stat -c %F "$lock_file" 2>/dev/null || true)
-lock_owner=$(stat -c %u "$lock_file" 2>/dev/null || true)
-lock_mode=$(stat -c %a "$lock_file" 2>/dev/null || true)
-if [[ $lock_type == "regular file" && $lock_owner == "$lock_uid" && $lock_mode != 600 && ! -s "$lock_file" ]]; then
+lock_type=$(stat -c %F "$lock_file" 2>/dev/null || stat -f %HT "$lock_file" 2>/dev/null || true)
+lock_owner=$(stat -c %u "$lock_file" 2>/dev/null || stat -f %u "$lock_file" 2>/dev/null || true)
+lock_mode=$(stat -c %a "$lock_file" 2>/dev/null || stat -f %Lp "$lock_file" 2>/dev/null || true)
+if [[ ($lock_type == "regular file" || $lock_type == "regular empty file" || $lock_type == "Regular File") && $lock_owner == "$lock_uid" && $lock_mode != 600 && ! -s "$lock_file" ]]; then
 	chmod 600 "$lock_file"
-	lock_mode=$(stat -c %a "$lock_file" 2>/dev/null || true)
+	lock_mode=$(stat -c %a "$lock_file" 2>/dev/null || stat -f %Lp "$lock_file" 2>/dev/null || true)
 fi
-if [[ $lock_type != "regular file" || $lock_owner != "$lock_uid" || $lock_mode != 600 ]]; then
+if [[ ($lock_type != "regular file" && $lock_type != "regular empty file" && $lock_type != "Regular File") || $lock_owner != "$lock_uid" || $lock_mode != 600 ]]; then
 	echo "creator tracking lock must be an owned regular file with mode 600: $lock_file" >&2
 	exit 1
 fi
