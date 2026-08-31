@@ -42,6 +42,19 @@ func TestCollectEnvironmentProbesLiveTools(t *testing.T) {
 	}
 }
 
+func TestCollectEnvironmentUsesLinuxCPUInfoFallback(t *testing.T) {
+	key := "awk -F:[[:space:]]* " + linuxCPUInfoProbe + " /proc/cpuinfo"
+	e := CollectEnvironment(context.Background(), fakeCommandRunner{
+		key: []byte("Ampere Altra\n"),
+	}, map[string]string{"BENCH_ARCH": "arm64"})
+	if e.HostCPUModel != "Ampere Altra" {
+		t.Fatalf("host CPU model = %q, want live Linux model", e.HostCPUModel)
+	}
+	if e.Evidence[fieldHostCPUModel] != "live /proc/cpuinfo" {
+		t.Fatalf("host CPU evidence = %q, want live /proc/cpuinfo", e.Evidence[fieldHostCPUModel])
+	}
+}
+
 func TestCollectEnvironmentUsesCapturedPolicyMaterial(t *testing.T) {
 	d := t.TempDir()
 	if err := os.Chmod(d, 0o700); err != nil {

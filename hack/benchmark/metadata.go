@@ -86,6 +86,8 @@ type CommandRunner interface {
 }
 type OSCommandRunner struct{}
 
+const linuxCPUInfoProbe = `/^[Mm]odel([[:space:]]+name)?[[:space:]]*:/ {print $2; found=1; exit} /^((Hardware)|(Processor))[[:space:]]*:/ {if (!found) hardware=$2} /^CPU implementer[[:space:]]*:/ {implementer=$2} /^CPU part[[:space:]]*:/ {part=$2} END {if (!found) {if (hardware != "") print hardware; else if (implementer != "") {printf "ARM implementer %s", implementer; if (part != "") printf ", part %s", part; print ""}}}`
+
 func (OSCommandRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
 	if filepath.Base(name) != name {
 		return nil, fmt.Errorf("command path is not allowed: %q", name)
@@ -215,6 +217,12 @@ func CollectEnvironment(parent context.Context, runner CommandRunner, values map
 	}
 	if e.HostCPUModel == "" {
 		e.HostCPUModel = probeVersion("awk", `/^model name[[:space:]]*:/ {sub(/^[^:]*:[[:space:]]*/, ""); print; exit}`, "/proc/cpuinfo")
+		if e.HostCPUModel == "" {
+			// Linux arm64 exposes implementation and part identifiers instead of
+			// the x86-style model name. Keep this as live /proc/cpuinfo evidence
+			// rather than substituting a caller-provided description.
+			e.HostCPUModel = probeVersion("awk", "-F:[[:space:]]*", linuxCPUInfoProbe, "/proc/cpuinfo")
+		}
 		if e.HostCPUModel != "" {
 			e.Evidence["host_cpu_model"] = "live /proc/cpuinfo"
 		}
