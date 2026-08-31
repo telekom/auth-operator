@@ -56,7 +56,7 @@ func TestQuickPlanMatchesRunnerContract(t *testing.T) {
 func TestContributorTraceContract(t *testing.T) {
 	r := Result{
 		Cell:  Cell{Engine: engineMap, Tier: "t1", Mode: modeContributors, Phase: phaseChurn, Verb: verbUpdate, Concurrency: 8},
-		RunID: "run", InputHash: "input", EnvironmentID: "env", Status: "complete", Samples: 1,
+		RunID: fallbackRunID, InputHash: "input", EnvironmentID: "env", Status: "complete", Samples: 1,
 		Trace: []MutationTrace{{Editor: "creator-bench-000", Object: "object", Repeated: true, Deduplicated: true, TamperTested: true, Restored: true}},
 	}
 	if err := r.Validate(); err != nil {
