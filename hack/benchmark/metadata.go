@@ -119,70 +119,102 @@ func CollectEnvironment(parent context.Context, runner CommandRunner, values map
 			e.Evidence[field] = "environment override"
 		}
 	}
-	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
-	defer cancel()
+	probe := func(name string, args ...string) ([]byte, error) {
+		ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+		defer cancel()
+		return runner.Run(ctx, name, args...)
+	}
+	probeVersion := func(name string, args ...string) string {
+		b, err := probe(name, args...)
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(b))
+	}
 	if e.KindVersion == "" {
-		e.KindVersion = commandVersion(ctx, runner, "kind", "version")
+		e.KindVersion = probeVersion("kind", "version")
 	}
 	if e.GoVersion == "" {
-		e.GoVersion = commandVersion(ctx, runner, "go", "version")
+		e.GoVersion = probeVersion("go", "version")
 		if e.GoVersion != "" {
 			e.Evidence["go_version"] = "live go version"
 		}
 	}
 	if e.HelmVersion == "" {
-		e.HelmVersion = commandVersion(ctx, runner, "helm", "version", "--short")
+		e.HelmVersion = probeVersion("helm", "version", "--short")
 	}
 	if e.KyvernoVersion == "" {
-		e.KyvernoVersion = commandVersion(ctx, runner, kyvernoCommand, "version")
+		e.KyvernoVersion = probeVersion(kyvernoCommand, "version")
 	}
 	if e.KubernetesVersion == "" {
-		e.KubernetesVersion = kubernetesVersion(ctx, runner)
+		if b, err := probe("kubectl", "version", "-o", "json"); err == nil {
+			var v struct {
+				ServerVersion struct {
+					GitVersion string `json:"gitVersion"`
+				} `json:"serverVersion"`
+			}
+			if json.Unmarshal(b, &v) == nil {
+				e.KubernetesVersion = v.ServerVersion.GitVersion
+			}
+		}
 		if e.KubernetesVersion != "" {
 			e.Evidence["kubernetes_version"] = "kubectl serverVersion"
 		}
 	}
 	if e.NodeVersion == "" {
-		e.NodeVersion = nodeVersion(ctx, runner)
+		if b, err := probe("kubectl", "get", "nodes", "-o", "json"); err == nil {
+			var nodes struct {
+				Items []struct {
+					Status struct {
+						NodeInfo struct {
+							KubeletVersion string `json:"kubeletVersion"`
+						} `json:"nodeInfo"`
+					} `json:"status"`
+				} `json:"items"`
+			}
+			if json.Unmarshal(b, &nodes) == nil && len(nodes.Items) > 0 {
+				e.NodeVersion = nodes.Items[0].Status.NodeInfo.KubeletVersion
+			}
+		}
 		if e.NodeVersion != "" {
 			e.Evidence["node_version"] = "kubectl node status.nodeInfo.kubeletVersion"
 		}
 	}
 	if e.ContainerRuntime == "" {
-		e.ContainerRuntime = commandVersion(ctx, runner, "docker", "version", "--format", "{{.Server.Version}}")
+		e.ContainerRuntime = probeVersion("docker", "version", "--format", "{{.Server.Version}}")
 	}
 	if e.HostCPUModel == "" {
-		e.HostCPUModel = commandVersion(ctx, runner, "sysctl", "-n", "machdep.cpu.brand_string")
+		e.HostCPUModel = probeVersion("sysctl", "-n", "machdep.cpu.brand_string")
 		if e.HostCPUModel == "" {
-			e.HostCPUModel = commandVersion(ctx, runner, "sysctl", "-n", "hw.model")
+			e.HostCPUModel = probeVersion("sysctl", "-n", "hw.model")
 		}
 		if e.HostCPUModel != "" {
 			e.Evidence[fieldHostCPUModel] = "live sysctl"
 		}
 	}
 	if e.HostMemory == "" {
-		e.HostMemory = commandVersion(ctx, runner, "sysctl", "-n", "hw.memsize")
+		e.HostMemory = probeVersion("sysctl", "-n", "hw.memsize")
 		if e.HostMemory == "" {
-			e.HostMemory = commandVersion(ctx, runner, "sysctl", "-n", "hw.physmem")
+			e.HostMemory = probeVersion("sysctl", "-n", "hw.physmem")
 		}
 		if e.HostMemory != "" {
 			e.Evidence[fieldHostMemory] = "live sysctl"
 		}
 	}
 	if e.CPUs == "" {
-		e.CPUs = commandVersion(ctx, runner, "getconf", "_NPROCESSORS_ONLN")
+		e.CPUs = probeVersion("getconf", "_NPROCESSORS_ONLN")
 		if e.CPUs != "" {
 			e.Evidence[fieldCPUs] = "live getconf"
 		}
 	}
 	if e.Memory == "" {
-		e.Memory = commandVersion(ctx, runner, "awk", `/MemTotal:/ {print $2 " kB"; exit}`, "/proc/meminfo")
+		e.Memory = probeVersion("awk", `/MemTotal:/ {print $2 " kB"; exit}`, "/proc/meminfo")
 		if e.Memory != "" {
 			e.Evidence[fieldMemory] = evidenceLiveMeminfo
 		}
 	}
 	if e.HostCPUModel == "" {
-		e.HostCPUModel = commandVersion(ctx, runner, "awk", `/^model name[[:space:]]*:/ {sub(/^[^:]*:[[:space:]]*/, ""); print; exit}`, "/proc/cpuinfo")
+		e.HostCPUModel = probeVersion("awk", `/^model name[[:space:]]*:/ {sub(/^[^:]*:[[:space:]]*/, ""); print; exit}`, "/proc/cpuinfo")
 		if e.HostCPUModel != "" {
 			e.Evidence["host_cpu_model"] = "live /proc/cpuinfo"
 		}
@@ -194,7 +226,7 @@ func CollectEnvironment(parent context.Context, runner CommandRunner, values map
 		}
 	}
 	if e.OperatorVersion == "" || e.ChartVersion == "" {
-		if b, err := runner.Run(ctx, "kubectl", "get", "deployments", "-A", "-l", "app.kubernetes.io/name=auth-operator", "-o", "json"); err == nil {
+		if b, err := probe("kubectl", "get", "deployments", "-A", "-l", "app.kubernetes.io/name=auth-operator", "-o", "json"); err == nil {
 			var d struct {
 				Items []struct {
 					Metadata struct {
@@ -235,7 +267,7 @@ func CollectEnvironment(parent context.Context, runner CommandRunner, values map
 		}
 	}
 	if e.PolicyHash == "" && values["BENCH_POLICY_PATH"] == "" {
-		if b, err := runner.Run(ctx, "kubectl", "get", "mutatingwebhookconfigurations", "-o", "json"); err == nil {
+		if b, err := probe("kubectl", "get", "mutatingwebhookconfigurations", "-o", "json"); err == nil {
 			e.PolicyHash = hashBytes(b)
 			e.Evidence[fieldPolicyHash] = "kubectl mutatingwebhookconfigurations"
 		}
