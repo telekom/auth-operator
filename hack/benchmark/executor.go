@@ -302,23 +302,23 @@ func canonicalKind(resource string) string {
 	case resourceNamespace:
 		return kindNamespace
 	case resourceServiceAccount:
-		return "ServiceAccount"
+		return kindServiceAccount
 	case resourceSecret:
-		return "Secret"
+		return kindSecret
 	case resourceRole:
 		return kindRole
 	case resourceRoleBinding:
-		return "RoleBinding"
+		return kindRoleBinding
 	case resourceClusterRole:
 		return kindClusterRole
 	case resourceClusterRoleBinding:
-		return "ClusterRoleBinding"
+		return kindClusterRoleBinding
 	case resourceRoleDefinition:
-		return "RoleDefinition"
+		return kindRoleDefinition
 	case resourceBindDefinition:
-		return "BindDefinition"
+		return kindBindDefinition
 	case resourceRBACPolicy:
-		return "RBACPolicy"
+		return kindRBACPolicy
 	default:
 		return resource
 	}
