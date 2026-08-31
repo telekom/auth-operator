@@ -206,6 +206,21 @@ type resourceSpec struct {
 	apiVersion string
 }
 
+func resourceKind(resource string) string {
+	return map[string]string{
+		resourceNamespace:          "Namespace",
+		resourceServiceAccount:     "ServiceAccount",
+		resourceSecret:             "Secret",
+		resourceRole:               "Role",
+		resourceRoleBinding:        "RoleBinding",
+		resourceClusterRole:        "ClusterRole",
+		resourceClusterRoleBinding: "ClusterRoleBinding",
+		resourceRoleDefinition:     "RoleDefinition",
+		resourceBindDefinition:     "BindDefinition",
+		resourceRBACPolicy:         "RBACPolicy",
+	}[resource]
+}
+
 var resourceSpecs = map[string]resourceSpec{
 	resourceNamespace: {
 		gvr:        schema.GroupVersionResource{Version: "v1", Resource: resourceNamespaces},
@@ -297,7 +312,7 @@ func objectFor(cell Cell, name, namespace string, s resourceSpec) *unstructured.
 		"t-caas.telekom.com/benchmark-scope": strings.Join(tierScopes[cell.Tier], ","),
 	}
 	u := &unstructured.Unstructured{Object: map[string]interface{}{
-		apiVersionField: s.apiVersion, kindField: cell.Kind,
+		apiVersionField: s.apiVersion, kindField: resourceKind(cell.Kind),
 		metadataField: map[string]interface{}{
 			nameField: name, labelsField: labels, annotationsField: annotations,
 		},
@@ -314,7 +329,6 @@ func objectFor(cell Cell, name, namespace string, s resourceSpec) *unstructured.
 	case resourceRoleBinding:
 		u.Object["roleRef"] = map[string]interface{}{apiGroupField: rbacv1.GroupName, kindField: "Role", nameField: dependencyName(cell)}
 		u.Object["subjects"] = []interface{}{map[string]interface{}{
-			apiGroupField:     rbacv1.GroupName,
 			kindField:         kindServiceAccount,
 			nameField:         dependencyName(cell),
 			resourceNamespace: namespace,
@@ -322,7 +336,6 @@ func objectFor(cell Cell, name, namespace string, s resourceSpec) *unstructured.
 	case resourceClusterRoleBinding:
 		u.Object["roleRef"] = map[string]interface{}{apiGroupField: rbacv1.GroupName, kindField: "ClusterRole", nameField: dependencyName(cell)}
 		u.Object["subjects"] = []interface{}{map[string]interface{}{
-			apiGroupField:     rbacv1.GroupName,
 			kindField:         kindServiceAccount,
 			nameField:         dependencyName(cell),
 			resourceNamespace: namespace,
@@ -333,7 +346,7 @@ func objectFor(cell Cell, name, namespace string, s resourceSpec) *unstructured.
 		u.Object["spec"] = map[string]interface{}{
 			"targetName": "creator-bench-generated-binding",
 			"subjects": []interface{}{map[string]interface{}{
-				apiGroupField: rbacv1.GroupName, kindField: kindServiceAccount,
+				kindField: kindServiceAccount,
 				nameField: dependencyName(cell), resourceNamespace: namespace,
 			}},
 			"clusterRoleBindings": map[string]interface{}{
@@ -486,7 +499,7 @@ func executeBenchmark(ctx context.Context, base *rest.Config, cell Cell, o optio
 	currentProgress := 0
 	started := time.Now().UTC().Format(time.RFC3339Nano)
 	if o.resume {
-		if b, readErr := os.ReadFile(journal); readErr == nil {
+		if b, readErr := readBenchmarkFile(journal); readErr == nil {
 			var previous CellJournal
 			if jsonErr := json.Unmarshal(b, &previous); jsonErr != nil {
 				return fmt.Errorf("decode resume journal: %w", jsonErr)
@@ -551,7 +564,7 @@ func executeBenchmark(ctx context.Context, base *rest.Config, cell Cell, o optio
 			pc.Sustained = phase == phaseSustained
 			completedPath := filepath.Join(out, cellFilename(o.runID, pc, phase))
 			if o.resume {
-				if b, readErr := os.ReadFile(completedPath); readErr == nil {
+				if b, readErr := readBenchmarkFile(completedPath); readErr == nil {
 					var prior Result
 					if jsonErr := json.Unmarshal(b, &prior); jsonErr != nil {
 						return fmt.Errorf("decode existing phase result %s: %w", completedPath, jsonErr)
@@ -657,7 +670,7 @@ func executeBenchmark(ctx context.Context, base *rest.Config, cell Cell, o optio
 				run.MetricBefore = ParseMetricResponse(before.StatusCode, before.Body, APIServerAdmissionDuration+"_count")
 				run.MetricAfter = ParseMetricResponse(after.StatusCode, after.Body, APIServerAdmissionDuration+"_count")
 				run.MetricDelta = CounterDelta(run.MetricBefore, run.MetricAfter)
-				run.MetricDeltaState = run.MetricDelta.State
+				run.MetricDeltaState = metricDeltaState(before, after)
 				labels := map[string]string{"type": "mutating"}
 				run.WebhookBefore = ParseHistogramResponse(before, WebhookAdmissionDuration+"_sum", WebhookAdmissionDuration+"_count", labels)
 				run.WebhookAfter = ParseHistogramResponse(after, WebhookAdmissionDuration+"_sum", WebhookAdmissionDuration+"_count", labels)
@@ -889,7 +902,7 @@ func writeJournal(path string, journal CellJournal) error {
 }
 
 func ValidateResumeExact(path, runID, inputHash, environmentID, configHash string) error {
-	b, err := os.ReadFile(path)
+	b, err := readBenchmarkFile(path)
 	if err != nil {
 		return fmt.Errorf("read journal: %w", err)
 	}
