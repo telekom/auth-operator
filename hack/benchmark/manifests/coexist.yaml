@@ -1,0 +1,53 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+# SPDX-License-Identifier: Apache-2.0
+# Coexistence fixture: both admission engines are executable resources. The
+# benchmark applies the native chart and the documented Kyverno policy in the
+# same run and checks both generated/admission objects before measuring.
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicy
+metadata:
+  name: creator-tracking-benchmark-coexist-map
+spec:
+  failurePolicy: Ignore
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: [CREATE]
+        resources: [configmaps]
+  mutations:
+    - patchType: ApplyConfiguration
+      applyConfiguration:
+        expression: >-
+          Object{
+            metadata: Object.metadata{
+              labels: {"creator-tracking-benchmark": "coexist-map"}
+            }
+          }
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicyBinding
+metadata:
+  name: creator-tracking-benchmark-coexist-map
+spec:
+  policyName: creator-tracking-benchmark-coexist-map
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: creator-tracking-benchmark-coexist-webhook
+spec:
+  background: false
+  failurePolicy: Ignore
+  rules:
+    - name: mark-benchmark-resource
+      match:
+        any:
+          - resources:
+              kinds: [ConfigMap]
+              operations: [CREATE]
+      mutate:
+        patchStrategicMerge:
+          metadata:
+            labels:
+              creator-tracking-benchmark: coexist-webhook
