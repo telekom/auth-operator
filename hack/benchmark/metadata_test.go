@@ -50,8 +50,8 @@ func TestCollectEnvironmentUsesLinuxCPUInfoFallback(t *testing.T) {
 	if e.HostCPUModel != "Ampere Altra" {
 		t.Fatalf("host CPU model = %q, want live Linux model", e.HostCPUModel)
 	}
-	if e.Evidence[fieldHostCPUModel] != "live /proc/cpuinfo" {
-		t.Fatalf("host CPU evidence = %q, want live /proc/cpuinfo", e.Evidence[fieldHostCPUModel])
+	if e.Evidence[fieldHostCPUModel] != evidenceLiveCPUInfo {
+		t.Fatalf("host CPU evidence = %q, want %s", e.Evidence[fieldHostCPUModel], evidenceLiveCPUInfo)
 	}
 }
 
@@ -175,7 +175,7 @@ func TestValidateEvidenceRequiresLiveHostCapacity(t *testing.T) {
 			"chart_version":      "kubectl deployment label",
 			"cpus":               "environment override",
 			fieldMemory:          evidenceLiveMeminfo,
-			fieldHostCPUModel:    "live /proc/cpuinfo",
+			fieldHostCPUModel:    evidenceLiveCPUInfo,
 			fieldHostMemory:      evidenceLiveMeminfo,
 		},
 	}
