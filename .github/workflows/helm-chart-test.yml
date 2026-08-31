@@ -17,6 +17,10 @@ on:
       - 'hack/verify-rendered-rbac.go'
       - '.github/workflows/helm-chart-test.yml'
       - '.github/ct.yaml'
+      - 'config/webhook/creator_tracking_map.yaml'
+      - 'config/webhook/kustomization.yaml'
+      - 'config/webhook/kustomizeconfig.yaml'
+      - 'docs/examples/creator-tracking-map*.yaml'
   pull_request:
     branches: [main]
     paths:
@@ -29,6 +33,10 @@ on:
       - 'hack/verify-rendered-rbac.go'
       - '.github/workflows/helm-chart-test.yml'
       - '.github/ct.yaml'
+      - 'config/webhook/creator_tracking_map.yaml'
+      - 'config/webhook/kustomization.yaml'
+      - 'config/webhook/kustomizeconfig.yaml'
+      - 'docs/examples/creator-tracking-map*.yaml'
   workflow_dispatch:
 
 permissions:
@@ -80,6 +88,19 @@ jobs:
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: ${{ env.HELM_VERSION }}
+
+      - name: Setup Go
+        uses: ./.github/actions/setup-go-env
+
+      - name: Setup Kustomize
+        run: make kustomize
+
+      - name: Test creator tracking rendering
+        run: |
+          export KUSTOMIZE="${GITHUB_WORKSPACE}/bin/kustomize"
+          helm version --short
+          ./bin/kustomize version
+          go test ./chart/auth-operator/ -run TestCreatorTracking -count=1
 
       - name: Validate default values
         run: |

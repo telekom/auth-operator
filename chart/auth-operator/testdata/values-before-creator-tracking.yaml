@@ -229,35 +229,6 @@ namespaceDeletionProtection:
   #   disabled - never render; webhook-only enforcement.
   vap: auto
 
-creatorTracking:
-  # Record creator identity at admission. Protect mode restores creator data
-  # after tampering; DELETE is not tracked. Contributors mode also records
-  # distinct editors in first-edit order. failurePolicy is Ignore, so a policy error
-  # does not block resource writes.
-  # Opt in after performance tests are complete.
-  enabled: false
-  # Available modes: create-only, protect, contributors.
-  mode: protect
-  # MutatingAdmissionPolicy rendering mode:
-  #   auto     - render v1 when served, otherwise v1beta1 when served. Offline
-  #              `helm template` needs the matching MAP --api-versions value.
-  #   enabled  - always render admissionregistration.k8s.io/v1.
-  #   disabled - never render.
-  map: auto
-  resources:
-    - apiGroups: [""]
-      apiVersions: ["v1"]
-      resources: ["namespaces", "serviceaccounts", "secrets"]
-    - apiGroups: ["rbac.authorization.k8s.io"]
-      apiVersions: ["v1"]
-      resources: ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
-    - apiGroups: ["authorization.t-caas.telekom.com"]
-      apiVersions: ["v1alpha1"]
-      resources: ["roledefinitions", "binddefinitions", "rbacpolicies", "restrictedbinddefinitions", "restrictedroledefinitions", "webhookauthorizers"]
-  # These usernames are not stamped on CREATE or appended as contributors.
-  # Restoration is still attempted for changes made by these users.
-  excludedUsernames: []
-
 metrics:
   # Require authentication and authorization for the /metrics endpoint.
   # Enabled by default for secure Helm installs. TokenReview and
