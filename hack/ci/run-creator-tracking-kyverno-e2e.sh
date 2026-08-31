@@ -84,8 +84,14 @@ artifact_owned() {
   [[ -f "$artifact_dir/.owner" && ! -L "$artifact_dir/.owner" ]] || return 1
   [[ "$(<"$artifact_dir/.owner")" == "$owner" ]]
 }
-owned_remove_file() { [[ ! -L "$1" ]] || return 1; [[ ! -e "$1" ]] || rm -f -- "$1"; }
-owned_remove_dir() { [[ ! -L "$1" ]] || return 1; [[ ! -e "$1" ]] || rm -rf -- "$1"; }
+owned_remove_file() {
+  [[ ! -L "$1" ]] || return 1
+  if [[ -e "$1" ]]; then rm -f -- "$1" || return 1; fi
+}
+owned_remove_dir() {
+  [[ ! -L "$1" ]] || return 1
+  if [[ -e "$1" ]]; then rm -rf -- "$1" || return 1; fi
+}
 
 cleanup_owned() {
   local original_status=${1:-0} failures=() clusters output rc image
