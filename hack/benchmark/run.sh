@@ -48,29 +48,31 @@ else
     perl -MFcntl -e 'open(my $fh, "<&=9") or exit 2; exit flock($fh, LOCK_EX | LOCK_NB) ? 0 : 1;' --
   }
 fi
-if command -v setsid >/dev/null 2>&1; then
-  start_session() { setsid "$@"; }
-else
-  command -v perl >/dev/null 2>&1 || die 'setsid or perl is required'
-  start_session() {
-    perl -MPOSIX=setsid -e 'setsid() or die "setsid: $!"; exec @ARGV or die "exec: $!";' -- "$@"
-  }
-fi
+command -v setsid >/dev/null 2>&1 || command -v perl >/dev/null 2>&1 || die 'setsid or perl is required'
 bounded_pid=''
 terminate_bounded() {
   local status=$1 pid=$bounded_pid
   bounded_pid=''
   if [[ -n "$pid" ]]; then
+    kill -TERM "$pid" 2>/dev/null || true
     kill -TERM -- "-$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
   fi
   exit "$status"
 }
 bounded() {
-  start_session "$timeout_bin" --signal=TERM --kill-after=30s "$phase_timeout" "$@" &
+  if command -v setsid >/dev/null 2>&1; then
+    setsid "$timeout_bin" --signal=TERM --kill-after=30s "$phase_timeout" "$@" &
+  else
+    perl -MPOSIX=setsid -e 'setsid() or die "setsid: $!"; exec @ARGV or die "exec: $!";' -- \
+      "$timeout_bin" --signal=TERM --kill-after=30s "$@" &
+  fi
   bounded_pid=$!
-  local status
-  if wait "$bounded_pid"; then status=0; else status=$?; fi
+  local pid=$bounded_pid status
+  if wait "$pid"; then status=0; else status=$?; fi
+  if [[ "$status" -eq 130 || "$status" -eq 143 ]]; then
+    terminate_bounded "$status"
+  fi
   bounded_pid=''
   return "$status"
 }
@@ -370,6 +372,7 @@ if [[ "$requested_mode" == fresh ]]; then
 else export KUBECONFIG="$kubeconfig"; fi
 
 phase() { echo "benchmark phase: $*" >&2; bounded "$@"; }
+phase kubectl apply -f hack/benchmark/manifests/benchmark-rbac.yaml
 helm_operator() {
   local enabled=$1 mode=$2 excluded=${3:-false}
   local -a args=(upgrade --install auth-operator chart/auth-operator --namespace "$operator_namespace" --create-namespace --set image.repository=auth-operator --set image.tag="creator-tracking-benchmark-$run_id" --set image.pullPolicy=Never --set creatorTracking.enabled="$enabled" --set creatorTracking.mode="$mode")
