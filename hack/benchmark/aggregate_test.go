@@ -10,6 +10,9 @@ import (
 
 func TestLoadResultsAndReports(t *testing.T) {
 	d := t.TempDir()
+	if err := os.Chmod(d, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	r := Result{
 		Cell: Cell{
 			Engine:      "map",
