@@ -378,7 +378,7 @@ uninstall_engines() {
   phase helm uninstall auth-operator --namespace "$operator_namespace" --ignore-not-found
   phase helm uninstall kyverno --namespace "$kyverno_namespace" --ignore-not-found
   local release
-  release=$(phase helm list -A --filter '^(auth-operator|kyverno)$' --output name)
+  release=$(phase helm list -A --filter '^(auth-operator|kyverno)$' --short)
   [[ -z "$release" ]] || die "Helm release teardown was not confirmed: $release"
   delete_policy() {
     local resource=$1 name=$2 existing
