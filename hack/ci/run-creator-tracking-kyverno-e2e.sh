@@ -36,6 +36,10 @@ fi
 lock_type=$(stat -c %F "$lock" 2>/dev/null || true)
 lock_owner=$(stat -c %u "$lock" 2>/dev/null || true)
 lock_mode=$(stat -c %a "$lock" 2>/dev/null || true)
+if [[ "$lock_type" == 'regular file' && "$lock_owner" == "$(id -u)" && "$lock_mode" != 600 && ! -s "$lock" ]]; then
+  chmod 600 "$lock"
+  lock_mode=$(stat -c %a "$lock" 2>/dev/null || true)
+fi
 [[ "$lock_type" == 'regular file' && "$lock_owner" == "$(id -u)" && "$lock_mode" == 600 ]] || {
   echo "Kyverno E2E lock must be an owned regular file with mode 600: $lock" >&2
   exit 1
