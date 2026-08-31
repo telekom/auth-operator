@@ -448,7 +448,7 @@ capture_input_material() {
   local material_tmp
   material_tmp=$(mktemp "${material}.tmp.XXXXXX")
   {
-    printf 'scope: %s\nengine: %s\nmode: %s\n' "$active_scope" "$engine" "$active_mode"
+    printf 'run_id: %s\nscope: %s\nengine: %s\nmode: %s\nvariant: %s\n' "$run_id" "$active_scope" "$engine" "$active_mode" "$active_variant"
     case "$engine" in
       baseline) cat hack/benchmark/manifests/baseline.yaml ;;
       map|coexist)
@@ -542,7 +542,8 @@ apply_engine() {
 }
 run_cell() {
   local engine=$1 tier=$2 mode=$3 ops=${4:-} excluded=${5:-false}
-  local -a args=(-out "$results_dir" -run-id "$run_id" -resume -identities 10 -engine "$engine" -tier "$tier" -mode "$mode")
+  local -a args=(-out "$results_dir" -run-id "$run_id" -identities 10 -engine "$engine" -tier "$tier" -mode "$mode")
+  [[ "$requested_mode" == resume ]] && args+=(-resume)
   if [[ "$quick" == true ]]; then
     args+=(-quick -ops 500)
   elif [[ -n "$ops" ]]; then
