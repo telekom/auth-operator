@@ -15,6 +15,13 @@ func TestMetricResponseStates(t *testing.T) {
 		t.Fatal("available")
 	}
 }
+
+func TestParseMetricUsesValueBeforeOptionalTimestamp(t *testing.T) {
+	got := ParseMetric("x 4 1700000000\n", "x")
+	if got.State != MetricAvailable || got.Value != 4 {
+		t.Fatalf("metric = %#v, want value 4", got)
+	}
+}
 func TestMetricReset(t *testing.T) {
 	if CounterDelta(Counter{10, MetricAvailable}, Counter{2, MetricAvailable}).State != MetricReset {
 		t.Fatal("reset")
