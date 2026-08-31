@@ -30,13 +30,20 @@ func TestCleanupCellUsesOwnedLabel(t *testing.T) {
 			labelsField: map[string]interface{}{"t-caas.telekom.com/benchmark": benchmarkLabelValue},
 		},
 	}}
+	foreign := u.DeepCopy()
+	foreign.SetName("foreign")
+	foreign.SetLabels(map[string]string{"t-caas.telekom.com/benchmark": "other"})
 	cl := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{s.gvr: "ServiceAccountList"})
 	_, _ = cl.Resource(s.gvr).Namespace("bench").Create(context.Background(), u, metav1.CreateOptions{})
+	_, _ = cl.Resource(s.gvr).Namespace("bench").Create(context.Background(), foreign, metav1.CreateOptions{})
 	if e := cleanupCell(context.Background(), cl, s, "bench"); e != nil {
 		t.Fatal(e)
 	}
 	if _, e := cl.Resource(s.gvr).Namespace("bench").Get(context.Background(), "owned", metav1.GetOptions{}); !apierrors.IsNotFound(e) {
 		t.Fatalf("owned object remains after cleanup: %v", e)
+	}
+	if _, e := cl.Resource(s.gvr).Namespace("bench").Get(context.Background(), "foreign", metav1.GetOptions{}); e != nil {
+		t.Fatalf("foreign object was removed: %v", e)
 	}
 }
 
