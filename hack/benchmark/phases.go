@@ -5,8 +5,10 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"math"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -73,16 +75,17 @@ func summarize(r *CellRun, started time.Time) {
 }
 func statusFor(verb string, e error) int {
 	if e != nil {
-		if s, ok := e.(apierrors.APIStatus); ok {
-			return int(s.Status().Code)
+		var status apierrors.APIStatus
+		if errors.As(e, &status) {
+			return int(status.Status().Code)
 		}
 		return 0
 	}
 	// Warmup is a create-only phase even though its name is not an API verb.
 	if verb == phaseCreate || verb == phaseWarmup {
-		return 201
+		return http.StatusCreated
 	}
-	return 200
+	return http.StatusOK
 }
 
 func copyAnnotations(in map[string]string) map[string]string {

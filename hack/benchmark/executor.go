@@ -347,17 +347,18 @@ func metricDeltaCounter(before, after MetricsSnapshot, name string) Counter {
 	afterCounter := ParseMetricResponse(after.StatusCode, after.Body, name)
 	delta := CounterDelta(beforeCounter, afterCounter)
 	state := metricDeltaState(before, after)
-	if state == MetricAvailable {
-		switch {
-		case beforeCounter.State == MetricUnauthorized || afterCounter.State == MetricUnauthorized:
-			state = MetricUnauthorized
-		case beforeCounter.State == MetricUnavailable || afterCounter.State == MetricUnavailable:
-			state = MetricUnavailable
-		case beforeCounter.State != MetricAvailable || afterCounter.State != MetricAvailable:
-			state = MetricMissing
-		default:
-			state = delta.State
-		}
+	// FetchMetrics normally sets Snapshot.State, but retain the more specific
+	// parser result when callers construct a snapshot from just its status code
+	// and body (for example, tests or alternate transport adapters).
+	switch {
+	case beforeCounter.State == MetricUnauthorized || afterCounter.State == MetricUnauthorized:
+		state = MetricUnauthorized
+	case beforeCounter.State == MetricUnavailable || afterCounter.State == MetricUnavailable:
+		state = MetricUnavailable
+	case beforeCounter.State != MetricAvailable || afterCounter.State != MetricAvailable:
+		state = MetricMissing
+	case state == MetricAvailable:
+		state = delta.State
 	}
 	delta.State = state
 	if state != MetricAvailable {

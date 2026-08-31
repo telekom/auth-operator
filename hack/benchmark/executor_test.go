@@ -183,6 +183,30 @@ func TestMetricDeltaCounterPreservesTelemetryState(t *testing.T) {
 	if reset.State != MetricReset || reset.Value != 0 {
 		t.Fatalf("reset delta = %#v, want reset with zero value", reset)
 	}
+	for _, test := range []struct {
+		name  string
+		code  int
+		state MetricState
+	}{
+		{name: "status-only unauthorized", code: http.StatusForbidden, state: MetricUnauthorized},
+		{name: "status-only unavailable", code: http.StatusInternalServerError, state: MetricUnavailable},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			before := MetricsSnapshot{StatusCode: http.StatusOK, Body: metricName + " 4\n"}
+			after := MetricsSnapshot{StatusCode: test.code}
+			got := metricDeltaCounter(before, after, metricName)
+			if got.State != test.state || got.Value != 0 {
+				t.Fatalf("status-only delta = %#v, want state=%q and zero value", got, test.state)
+			}
+		})
+	}
+}
+
+func TestStatusForWrappedAPIError(t *testing.T) {
+	err := fmt.Errorf("update benchmark object: %w", apierrors.NewTooManyRequests("busy", 1))
+	if got := statusFor(verbUpdate, err); got != http.StatusTooManyRequests {
+		t.Fatalf("wrapped API error status = %d, want %d", got, http.StatusTooManyRequests)
+	}
 }
 
 func TestCleanupResourceKindsIncludesSelectedIsolationResource(t *testing.T) {
