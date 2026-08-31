@@ -19,8 +19,13 @@ case "${KYVERNO_VERSION}:${KYVERNO_CHART_VERSION}" in
   *) echo "unsupported Kyverno pin: app ${KYVERNO_VERSION}, chart ${KYVERNO_CHART_VERSION}; only v1.19.0/3.9.0 is tested" >&2; exit 1 ;;
 esac
 namespace="kyverno"
-archive_dir="${KYVERNO_E2E_ARCHIVE_DIR:-${RUNNER_TEMP:-/tmp}}"
-mkdir -p "$archive_dir"
+archive_root="${KYVERNO_E2E_ARCHIVE_DIR:-${RUNNER_TEMP:-/tmp}}"
+[[ -d "$archive_root" && ! -L "$archive_root" ]] || {
+  echo "Kyverno archive root must be an existing non-symlink directory: $archive_root" >&2
+  exit 1
+}
+archive_dir=$(mktemp -d -- "${archive_root%/}/auth-operator-kyverno.XXXXXX")
+chmod 700 "$archive_dir"
 archive="${archive_dir}/kyverno-${KYVERNO_CHART_VERSION}.tgz"
 actual="${archive}.sha256"
 [[ ! -L "$archive" && ! -e "$archive" ]] || { echo "refusing to overwrite existing archive $archive" >&2; exit 1; }
