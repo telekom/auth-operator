@@ -15,11 +15,13 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 )
 
 const (
-	createdByKey       = "t-caas.telekom.com/created-by"
-	createdByGroupsKey = "t-caas.telekom.com/created-by-groups"
+	createdByKey       = authorizationv1alpha1.AnnotationKeyCreatedBy
+	createdByGroupsKey = authorizationv1alpha1.AnnotationKeyCreatedByGroups
 	triggerLabelKey    = "e2e.t-caas.telekom.com/reinvoke-trigger"
 	markerKey          = "e2e.t-caas.telekom.com/reinvoke-uid"
 	maxReviewBytes     = 1 << 20
