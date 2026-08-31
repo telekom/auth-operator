@@ -213,7 +213,7 @@ func resourceKind(resource string) string {
 		resourceSecret:             "Secret",
 		resourceRole:               "Role",
 		resourceRoleBinding:        "RoleBinding",
-		resourceClusterRole:        "ClusterRole",
+		resourceClusterRole:        kindClusterRole,
 		resourceClusterRoleBinding: "ClusterRoleBinding",
 		resourceRoleDefinition:     "RoleDefinition",
 		resourceBindDefinition:     "BindDefinition",
@@ -334,14 +334,14 @@ func objectFor(cell Cell, name, namespace string, s resourceSpec) *unstructured.
 			resourceNamespace: namespace,
 		}}
 	case resourceClusterRoleBinding:
-		u.Object["roleRef"] = map[string]interface{}{apiGroupField: rbacv1.GroupName, kindField: "ClusterRole", nameField: dependencyName(cell)}
+		u.Object["roleRef"] = map[string]interface{}{apiGroupField: rbacv1.GroupName, kindField: kindClusterRole, nameField: dependencyName(cell)}
 		u.Object["subjects"] = []interface{}{map[string]interface{}{
 			kindField:         kindServiceAccount,
 			nameField:         dependencyName(cell),
 			resourceNamespace: namespace,
 		}}
 	case resourceRoleDefinition:
-		u.Object["spec"] = map[string]interface{}{"targetRole": "ClusterRole", "targetName": "creator-bench-generated-role", "scopeNamespaced": false}
+		u.Object["spec"] = map[string]interface{}{"targetRole": kindClusterRole, "targetName": "creator-bench-generated-role", "scopeNamespaced": false}
 	case resourceBindDefinition:
 		u.Object["spec"] = map[string]interface{}{
 			"targetName": "creator-bench-generated-binding",
