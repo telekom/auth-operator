@@ -118,6 +118,7 @@ else
 	run_dir_created=true
 fi
 export E2E_CREATOR_TRACKING_RUN_DIR=$run_dir
+kubeconfig=$run_dir/cluster.kubeconfig
 printf "%s\n" "$cluster_name" > "$run_dir/provenance"
 chmod 600 "$run_dir/provenance"
 cluster_authorized_marker=$run_dir/cluster-authorized
@@ -196,7 +197,6 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-kubeconfig=$run_dir/cluster.kubeconfig
 : >"$kubeconfig"
 chmod 0600 "$kubeconfig"
 export KUBECONFIG=$kubeconfig
