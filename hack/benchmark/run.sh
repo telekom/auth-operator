@@ -115,7 +115,7 @@ if [[ ! -e "$lock_file" ]]; then
 fi
 [[ -f "$lock_file" && ! -L "$lock_file" ]] || die "private lock file is not regular: $lock_file"
 lock_type=$(stat -c '%F' "$lock_file" 2>/dev/null || stat -f '%HT' "$lock_file")
-[[ "$lock_type" == 'regular file' || "$lock_type" == 'Regular File' ]] || die "fixed lock must be an owned regular file with mode 600: $lock_file"
+[[ "$lock_type" == 'regular file' || "$lock_type" == 'regular empty file' || "$lock_type" == 'Regular File' ]] || die "fixed lock must be an owned regular file with mode 600: $lock_file"
 chmod 600 "$lock_file"
 lock_owner=$(stat -c '%u' "$lock_file" 2>/dev/null || stat -f '%u' "$lock_file")
 [[ "$lock_owner" == "$current_uid" ]] || die "private lock file is not owned by the current user: $lock_file"
