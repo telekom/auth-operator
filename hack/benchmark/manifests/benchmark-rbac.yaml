@@ -20,7 +20,7 @@ rules:
       - clusterroles
       - clusterrolebindings
     verbs: [create, get, update]
-  - apiGroups: [t-caas.telekom.com]
+  - apiGroups: [authorization.t-caas.telekom.com]
     resources:
       - roledefinitions
       - binddefinitions
