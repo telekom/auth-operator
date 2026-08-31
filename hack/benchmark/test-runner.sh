@@ -187,7 +187,7 @@ rm -rf -- "$retained_dir" "$signal_dir"
 # Caller-controlled output paths must not escape through traversal or symlinked
 # path components. These checks happen before Docker/Kind are queried.
 path_dir=$(mktemp -d "$test_tmp_root/auth-operator-benchmark.paths.XXXXXX")
-trap 'rm -rf -- "$path_dir"' EXIT
+trap 'rm -rf -- "$probe_dir" "$path_dir"' EXIT
 mkdir -p "$path_dir/results"
 if env -u KUBECONFIG -u KIND_CLUSTER_NAME -u CLUSTER_NAME -u BENCHMARK_CLUSTER PATH="$probe_dir/bin:$PATH" RUN_ID=path-test RESULTS_DIR="$path_dir/results/../escape" bash "$runner" >/dev/null 2>"$path_dir/traversal-error"; then
   echo 'runner accepted traversal in RESULTS_DIR' >&2
