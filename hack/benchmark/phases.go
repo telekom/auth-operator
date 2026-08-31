@@ -494,8 +494,9 @@ func runMixedSustained(
 					if progress != nil && progressErr == nil {
 						progressErr = progress(total)
 					}
+					err := progressErr
 					mu.Unlock()
-					return progressErr
+					return err
 				})
 			mu.Lock()
 			out.Operations = append(out.Operations, part.Operations...)

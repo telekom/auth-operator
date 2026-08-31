@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestMetricResponseStates(t *testing.T) {
 	if ParseMetricResponse(403, "", "x").State != MetricUnauthorized {
@@ -20,6 +23,13 @@ func TestParseMetricUsesValueBeforeOptionalTimestamp(t *testing.T) {
 	got := ParseMetric("x 4 1700000000\n", "x")
 	if got.State != MetricAvailable || got.Value != 4 {
 		t.Fatalf("metric = %#v, want value 4", got)
+	}
+}
+
+func TestParseMetricRejectsOversizedLines(t *testing.T) {
+	got := ParseMetric("x "+strings.Repeat("7", metricScannerMaxTokenSize)+"\n", "x")
+	if got.State != MetricUnavailable {
+		t.Fatalf("oversized metric state = %q, want unavailable", got.State)
 	}
 }
 

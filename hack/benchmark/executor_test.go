@@ -87,6 +87,18 @@ func TestCleanupResourceKindsIncludesSelectedIsolationResource(t *testing.T) {
 	}
 }
 
+func TestObjectForAnnotatesIsolationScope(t *testing.T) {
+	s, err := specFor(resourceRole)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := objectFor(Cell{Engine: engineMap, Tier: "iso-rbac-group", Mode: modeProtect, Kind: resourceRole}, "object", "", s)
+	got, _, err := unstructured.NestedString(u.Object, metadataField, annotationsField, "t-caas.telekom.com/benchmark-scope")
+	if err != nil || got != "rbac-group" {
+		t.Fatalf("isolation scope = %q, err %v", got, err)
+	}
+}
+
 func TestJournalStateReflectsCleanupFailure(t *testing.T) {
 	if got := journalState(fmt.Errorf("cleanup failed")); got != statusFailed {
 		t.Fatalf("journal state after cleanup failure = %q, want %q", got, statusFailed)

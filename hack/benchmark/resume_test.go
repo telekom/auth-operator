@@ -6,17 +6,13 @@ import "testing"
 
 func TestResumeStartOffsetAlwaysReplaysIncompletePhase(t *testing.T) {
 	for _, tc := range []struct {
-		name               string
-		resume             bool
-		phase, resumePhase string
-		want               int
+		name string
+		want int
 	}{
-		{"matching phase", true, "churn", "churn", 0},
-		{"different phase", true, "create", "churn", 0},
-		{"fresh run", false, "create", "", 0},
+		{"always replay incomplete phase", 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := resumeStartOffset(tc.resume, tc.phase, tc.resumePhase); got != tc.want {
+			if got := resumeStartOffset(); got != tc.want {
 				t.Fatalf("resume offset = %d, want %d", got, tc.want)
 			}
 		})

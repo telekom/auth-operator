@@ -66,6 +66,11 @@ func telemetryValues(r Result) []string {
 }
 
 func reportMetricState(explicit MetricState, counter Counter) MetricState {
+	// Snapshot state describes transport/authentication, while the parsed
+	// counter can carry a more specific missing/reset state.
+	if counter.State != "" && (explicit == "" || explicit == MetricAvailable) {
+		return counter.State
+	}
 	if explicit != "" {
 		return explicit
 	}
