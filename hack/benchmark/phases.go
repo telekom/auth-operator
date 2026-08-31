@@ -464,6 +464,18 @@ func runMixedSustained(
 		gateCapacity = 1
 	}
 	kindGate := make(chan struct{}, gateCapacity)
+	var ordered []chan struct{}
+	if workers == 1 && len(kinds) > 1 {
+		// A single worker cannot service all kinds concurrently. Run the slots
+		// in plan order so a short shared deadline still gives every kind a
+		// deterministic slice instead of letting goroutine scheduling starve a
+		// later resource kind.
+		ordered = make([]chan struct{}, len(kinds))
+		for i := range ordered {
+			ordered[i] = make(chan struct{})
+		}
+		close(ordered[0])
+	}
 	for ri, kind := range kinds {
 		kindWorkers := workerCounts[ri]
 		if kindWorkers == 0 {
@@ -490,6 +502,18 @@ func runMixedSustained(
 		wg.Add(1)
 		go func(ri int, kind string, targets []dynamic.ResourceInterface, localOffset, kindWorkers int) {
 			defer wg.Done()
+			if len(ordered) > 0 {
+				select {
+				case <-ordered[ri]:
+				case <-phaseCtx.Done():
+					return
+				}
+				defer func() {
+					if ri+1 < len(ordered) {
+						close(ordered[ri+1])
+					}
+				}()
+			}
 			select {
 			case kindGate <- struct{}{}:
 			case <-phaseCtx.Done():
