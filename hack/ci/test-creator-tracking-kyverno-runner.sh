@@ -17,6 +17,12 @@ if grep -Fq "$unbraced" "$runner"; then exit 1; fi
 grep -Fq 'readonly marker=/tmp/auth-operator-e2e-kyverno.owner' "$runner"
 grep -Fq 'KYVERNO_E2E_CLUSTER, KYVERNO_E2E_LOCK, and KYVERNO_E2E_KUBECONFIG are not supported' "$runner"
 grep -Fq 'cleanup-only requires the exact ownership marker' "$runner"
+grep -Fq 'marker_owner=$(stat -c %u' "$runner"
+grep -Fq 'marker_mode=$(stat -c %a' "$runner"
+grep -Fq 'marker_owner" == "$(id -u)"' "$runner"
+grep -Fq 'marker_type" == '\''regular file'\''' "$runner"
+grep -Fq 'set -C; printf' "$runner"
+grep -Fq '"$owner" >"$marker"' "$runner"
 
 # The installer must use the supported Kyverno source CRD and native generated
 # admissionregistration resources, never an invented binding CRD.
@@ -74,13 +80,22 @@ cat >"$probe_dir/bin/flock" <<'EOF'
 #!/usr/bin/env bash
 exit 0
 EOF
+cat >"$probe_dir/bin/stat" <<'EOF'
+#!/usr/bin/env bash
+case "${2:-}" in
+  %F) echo 'regular file' ;;
+  %u) id -u ;;
+  %a) echo 600 ;;
+  *) exit 1 ;;
+esac
+EOF
 cat >"$probe_dir/bin/timeout" <<'EOF'
 #!/usr/bin/env bash
 while [[ "${1:-}" == --* ]]; do shift; done
 shift
 exec "$@"
 EOF
-chmod 0755 "$probe_dir/bin/kind" "$probe_dir/bin/docker" "$probe_dir/bin/flock" "$probe_dir/bin/timeout"
+chmod 0755 "$probe_dir/bin/kind" "$probe_dir/bin/docker" "$probe_dir/bin/flock" "$probe_dir/bin/stat" "$probe_dir/bin/timeout"
 
 for path in \
   /tmp/auth-operator-e2e-kyverno.owner \
