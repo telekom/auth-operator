@@ -120,6 +120,7 @@ for manifest in baseline map kyverno-webhook kyverno-map coexist; do
   grep -Eq '^apiVersion:' "$root/hack/benchmark/manifests/$manifest.yaml"
   grep -Eq '^kind:' "$root/hack/benchmark/manifests/$manifest.yaml"
 done
+grep -Fq 'apiGroups: [authorization.t-caas.telekom.com]' "$root/hack/benchmark/manifests/benchmark-rbac.yaml"
 
 # Exercise the refusal path with a deliberately incomplete ownership marker.
 # This is an interruption/resume safety guard: resume must not query or delete
