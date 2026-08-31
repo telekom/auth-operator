@@ -49,6 +49,13 @@ func TestParseOptionsUsesPrivateFlagSet(t *testing.T) {
 	}
 }
 
+func TestParseOptionsResumeRequiresRunID(t *testing.T) {
+	_, err := parseOptions([]string{"-resume", "-kubeconfig", "resume-kubeconfig"})
+	if err == nil || !strings.Contains(err.Error(), "-resume requires -run-id") {
+		t.Fatalf("parseOptions resume error = %v, want missing run ID", err)
+	}
+}
+
 func TestQuickOptionsHonorRunnerOperationBudget(t *testing.T) {
 	o, err := parseOptions([]string{"-quick", "-kubeconfig", "quick-kubeconfig"})
 	if err != nil {
