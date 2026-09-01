@@ -189,7 +189,7 @@ cleanup() {
 	if [[ $run_dir_created == true ]] && ! rm -rf -- "$run_dir"; then
 		echo "failed to remove creator tracking run directory $run_dir" >&2
 		cleanup_failed=true
-	elif [[ -e $run_dir ]]; then
+	elif [[ -e "$run_dir" ]]; then
 		echo "creator tracking run directory still exists: $run_dir" >&2
 		cleanup_failed=true
 	fi
