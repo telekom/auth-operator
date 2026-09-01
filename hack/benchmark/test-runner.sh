@@ -298,6 +298,13 @@ grep -Fq 'benchmark state retained for resume:' "$signal_log"
 retained_dir=$(sed -n 's/.*benchmark state retained for resume: //p' "$signal_log" | tail -n 1)
 test -n "$retained_dir"
 test -f "$retained_dir/owner"
+case "$retained_dir" in
+  "$signal_dir"/auth-operator-benchmark.*) ;;
+  *)
+    echo 'retained benchmark path escaped signal directory' >&2
+    exit 1
+    ;;
+esac
 rm -rf -- "$retained_dir" "$signal_dir"
 signal_dir=''
 

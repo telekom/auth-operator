@@ -650,7 +650,7 @@ endef
 .PHONY: benchmark-creator-tracking benchmark-creator-tracking-quick benchmark-creator-tracking-static
 BENCHMARK_QUICK ?= false
 benchmark-creator-tracking:
-	env -u KUBECONFIG -u KIND_CLUSTER_NAME -u CLUSTER_NAME -u BENCHMARK_CLUSTER QUICK=$(BENCHMARK_QUICK) bash hack/benchmark/run.sh
+	env -u KUBECONFIG -u KIND_CLUSTER_NAME -u CLUSTER_NAME -u BENCHMARK_CLUSTER QUICK="$(BENCHMARK_QUICK)" bash hack/benchmark/run.sh
 benchmark-creator-tracking-quick:
 	env -u KUBECONFIG -u KIND_CLUSTER_NAME -u CLUSTER_NAME -u BENCHMARK_CLUSTER QUICK=true bash hack/benchmark/run.sh
 benchmark-creator-tracking-static:

@@ -36,33 +36,8 @@ func TestReportFormatsPreserveProvenanceAndTelemetry(t *testing.T) {
 	if err := WriteReportCSV(&aggregate, rows); err != nil {
 		t.Fatal(err)
 	}
-	for name, data := range map[string]string{"raw": raw.String(), "aggregate": aggregate.String()} {
-		records, err := csv.NewReader(strings.NewReader(data)).ReadAll()
-		if err != nil {
-			t.Fatalf("%s CSV: %v", name, err)
-		}
-		if len(records) != 2 || len(records[0]) != len(records[1]) {
-			t.Fatalf("%s shape: %#v", name, records)
-		}
-		for _, field := range append(provenanceHeaders, telemetryHeaders...) {
-			found := false
-			for _, h := range records[0] {
-				if h == field {
-					found = true
-					break
-				}
-			}
-			if !found {
-				t.Errorf("%s missing %s", name, field)
-			}
-		}
-		joined := strings.Join(records[1], "|")
-		for _, value := range []string{"run-7", "input-7", "work-7", "config-7", "env-7", "amd64", "live", "reset", "3.000", "4.000"} {
-			if !strings.Contains(joined, value) {
-				t.Errorf("%s missing value %q", name, value)
-			}
-		}
-	}
+	assertReportCSV(t, "raw", raw.String())
+	assertReportCSV(t, "aggregate", aggregate.String())
 	var md, aggregateMD strings.Builder
 	if err := WriteMarkdown(&md, []Result{r}); err != nil {
 		t.Fatal(err)
@@ -84,6 +59,37 @@ func TestReportFormatsPreserveProvenanceAndTelemetry(t *testing.T) {
 			t.Errorf("aggregate Markdown missing %q", value)
 		}
 	}
+}
+
+func assertReportCSV(t *testing.T, name, data string) {
+	t.Helper()
+	records, err := csv.NewReader(strings.NewReader(data)).ReadAll()
+	if err != nil {
+		t.Fatalf("%s CSV: %v", name, err)
+	}
+	if len(records) != 2 || len(records[0]) != len(records[1]) {
+		t.Fatalf("%s shape: %#v", name, records)
+	}
+	for _, field := range append(provenanceHeaders, telemetryHeaders...) {
+		if !containsString(records[0], field) {
+			t.Errorf("%s missing %s", name, field)
+		}
+	}
+	joined := strings.Join(records[1], "|")
+	for _, value := range []string{"run-7", "input-7", "work-7", "config-7", "env-7", "amd64", "live", "reset", "3.000", "4.000"} {
+		if !strings.Contains(joined, value) {
+			t.Errorf("%s missing value %q", name, value)
+		}
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestReportMetricStatePreservesParsedReset(t *testing.T) {
