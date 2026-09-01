@@ -28,6 +28,10 @@ else
     echo "refusing symlink Kyverno E2E state directory: $state_dir" >&2
     exit 1
   }
+  [[ ! -e "$state_dir" || "$mode" != full ]] || {
+    echo "refusing to reuse existing Kyverno E2E state directory for a full run: $state_dir" >&2
+    exit 1
+  }
   if [[ ! -e "$state_dir" ]]; then
     [[ "$mode" == full ]] || {
       echo "Kyverno E2E state directory does not exist: $state_dir" >&2

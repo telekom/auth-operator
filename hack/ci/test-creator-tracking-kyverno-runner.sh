@@ -152,6 +152,19 @@ fi
 [[ -f "$probe_dir/docker-called" ]]
 [[ ! -e "$state_dir" && ! -L "$state_dir" ]]
 
+# An explicit existing state directory must never be reused by a full run,
+# because a successful run removes its state directory on exit.
+existing_state_dir="$test_root/existing-state"
+mkdir -m 700 "$existing_state_dir"
+if PATH="$probe_dir/bin:$PATH" KYVERNO_E2E_STATE_DIR="$existing_state_dir" "$runner" full >"$probe_dir/existing-state.log" 2>&1; then
+  rc=0
+else
+  rc=$?
+fi
+[[ "$rc" -eq 1 ]]
+grep -Fq 'refusing to reuse existing Kyverno E2E state directory for a full run' "$probe_dir/existing-state.log"
+[[ -d "$existing_state_dir" && ! -L "$existing_state_dir" ]]
+
 # An interruption after creating the debug directory but before writing its
 # owner marker leaves an empty, owned, mode-0700 directory. Cleanup-only may
 # remove exactly that recoverable state.
