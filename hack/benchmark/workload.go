@@ -4,21 +4,6 @@ package main
 
 import "fmt"
 
-type Workload struct {
-	Name, Tier, Kind, Verb string
-	Requests, Concurrency  int
-}
-
-func (w Workload) Validate() error {
-	if w.Name == "" || w.Tier == "" || w.Kind == "" || w.Verb == "" {
-		return fmt.Errorf("workload fields must be non-empty")
-	}
-	if w.Requests < 1 || w.Concurrency < 1 {
-		return fmt.Errorf("requests and concurrency must be positive")
-	}
-	return nil
-}
-
 // Tier resource scopes grow while the object workload stays service-account based.
 var tierScopes = map[string][]string{
 	"t1": {resourceServiceAccount},
