@@ -2,6 +2,10 @@
 # SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
 # SPDX-License-Identifier: Apache-2.0
 set -euo pipefail
+test_root="$PWD/.creator-tracking-kyverno-runner-test-$$"
+mkdir -m 700 -- "$test_root"
+trap 'rc=$?; if ((rc != 0)); then printf "Kyverno runner self-test failed at line %d: %s (exit %d)\n" "$LINENO" "$BASH_COMMAND" "$rc" >&2; fi' ERR
+trap 'rm -rf -- "$test_root"' EXIT
 
 runner=hack/ci/run-creator-tracking-kyverno-e2e.sh
 installer=hack/ci/install-kyverno.sh
@@ -12,7 +16,7 @@ bash -n "$creator_runner"
 grep -Fq 'for command in curl sha256sum helm kubectl timeout mktemp chmod awk grep' "$installer"
 grep -Fq ': "${KUBECONFIG:?set KUBECONFIG to an explicit disposable Kind kubeconfig}"' "$installer"
 grep -Fq 'KUBECONFIG must name an existing non-symlink disposable kubeconfig' "$installer"
-grep -Fq 'for command in flock stat timeout docker kind helm kubectl go grep sed' "$runner"
+grep -Fq 'for command in flock stat timeout docker kind helm kubectl go grep sed mktemp' "$runner"
 grep -Fq 'stat_identity()' "$runner"
 grep -Fq '"/dev/fd/9"' "$runner"
 grep -Fq 'descriptor_identity' "$runner"
@@ -33,7 +37,7 @@ grep -Fq 'stat -f %HT' "$workflow"
 grep -Fq '[ ! -s "$lock_file" ]' "$workflow"
 grep -Fq 'make test-creator-tracking-kyverno-runner' "$workflow"
 grep -Fq 'name: Upload Kyverno debug artifacts' "$workflow"
-grep -Fq 'path: /tmp/creator-tracking-kyverno-debug/' "$workflow"
+grep -Fq 'path: ${{ runner.temp }}/auth-operator-e2e-kyverno.*/creator-tracking-kyverno-debug/' "$workflow"
 
 # A composite name must brace the variable when nounset is enabled.
 braced="assert_container_absent \"\${cluster}-control-plane\""
@@ -41,8 +45,8 @@ unbraced="assert_container_absent \"\$cluster-control-plane\""
 grep -Fq "$braced" "$runner"
 if grep -Fq "$unbraced" "$runner"; then exit 1; fi
 
-# Cleanup is authorized only by the fixed marker and cannot adopt caller paths.
-grep -Fq 'readonly marker=/tmp/auth-operator-e2e-kyverno.owner' "$runner"
+# Cleanup is authorized only by an owned state directory and marker.
+grep -Fq 'KYVERNO_E2E_STATE_DIR' "$runner"
 grep -Fq 'KYVERNO_E2E_CLUSTER, KYVERNO_E2E_LOCK, and KYVERNO_E2E_KUBECONFIG are not supported' "$runner"
 grep -Fq 'cleanup-only requires the exact ownership marker' "$runner"
 grep -Fq 'marker_owner=$(stat -c %u' "$runner"
@@ -87,8 +91,7 @@ grep -Fq 'uploads them on failure; standalone invocations retain them for cleanu
 # An empty Kind inventory is a successful preflight state. Exercise the runner
 # with bounded fakes and prove that it reaches Docker readiness instead of
 # silently exiting on the expected failed cluster-name match under `set -e`.
-probe_dir=$(mktemp -d)
-trap 'rm -rf "$probe_dir"' EXIT
+probe_dir=$(mktemp -d -- "$test_root/probe.XXXXXX")
 mkdir "$probe_dir/bin"
 cat >"$probe_dir/bin/kind" <<'EOF'
 #!/usr/bin/env bash
@@ -138,34 +141,34 @@ exec "$@"
 EOF
 chmod 0755 "$probe_dir/bin/kind" "$probe_dir/bin/docker" "$probe_dir/bin/flock" "$probe_dir/bin/stat" "$probe_dir/bin/timeout"
 
-for path in \
-  /tmp/auth-operator-e2e-kyverno.owner \
-  /tmp/auth-operator-e2e-kyverno.kubeconfig \
-  /tmp/auth-operator-e2e-kyverno-run \
-  /tmp/creator-tracking-kyverno-debug; do
-  [[ ! -e "$path" && ! -L "$path" ]]
-done
-set +e
-PATH="$probe_dir/bin:$PATH" KYVERNO_RUNNER_PROBE="$probe_dir/docker-called" "$runner" full
-rc=$?
-set -e
+state_dir="$test_root/state"
+[[ ! -e "$state_dir" && ! -L "$state_dir" ]]
+if PATH="$probe_dir/bin:$PATH" KYVERNO_RUNNER_PROBE="$probe_dir/docker-called" KYVERNO_E2E_STATE_DIR="$state_dir" "$runner" full; then
+  rc=0
+else
+  rc=$?
+fi
 [[ "$rc" -eq 42 ]]
 [[ -f "$probe_dir/docker-called" ]]
-[[ ! -e /tmp/auth-operator-e2e-kyverno.owner && ! -L /tmp/auth-operator-e2e-kyverno.owner ]]
+[[ ! -e "$state_dir" && ! -L "$state_dir" ]]
 
 # An interruption after creating the debug directory but before writing its
 # owner marker leaves an empty, owned, mode-0700 directory. Cleanup-only may
 # remove exactly that recoverable state.
-mkdir -m 700 /tmp/creator-tracking-kyverno-debug
-printf '%s\n' 'auth-operator-creator-tracking-kyverno/v1' >/tmp/auth-operator-e2e-kyverno.owner
-chmod 600 /tmp/auth-operator-e2e-kyverno.owner
-set +e
-PATH="$probe_dir/bin:$PATH" "$runner" cleanup-only >"$probe_dir/cleanup-only.log" 2>&1
-rc=$?
-set -e
+interrupted_state_dir="$test_root/interrupted-state"
+mkdir -m 700 "$interrupted_state_dir"
+: >"$interrupted_state_dir/lock"
+chmod 600 "$interrupted_state_dir/lock"
+mkdir -m 700 "$interrupted_state_dir/creator-tracking-kyverno-debug"
+printf '%s\n' 'auth-operator-creator-tracking-kyverno/v1' >"$interrupted_state_dir/owner"
+chmod 600 "$interrupted_state_dir/owner"
+if PATH="$probe_dir/bin:$PATH" KYVERNO_E2E_STATE_DIR="$interrupted_state_dir" "$runner" cleanup-only; then
+  rc=0
+else
+  rc=$?
+fi
 [[ "$rc" -eq 0 ]]
-[[ ! -e /tmp/creator-tracking-kyverno-debug && ! -L /tmp/creator-tracking-kyverno-debug ]]
-[[ ! -e /tmp/auth-operator-e2e-kyverno.owner && ! -L /tmp/auth-operator-e2e-kyverno.owner ]]
+[[ ! -e "$interrupted_state_dir" && ! -L "$interrupted_state_dir" ]]
 
 # Retained diagnostics keep an exact ownership capability, and cleanup-only
 # consumes it while removing the owned artifacts.

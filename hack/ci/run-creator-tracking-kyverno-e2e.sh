@@ -5,24 +5,54 @@ set -Eeuo pipefail
 umask 077
 
 readonly cluster=auth-operator-e2e-kyverno
-readonly lock=/tmp/auth-operator-e2e-kyverno.lock
-readonly kubeconfig=/tmp/auth-operator-e2e-kyverno.kubeconfig
-readonly marker=/tmp/auth-operator-e2e-kyverno.owner
-readonly run_dir=/tmp/auth-operator-e2e-kyverno-run
-# Failure diagnostics are sanitized readiness/version summaries. GitHub Actions
-# uploads them on failure; standalone invocations retain them for cleanup-only.
-readonly artifact_dir=/tmp/creator-tracking-kyverno-debug
 readonly source_image='auth-operator:creator-tracking-kyverno-source'
 readonly e2e_image='auth-operator:creator-tracking-kyverno-e2e'
 readonly owner='auth-operator-creator-tracking-kyverno/v1'
 
 mode=${1:-full}
 case "$mode" in full|cleanup-only|debug) ;; *) echo "usage: $0 [full|cleanup-only|debug]" >&2; exit 2 ;; esac
+state_parent=${KYVERNO_E2E_STATE_PARENT:-${RUNNER_TEMP:-${TMPDIR:-/tmp}}}
+state_dir=${KYVERNO_E2E_STATE_DIR:-}
+if [[ -z "$state_dir" ]]; then
+  [[ "$mode" == full ]] || {
+    echo 'cleanup-only and debug require KYVERNO_E2E_STATE_DIR' >&2
+    exit 2
+  }
+  [[ -d "$state_parent" && ! -L "$state_parent" ]] || {
+    echo "Kyverno E2E state parent must be an existing non-symlink directory: $state_parent" >&2
+    exit 1
+  }
+  state_dir=$(mktemp -d -- "${state_parent%/}/auth-operator-e2e-kyverno.XXXXXX")
+else
+  [[ ! -L "$state_dir" ]] || {
+    echo "refusing symlink Kyverno E2E state directory: $state_dir" >&2
+    exit 1
+  }
+  if [[ ! -e "$state_dir" ]]; then
+    [[ "$mode" == full ]] || {
+      echo "Kyverno E2E state directory does not exist: $state_dir" >&2
+      exit 1
+    }
+    mkdir -m 700 -- "$state_dir"
+  fi
+  [[ -d "$state_dir" ]] || {
+    echo "Kyverno E2E state path is not a directory: $state_dir" >&2
+    exit 1
+  }
+fi
+readonly state_dir
+readonly lock="$state_dir/lock"
+readonly kubeconfig="$state_dir/kubeconfig"
+readonly marker="$state_dir/owner"
+readonly run_dir="$state_dir/run"
+# Failure diagnostics are sanitized readiness/version summaries. GitHub Actions
+# uploads them on failure; standalone invocations retain them for cleanup-only.
+readonly artifact_dir="$state_dir/creator-tracking-kyverno-debug"
 [[ -z "${KYVERNO_E2E_CLUSTER+x}${KYVERNO_E2E_LOCK+x}${KYVERNO_E2E_KUBECONFIG+x}" ]] || {
   echo 'KYVERNO_E2E_CLUSTER, KYVERNO_E2E_LOCK, and KYVERNO_E2E_KUBECONFIG are not supported' >&2
   exit 2
 }
-for command in flock stat timeout docker kind helm kubectl go grep sed; do
+for command in flock stat timeout docker kind helm kubectl go grep sed mktemp; do
   command -v "$command" >/dev/null || { echo "$command is required" >&2; exit 1; }
 done
 stat_identity() {
@@ -137,6 +167,7 @@ artifact_empty_owned_dir() {
   for entry in "$artifact_dir"/* "$artifact_dir"/.[!.]* "$artifact_dir"/..?*; do
     [[ -e "$entry" || -L "$entry" ]] && return 1
   done
+  return 0
 }
 owned_remove_file() {
   [[ ! -L "$1" ]] || return 1
@@ -186,8 +217,9 @@ cleanup_owned() {
   if ((${#failures[@]})); then printf 'cleanup failures: %s\n' "${failures[*]}" >&2; return 1; fi
   if [[ "$original_status" -eq 0 || ! -e "$artifact_dir" ]]; then
     owned_remove_file "$marker" || { echo 'cleanup failures: remove ownership marker' >&2; return 1; }
+    owned_remove_dir "$state_dir" || { echo 'cleanup failures: remove state directory' >&2; return 1; }
   else
-    echo "ownership marker retained for cleanup-only" >&2
+    echo "ownership marker retained for cleanup-only: $state_dir" >&2
   fi
 }
 
