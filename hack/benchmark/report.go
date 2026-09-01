@@ -79,7 +79,7 @@ func reportMetricState(explicit MetricState, counter Counter) MetricState {
 
 func reportHeaders(throughput string) []string {
 	return []string{
-		"engine", "tier", "mode", "phase", "verb", "concurrency", fieldVariant, fieldStatus,
+		"engine", "tier", "mode", "phase", "verb", fieldConcurrency, fieldVariant, fieldStatus,
 		fieldSamples, fieldSuccesses, fieldErrors, headerErrors429, "p50_us", "p95_us", "p99_us",
 		"max_us", throughput,
 	}
@@ -254,7 +254,7 @@ func stableFloat(v float64) string {
 func csvRows(rows []ReportRow) [][]string {
 	header := append([]string{}, provenanceHeaders...)
 	header = append(header, []string{
-		"engine", "tier", "mode", "phase", "verb", "concurrency", fieldVariant, fieldStatus,
+		"engine", "tier", "mode", "phase", "verb", fieldConcurrency, fieldVariant, fieldStatus,
 		fieldSamples, fieldSuccesses, fieldErrors, headerErrors429, "error", "p50_us", "p95_us",
 		"p99_us", "max_us", "throughput_successes_per_sec", "baseline_p50_us", "delta_ms", "overhead_pct",
 	}...)
