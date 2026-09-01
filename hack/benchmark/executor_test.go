@@ -141,6 +141,38 @@ func TestObjectForUsesCanonicalKinds(t *testing.T) {
 	}
 }
 
+func TestT4DefinitionsUseUniqueDeterministicTargetNames(t *testing.T) {
+	cell := Cell{Engine: engineMap, Tier: "t4", Mode: modeProtect, RunID: "run-1"}
+	for _, kind := range []string{resourceRoleDefinition, resourceBindDefinition} {
+		t.Run(kind, func(t *testing.T) {
+			cell.Kind = kind
+			s, err := specFor(kind)
+			if err != nil {
+				t.Fatal(err)
+			}
+			first := objectFor(cell, "creator-bench-run-1-map-t4-protect-create-00000", "bench", s)
+			second := objectFor(cell, "creator-bench-run-1-map-t4-protect-create-00001", "bench", s)
+			firstTarget, found, err := unstructured.NestedString(first.Object, "spec", "targetName")
+			if err != nil || !found {
+				t.Fatalf("first targetName = %q, found=%t, err=%v", firstTarget, found, err)
+			}
+			secondTarget, found, err := unstructured.NestedString(second.Object, "spec", "targetName")
+			if err != nil || !found {
+				t.Fatalf("second targetName = %q, found=%t, err=%v", secondTarget, found, err)
+			}
+			if firstTarget == secondTarget {
+				t.Fatalf("targetName collision: %q", firstTarget)
+			}
+			if firstTarget != generatedTargetName(first.GetName(), map[string]string{
+				resourceRoleDefinition: "role",
+				resourceBindDefinition: "binding",
+			}[kind]) {
+				t.Fatalf("first targetName = %q, want deterministic name derived from %q", firstTarget, first.GetName())
+			}
+		})
+	}
+}
+
 func TestRBACSubjectAPIGroupSemantics(t *testing.T) {
 	for _, resource := range []string{resourceRoleBinding, resourceClusterRoleBinding} {
 		t.Run(resource, func(t *testing.T) {
