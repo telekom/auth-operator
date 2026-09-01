@@ -92,7 +92,7 @@ jobs:
           fi
           {
             echo '### Creator-tracking benchmark evidence'
-            echo "- Requested mode: ${BENCHMARK_QUICK:-unknown} (quick=true is smoke; quick=false is full)"
+            echo "- Quick mode: ${BENCHMARK_QUICK:-unknown} (quick=true is smoke; quick=false is full)"
             echo "- Phase result files: $result_count"
             echo "- Complete: $complete_count"
             echo "- Failed: $failed_count"
