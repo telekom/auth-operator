@@ -159,6 +159,48 @@ func TestCreateOnlyChurnRemainsAnUpdateWorkload(t *testing.T) {
 	}
 }
 
+func TestEnabledUpdateValidatesUpdateResponseWithoutFollowupGet(t *testing.T) {
+	client := fake.NewSimpleDynamicClient(runtime.NewScheme())
+	s, err := specFor(resourceServiceAccount)
+	if err != nil {
+		t.Fatalf("specFor(%q): %v", resourceServiceAccount, err)
+	}
+	createCell := Cell{
+		Engine: engineMap, Tier: "t1", Mode: modeProtect, Phase: phaseCreate,
+		Kind: resourceServiceAccount, Verb: verbMixed, Variant: variantEnabled,
+		RunID: "update-response",
+	}
+	r := client.Resource(s.gvr).Namespace("bench")
+	name := deterministicName(createCell, 0)
+	if _, err := r.Create(context.Background(), objectFor(createCell, name, "bench", s), metav1.CreateOptions{}); err != nil {
+		t.Fatalf("seed object: %v", err)
+	}
+	gets := 0
+	client.PrependReactor("get", resourceServiceAccounts, func(testingclient.Action) (bool, runtime.Object, error) {
+		gets++
+		return false, nil, nil
+	})
+	client.PrependReactor("update", resourceServiceAccounts, func(action testingclient.Action) (bool, runtime.Object, error) {
+		u := action.(testingclient.UpdateAction).GetObject().(*unstructured.Unstructured).DeepCopy()
+		annotations := u.GetAnnotations()
+		annotations[annotationCreator] = spoofedCreator
+		annotations[annotationGroups] = spoofedGroups
+		u.SetAnnotations(annotations)
+		return true, u, nil
+	})
+	run := runPhaseWithClientsProgressOffset(context.Background(), []dynamic.ResourceInterface{r}, Cell{
+		Engine: engineMap, Tier: "t1", Mode: modeProtect, Phase: phaseChurn,
+		Kind: resourceServiceAccount, Verb: verbMixed, Variant: variantEnabled,
+		RunID: "update-response", Objects: 1,
+	}, 1, 1, []string{defaultEditorIdentity}, "bench", 0, 0, nil)
+	if run.Status != statusComplete || run.Errors != 0 {
+		t.Fatalf("enabled update status = %q, errors = %d, error = %q", run.Status, run.Errors, run.Error)
+	}
+	if gets != 1 {
+		t.Fatalf("enabled update GET count = %d, want one pre-update read", gets)
+	}
+}
+
 func TestSustainedContainsCreatesAndUpdatesForEveryMode(t *testing.T) {
 	for _, mode := range []string{modeCreateOnly, modeProtect, modeContributors} {
 		t.Run(mode, func(t *testing.T) {
