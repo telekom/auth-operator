@@ -49,7 +49,9 @@ spec:
           metadata:
             annotations:
               t-caas.telekom.com/created-by: "{{ request.userInfo.username }}"
-              t-caas.telekom.com/created-by-groups: "{{ join(',', request.userInfo.groups) }}"
+              t-caas.telekom.com/created-by-groups: >-
+                {{ join(',', map(&replace_all(replace_all(@, '%', '%25'), ',', '%2C'),
+                request.userInfo.groups)) }}
     - name: restore-creator
       match:
         any:
