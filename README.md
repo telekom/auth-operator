@@ -14,7 +14,7 @@ A Kubernetes operator for managing dynamic RBAC through Custom Resource Definiti
 - 🛡️ **Drift Protection** — Periodically reconciles to prevent unauthorized manual changes
 - 📜 **Self-Signed TLS** — No cert-manager required; uses [cert-controller](https://github.com/open-policy-agent/cert-controller) for automatic certificate rotation
 - 🚫 **Namespace Deletion Protection** — Platform and opted-in namespaces require an explicit allow-deletion annotation before deletion; system namespaces are never deletable, with no admin bypass (ValidatingAdmissionPolicy + webhook fallback)
-- 🧾 **Creator Tracking** — Optionally records effective creator and contributor identities with Kubernetes MutatingAdmissionPolicy; see the [creator tracking guide](./docs/creator-tracking.md)
+- 🧾 **Creator Tracking** — Optionally records effective creator and contributor identities with Kubernetes MutatingAdmissionPolicy (Kubernetes 1.34+); see the [creator tracking guide](./docs/creator-tracking.md)
 
 ---
 
