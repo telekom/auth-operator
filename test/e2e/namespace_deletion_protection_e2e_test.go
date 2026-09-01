@@ -333,9 +333,14 @@ var _ = Describe("Namespace Deletion Protection", Ordered, Label("helm", "namesp
 			})
 
 			By("Deleting it without the allow-deletion annotation")
-			output, err := attemptNamespaceDelete(nsdpVAPDisabledNS)
-			Expect(err).NotTo(HaveOccurred(),
-				"without VAP and namespace webhook, deletion must not be blocked: %s", output)
+			Eventually(func() error {
+				output, err := attemptNamespaceDelete(nsdpVAPDisabledNS)
+				if err != nil {
+					return fmt.Errorf("namespace deletion is still blocked while admission policy removal propagates: %w (%s)", err, output)
+				}
+				return nil
+			}, shortTimeout, nsdpPollInterval).Should(Succeed(),
+				"without VAP and namespace webhook, deletion must not be blocked")
 
 			By("Waiting for the namespace to be fully removed")
 			Eventually(func() bool {
