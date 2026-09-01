@@ -5,6 +5,7 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -27,6 +28,9 @@ func TestResumeSkipsOnlyMatchingComplete(t *testing.T) {
 	c := CoreCells()[0]
 	m := []byte("m")
 	p := resultPath(d, c)
+	if filepath.Base(p) != "cell-run-map-t1-create-only-enabled-core-1.json" {
+		t.Fatalf("result path = %q, want loader-compatible cell filename", p)
+	}
 	if e := writeResult(p, Result{Cell: c, InputHash: InputHash(c, m), Status: "pending"}); e != nil {
 		t.Fatal(e)
 	}

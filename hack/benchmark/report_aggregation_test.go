@@ -115,6 +115,32 @@ func TestAggregateReportSameCellBaselineAndEscaping(t *testing.T) {
 		t.Fatalf("markdown %s", b.String())
 	}
 }
+
+func TestAggregateReportJoinsExcludedVariantToBaseline(t *testing.T) {
+	common := func(variant string, p50 int64) Result {
+		return Result{
+			Cell:   Cell{Engine: engineMap, Tier: "t1", Mode: modeProtect, Phase: phaseCreate, Verb: verbMixed, Concurrency: 1, Variant: variant},
+			Status: "complete", Samples: 1, P50Micros: p50, RunID: "run-1", InputHash: "input", WorkloadHash: "work", ConfigHash: "cfg", EnvironmentID: "env",
+		}
+	}
+	baseline := common(engineBaseline, 1000)
+	baseline.Cell.Engine = engineBaseline
+	excluded := common(variantExcluded, 1250)
+
+	rows := AggregateReport([]Result{excluded, baseline}, "")
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want 2: %#v", len(rows), rows)
+	}
+	for _, row := range rows {
+		if row.Cell.Variant == variantExcluded {
+			if !row.HasBaseline || row.BaselineP50Micros != baseline.P50Micros {
+				t.Fatalf("excluded row did not join baseline: %#v", row)
+			}
+			return
+		}
+	}
+	t.Fatalf("excluded row missing: %#v", rows)
+}
 func TestAggregateReportStableAndMarginal(t *testing.T) {
 	rs := []Result{
 		{Cell: Cell{Engine: "z", Tier: "b", Mode: "m", Phase: "create", Concurrency: 1, Variant: "enabled"}, Status: "complete", P50Micros: 20},
