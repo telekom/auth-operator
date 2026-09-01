@@ -22,9 +22,13 @@ case "$mode" in full|cleanup-only|debug) ;; *) echo "usage: $0 [full|cleanup-onl
   echo 'KYVERNO_E2E_CLUSTER, KYVERNO_E2E_LOCK, and KYVERNO_E2E_KUBECONFIG are not supported' >&2
   exit 2
 }
-for command in flock readlink stat timeout docker kind helm kubectl go grep sed; do
+for command in flock stat timeout docker kind helm kubectl go grep sed; do
   command -v "$command" >/dev/null || { echo "$command is required" >&2; exit 1; }
 done
+stat_identity() {
+  local path=$1
+  stat -c '%d:%i' "$path" 2>/dev/null || stat -f '%d:%i' "$path" 2>/dev/null
+}
 [[ ! -L "$lock" ]] || { echo "refusing symlink lock $lock" >&2; exit 1; }
 if [[ ! -e "$lock" ]]; then
   if ! (set -C; : >"$lock") 2>/dev/null; then
@@ -49,7 +53,19 @@ fi
   exit 1
 }
 exec 9<>"$lock"
-if [[ "$(readlink -f /proc/$$/fd/9 2>/dev/null || true)" != "$lock" ]]; then
+descriptor_path=''
+for candidate in "/proc/$$/fd/9" "/dev/fd/9"; do
+  if [[ -e "$candidate" || -L "$candidate" ]]; then
+    descriptor_path=$candidate
+    break
+  fi
+done
+lock_identity=$(stat_identity "$lock" 2>/dev/null || true)
+descriptor_identity=''
+if [[ -n "$descriptor_path" ]]; then
+  descriptor_identity=$(stat_identity "$descriptor_path" 2>/dev/null || true)
+fi
+if [[ -z "$lock_identity" || -z "$descriptor_identity" || "$descriptor_identity" != "$lock_identity" ]]; then
   exec 9>&-
   echo "Kyverno E2E lock descriptor points to the wrong file" >&2
   exit 1
