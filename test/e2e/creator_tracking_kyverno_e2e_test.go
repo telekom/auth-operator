@@ -383,7 +383,9 @@ subjects:
 		createNamespace(ctx, reservedUser, kyvernoNamespace, creatorGroup)
 		waitAnnotation(ctx, "namespace", kyvernoNamespace, creatorAnnotation, reservedUser)
 		a := annotations(ctx, "namespace", kyvernoNamespace)
-		Expect(a[creatorGroupsAnnotation]).To(Equal(encodeGroups(identity.Groups)))
+		actualGroups := strings.Split(a[creatorGroupsAnnotation], ",")
+		expectedGroups := strings.Split(encodeGroups(identity.Groups), ",")
+		Expect(creatorSameMembers(actualGroups, expectedGroups)).To(BeTrue())
 		Expect(a[updatedAnnotation]).To(BeEmpty())
 		dryRun := run(ctx, append(impersonated(reservedUser, creatorGroup), "create", "namespace", "creator-tracking-kyverno-dry-run", "--dry-run=server", "-o", "json")...)
 		var dryObject map[string]interface{}
