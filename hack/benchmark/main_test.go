@@ -93,6 +93,23 @@ func TestQuickOptionsHonorRunnerOperationBudget(t *testing.T) {
 	}
 }
 
+func TestExecutionTimeoutIncludesEveryConcurrencyLevel(t *testing.T) {
+	o := options{sustained: 5 * time.Minute, concurrency: []int{8, 32, 64}}
+	if got, want := executionTimeout(o), 45*time.Minute; got != want {
+		t.Fatalf("execution timeout = %s, want %s", got, want)
+	}
+	if got, want := executionTimeout(options{sustained: time.Minute}), 31*time.Minute; got != want {
+		t.Fatalf("single-level execution timeout = %s, want %s", got, want)
+	}
+}
+
+func TestInputHashMismatchErrorIncludesExpectedAndComputedValues(t *testing.T) {
+	err := inputHashMismatchError("expected-hash", "computed-hash")
+	if got, want := err.Error(), `input hash mismatch: expected "expected-hash", computed "computed-hash"`; got != want {
+		t.Fatalf("input hash error = %q, want %q", got, want)
+	}
+}
+
 func TestCellsQuickShape(t *testing.T) {
 	if len(Cells(true)) != 8 {
 		t.Fatal(len(Cells(true)))
