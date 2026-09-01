@@ -9,8 +9,8 @@ readonly lock=/tmp/auth-operator-e2e-kyverno.lock
 readonly kubeconfig=/tmp/auth-operator-e2e-kyverno.kubeconfig
 readonly marker=/tmp/auth-operator-e2e-kyverno.owner
 readonly run_dir=/tmp/auth-operator-e2e-kyverno-run
-# Failure diagnostics are sanitized readiness/version summaries and remain
-# local-only; this runner intentionally does not upload cluster metadata.
+# Failure diagnostics are sanitized readiness/version summaries. GitHub Actions
+# uploads them on failure; standalone invocations retain them for cleanup-only.
 readonly artifact_dir=/tmp/creator-tracking-kyverno-debug
 readonly source_image='auth-operator:creator-tracking-kyverno-source'
 readonly e2e_image='auth-operator:creator-tracking-kyverno-e2e'
