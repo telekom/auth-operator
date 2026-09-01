@@ -9,7 +9,7 @@ creator_runner=hack/run-creator-tracking-e2e.sh
 workflow=.github/workflows/e2e.yml
 bash -n "$runner" "$installer"
 bash -n "$creator_runner"
-grep -Fq 'for command in curl sha256sum helm kubectl timeout' "$installer"
+grep -Fq 'for command in curl sha256sum helm kubectl timeout mktemp chmod awk grep' "$installer"
 grep -Fq 'for command in flock readlink stat timeout docker kind helm kubectl go grep sed' "$runner"
 
 # GNU stat reports an empty regular file as "regular empty file", while BSD

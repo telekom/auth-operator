@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 set -euo pipefail
 
-for command in curl sha256sum helm kubectl timeout; do
+for command in curl sha256sum helm kubectl timeout mktemp chmod awk grep; do
   command -v "$command" >/dev/null || {
     echo "$command is required" >&2
     exit 1
