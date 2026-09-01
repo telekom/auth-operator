@@ -43,6 +43,7 @@ grep -Fq 'marker_owner=$(stat -c %u' "$runner"
 grep -Fq 'marker_mode=$(stat -c %a' "$runner"
 grep -Fq 'marker_owner" == "$(id -u)"' "$runner"
 grep -Fq 'marker_type" == '\''regular file'\''' "$runner"
+grep -Fq 'stat -f %Lp' "$runner"
 grep -Fq 'set -C; printf' "$runner"
 grep -Fq '"$owner" >"$marker"' "$runner"
 
