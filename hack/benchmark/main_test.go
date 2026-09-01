@@ -200,7 +200,7 @@ func TestQuickPlanMatchesRunnerContract(t *testing.T) {
 
 func TestContributorTraceContract(t *testing.T) {
 	r := Result{
-		Cell:  Cell{Engine: engineMap, Tier: "t1", Mode: modeContributors, Phase: phaseChurn, Verb: verbUpdate, Concurrency: 8},
+		Cell:  Cell{Engine: engineMap, Tier: "t1", Mode: modeContributors, Phase: phaseChurn, Kind: resourceServiceAccount, Verb: verbUpdate, Variant: variantEnabled, Concurrency: 8},
 		RunID: fallbackRunID, InputHash: "input", EnvironmentID: "env", Status: "complete", Samples: 1,
 		Trace: []MutationTrace{{Editor: "creator-bench-000", Object: "object", Repeated: true, Deduplicated: true, TamperTested: true, Restored: true}},
 	}
@@ -216,7 +216,7 @@ func TestResultValidationAllowsUnavailableSupportingTelemetry(t *testing.T) {
 	r := Result{
 		Cell: Cell{
 			Engine: engineBaseline, Tier: "t1", Mode: modeProtect, Phase: phaseCreate,
-			Verb: verbMixed, Concurrency: 8,
+			Kind: resourceServiceAccount, Verb: verbMixed, Variant: variantEnabled, Concurrency: 8,
 		},
 		RunID: fallbackRunID, InputHash: "input", EnvironmentID: "env",
 		Status: statusComplete, Samples: 1,
@@ -226,6 +226,32 @@ func TestResultValidationAllowsUnavailableSupportingTelemetry(t *testing.T) {
 	}
 	if err := r.Validate(); err != nil {
 		t.Fatalf("supporting telemetry state must not invalidate latency result: %v", err)
+	}
+}
+
+func TestResultValidationRequiresKindAndVariant(t *testing.T) {
+	valid := Result{
+		Cell: Cell{
+			Engine: engineBaseline, Tier: "t1", Mode: modeProtect, Phase: phaseCreate,
+			Kind: resourceServiceAccount, Verb: verbMixed, Variant: variantEnabled, Concurrency: 8,
+		},
+		RunID: fallbackRunID, InputHash: "input", EnvironmentID: "env",
+		Status: statusComplete, Samples: 1,
+	}
+	for _, tc := range []struct {
+		name string
+		edit func(*Result)
+	}{
+		{name: "kind", edit: func(r *Result) { r.Cell.Kind = "" }},
+		{name: "variant", edit: func(r *Result) { r.Cell.Variant = "" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			invalid := valid
+			tc.edit(&invalid)
+			if err := invalid.Validate(); err == nil {
+				t.Fatalf("result without %s was accepted", tc.name)
+			}
+		})
 	}
 }
 

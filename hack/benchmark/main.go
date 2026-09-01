@@ -79,7 +79,8 @@ type MutationTrace struct {
 }
 
 func (r Result) Validate() error {
-	if r.Cell.Engine == "" || r.Cell.Tier == "" || r.Cell.Mode == "" || r.Cell.Phase == "" || r.Cell.Verb == "" || r.Cell.Concurrency < 1 {
+	if r.Cell.Engine == "" || r.Cell.Tier == "" || r.Cell.Mode == "" || r.Cell.Phase == "" ||
+		r.Cell.Kind == "" || r.Cell.Verb == "" || r.Cell.Variant == "" || r.Cell.Concurrency < 1 {
 		return fmt.Errorf("cell identity is incomplete")
 	}
 	if r.RunID == "" || r.InputHash == "" || r.EnvironmentID == "" {
