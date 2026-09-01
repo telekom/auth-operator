@@ -295,7 +295,9 @@ var _ = Describe("Creator Tracking Kyverno", Label("creator-tracking-kyverno"), 
 		args := append([]string{"kubectl", "delete", resource}, names...)
 		args = append(args, "--ignore-not-found=true")
 		output, err := utils.Run(utils.CommandContext(ctx, args[0], args[1:]...)) // #nosec G204
-		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "delete %s failed: %s", resource, output)
+		if err != nil && !creatorIsAbsentError(output, err) {
+			ExpectWithOffset(1, err).NotTo(HaveOccurred(), "delete %s failed: %s", resource, output)
+		}
 		waitAbsent(ctx, resource, names...)
 	}
 	waitAnnotation := func(ctx context.Context, resource, name, key, expected string, namespace ...string) {
