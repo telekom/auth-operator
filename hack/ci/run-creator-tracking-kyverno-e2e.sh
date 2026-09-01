@@ -127,6 +127,17 @@ artifact_owned() {
   [[ ("$marker_type" == 'regular file' || "$marker_type" == 'regular empty file' || "$marker_type" == 'Regular File') && "$marker_owner" == "$(id -u)" && "$marker_mode" == 600 ]] || return 1
   [[ "$(<"$artifact_dir/.owner")" == "$owner" ]]
 }
+artifact_empty_owned_dir() {
+  [[ -d "$artifact_dir" && ! -L "$artifact_dir" ]] || return 1
+  local dir_type dir_owner dir_mode entry
+  dir_type=$(stat -c %F "$artifact_dir" 2>/dev/null || stat -f %HT "$artifact_dir" 2>/dev/null || true)
+  dir_owner=$(stat -c %u "$artifact_dir" 2>/dev/null || stat -f %u "$artifact_dir" 2>/dev/null || true)
+  dir_mode=$(stat -c %a "$artifact_dir" 2>/dev/null || stat -f %Lp "$artifact_dir" 2>/dev/null || true)
+  [[ ("$dir_type" == directory || "$dir_type" == Directory) && "$dir_owner" == "$(id -u)" && "$dir_mode" == 700 ]] || return 1
+  for entry in "$artifact_dir"/* "$artifact_dir"/.[!.]* "$artifact_dir"/..?*; do
+    [[ -e "$entry" || -L "$entry" ]] && return 1
+  done
+}
 owned_remove_file() {
   [[ ! -L "$1" ]] || return 1
   if [[ -e "$1" ]]; then rm -f -- "$1" || return 1; fi
@@ -153,7 +164,11 @@ cleanup_owned() {
   done
   if [[ -e "$artifact_dir" || -L "$artifact_dir" ]]; then
     if ! artifact_owned; then
-      failures+=("debug artifact ownership is invalid")
+      if artifact_empty_owned_dir; then
+        owned_remove_dir "$artifact_dir" || failures+=("remove interrupted debug artifact directory")
+      else
+        failures+=("debug artifact ownership is invalid")
+      fi
     elif [[ "$original_status" -eq 0 ]]; then
       owned_remove_dir "$artifact_dir" || failures+=("remove debug artifacts")
     else
