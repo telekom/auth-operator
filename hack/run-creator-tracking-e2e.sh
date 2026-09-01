@@ -38,7 +38,7 @@ if [[ -n ${E2E_CREATOR_TRACKING_WEBHOOK_IMG:-} && ${E2E_CREATOR_TRACKING_WEBHOOK
 	exit 2
 fi
 
-for command in docker flock go helm kind kubectl readlink stat timeout; do
+for command in docker flock go helm kind kubectl readlink stat timeout grep; do
 	if ! command -v "$command" >/dev/null 2>&1; then
 		echo "$command is required" >&2
 		exit 1
