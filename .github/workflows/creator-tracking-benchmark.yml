@@ -6,13 +6,12 @@ on:
   workflow_dispatch:
     inputs:
       benchmark_mode:
-        description: Benchmark scope to execute (full is the release matrix)
+        description: Run the bounded CI smoke; the full matrix is resumable local work
         required: true
         type: choice
         options:
-          - full
           - quick
-        default: full
+        default: quick
   pull_request:
     paths:
       - .github/workflows/creator-tracking-benchmark.yml
@@ -55,11 +54,11 @@ jobs:
           helm-version: ${{ env.HELM_VERSION }}
       - name: Run benchmark in an isolated owned cluster
         env:
-          # Pull requests run the bounded smoke by default. Adding the
-          # creator-tracking-full-benchmark label opts this draft PR into the
-          # exact full matrix without requiring the workflow to exist on the
-          # default branch for workflow_dispatch discovery.
-          BENCHMARK_QUICK: ${{ (github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'creator-tracking-full-benchmark')) || (github.event_name == 'workflow_dispatch' && github.event.inputs.benchmark_mode == 'quick') }}
+          # GitHub-hosted jobs have a six-hour maximum, while the full
+          # 84-cell/1008-result matrix is intentionally resumable and can
+          # exceed that limit. CI therefore runs only the bounded smoke; use
+          # the documented local runner for a full release-matrix campaign.
+          BENCHMARK_QUICK: true
         run: |
           set +e
           make benchmark-creator-tracking 2>&1 | tee /tmp/creator-tracking-benchmark.log
@@ -72,7 +71,7 @@ jobs:
       - name: Summarize benchmark evidence
         if: always()
         env:
-          BENCHMARK_QUICK: ${{ (github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'creator-tracking-full-benchmark')) || (github.event_name == 'workflow_dispatch' && github.event.inputs.benchmark_mode == 'quick') }}
+          BENCHMARK_QUICK: true
         run: |
           result_root=benchmarks/data
           result_count=0
