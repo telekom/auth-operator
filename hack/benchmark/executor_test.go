@@ -34,6 +34,23 @@ func TestCleanupCellUsesOwnedLabel(t *testing.T) {
 	foreign.SetName("foreign")
 	foreign.SetLabels(map[string]string{benchmarkLabelKey: "other"})
 	cl := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{s.gvr: "ServiceAccountList"})
+	// The dynamic fake's default tracker accepts DeleteCollection but does not
+	// remove objects. Emulate the API server's collection semantics so this
+	// regression test exercises the production polling path without hanging.
+	cl.PrependReactor("delete-collection", s.gvr.Resource, func(action k8stesting.Action) (bool, runtime.Object, error) {
+		list, err := cl.Resource(s.gvr).Namespace("bench").List(context.Background(), metav1.ListOptions{})
+		if err != nil {
+			return true, nil, err
+		}
+		for _, item := range list.Items {
+			if item.GetLabels()[benchmarkLabelKey] == benchmarkLabelValue {
+				if err := cl.Resource(s.gvr).Namespace("bench").Delete(context.Background(), item.GetName(), metav1.DeleteOptions{}); err != nil {
+					return true, nil, err
+				}
+			}
+		}
+		return true, nil, nil
+	})
 	_, _ = cl.Resource(s.gvr).Namespace("bench").Create(context.Background(), u, metav1.CreateOptions{})
 	_, _ = cl.Resource(s.gvr).Namespace("bench").Create(context.Background(), foreign, metav1.CreateOptions{})
 	if e := cleanupCell(context.Background(), cl, s, "bench"); e != nil {
