@@ -50,7 +50,7 @@ func IsolationResource(tier string) (string, error) {
 		return "", fmt.Errorf("not an isolation tier")
 	}
 	switch k := tier[4:]; k {
-	case resourceNamespaces, resourceServiceAccount + "s", resourceSecret + "s", isolationRBACGroup, isolationCRDGroup:
+	case resourceNamespaces, resourceServiceAccounts, resourceSecrets, isolationRBACGroup, isolationCRDGroup:
 		return k, nil
 	default:
 		return "", fmt.Errorf("unsupported isolation tier %q", tier)
@@ -110,8 +110,8 @@ func validBenchmarkMode(mode string) bool {
 func isolationTiers() []string {
 	return []string{
 		"iso-" + resourceNamespaces,
-		"iso-" + resourceServiceAccount + "s",
-		"iso-" + resourceSecret + "s",
+		"iso-" + resourceServiceAccounts,
+		"iso-" + resourceSecrets,
 		"iso-" + isolationRBACGroup,
 		"iso-" + isolationCRDGroup,
 	}
