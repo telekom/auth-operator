@@ -85,10 +85,10 @@ Tests are organized using Ginkgo labels for selective execution:
 Before running e2e tests, ensure you have:
 
 - **Docker**: Running and accessible
-- **Go**: 1.25 or later
+- **Go**: 1.26.6 or later
 - **kubectl**: Compatible with Kubernetes 1.28+
-- **Kind**: v0.31.0 or later
-- **Helm**: v3.17.0 or later
+- **Kind**: v0.32.0 or later
+- **Helm**: v4.2.3 or later
 - **kustomize**: v5.0.0 or later (optional, can be installed via Make)
 
 The creator-tracking full targets run on Linux, including an OrbStack Linux
