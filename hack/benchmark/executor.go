@@ -426,10 +426,10 @@ func objectFor(cell Cell, name, namespace string, s resourceSpec) *unstructured.
 		u.Object["roleRef"] = map[string]interface{}{apiGroupField: rbacv1.GroupName, kindField: kindClusterRole, nameField: dependencyName(cell)}
 		u.Object["subjects"] = []interface{}{subjectFor(kindServiceAccount, dependencyName(cell), namespace)}
 	case resourceRoleDefinition:
-		u.Object["spec"] = map[string]interface{}{"targetRole": kindClusterRole, "targetName": "creator-bench-generated-role", "scopeNamespaced": false}
+		u.Object["spec"] = map[string]interface{}{"targetRole": kindClusterRole, "targetName": generatedTargetName(name, "role"), "scopeNamespaced": false}
 	case resourceBindDefinition:
 		u.Object["spec"] = map[string]interface{}{
-			"targetName": "creator-bench-generated-binding",
+			"targetName": generatedTargetName(name, "binding"),
 			"subjects":   []interface{}{subjectFor(kindServiceAccount, dependencyName(cell), namespace)},
 			"clusterRoleBindings": map[string]interface{}{
 				"clusterRoleRefs": []interface{}{dependencyName(cell)},
@@ -438,6 +438,15 @@ func objectFor(cell Cell, name, namespace string, s resourceSpec) *unstructured.
 	}
 	return u
 }
+
+// generatedTargetName keeps definition target names unique while retaining a
+// stable relationship with the deterministic benchmark object name. The
+// target kind suffix prevents the generated role and binding names from
+// colliding if they are used by different resource types.
+func generatedTargetName(name, kind string) string {
+	return sanitizeName(name + "-" + kind)
+}
+
 func cellKey(cell Cell) string {
 	return sanitizeName(cell.Engine + "-" + cell.Tier + "-" + cell.Mode + "-" + cell.Variant)
 }
