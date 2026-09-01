@@ -17,6 +17,7 @@ const (
 	spoofedGroups               = "creator-bench-spoofed-group"
 	benchmarkLabelValue         = "creator-tracking"
 	benchmarkImpersonationGroup = "creator-tracking-benchmark"
+	metricTypeMutating          = "mutating"
 	booleanTrue                 = "true"
 	fallbackRunID               = "run"
 	kindField                   = "kind"
