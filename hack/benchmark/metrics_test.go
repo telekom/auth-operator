@@ -74,11 +74,11 @@ func TestParseHistogramResponsePropagatesHTTPState(t *testing.T) {
 
 func TestMatchingSampleAggregatesMatchingSeries(t *testing.T) {
 	samples := []MetricSample{
-		{Labels: map[string]string{"type": metricTypeMutating, "operation": "create"}, Value: 2},
-		{Labels: map[string]string{"type": metricTypeMutating, "operation": "update"}, Value: 3},
-		{Labels: map[string]string{"type": "validating", "operation": "create"}, Value: 11},
+		{Labels: map[string]string{typeField: metricTypeMutating, "operation": "create"}, Value: 2},
+		{Labels: map[string]string{typeField: metricTypeMutating, "operation": "update"}, Value: 3},
+		{Labels: map[string]string{typeField: "validating", "operation": "create"}, Value: 11},
 	}
-	got, ok := matchingSample(samples, map[string]string{"type": metricTypeMutating})
+	got, ok := matchingSample(samples, map[string]string{typeField: metricTypeMutating})
 	if !ok || got.Value != 5 {
 		t.Fatalf("matching sample = %#v, ok=%v, want aggregate value 5", got, ok)
 	}

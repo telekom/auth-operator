@@ -405,7 +405,7 @@ func objectFor(cell Cell, name, namespace string, s resourceSpec) *unstructured.
 	}
 	switch cell.Kind {
 	case resourceSecret:
-		u.Object["type"] = "Opaque"
+		u.Object[typeField] = "Opaque"
 		u.Object["stringData"] = map[string]interface{}{"benchmark": booleanTrue}
 	case resourceRole, resourceClusterRole:
 		// Keep the generated role within the benchmark runner group's existing
@@ -770,7 +770,7 @@ func executeBenchmark(ctx context.Context, base *rest.Config, cell Cell, o optio
 				run.MetricAfter = ParseMetricResponse(after.StatusCode, after.Body, APIServerAdmissionDuration+"_count")
 				run.MetricDelta = metricDeltaCounter(before, after, APIServerAdmissionDuration+"_count")
 				run.MetricDeltaState = run.MetricDelta.State
-				labels := map[string]string{"type": metricTypeMutating}
+				labels := map[string]string{typeField: metricTypeMutating}
 				run.WebhookBefore = ParseHistogramResponse(before, WebhookAdmissionDuration+"_sum", WebhookAdmissionDuration+"_count", labels)
 				run.WebhookAfter = ParseHistogramResponse(after, WebhookAdmissionDuration+"_sum", WebhookAdmissionDuration+"_count", labels)
 				run.WebhookDelta = histogramResponseDelta(before, after, WebhookAdmissionDuration+"_sum", WebhookAdmissionDuration+"_count", labels)
