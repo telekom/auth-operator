@@ -33,6 +33,7 @@ const (
 	engineKyvernoMAP     = "kyverno-map"
 	engineKyvernoWebhook = "kyverno-webhook"
 	engineMap            = "map"
+	kindCommand          = "kind"
 	kyvernoCommand       = "kyverno"
 
 	modeContributors     = "contributors"
