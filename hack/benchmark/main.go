@@ -386,7 +386,27 @@ func writePlan(dir string, cells []Cell) error {
 		return fmt.Errorf("marshal plan: %w", e)
 	}
 	b = append(b, '\n')
-	return os.WriteFile(filepath.Join(dir, "plan.json"), b, 0o600)
+	t, e := os.CreateTemp(dir, ".plan-*")
+	if e != nil {
+		return fmt.Errorf("create plan: %w", e)
+	}
+	n := t.Name()
+	defer func() { _ = os.Remove(n) }()
+	if _, e = t.Write(b); e != nil {
+		_ = t.Close()
+		return fmt.Errorf("write plan: %w", e)
+	}
+	if e = t.Chmod(0o600); e != nil {
+		_ = t.Close()
+		return fmt.Errorf("protect plan: %w", e)
+	}
+	if e = t.Close(); e != nil {
+		return fmt.Errorf("close plan: %w", e)
+	}
+	if e = os.Rename(n, filepath.Join(dir, "plan.json")); e != nil {
+		return fmt.Errorf("publish plan: %w", e)
+	}
+	return nil
 }
 func sortedResults(in []Result) []Result {
 	o := append([]Result(nil), in...)
