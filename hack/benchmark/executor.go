@@ -146,9 +146,9 @@ func comparisonConfigHash(o options) string {
 		Tier, Mode, Kind, Out, Kubeconfig, RunID string
 		Ops, Churn, Identities, Warmup           int
 		Concurrency                              []int
-		Excluded, Quick, Resume, Report          bool
+		Excluded, Quick                          bool
 		Sustained                                time.Duration
-	}{o.tier, o.mode, o.kind, o.out, o.kubeconfig, o.runID, o.ops, o.churn, o.identities, o.warmup, o.concurrency, o.excluded, o.quick, o.resume, o.report, o.sustained}))
+	}{o.tier, o.mode, o.kind, o.out, o.kubeconfig, o.runID, o.ops, o.churn, o.identities, o.warmup, o.concurrency, o.excluded, o.quick, o.sustained}))
 }
 
 func resumeStartOffset() int {
