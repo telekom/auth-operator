@@ -308,6 +308,8 @@ func unquoteLabel(s string) string {
 	return s
 }
 func matchingSample(samples []MetricSample, labels map[string]string) (MetricSample, bool) {
+	var matched MetricSample
+	found := false
 	for _, sample := range samples {
 		ok := true
 		for k, v := range labels {
@@ -317,10 +319,14 @@ func matchingSample(samples []MetricSample, labels map[string]string) (MetricSam
 			}
 		}
 		if ok {
-			return sample, true
+			if !found {
+				matched.Labels = sample.Labels
+				found = true
+			}
+			matched.Value += sample.Value
 		}
 	}
-	return MetricSample{}, false
+	return matched, found
 }
 
 func matchingMetricSample(text, name string, labels map[string]string) (MetricSample, bool, error) {
