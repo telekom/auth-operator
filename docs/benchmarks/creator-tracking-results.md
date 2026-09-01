@@ -3,8 +3,8 @@
 ## Status: pending
 
 No authorized runtime benchmark result is committed yet. The quick benchmark
-is a smoke check and is not release evidence. Do not interpret the absence of a
-row as zero overhead, and do not use this document to claim a default-on
+is a smoke check and is not release evidence. Missing rows are not zero
+overhead, and this document must not be used to claim a default-on
 recommendation.
 
 The reproducible workload and lifecycle are defined in the [benchmark
