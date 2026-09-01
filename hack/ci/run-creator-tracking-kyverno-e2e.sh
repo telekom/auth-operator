@@ -140,11 +140,6 @@ cleanup_owned() {
       echo "owned debug artifacts retained at $artifact_dir; run cleanup-only before retrying" >&2
     fi
   fi
-  if [[ "$original_status" -eq 0 || ! -e "$artifact_dir" ]]; then
-    owned_remove_file "$marker" || failures+=("remove ownership marker")
-  else
-    echo "ownership marker retained for cleanup-only" >&2
-  fi
   set +e; output=$(kind get clusters 2>&1); rc=$?; set -e
   if ((rc != 0)); then failures+=("verify Kind cleanup: $output"); elif grep -Fxq "$cluster" <<<"$output"; then failures+=("Kind cluster remains"); fi
   for image in "$e2e_image" "$source_image"; do
@@ -154,6 +149,11 @@ cleanup_owned() {
   [[ ! -e "$kubeconfig" && ! -L "$kubeconfig" ]] || failures+=("kubeconfig remains")
   [[ ! -e "$run_dir" && ! -L "$run_dir" ]] || failures+=("run directory remains")
   if ((${#failures[@]})); then printf 'cleanup failures: %s\n' "${failures[*]}" >&2; return 1; fi
+  if [[ "$original_status" -eq 0 || ! -e "$artifact_dir" ]]; then
+    owned_remove_file "$marker" || { echo 'cleanup failures: remove ownership marker' >&2; return 1; }
+  else
+    echo "ownership marker retained for cleanup-only" >&2
+  fi
 }
 
 prepare_debug_dir() {
