@@ -856,6 +856,19 @@ func requireHelm(t *testing.T) {
 	if _, err := exec.LookPath("helm"); err != nil {
 		t.Skipf("helm not installed: %v", err)
 	}
+	// The creator-tracking render assertions rely on Helm 4's gated
+	// --show-only behavior. Skip a locally installed older major so a Helm 3
+	// binary cannot turn an otherwise valid chart test into a misleading
+	// failure; CI installs the pinned Helm 4 version from versions.env.
+	cmd := exec.CommandContext(t.Context(), "helm", "version", "--template", "{{.Version}}") // #nosec G204 -- fixed test command
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Skipf("cannot determine Helm version: %v\n%s", err, output)
+	}
+	version := strings.TrimSpace(string(output))
+	if !strings.HasPrefix(version, "v4.") && !strings.HasPrefix(version, "4.") {
+		t.Skipf("Helm 4 is required for creator-tracking render tests, found %q", version)
+	}
 }
 
 func writeTestFile(t *testing.T, path, content string) {
