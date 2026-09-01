@@ -20,6 +20,7 @@ func TestLoadResultsAndReports(t *testing.T) {
 			Mode:        "protect",
 			Phase:       "create",
 			Verb:        "create",
+			Kind:        resourceServiceAccount,
 			Variant:     "enabled",
 			Concurrency: 8,
 		},

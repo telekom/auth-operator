@@ -72,9 +72,9 @@ func IsolationKind(tier string) (string, error) {
 		return resourceServiceAccount, nil
 	case resourceSecrets:
 		return resourceSecret, nil
-	case "rbac-group":
+	case isolationRBACGroup:
 		return resourceRole, nil
-	case "crd-group":
+	case isolationCRDGroup:
 		return resourceRoleDefinition, nil
 	default:
 		return "", fmt.Errorf("unsupported isolation resource %q", resource)
@@ -112,7 +112,7 @@ func isolationTiers() []string {
 		"iso-" + resourceNamespaces,
 		"iso-" + resourceServiceAccount + "s",
 		"iso-" + resourceSecret + "s",
-		"iso-rbac-group",
-		"iso-crd-group",
+		"iso-" + isolationRBACGroup,
+		"iso-" + isolationCRDGroup,
 	}
 }
