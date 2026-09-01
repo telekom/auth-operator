@@ -326,10 +326,12 @@ alternatives. The [Helm chart README](../chart/auth-operator/README.md) lists
 the available values.
 
 The native `MutatingAdmissionPolicy` path requires Kubernetes 1.34 or later.
-Kubernetes 1.34 and 1.35 require the beta API and its feature gate; Kubernetes
-1.36 provides the stable API. On older Kubernetes versions, use the documented
-[Kyverno alternatives](kyverno-creator-tracking.md), which use the webhook
-path and have reduced behavior compared with native policies.
+Kubernetes 1.34 and 1.35 require the beta API, the API-server feature gate
+`MutatingAdmissionPolicy=true`, and runtime config
+`admissionregistration.k8s.io/v1beta1=true`; Kubernetes 1.36 provides the
+stable API. On older Kubernetes versions, use the documented [Kyverno
+alternatives](kyverno-creator-tracking.md), which use the webhook path and have
+reduced behavior compared with native policies.
 
 Creator tracking provides best-effort operational context. It does not prove the
 original caller when impersonation is used, and `failurePolicy: Ignore` plus

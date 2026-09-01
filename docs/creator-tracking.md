@@ -85,10 +85,10 @@ the cluster serves.
 
 Kubernetes 1.36 serves the stable `MutatingAdmissionPolicy` resource through
 the `admissionregistration.k8s.io/v1` API. Kubernetes 1.34 and 1.35 can serve
-`v1beta1` when `MutatingAdmissionPolicy=true` and
-`admissionregistration.k8s.io/v1beta1=true` are enabled. The chart's `auto`
-mode prefers v1 and falls back to v1beta1 when that API is served. It does not
-enable an API-server feature gate.
+`v1beta1` when the API-server feature gate `MutatingAdmissionPolicy=true` and
+runtime config `admissionregistration.k8s.io/v1beta1=true` are enabled. The
+chart's `auto` mode prefers v1 and falls back to v1beta1 when that API is
+served. It does not enable an API-server feature gate or runtime config.
 
 The v1 and v1beta1 endpoints expose views of the same persisted resources.
 During an API-version migration, keep the existing policy objects and update
