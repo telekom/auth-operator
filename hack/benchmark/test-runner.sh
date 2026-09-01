@@ -7,7 +7,11 @@ set -Eeuo pipefail
 # Helm, a cluster, or network access; live lifecycle is exercised separately.
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 runner="$root/hack/benchmark/run.sh"
+benchmark_workflow="$root/.github/workflows/creator-tracking-benchmark.yml"
 test_tmp_root=$(cd -P -- "${TMPDIR:-/tmp}" && pwd -P)
+grep -Fq 'description: Run the bounded CI smoke; the full matrix is resumable local work' "$benchmark_workflow"
+grep -Fq 'BENCHMARK_QUICK: true' "$benchmark_workflow"
+! grep -Fq 'creator-tracking-full-benchmark' "$benchmark_workflow"
 grep -Fq "flock -n 9" "$runner"
 grep -Fq 'lock_type=$(stat' "$runner"
 grep -Fq 'lock_owner=$(stat' "$runner"
