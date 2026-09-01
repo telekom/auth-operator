@@ -195,6 +195,14 @@ func TestRBACSubjectAPIGroupSemantics(t *testing.T) {
 
 func TestMetricDeltaCounterPreservesTelemetryState(t *testing.T) {
 	metricName := "benchmark_counter"
+	valid := metricDeltaCounter(
+		MetricsSnapshot{StatusCode: http.StatusOK, Body: metricName + " 4\n"},
+		MetricsSnapshot{StatusCode: http.StatusOK, Body: metricName + " 7\n"},
+		metricName,
+	)
+	if valid.State != MetricAvailable || valid.Value != 3 {
+		t.Fatalf("status-only success delta = %#v, want available value 3", valid)
+	}
 	for _, test := range []struct {
 		name  string
 		state MetricState
