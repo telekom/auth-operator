@@ -540,6 +540,24 @@ func validateOptions(o options) error {
 	}
 	return nil
 }
+
+// executionTimeout covers one sustained phase for every configured
+// concurrency level, plus the fixed lifecycle allowance for setup, warmup,
+// churn, cleanup, and API-server settling. Concurrency levels are executed
+// serially within a cell, so budgeting only one sustained duration can cancel
+// a valid multi-level run prematurely.
+func executionTimeout(o options) time.Duration {
+	levels := len(o.concurrency)
+	if levels < 1 {
+		levels = 1
+	}
+	return time.Duration(levels)*o.sustained + 30*time.Minute
+}
+
+func inputHashMismatchError(expected, computed string) error {
+	return fmt.Errorf("input hash mismatch: expected %q, computed %q", expected, computed)
+}
+
 func main() {
 	os.Exit(runMain(os.Args[1:]))
 }
@@ -590,12 +608,15 @@ func runMain(args []string) int {
 		fmt.Fprintln(os.Stderr, e)
 		return 1
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), o.sustained+30*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), executionTimeout(o))
 	c := executionCell(o)
-	if o.inputHash != "" && o.inputHash != cellInputHash(c) {
-		fmt.Fprintln(os.Stderr, "input hash mismatch")
-		cancel()
-		return 2
+	if o.inputHash != "" {
+		computedInputHash := cellInputHash(c)
+		if o.inputHash != computedInputHash {
+			fmt.Fprintln(os.Stderr, inputHashMismatchError(o.inputHash, computedInputHash))
+			cancel()
+			return 2
+		}
 	}
 	if e = executeBenchmark(ctx, base, c, o, filepath.Clean(o.out)); e != nil {
 		fmt.Fprintln(os.Stderr, e)
