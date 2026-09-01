@@ -102,6 +102,7 @@ const (
 	fieldVariant            = "variant"
 
 	fieldCPUs              = "cpus"
+	fieldConcurrency       = "concurrency"
 	fieldErrors            = "errors"
 	fieldHostCPUModel      = "host_cpu_model"
 	fieldHostMemory        = "host_memory"
