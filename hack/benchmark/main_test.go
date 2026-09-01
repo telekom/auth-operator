@@ -63,6 +63,23 @@ func TestParseOptionsRejectsTrailingConcurrencyText(t *testing.T) {
 	}
 }
 
+func TestParseOptionsRejectsDuplicateConcurrency(t *testing.T) {
+	_, err := parseOptions([]string{"-concurrency", "8,8", "-kubeconfig", "duplicate-concurrency-kubeconfig"})
+	if err == nil || !strings.Contains(err.Error(), "duplicate concurrency 8") {
+		t.Fatalf("parseOptions duplicate concurrency error = %v", err)
+	}
+}
+
+func TestParseOptionsSortsConcurrency(t *testing.T) {
+	o, err := parseOptions([]string{"-concurrency", "64,8,32", "-kubeconfig", "unsorted-concurrency-kubeconfig"})
+	if err != nil {
+		t.Fatalf("parseOptions() error = %v", err)
+	}
+	if !reflect.DeepEqual(o.concurrency, []int{8, 32, 64}) {
+		t.Fatalf("sorted concurrency = %#v", o.concurrency)
+	}
+}
+
 func TestQuickOptionsHonorRunnerOperationBudget(t *testing.T) {
 	o, err := parseOptions([]string{"-quick", "-kubeconfig", "quick-kubeconfig"})
 	if err != nil {
