@@ -76,6 +76,13 @@ grep -Fq 'mkdir -- "$artifact_dir"' "$runner"
 grep -Fq '[[ -d "$archive_root" && ! -L "$archive_root" ]]' "$installer"
 grep -Fq 'mktemp -d -- "${archive_root%/}/auth-operator-kyverno.XXXXXX"' "$installer"
 ! grep -Fq 'mkdir -p "$archive_dir"' "$installer"
+grep -Fq 'trap cleanup_archive EXIT' "$installer"
+grep -Fq 'rm -rf -- "$archive_dir"' "$installer"
+
+# Failure diagnostics are uploaded by the GitHub Actions job, while standalone
+# runner invocations retain them for an explicit cleanup-only retry.
+grep -Fq 'uploads them on failure; standalone invocations retain them for cleanup-only' "$runner"
+! grep -Fq 'local-only; this runner intentionally does not upload' "$runner"
 
 # An empty Kind inventory is a successful preflight state. Exercise the runner
 # with bounded fakes and prove that it reaches Docker readiness instead of
