@@ -16,6 +16,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/dynamic"
 )
 
@@ -234,6 +235,7 @@ func runPhaseWithClientsProgressOffset(
 				obj := objectFor(cell, name, namespace, s)
 				var err error
 				var trace *MutationTrace
+				var updated *unstructured.Unstructured
 				if verb == verbUpdate {
 					old, getErr := r.Get(ctx, name, metav1.GetOptions{})
 					if getErr != nil {
@@ -252,23 +254,23 @@ func runPhaseWithClientsProgressOffset(
 							requestAnnotations[annotationCreator] = spoofedCreator + "-tampered"
 							requestAnnotations[annotationGroups] = spoofedGroups + "-tampered"
 							request.SetAnnotations(requestAnnotations)
-							_, err = r.Update(ctx, request, metav1.UpdateOptions{})
+							updated, err = r.Update(ctx, request, metav1.UpdateOptions{})
 						case modeContributors:
 							// One measured UPDATE per operation. Rotating the
 							// impersonated client by round exercises both append and
 							// deduplication without hiding extra requests in latency.
-							_, err = r.Update(ctx, request, metav1.UpdateOptions{})
+							updated, err = r.Update(ctx, request, metav1.UpdateOptions{})
 						case modeCreateOnly:
-							_, err = r.Update(ctx, request, metav1.UpdateOptions{})
+							updated, err = r.Update(ctx, request, metav1.UpdateOptions{})
 						default:
-							_, err = r.Update(ctx, request, metav1.UpdateOptions{})
+							updated, err = r.Update(ctx, request, metav1.UpdateOptions{})
 						}
 						latency := time.Since(st).Microseconds()
-						if err == nil && enabledTrackingEngine(cell.Engine) {
-							observed, observeErr := r.Get(ctx, name, metav1.GetOptions{})
-							if observeErr != nil {
-								err = fmt.Errorf("verify tracking annotations: %w", observeErr)
+						if err == nil && enabledTrackingEngine(cell.Engine) && (mode == modeProtect || mode == modeContributors) {
+							if updated == nil {
+								err = fmt.Errorf("verify tracking annotations: update returned no object")
 							} else {
+								observed := updated
 								switch mode {
 								case modeProtect:
 									restored := trackingAnnotationsEqual(old.GetAnnotations(), observed.GetAnnotations())
