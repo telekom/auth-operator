@@ -64,3 +64,15 @@ func TestParseHistogramResponsePropagatesHTTPState(t *testing.T) {
 		}
 	}
 }
+
+func TestMatchingSampleAggregatesMatchingSeries(t *testing.T) {
+	samples := []MetricSample{
+		{Labels: map[string]string{"type": "mutating", "operation": "create"}, Value: 2},
+		{Labels: map[string]string{"type": "mutating", "operation": "update"}, Value: 3},
+		{Labels: map[string]string{"type": "validating", "operation": "create"}, Value: 11},
+	}
+	got, ok := matchingSample(samples, map[string]string{"type": "mutating"})
+	if !ok || got.Value != 5 {
+		t.Fatalf("matching sample = %#v, ok=%v, want aggregate value 5", got, ok)
+	}
+}
