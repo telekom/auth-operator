@@ -20,8 +20,13 @@ MutatingAdmissionPolicy controller feature:
 
 ```bash
 source versions.env
+export KUBECONFIG=/path/to/the/disposable-kind/kubeconfig
 ./hack/ci/install-kyverno.sh
 ```
+
+The installer requires `KUBECONFIG` to point to an existing, non-symlink
+kubeconfig for the disposable Kind cluster; it will not use an ambient
+kubectl context.
 
 After applying the CEL example, inspect generated native resources:
 
