@@ -83,8 +83,8 @@ Creator tracking requires Kubernetes 1.34 or newer because it uses
 `MutatingAdmissionPolicy`; the chart selects the stable or beta endpoint that
 the cluster serves.
 
-Kubernetes 1.36 serves the stable
-`admissionregistration.k8s.io/v1` API. Kubernetes 1.34 and 1.35 can serve
+Kubernetes 1.36 serves the stable `MutatingAdmissionPolicy` resource through
+the `admissionregistration.k8s.io/v1` API. Kubernetes 1.34 and 1.35 can serve
 `v1beta1` when `MutatingAdmissionPolicy=true` and
 `admissionregistration.k8s.io/v1beta1=true` are enabled. The chart's `auto`
 mode prefers v1 and falls back to v1beta1 when that API is served. It does not

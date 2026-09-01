@@ -325,10 +325,11 @@ annotation semantics, modes, API-version requirements, and Kyverno
 alternatives. The [Helm chart README](../chart/auth-operator/README.md) lists
 the available values.
 
-Creator tracking is best-effort operational context. It does not prove the
+Creator tracking provides best-effort operational context. It does not prove the
 original caller when impersonation is used, and `failurePolicy: Ignore` plus
 Kubernetes's total annotation size limit (the sum of annotation keys and
-values) can leave an object unstamped or without restored protection.
+values) can leave an object unstamped or leave protected creator values
+unrestored.
 
 When disabling or uninstalling the feature, first remove or disable the
 creator and contributor policies and verify that their policy resources and
