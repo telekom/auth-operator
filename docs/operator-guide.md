@@ -16,7 +16,7 @@ of the auth-operator in production Kubernetes environments.
 - [Installation](#installation)
 - [Architecture Overview](#architecture-overview)
 - [Configuration](#configuration)
-- [Creator Tracking](#creator-tracking)
+  - [Creator Tracking](#creator-tracking)
 - [High Availability](#high-availability)
 - [Monitoring](#monitoring)
 - [Security Considerations](#security-considerations)

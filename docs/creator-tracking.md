@@ -91,9 +91,10 @@ mode prefers v1 and falls back to v1beta1 when that API is served. It does not
 enable an API-server feature gate.
 
 The v1 and v1beta1 endpoints expose views of the same persisted resources.
-Keep both endpoints available during an API-version migration and do not
-delete the beta objects after applying through v1. See the chart README and
-the standalone [native policy example](examples/creator-tracking-map.yaml).
+During an API-version migration, keep the existing policy objects and update
+them through the preferred endpoint; do not delete and recreate them solely
+because the endpoint changes. See the chart README and the standalone [native
+policy example](examples/creator-tracking-map.yaml).
 
 ## Kyverno alternatives
 
