@@ -23,6 +23,9 @@ grep -Fq 'regular empty file' "$workflow"
 grep -Fq 'Regular File' "$workflow"
 grep -Fq 'stat -f %HT' "$workflow"
 grep -Fq '[ ! -s "$lock_file" ]' "$workflow"
+grep -Fq 'make test-creator-tracking-kyverno-runner' "$workflow"
+grep -Fq 'name: Upload Kyverno debug artifacts' "$workflow"
+grep -Fq 'path: /tmp/creator-tracking-kyverno-debug/' "$workflow"
 
 # A composite name must brace the variable when nounset is enabled.
 braced="assert_container_absent \"\${cluster}-control-plane\""

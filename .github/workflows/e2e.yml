@@ -485,5 +485,14 @@ jobs:
           kind-version: ${{ env.KIND_VERSION }}
           install-helm: 'true'
           helm-version: ${{ env.HELM_VERSION }}
+      - name: Test Kyverno runner lifecycle
+        run: make test-creator-tracking-kyverno-runner
       - name: Run isolated Kyverno E2E
         run: make test-e2e-creator-tracking-kyverno
+      - name: Upload Kyverno debug artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-creator-tracking-kyverno-debug
+          path: /tmp/creator-tracking-kyverno-debug/
+          if-no-files-found: ignore

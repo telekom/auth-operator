@@ -226,6 +226,10 @@ test-e2e-helm: kind-create kind-load-image ## Run Helm e2e tests (installs via H
 .PHONY: test-e2e-creator-tracking-kyverno
 test-e2e-creator-tracking-kyverno: ## Run isolated creator-tracking Kyverno interop tests.
 	hack/ci/run-creator-tracking-kyverno-e2e.sh
+
+.PHONY: test-creator-tracking-kyverno-runner
+test-creator-tracking-kyverno-runner: ## Test Kyverno creator-tracking runner safety invariants.
+	bash hack/ci/test-creator-tracking-kyverno-runner.sh
 .PHONY: test-e2e-dev
 test-e2e-dev: ## Run dev e2e tests (kustomize deploy) on a dedicated cluster.
 	@set -e; \
