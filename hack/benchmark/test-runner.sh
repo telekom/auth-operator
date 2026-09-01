@@ -12,7 +12,7 @@ test_tmp_root=$(cd -P -- "${TMPDIR:-/tmp}" && pwd -P)
 grep -Fq 'description: Run the bounded CI smoke; the full matrix is resumable local work' "$benchmark_workflow"
 grep -Fq 'BENCHMARK_QUICK: true' "$benchmark_workflow"
 ! grep -Fq 'creator-tracking-full-benchmark' "$benchmark_workflow"
-grep -Fq -- '-type d -name journals -prune' "$benchmark_workflow"
+grep -Fq -- "-type f -name 'cell-*.json' ! -path '*/journals/*' -print0" "$benchmark_workflow"
 grep -Fq "flock -n 9" "$runner"
 grep -Fq 'lock_type=$(stat' "$runner"
 grep -Fq 'lock_owner=$(stat' "$runner"
