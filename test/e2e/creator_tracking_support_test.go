@@ -368,7 +368,7 @@ func creatorGenerateTLS(service, namespace string) (creatorTLSBundle, error) {
 		SerialNumber: serverSerial,
 		Subject:      pkix.Name{CommonName: serviceDNS},
 		NotBefore:    now.Add(-time.Minute),
-		NotAfter:     now.Add(time.Hour),
+		NotAfter:     now.Add(creatorCAValidity),
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		DNSNames: []string{
