@@ -123,9 +123,9 @@ if [[ "${1:-}" == -L ]]; then
   format=${3:-}
 fi
 case "$format" in
-  %F) echo 'regular file' ;;
+  %F) [[ -d "${!#}" ]] && echo directory || echo 'regular file' ;;
   %u) id -u ;;
-  %a) echo 600 ;;
+  %a) [[ -d "${!#}" ]] && echo 700 || echo 600 ;;
   %d:%i) echo '1:2' ;;
   *) exit 1 ;;
 esac
@@ -151,6 +151,20 @@ rc=$?
 set -e
 [[ "$rc" -eq 42 ]]
 [[ -f "$probe_dir/docker-called" ]]
+[[ ! -e /tmp/auth-operator-e2e-kyverno.owner && ! -L /tmp/auth-operator-e2e-kyverno.owner ]]
+
+# An interruption after creating the debug directory but before writing its
+# owner marker leaves an empty, owned, mode-0700 directory. Cleanup-only may
+# remove exactly that recoverable state.
+mkdir -m 700 /tmp/creator-tracking-kyverno-debug
+printf '%s\n' 'auth-operator-creator-tracking-kyverno/v1' >/tmp/auth-operator-e2e-kyverno.owner
+chmod 600 /tmp/auth-operator-e2e-kyverno.owner
+set +e
+PATH="$probe_dir/bin:$PATH" "$runner" cleanup-only >"$probe_dir/cleanup-only.log" 2>&1
+rc=$?
+set -e
+[[ "$rc" -eq 0 ]]
+[[ ! -e /tmp/creator-tracking-kyverno-debug && ! -L /tmp/creator-tracking-kyverno-debug ]]
 [[ ! -e /tmp/auth-operator-e2e-kyverno.owner && ! -L /tmp/auth-operator-e2e-kyverno.owner ]]
 
 # Retained diagnostics keep an exact ownership capability, and cleanup-only
