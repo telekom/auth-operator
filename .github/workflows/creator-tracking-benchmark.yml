@@ -78,9 +78,9 @@ jobs:
           complete_count=0
           failed_count=0
           if [ -d "$result_root" ]; then
-            result_count=$(find "$result_root" -type f -name 'cell-*.json' -print | wc -l | tr -d ' ')
-            complete_count=$(find "$result_root" -type f -name 'cell-*.json' -print0 | xargs -0r jq -r '.status' | grep -c '^complete$' || true)
-            failed_count=$(find "$result_root" -type f -name 'cell-*.json' -print0 | xargs -0r jq -r '.status' | grep -c '^failed$' || true)
+            result_count=$(find "$result_root" -type d -name journals -prune -o -type f -name 'cell-*.json' -print | wc -l | tr -d ' ')
+            complete_count=$(find "$result_root" -type d -name journals -prune -o -type f -name 'cell-*.json' -print0 | xargs -0r jq -r '.status' | grep -c '^complete$' || true)
+            failed_count=$(find "$result_root" -type d -name journals -prune -o -type f -name 'cell-*.json' -print0 | xargs -0r jq -r '.status' | grep -c '^failed$' || true)
           fi
           {
             echo '### Creator-tracking benchmark evidence'
@@ -90,7 +90,7 @@ jobs:
             echo "- Failed: $failed_count"
             if [ "$result_count" -gt 0 ]; then
               echo '- Telemetry states:'
-              find "$result_root" -type f -name 'cell-*.json' -print0 | xargs -0r jq -r '.metric_delta_state // "unset"' | sort | uniq -c | sed 's/^/  - /'
+              find "$result_root" -type d -name journals -prune -o -type f -name 'cell-*.json' -print0 | xargs -0r jq -r '.metric_delta_state // "unset"' | sort | uniq -c | sed 's/^/  - /'
               echo '- Raw result files are attached to the benchmark artifact.'
             else
               echo '- No phase result files were produced.'
