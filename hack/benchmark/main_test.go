@@ -56,6 +56,13 @@ func TestParseOptionsResumeRequiresRunID(t *testing.T) {
 	}
 }
 
+func TestParseOptionsRejectsTrailingConcurrencyText(t *testing.T) {
+	_, err := parseOptions([]string{"-concurrency", "8x", "-kubeconfig", "invalid-concurrency-kubeconfig"})
+	if err == nil || !strings.Contains(err.Error(), `invalid concurrency "8x"`) {
+		t.Fatalf("parseOptions concurrency error = %v", err)
+	}
+}
+
 func TestQuickOptionsHonorRunnerOperationBudget(t *testing.T) {
 	o, err := parseOptions([]string{"-quick", "-kubeconfig", "quick-kubeconfig"})
 	if err != nil {

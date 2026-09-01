@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -485,8 +486,8 @@ func parseOptions(args []string) (options, error) {
 		return o, fmt.Errorf("parse options: %w", err)
 	}
 	for _, s := range strings.Split(cs, ",") {
-		var n int
-		if _, e := fmt.Sscanf(strings.TrimSpace(s), "%d", &n); e != nil || n < 1 {
+		n, e := strconv.Atoi(strings.TrimSpace(s))
+		if e != nil || n < 1 {
 			return o, fmt.Errorf("invalid concurrency %q", s)
 		}
 		o.concurrency = append(o.concurrency, n)
