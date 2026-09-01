@@ -146,11 +146,19 @@ func hashBytes(b []byte) string {
 	return hex.EncodeToString(h[:])
 }
 func cellInputHash(c Cell) string {
+	// Input identity describes the logical workload and its policy material.
+	// Phase, concurrency, sustained timing, run ID, and object count are
+	// execution controls: executeBenchmark deliberately reuses one input hash
+	// across those dimensions while producing the phase/concurrency matrix.
+	identity := Cell{
+		Engine: c.Engine, Tier: c.Tier, Mode: c.Mode, Kind: c.Kind,
+		Verb: c.Verb, Variant: c.Variant,
+	}
 	b, e := cellInputMaterial(c)
 	if e != nil {
-		b = canonical(c)
+		b = canonical(identity)
 	}
-	return InputHash(c, b)
+	return InputHash(identity, b)
 }
 func cellInputMaterial(c Cell) ([]byte, error) {
 	if material := os.Getenv("BENCHMARK_INPUT_MATERIAL"); material != "" {
