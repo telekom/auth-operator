@@ -8,6 +8,7 @@ set -euo pipefail
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck disable=SC1091 # Repository-owned version pins.
 source "$repo_root/versions.env"
+cd -- "$repo_root"
 
 mode=${1:-}
 case "$mode" in
