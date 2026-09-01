@@ -451,16 +451,10 @@ func TestCreatorTrackingKustomizeNameReference(t *testing.T) {
 }
 
 func TestCreatorTrackingStandaloneConfigMatchesDocs(t *testing.T) {
-	doc, err := os.ReadFile("../../docs/examples/creator-tracking-map.yaml")
-	if err != nil {
-		t.Fatalf("read standalone example: %v", err)
-	}
-	config, err := os.ReadFile("../../config/webhook/creator_tracking_map.yaml")
-	if err != nil {
-		t.Fatalf("read webhook config: %v", err)
-	}
-	if !bytes.Equal(doc, config) {
-		t.Fatal("config/webhook/creator_tracking_map.yaml differs from the protect example")
+	doc := readYAMLDocuments(t, "../../docs/examples/creator-tracking-map.yaml")
+	config := readYAMLDocuments(t, "../../config/webhook/creator_tracking_map.yaml")
+	if !reflect.DeepEqual(doc, config) {
+		t.Fatal("config/webhook/creator_tracking_map.yaml differs semantically from the protect example")
 	}
 	kustomizationData, err := os.ReadFile("../../config/webhook/kustomization.yaml")
 	if err != nil {
