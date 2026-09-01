@@ -173,6 +173,26 @@ func TestT4DefinitionsUseUniqueDeterministicTargetNames(t *testing.T) {
 	}
 }
 
+func TestGeneratedTargetNameBoundsMaxLengthObjectNames(t *testing.T) {
+	name := strings.Repeat("a", 63)
+	role := generatedTargetName(name, "role")
+	binding := generatedTargetName(name, "binding")
+	for kind, target := range map[string]string{"role": role, "binding": binding} {
+		if len(target) > 63 {
+			t.Errorf("%s targetName length = %d, want <= 63: %q", kind, len(target), target)
+		}
+		if target != generatedTargetName(name, kind) {
+			t.Errorf("%s targetName is not deterministic: %q", kind, target)
+		}
+		if !strings.HasSuffix(target, "-"+kind+"-"+target[len(target)-8:]) {
+			t.Errorf("%s targetName does not retain kind suffix: %q", kind, target)
+		}
+	}
+	if role == binding {
+		t.Fatalf("role and binding target names collide: %q", role)
+	}
+}
+
 func TestRBACSubjectAPIGroupSemantics(t *testing.T) {
 	for _, resource := range []string{resourceRoleBinding, resourceClusterRoleBinding} {
 		t.Run(resource, func(t *testing.T) {

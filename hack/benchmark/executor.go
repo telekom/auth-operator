@@ -444,7 +444,22 @@ func objectFor(cell Cell, name, namespace string, s resourceSpec) *unstructured.
 // target kind suffix prevents the generated role and binding names from
 // colliding if they are used by different resource types.
 func generatedTargetName(name, kind string) string {
-	return sanitizeName(name + "-" + kind)
+	base := sanitizeName(name)
+	suffix := "-" + sanitizeName(kind)
+	target := base + suffix
+	const maxTargetNameLength = 63
+	if len(target) <= maxTargetNameLength {
+		return target
+	}
+
+	digest := sha256.Sum256([]byte(base))
+	hashSuffix := fmt.Sprintf("-%x", digest[:])[:9]
+	suffix += hashSuffix
+	prefixLength := maxTargetNameLength - len(suffix)
+	if prefixLength < 1 {
+		return strings.Trim(suffix, "-")[:maxTargetNameLength]
+	}
+	return strings.TrimRight(base[:prefixLength], "-") + suffix
 }
 
 func cellKey(cell Cell) string {
