@@ -332,6 +332,53 @@ func TestInputHash(t *testing.T) {
 	}
 }
 
+func TestCellInputHashIgnoresExecutionSchedulingFields(t *testing.T) {
+	t.Setenv("BENCHMARK_INPUT_MATERIAL", "")
+	base := Cell{
+		Engine: engineMap, Tier: "t1", Mode: modeProtect, Phase: phaseCore,
+		Concurrency: 8, Kind: resourceServiceAccount, Verb: verbMixed,
+		Variant: variantEnabled, RunID: "run-a", Objects: 500,
+	}
+	want := cellInputHash(base)
+	for name, mutate := range map[string]func(*Cell){
+		"phase":       func(c *Cell) { c.Phase = phaseChurn },
+		"concurrency": func(c *Cell) { c.Concurrency = 64 },
+		"sustained":   func(c *Cell) { c.Sustained = true },
+		"run ID":      func(c *Cell) { c.RunID = "run-b" },
+		"objects":     func(c *Cell) { c.Objects = 5000 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := base
+			mutate(&got)
+			if hash := cellInputHash(got); hash != want {
+				t.Fatalf("cellInputHash changed for %s: got %q, want %q", name, hash, want)
+			}
+		})
+	}
+}
+
+func TestCellInputHashIncludesLogicalIdentity(t *testing.T) {
+	t.Setenv("BENCHMARK_INPUT_MATERIAL", "")
+	base := Cell{Engine: engineMap, Tier: "t1", Mode: modeProtect, Kind: resourceServiceAccount, Verb: verbMixed, Variant: variantEnabled}
+	want := cellInputHash(base)
+	for name, mutate := range map[string]func(*Cell){
+		"engine":  func(c *Cell) { c.Engine = engineKyvernoWebhook },
+		"tier":    func(c *Cell) { c.Tier = "t2" },
+		"mode":    func(c *Cell) { c.Mode = modeContributors },
+		"kind":    func(c *Cell) { c.Kind = resourceSecret },
+		"verb":    func(c *Cell) { c.Verb = verbUpdate },
+		"variant": func(c *Cell) { c.Variant = variantExcluded },
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := base
+			mutate(&got)
+			if hash := cellInputHash(got); hash == want {
+				t.Fatalf("cellInputHash did not change for %s", name)
+			}
+		})
+	}
+}
+
 func TestValidateOptionsRequiresWarmup(t *testing.T) {
 	o := options{engine: engineBaseline, tier: "t1", mode: modeProtect, ops: 1, churn: 1, identities: 10, sustained: time.Second}
 	if err := validateOptions(o); err == nil {
