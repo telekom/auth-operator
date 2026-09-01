@@ -78,7 +78,10 @@ bounded() {
 }
 sanitize() {
   local value=$1
-  value=${value//[^a-zA-Z0-9-]/-}; value=${value#-}; value=${value%-}
+  value=${value//[^a-zA-Z0-9-]/-}
+  while [[ "$value" == *--* ]]; do value=${value//--/-}; done
+  while [[ "$value" == -* ]]; do value=${value#-}; done
+  while [[ "$value" == *- ]]; do value=${value%-}; done
   [[ -n "$value" ]] || value=run
   printf '%s' "$value" | tr '[:upper:]' '[:lower:]'
 }
@@ -225,10 +228,15 @@ if [[ "$requested_mode" == resume ]]; then
   expected_owner=$(printf 'owner=%s\nrun_id=%s\ncluster=%s\nkubeconfig=%s\noperator_image=%s' "$owner" "$run_id" "$cluster" "$kubeconfig" "$expected_image")
   [[ "$(<"$run_dir/owner")" == "$expected_owner" ]] || die 'resume ownership marker does not match exact identity'
   [[ "$cluster" == "$expected_cluster" ]] || die 'resume cluster does not match the run identity'
+  (( ${#run_id} <= 49 )) || die 'resume run ID exceeds the 49-character limit'
   readonly run_id cluster kubeconfig
 else
   nonce=$(random_suffix); readonly nonce
-  run_id="$(sanitize "$requested_run")-$nonce"; readonly run_id
+  run_base=$(sanitize "$requested_run")
+  run_base=${run_base:0:32}
+  run_id="$run_base-$nonce"
+  (( ${#run_id} <= 49 )) || die 'generated run ID exceeds the 49-character limit'
+  readonly run_id
   # Install the preflight cleanup immediately after creating the run directory.
   # Keep the expansion nounset-safe if an early setup failure leaves it unset.
   run_dir="$(mktemp -d "$private_tmp_root/auth-operator-benchmark.${run_id}.XXXXXX")"; readonly run_dir

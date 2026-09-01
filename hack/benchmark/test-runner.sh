@@ -27,10 +27,29 @@ grep -Fq 'readonly lock_dir="$system_tmp_root/auth-operator-creator-tracking-ben
 grep -Fq 'stat_mode_with_special_bits' "$runner"
 grep -Fq "validate_temp_root \"\$private_tmp_root\" 'benchmark temporary root'" "$runner"
 grep -Fq 'source "$repo_root/versions.env"' "$runner"
+grep -Fq 'while [[ "$value" == *--* ]]' "$runner"
+grep -Fq 'while [[ "$value" == -* ]]' "$runner"
+grep -Fq 'while [[ "$value" == *- ]]' "$runner"
+sanitize_source=$(sed -n '/^sanitize() {/,/^}$/p' "$runner")
+while IFS='|' read -r sanitize_input sanitize_expected; do
+  sanitize_actual=$(SANITIZE_INPUT="$sanitize_input" bash -c "$sanitize_source; sanitize \"\${SANITIZE_INPUT}\"")
+  [[ "$sanitize_actual" == "$sanitize_expected" ]] || {
+    echo "sanitize($sanitize_input) = $sanitize_actual, want $sanitize_expected" >&2
+    exit 1
+  }
+done <<'EOF'
+---A---B---|a-b
+---|run
+A--B|a-b
+EOF
+grep -Fq 'run_base=${run_base:0:32}' "$runner"
+grep -Fq 'generated run ID exceeds the 49-character limit' "$runner"
+grep -Fq 'resume run ID exceeds the 49-character limit' "$runner"
 grep -Fq 'readonly kind_node_image=$E2E_CREATOR_TRACKING_STABLE_NODE_IMAGE' "$runner"
 grep -Fq 'readonly kyverno_chart_url=$KYVERNO_CHART_URL' "$runner"
 grep -Fq 'readonly kyverno_chart_sha256=$KYVERNO_CHART_SHA256' "$runner"
 grep -Fq 'readonly kyverno_chart_version=$KYVERNO_CHART_VERSION' "$runner"
+grep -Fq 'kindCommand' "$root/hack/benchmark/metadata.go"
 ! grep -Fq 'kindest/node:' "$runner"
 grep -Fq 'BENCHMARK_MODE' "$runner"
 grep -Fq 'BENCHMARK_RUN_DIR' "$runner"
