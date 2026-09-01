@@ -246,6 +246,16 @@ func TestComparisonConfigHashExcludesEngineOnly(t *testing.T) {
 		t.Fatal("engine-specific input hash must not affect comparison hash")
 	}
 }
+
+func TestComparisonConfigHashIgnoresResumeAndReportFlags(t *testing.T) {
+	a := options{engine: engineBaseline, tier: "t1", mode: modeProtect, ops: 10, churn: 2, identities: 10, warmup: 1, sustained: time.Second, concurrency: []int{8}}
+	b := a
+	b.resume = true
+	b.report = true
+	if comparisonConfigHash(a) != comparisonConfigHash(b) {
+		t.Fatal("resume/report control flags must not change the execution config hash")
+	}
+}
 func TestInputHash(t *testing.T) {
 	a := Cell{Engine: engineMap}
 	b := a

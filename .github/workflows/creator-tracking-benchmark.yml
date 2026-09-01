@@ -59,7 +59,7 @@ jobs:
           # creator-tracking-full-benchmark label opts this draft PR into the
           # exact full matrix without requiring the workflow to exist on the
           # default branch for workflow_dispatch discovery.
-          BENCHMARK_QUICK: ${{ (github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'creator-tracking-full-benchmark')) || (github.event_name == 'workflow_dispatch' && inputs.benchmark_mode == 'quick') }}
+          BENCHMARK_QUICK: ${{ (github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'creator-tracking-full-benchmark')) || (github.event_name == 'workflow_dispatch' && github.event.inputs.benchmark_mode == 'quick') }}
         run: |
           set +e
           make benchmark-creator-tracking 2>&1 | tee /tmp/creator-tracking-benchmark.log
@@ -72,7 +72,7 @@ jobs:
       - name: Summarize benchmark evidence
         if: always()
         env:
-          BENCHMARK_QUICK: ${{ (github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'creator-tracking-full-benchmark')) || (github.event_name == 'workflow_dispatch' && inputs.benchmark_mode == 'quick') }}
+          BENCHMARK_QUICK: ${{ (github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'creator-tracking-full-benchmark')) || (github.event_name == 'workflow_dispatch' && github.event.inputs.benchmark_mode == 'quick') }}
         run: |
           result_root=benchmarks/data
           result_count=0
