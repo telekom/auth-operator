@@ -40,7 +40,7 @@ kubectl get mutatingadmissionpolicybindings mpol-contributor-tracking-binding
 Both paths use `failurePolicy: Ignore`, which lets the API server continue when
 policy evaluation fails. Normal admission validation still applies after a
 successful mutation. The CEL policies exclude objects with the
-`t-caas.telekom.com/creator-tracking: disabled` label from new tracking,
+`t-caas.telekom.com/creator-tracking=disabled` label from new tracking,
 restore old creator values on updates, escape `%` and then `,` in group and
 contributor components, and account for annotation bytes against the
 262,144-byte limit. Kyverno's legacy policy is tested in a separate phase after
