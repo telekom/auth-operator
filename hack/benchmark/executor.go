@@ -770,7 +770,7 @@ func executeBenchmark(ctx context.Context, base *rest.Config, cell Cell, o optio
 				run.MetricAfter = ParseMetricResponse(after.StatusCode, after.Body, APIServerAdmissionDuration+"_count")
 				run.MetricDelta = metricDeltaCounter(before, after, APIServerAdmissionDuration+"_count")
 				run.MetricDeltaState = run.MetricDelta.State
-				labels := map[string]string{"type": "mutating"}
+				labels := map[string]string{"type": metricTypeMutating}
 				run.WebhookBefore = ParseHistogramResponse(before, WebhookAdmissionDuration+"_sum", WebhookAdmissionDuration+"_count", labels)
 				run.WebhookAfter = ParseHistogramResponse(after, WebhookAdmissionDuration+"_sum", WebhookAdmissionDuration+"_count", labels)
 				run.WebhookDelta = histogramResponseDelta(before, after, WebhookAdmissionDuration+"_sum", WebhookAdmissionDuration+"_count", labels)
