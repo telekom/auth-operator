@@ -254,6 +254,16 @@ func TestStatusForWrappedAPIError(t *testing.T) {
 	}
 }
 
+func TestBenchmarkWorkloadHashIncludesIdentityCount(t *testing.T) {
+	cell := Cell{Mode: modeProtect}
+	base := options{ops: 10, churn: 2, identities: 10, warmup: 1, concurrency: []int{8}, sustained: time.Second}
+	other := base
+	other.identities = 9
+	if got, want := benchmarkWorkloadHash([]string{resourceServiceAccount}, cell, base), benchmarkWorkloadHash([]string{resourceServiceAccount}, cell, other); got == want {
+		t.Fatalf("workload hash ignores identity count: %q", got)
+	}
+}
+
 func TestCleanupResourceKindsIncludesSelectedIsolationResource(t *testing.T) {
 	selected := resourceRoleDefinition
 	got := cleanupResourceKinds(nil, selected)

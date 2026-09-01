@@ -151,6 +151,17 @@ func comparisonConfigHash(o options) string {
 	}{o.tier, o.mode, o.kind, o.out, o.kubeconfig, o.runID, o.ops, o.churn, o.identities, o.warmup, o.concurrency, o.excluded, o.quick, o.sustained}))
 }
 
+func benchmarkWorkloadHash(mix []string, cell Cell, o options) string {
+	return hashBytes(canonical(struct {
+		Resources                      []string
+		Mode                           string
+		Ops, Churn, Identities, Warmup int
+		Concurrency                    []int
+		Sustained                      time.Duration
+		Excluded                       bool
+	}{mix, cell.Mode, o.ops, o.churn, o.identities, o.warmup, o.concurrency, o.sustained, o.excluded}))
+}
+
 func resumeStartOffset() int {
 	// A partial phase is never statistically complete. Replay it from zero
 	// instead of mixing a retained prefix with a fresh suffix.
@@ -561,14 +572,7 @@ func executeBenchmark(ctx context.Context, base *rest.Config, cell Cell, o optio
 	if err := WriteInputMaterial(filepath.Join(out, "input-"+baseName+".yaml"), material); err != nil {
 		return fmt.Errorf("write input manifest: %w", err)
 	}
-	workloadHash := hashBytes(canonical(struct {
-		Resources                      []string
-		Mode                           string
-		Ops, Churn, Identities, Warmup int
-		Concurrency                    []int
-		Sustained                      time.Duration
-		Excluded                       bool
-	}{mix, cell.Mode, o.ops, o.churn, 10, o.warmup, o.concurrency, o.sustained, o.excluded}))
+	workloadHash := benchmarkWorkloadHash(mix, cell, o)
 	journal := filepath.Join(out, "journals", cellFilename(o.runID, cell, "cell")+".journal.json")
 	restartCell := false
 	currentPhase := ""
