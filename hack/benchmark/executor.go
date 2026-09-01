@@ -585,7 +585,7 @@ func executeBenchmark(ctx context.Context, base *rest.Config, cell Cell, o optio
 				previous.EnvironmentID != environmentID ||
 				previous.ConfigHash != configHash ||
 				previous.WorkloadHash != workloadHash {
-				return fmt.Errorf("resume journal does not match run or input hash")
+				return fmt.Errorf("resume journal does not match run ID, input hash, environment ID, config hash, or workload hash")
 			}
 			if previous.State == statusComplete {
 				// Completed cells were already cleaned by their original run. Do
