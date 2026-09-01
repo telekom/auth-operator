@@ -307,12 +307,12 @@ func creatorCanI(ctx context.Context, kubeconfig string, args ...string) (bool, 
 	output, err := creatorKubectlAs(ctx, kubeconfig, "", "", commandArgs...)
 	response := strings.TrimSpace(string(output))
 	switch {
-	case response == "yes" && err == nil:
-		return true, nil
-	case strings.HasSuffix(response, "no"):
-		return false, nil
 	case err != nil:
 		return false, fmt.Errorf("check authorization %v: %w: %s", args, err, response)
+	case response == "yes":
+		return true, nil
+	case response == "no":
+		return false, nil
 	default:
 		return false, fmt.Errorf("unexpected authorization response %q", response)
 	}
