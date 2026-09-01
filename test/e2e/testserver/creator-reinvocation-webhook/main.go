@@ -9,11 +9,11 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
@@ -188,16 +188,17 @@ func annotationPath(key string) string {
 }
 
 func escapeJSONPointer(value string) string {
-	result := ""
+	var result strings.Builder
+	result.Grow(len(value))
 	for _, character := range value {
 		switch character {
 		case '~':
-			result += "~0"
+			result.WriteString("~0")
 		case '/':
-			result += "~1"
+			result.WriteString("~1")
 		default:
-			result += fmt.Sprintf("%c", character)
+			result.WriteRune(character)
 		}
 	}
-	return result
+	return result.String()
 }
