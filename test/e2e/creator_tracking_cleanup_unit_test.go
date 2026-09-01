@@ -103,6 +103,7 @@ func TestCreatorRunnerUsesOwnedRegularLock(t *testing.T) {
 	}
 	script := string(runner)
 	for _, required := range []string{
+		"cd -- \"$repo_root\"",
 		"set -C; : >\"$lock_file\"",
 		"lock_type=$(stat -c %F",
 		"lock_owner=$(stat -c %u",
