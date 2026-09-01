@@ -299,11 +299,7 @@ func PlannedFullExecutionCells(q bool, concurrency []int) []Cell {
 	return append(core, PlannedAuxiliaryExecutionCells(false, concurrency)...)
 }
 func resultPath(d string, c Cell) string {
-	prefix := ""
-	if c.RunID != "" {
-		prefix = sanitizeName(c.RunID) + "-"
-	}
-	return filepath.Join(d, prefix+c.Engine+"-"+c.Tier+"-"+c.Mode+"-"+c.Variant+"-"+c.Phase+fmt.Sprintf("-%d.json", c.Concurrency))
+	return filepath.Join(d, cellFilename(c.RunID, c, c.Phase))
 }
 func sanitizeName(value string) string {
 	var b strings.Builder
