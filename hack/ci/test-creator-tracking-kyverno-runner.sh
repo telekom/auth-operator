@@ -111,7 +111,11 @@ exit 0
 EOF
 cat >"$probe_dir/bin/stat" <<'EOF'
 #!/usr/bin/env bash
-case "${2:-}" in
+format=${2:-}
+if [[ "${1:-}" == -L ]]; then
+  format=${3:-}
+fi
+case "$format" in
   %F) echo 'regular file' ;;
   %u) id -u ;;
   %a) echo 600 ;;
