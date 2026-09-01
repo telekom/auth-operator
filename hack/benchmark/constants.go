@@ -98,6 +98,7 @@ const (
 	headerPodRestartsAfter  = "pod_restarts_after"
 	headerPodRestartsDelta  = "pod_restarts_delta"
 	headerWebhookDeltaState = "webhook_delta_state"
+	fieldVariant            = "variant"
 
 	fieldCPUs              = "cpus"
 	fieldErrors            = "errors"

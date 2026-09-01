@@ -79,13 +79,27 @@ type MutationTrace struct {
 }
 
 func (r Result) Validate() error {
-	if r.Cell.Engine == "" || r.Cell.Tier == "" || r.Cell.Mode == "" || r.Cell.Phase == "" ||
-		r.Cell.Kind == "" || r.Cell.Verb == "" || r.Cell.Variant == "" || r.Cell.Concurrency < 1 {
-		return fmt.Errorf("cell identity is incomplete")
+	if err := validateCell(r.Cell); err != nil {
+		return err
 	}
 	if r.RunID == "" || r.InputHash == "" || r.EnvironmentID == "" {
 		return fmt.Errorf("run, input, and environment metadata are required")
 	}
+	if err := validateResultStatus(r); err != nil {
+		return err
+	}
+	return validateFiniteResultValues(r)
+}
+
+func validateCell(c Cell) error {
+	if c.Engine == "" || c.Tier == "" || c.Mode == "" || c.Phase == "" ||
+		c.Kind == "" || c.Verb == "" || c.Variant == "" || c.Concurrency < 1 {
+		return fmt.Errorf("cell identity is incomplete")
+	}
+	return nil
+}
+
+func validateResultStatus(r Result) error {
 	if r.Status != statusComplete && r.Status != statusFailed {
 		return fmt.Errorf("invalid status %q", r.Status)
 	}
@@ -95,6 +109,10 @@ func (r Result) Validate() error {
 	if r.Status == statusFailed && r.Error == "" {
 		return fmt.Errorf("failed result must include an error")
 	}
+	return nil
+}
+
+func validateFiniteResultValues(r Result) error {
 	values := map[string]float64{
 		"throughput":    r.Throughput,
 		"metric_before": r.MetricBefore.Value,
