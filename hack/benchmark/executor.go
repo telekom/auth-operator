@@ -370,7 +370,7 @@ func metricDeltaCounter(before, after MetricsSnapshot, name string) Counter {
 		state = MetricUnavailable
 	case beforeCounter.State != MetricAvailable || afterCounter.State != MetricAvailable:
 		state = MetricMissing
-	case state == MetricAvailable:
+	case beforeCounter.State == MetricAvailable && afterCounter.State == MetricAvailable:
 		state = delta.State
 	}
 	delta.State = state
