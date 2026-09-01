@@ -25,6 +25,7 @@ const (
 	labelsField                 = "labels"
 	metadataField               = "metadata"
 	nameField                   = "name"
+	typeField                   = "type"
 
 	engineBaseline       = "baseline"
 	engineCoexist        = "coexist"
