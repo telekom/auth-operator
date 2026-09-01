@@ -307,7 +307,7 @@ func aggregateValues(r ReportRow, successes int, base string) []string {
 }
 func WriteReportMarkdown(w io.Writer, rows []ReportRow) error {
 	const aliases = "<!-- Human-readable aliases: Successes, Metric Before/After/Delta, P50 (us), P95 (us), P99 (us), Max (us), " +
-		"Pod Restarts Before/After/Delta. -->"
+		"Pod Restarts Before, Pod Restarts After, Pod Restarts Delta. -->"
 	if _, err := fmt.Fprintln(w, aliases); err != nil {
 		return err
 	}
