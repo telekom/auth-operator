@@ -3,11 +3,12 @@
 # SPDX-License-Identifier: Apache-2.0
 set -euo pipefail
 
-command -v curl >/dev/null
-command -v sha256sum >/dev/null
-command -v helm >/dev/null
-command -v kubectl >/dev/null
-command -v timeout >/dev/null
+for command in curl sha256sum helm kubectl timeout; do
+  command -v "$command" >/dev/null || {
+    echo "$command is required" >&2
+    exit 1
+  }
+done
 
 : "${KYVERNO_CHART_URL:?set KYVERNO_CHART_URL from versions.env}"
 : "${KYVERNO_CHART_SHA256:?set KYVERNO_CHART_SHA256 from versions.env}"
