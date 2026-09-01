@@ -186,15 +186,6 @@ const (
 	WebhookAdmissionDuration   = "apiserver_admission_webhook_admission_duration_seconds"
 )
 
-func ParseAdmissionMetrics(before, after string, labels map[string]string) (Counter, HistogramDelta, error) {
-	api := ParseHistogramDelta(before, after, APIServerAdmissionDuration+"_sum", APIServerAdmissionDuration+"_count", labels)
-	webhook := ParseHistogramDelta(before, after, WebhookAdmissionDuration+"_sum", WebhookAdmissionDuration+"_count", labels)
-	if api.State == MetricUnavailable || webhook.State == MetricUnavailable {
-		return Counter{State: MetricUnavailable}, webhook, fmt.Errorf("malformed admission metrics")
-	}
-	return api.Count, webhook, nil
-}
-
 func ParseHistogramSnapshot(text, sumName, countName string, labels map[string]string) HistogramDelta {
 	sum, sumOK, sumErr := matchingMetricSample(text, sumName, labels)
 	count, countOK, countErr := matchingMetricSample(text, countName, labels)
