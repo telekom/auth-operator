@@ -303,6 +303,7 @@ var _ = Describe("Creator Tracking Kyverno", Label("creator-tracking-kyverno"), 
 	}
 
 	BeforeAll(func(ctx SpecContext) {
+		setSuiteOutputDir("creator-tracking-kyverno")
 		run(ctx, "kubectl", "api-resources", "--api-group=policies.kyverno.io")
 		run(ctx, "kubectl", "api-resources", "--api-group=admissionregistration.k8s.io")
 		whoami(ctx, reservedUser, creatorGroup)
