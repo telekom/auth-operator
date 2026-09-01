@@ -1,7 +1,7 @@
 # Creator tracking
 
 Auth Operator can record the effective Kubernetes request identity on selected
-resources with native `MutatingAdmissionPolicy` resources. The feature is
+resources with native `MutatingAdmissionPolicy` policies. The feature is
 disabled by default. Enable it only when the cluster serves a supported policy
 API and the operational impact is understood.
 
