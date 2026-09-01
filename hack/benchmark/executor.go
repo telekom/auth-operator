@@ -472,11 +472,6 @@ func executeBenchmark(ctx context.Context, base *rest.Config, cell Cell, o optio
 		mix = []string{cell.Kind}
 	}
 	cleanupKinds := cleanupResourceKinds(mix, cell.Kind)
-	if s.namespaced {
-		if e := ensureNamespace(ctx, base, ns, o.runID); e != nil {
-			return e
-		}
-	}
 	cleanup := func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
@@ -622,6 +617,13 @@ func executeBenchmark(ctx context.Context, base *rest.Config, cell Cell, o optio
 			if e = ensureNamespace(ctx, base, ns, o.runID); e != nil {
 				return fmt.Errorf("recreate benchmark namespace: %w", e)
 			}
+		}
+	} else if s.namespaced {
+		// A fresh cell creates its namespace only after resume validation. A
+		// completed cell returned above without touching the shared namespace,
+		// while a missing or mismatched journal failed closed before any create.
+		if e = ensureNamespace(ctx, base, ns, o.runID); e != nil {
+			return e
 		}
 	}
 	if e = writeJournal(journal, CellJournal{
