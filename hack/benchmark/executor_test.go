@@ -14,6 +14,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -38,13 +39,25 @@ func TestCleanupCellUsesOwnedLabel(t *testing.T) {
 	// remove objects. Emulate the API server's collection semantics so this
 	// regression test exercises the production polling path without hanging.
 	cl.PrependReactor("delete-collection", s.gvr.Resource, func(action k8stesting.Action) (bool, runtime.Object, error) {
-		list, err := cl.Resource(s.gvr).Namespace("bench").List(context.Background(), metav1.ListOptions{})
-		if err != nil {
-			return true, nil, err
+		deleteAction, ok := action.(k8stesting.DeleteCollectionAction)
+		if !ok {
+			return true, nil, fmt.Errorf("delete-collection action has type %T", action)
 		}
-		for _, item := range list.Items {
-			if item.GetLabels()[benchmarkLabelKey] == benchmarkLabelValue {
-				if err := cl.Resource(s.gvr).Namespace("bench").Delete(context.Background(), item.GetName(), metav1.DeleteOptions{}); err != nil {
+		selector := deleteAction.GetListRestrictions().Labels
+		for _, name := range []string{"owned", "foreign"} {
+			item, err := cl.Tracker().Get(s.gvr, "bench", name, metav1.GetOptions{})
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			if err != nil {
+				return true, nil, err
+			}
+			object, ok := item.(*unstructured.Unstructured)
+			if !ok {
+				return true, nil, fmt.Errorf("tracked object has type %T", item)
+			}
+			if selector.Matches(labels.Set(object.GetLabels())) {
+				if err := cl.Tracker().Delete(s.gvr, "bench", name); err != nil {
 					return true, nil, err
 				}
 			}
