@@ -14,6 +14,11 @@ done
 : "${KYVERNO_CHART_SHA256:?set KYVERNO_CHART_SHA256 from versions.env}"
 : "${KYVERNO_CHART_VERSION:?set KYVERNO_CHART_VERSION from versions.env}"
 : "${KYVERNO_VERSION:?set KYVERNO_VERSION from versions.env}"
+: "${KUBECONFIG:?set KUBECONFIG to an explicit disposable Kind kubeconfig}"
+[[ -f "${KUBECONFIG}" && ! -L "${KUBECONFIG}" ]] || {
+  echo "KUBECONFIG must name an existing non-symlink disposable kubeconfig: ${KUBECONFIG}" >&2
+  exit 1
+}
 
 case "${KYVERNO_VERSION}:${KYVERNO_CHART_VERSION}" in
   v1.19.0:3.9.0) ;;
