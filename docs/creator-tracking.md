@@ -79,9 +79,8 @@ admission without changing the operator's RBAC ownership model.
 
 ## Kubernetes API availability
 
-Creator tracking requires Kubernetes 1.34 or newer because it uses
-`MutatingAdmissionPolicy`; the chart selects the stable or beta endpoint that
-the cluster serves.
+The native `MutatingAdmissionPolicy` chart path requires Kubernetes 1.34 or
+newer; the chart selects the stable or beta endpoint that the cluster serves.
 
 Kubernetes 1.36 serves the stable `MutatingAdmissionPolicy` resource through
 the `admissionregistration.k8s.io/v1` API. Kubernetes 1.34 and 1.35 can serve
