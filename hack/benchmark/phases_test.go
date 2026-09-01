@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"net/http"
 	"sync"
 	"testing"
 	"time"
@@ -18,11 +19,11 @@ import (
 )
 
 func TestStatusForWarmupCreate(t *testing.T) {
-	if got := statusFor(phaseWarmup, nil); got != 201 {
-		t.Fatalf("warmup status = %d, want 201", got)
+	if got := statusFor(phaseWarmup, nil); got != http.StatusCreated {
+		t.Fatalf("warmup status = %d, want %d", got, http.StatusCreated)
 	}
-	if got := statusFor(phaseCreate, nil); got != 201 {
-		t.Fatalf("create status = %d, want 201", got)
+	if got := statusFor(phaseCreate, nil); got != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d", got, http.StatusCreated)
 	}
 }
 
@@ -89,8 +90,8 @@ func TestWarmupCreateRecordsCreatedStatus(t *testing.T) {
 	if len(run.Operations) != 1 {
 		t.Fatalf("warmup operation count = %d, want 1", len(run.Operations))
 	}
-	if got := run.Operations[0].Status; got != 201 {
-		t.Fatalf("warmup create status = %d, want 201", got)
+	if got := run.Operations[0].Status; got != http.StatusCreated {
+		t.Fatalf("warmup create status = %d, want %d", got, http.StatusCreated)
 	}
 }
 
