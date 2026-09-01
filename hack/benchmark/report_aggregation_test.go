@@ -67,6 +67,9 @@ func TestReportFormatsPreserveProvenanceAndTelemetry(t *testing.T) {
 	if err := WriteMarkdown(&md, []Result{r}); err != nil {
 		t.Fatal(err)
 	}
+	if !strings.Contains(md.String(), "throughput_successes_per_sec") {
+		t.Fatalf("markdown header %s", md.String())
+	}
 	if err := WriteReportMarkdown(&aggregateMD, rows); err != nil {
 		t.Fatal(err)
 	}

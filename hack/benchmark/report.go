@@ -120,7 +120,7 @@ func WriteCSV(w io.Writer, rs []Result) error {
 }
 func WriteMarkdown(w io.Writer, rs []Result) error {
 	head := append([]string{}, provenanceHeaders...)
-	head = append(head, reportHeaders("throughput")...)
+	head = append(head, reportHeaders("throughput_successes_per_sec")...)
 	head = append(head, telemetryHeaders...)
 	head = append(head, "started_at", "ended_at", "error")
 	if e := writeMarkdownHeader(w, head); e != nil {
