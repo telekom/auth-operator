@@ -50,8 +50,10 @@ make test-e2e-helm               # Run failing test
 
 The creator-tracking full targets require Linux or an OrbStack Linux machine,
 Docker 20.10 or newer, Kind 0.32, GNU `flock`, GNU `readlink`, GNU `timeout`,
-Helm 4.2.3, and matching `kubectl`. Do not run them with `make kind-delete-all`.
-Their persistent lock serializes creator-tracking targets only.
+Helm 4.2.3, and matching `kubectl`. Their persistent lock does not protect
+against manual or other external deletion of the dedicated cluster, so do not
+run these targets concurrently with global cleanup. The lock serializes
+creator-tracking targets only.
 
 > ⚠️ **Each suite MUST run in its own cluster** to avoid cross-contamination
 
