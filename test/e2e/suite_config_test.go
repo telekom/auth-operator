@@ -5,7 +5,11 @@
 
 package e2e
 
-import "testing"
+import (
+	"os"
+	"strings"
+	"testing"
+)
 
 func TestCreatorTrackingLabelsUseDedicatedCluster(t *testing.T) {
 	const wantCluster = "auth-operator-e2e-creator-tracking"
@@ -17,5 +21,23 @@ func TestCreatorTrackingLabelsUseDedicatedCluster(t *testing.T) {
 		if config.ClusterName != wantCluster {
 			t.Fatalf("GetSuiteForLabels(%q) selected %q, want %q", label, config.ClusterName, wantCluster)
 		}
+	}
+}
+
+func TestCreatorTrackingKindConfigsUseVersionSpecificAdmissionPolicyGates(t *testing.T) {
+	stable, err := os.ReadFile("kind-config-creator-tracking-stable.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(stable), "MutatingAdmissionPolicy=true") {
+		t.Fatal("stable creator-tracking config must not pass the graduated MutatingAdmissionPolicy gate")
+	}
+
+	beta, err := os.ReadFile("kind-config-creator-tracking-beta.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(beta), "MutatingAdmissionPolicy=true") {
+		t.Fatal("beta creator-tracking config must keep the MutatingAdmissionPolicy gate")
 	}
 }
