@@ -568,7 +568,7 @@ func executeBenchmark(ctx context.Context, base *rest.Config, cell Cell, o optio
 		Concurrency                    []int
 		Sustained                      time.Duration
 		Excluded                       bool
-	}{mix, cell.Mode, o.ops, o.churn, 10, o.warmup, o.concurrency, o.sustained, o.excluded}))
+	}{mix, cell.Mode, o.ops, o.churn, o.identities, o.warmup, o.concurrency, o.sustained, o.excluded}))
 	journal := filepath.Join(out, "journals", cellFilename(o.runID, cell, "cell")+".journal.json")
 	restartCell := false
 	currentPhase := ""
