@@ -463,6 +463,7 @@ type options struct {
 func parseOptions(args []string) (options, error) {
 	var o options
 	var cs string
+	seenConcurrency := make(map[int]struct{})
 	fs := flag.NewFlagSet("creator-tracking-benchmark", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&o.engine, "engine", engineBaseline, "engine: baseline|map|kyverno-webhook|kyverno-map|coexist")
@@ -490,8 +491,13 @@ func parseOptions(args []string) (options, error) {
 		if e != nil || n < 1 {
 			return o, fmt.Errorf("invalid concurrency %q", s)
 		}
+		if _, ok := seenConcurrency[n]; ok {
+			return o, fmt.Errorf("duplicate concurrency %d", n)
+		}
+		seenConcurrency[n] = struct{}{}
 		o.concurrency = append(o.concurrency, n)
 	}
+	sort.Ints(o.concurrency)
 	if o.quick {
 		o.concurrency = []int{8}
 		o.ops = min(o.ops, 500)
