@@ -95,6 +95,55 @@ func TestWarmupCreateRecordsCreatedStatus(t *testing.T) {
 	}
 }
 
+func TestProgressCallbacksAreSerializedAndMonotonic(t *testing.T) {
+	client := fake.NewSimpleDynamicClient(runtime.NewScheme())
+	var callbackMu sync.Mutex
+	active, maxActive := 0, 0
+	checkpoints := make([]int, 0, 2)
+	progress := func(checkpoint int) error {
+		callbackMu.Lock()
+		active++
+		if active > maxActive {
+			maxActive = active
+		}
+		checkpoints = append(checkpoints, checkpoint)
+		callbackMu.Unlock()
+
+		// Keep the callback in flight long enough for concurrent workers to
+		// reach later checkpoints; the implementation must serialize these
+		// journal writes and discard stale checkpoints.
+		time.Sleep(10 * time.Millisecond)
+
+		callbackMu.Lock()
+		active--
+		callbackMu.Unlock()
+		return nil
+	}
+	run := runPhaseWithClientsProgressOffset(context.Background(), []dynamic.ResourceInterface{
+		client.Resource(schema.GroupVersionResource{Group: "", Version: "v1", Resource: resourceServiceAccounts}).Namespace("bench"),
+	}, Cell{
+		Engine: engineBaseline, Tier: "t1", Mode: modeCreateOnly, Phase: phaseCreate,
+		Kind: resourceServiceAccount, Verb: verbMixed, Variant: variantEnabled,
+		RunID: "progress-order",
+	}, 200, 8, nil, "bench", 0, 0, progress)
+	if run.Status != statusComplete {
+		t.Fatalf("progress run status = %q, error = %q", run.Status, run.Error)
+	}
+	callbackMu.Lock()
+	defer callbackMu.Unlock()
+	if maxActive != 1 {
+		t.Fatalf("maximum concurrent progress callbacks = %d, want 1", maxActive)
+	}
+	if len(checkpoints) == 0 || checkpoints[len(checkpoints)-1] != 200 {
+		t.Fatalf("progress checkpoints = %v, want final checkpoint 200", checkpoints)
+	}
+	for i := 1; i < len(checkpoints); i++ {
+		if checkpoints[i] <= checkpoints[i-1] {
+			t.Fatalf("progress checkpoints = %v, want strictly increasing", checkpoints)
+		}
+	}
+}
+
 func TestCreateOnlyChurnRemainsAnUpdateWorkload(t *testing.T) {
 	client := fake.NewSimpleDynamicClient(runtime.NewScheme())
 	s, err := specFor(resourceServiceAccount)

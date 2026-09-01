@@ -155,8 +155,10 @@ func runPhaseWithClientsProgressOffset(
 		ids = []string{defaultEditorIdentity}
 	}
 	var mu sync.Mutex
+	var progressMu sync.Mutex
 	var wg sync.WaitGroup
 	var progressErr error
+	lastProgress := offset
 	addTrace := func(t MutationTrace) { mu.Lock(); out.Trace = append(out.Trace, t); mu.Unlock() }
 	next := offset
 	rec := func(o Operation) {
@@ -165,13 +167,19 @@ func runPhaseWithClientsProgressOffset(
 		n := len(out.Operations)
 		mu.Unlock()
 		if progress != nil && n%100 == 0 {
-			if err := progress(offset + n); err != nil {
-				mu.Lock()
-				if progressErr == nil {
-					progressErr = err
+			progressMu.Lock()
+			checkpoint := offset + n
+			if checkpoint > lastProgress {
+				lastProgress = checkpoint
+				if err := progress(checkpoint); err != nil {
+					mu.Lock()
+					if progressErr == nil {
+						progressErr = err
+					}
+					mu.Unlock()
 				}
-				mu.Unlock()
 			}
+			progressMu.Unlock()
 		}
 	}
 	for range workers {
