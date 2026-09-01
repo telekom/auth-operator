@@ -60,9 +60,10 @@ or cryptographic proof.
 The policies use `failurePolicy: Ignore` so tracking does not block a write.
 This can leave a valid object unstamped during an activation or evaluation
 gap. Kubernetes still validates the object after a successful mutation.
-Annotation keys and values are limited by Kubernetes's total metadata budget of
-262144 bytes. When a stamp, contributor append, or restoration would exceed
-that budget, the mutation is omitted or the protected value remains absent.
+Annotation keys and values are limited by Kubernetes's total annotation size
+limit of 262144 bytes (the sum of annotation keys and values). When a stamp,
+contributor append, or restoration would exceed that limit, the mutation is
+omitted or the protected value remains absent.
 Protection can therefore be lost at the annotation limit.
 
 Excluded usernames suppress new creator stamps and contributor appends. They do
