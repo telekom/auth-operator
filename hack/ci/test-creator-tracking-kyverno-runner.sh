@@ -142,5 +142,6 @@ grep -Fq "owned debug artifacts retained at \$artifact_dir; run cleanup-only bef
 grep -Fq 'cleanup_owned 0' "$runner"
 grep -Fq 'source versions.env' "$runner"
 grep -Fq 'readonly kind_image=$E2E_CREATOR_TRACKING_STABLE_NODE_IMAGE' "$runner"
+grep -Fq 'kind_image=${kind_image-<unset>}' "$runner"
 ! grep -Fq 'kindest/node:' "$runner"
 grep -Fq 'E2E_EXACT_CLEANUP_ONLY=true SKIP_CLUSTER_SETUP=true' "$runner"

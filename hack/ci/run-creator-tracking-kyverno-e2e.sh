@@ -171,7 +171,9 @@ write_safe_debug() {
   prepare_debug_dir || return 1
   {
     echo "cluster=$cluster"
-    echo "kind_image=$kind_image"
+    # Debug mode runs before versions.env is loaded, so keep this diagnostic
+    # safe under set -u and make the pre-install state explicit.
+    echo "kind_image=${kind_image-<unset>}"
     echo "source_image=$source_image"
     echo "e2e_image=$e2e_image"
     kind version 2>&1 | sed -E 's/(token|password|secret|authorization)[^[:space:]]*/[redacted]/Ig' || true
