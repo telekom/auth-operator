@@ -396,6 +396,18 @@ func TestValidateOptionsRequiresWarmup(t *testing.T) {
 	}
 }
 
+func TestValidateOptionsReportsUnsupportedIsolationTier(t *testing.T) {
+	o := options{
+		engine: engineBaseline, tier: "iso-unknown", mode: modeProtect,
+		ops: 1, churn: 1, identities: 10, warmup: 1, sustained: time.Second,
+		kubeconfig: "kubeconfig",
+	}
+	err := validateOptions(o)
+	if err == nil || !strings.Contains(err.Error(), `unsupported isolation tier "iso-unknown"`) {
+		t.Fatalf("validateOptions() error = %v, want unsupported isolation tier detail", err)
+	}
+}
+
 func TestValidateRunID(t *testing.T) {
 	tests := []struct {
 		name  string

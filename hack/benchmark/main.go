@@ -534,7 +534,7 @@ func validateOptions(o options) error {
 	}
 	if _, err := TierResources(o.tier); err != nil {
 		if _, isolationErr := IsolationResource(o.tier); isolationErr != nil {
-			return fmt.Errorf("invalid tier %q: %w", o.tier, err)
+			return fmt.Errorf("invalid tier %q: %w", o.tier, isolationErr)
 		}
 	}
 	if !validBenchmarkMode(o.mode) {
