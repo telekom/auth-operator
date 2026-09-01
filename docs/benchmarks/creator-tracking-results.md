@@ -9,7 +9,7 @@ recommendation.
 
 The reproducible workload and lifecycle are defined in the [benchmark
 methodology](creator-tracking-methodology.md). This report will be populated
-only after the complete run, provenance validation, and review finish.
+only after the complete run, provenance validation, and review are complete.
 
 ## Planned evidence
 
