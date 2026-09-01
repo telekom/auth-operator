@@ -49,6 +49,16 @@ func TestParseOptionsUsesPrivateFlagSet(t *testing.T) {
 	}
 }
 
+func TestParseOptionsLeavesOutputUnsetForRunScopedDefault(t *testing.T) {
+	o, err := parseOptions([]string{"-report"})
+	if err != nil {
+		t.Fatalf("parseOptions() error = %v", err)
+	}
+	if o.out != "" {
+		t.Fatalf("default output directory = %q, want unset", o.out)
+	}
+}
+
 func TestParseOptionsResumeRequiresRunID(t *testing.T) {
 	_, err := parseOptions([]string{"-resume", "-kubeconfig", "resume-kubeconfig"})
 	if err == nil || !strings.Contains(err.Error(), "-resume requires -run-id") {

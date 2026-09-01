@@ -364,7 +364,7 @@ func validateRunID(runID string) error {
 }
 
 func defaultRunID(now time.Time) string {
-	return strings.ToLower(now.UTC().Format("20060102T150405Z"))
+	return now.UTC().Format("20060102t150405z")
 }
 
 func executionCell(o options) Cell {
@@ -484,7 +484,7 @@ func parseOptions(args []string) (options, error) {
 	fs.IntVar(&o.warmup, "warmup", 200, "warmup operations")
 	fs.BoolVar(&o.excluded, "excluded-usernames-bench", false, "mark the populated excluded-usernames comparison")
 	fs.DurationVar(&o.sustained, "sustained-duration", 5*time.Minute, "sustained phase duration")
-	fs.StringVar(&o.out, "out", "benchmarks/data/result", "output directory for CSV/JSON results")
+	fs.StringVar(&o.out, "out", "", "output directory for CSV/JSON results (default: benchmarks/data/<run-id>)")
 	fs.StringVar(&o.kubeconfig, "kubeconfig", os.Getenv("KUBECONFIG"), "kubeconfig")
 	fs.StringVar(&o.runID, "run-id", "", "run identifier")
 	fs.StringVar(&o.inputHash, "input-hash", "", "expected input hash")
@@ -582,6 +582,9 @@ func runMain(args []string) int {
 	if e = validateRunID(o.runID); e != nil {
 		fmt.Fprintln(os.Stderr, e)
 		return 2
+	}
+	if o.out == "" {
+		o.out = filepath.Join("benchmarks", "data", o.runID)
 	}
 	if o.report {
 		rs, reportErr := LoadResults(filepath.Clean(o.out))
