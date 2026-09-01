@@ -24,6 +24,7 @@ import (
 	"math/big"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -305,14 +306,25 @@ func creatorKubeconfigServer(config *clientcmdapi.Config, description string) (s
 func creatorCanI(ctx context.Context, kubeconfig string, args ...string) (bool, error) {
 	commandArgs := append([]string{"auth", "can-i"}, args...)
 	output, err := creatorKubectlAs(ctx, kubeconfig, "", "", commandArgs...)
-	response := strings.TrimSpace(string(output))
+	// kubectl auth can-i returns exit status 1 for a legitimate denial and may
+	// include a warning on stderr before the final "no" response. Interpret
+	// only that documented denial shape as false; surface all other command
+	// failures so setup errors cannot be mistaken for an authorization result.
+	response := ""
+	for _, line := range strings.Split(string(output), "\n") {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			response = trimmed
+		}
+	}
+	var exitErr *exec.ExitError
+	denied := response == "no" && errors.As(err, &exitErr) && exitErr.ExitCode() == 1
 	switch {
+	case response == "yes" && err == nil:
+		return true, nil
+	case response == "no" && (err == nil || denied):
+		return false, nil
 	case err != nil:
 		return false, fmt.Errorf("check authorization %v: %w: %s", args, err, response)
-	case response == "yes":
-		return true, nil
-	case response == "no":
-		return false, nil
 	default:
 		return false, fmt.Errorf("unexpected authorization response %q", response)
 	}
