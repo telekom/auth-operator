@@ -74,13 +74,21 @@ jobs:
           BENCHMARK_QUICK: true
         run: |
           result_root=benchmarks/data
-          result_count=0
+          result_files=()
+          if [ -d "$result_root" ]; then
+            while IFS= read -r -d '' result_file; do
+              result_files+=("$result_file")
+            done < <(find "$result_root" -type f -name 'cell-*.json' ! -path '*/journals/*' -print0)
+          fi
+          result_count=${#result_files[@]}
           complete_count=0
           failed_count=0
-          if [ -d "$result_root" ]; then
-            result_count=$(find "$result_root" -type d -name journals -prune -o -type f -name 'cell-*.json' -print | wc -l | tr -d ' ')
-            complete_count=$(find "$result_root" -type d -name journals -prune -o -type f -name 'cell-*.json' -print0 | xargs -0r jq -r '.status' | grep -c '^complete$' || true)
-            failed_count=$(find "$result_root" -type d -name journals -prune -o -type f -name 'cell-*.json' -print0 | xargs -0r jq -r '.status' | grep -c '^failed$' || true)
+          if [ "$result_count" -gt 0 ]; then
+            complete_count=$(printf '%s\0' "${result_files[@]}" | xargs -0r jq -r '.status' | grep -c '^complete$' || true)
+            failed_count=$(printf '%s\0' "${result_files[@]}" | xargs -0r jq -r '.status' | grep -c '^failed$' || true)
+          else
+            echo '::error title=creator-tracking benchmark evidence missing::No phase result files were produced'
+            exit 1
           fi
           {
             echo '### Creator-tracking benchmark evidence'
@@ -88,13 +96,9 @@ jobs:
             echo "- Phase result files: $result_count"
             echo "- Complete: $complete_count"
             echo "- Failed: $failed_count"
-            if [ "$result_count" -gt 0 ]; then
-              echo '- Telemetry states:'
-              find "$result_root" -type d -name journals -prune -o -type f -name 'cell-*.json' -print0 | xargs -0r jq -r '.metric_delta_state // "unset"' | sort | uniq -c | sed 's/^/  - /'
-              echo '- Raw result files are attached to the benchmark artifact.'
-            else
-              echo '- No phase result files were produced.'
-            fi
+            echo '- Telemetry states:'
+            printf '%s\0' "${result_files[@]}" | xargs -0r jq -r '.metric_delta_state // "unset"' | sort | uniq -c | sed 's/^/  - /'
+            echo '- Raw result files are attached to the benchmark artifact.'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload raw benchmark results
         if: always()
