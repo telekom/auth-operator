@@ -242,8 +242,9 @@ make test-e2e-creator-tracking-full E2E_CREATOR_TRACKING_VARIANT=beta
 
 The suite uses a fixed cluster name and dedicated image tags. A persistent file
 lock rejects another creator-tracking target before it can delete or replace
-those resources. The lock does not protect against `make kind-delete-all`; do
-not run the dedicated target concurrently with global cleanup.
+those resources. The lock does not protect against manual or other external
+deletion of the dedicated cluster; do not run the dedicated target concurrently
+with global cleanup.
 
 ---
 
