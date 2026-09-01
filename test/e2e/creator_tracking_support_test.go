@@ -50,6 +50,7 @@ const (
 	creatorUserBinding         = "e2e-creator-user-impersonate"
 
 	creatorReservedUser = "e2e-user%,comma"
+	creatorCAValidity   = 2 * time.Hour
 )
 
 type creatorTLSBundle struct {
@@ -344,7 +345,7 @@ func creatorGenerateTLS(service, namespace string) (creatorTLSBundle, error) {
 		SerialNumber:          caSerial,
 		Subject:               pkix.Name{CommonName: "creator-reinvocation-e2e-ca"},
 		NotBefore:             now.Add(-time.Minute),
-		NotAfter:              now.Add(time.Hour),
+		NotAfter:              now.Add(creatorCAValidity),
 		IsCA:                  true,
 		BasicConstraintsValid: true,
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
