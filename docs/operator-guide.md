@@ -327,8 +327,8 @@ the available values.
 
 Creator tracking is best-effort operational context. It does not prove the
 original caller when impersonation is used, and `failurePolicy: Ignore` plus
-the Kubernetes annotation-size limit can leave an object unstamped or without
-restored protection.
+Kubernetes's total annotation size limit (the sum of annotation keys and
+values) can leave an object unstamped or without restored protection.
 
 When disabling or uninstalling the feature, first remove or disable the
 creator and contributor policies and verify that their policy resources and
