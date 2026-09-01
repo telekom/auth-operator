@@ -2,7 +2,7 @@
 #
 # Kubernetes 1.36 or newer serves admissionregistration.k8s.io/v1 and enables
 # MutatingAdmissionPolicy by default. Apply this file with:
-#   kubectl apply -f docs/examples/creator-tracking-map.yaml
+#   kubectl apply -f config/webhook/creator_tracking_map.yaml
 #
 # Kubernetes 1.34 and 1.35 use admissionregistration.k8s.io/v1beta1. Change
 # all apiVersion fields and use the complete Kind configuration at
