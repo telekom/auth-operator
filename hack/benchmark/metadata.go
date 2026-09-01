@@ -98,7 +98,7 @@ func (OSCommandRunner) Run(ctx context.Context, name string, args ...string) ([]
 		return nil, fmt.Errorf("command path is not allowed: %q", name)
 	}
 	switch name {
-	case "awk", "docker", "getconf", "go", "helm", "kubectl", kindField, kyvernoCommand, "sysctl":
+	case "awk", "docker", "getconf", "go", "helm", "kubectl", kindCommand, kyvernoCommand, "sysctl":
 	default:
 		return nil, fmt.Errorf("command is not allowlisted: %q", name)
 	}
