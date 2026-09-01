@@ -26,6 +26,13 @@ func TestParseMetricUsesValueBeforeOptionalTimestamp(t *testing.T) {
 	}
 }
 
+func TestParseMetricAcceptsTabSeparatedFields(t *testing.T) {
+	got := ParseMetric("x\t4\t1700000000\n", "x")
+	if got.State != MetricAvailable || got.Value != 4 {
+		t.Fatalf("tab-separated metric = %#v, want available value 4", got)
+	}
+}
+
 func TestParseMetricRejectsOversizedLines(t *testing.T) {
 	got := ParseMetric("x "+strings.Repeat("7", metricScannerMaxTokenSize)+"\n", "x")
 	if got.State != MetricUnavailable {

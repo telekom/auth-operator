@@ -43,14 +43,12 @@ func ParseMetric(text, name string) Counter {
 		if strings.HasPrefix(l, "#") || l == "" {
 			continue
 		}
-		if strings.HasPrefix(l, name+" ") || strings.HasPrefix(l, name+"{") {
-			p := strings.Fields(l)
-			if len(p) > 1 {
-				if value, e := strconv.ParseFloat(p[1], 64); e == nil && !math.IsNaN(value) && !math.IsInf(value, 0) {
-					return Counter{value, MetricAvailable}
-				}
-				return Counter{State: MetricUnavailable}
+		p := strings.Fields(l)
+		if len(p) > 1 && (p[0] == name || strings.HasPrefix(p[0], name+"{")) {
+			if value, e := strconv.ParseFloat(p[1], 64); e == nil && !math.IsNaN(value) && !math.IsInf(value, 0) {
+				return Counter{value, MetricAvailable}
 			}
+			return Counter{State: MetricUnavailable}
 		}
 	}
 	if err := s.Err(); err != nil {
