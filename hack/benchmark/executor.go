@@ -622,8 +622,8 @@ func executeBenchmark(ctx context.Context, base *rest.Config, cell Cell, o optio
 		// A fresh cell creates its namespace only after resume validation. A
 		// completed cell returned above without touching the shared namespace,
 		// while a missing or mismatched journal failed closed before any create.
-		if e = ensureNamespace(ctx, base, ns, o.runID); e != nil {
-			return e
+		if err := ensureNamespace(ctx, base, ns, o.runID); err != nil {
+			return err
 		}
 	}
 	if e = writeJournal(journal, CellJournal{
