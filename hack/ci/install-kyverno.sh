@@ -31,6 +31,18 @@ archive_root="${KYVERNO_E2E_ARCHIVE_DIR:-${RUNNER_TEMP:-/tmp}}"
   exit 1
 }
 archive_dir=$(mktemp -d -- "${archive_root%/}/auth-operator-kyverno.XXXXXX")
+cleanup_archive() {
+  local status=$?
+  trap - EXIT
+  if [[ -d "${archive_dir:-}" || -L "${archive_dir:-}" ]]; then
+    if ! rm -rf -- "$archive_dir"; then
+      echo "failed to remove temporary Kyverno archive directory: $archive_dir" >&2
+      [[ "$status" -eq 0 ]] && status=1
+    fi
+  fi
+  exit "$status"
+}
+trap cleanup_archive EXIT
 chmod 700 "$archive_dir"
 archive="${archive_dir}/kyverno-${KYVERNO_CHART_VERSION}.tgz"
 actual="${archive}.sha256"
