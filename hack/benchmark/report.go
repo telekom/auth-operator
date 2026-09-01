@@ -176,7 +176,12 @@ func sameRunCell(a, b Result) bool {
 	if !sameIdentity(a, b) || !sameWorkload(a, b) || !sameConfig(a, b) {
 		return false
 	}
-	engineEqual := a.Cell.Engine == b.Cell.Engine || (isBaseline(a) && strings.EqualFold(b.Cell.Variant, "enabled")) || (isBaseline(b) && strings.EqualFold(a.Cell.Variant, "enabled"))
+	// Baselines are shared across all measured variants. In particular, the
+	// excluded-usernames comparison has the same workload/configuration as the
+	// normal enabled variant and must still join to the disabled baseline.
+	engineEqual := a.Cell.Engine == b.Cell.Engine ||
+		(isBaseline(a) && !isBaseline(b)) ||
+		(isBaseline(b) && !isBaseline(a))
 	return engineEqual && a.Cell.Tier == b.Cell.Tier && a.Cell.Mode == b.Cell.Mode &&
 		a.Cell.Phase == b.Cell.Phase && a.Cell.Concurrency == b.Cell.Concurrency && a.Cell.Kind == b.Cell.Kind &&
 		a.Cell.Verb == b.Cell.Verb && a.Cell.Sustained == b.Cell.Sustained
