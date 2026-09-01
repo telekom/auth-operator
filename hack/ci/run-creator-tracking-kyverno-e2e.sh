@@ -22,7 +22,7 @@ case "$mode" in full|cleanup-only|debug) ;; *) echo "usage: $0 [full|cleanup-onl
   echo 'KYVERNO_E2E_CLUSTER, KYVERNO_E2E_LOCK, and KYVERNO_E2E_KUBECONFIG are not supported' >&2
   exit 2
 }
-for command in flock readlink stat timeout; do
+for command in flock readlink stat timeout docker kind helm kubectl go grep sed; do
   command -v "$command" >/dev/null || { echo "$command is required" >&2; exit 1; }
 done
 [[ ! -L "$lock" ]] || { echo "refusing symlink lock $lock" >&2; exit 1; }
