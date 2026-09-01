@@ -131,8 +131,11 @@ webhook_image_authorized_marker=$run_dir/webhook-image-authorized
 if [[ $mode == full ]]; then
 	touch "$webhook_image_authorized_marker"
 fi
+stat_mode() {
+	stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1" 2>/dev/null || true
+}
 marker_is_authorized() {
-	[[ -f "$1" && ! -L "$1" && $(stat -c %a "$1" 2>/dev/null) == 600 ]]
+	[[ -f "$1" && ! -L "$1" && $(stat_mode "$1") == 600 ]]
 }
 
 cleanup_failed=false

@@ -264,7 +264,8 @@ jobs:
           if ! flock -n 9; then echo "creator tracking cleanup lock is busy; refusing fallback mutation" >&2; exit 1; fi
           run_dir="/tmp/auth-operator-creator-tracking-ci-${{ matrix.variant }}"
           owned_run=false
-          if [ -d "$run_dir" ] && [ "$(stat -c %a "$run_dir" 2>/dev/null)" = 700 ] && [ "$(stat -c %a "$run_dir/provenance" 2>/dev/null)" = 600 ] && [ ! -L "$run_dir/provenance" ] && [ "$(tr -d '\\n' < "$run_dir/provenance" 2>/dev/null)" = auth-operator-e2e-creator-tracking ]; then
+          stat_mode() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1" 2>/dev/null || true; }
+          if [ -d "$run_dir" ] && [ "$(stat_mode "$run_dir")" = 700 ] && [ "$(stat_mode "$run_dir/provenance")" = 600 ] && [ ! -L "$run_dir/provenance" ] && [ "$(tr -d '\\n' < "$run_dir/provenance" 2>/dev/null)" = auth-operator-e2e-creator-tracking ]; then
             owned_run=true
           fi
           if [ ! -e "$run_dir" ]; then
@@ -276,7 +277,7 @@ jobs:
             exit 1
           fi
           marker_authorized() {
-            [ -f "$1" ] && [ ! -L "$1" ] && [ "$(stat -c %a "$1" 2>/dev/null)" = 600 ]
+            [ -f "$1" ] && [ ! -L "$1" ] && [ "$(stat_mode "$1")" = 600 ]
           }
           for marker in cluster-authorized operator-image-authorized webhook-image-authorized; do
             if { [ -e "$run_dir/$marker" ] || [ -L "$run_dir/$marker" ]; } && ! marker_authorized "$run_dir/$marker"; then
