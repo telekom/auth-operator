@@ -44,6 +44,7 @@ Welcome to the auth-operator e2e test documentation!
 |----------|---------|-------------|
 | **[README.md](README.md)** | Complete guide | First time setup, comprehensive reference |
 | **[QUICKREF.md](QUICKREF.md)** | Cheat sheet | Quick commands, troubleshooting |
+| **[../../docs/kyverno-creator-tracking.md](../../docs/kyverno-creator-tracking.md)** | Kyverno creator-tracking compatibility | Policy behavior, pins, and isolated runner |
 
 ---
 
@@ -71,6 +72,7 @@ test/e2e/
 │   ├── integration_e2e_test.go # [integration] Cross-CRD scenarios
 │   ├── golden_e2e_test.go  # [golden] Expected output validation
 │   ├── ha_e2e_test.go      # [ha] High availability tests
+│   ├── creator_tracking_kyverno_e2e_test.go # [creator-tracking-kyverno] Kyverno parity
 │   └── kustomize_e2e_test.go # [kustomize] Build-only validation
 │
 ├── 🔧 Utilities
@@ -115,6 +117,7 @@ Each label corresponds to a dedicated Kind cluster:
 | `golden` | `auth-operator-e2e-golden` | Helm | Output comparison |
 | `ha` | `auth-operator-e2e-ha-multi` | Helm (HA) | High availability |
 | `kustomize` | *None* | *Build only* | Overlay validation |
+| `creator-tracking-kyverno` | `auth-operator-e2e-kyverno` | Helm + Kyverno | Native MAP, generated MAP, and legacy webhook interoperability |
 
 ---
 
@@ -184,6 +187,7 @@ PrintSuiteConfig(config)
 ## 📁 Test Files
 - `helm_e2e_test.go` - Helm chart tests
 - `creator_tracking_e2e_test.go` - Dedicated identity tracking on stable and beta Kubernetes APIs
+- `creator_tracking_kyverno_e2e_test.go` - Kyverno policy parity and interoperability
 - `dev_e2e_test.go` - Dev/kustomize deployment
 - `complex_e2e_test.go` - Complex scenarios
 - `integration_e2e_test.go` - Integration tests
@@ -403,6 +407,7 @@ See [Best Practices](README.md#best-practices) for more details.
 - [Main README](../../README.md) - Auth operator overview
 - [API Reference](../../docs/api-reference/) - CRD API documentation
 - [Makefile](../../Makefile) - Build and test targets
+- [Kyverno creator tracking](../../docs/kyverno-creator-tracking.md) - Pinned policies and isolated runner
 
 ---
 

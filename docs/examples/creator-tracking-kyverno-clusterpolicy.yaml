@@ -1,0 +1,88 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+# SPDX-License-Identifier: CC0-1.0
+#
+# Compatibility-only Kyverno 1.19.0 ClusterPolicy example. ClusterPolicy is
+# deprecated in 1.19. Prefer the CEL MutatingPolicy.
+#
+# This deliberately documents the legacy engine's limits: it records only the
+# effective creator, does not append contributors, does not implement the
+# exact UTF-8 annotation budget, and cannot safely remove a forged annotation
+# from an object that has no prior creator stamp. Background processing is off
+# because request.userInfo is only available during admission. The UPDATE rule
+# has no exclusion, so disabling tracking still restores the old creator and
+# removes an attempted forged replacement.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: creator-tracking
+spec:
+  background: false
+  failurePolicy: Ignore
+  rules:
+    - name: stamp-creator
+      match:
+        any:
+          - resources:
+              kinds:
+                - Namespace
+                - ServiceAccount
+                - Secret
+                - Role
+                - RoleBinding
+                - ClusterRole
+                - ClusterRoleBinding
+                - authorization.t-caas.telekom.com/v1alpha1/RoleDefinition
+                - authorization.t-caas.telekom.com/v1alpha1/BindDefinition
+                - authorization.t-caas.telekom.com/v1alpha1/RBACPolicy
+                - authorization.t-caas.telekom.com/v1alpha1/RestrictedBindDefinition
+                - authorization.t-caas.telekom.com/v1alpha1/RestrictedRoleDefinition
+                - authorization.t-caas.telekom.com/v1alpha1/WebhookAuthorizer
+              operations: [CREATE]
+      exclude:
+        any:
+          - resources:
+              selector:
+                matchLabels:
+                  t-caas.telekom.com/creator-tracking: "disabled"
+      mutate:
+        patchStrategicMerge:
+          metadata:
+            annotations:
+              t-caas.telekom.com/created-by: "{{ request.userInfo.username }}"
+              t-caas.telekom.com/created-by-groups: >-
+                {{ join(',', map(&replace_all(replace_all(@, '%', '%25'), ',', '%2C'),
+                request.userInfo.groups)) }}
+    - name: restore-creator
+      match:
+        any:
+          - resources:
+              kinds:
+                - Namespace
+                - ServiceAccount
+                - Secret
+                - Role
+                - RoleBinding
+                - ClusterRole
+                - ClusterRoleBinding
+                - authorization.t-caas.telekom.com/v1alpha1/RoleDefinition
+                - authorization.t-caas.telekom.com/v1alpha1/BindDefinition
+                - authorization.t-caas.telekom.com/v1alpha1/RBACPolicy
+                - authorization.t-caas.telekom.com/v1alpha1/RestrictedBindDefinition
+                - authorization.t-caas.telekom.com/v1alpha1/RestrictedRoleDefinition
+                - authorization.t-caas.telekom.com/v1alpha1/WebhookAuthorizer
+              operations: [UPDATE]
+      preconditions:
+        all:
+          - key: >-
+              {{ request.oldObject.metadata.annotations."t-caas.telekom.com/created-by" || '' }}
+            operator: NotEquals
+            value: >-
+              {{ request.object.metadata.annotations."t-caas.telekom.com/created-by" || '' }}
+      mutate:
+        patchStrategicMerge:
+          metadata:
+            annotations:
+              t-caas.telekom.com/created-by: >-
+                {{ request.oldObject.metadata.annotations."t-caas.telekom.com/created-by" }}
+              t-caas.telekom.com/created-by-groups: >-
+                {{ request.oldObject.metadata.annotations."t-caas.telekom.com/created-by-groups" }}

@@ -26,6 +26,10 @@ export E2E_EXTERNAL_SECRETS_VERSION
 export E2E_VELERO_VERSION
 export E2E_UTILS_CERT_MANAGER_VERSION
 export E2E_UTILS_PROMETHEUS_OPERATOR_VERSION
+export KYVERNO_VERSION
+export KYVERNO_CHART_VERSION
+export KYVERNO_CHART_URL
+export KYVERNO_CHART_SHA256
 KIND_K8S_VERSION ?= v1.36.1
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 # Pin it separately because setup-envtest and kindest/node publish patch releases independently.
@@ -169,7 +173,7 @@ test-e2e-setup-multi: kind-create-multi kind-load-image-multi install ## Set up 
 
 .PHONY: test-e2e
 test-e2e: ## Run base e2e tests against existing kind cluster.
-	KIND_CLUSTER=$(KIND_CLUSTER_NAME) IMG=$(E2E_IMG) go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="!helm && !complex && !integration && !golden && !ha && !leader-election && !dev && !creator-tracking" -timeout 30m
+	KIND_CLUSTER=$(KIND_CLUSTER_NAME) IMG=$(E2E_IMG) go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="!helm && !complex && !integration && !golden && !ha && !leader-election && !dev && !creator-tracking && !creator-tracking-kyverno" -timeout 30m
 
 .PHONY: test-e2e-compile
 test-e2e-compile: ## Compile e2e tests without creating a kind cluster.
@@ -217,8 +221,15 @@ test-e2e-cleanup: ## Clean up e2e test resources.
 
 .PHONY: test-e2e-helm
 test-e2e-helm: kind-create kind-load-image ## Run Helm e2e tests (installs via Helm chart).
-	KIND_CLUSTER=$(KIND_CLUSTER_NAME) IMG=$(E2E_IMG) go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="helm && !creator-tracking" -timeout 30m
+	KIND_CLUSTER=$(KIND_CLUSTER_NAME) IMG=$(E2E_IMG) go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="helm && !creator-tracking && !creator-tracking-kyverno" -timeout 30m
 
+.PHONY: test-e2e-creator-tracking-kyverno
+test-e2e-creator-tracking-kyverno: ## Run isolated creator-tracking Kyverno interop tests.
+	hack/ci/run-creator-tracking-kyverno-e2e.sh
+
+.PHONY: test-creator-tracking-kyverno-runner
+test-creator-tracking-kyverno-runner: ## Test Kyverno creator-tracking runner safety invariants.
+	bash hack/ci/test-creator-tracking-kyverno-runner.sh
 .PHONY: test-e2e-dev
 test-e2e-dev: ## Run dev e2e tests (kustomize deploy) on a dedicated cluster.
 	@set -e; \
@@ -292,7 +303,7 @@ test-e2e-all: ## Run non-Helm/non-complex e2e tests on multi-node cluster.
 	@set -e; \
 	if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-all; fi; \
 	$(MAKE) test-e2e-setup-multi KIND_CLUSTER_NAME=auth-operator-e2e-all; \
-	if KIND_CLUSTER=auth-operator-e2e-all-multi IMG=$(E2E_IMG) go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="!helm && !complex && !creator-tracking" -timeout 60m; then \
+	if KIND_CLUSTER=auth-operator-e2e-all-multi IMG=$(E2E_IMG) go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="!helm && !complex && !creator-tracking && !creator-tracking-kyverno" -timeout 60m; then \
 		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-all; fi; \
 	else \
 		if [ "$(SKIP_E2E_CLEANUP)" != "true" ]; then $(MAKE) kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-all; fi; exit 1; \

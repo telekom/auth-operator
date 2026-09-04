@@ -1,0 +1,317 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+# SPDX-License-Identifier: Apache-2.0
+set -Eeuo pipefail
+umask 077
+
+readonly cluster=auth-operator-e2e-kyverno
+readonly source_image='auth-operator:creator-tracking-kyverno-source'
+readonly e2e_image='auth-operator:creator-tracking-kyverno-e2e'
+readonly owner='auth-operator-creator-tracking-kyverno/v1'
+
+mode=${1:-full}
+case "$mode" in full|cleanup-only|debug) ;; *) echo "usage: $0 [full|cleanup-only|debug]" >&2; exit 2 ;; esac
+state_parent=${KYVERNO_E2E_STATE_PARENT:-${RUNNER_TEMP:-${TMPDIR:-/tmp}}}
+state_dir=${KYVERNO_E2E_STATE_DIR:-}
+if [[ -z "$state_dir" ]]; then
+  [[ "$mode" == full ]] || {
+    echo 'cleanup-only and debug require KYVERNO_E2E_STATE_DIR' >&2
+    exit 2
+  }
+  [[ -d "$state_parent" && ! -L "$state_parent" ]] || {
+    echo "Kyverno E2E state parent must be an existing non-symlink directory: $state_parent" >&2
+    exit 1
+  }
+  state_dir=$(mktemp -d -- "${state_parent%/}/auth-operator-e2e-kyverno.XXXXXX")
+else
+  [[ ! -L "$state_dir" ]] || {
+    echo "refusing symlink Kyverno E2E state directory: $state_dir" >&2
+    exit 1
+  }
+  [[ ! -e "$state_dir" || "$mode" != full ]] || {
+    echo "refusing to reuse existing Kyverno E2E state directory for a full run: $state_dir" >&2
+    exit 1
+  }
+  if [[ ! -e "$state_dir" ]]; then
+    [[ "$mode" == full ]] || {
+      echo "Kyverno E2E state directory does not exist: $state_dir" >&2
+      exit 1
+    }
+    mkdir -m 700 -- "$state_dir"
+  fi
+  [[ -d "$state_dir" ]] || {
+    echo "Kyverno E2E state path is not a directory: $state_dir" >&2
+    exit 1
+  }
+fi
+readonly state_dir
+readonly lock="$state_dir/lock"
+readonly kubeconfig="$state_dir/kubeconfig"
+readonly marker="$state_dir/owner"
+readonly run_dir="$state_dir/run"
+# Failure diagnostics are sanitized readiness/version summaries. GitHub Actions
+# uploads them on failure; standalone invocations retain them for cleanup-only.
+readonly artifact_dir="$state_dir/creator-tracking-kyverno-debug"
+[[ -z "${KYVERNO_E2E_CLUSTER+x}${KYVERNO_E2E_LOCK+x}${KYVERNO_E2E_KUBECONFIG+x}" ]] || {
+  echo 'KYVERNO_E2E_CLUSTER, KYVERNO_E2E_LOCK, and KYVERNO_E2E_KUBECONFIG are not supported' >&2
+  exit 2
+}
+for command in flock stat timeout docker kind helm kubectl go grep sed mktemp; do
+  command -v "$command" >/dev/null || { echo "$command is required" >&2; exit 1; }
+done
+stat_identity() {
+	local path=$1 follow=${2:-false}
+	if [[ "$follow" == true ]]; then
+		stat -L -c '%d:%i' "$path" 2>/dev/null || stat -L -f '%d:%i' "$path" 2>/dev/null
+	else
+		stat -c '%d:%i' "$path" 2>/dev/null || stat -f '%d:%i' "$path" 2>/dev/null
+	fi
+}
+[[ ! -L "$lock" ]] || { echo "refusing symlink lock $lock" >&2; exit 1; }
+if [[ ! -e "$lock" ]]; then
+  if ! (set -C; : >"$lock") 2>/dev/null; then
+    echo "unable to create Kyverno E2E lock $lock" >&2
+    exit 1
+  fi
+fi
+[[ ! -L "$lock" ]] || { echo "refusing symlink lock $lock" >&2; exit 1; }
+lock_type=$(stat -c %F "$lock" 2>/dev/null || stat -f %HT "$lock" 2>/dev/null || true)
+lock_owner=$(stat -c %u "$lock" 2>/dev/null || stat -f %u "$lock" 2>/dev/null || true)
+lock_mode=$(stat -c %a "$lock" 2>/dev/null || stat -f %Lp "$lock" 2>/dev/null || true)
+if [[ ("$lock_type" == 'regular file' || "$lock_type" == 'regular empty file' || "$lock_type" == 'Regular File') && "$lock_owner" == "$(id -u)" && "$lock_mode" != 600 && ! -s "$lock" ]]; then
+  chmod 600 "$lock"
+  lock_mode=$(stat -c %a "$lock" 2>/dev/null || stat -f %Lp "$lock" 2>/dev/null || true)
+fi
+[[ "$lock_type" == 'regular file' || "$lock_type" == 'regular empty file' || "$lock_type" == 'Regular File' ]] || {
+  echo "Kyverno E2E lock must be an owned regular file with mode 600: $lock" >&2
+  exit 1
+}
+[[ "$lock_owner" == "$(id -u)" && "$lock_mode" == 600 ]] || {
+  echo "Kyverno E2E lock must be an owned regular file with mode 600: $lock" >&2
+  exit 1
+}
+exec 9<>"$lock"
+descriptor_path=''
+for candidate in "/proc/$$/fd/9" "/dev/fd/9"; do
+  if [[ -e "$candidate" || -L "$candidate" ]]; then
+    descriptor_path=$candidate
+    break
+  fi
+done
+lock_identity=$(stat_identity "$lock" 2>/dev/null || true)
+descriptor_identity=''
+if [[ -n "$descriptor_path" ]]; then
+	descriptor_identity=$(stat_identity "$descriptor_path" true 2>/dev/null || true)
+fi
+if [[ -z "$lock_identity" || -z "$descriptor_identity" || "$descriptor_identity" != "$lock_identity" ]]; then
+  exec 9>&-
+  echo "Kyverno E2E lock descriptor points to the wrong file" >&2
+  exit 1
+fi
+flock -n 9 || { echo "Kyverno E2E already running" >&2; exit 1; }
+
+die() { echo "creator-tracking Kyverno E2E: $*" >&2; exit 1; }
+is_known_absent() { case "$1" in *'No such image'*|*'No such container'*|*'No such object'*|*'not found'*|*'does not exist'*) return 0;; *) return 1;; esac; }
+bounded() { timeout --signal=TERM --kill-after=30s 30m "$@"; }
+assert_image_absent() {
+  local image=$1 output rc
+  set +e; output=$(docker image inspect "$image" 2>&1); rc=$?; set -e
+  if ((rc == 0)); then die "refusing to overwrite existing image $image"; fi
+  is_known_absent "$output" || die "cannot establish that image $image is absent: $output"
+}
+assert_container_absent() {
+  local name=$1 output rc
+  set +e; output=$(docker container inspect "$name" 2>&1); rc=$?; set -e
+  if ((rc == 0)); then die "refusing to reuse existing container $name"; fi
+  is_known_absent "$output" || die "cannot establish that container $name is absent: $output"
+}
+assert_kind_absent() {
+  local output rc
+  set +e; output=$(kind get clusters 2>&1); rc=$?; set -e
+  ((rc == 0)) || die "cannot query Kind clusters: $output"
+  if grep -Fxq "$cluster" <<<"$output"; then
+    die "refusing to adopt existing Kind cluster $cluster"
+  fi
+}
+assert_regular_absent() {
+  local path=$1
+  [[ ! -L "$path" ]] || die "refusing symlink artifact $path"
+  [[ ! -e "$path" ]] || die "refusing to overwrite existing artifact $path"
+}
+marker_owned() {
+  [[ -f "$marker" && ! -L "$marker" ]] || return 1
+  local marker_type marker_owner marker_mode
+  marker_type=$(stat -c %F "$marker" 2>/dev/null || stat -f %HT "$marker" 2>/dev/null || true)
+  marker_owner=$(stat -c %u "$marker" 2>/dev/null || stat -f %u "$marker" 2>/dev/null || true)
+  marker_mode=$(stat -c %a "$marker" 2>/dev/null || stat -f %Lp "$marker" 2>/dev/null || true)
+  [[ ("$marker_type" == 'regular file' || "$marker_type" == 'regular empty file' || "$marker_type" == 'Regular File') && "$marker_owner" == "$(id -u)" && "$marker_mode" == 600 ]] || return 1
+  [[ "$(<"$marker")" == "$owner" ]]
+}
+artifact_owned() {
+  [[ -d "$artifact_dir" && ! -L "$artifact_dir" ]] || return 1
+  [[ -f "$artifact_dir/.owner" && ! -L "$artifact_dir/.owner" ]] || return 1
+  local dir_type dir_owner dir_mode marker_type marker_owner marker_mode
+  dir_type=$(stat -c %F "$artifact_dir" 2>/dev/null || stat -f %HT "$artifact_dir" 2>/dev/null || true)
+  dir_owner=$(stat -c %u "$artifact_dir" 2>/dev/null || stat -f %u "$artifact_dir" 2>/dev/null || true)
+  dir_mode=$(stat -c %a "$artifact_dir" 2>/dev/null || stat -f %Lp "$artifact_dir" 2>/dev/null || true)
+  marker_type=$(stat -c %F "$artifact_dir/.owner" 2>/dev/null || stat -f %HT "$artifact_dir/.owner" 2>/dev/null || true)
+  marker_owner=$(stat -c %u "$artifact_dir/.owner" 2>/dev/null || stat -f %u "$artifact_dir/.owner" 2>/dev/null || true)
+  marker_mode=$(stat -c %a "$artifact_dir/.owner" 2>/dev/null || stat -f %Lp "$artifact_dir/.owner" 2>/dev/null || true)
+  [[ ("$dir_type" == directory || "$dir_type" == Directory) && "$dir_owner" == "$(id -u)" && "$dir_mode" == 700 ]] || return 1
+  [[ ("$marker_type" == 'regular file' || "$marker_type" == 'regular empty file' || "$marker_type" == 'Regular File') && "$marker_owner" == "$(id -u)" && "$marker_mode" == 600 ]] || return 1
+  [[ "$(<"$artifact_dir/.owner")" == "$owner" ]]
+}
+artifact_empty_owned_dir() {
+  [[ -d "$artifact_dir" && ! -L "$artifact_dir" ]] || return 1
+  local dir_type dir_owner dir_mode entry
+  dir_type=$(stat -c %F "$artifact_dir" 2>/dev/null || stat -f %HT "$artifact_dir" 2>/dev/null || true)
+  dir_owner=$(stat -c %u "$artifact_dir" 2>/dev/null || stat -f %u "$artifact_dir" 2>/dev/null || true)
+  dir_mode=$(stat -c %a "$artifact_dir" 2>/dev/null || stat -f %Lp "$artifact_dir" 2>/dev/null || true)
+  [[ ("$dir_type" == directory || "$dir_type" == Directory) && "$dir_owner" == "$(id -u)" && "$dir_mode" == 700 ]] || return 1
+  for entry in "$artifact_dir"/* "$artifact_dir"/.[!.]* "$artifact_dir"/..?*; do
+    [[ -e "$entry" || -L "$entry" ]] && return 1
+  done
+  return 0
+}
+owned_remove_file() {
+  [[ ! -L "$1" ]] || return 1
+  if [[ -e "$1" ]]; then rm -f -- "$1" || return 1; fi
+}
+owned_remove_dir() {
+  [[ ! -L "$1" ]] || return 1
+  if [[ -e "$1" ]]; then rm -rf -- "$1" || return 1; fi
+}
+
+cleanup_owned() {
+  local original_status=${1:-0} failures=() clusters output rc image
+  if ! marker_owned; then
+    echo 'cleanup failures: ownership marker missing' >&2
+    return 1
+  fi
+  set +e; output=$(kind get clusters 2>&1); rc=$?; set -e
+  if ((rc != 0)); then failures+=("query Kind clusters: $output"); clusters=''; else clusters=$output; fi
+  if ((rc == 0)) && grep -Fxq "$cluster" <<<"$clusters"; then bounded kind delete cluster --name "$cluster" || failures+=("delete Kind cluster"); fi
+  [[ ! -e "$kubeconfig" && ! -L "$kubeconfig" ]] || owned_remove_file "$kubeconfig" || failures+=("remove kubeconfig")
+  [[ ! -e "$run_dir" && ! -L "$run_dir" ]] || owned_remove_dir "$run_dir" || failures+=("remove run directory")
+  for image in "$e2e_image" "$source_image"; do
+    set +e; output=$(docker image inspect "$image" 2>&1); rc=$?; set -e
+    if ((rc == 0)); then bounded docker image rm "$image" >/dev/null || failures+=("remove image $image"); elif ! is_known_absent "$output"; then failures+=("query image $image: $output"); fi
+  done
+  if [[ -e "$artifact_dir" || -L "$artifact_dir" ]]; then
+    if ! artifact_owned; then
+      if artifact_empty_owned_dir; then
+        owned_remove_dir "$artifact_dir" || failures+=("remove interrupted debug artifact directory")
+      else
+        failures+=("debug artifact ownership is invalid")
+      fi
+    elif [[ "$original_status" -eq 0 ]]; then
+      owned_remove_dir "$artifact_dir" || failures+=("remove debug artifacts")
+    else
+      echo "owned debug artifacts retained at $artifact_dir; run cleanup-only before retrying" >&2
+    fi
+  fi
+  set +e; output=$(kind get clusters 2>&1); rc=$?; set -e
+  if ((rc != 0)); then failures+=("verify Kind cleanup: $output"); elif grep -Fxq "$cluster" <<<"$output"; then failures+=("Kind cluster remains"); fi
+  for image in "$e2e_image" "$source_image"; do
+    set +e; output=$(docker image inspect "$image" 2>&1); rc=$?; set -e
+    if ((rc == 0)); then failures+=("image remains: $image"); elif ! is_known_absent "$output"; then failures+=("verify image cleanup $image: $output"); fi
+  done
+  [[ ! -e "$kubeconfig" && ! -L "$kubeconfig" ]] || failures+=("kubeconfig remains")
+  [[ ! -e "$run_dir" && ! -L "$run_dir" ]] || failures+=("run directory remains")
+  if ((${#failures[@]})); then printf 'cleanup failures: %s\n' "${failures[*]}" >&2; return 1; fi
+  if [[ "$original_status" -eq 0 || ! -e "$artifact_dir" ]]; then
+    owned_remove_file "$marker" || { echo 'cleanup failures: remove ownership marker' >&2; return 1; }
+    owned_remove_dir "$state_dir" || { echo 'cleanup failures: remove state directory' >&2; return 1; }
+  else
+    echo "ownership marker retained for cleanup-only: $state_dir" >&2
+  fi
+}
+
+prepare_debug_dir() {
+  if [[ -e "$artifact_dir" || -L "$artifact_dir" ]]; then
+    artifact_owned || { echo "refusing unsafe debug artifact path $artifact_dir" >&2; return 1; }
+    return 0
+  fi
+  mkdir -- "$artifact_dir" || { echo "cannot create debug artifact directory $artifact_dir" >&2; return 1; }
+  chmod 700 "$artifact_dir"
+  printf '%s\n' "$owner" >"$artifact_dir/.owner"
+  chmod 600 "$artifact_dir/.owner"
+}
+
+write_safe_debug() {
+  prepare_debug_dir || return 1
+  {
+    echo "cluster=$cluster"
+    # Debug mode runs before versions.env is loaded, so keep this diagnostic
+    # safe under set -u and make the pre-install state explicit.
+    echo "kind_image=${kind_image-<unset>}"
+    echo "source_image=$source_image"
+    echo "e2e_image=$e2e_image"
+    kind version 2>&1 | sed -E 's/(token|password|secret|authorization)[^[:space:]]*/[redacted]/Ig' || true
+    helm version --short 2>&1 || true
+    kubectl version --client 2>&1 || true
+  } >"$artifact_dir/versions.txt"
+  {
+    kubectl get --raw=/readyz 2>&1 || true
+    kubectl get nodes -o 'custom-columns=NAME:.metadata.name,READY:.status.conditions[-1].status' 2>&1 || true
+    kubectl get deployments -A -o 'custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name,READY:.status.readyReplicas,AVAILABLE:.status.availableReplicas' 2>&1 || true
+    kubectl get pods -A -o 'custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name,PHASE:.status.phase,READY:.status.conditions[-1].status' 2>&1 || true
+  } >"$artifact_dir/readiness.txt"
+}
+
+if [[ "$mode" == cleanup-only ]]; then marker_owned || die "cleanup-only requires the exact ownership marker"; cleanup_owned 0; exit $?; fi
+if [[ "$mode" == debug ]]; then
+  marker_owned || die "debug requires the exact ownership marker"
+  [[ -f "$kubeconfig" && ! -L "$kubeconfig" ]] || die "owned kubeconfig is missing"
+  KUBECONFIG="$kubeconfig" write_safe_debug
+  exit $?
+fi
+
+assert_kind_absent
+assert_container_absent "${cluster}-control-plane"
+assert_regular_absent "$marker"
+assert_regular_absent "$kubeconfig"
+assert_regular_absent "$run_dir"
+assert_regular_absent "$artifact_dir"
+docker info >/dev/null
+assert_image_absent "$source_image"
+assert_image_absent "$e2e_image"
+[[ -f versions.env && ! -L versions.env ]] || die 'versions.env must be a regular repository file'
+set -a
+# The runner validates and loads the repository pin file.
+# shellcheck disable=SC1091
+source versions.env
+set +a
+: "${E2E_CREATOR_TRACKING_STABLE_NODE_IMAGE:?versions.env must define E2E_CREATOR_TRACKING_STABLE_NODE_IMAGE}"
+readonly kind_image=$E2E_CREATOR_TRACKING_STABLE_NODE_IMAGE
+if ! (set -C; printf '%s\n' "$owner" >"$marker") 2>/dev/null; then
+  die "unable to create ownership marker $marker"
+fi
+chmod 600 "$marker"
+marker_owned || die "ownership marker is not a private file owned by this user"
+status=0
+cleanup() {
+  status=$?
+  trap - EXIT INT TERM
+  if [[ "$status" -ne 0 && -f "$kubeconfig" && ! -L "$kubeconfig" ]]; then
+    KUBECONFIG="$kubeconfig" write_safe_debug || true
+  fi
+  cleanup_status=0
+  cleanup_owned "$status" || cleanup_status=$?
+  if [[ "$status" -eq 0 && "$cleanup_status" -ne 0 ]]; then status=$cleanup_status; fi
+  exit "$status"
+}
+trap cleanup EXIT INT TERM
+mkdir "$run_dir"
+bounded env DOCKER_BUILDKIT=1 docker build --tag "$source_image" .
+bounded kind create cluster --name "$cluster" --kubeconfig "$kubeconfig" --config test/e2e/kind-config-single.yaml --image "$kind_image" --wait 5m
+[[ -f "$kubeconfig" && ! -L "$kubeconfig" ]] || die "Kind did not create a regular kubeconfig"
+chmod 600 "$kubeconfig"
+export KUBECONFIG="$kubeconfig"
+bounded docker tag "$source_image" "$e2e_image"
+bounded kind load docker-image "$e2e_image" --name "$cluster"
+bounded helm upgrade --install auth-operator chart/auth-operator --namespace auth-operator-system --create-namespace --set image.repository=auth-operator --set image.tag=creator-tracking-kyverno-e2e --set image.pullPolicy=Never --set creatorTracking.enabled=true --wait --timeout 5m
+KUBECONFIG="$kubeconfig" KIND_CLUSTER="$cluster" IMG="$e2e_image" KYVERNO_E2E_ARCHIVE_DIR="$run_dir" bounded hack/ci/install-kyverno.sh
+KUBECONFIG="$kubeconfig" KIND_CLUSTER="$cluster" IMG="$e2e_image" \
+  E2E_EXACT_CLEANUP_ONLY=true SKIP_CLUSTER_SETUP=true \
+  bounded go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.fail-on-pending=true -ginkgo.label-filter=creator-tracking-kyverno -timeout 30m

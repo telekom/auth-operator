@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+# SPDX-License-Identifier: CC0-1.0
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: creator-tracking-benign-label
+spec:
+  background: false
+  failurePolicy: Ignore
+  rules:
+    - name: add-benign-label
+      match:
+        any:
+          - resources:
+              kinds: [Namespace]
+              operations: [CREATE]
+      mutate:
+        patchStrategicMerge:
+          metadata:
+            labels:
+              kyverno-touched: "true"
