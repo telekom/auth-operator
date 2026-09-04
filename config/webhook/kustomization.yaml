@@ -17,6 +17,10 @@ resources:
 # likewise opt-in: overlays add namespace_deletion_protection_vap.yaml. The
 # namespace validating webhook enforces the same rules as fallback when the
 # cluster has no VAP support.
+#
+# Creator tracking via MutatingAdmissionPolicy is also opt-in: overlays add
+# creator_tracking_map.yaml when creator protection is wanted. The file uses
+# stable v1 (K8s >= 1.36) and documents the v1beta1 setup for 1.34 and 1.35.
 
 configurations:
 - kustomizeconfig.yaml

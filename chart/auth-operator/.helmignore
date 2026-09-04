@@ -22,3 +22,5 @@
 *.tmproj
 .vscode/
 kustomization.yaml
+*_test.go
+testdata/

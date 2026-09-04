@@ -1,0 +1,163 @@
+# Standalone UPDATE contributor tracking via MutatingAdmissionPolicy.
+#
+# Apply this file after docs/examples/creator-tracking-map.yaml. It replaces
+# that example's contributor-tracking scrub policy with history tracking.
+# Kubernetes 1.36 serves v1. For Kubernetes 1.34 and 1.35, use the v1beta1 API
+# and test/e2e/kind-config-creator-tracking-beta.yaml. This implementation
+# supports Kubernetes 1.34 and newer. It intentionally does not support the
+# alpha APIs exposed by Kubernetes 1.32 and 1.33.
+#
+# Editors are stored once in first-edit order. Usernames escape '%' as '%25'
+# and then ',' as '%2C' before comma joining. The first ordinary UPDATE creates
+# the list. The creator appears only after that identity later edits the object.
+#
+# This policy uses failurePolicy Ignore. It restores old history only when the
+# final annotations fit; otherwise it removes the list and allows the update.
+# Old values cannot prove provenance after an activation or fail-open gap. An
+# authorized impersonator controls the effective username, and the original
+# caller is not recorded. Treat this as best-effort context, not evidence.
+#
+# This UPDATE-only policy is cluster-wide and has no namespace selector. It uses
+# the same default kinds as the protect example. Anyone who can read an object
+# can read updated-by. No-op and controller updates can count; DELETE, status,
+# timestamps, and full history are not tracked. Do not enable standalone and
+# Helm variants together. Removing the policy leaves annotations behind, and
+# config changes or re-enable do not update old objects retroactively. The policy
+# runs in the API server while operator pods are stopped. Remove it, verify its
+# policy and binding are gone, then clean retained annotations if needed.
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicy
+metadata:
+  name: contributor-tracking
+spec:
+  failurePolicy: Ignore
+  reinvocationPolicy: IfNeeded
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["UPDATE"]
+        resources: ["namespaces", "serviceaccounts", "secrets"]
+      - apiGroups: ["rbac.authorization.k8s.io"]
+        apiVersions: ["v1"]
+        operations: ["UPDATE"]
+        resources: ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
+      - apiGroups: ["authorization.t-caas.telekom.com"]
+        apiVersions: ["v1alpha1"]
+        operations: ["UPDATE"]
+        resources: ["roledefinitions", "binddefinitions", "rbacpolicies", "restrictedbinddefinitions", "restrictedroledefinitions", "webhookauthorizers"]
+  matchConditions:
+    - name: parent-resource
+      expression: request.?subResource.orValue('') == ''
+  variables:
+    - name: editor
+      expression: request.userInfo.username.replace('%', '%25').replace(',', '%2C')
+    - name: isExcluded
+      expression: 'false'
+    - name: oldListExists
+      expression: >-
+        has(oldObject.metadata.annotations)
+        && 't-caas.telekom.com/updated-by' in oldObject.metadata.annotations
+    - name: oldList
+      expression: >-
+        variables.oldListExists
+        ? oldObject.metadata.annotations['t-caas.telekom.com/updated-by']
+        : ''
+    - name: editorAlreadyTracked
+      expression: >-
+        variables.oldList != '' && variables.editor in variables.oldList.split(',')
+    - name: candidateList
+      expression: >-
+        variables.oldList == ''
+        ? variables.editor
+        : variables.oldList + ',' + variables.editor
+    - name: otherAnnotationBytes
+      expression: >-
+        !has(object.metadata.annotations) ? 0
+        : object.metadata.annotations.map(key,
+            key in ['t-caas.telekom.com/created-by',
+                    't-caas.telekom.com/created-by-groups',
+                    't-caas.telekom.com/updated-by']
+            ? 0
+            : bytes(key).size()
+              + bytes(object.metadata.annotations[key]).size()).sum()
+    - name: previousCreatorBytes
+      expression: >-
+        has(oldObject.metadata.annotations)
+        && 't-caas.telekom.com/created-by' in oldObject.metadata.annotations
+        ? bytes('t-caas.telekom.com/created-by').size()
+          + bytes(oldObject.metadata.annotations['t-caas.telekom.com/created-by']).size()
+          + bytes('t-caas.telekom.com/created-by-groups').size()
+          + bytes(('t-caas.telekom.com/created-by-groups'
+                   in oldObject.metadata.annotations)
+                  ? oldObject.metadata.annotations['t-caas.telekom.com/created-by-groups']
+                  : '').size()
+        : 0
+    - name: oldListFits
+      expression: >-
+        variables.oldListExists
+        && variables.otherAnnotationBytes
+           + variables.previousCreatorBytes
+           + bytes('t-caas.telekom.com/updated-by').size()
+           + bytes(variables.oldList).size()
+           <= 262144
+    - name: candidateFits
+      expression: >-
+        variables.otherAnnotationBytes
+        + variables.previousCreatorBytes
+        + bytes('t-caas.telekom.com/updated-by').size()
+        + bytes(variables.candidateList).size()
+        <= 262144
+    - name: listShouldExist
+      expression: >-
+        variables.oldListExists
+        ? variables.oldListFits
+        : (!variables.isExcluded && variables.candidateFits)
+    - name: desiredList
+      expression: >-
+        !variables.oldListExists
+        ? variables.candidateList
+        : (variables.oldListFits
+           && !variables.isExcluded
+           && !variables.editorAlreadyTracked
+           && variables.candidateFits
+           ? variables.candidateList
+           : variables.oldList)
+  mutations:
+    - patchType: JSONPatch
+      jsonPatch:
+        expression: >-
+          variables.listShouldExist
+          ? (
+              (!has(object.metadata.annotations)
+               ? [JSONPatch{op: 'add', path: '/metadata/annotations', value: {}}]
+               : [])
+              + (!has(object.metadata.annotations)
+                 || !('t-caas.telekom.com/updated-by' in object.metadata.annotations)
+                 || object.metadata.annotations['t-caas.telekom.com/updated-by']
+                    != variables.desiredList
+                 ? [JSONPatch{
+                     op: 'add',
+                     path: '/metadata/annotations/'
+                           + jsonpatch.escapeKey('t-caas.telekom.com/updated-by'),
+                     value: variables.desiredList
+                   }]
+                 : [])
+            )
+          : (
+              has(object.metadata.annotations)
+              && 't-caas.telekom.com/updated-by' in object.metadata.annotations
+              ? [JSONPatch{
+                  op: 'remove',
+                  path: '/metadata/annotations/'
+                        + jsonpatch.escapeKey('t-caas.telekom.com/updated-by')
+                }]
+              : []
+            )
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicyBinding
+metadata:
+  name: contributor-tracking
+spec:
+  policyName: contributor-tracking

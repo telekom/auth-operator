@@ -16,6 +16,8 @@ make test-e2e-full           # Base CRD tests - kustomize install
 make test-e2e-helm-full      # Helm chart tests - helm install  
 make test-e2e-dev            # Dev overlay tests - make deploy
 make test-e2e-complex        # Multi-CRD scenarios
+make test-e2e-creator-tracking-full                         # Kubernetes 1.36 v1
+make test-e2e-creator-tracking-full E2E_CREATOR_TRACKING_VARIANT=beta # Kubernetes 1.34.3 v1beta1
 make test-e2e-ha             # HA & leader election (multi-node)
 make test-e2e-integration    # Cross-CRD integration
 make test-e2e-golden         # Golden file validation
@@ -37,6 +39,7 @@ make test-e2e-helm               # Run failing test
 
 | Test Suite | Cluster Name | Install Method | Nodes |
 |------------|--------------|----------------|-------|
+| **creator-tracking** | `auth-operator-e2e-creator-tracking` | Helm | 1 |
 | **base** | `auth-operator-e2e` | Kustomize | 1 |
 | **helm** | `auth-operator-e2e-helm` | Helm | 1 |
 | **dev** | `auth-operator-e2e-dev` | Kustomize | 1 |
@@ -44,6 +47,13 @@ make test-e2e-helm               # Run failing test
 | **integration** | `auth-operator-e2e-integration` | Helm | 1 |
 | **golden** | `auth-operator-e2e-golden` | Helm | 1 |
 | **ha** | `auth-operator-e2e-ha-multi` | Helm (HA) | 3 |
+
+The creator-tracking full targets require Linux or an OrbStack Linux machine,
+Docker 20.10 or newer, Kind 0.32, GNU `flock`, GNU `readlink`, GNU `timeout`,
+Helm 4.2.3, and matching `kubectl`. Their persistent lock does not protect
+against manual or other external deletion of the dedicated cluster, so do not
+run these targets concurrently with global cleanup. The lock serializes
+creator-tracking targets only.
 
 > ⚠️ **Each suite MUST run in its own cluster** to avoid cross-contamination
 
@@ -90,17 +100,18 @@ IMG=myregistry/auth-operator:v1.2.3   # Custom operator image
 
 ```bash
 # Run specific test types
-go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="LABEL"
+go test -tags e2e ./test/e2e/ -v -ginkgo.v -ginkgo.label-filter="LABEL && !creator-tracking"
 
 # Combine labels
--ginkgo.label-filter="helm && !complex"    # Helm but not complex
--ginkgo.label-filter="ha || leader-election" # HA or leader election
+-ginkgo.label-filter="helm && !complex && !creator-tracking" # Helm, not dedicated creator tracking
+-ginkgo.label-filter="(ha || leader-election) && !creator-tracking" # High availability only
 ```
 
 | Label | Purpose | Requires Cluster? |
 |-------|---------|-------------------|
 | `setup` | Prerequisites check | Yes |
 | `helm` | Helm chart installation | Yes |
+| `creator-tracking` | Creator annotations on stable and beta Kubernetes APIs | Yes (dedicated) |
 | `dev` | Dev/kustomize deployment | Yes |
 | `complex` | Multi-CRD combinations | Yes |
 | `integration` | Cross-CRD scenarios | Yes |
@@ -191,10 +202,10 @@ make test-e2e-integration &
 wait
 
 # Run single test by name
-go test -tags e2e ./test/e2e/ -v -ginkgo.focus="should create ClusterRole"
+go test -tags e2e ./test/e2e/ -v -ginkgo.label-filter="!creator-tracking" -ginkgo.focus="should create ClusterRole"
 
 # Skip slow tests during development
-go test -tags e2e ./test/e2e/ -v -ginkgo.skip="ha|integration|golden"
+go test -tags e2e ./test/e2e/ -v -ginkgo.label-filter="!creator-tracking" -ginkgo.skip="ha|integration|golden"
 
 # List all kind clusters
 kind get clusters | grep auth-operator
@@ -239,7 +250,7 @@ kubectl logs -n <ns> -l control-plane=controller-manager --tail=100
 kubectl get roledefinitions -w
 
 # Debug specific test
-go test -tags e2e ./test/e2e/ -v -ginkgo.focus="should create ClusterRole"
+go test -tags e2e ./test/e2e/ -v -ginkgo.label-filter="!creator-tracking" -ginkgo.focus="should create ClusterRole"
 
 # Check webhook config
 kubectl get validatingwebhookconfigurations

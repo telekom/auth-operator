@@ -5,6 +5,7 @@ package e2e
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -79,6 +80,17 @@ var ClusterMapping = map[string]TestSuiteConfig{
 		DeployTimeout:    "5m",
 		ReconcileTimeout: "3m",
 		PollingInterval:  "5s",
+	},
+	"creator-tracking": {
+		SuiteName:        "creator-tracking",
+		ClusterName:      "auth-operator-e2e-creator-tracking",
+		InstallMethod:    InstallMethodHelm,
+		Namespace:        "auth-operator-creator-e2e",
+		TestNamespaces:   []string{"e2e-creator-tracking"},
+		Labels:           []string{"creator-tracking", "creator-tracking-cleanup", "creator-tracking-upgrade"},
+		DeployTimeout:    "5m",
+		ReconcileTimeout: "3m",
+		PollingInterval:  "2s",
 	},
 	"dev": {
 		SuiteName:        "dev",
@@ -157,12 +169,24 @@ func GetSuiteConfig(suiteName string) (TestSuiteConfig, error) {
 
 // GetSuiteForLabels determines which suite config to use based on active labels.
 func GetSuiteForLabels(labels []string) (TestSuiteConfig, error) {
+	priority := []string{
+		"creator-tracking-cleanup", "creator-tracking-upgrade", "creator-tracking",
+		"ha", "leader-election", "complex", "integration",
+		"golden", "helm", "dev", "kustomize", "setup", "api", "debug",
+	}
+	active := make(map[string]struct{}, len(labels))
 	for _, label := range labels {
-		for name, config := range ClusterMapping {
-			for _, configLabel := range config.Labels {
-				if label == configLabel {
-					return ClusterMapping[name], nil
-				}
+		active[label] = struct{}{}
+	}
+	for _, label := range priority {
+		if _, ok := active[label]; !ok {
+			continue
+		}
+		for _, name := range []string{
+			"creator-tracking", "ha", "complex", "integration", "golden", "helm", "dev", "kustomize", "base",
+		} {
+			if slices.Contains(ClusterMapping[name].Labels, label) {
+				return ClusterMapping[name], nil
 			}
 		}
 	}

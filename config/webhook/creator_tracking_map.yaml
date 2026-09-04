@@ -1,0 +1,299 @@
+# Standalone creator tracking via MutatingAdmissionPolicy.
+#
+# Kubernetes 1.36 or newer serves admissionregistration.k8s.io/v1 and enables
+# MutatingAdmissionPolicy by default. Apply this file with:
+#   kubectl apply -f config/webhook/creator_tracking_map.yaml
+#
+# Kubernetes 1.34 and 1.35 use admissionregistration.k8s.io/v1beta1. Change
+# all apiVersion fields and use the complete Kind configuration at
+# test/e2e/kind-config-creator-tracking-beta.yaml. Its API server settings are:
+#   apiServer:
+#     extraArgs:
+#       feature-gates: MutatingAdmissionPolicy=true
+#       runtime-config: admissionregistration.k8s.io/v1beta1=true
+#
+# This is protect mode. CREATE records the effective request username and
+# encoded groups. UPDATE restores old creator values when they fit. A separate
+# policy removes updated-by on UPDATE; applying the contributor example
+# replaces that policy with contributor tracking.
+# Group components escape '%' as '%25' and then ',' as '%2C' before joining.
+#
+# The policies use failurePolicy Ignore and may skip or remove tracking data at
+# the annotation limit. Old values also cannot prove provenance after an
+# activation or fail-open gap. An authorized impersonator controls the
+# effective username; the original caller is not recorded. Treat these
+# annotations as best-effort operational context, not forensic evidence.
+#
+# This policy is cluster-wide and has no namespace selector. Defaults cover
+# Namespace, ServiceAccount, Secret, all RBAC role/binding kinds, and all auth
+# operator kinds listed below. Replace resourceRules to collect less metadata.
+# Annotations and creation-time groups are visible to anyone who can read the
+# object, including Secrets. Do not enable this and the Helm variant together.
+# CREATE and parent UPDATE are handled; DELETE, status, timestamps, and full
+# history are not. No-op and controller updates can count. Policies keep running
+# while operator pods are stopped. Removing policies leaves annotations behind;
+# config changes are not retroactive and re-enable does not backfill objects. An
+# old creator value is preserved after re-enable, even if it changed while off.
+# Remove policies and bindings, verify they are gone, then clean annotations.
+# This implementation supports Kubernetes 1.34 and newer. Kubernetes 1.32 and
+# 1.33 exposed alpha APIs, which this example intentionally does not support.
+# For a v1beta1-to-v1 upgrade, keep both endpoints served while applying or
+# upgrading through v1. The endpoints show the same persisted objects. Verify
+# them through v1, then stop serving the v1beta1 endpoint.
+# Verify activation without creating an object; both creator keys must appear:
+#   kubectl create namespace creator-tracking-check --dry-run=server -o json \
+#     | jq -e '.metadata.annotations["t-caas.telekom.com/created-by"] and .metadata.annotations["t-caas.telekom.com/created-by-groups"]'
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicy
+metadata:
+  name: creator-tracking
+spec:
+  failurePolicy: Ignore
+  reinvocationPolicy: IfNeeded
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["namespaces", "serviceaccounts", "secrets"]
+      - apiGroups: ["rbac.authorization.k8s.io"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
+      - apiGroups: ["authorization.t-caas.telekom.com"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["roledefinitions", "binddefinitions", "rbacpolicies", "restrictedbinddefinitions", "restrictedroledefinitions", "webhookauthorizers"]
+  matchConditions:
+    - name: parent-resource
+      expression: request.?subResource.orValue('') == ''
+  variables:
+    - name: username
+      expression: request.userInfo.username
+    - name: groups
+      expression: >-
+        has(request.userInfo.groups)
+        ? request.userInfo.groups.map(group,
+            group.replace('%', '%25').replace(',', '%2C')).join(',')
+        : ''
+    - name: isExcluded
+      expression: 'false'
+    - name: createOtherAnnotationBytes
+      expression: >-
+        !has(object.metadata.annotations) ? 0
+        : object.metadata.annotations.map(key,
+            key in ['t-caas.telekom.com/created-by',
+                    't-caas.telekom.com/created-by-groups',
+                    't-caas.telekom.com/updated-by']
+            ? 0
+            : bytes(key).size()
+              + bytes(object.metadata.annotations[key]).size()).sum()
+    - name: creatorStampFits
+      expression: >-
+        variables.createOtherAnnotationBytes
+        + bytes('t-caas.telekom.com/created-by').size()
+        + bytes(variables.username).size()
+        + bytes('t-caas.telekom.com/created-by-groups').size()
+        + bytes(variables.groups).size()
+        <= 262144
+    - name: updateOtherAnnotationBytes
+      expression: >-
+        !has(object.metadata.annotations) ? 0
+        : object.metadata.annotations.map(key,
+            key in ['t-caas.telekom.com/created-by',
+                    't-caas.telekom.com/created-by-groups',
+                    't-caas.telekom.com/updated-by']
+            ? 0
+            : bytes(key).size()
+              + bytes(object.metadata.annotations[key]).size()).sum()
+    - name: oldCreatorBytes
+      expression: >-
+        has(oldObject.metadata.annotations)
+        && 't-caas.telekom.com/created-by' in oldObject.metadata.annotations
+        ? bytes('t-caas.telekom.com/created-by').size()
+          + bytes(oldObject.metadata.annotations['t-caas.telekom.com/created-by']).size()
+          + bytes('t-caas.telekom.com/created-by-groups').size()
+          + bytes(('t-caas.telekom.com/created-by-groups'
+                   in oldObject.metadata.annotations)
+                  ? oldObject.metadata.annotations['t-caas.telekom.com/created-by-groups']
+                  : '').size()
+        : 0
+    - name: creatorRestoreFits
+      expression: >-
+        variables.updateOtherAnnotationBytes + variables.oldCreatorBytes <= 262144
+  mutations:
+    - patchType: JSONPatch
+      jsonPatch:
+        expression: >-
+          request.operation == 'CREATE'
+          ? (
+              !variables.isExcluded && variables.creatorStampFits
+              ? (
+                  (!has(object.metadata.annotations)
+                   ? [JSONPatch{op: 'add', path: '/metadata/annotations', value: {}}]
+                   : [])
+                  + (!has(object.metadata.annotations)
+                     || !('t-caas.telekom.com/created-by' in object.metadata.annotations)
+                     || object.metadata.annotations['t-caas.telekom.com/created-by']
+                        != variables.username
+                     ? [JSONPatch{
+                         op: 'add',
+                         path: '/metadata/annotations/'
+                               + jsonpatch.escapeKey('t-caas.telekom.com/created-by'),
+                         value: variables.username
+                       }]
+                     : [])
+                  + (!has(object.metadata.annotations)
+                     || !('t-caas.telekom.com/created-by-groups' in object.metadata.annotations)
+                     || object.metadata.annotations['t-caas.telekom.com/created-by-groups']
+                        != variables.groups
+                     ? [JSONPatch{
+                         op: 'add',
+                         path: '/metadata/annotations/'
+                               + jsonpatch.escapeKey('t-caas.telekom.com/created-by-groups'),
+                         value: variables.groups
+                       }]
+                     : [])
+                  + (has(object.metadata.annotations)
+                     && 't-caas.telekom.com/updated-by' in object.metadata.annotations
+                     ? [JSONPatch{
+                         op: 'remove',
+                         path: '/metadata/annotations/'
+                               + jsonpatch.escapeKey('t-caas.telekom.com/updated-by')
+                       }]
+                     : [])
+                )
+              : (
+                  (has(object.metadata.annotations)
+                   && 't-caas.telekom.com/created-by' in object.metadata.annotations
+                   ? [JSONPatch{
+                       op: 'remove',
+                       path: '/metadata/annotations/'
+                             + jsonpatch.escapeKey('t-caas.telekom.com/created-by')
+                     }]
+                   : [])
+                  + (has(object.metadata.annotations)
+                     && 't-caas.telekom.com/created-by-groups' in object.metadata.annotations
+                     ? [JSONPatch{
+                         op: 'remove',
+                         path: '/metadata/annotations/'
+                               + jsonpatch.escapeKey('t-caas.telekom.com/created-by-groups')
+                       }]
+                     : [])
+                  + (has(object.metadata.annotations)
+                     && 't-caas.telekom.com/updated-by' in object.metadata.annotations
+                     ? [JSONPatch{
+                         op: 'remove',
+                         path: '/metadata/annotations/'
+                               + jsonpatch.escapeKey('t-caas.telekom.com/updated-by')
+                       }]
+                     : [])
+                )
+            )
+          : (
+              has(oldObject.metadata.annotations)
+              && 't-caas.telekom.com/created-by' in oldObject.metadata.annotations
+              && variables.creatorRestoreFits
+              ? (
+                  (!has(object.metadata.annotations)
+                   ? [JSONPatch{op: 'add', path: '/metadata/annotations', value: {}}]
+                   : [])
+                  + (!has(object.metadata.annotations)
+                     || !('t-caas.telekom.com/created-by' in object.metadata.annotations)
+                     || object.metadata.annotations['t-caas.telekom.com/created-by']
+                        != oldObject.metadata.annotations['t-caas.telekom.com/created-by']
+                     ? [JSONPatch{
+                         op: 'add',
+                         path: '/metadata/annotations/'
+                               + jsonpatch.escapeKey('t-caas.telekom.com/created-by'),
+                         value: oldObject.metadata.annotations['t-caas.telekom.com/created-by']
+                       }]
+                     : [])
+                  + (!has(object.metadata.annotations)
+                     || !('t-caas.telekom.com/created-by-groups' in object.metadata.annotations)
+                     || object.metadata.annotations['t-caas.telekom.com/created-by-groups']
+                        != (('t-caas.telekom.com/created-by-groups'
+                             in oldObject.metadata.annotations)
+                            ? oldObject.metadata.annotations['t-caas.telekom.com/created-by-groups']
+                            : '')
+                     ? [JSONPatch{
+                         op: 'add',
+                         path: '/metadata/annotations/'
+                               + jsonpatch.escapeKey('t-caas.telekom.com/created-by-groups'),
+                         value: ('t-caas.telekom.com/created-by-groups'
+                                 in oldObject.metadata.annotations)
+                                ? oldObject.metadata.annotations['t-caas.telekom.com/created-by-groups']
+                                : ''
+                       }]
+                     : [])
+                )
+              : (
+                  (has(object.metadata.annotations)
+                   && 't-caas.telekom.com/created-by' in object.metadata.annotations
+                   ? [JSONPatch{
+                       op: 'remove',
+                       path: '/metadata/annotations/'
+                             + jsonpatch.escapeKey('t-caas.telekom.com/created-by')
+                     }]
+                   : [])
+                  + (has(object.metadata.annotations)
+                     && 't-caas.telekom.com/created-by-groups' in object.metadata.annotations
+                     ? [JSONPatch{
+                         op: 'remove',
+                         path: '/metadata/annotations/'
+                               + jsonpatch.escapeKey('t-caas.telekom.com/created-by-groups')
+                       }]
+                     : [])
+                )
+            )
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicyBinding
+metadata:
+  name: creator-tracking
+spec:
+  policyName: creator-tracking
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicy
+metadata:
+  name: contributor-tracking
+spec:
+  failurePolicy: Ignore
+  reinvocationPolicy: IfNeeded
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["UPDATE"]
+        resources: ["namespaces", "serviceaccounts", "secrets"]
+      - apiGroups: ["rbac.authorization.k8s.io"]
+        apiVersions: ["v1"]
+        operations: ["UPDATE"]
+        resources: ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
+      - apiGroups: ["authorization.t-caas.telekom.com"]
+        apiVersions: ["v1alpha1"]
+        operations: ["UPDATE"]
+        resources: ["roledefinitions", "binddefinitions", "rbacpolicies", "restrictedbinddefinitions", "restrictedroledefinitions", "webhookauthorizers"]
+  matchConditions:
+    - name: parent-resource
+      expression: request.?subResource.orValue('') == ''
+  mutations:
+    - patchType: JSONPatch
+      jsonPatch:
+        expression: >-
+          has(object.metadata.annotations)
+          && 't-caas.telekom.com/updated-by' in object.metadata.annotations
+          ? [JSONPatch{
+              op: 'remove',
+              path: '/metadata/annotations/'
+                    + jsonpatch.escapeKey('t-caas.telekom.com/updated-by')
+            }]
+          : []
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicyBinding
+metadata:
+  name: contributor-tracking
+spec:
+  policyName: contributor-tracking

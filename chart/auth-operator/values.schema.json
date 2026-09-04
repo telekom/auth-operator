@@ -574,6 +574,96 @@
         }
       }
     },
+    "creatorTracking": {
+      "type": ["object", "null"],
+      "description": "Creator and contributor annotation tracking through MutatingAdmissionPolicy.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable creator tracking.",
+          "default": false
+        },
+        "mode": {
+          "type": "string",
+          "description": "Tracking mode: create-only, protect, or contributors.",
+          "enum": ["create-only", "protect", "contributors"],
+          "default": "protect"
+        },
+        "map": {
+          "type": "string",
+          "description": "MutatingAdmissionPolicy rendering mode: auto, enabled, or disabled.",
+          "enum": ["auto", "enabled", "disabled"],
+          "default": "auto"
+        },
+        "resources": {
+          "type": "array",
+          "description": "API resources whose creator identity is tracked.",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "apiGroups": {
+                "type": "array",
+                "items": { "type": "string" },
+                "minItems": 1,
+                "uniqueItems": true,
+                "allOf": [
+                  {
+                    "if": { "contains": { "const": "*" } },
+                    "then": { "maxItems": 1 }
+                  }
+                ]
+              },
+              "apiVersions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "minItems": 1,
+                "uniqueItems": true,
+                "allOf": [
+                  {
+                    "if": { "contains": { "const": "*" } },
+                    "then": { "maxItems": 1 }
+                  }
+                ]
+              },
+              "resources": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[^/]+$"
+                },
+                "minItems": 1,
+                "uniqueItems": true,
+                "allOf": [
+                  {
+                    "if": { "contains": { "const": "*" } },
+                    "then": { "maxItems": 1 }
+                  }
+                ]
+              }
+            },
+            "required": ["apiGroups", "apiVersions", "resources"]
+          }
+        },
+        "excludedUsernames": {
+          "type": "array",
+          "description": "Usernames omitted from new creator and contributor data. Exclusion does not bypass restoration attempts.",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "default": [],
+          "uniqueItems": true
+        }
+      }
+    },
     "metrics": {
       "type": "object",
       "description": "Metrics and monitoring configuration.",

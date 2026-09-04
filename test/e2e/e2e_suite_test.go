@@ -132,8 +132,10 @@ var _ = AfterSuite(func() {
 		utils.CollectAndSaveAllDebugInfo("AfterSuite")
 	}
 
-	By("Cleaning up webhooks that might interfere with other tests")
-	utils.CleanupAllAuthOperatorWebhooks()
+	if os.Getenv("E2E_EXACT_CLEANUP_ONLY") != "true" {
+		By("Cleaning up webhooks that might interfere with other tests")
+		utils.CleanupAllAuthOperatorWebhooks()
+	}
 })
 
 // AfterEach records a per-spec summary and collects full artifacts on failure (or when forced).
@@ -186,6 +188,7 @@ var _ = ReportAfterEach(func(report SpecReport) {
 		operatorNamespaces := []string{
 			"auth-operator-system",
 			"auth-operator-helm",
+			"auth-operator-creator-e2e",
 			"auth-operator-ha",
 			"auth-operator-integration-test",
 		}
@@ -205,6 +208,8 @@ func detectInstallMethod() string {
 		cluster = kindClusterName
 	}
 	switch {
+	case strings.Contains(cluster, "creator-tracking"):
+		return "helm"
 	case strings.Contains(cluster, "helm"):
 		return "helm"
 	case strings.Contains(cluster, "dev"):

@@ -1,0 +1,425 @@
+{{- /*
+Creator and contributor identity tracking via MutatingAdmissionPolicy.
+
+Keep the annotation keys and standalone CEL examples in sync with:
+  - api/authorization/v1alpha1/labels.go
+  - docs/examples/creator-tracking-map.yaml
+  - docs/examples/creator-tracking-map-contributors.yaml
+
+Both policies match every parent-resource request. Their JSONPatch expressions
+perform no-op detection so IfNeeded reinvocation remains effective. The
+contributor policy owns updated-by on UPDATE in every mode: it tracks editors
+in contributors mode and removes the reserved key in other modes.
+*/}}
+{{- $creatorTracking := .Values.creatorTracking | default dict }}
+{{- $enabled := get $creatorTracking "enabled" | default false }}
+{{- $mode := get $creatorTracking "mode" | default "protect" }}
+{{- if not (has $mode (list "create-only" "protect" "contributors")) }}
+{{- fail (printf "creatorTracking.mode must be one of create-only, protect, contributors (got %q)" $mode) }}
+{{- end }}
+{{- $mapMode := get $creatorTracking "map" | default "auto" }}
+{{- if not (has $mapMode (list "auto" "enabled" "disabled")) }}
+{{- fail (printf "creatorTracking.map must be one of auto, enabled, disabled (got %q)" $mapMode) }}
+{{- end }}
+{{- $defaultResources := list
+      (dict
+        "apiGroups" (list "")
+        "apiVersions" (list "v1")
+        "resources" (list "namespaces" "serviceaccounts" "secrets"))
+      (dict
+        "apiGroups" (list "rbac.authorization.k8s.io")
+        "apiVersions" (list "v1")
+        "resources" (list "roles" "rolebindings" "clusterroles" "clusterrolebindings"))
+      (dict
+        "apiGroups" (list "authorization.t-caas.telekom.com")
+        "apiVersions" (list "v1alpha1")
+        "resources" (list "roledefinitions" "binddefinitions" "rbacpolicies" "restrictedbinddefinitions" "restrictedroledefinitions" "webhookauthorizers")) }}
+{{- $resources := $defaultResources }}
+{{- if hasKey $creatorTracking "resources" }}
+{{- $resources = get $creatorTracking "resources" }}
+{{- end }}
+{{- $excludedUsernames := get $creatorTracking "excludedUsernames" | default (list) }}
+{{- if and $enabled (eq (len $resources) 0) }}
+{{- fail "creatorTracking.resources must not be empty when creator tracking is enabled" }}
+{{- end }}
+{{- $v1 := .Capabilities.APIVersions.Has "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy" }}
+{{- $v1beta1 := .Capabilities.APIVersions.Has "admissionregistration.k8s.io/v1beta1/MutatingAdmissionPolicy" }}
+{{- $render := and $enabled (or (eq $mapMode "enabled") (and (eq $mapMode "auto") (or $v1 $v1beta1))) }}
+{{- $apiVersion := "admissionregistration.k8s.io/v1" }}
+{{- if and (eq $mapMode "auto") (not $v1) $v1beta1 }}
+{{- $apiVersion = "admissionregistration.k8s.io/v1beta1" }}
+{{- end }}
+{{- if $render }}
+apiVersion: {{ $apiVersion }}
+kind: MutatingAdmissionPolicy
+metadata:
+  name: {{ include "auth-operator.fullname" . }}-creator-tracking
+  labels:
+  {{- include "auth-operator.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Ignore
+  reinvocationPolicy: IfNeeded
+  matchConstraints:
+    resourceRules:
+      {{- range $resources }}
+      - apiGroups: {{ .apiGroups | toJson }}
+        apiVersions: {{ .apiVersions | toJson }}
+        operations: {{ if eq $mode "create-only" }}["CREATE"]{{ else }}["CREATE","UPDATE"]{{ end }}
+        resources: {{ .resources | toJson }}
+      {{- end }}
+  matchConditions:
+    - name: parent-resource
+      expression: request.?subResource.orValue('') == ''
+  variables:
+    - name: username
+      expression: request.userInfo.username
+    - name: groups
+      expression: >-
+        has(request.userInfo.groups)
+        ? request.userInfo.groups.map(group,
+            group.replace('%', '%25').replace(',', '%2C')).join(',')
+        : ''
+    - name: isExcluded
+      expression: >-
+        {{- if $excludedUsernames }}
+        request.userInfo.username in {{ $excludedUsernames | toJson }}
+        {{- else }}
+        false
+        {{- end }}
+    - name: createOtherAnnotationBytes
+      expression: >-
+        !has(object.metadata.annotations) ? 0
+        : object.metadata.annotations.map(key,
+            key in ['t-caas.telekom.com/created-by',
+                    't-caas.telekom.com/created-by-groups',
+                    't-caas.telekom.com/updated-by']
+            ? 0
+            : bytes(key).size()
+              + bytes(object.metadata.annotations[key]).size()).sum()
+    - name: creatorStampFits
+      expression: >-
+        variables.createOtherAnnotationBytes
+        + bytes('t-caas.telekom.com/created-by').size()
+        + bytes(variables.username).size()
+        + bytes('t-caas.telekom.com/created-by-groups').size()
+        + bytes(variables.groups).size()
+        <= 262144
+    {{- if ne $mode "create-only" }}
+    - name: updateOtherAnnotationBytes
+      expression: >-
+        !has(object.metadata.annotations) ? 0
+        : object.metadata.annotations.map(key,
+            key in ['t-caas.telekom.com/created-by',
+                    't-caas.telekom.com/created-by-groups',
+                    't-caas.telekom.com/updated-by']
+            ? 0
+            : bytes(key).size()
+              + bytes(object.metadata.annotations[key]).size()).sum()
+    - name: oldCreatorBytes
+      expression: >-
+        has(oldObject.metadata.annotations)
+        && 't-caas.telekom.com/created-by' in oldObject.metadata.annotations
+        ? bytes('t-caas.telekom.com/created-by').size()
+          + bytes(oldObject.metadata.annotations['t-caas.telekom.com/created-by']).size()
+          + bytes('t-caas.telekom.com/created-by-groups').size()
+          + bytes(('t-caas.telekom.com/created-by-groups'
+                   in oldObject.metadata.annotations)
+                  ? oldObject.metadata.annotations['t-caas.telekom.com/created-by-groups']
+                  : '').size()
+        : 0
+    - name: creatorRestoreFits
+      expression: >-
+        variables.updateOtherAnnotationBytes + variables.oldCreatorBytes <= 262144
+    {{- end }}
+  mutations:
+    - patchType: JSONPatch
+      jsonPatch:
+        expression: >-
+          {{- if ne $mode "create-only" }}
+          request.operation == 'CREATE'
+          ? (
+          {{- end }}
+              !variables.isExcluded && variables.creatorStampFits
+              ? (
+                  (!has(object.metadata.annotations)
+                   ? [JSONPatch{op: 'add', path: '/metadata/annotations', value: {}}]
+                   : [])
+                  + (!has(object.metadata.annotations)
+                     || !('t-caas.telekom.com/created-by' in object.metadata.annotations)
+                     || object.metadata.annotations['t-caas.telekom.com/created-by']
+                        != variables.username
+                     ? [JSONPatch{
+                         op: 'add',
+                         path: '/metadata/annotations/'
+                               + jsonpatch.escapeKey('t-caas.telekom.com/created-by'),
+                         value: variables.username
+                       }]
+                     : [])
+                  + (!has(object.metadata.annotations)
+                     || !('t-caas.telekom.com/created-by-groups' in object.metadata.annotations)
+                     || object.metadata.annotations['t-caas.telekom.com/created-by-groups']
+                        != variables.groups
+                     ? [JSONPatch{
+                         op: 'add',
+                         path: '/metadata/annotations/'
+                               + jsonpatch.escapeKey('t-caas.telekom.com/created-by-groups'),
+                         value: variables.groups
+                       }]
+                     : [])
+                  + (has(object.metadata.annotations)
+                     && 't-caas.telekom.com/updated-by' in object.metadata.annotations
+                     ? [JSONPatch{
+                         op: 'remove',
+                         path: '/metadata/annotations/'
+                               + jsonpatch.escapeKey('t-caas.telekom.com/updated-by')
+                       }]
+                     : [])
+                )
+              : (
+                  (has(object.metadata.annotations)
+                   && 't-caas.telekom.com/created-by' in object.metadata.annotations
+                   ? [JSONPatch{
+                       op: 'remove',
+                       path: '/metadata/annotations/'
+                             + jsonpatch.escapeKey('t-caas.telekom.com/created-by')
+                     }]
+                   : [])
+                  + (has(object.metadata.annotations)
+                     && 't-caas.telekom.com/created-by-groups' in object.metadata.annotations
+                     ? [JSONPatch{
+                         op: 'remove',
+                         path: '/metadata/annotations/'
+                               + jsonpatch.escapeKey('t-caas.telekom.com/created-by-groups')
+                       }]
+                     : [])
+                  + (has(object.metadata.annotations)
+                     && 't-caas.telekom.com/updated-by' in object.metadata.annotations
+                     ? [JSONPatch{
+                         op: 'remove',
+                         path: '/metadata/annotations/'
+                               + jsonpatch.escapeKey('t-caas.telekom.com/updated-by')
+                       }]
+                     : [])
+                )
+          {{- if ne $mode "create-only" }}
+            )
+          : (
+              has(oldObject.metadata.annotations)
+              && 't-caas.telekom.com/created-by' in oldObject.metadata.annotations
+              && variables.creatorRestoreFits
+              ? (
+                  (!has(object.metadata.annotations)
+                   ? [JSONPatch{op: 'add', path: '/metadata/annotations', value: {}}]
+                   : [])
+                  + (!has(object.metadata.annotations)
+                     || !('t-caas.telekom.com/created-by' in object.metadata.annotations)
+                     || object.metadata.annotations['t-caas.telekom.com/created-by']
+                        != oldObject.metadata.annotations['t-caas.telekom.com/created-by']
+                     ? [JSONPatch{
+                         op: 'add',
+                         path: '/metadata/annotations/'
+                               + jsonpatch.escapeKey('t-caas.telekom.com/created-by'),
+                         value: oldObject.metadata.annotations['t-caas.telekom.com/created-by']
+                       }]
+                     : [])
+                  + (!has(object.metadata.annotations)
+                     || !('t-caas.telekom.com/created-by-groups' in object.metadata.annotations)
+                     || object.metadata.annotations['t-caas.telekom.com/created-by-groups']
+                        != (('t-caas.telekom.com/created-by-groups'
+                             in oldObject.metadata.annotations)
+                            ? oldObject.metadata.annotations['t-caas.telekom.com/created-by-groups']
+                            : '')
+                     ? [JSONPatch{
+                         op: 'add',
+                         path: '/metadata/annotations/'
+                               + jsonpatch.escapeKey('t-caas.telekom.com/created-by-groups'),
+                         value: ('t-caas.telekom.com/created-by-groups'
+                                 in oldObject.metadata.annotations)
+                                ? oldObject.metadata.annotations['t-caas.telekom.com/created-by-groups']
+                                : ''
+                       }]
+                     : [])
+                )
+              : (
+                  (has(object.metadata.annotations)
+                   && 't-caas.telekom.com/created-by' in object.metadata.annotations
+                   ? [JSONPatch{
+                       op: 'remove',
+                       path: '/metadata/annotations/'
+                             + jsonpatch.escapeKey('t-caas.telekom.com/created-by')
+                     }]
+                   : [])
+                  + (has(object.metadata.annotations)
+                     && 't-caas.telekom.com/created-by-groups' in object.metadata.annotations
+                     ? [JSONPatch{
+                         op: 'remove',
+                         path: '/metadata/annotations/'
+                               + jsonpatch.escapeKey('t-caas.telekom.com/created-by-groups')
+                       }]
+                     : [])
+                )
+            )
+          {{- end }}
+---
+apiVersion: {{ $apiVersion }}
+kind: MutatingAdmissionPolicyBinding
+metadata:
+  name: {{ include "auth-operator.fullname" . }}-creator-tracking
+  labels:
+  {{- include "auth-operator.labels" . | nindent 4 }}
+spec:
+  policyName: {{ include "auth-operator.fullname" . }}-creator-tracking
+---
+apiVersion: {{ $apiVersion }}
+kind: MutatingAdmissionPolicy
+metadata:
+  name: {{ include "auth-operator.fullname" . }}-contributor-tracking
+  labels:
+  {{- include "auth-operator.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Ignore
+  reinvocationPolicy: IfNeeded
+  matchConstraints:
+    resourceRules:
+      {{- range $resources }}
+      - apiGroups: {{ .apiGroups | toJson }}
+        apiVersions: {{ .apiVersions | toJson }}
+        operations: ["UPDATE"]
+        resources: {{ .resources | toJson }}
+      {{- end }}
+  matchConditions:
+    - name: parent-resource
+      expression: request.?subResource.orValue('') == ''
+  {{- if eq $mode "contributors" }}
+  variables:
+    - name: editor
+      expression: request.userInfo.username.replace('%', '%25').replace(',', '%2C')
+    - name: isExcluded
+      expression: >-
+        {{- if $excludedUsernames }}
+        request.userInfo.username in {{ $excludedUsernames | toJson }}
+        {{- else }}
+        false
+        {{- end }}
+    - name: oldListExists
+      expression: >-
+        has(oldObject.metadata.annotations)
+        && 't-caas.telekom.com/updated-by' in oldObject.metadata.annotations
+    - name: oldList
+      expression: >-
+        variables.oldListExists
+        ? oldObject.metadata.annotations['t-caas.telekom.com/updated-by']
+        : ''
+    - name: editorAlreadyTracked
+      expression: >-
+        variables.oldList != '' && variables.editor in variables.oldList.split(',')
+    - name: candidateList
+      expression: >-
+        variables.oldList == ''
+        ? variables.editor
+        : variables.oldList + ',' + variables.editor
+    - name: otherAnnotationBytes
+      expression: >-
+        !has(object.metadata.annotations) ? 0
+        : object.metadata.annotations.map(key,
+            key in ['t-caas.telekom.com/created-by',
+                    't-caas.telekom.com/created-by-groups',
+                    't-caas.telekom.com/updated-by']
+            ? 0
+            : bytes(key).size()
+              + bytes(object.metadata.annotations[key]).size()).sum()
+    - name: previousCreatorBytes
+      expression: >-
+        has(oldObject.metadata.annotations)
+        && 't-caas.telekom.com/created-by' in oldObject.metadata.annotations
+        ? bytes('t-caas.telekom.com/created-by').size()
+          + bytes(oldObject.metadata.annotations['t-caas.telekom.com/created-by']).size()
+          + bytes('t-caas.telekom.com/created-by-groups').size()
+          + bytes(('t-caas.telekom.com/created-by-groups'
+                   in oldObject.metadata.annotations)
+                  ? oldObject.metadata.annotations['t-caas.telekom.com/created-by-groups']
+                  : '').size()
+        : 0
+    - name: oldListFits
+      expression: >-
+        variables.oldListExists
+        && variables.otherAnnotationBytes
+           + variables.previousCreatorBytes
+           + bytes('t-caas.telekom.com/updated-by').size()
+           + bytes(variables.oldList).size()
+           <= 262144
+    - name: candidateFits
+      expression: >-
+        variables.otherAnnotationBytes
+        + variables.previousCreatorBytes
+        + bytes('t-caas.telekom.com/updated-by').size()
+        + bytes(variables.candidateList).size()
+        <= 262144
+    - name: listShouldExist
+      expression: >-
+        variables.oldListExists
+        ? variables.oldListFits
+        : (!variables.isExcluded && variables.candidateFits)
+    - name: desiredList
+      expression: >-
+        !variables.oldListExists
+        ? variables.candidateList
+        : (variables.oldListFits
+           && !variables.isExcluded
+           && !variables.editorAlreadyTracked
+           && variables.candidateFits
+           ? variables.candidateList
+           : variables.oldList)
+  {{- end }}
+  mutations:
+    - patchType: JSONPatch
+      jsonPatch:
+        expression: >-
+          {{- if eq $mode "contributors" }}
+          variables.listShouldExist
+          ? (
+              (!has(object.metadata.annotations)
+               ? [JSONPatch{op: 'add', path: '/metadata/annotations', value: {}}]
+               : [])
+              + (!has(object.metadata.annotations)
+                 || !('t-caas.telekom.com/updated-by' in object.metadata.annotations)
+                 || object.metadata.annotations['t-caas.telekom.com/updated-by']
+                    != variables.desiredList
+                 ? [JSONPatch{
+                     op: 'add',
+                     path: '/metadata/annotations/'
+                           + jsonpatch.escapeKey('t-caas.telekom.com/updated-by'),
+                     value: variables.desiredList
+                   }]
+                 : [])
+            )
+          : (
+              has(object.metadata.annotations)
+              && 't-caas.telekom.com/updated-by' in object.metadata.annotations
+              ? [JSONPatch{
+                  op: 'remove',
+                  path: '/metadata/annotations/'
+                        + jsonpatch.escapeKey('t-caas.telekom.com/updated-by')
+                }]
+              : []
+            )
+          {{- else }}
+          has(object.metadata.annotations)
+          && 't-caas.telekom.com/updated-by' in object.metadata.annotations
+          ? [JSONPatch{
+              op: 'remove',
+              path: '/metadata/annotations/'
+                    + jsonpatch.escapeKey('t-caas.telekom.com/updated-by')
+            }]
+          : []
+          {{- end }}
+---
+apiVersion: {{ $apiVersion }}
+kind: MutatingAdmissionPolicyBinding
+metadata:
+  name: {{ include "auth-operator.fullname" . }}-contributor-tracking
+  labels:
+  {{- include "auth-operator.labels" . | nindent 4 }}
+spec:
+  policyName: {{ include "auth-operator.fullname" . }}-contributor-tracking
+{{- end }}
