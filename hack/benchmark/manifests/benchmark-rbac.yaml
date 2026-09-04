@@ -1,0 +1,43 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: creator-tracking-benchmark-runner
+  labels:
+    t-caas.telekom.com/benchmark: creator-tracking
+rules:
+  - apiGroups: [""]
+    resources:
+      - namespaces
+      - serviceaccounts
+      - secrets
+    verbs: [create, get, update]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources:
+      - roles
+      - rolebindings
+      - clusterroles
+      - clusterrolebindings
+    verbs: [create, get, update]
+  - apiGroups: [authorization.t-caas.telekom.com]
+    resources:
+      - roledefinitions
+      - binddefinitions
+      - rbacpolicies
+    verbs: [create, get, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: creator-tracking-benchmark-runner
+  labels:
+    t-caas.telekom.com/benchmark: creator-tracking
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: creator-tracking-benchmark-runner
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: creator-tracking-benchmark

@@ -1,0 +1,111 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+# SPDX-License-Identifier: Apache-2.0
+name: Creator tracking benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      benchmark_mode:
+        description: Run the bounded CI smoke; the full matrix is resumable local work
+        required: true
+        type: choice
+        options:
+          - quick
+        default: quick
+  pull_request:
+    paths:
+      - .github/workflows/creator-tracking-benchmark.yml
+      - hack/benchmark/**
+      - docs/examples/creator-tracking-kyverno-*.yaml
+      - chart/auth-operator/**
+      - versions.env
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    name: Benchmark lifecycle static checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Load versions
+        run: grep -v '^#' versions.env | grep -v '^$' >> "$GITHUB_ENV"
+      - uses: ./.github/actions/setup-go-env
+        with:
+          go-version-file: go.mod
+      - run: make benchmark-creator-tracking-static
+
+  benchmark:
+    name: Creator tracking benchmark
+    needs: static
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Load versions
+        run: grep -v '^#' versions.env | grep -v '^$' >> "$GITHUB_ENV"
+      - uses: ./.github/actions/setup-go-env
+        with:
+          go-version-file: go.mod
+          install-kind: 'true'
+          kind-version: ${{ env.KIND_VERSION }}
+          install-helm: 'true'
+          helm-version: ${{ env.HELM_VERSION }}
+      - name: Run benchmark in an isolated owned cluster
+        env:
+          # GitHub-hosted jobs have a six-hour maximum, while the full
+          # 84-cell/1008-result matrix is intentionally resumable and can
+          # exceed that limit. CI therefore runs only the bounded smoke; use
+          # the documented local runner for a full release-matrix campaign.
+          BENCHMARK_QUICK: true
+        run: |
+          set +e
+          make benchmark-creator-tracking 2>&1 | tee /tmp/creator-tracking-benchmark.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            detail=$(tail -n 40 /tmp/creator-tracking-benchmark.log | tr '\n' ' ' | sed 's/%/%25/g; s/\r/%0D/g')
+            echo "::error title=creator-tracking benchmark failure::$detail"
+          fi
+          exit "$status"
+      - name: Summarize benchmark evidence
+        if: always()
+        env:
+          BENCHMARK_QUICK: true
+        run: |
+          result_root=benchmarks/data
+          result_files=()
+          if [ -d "$result_root" ]; then
+            while IFS= read -r -d '' result_file; do
+              result_files+=("$result_file")
+            done < <(find "$result_root" -type f -name 'cell-*.json' ! -path '*/journals/*' -print0)
+          fi
+          result_count=${#result_files[@]}
+          complete_count=0
+          failed_count=0
+          if [ "$result_count" -gt 0 ]; then
+            complete_count=$(printf '%s\0' "${result_files[@]}" | xargs -0r jq -r '.status' | grep -c '^complete$' || true)
+            failed_count=$(printf '%s\0' "${result_files[@]}" | xargs -0r jq -r '.status' | grep -c '^failed$' || true)
+          else
+            echo '::error title=creator-tracking benchmark evidence missing::No phase result files were produced'
+            exit 1
+          fi
+          {
+            echo '### Creator-tracking benchmark evidence'
+            echo "- Quick mode: ${BENCHMARK_QUICK:-unknown} (quick=true is smoke; quick=false is full)"
+            echo "- Phase result files: $result_count"
+            echo "- Complete: $complete_count"
+            echo "- Failed: $failed_count"
+            echo '- Telemetry states:'
+            printf '%s\0' "${result_files[@]}" | xargs -0r jq -r '.metric_delta_state // "unset"' | sort | uniq -c | sed 's/^/  - /'
+            echo '- Raw result files are attached to the benchmark artifact.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload raw benchmark results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: creator-tracking-benchmark-${{ github.run_id }}
+          path: |
+            benchmarks/data/
+            /tmp/creator-tracking-benchmark.log
+          if-no-files-found: ignore

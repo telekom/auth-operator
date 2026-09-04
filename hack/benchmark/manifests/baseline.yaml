@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+# SPDX-License-Identifier: Apache-2.0
+# The disabled baseline is an executable marker, not a policy. It is applied
+# only in dry-run/static validation; the runner installs the operator with
+# creatorTracking.enabled=false for measured baseline cells.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: creator-tracking-benchmark-baseline
+  labels:
+    t-caas.telekom.com/benchmark: creator-tracking
+data:
+  creatorTracking: disabled

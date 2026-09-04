@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+# SPDX-License-Identifier: Apache-2.0
+# Executable Kyverno 1.19 MutatingPolicy fixture. The full creator policy is
+# sourced from docs/examples/creator-tracking-kyverno-mutatingpolicy.yaml.
+apiVersion: policies.kyverno.io/v1
+kind: MutatingPolicy
+metadata:
+  name: creator-tracking-benchmark-map
+spec:
+  failurePolicy: Ignore
+  evaluation:
+    admission:
+      enabled: true
+    mutateExisting:
+      enabled: false
+  autogen:
+    mutatingAdmissionPolicy:
+      enabled: true
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: [CREATE]
+        resources: [configmaps]
+  mutations:
+    - patchType: JSONPatch
+      jsonPatch:
+        expression: >-
+          [JSONPatch{
+            op: 'add',
+            path: '/metadata/labels/creator-tracking-benchmark',
+            value: 'kyverno-map'
+          }]
