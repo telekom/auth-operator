@@ -16,6 +16,7 @@ of the auth-operator in production Kubernetes environments.
 - [Installation](#installation)
 - [Architecture Overview](#architecture-overview)
 - [Configuration](#configuration)
+  - [Creator Tracking](#creator-tracking)
 - [High Availability](#high-availability)
 - [Monitoring](#monitoring)
 - [Security Considerations](#security-considerations)
@@ -314,6 +315,35 @@ Kubernetes ≥ 1.30 cluster without installing auth-operator:
 ```bash
 kubectl apply -f docs/examples/namespace-deletion-protection-vap.yaml
 ```
+
+### Creator Tracking
+
+Creator tracking records the effective Kubernetes request identity as object
+annotations through native `MutatingAdmissionPolicy` resources. It is disabled
+by default. See the [Creator Tracking guide](creator-tracking.md) for the
+annotation semantics, modes, API-version requirements, and Kyverno
+alternatives. The [Helm chart README](../chart/auth-operator/README.md) lists
+the available values.
+
+The native `MutatingAdmissionPolicy` path requires Kubernetes 1.34 or later.
+Kubernetes 1.34 and 1.35 require the beta API, with kube-apiserver flags
+`--feature-gates=MutatingAdmissionPolicy=true` and
+`--runtime-config=admissionregistration.k8s.io/v1beta1=true`; Kubernetes 1.36
+provides the stable API. On older Kubernetes versions, use the documented
+[Kyverno alternatives](kyverno-creator-tracking.md), which use the webhook path
+and have reduced behavior compared with native policies.
+
+Creator tracking provides best-effort operational context. It does not prove the
+original caller when impersonation is used, and `failurePolicy: Ignore` plus
+Kubernetes's total annotation size limit (the sum of annotation keys and
+values) can leave an object unstamped or leave protected creator values
+unrestored.
+
+When disabling or uninstalling the feature, first remove or disable the
+creator and contributor policies and verify that their policy resources and
+bindings are gone. Existing annotations remain on objects after policy removal;
+clean them only after admission is inactive. Changes to mode, resource scope,
+and exclusions apply only to future matching requests.
 
 ### Helm Values
 

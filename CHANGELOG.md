@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Opt-in creator tracking through Kubernetes `MutatingAdmissionPolicy`, with
+  creator and contributor annotations, protected update behavior, and native
+  Kubernetes and Kyverno examples. Performance measurements and the default
+  decision remain pending; see `docs/creator-tracking.md`.
 - Namespace deletion protection: platform-owned namespaces
   (`t-caas.telekom.com/owner=platform`) and namespaces opted in via the
   `t-caas.telekom.com/deletion-protection=enabled` label can only be deleted

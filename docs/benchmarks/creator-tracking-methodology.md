@@ -3,6 +3,12 @@
 This benchmark is an explicit, reproducible plan. It does not make a default
 decision from a smoke test or from measurements taken on a shared cluster.
 
+## Current status
+
+Runtime authorization and measured benchmark results are pending. The
+[results report](creator-tracking-results.md) is intentionally a pending
+shell until the complete matrix, auxiliary cells, and provenance checks pass.
+
 ## Lifecycle plan
 
 1. Acquire the persistent private benchmark lock (`0600`).
