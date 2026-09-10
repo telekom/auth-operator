@@ -246,15 +246,24 @@ var _ = Describe("ResourceTracker CRD Watch Handling", func() {
 		resourceTracker.collectMu.Lock()
 		defer resourceTracker.collectMu.Unlock()
 
-		done := make(chan error, 1)
+		done := make(chan struct {
+			Changed bool
+			Err     error
+		}, 1)
 		go func() {
 			defer GinkgoRecover()
-			_, err := resourceTracker.collectAPIResourcesBlocking(ctx)
-			done <- err
+			changed, err := resourceTracker.collectAPIResourcesBlocking(ctx)
+			done <- struct {
+				Changed bool
+				Err     error
+			}{Changed: changed, Err: err}
 		}()
 
 		cancel()
-		Eventually(done, "1s", "10ms").Should(Receive(MatchError(context.Canceled)))
+		Eventually(done, "1s", "10ms").Should(Receive(And(
+			HaveField("Changed", BeFalse()),
+			HaveField("Err", MatchError(context.Canceled)),
+		)))
 	})
 
 	It("discovers CRDs created after startup without waiting for periodic refresh", func() {
@@ -308,9 +317,10 @@ var _ = Describe("ResourceTracker CRD Watch Handling", func() {
 			return nil
 		})
 
+		started := make(chan error, 1)
 		go func() {
 			defer GinkgoRecover()
-			_ = resourceTracker.Start(ctx)
+			started <- resourceTracker.Start(ctx)
 		}()
 
 		By("waiting for ResourceTracker to be ready")
@@ -318,6 +328,15 @@ var _ = Describe("ResourceTracker CRD Watch Handling", func() {
 			_, err := resourceTracker.GetAPIResources()
 			return err == nil
 		}, "30s", "1s").Should(BeTrue())
+		Eventually(started, "1s", "10ms").Should(Receive(BeNil()))
+		for {
+			select {
+			case <-signalReceived:
+			default:
+				goto startupSignalsDrained
+			}
+		}
+	startupSignalsDrained:
 
 		By("creating a CRD after ResourceTracker startup")
 		Expect(k8sClient.Create(ctx, watchCRD)).To(Succeed())
@@ -584,9 +603,10 @@ var _ = Describe("ResourceTracker Integration - CRD Lifecycle", Ordered, func() 
 			return nil
 		})
 
+		started := make(chan error, 1)
 		go func() {
 			defer GinkgoRecover()
-			_ = resourceTracker.Start(ctx)
+			started <- resourceTracker.Start(ctx)
 		}()
 
 		By("waiting for ResourceTracker to be ready")
@@ -594,6 +614,15 @@ var _ = Describe("ResourceTracker Integration - CRD Lifecycle", Ordered, func() 
 			_, err := resourceTracker.GetAPIResources()
 			return err == nil
 		}, "30s", "1s").Should(BeTrue())
+		Eventually(started, "1s", "10ms").Should(Receive(BeNil()))
+		for {
+			select {
+			case <-signalReceived:
+			default:
+				goto lifecycleStartupSignalsDrained
+			}
+		}
+	lifecycleStartupSignalsDrained:
 	})
 
 	AfterAll(func() {
@@ -668,6 +697,14 @@ var _ = Describe("ResourceTracker Integration - CRD Lifecycle", Ordered, func() 
 	})
 
 	It("should remove lifecycle CRD resources from cache after full deletion", func() {
+		for {
+			select {
+			case <-signalReceived:
+			default:
+				goto beforeLifecycleDeletion
+			}
+		}
+	beforeLifecycleDeletion:
 		By("removing the finalizer to allow full deletion")
 		crd := &apiextensionsv1.CustomResourceDefinition{}
 		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(lifecycleCRD), crd)).To(Succeed())

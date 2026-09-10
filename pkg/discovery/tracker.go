@@ -106,6 +106,7 @@ type ResourceTracker struct {
 	collectMu          sync.Mutex   // serialises collectAPIResources calls
 	cacheMu            sync.RWMutex // guards cache reads/writes (held briefly)
 	cache              APIResourcesByGroupVersion
+	signalMu           sync.RWMutex // guards signalFuncs registration and snapshots
 	signalFuncs        []signalFunc
 	crdsMutex          sync.RWMutex
 	crdsUUIDs          map[string]struct{}
@@ -195,7 +196,15 @@ func NewResourceTracker(scheme *runtime.Scheme, config *rest.Config) *ResourceTr
 
 // AddSignalFunc adds a signal function to be called when API resources are updated.
 func (r *ResourceTracker) AddSignalFunc(f signalFunc) {
+	r.signalMu.Lock()
+	defer r.signalMu.Unlock()
 	r.signalFuncs = append(r.signalFuncs, f)
+}
+
+func (r *ResourceTracker) signalFuncsSnapshot() []signalFunc {
+	r.signalMu.RLock()
+	defer r.signalMu.RUnlock()
+	return append([]signalFunc(nil), r.signalFuncs...)
 }
 
 // NeedLeaderElection implements LeaderElectionRunnable and indicates that it does not need leader election.
@@ -252,6 +261,11 @@ func (r *ResourceTracker) Start(ctx context.Context) error {
 	// By marking as started only after startup collection, we ensure
 	// that the RoleDefinitionReconciler always gets a valid cache on first call (or ErrResourceTrackerNotStarted).
 	r.started.Store(true)
+	for _, f := range r.signalFuncsSnapshot() {
+		if err := f(); err != nil {
+			logger.Error(err, "failed to send signal after initial API resource collection")
+		}
+	}
 
 	// Start periodic collection
 	go r.periodicCollection(ctx)
@@ -304,7 +318,7 @@ func (r *ResourceTracker) collectAndNotify(ctx context.Context) func() {
 		if !changed {
 			return
 		}
-		for _, f := range r.signalFuncs {
+		for _, f := range r.signalFuncsSnapshot() {
 			err := f()
 			if err != nil {
 				logger.Error(err, "failed to send signal after API resource collection")
@@ -350,10 +364,10 @@ func (r *ResourceTracker) collectAPIResourcesBlocking(ctx context.Context) (bool
 func (r *ResourceTracker) collectAPIResourcesWithLock(ctx context.Context, waitForLock bool) (bool, error) {
 	unlock, locked, err := r.acquireCollectLock(ctx, waitForLock)
 	if err != nil {
-		return true, err
+		return false, err
 	}
 	if !locked {
-		return true, nil
+		return false, nil
 	}
 	defer unlock()
 
@@ -369,7 +383,7 @@ func (r *ResourceTracker) collectAPIResourcesWithLock(ctx context.Context, waitF
 	if err != nil {
 		logger.Error(err, "failed to create Discovery client")
 		metrics.APIDiscoveryErrors.Inc()
-		return true, err
+		return false, err
 	}
 
 	logger.V(2).Info("starting API discovery")
@@ -378,7 +392,7 @@ func (r *ResourceTracker) collectAPIResourcesWithLock(ctx context.Context, waitF
 	if err != nil {
 		logger.Error(err, "failed to discover API groups")
 		metrics.APIDiscoveryErrors.Inc()
-		return true, err
+		return false, err
 	}
 	logger.V(2).Info("discovered API groups", "groupCount", len(discoveredAPIGroups.Groups))
 
@@ -391,31 +405,26 @@ func (r *ResourceTracker) collectAPIResourcesWithLock(ctx context.Context, waitF
 	apiResourcesByGroupVersion := make(APIResourcesByGroupVersion)
 	mutex := sync.Mutex{}
 
-	coreGV := metav1.GroupVersion{Version: "v1"}
-	errorGroup.Go(func() error {
-		select {
-		case <-groupCtx.Done():
-			return groupCtx.Err()
-		default:
-		}
-
-		resources, err := r.collectAPIResourcesForGroupVersion(discoveryClient, coreGV.Group, coreGV.Version)
-		if err != nil {
-			logger.Error(err, "failed to discover API resources for core group version",
-				"group", coreGV.Group, "version", coreGV.Version)
-			return err
-		}
-		mutex.Lock()
-		apiResourcesByGroupVersion[coreGV.String()] = append(apiResourcesByGroupVersion[coreGV.String()], resources...)
-		mutex.Unlock()
-		return nil
-	})
+	if !discoveryHasCoreV1(discoveredAPIGroups.Groups) {
+		// ServerGroups normally includes the legacy core group. Keep this
+		// fallback for discovery implementations that omit it.
+		errorGroup.Go(func() error {
+			resources, err := r.collectAPIResourcesForGroupVersion(discoveryClient, "", "v1")
+			if err != nil {
+				return err
+			}
+			mutex.Lock()
+			apiResourcesByGroupVersion["v1"] = resources
+			mutex.Unlock()
+			return nil
+		})
+	}
 
 	for _, apiGroup := range discoveredAPIGroups.Groups {
 		select {
 		case <-ctx.Done():
 			logger.V(1).Info("stopping API resource collection due to context cancellation")
-			return true, ctx.Err()
+			return false, ctx.Err()
 		default:
 		}
 
@@ -449,25 +458,56 @@ func (r *ResourceTracker) collectAPIResourcesWithLock(ctx context.Context, waitF
 	if err := errorGroup.Wait(); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			logger.V(1).Info("API resource collection cancelled", "reason", err.Error())
-			return true, err
+			return false, err
 		}
 		logger.Error(err, "failed to discover resources concurrently")
-		return true, err
+		return false, err
 	}
 
-	logger.V(2).Info("discovered API resources", "resourceCount", len(apiResourcesByGroupVersion))
+	resourceCount := countAPIResources(apiResourcesByGroupVersion)
+	if resourceCount == 0 {
+		r.cacheMu.RLock()
+		cachedResourceCount := countAPIResources(r.cache)
+		r.cacheMu.RUnlock()
+		if cachedResourceCount > 0 {
+			logger.Info("keeping existing API resources cache after empty discovery result")
+			return false, nil
+		}
+		return false, fmt.Errorf("API resource discovery returned no usable resources")
+	}
+
+	logger.V(2).Info("discovered API resources", "resourceCount", resourceCount)
 
 	r.cacheMu.Lock()
 	defer r.cacheMu.Unlock()
 
 	if apiResourcesByGroupVersion.Equals(r.cache) {
 		logger.V(2).Info("API resources cache unchanged")
-		return true, nil
+		return false, nil
 	}
 	r.cache = apiResourcesByGroupVersion
 
 	logger.V(2).Info("API resources cache updated")
 	return true, nil
+}
+
+func discoveryHasCoreV1(groups []metav1.APIGroup) bool {
+	for _, group := range groups {
+		for _, version := range group.Versions {
+			if group.Name == "" && version.Version == "v1" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func countAPIResources(resources APIResourcesByGroupVersion) int {
+	count := 0
+	for _, groupResources := range resources {
+		count += len(groupResources)
+	}
+	return count
 }
 
 func (r *ResourceTracker) acquireCollectLock(ctx context.Context, waitForLock bool) (unlock func(), locked bool, err error) {
@@ -540,7 +580,7 @@ func (r *ResourceTracker) periodicFullRescan(ctx context.Context) {
 				logger.V(1).Info("full rescan completed, no changes detected (or concurrent collection in progress)")
 				continue
 			}
-			for _, f := range r.signalFuncs {
+			for _, f := range r.signalFuncsSnapshot() {
 				if err := f(); err != nil {
 					logger.Error(err, "failed to send signal after full rescan")
 					continue
