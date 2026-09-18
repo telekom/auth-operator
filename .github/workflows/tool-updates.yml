@@ -32,7 +32,7 @@ jobs:
 
           while IFS='=' read -r key value; do
             [[ "$key" =~ ^[A-Z0-9_]+$ ]] || { echo "::error::invalid key in versions.env: ${key}"; exit 1; }
-            [[ "$value" =~ ^[A-Za-z0-9._/+:-]+$ ]] || { echo "::error::invalid value for ${key}"; exit 1; }
+            [[ "$value" =~ ^[A-Za-z0-9._/@+:-]+$ ]] || { echo "::error::invalid value for ${key}"; exit 1; }
 
             case "$key" in
               KUSTOMIZE_VERSION) echo "kustomize=${value}" >> "$GITHUB_OUTPUT" ;;

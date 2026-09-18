@@ -48,6 +48,20 @@ Documentation must be updated for every user-facing change:
 
 ## Workflow
 
+### Dependency Updates
+
+Dependabot tracks direct and indirect Go modules, root Dockerfile base images,
+workflow actions, all three local composite actions, and the Helm chart in
+`.github/dependabot.yml`. The operator's own deployment image placeholders are
+release inputs, not third-party dependencies.
+
+Tool versions, fixture URLs, image digests and checksums in `versions.env` are
+not native Dependabot manifests. The weekly **Check Tool Updates** workflow
+reports supported tool/fixture updates; maintainers must update related pins and
+checksums together and run the relevant CI jobs. Its versions loader accepts
+digest-pinned image references (`image:tag@sha256:digest`) without evaluating
+shell syntax.
+
 ### 1. Find or Create an Issue
 
 - Check existing issues to avoid duplicates
