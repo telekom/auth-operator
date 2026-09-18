@@ -9,6 +9,14 @@ updates:
     directory: "/"
     allow:
       - dependency-type: "all"
+    # cel-go changed its declared module path from github.com/google/cel-go
+    # to cel.dev/cel-go in v0.32.0. Kubernetes and controller-runtime still
+    # import the former path, so newer releases cannot be selected here
+    # without an upstream import migration.
+    ignore:
+      - dependency-name: "github.com/google/cel-go"
+        versions:
+          - ">= 0.32.0"
     schedule:
       interval: "daily"
     open-pull-requests-limit: 10
