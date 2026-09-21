@@ -132,6 +132,8 @@ webhookServer:
   capiOperatorUpdateBypass: "false"
   # DNS label key domains allowed in BindDefinition namespace selectors.
   # Set multiple domains to allow labels from more than one group.
+  # Built-in ownership/protected labels and kubernetes.io/metadata.name
+  # remain allowed when this list replaces the default domain.
   bindDefinitionNamespaceSelectorLabelGroups:
     - t-caas.telekom.com
   # Maximum sustained requests per second for the /authorize endpoint.

@@ -316,6 +316,33 @@ func TestValidateNamespaceBindingsAllowsWellKnownTCAASLabels(t *testing.T) {
 	}
 }
 
+// Protected classification remains part of the built-in admission contract even
+// when an installation replaces the default configurable label domains.
+func TestProtectedNamespaceSelectorsWithCustomLabelGroups(t *testing.T) {
+	for _, kind := range []string{BindDefinitionKind, RestrictedBindDefinitionKind} {
+		for _, selector := range []metav1.LabelSelector{
+			{MatchLabels: map[string]string{LabelKeyProtected: "tenant-a"}},
+			{MatchExpressions: []metav1.LabelSelectorRequirement{{
+				Key: LabelKeyProtected, Operator: metav1.LabelSelectorOpIn, Values: []string{"tenant-a"},
+			}}},
+			{MatchExpressions: []metav1.LabelSelectorRequirement{{
+				Key: LabelKeyProtected, Operator: metav1.LabelSelectorOpDoesNotExist,
+			}}},
+		} {
+			t.Run(kind+"/"+metav1.FormatLabelSelector(&selector), func(t *testing.T) {
+				err := validateNamespaceBindingsWithLabelGroups(
+					schema.GroupKind{Group: GroupVersion.Group, Kind: kind}, "protected",
+					[]NamespaceBinding{{ClusterRoleRefs: []string{"view"}, NamespaceSelector: []metav1.LabelSelector{selector}}},
+					[]string{"platform.example.com"},
+				)
+				if err != nil {
+					t.Fatalf("built-in protected selector must remain allowed: %v", err)
+				}
+			})
+		}
+	}
+}
+
 func TestValidateNamespaceBindingsUsesConfiguredLabelGroups(t *testing.T) {
 	kind := schema.GroupKind{Group: GroupVersion.Group, Kind: BindDefinitionKind}
 	selector := func(key string) []NamespaceBinding {
