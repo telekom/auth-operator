@@ -261,6 +261,92 @@ the assignment.
 | `--namespace-deletion-protection` | Enable namespace deletion protection (no admin bypass; see [Namespace Deletion Protection](#namespace-deletion-protection)) | `true` |
 | `--protected-namespaces` | Additional namespace names unconditionally protected from deletion, on top of `kube-system`, `kube-public`, `kube-node-lease`, `default` | `[]` |
 
+### Protected Namespaces: Canonical Access Classification
+
+`t-caas.telekom.com/protected` is the canonical namespace label for separating
+ordinary access from the protected persona. Preserve this classification in
+namespace selectors, including breakglass and restricted RBAC configurations.
+Removing an exclusion to work around an admission rejection broadens the set of
+namespaces that receive bindings.
+
+For the T-CaaS tenant model, use the tenant identifier as the label value:
+
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tenant-a-sensitive
+  labels:
+    t-caas.telekom.com/owner: tenant
+    t-caas.telekom.com/tenant: tenant-a
+    t-caas.telekom.com/protected: tenant-a
+```
+
+A protected-persona binding selects all three labels with their exact values.
+Ordinary tenant bindings select the ownership pair and exclude the protected
+label:
+
+```yaml
+namespaceSelector:
+  - matchLabels:
+      t-caas.telekom.com/owner: tenant
+      t-caas.telekom.com/tenant: tenant-a
+    matchExpressions:
+      - key: t-caas.telekom.com/protected
+        operator: DoesNotExist
+```
+
+Apply the exclusion to **every** alternative selector in an ordinary binding:
+selectors in the list are ORed, while requirements within each selector are
+ANDed. Platform and third-party personas must retain their ownership constraints
+and the same exclusion, including selectors for named system namespaces.
+`DoesNotExist` excludes any present value, including `"false"` or an empty value;
+the marker is not a boolean switch. An exact tenant-valued protected selector
+will not match another tenant's marker.
+
+The label alone does not revoke arbitrary Kubernetes RBAC grants. The controller
+uses the selectors to create and reconcile RoleBindings; other RoleBindings,
+ClusterRoleBindings, and authorization paths must be scoped separately.
+`RestrictedBindDefinition` remains subject to its RBACPolicy and impersonation
+constraints. The namespace lifecycle webhook authorizes against
+`BindDefinition` subjects and selectors.
+
+Namespace lifecycle behavior:
+
+- **CREATE:** validation uses the submitted protected marker. The mutator may
+  derive ownership labels, but never synthesizes the protected marker from a
+  binding. An ordinary persona cannot create a protected namespace through an
+  ordinary selector.
+- **UPDATE:** authorization uses the existing classification. Ordinary and
+  protected personas cannot add, remove, or change the marker. Explicit
+  administrative and migration bypasses retain their documented scope.
+- **DELETE:** authorization uses the existing classification; a matching protected
+  persona still has to satisfy any separate deletion-protection policy.
+
+#### Selector Compatibility and Upgrades
+
+`BindDefinition` and `RestrictedBindDefinition` accept the protected key as a
+built-in selector key, alongside ownership labels and
+`kubernetes.io/metadata.name`. Replacing
+`webhookServer.bindDefinitionNamespaceSelectorLabelGroups` (CLI:
+`--binddefinition-namespace-selector-label-group`) only changes the additional
+allowed domains; it must not disable the protected-namespace contract.
+
+The default-domain selector support and lifecycle fixes are available in
+`v0.5.0-rc.8`. That release still requires `t-caas.telekom.com` in a custom domain
+list to accept the protected key; unconditional built-in support requires a
+release containing this fix. Until upgrading, retain that domain when supplying
+a custom list. If admission rejects the key with default settings, check the
+running webhook image and arguments against the intended release. Keep the
+selectors intact and fix or upgrade the upstream operator; do not remove the
+protection as a compatibility workaround.
+
+Access classification is separate from **namespace deletion protection** below.
+The `t-caas.telekom.com/deletion-protection=enabled` label, `--protected-namespaces`
+flag, and `namespaceDeletionProtection.extraProtectedNamespaces` setting guard
+deletion. They do not grant protected-persona access, and an `allow-deletion`
+annotation does not bypass access classification.
+
 ### Namespace Deletion Protection
 
 Protects critical namespaces from accidental deletion. Three protection tiers:
