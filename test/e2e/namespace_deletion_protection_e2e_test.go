@@ -33,11 +33,9 @@ import (
 //     e2e kubeconfig authenticates as — so every denial below also proves
 //     there is no admin bypass.
 //  2. Namespace validating webhook (fallback) — only registered when
-//     namespaceAdmission.enabled=true, which no e2e suite installs live (the
-//     cluster-wide Namespace webhooks would enforce T-CaaS ownership on every
-//     namespace operation in the shared cluster and interfere with sibling
-//     suites' fixtures and cleanup). The webhook enforcement path is covered
-//     by unit tests in
+//     namespaceAdmission.enabled=true. This suite leaves it disabled to isolate
+//     VAP enforcement. protected_namespace_e2e_test.go installs it in a separate
+//     release for access-classification tests. Deletion fallback is covered by
 //     internal/webhook/authorization/namespace_deletion_protection_test.go.
 //
 // Like the constrained impersonation suite, this suite owns its Helm release

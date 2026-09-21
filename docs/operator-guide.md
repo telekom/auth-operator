@@ -283,8 +283,8 @@ metadata:
 ```
 
 A protected-persona binding selects all three labels with their exact values.
-Ordinary tenant bindings select the ownership pair and exclude the protected
-label:
+Ordinary tenant **write and secret-read** bindings select the ownership pair and
+exclude the protected label:
 
 ```yaml
 namespaceSelector:
@@ -296,13 +296,27 @@ namespaceSelector:
         operator: DoesNotExist
 ```
 
-Apply the exclusion to **every** alternative selector in an ordinary binding:
+Apply the exclusion to **every** alternative selector in an ordinary privileged binding:
 selectors in the list are ORed, while requirements within each selector are
 ANDed. Platform and third-party personas must retain their ownership constraints
 and the same exclusion, including selectors for named system namespaces.
 `DoesNotExist` excludes any present value, including `"false"` or an empty value;
 the marker is not a boolean switch. An exact tenant-valued protected selector
 will not match another tenant's marker.
+
+The T-CaaS protected-namespace model retains baseline non-secret read access for
+ordinary tenant readers. Protection reserves writes and secret reads for the
+approved protected persona; it does not make namespace contents invisible.
+Keep that baseline read-only ClusterRoleBinding separate from the privileged
+selector-scoped RoleBindings above. Platform emergency administrators and other
+explicit cluster-wide grants remain additive.
+
+The protected persona does not itself imply namespace CREATE or DELETE rights.
+T-CaaS grants it namespace get/list; lifecycle operations described below also
+require independently granted Kubernetes RBAC permissions. A protected
+breakglass binding similarly grants only its configured scope. Access to both
+ordinary and protected namespaces requires bindings covering both scopes; group
+membership or the marker alone cannot supply the missing grant.
 
 The label alone does not revoke arbitrary Kubernetes RBAC grants. The controller
 uses the selectors to create and reconcile RoleBindings; other RoleBindings,
@@ -334,8 +348,8 @@ allowed domains; it must not disable the protected-namespace contract.
 
 The default-domain selector support and lifecycle fixes are available in
 `v0.5.0-rc.8`. That release still requires `t-caas.telekom.com` in a custom domain
-list to accept the protected key; unconditional built-in support requires a
-release containing this fix. Until upgrading, retain that domain when supplying
+list to accept the protected key; unconditional built-in support is available in
+`v0.5.0-rc.9`. Until upgrading, retain that domain when supplying
 a custom list. If admission rejects the key with default settings, check the
 running webhook image and arguments against the intended release. Keep the
 selectors intact and fix or upgrade the upstream operator; do not remove the
