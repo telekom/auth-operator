@@ -118,7 +118,7 @@ jobs:
           fi
 
       - name: Upload coverage
-        uses: codecov/codecov-action@0b35c9ecc4f0529d0eb674914510c22f85b196b4 # v7.1.0
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           files: ./coverage.out
           fail_ci_if_error: false
@@ -235,7 +235,7 @@ jobs:
           cache: 'false'
 
       - name: Upload Trivy scan results
-        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
         # This step may fail if org policy restricts security-events write permission
         # We continue on error to avoid blocking the workflow
         if: always()
