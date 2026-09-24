@@ -140,11 +140,13 @@ func TestBindDefinitionBridgeAuthorize(t *testing.T) {
 			}
 			builder := fake.NewClientBuilder().WithScheme(newSchemeWithCore(t)).
 				WithIndex(&authz.WebhookAuthorizer{}, indexer.WebhookAuthorizerHasNamespaceSelectorField, indexer.WebhookAuthorizerHasNamespaceSelectorFunc).
+				WithIndex(&authz.BindDefinition{}, indexer.BindDefinitionBridgeSubjectField, indexer.BindDefinitionBridgeSubjectFunc).
 				WithObjects(objs...)
 			if tc.intercept.List != nil || tc.intercept.Get != nil {
 				builder = builder.WithInterceptorFuncs(tc.intercept)
 			}
-			handler := &Authorizer{Client: builder.Build(), Log: logr.Discard(), AllowUnauthenticatedAuthorize: true}
+			reader := builder.Build()
+			handler := &Authorizer{Client: reader, LiveReader: reader, Log: logr.Discard(), AllowUnauthenticatedAuthorize: true}
 			sar := authzv1.SubjectAccessReview{Spec: authzv1.SubjectAccessReviewSpec{User: tc.user, Groups: tc.groups, ResourceAttributes: &tc.attr}}
 			before := testutil.ToFloat64(metrics.AuthorizerBridgedAllowsTotal)
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(marshalSAR(t, sar)))

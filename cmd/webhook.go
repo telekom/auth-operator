@@ -262,9 +262,10 @@ func configureWebhooks(mgr manager.Manager, tp *tracing.Provider) error {
 	// tracing is disabled, allowing its nil-check guard to skip header
 	// parsing and noop span creation entirely — true zero overhead.
 	authorizer := &authorizationwebhook.Authorizer{
-		Client: mgr.GetAPIReader(),
-		Log:    ctrl.Log.WithName("Authorizer"),
-		Tracer: tp.TracerIfEnabled(),
+		Client:     mgr.GetClient(),
+		LiveReader: mgr.GetAPIReader(),
+		Log:        ctrl.Log.WithName("Authorizer"),
+		Tracer:     tp.TracerIfEnabled(),
 	}
 	if err := validateAuthorizeConfig(authorizeRateLimit, authorizeRateBurst, authorizeAuthTokenFile); err != nil {
 		return err

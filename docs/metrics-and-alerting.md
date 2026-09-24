@@ -130,7 +130,8 @@ resources:
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `auth_operator_authorizer_requests_total` | Counter | `decision`, `authorizer` | Total SubjectAccessReview evaluations. `decision`: `allowed`, `denied`, `no-opinion`, `error`. `authorizer`: WebhookAuthorizer CR name or `none`. |
+| `auth_operator_authorizer_requests_total` | Counter | `decision`, `authorizer` | Total SubjectAccessReview evaluations. `decision`: `allowed`, `denied`, `no-opinion`, `error`. `authorizer`: WebhookAuthorizer or bridged BindDefinition name, or `none`. |
+| `auth_operator_authorizer_bridged_allows_total` | Counter | — | Allow decisions from opted-in BindDefinition namespaced RoleBindings before reconciliation. Counted separately from ordinary WebhookAuthorizer rules; also included in `authorizer_requests_total`. |
 | `auth_operator_authorizer_request_duration_seconds` | Histogram | `decision` | Duration of SAR evaluation (seconds). |
 | `auth_operator_authorizer_active_rules` | Gauge | — | Total resource and non-resource rule entries across all WebhookAuthorizer resources. Includes global and namespace-scoped authorizers, even when a scoped authorizer is not evaluated for the current request. Updated on every request. |
 | `auth_operator_authorizer_denied_principal_hits_total` | Counter | `authorizer` | Number of SAR denials due to denied-principal matching. |

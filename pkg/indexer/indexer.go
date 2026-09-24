@@ -60,6 +60,10 @@ const (
 	// does not emit this value so the field index remains sparse.
 	BindDefinitionHasRoleBindingsFalse = "false"
 
+	// BindDefinitionBridgeSubjectField is sparse: only subjects on
+	// selector-backed, opted-in RoleBindings are indexed.
+	BindDefinitionBridgeSubjectField = ".spec.roleBindings.bridgeSubject"
+
 	// RestrictedBindDefinitionPolicyRefField indexes RestrictedBindDefinition
 	// by the referenced RBACPolicy name for efficient reverse lookups.
 	RestrictedBindDefinitionPolicyRefField = authorizationv1alpha1.PolicyRefField
@@ -200,6 +204,15 @@ func SetupBaseIndexes(ctx context.Context, mgr manager.Manager) error {
 		BindDefinitionHasRoleBindingsFunc,
 	); err != nil {
 		return fmt.Errorf("failed to create index for BindDefinitions with RoleBindings: %w", err)
+	}
+
+	if err := mgr.GetFieldIndexer().IndexField(
+		ctx,
+		&authorizationv1alpha1.BindDefinition{},
+		BindDefinitionBridgeSubjectField,
+		BindDefinitionBridgeSubjectFunc,
+	); err != nil {
+		return fmt.Errorf("failed to create index for BindDefinition bridge subjects: %w", err)
 	}
 
 	return nil
@@ -410,6 +423,51 @@ func BindDefinitionHasRoleBindingsFunc(obj client.Object) []string {
 		return []string{BindDefinitionHasRoleBindingsTrue}
 	}
 	return nil
+}
+
+// BindDefinitionBridgeSubjectKey maps RBAC subjects to SAR identity index keys.
+func BindDefinitionBridgeSubjectKey(subject rbacv1.Subject) string {
+	switch subject.Kind {
+	case rbacv1.ServiceAccountKind:
+		if subject.APIGroup == "" && subject.Namespace != "" && subject.Name != "" {
+			return "u:system:serviceaccount:" + subject.Namespace + ":" + subject.Name
+		}
+	case rbacv1.UserKind:
+		if subject.APIGroup == rbacv1.GroupName && subject.Namespace == "" && subject.Name != "" {
+			return "u:" + subject.Name
+		}
+	case rbacv1.GroupKind:
+		if subject.APIGroup == rbacv1.GroupName && subject.Namespace == "" && subject.Name != "" {
+			return "g:" + subject.Name
+		}
+	}
+	return ""
+}
+
+// BindDefinitionBridgeSubjectFunc indexes subjects only for active opt-in bindings.
+func BindDefinitionBridgeSubjectFunc(obj client.Object) []string {
+	bd, ok := obj.(*authorizationv1alpha1.BindDefinition)
+	if !ok || !bd.DeletionTimestamp.IsZero() {
+		return nil
+	}
+	optedIn := false
+	for _, binding := range bd.Spec.RoleBindings {
+		if binding.AuthorizeBeforeBinding && binding.Namespace == "" && len(binding.NamespaceSelector) > 0 &&
+			len(binding.ClusterRoleRefs)+len(binding.RoleRefs) > 0 {
+			optedIn = true
+			break
+		}
+	}
+	if !optedIn {
+		return nil
+	}
+	keys := make([]string, 0, len(bd.Spec.Subjects))
+	for _, subject := range bd.Spec.Subjects {
+		if key := BindDefinitionBridgeSubjectKey(subject); key != "" && !slices.Contains(keys, key) {
+			keys = append(keys, key)
+		}
+	}
+	return keys
 }
 
 // RoleDefinitionTargetNameFunc extracts the RoleDefinition target name.

@@ -23,6 +23,7 @@ on:
           - ha
           - creator-tracking
           - kyverno
+          - authorization-chain
           - all
 
 permissions:
@@ -34,6 +35,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  e2e-authorization-chain:
+    name: E2E API server authorization chain
+    runs-on: ubuntu-latest
+    needs: e2e-compile
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'authorization-chain' || github.event.inputs.test_suite == 'all'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Load versions
+        run: grep -v '^#' versions.env | grep -v '^$' >> "$GITHUB_ENV"
+
+      - name: Setup Go, Kind and Helm
+        uses: ./.github/actions/setup-go-env
+        with:
+          install-kind: 'true'
+          kind-version: ${{ env.KIND_VERSION }}
+          install-helm: 'true'
+          helm-version: ${{ env.HELM_VERSION }}
+
+      - name: Run authorization chain through real API server
+        run: bash test/e2e/run-authorization-chain.sh
+        env:
+          KIND_NODE_IMAGE: kindest/node:${{ env.KIND_K8S_VERSION }}
+
   envtest:
     name: Envtest (Unit + Integration)
     runs-on: ubuntu-latest

@@ -87,6 +87,11 @@ func newIndexedClient(scheme *runtime.Scheme, objs ...client.Object) client.Clie
 			&authzv1alpha1.WebhookAuthorizer{},
 			indexer.WebhookAuthorizerHasNamespaceSelectorField,
 			indexer.WebhookAuthorizerHasNamespaceSelectorFunc,
+		).
+		WithIndex(
+			&authzv1alpha1.BindDefinition{},
+			indexer.BindDefinitionBridgeSubjectField,
+			indexer.BindDefinitionBridgeSubjectFunc,
 		)
 	if len(objs) > 0 {
 		builder = builder.WithObjects(objs...)

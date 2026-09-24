@@ -21,6 +21,7 @@ const (
 // +kubebuilder:validation:XValidation:rule="(has(self.clusterRoleBindings) && has(self.clusterRoleBindings.clusterRoleRefs) && size(self.clusterRoleBindings.clusterRoleRefs) > 0) || (has(self.roleBindings) && self.roleBindings.exists(rb, (has(rb.clusterRoleRefs) && size(rb.clusterRoleRefs) > 0) || (has(rb.roleRefs) && size(rb.roleRefs) > 0)))",message="at least one binding with a referenced role must be specified"
 // +kubebuilder:validation:XValidation:rule="size(self.subjects) > 0",message="at least one subject must be specified"
 // +kubebuilder:validation:XValidation:rule="self.subjects.all(s, s.kind != 'ServiceAccount' || (has(s.namespace) && size(s.namespace) > 0))",message="ServiceAccount subjects must specify a namespace"
+// +kubebuilder:validation:XValidation:rule="!has(self.roleBindings) || self.roleBindings.all(rb, !has(rb.authorizeBeforeBinding) || !rb.authorizeBeforeBinding)",message="authorizeBeforeBinding is only supported on BindDefinition"
 type RestrictedBindDefinitionSpec struct {
 	// PolicyRef references the RBACPolicy that governs this binding.
 	// This field is immutable after creation.

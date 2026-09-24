@@ -25,12 +25,14 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	corev1apply "k8s.io/client-go/applyconfigurations/core/v1"
 	"k8s.io/client-go/rest"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	authz "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	webhooks "github.com/telekom/auth-operator/internal/webhook/authorization"
+	"github.com/telekom/auth-operator/pkg/indexer"
 )
 
 //nolint:gocyclo // Each failure reports the exact setup or authorization step.
@@ -120,7 +122,24 @@ authorizers:
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler.Store(&webhooks.Authorizer{Client: admin, Log: zap.New(), AllowUnauthenticatedAuthorize: true})
+	bridgeCache, err := cache.New(cfg, cache.Options{Scheme: s})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cacheCtx, stopCache := context.WithCancel(t.Context())
+	t.Cleanup(stopCache)
+	if err := bridgeCache.IndexField(cacheCtx, &authz.BindDefinition{}, indexer.BindDefinitionBridgeSubjectField, indexer.BindDefinitionBridgeSubjectFunc); err != nil {
+		t.Fatal(err)
+	}
+	if err := bridgeCache.IndexField(cacheCtx, &authz.WebhookAuthorizer{}, indexer.WebhookAuthorizerHasNamespaceSelectorField, indexer.WebhookAuthorizerHasNamespaceSelectorFunc); err != nil {
+		t.Fatal(err)
+	}
+	cacheErrors := make(chan error, 1)
+	go func() { cacheErrors <- bridgeCache.Start(cacheCtx) }()
+	if !bridgeCache.WaitForCacheSync(cacheCtx) {
+		t.Fatalf("authorization cache failed to sync: %v", <-cacheErrors)
+	}
+	handler.Store(&webhooks.Authorizer{Client: bridgeCache, LiveReader: admin, Log: zap.New(), AllowUnauthenticatedAuthorize: true})
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 
@@ -169,6 +188,21 @@ authorizers:
 	}}
 	if err := admin.Create(ctx, bd); err != nil {
 		t.Fatal(err)
+	}
+	for {
+		indexed := &authz.BindDefinitionList{}
+		if err := bridgeCache.List(ctx, indexed, client.MatchingFields{
+			indexer.BindDefinitionBridgeSubjectField: "u:system:serviceaccount:bridge-source:gitops",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if len(indexed.Items) == 1 {
+			break
+		}
+		if err := ctx.Err(); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 
 	asSA := rest.CopyConfig(cfg)

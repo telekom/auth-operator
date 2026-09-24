@@ -210,7 +210,8 @@ RoleBinding reconciliation. Set `authorizeBeforeBinding: true` **on an individua
 `spec.roleBindings[]` entry** to let the `/authorize` webhook grant that entry's
 referenced Role/ClusterRole rules to its matching User, Group, or ServiceAccount
 subjects in a *live*, matching namespace. Omitted or `false` entries do not
-participate. This is an authorization decision, not an early RoleBinding: it
+participate. `RestrictedBindDefinition` rejects this field: its policy checks
+cannot be bypassed with authorization bridging. This is an authorization decision, not an early RoleBinding: it
 requires a configured API-server authorization webhook and does not create
 RBAC objects, grant access to create the Namespace itself, or apply to
 `spec.clusterRoleBindings` / cluster-scoped requests.
@@ -294,7 +295,12 @@ the bridge, and an earlier explicit deny cannot be overridden by it.
 allow; if no other authorizer grants access, the request remains forbidden.
 The bridge returns no opinion for absent namespaces, mismatched subjects or
 selectors, missing referenced roles, and rules outside the referenced
-permissions. Avoid permissive wildcard roles or broad selectors. Limit who
+permissions. An indexed informer cache nominates matching opt-in definitions;
+the selected BindDefinition, namespace labels and referenced roles are re-read
+from the API server before an allow. Cache lag can delay new grants but cannot
+prolong grants after a definition changes or deletion begins. To bound API-server
+work, requests exceeding 64 groups, 64 candidate definitions or 128 role
+reads receive no opinion. Avoid permissive wildcard roles or broad selectors. Limit who
 can write BindDefinitions and referenced Roles/ClusterRoles, as either can
 expand effective access immediately, before reconciliation or status updates.
 When disabling the bridge, revoke the opt-in; existing RoleBindings must also be removed separately if access

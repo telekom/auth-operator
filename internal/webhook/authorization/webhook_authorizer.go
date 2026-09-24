@@ -83,13 +83,15 @@ type evaluationResult struct {
 }
 
 // Authorizer implements an HTTP handler for SubjectAccessReview requests.
-// The Client field should be a live reader, typically manager.GetAPIReader(),
-// because authorization decisions must not allow requests from stale informer
-// state after rules or namespace labels change.
+// Client is the indexed cache used for WebhookAuthorizer discovery.
+// LiveReader is the API reader used to verify bridge grants.
 type Authorizer struct {
 	Client client.Reader
-	Log    logr.Logger
-	Tracer trace.Tracer
+	// LiveReader verifies bridge decisions against current API state. Client
+	// remains the indexed cache for normal WebhookAuthorizer discovery.
+	LiveReader client.Reader
+	Log        logr.Logger
+	Tracer     trace.Tracer
 	// BearerToken is optional. When set, /authorize requests must include
 	// Authorization: Bearer <token> before the request body is trusted.
 	BearerToken string

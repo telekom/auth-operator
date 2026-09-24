@@ -11,33 +11,40 @@ import (
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	rbacvalidation "k8s.io/component-helpers/auth/rbac/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/pkg/conditions"
+	"github.com/telekom/auth-operator/pkg/indexer"
 )
 
-// bridgeBindDefinition only grants permissions a selector-backed RoleBinding
-// would grant. All reads must be live: a stale label or revoked role is unsafe.
+const (
+	maxBridgeGroups     = 64
+	maxBridgeCandidates = 64
+	maxBridgeRoleReads  = 128
+)
+
+// Cached indexes only nominate candidates. A missing cache entry delays an allow;
+// live reads of each candidate, namespace and role prevent stale cache grants.
 func (wa *Authorizer) bridgeBindDefinition(ctx context.Context, sar *authzv1.SubjectAccessReview) (matched bool, name string) {
 	attr := sar.Spec.ResourceAttributes
-	if !bridgeEligible(attr) {
+	if !bridgeEligible(attr) || wa.LiveReader == nil {
 		return false, ""
 	}
 
-	bindings, err := listAllCachedBindDefinitionsWithRoleBindings(ctx, wa.Client)
+	names, err := wa.bridgeCandidates(ctx, sar)
 	if err != nil {
-		wa.Log.Error(err, "failed to list BindDefinitions for authorization bridge")
+		wa.Log.Error(err, "failed to select BindDefinitions for authorization bridge")
 		return false, ""
 	}
-	bindings = bridgeCandidates(bindings, sar)
-	if len(bindings) == 0 {
+	if len(names) == 0 {
 		return false, ""
 	}
 	ns := &corev1.Namespace{}
-	if err := wa.Client.Get(ctx, client.ObjectKey{Name: attr.Namespace}, ns); err != nil {
+	if err := wa.LiveReader.Get(ctx, client.ObjectKey{Name: attr.Namespace}, ns); err != nil {
 		wa.Log.V(1).Info("authorization bridge namespace unavailable", "namespace", attr.Namespace, "error", err)
 		return false, ""
 	}
@@ -46,8 +53,19 @@ func (wa *Authorizer) bridgeBindDefinition(ctx context.Context, sar *authzv1.Sub
 	}
 
 	var matchedName string
-	for i := range bindings {
-		bd := &bindings[i]
+	roleReads := 0
+	for _, name := range names {
+		bd := &authorizationv1alpha1.BindDefinition{}
+		if err := wa.LiveReader.Get(ctx, client.ObjectKey{Name: name}, bd); err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			wa.Log.Error(err, "failed to verify BindDefinition for authorization bridge", "bindDefinition", name)
+			return false, ""
+		}
+		if !bd.DeletionTimestamp.IsZero() || !bindDefinitionSubjectMatches(sar, bd.Spec.Subjects) {
+			continue
+		}
 		for _, binding := range bd.Spec.RoleBindings {
 			if !binding.AuthorizeBeforeBinding || binding.Namespace != "" || len(binding.NamespaceSelector) == 0 {
 				continue
@@ -60,9 +78,9 @@ func (wa *Authorizer) bridgeBindDefinition(ctx context.Context, sar *authzv1.Sub
 			if !matches {
 				continue
 			}
-			allowed, err := wa.bridgeBindingAllows(ctx, binding, attr)
+			allowed, err := wa.bridgeBindingAllows(ctx, binding, attr, &roleReads)
 			if err != nil {
-				wa.Log.V(1).Info("authorization bridge role unavailable", "bindDefinition", bd.Name, "error", err)
+				wa.Log.Error(err, "authorization bridge role unavailable", "bindDefinition", bd.Name)
 				return false, ""
 			}
 			if allowed {
@@ -73,20 +91,38 @@ func (wa *Authorizer) bridgeBindDefinition(ctx context.Context, sar *authzv1.Sub
 	return matchedName != "", matchedName
 }
 
-func bridgeCandidates(bindings []authorizationv1alpha1.BindDefinition, sar *authzv1.SubjectAccessReview) []authorizationv1alpha1.BindDefinition {
-	candidates := bindings[:0]
-	for _, bd := range bindings {
-		if !bindDefinitionSubjectMatches(sar, bd.Spec.Subjects) {
-			continue
-		}
-		for _, binding := range bd.Spec.RoleBindings {
-			if binding.AuthorizeBeforeBinding && binding.Namespace == "" && len(binding.NamespaceSelector) > 0 {
-				candidates = append(candidates, bd)
-				break
-			}
+func (wa *Authorizer) bridgeCandidates(ctx context.Context, sar *authzv1.SubjectAccessReview) ([]string, error) {
+	if len(sar.Spec.Groups) > maxBridgeGroups {
+		return nil, fmt.Errorf("bridge group limit exceeded: %d", len(sar.Spec.Groups))
+	}
+	keys := make([]string, 0, 1+len(sar.Spec.Groups))
+	if sar.Spec.User != "" {
+		keys = append(keys, "u:"+sar.Spec.User)
+	}
+	for _, group := range sar.Spec.Groups {
+		if !slices.Contains(keys, "g:"+group) {
+			keys = append(keys, "g:"+group)
 		}
 	}
-	return candidates
+	names := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, key := range keys {
+		list := &authorizationv1alpha1.BindDefinitionList{}
+		if err := wa.Client.List(ctx, list, client.MatchingFields{indexer.BindDefinitionBridgeSubjectField: key}); err != nil {
+			return nil, err
+		}
+		for _, bd := range list.Items {
+			if _, ok := seen[bd.Name]; ok {
+				continue
+			}
+			if len(names) >= maxBridgeCandidates {
+				return nil, fmt.Errorf("bridge candidate limit exceeded: %d", maxBridgeCandidates)
+			}
+			seen[bd.Name] = struct{}{}
+			names = append(names, bd.Name)
+		}
+	}
+	return names, nil
 }
 
 func bridgeEligible(attr *authzv1.ResourceAttributes) bool {
@@ -108,18 +144,26 @@ func bridgeSelectorMatches(binding authorizationv1alpha1.NamespaceBinding, names
 	return false, nil
 }
 
-func (wa *Authorizer) bridgeBindingAllows(ctx context.Context, binding authorizationv1alpha1.NamespaceBinding, attr *authzv1.ResourceAttributes) (bool, error) {
+func (wa *Authorizer) bridgeBindingAllows(ctx context.Context, binding authorizationv1alpha1.NamespaceBinding, attr *authzv1.ResourceAttributes, roleReads *int) (bool, error) {
 	allowed := false
 	for _, name := range binding.ClusterRoleRefs {
+		if *roleReads >= maxBridgeRoleReads {
+			return false, fmt.Errorf("bridge role read limit exceeded: %d", maxBridgeRoleReads)
+		}
+		*roleReads++
 		role := &rbacv1.ClusterRole{}
-		if err := wa.Client.Get(ctx, client.ObjectKey{Name: name}, role); err != nil {
+		if err := wa.LiveReader.Get(ctx, client.ObjectKey{Name: name}, role); err != nil {
 			return false, fmt.Errorf("get ClusterRole %q: %w", name, err)
 		}
 		allowed = bridgeRulesAllow(role.Rules, attr) || allowed
 	}
 	for _, name := range binding.RoleRefs {
+		if *roleReads >= maxBridgeRoleReads {
+			return false, fmt.Errorf("bridge role read limit exceeded: %d", maxBridgeRoleReads)
+		}
+		*roleReads++
 		role := &rbacv1.Role{}
-		if err := wa.Client.Get(ctx, client.ObjectKey{Name: name, Namespace: attr.Namespace}, role); err != nil {
+		if err := wa.LiveReader.Get(ctx, client.ObjectKey{Name: name, Namespace: attr.Namespace}, role); err != nil {
 			return false, fmt.Errorf("get Role %q in namespace %q: %w", name, attr.Namespace, err)
 		}
 		allowed = bridgeRulesAllow(role.Rules, attr) || allowed

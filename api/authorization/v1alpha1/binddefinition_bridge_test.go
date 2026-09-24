@@ -67,3 +67,20 @@ func TestAuthorizeBeforeBindingValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestRestrictedBindDefinitionRejectsBridge(t *testing.T) {
+	obj := &RestrictedBindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "restricted-bridge"},
+		Spec: RestrictedBindDefinitionSpec{
+			RoleBindings: []NamespaceBinding{{
+				AuthorizeBeforeBinding: true,
+				NamespaceSelector:      []metav1.LabelSelector{{MatchLabels: map[string]string{LabelKeyTenant: "team-a"}}},
+				ClusterRoleRefs:        []string{"reader"},
+			}},
+		},
+	}
+	err := (&RestrictedBindDefinitionValidator{}).validateRestrictedBindDefinitionSpec(context.Background(), obj)
+	if err == nil || !strings.Contains(err.Error(), "spec.roleBindings[0].authorizeBeforeBinding") {
+		t.Fatalf("expected restricted bridge validation error, got %v", err)
+	}
+}

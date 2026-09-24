@@ -52,7 +52,7 @@ var _ = Describe("BindDefinition authorization bridge", func() {
 
 		live, err := client.New(envCfg, client.Options{Scheme: scheme.Scheme})
 		Expect(err).NotTo(HaveOccurred())
-		authorizer := &webhooks.Authorizer{Client: live, Log: zap.New(zap.WriteTo(io.Discard)), AllowUnauthenticatedAuthorize: true}
+		authorizer := &webhooks.Authorizer{Client: envClient, LiveReader: live, Log: zap.New(zap.WriteTo(io.Discard)), AllowUnauthenticatedAuthorize: true}
 		sar := authzv1.SubjectAccessReview{Spec: authzv1.SubjectAccessReviewSpec{
 			User: "bridge-user", ResourceAttributes: &authzv1.ResourceAttributes{
 				Namespace: ns.Name, Verb: "get", Resource: "pods",
@@ -61,7 +61,8 @@ var _ = Describe("BindDefinition authorization bridge", func() {
 		var bindings rbacv1.RoleBindingList
 		Expect(live.List(ctx, &bindings, client.InNamespace(ns.Name))).To(Succeed())
 		Expect(bindings.Items).To(BeEmpty())
-		Expect(sendSAR(authorizer, sar).Status.Allowed).To(BeTrue())
+		Eventually(func() bool { return sendSAR(authorizer, sar).Status.Allowed }).
+			WithTimeout(10 * time.Second).Should(BeTrue())
 		sar.Spec.ResourceAttributes.Resource = "configmaps"
 		Expect(sendSAR(authorizer, sar).Status.Allowed).To(BeTrue())
 		Expect(live.List(ctx, &bindings, client.InNamespace(ns.Name))).To(Succeed())

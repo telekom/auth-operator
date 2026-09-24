@@ -264,6 +264,9 @@ spec:
             - message: ServiceAccount subjects must specify a namespace
               rule: self.subjects.all(s, s.kind != 'ServiceAccount' || (has(s.namespace)
                 && size(s.namespace) > 0))
+            - message: authorizeBeforeBinding is only supported on BindDefinition
+              rule: '!has(self.roleBindings) || self.roleBindings.all(rb, !has(rb.authorizeBeforeBinding)
+                || !rb.authorizeBeforeBinding)'
           status:
             description: RestrictedBindDefinitionStatus defines the observed state
               of RestrictedBindDefinition.
