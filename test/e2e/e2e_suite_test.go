@@ -89,7 +89,15 @@ func TestE2E(t *testing.T) {
 	_, _ = fmt.Fprintf(GinkgoWriter, "  E2E_DEBUG_LEVEL: %d\n", utils.DebugLevel)
 	_, _ = fmt.Fprintf(GinkgoWriter, "  Timestamp: %s\n", time.Now().UTC().Format(time.RFC3339))
 	_, _ = fmt.Fprintf(GinkgoWriter, "======================================\n\n")
-	RunSpecs(t, "Auth Operator E2E Suite")
+	suiteConfig, _ := GinkgoConfiguration()
+	if !strings.HasPrefix(kindClusterName, "auth-operator-chain-") {
+		if suiteConfig.LabelFilter != "" {
+			suiteConfig.LabelFilter = "(" + suiteConfig.LabelFilter + ") && !authorization-chain"
+		} else {
+			suiteConfig.LabelFilter = "!authorization-chain"
+		}
+	}
+	RunSpecs(t, "Auth Operator E2E Suite", suiteConfig)
 }
 
 var _ = BeforeSuite(func() {

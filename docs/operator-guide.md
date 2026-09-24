@@ -17,6 +17,7 @@ of the auth-operator in production Kubernetes environments.
 - [Architecture Overview](#architecture-overview)
 - [Configuration](#configuration)
   - [Creator Tracking](#creator-tracking)
+  - [Authorization Before Binding](#authorization-before-binding)
 - [High Availability](#high-availability)
 - [Monitoring](#monitoring)
 - [Security Considerations](#security-considerations)
@@ -201,6 +202,117 @@ the assignment.
 | Annotation | Values | Default | Description |
 |-----------|--------|---------|-------------|
 | `authorization.t-caas.telekom.com/missing-role-policy` | `warn`, `error`, `ignore` | `warn` | Controls behavior when referenced roles don't exist. `warn`: create bindings, surface warning in status. `error`: block binding creation, set condition False. `ignore`: skip validation entirely, set condition Unknown. |
+
+### Authorization Before Binding
+
+`BindDefinition` can bridge the short interval between namespace creation and
+RoleBinding reconciliation. Set `authorizeBeforeBinding: true` **on an individual
+`spec.roleBindings[]` entry** to let the `/authorize` webhook grant that entry's
+referenced Role/ClusterRole rules to its matching User, Group, or ServiceAccount
+subjects in a *live*, matching namespace. Omitted or `false` entries do not
+participate. `RestrictedBindDefinition` rejects this field: its policy checks
+cannot be bypassed with authorization bridging. This is an authorization decision, not an early RoleBinding: it
+requires a configured API-server authorization webhook and does not create
+RBAC objects, grant access to create the Namespace itself, or apply to
+`spec.clusterRoleBindings` / cluster-scoped requests.
+
+For example, if the ClusterRole already exists with only `create` on core
+`secrets`, this binding can bridge a newly created labeled namespace:
+
+```yaml
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: namespace-bootstrap
+spec:
+  targetName: namespace-bootstrap
+  subjects:
+    - apiGroup: rbac.authorization.k8s.io
+      kind: User
+      name: namespace-bootstrapper
+  roleBindings:
+    - clusterRoleRefs: ["bootstrap-secret-creator"]
+      namespaceSelector:
+        - matchLabels:
+            example.com/bootstrap: "enabled"
+      authorizeBeforeBinding: true
+```
+
+Configure `webhookServer.bindDefinitionNamespaceSelectorLabelGroups` to
+permit `example.com` if using this example selector; use your own approved
+label domain in production.
+
+An independently authorized namespace creator can then submit a Namespace and
+Secret in one ordered `kubectl apply --server-side -f` containing both documents
+(Namespace **first**, Secret second). The namespace must exist and its labels
+must match when the Secret request is authorized. Grant namespace creation
+separately and carefully: this bridge does not confer it, and Kubernetes RBAC
+cannot constrain a `create namespaces` grant by `resourceNames`. A
+unordered GitOps execution does not guarantee the
+namespace is visible before the Secret is checked.
+
+The API server needs an `AuthorizationConfiguration` (Kubernetes 1.32+;
+earlier versions require checking version-specific support) with **Node,
+RBAC, Webhook** in that order. For example, with an API-server-readable
+kubeconfig pointing to the TLS-protected auth-operator `/authorize` endpoint:
+
+```yaml
+apiVersion: apiserver.config.k8s.io/v1
+kind: AuthorizationConfiguration
+authorizers:
+  - type: Node
+    name: node
+  - type: RBAC
+    name: rbac
+  - type: Webhook
+    name: auth-operator
+    webhook:
+      authorizedTTL: 0s
+      unauthorizedTTL: 0s
+      cacheAuthorizedRequests: false
+      cacheUnauthorizedRequests: false
+      timeout: 3s
+      subjectAccessReviewVersion: v1
+      matchConditionSubjectAccessReviewVersion: v1
+      failurePolicy: NoOpinion
+      connectionInfo:
+        type: KubeConfigFile
+        kubeConfigFile: /etc/kubernetes/auth-operator-authorize.kubeconfig
+```
+
+Pass the mounted configuration path to kube-apiserver as
+`--authorization-config=/etc/kubernetes/auth-operator-authorization.yaml`;
+do **not** combine it with `--authorization-mode`. The webhook kubeconfig
+must specify the `/authorize` URL, trusted CA, and a bearer token matching
+`webhookServer.authorizeAuth.tokenSecretName`. Secure the token and restrict
+access to the endpoint; never enable unauthenticated `/authorize` in production.
+The chart installs neither this API-server configuration nor the token in the
+API server. The API server must be able to reach the webhook Service.
+
+The first definitive allow/deny in the chain wins: Node/RBAC allows bypass
+the bridge, and an earlier explicit deny cannot be overridden by it.
+`failurePolicy: NoOpinion` makes transport errors fall through, **not**
+allow; if no other authorizer grants access, the request remains forbidden.
+The bridge returns no opinion for absent namespaces, mismatched subjects or
+selectors, missing referenced roles, and rules outside the referenced
+permissions. Only resources discovered as namespaced can be bridged; unknown
+resources receive no opinion. An indexed informer cache nominates matching
+opt-in definitions; the selected BindDefinition, namespace labels and
+referenced roles are re-read from the API server before an allow. Explicit-deny
+WebhookAuthorizers are also checked against live specs, regardless of cache
+classification or controller readiness, so newly added denies take precedence
+even before status observes the update. A failed bridge deny check produces no
+opinion, never a bridge allow or definitive deny. Resource scope discovery is
+cached for at most five seconds to limit API-server calls, then refreshed so scope changes
+cannot remain stale indefinitely. Cache lag can delay new grants but cannot
+prolong grants after a definition changes or deletion begins. To bound API-server
+work, requests exceeding 64 groups, 64 candidate definitions, 128 role
+reads or 256 live WebhookAuthorizers receive no opinion. Live deny checks page
+through at most 64 WebhookAuthorizers at a time. Avoid permissive wildcard roles or broad selectors. Limit who
+can write BindDefinitions and referenced Roles/ClusterRoles, as either can
+expand effective access immediately, before reconciliation or status updates.
+When disabling the bridge, revoke the opt-in; existing RoleBindings must also be removed separately if access
+must end.
 
 ---
 

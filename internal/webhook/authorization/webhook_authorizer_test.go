@@ -87,6 +87,11 @@ func newIndexedClient(scheme *runtime.Scheme, objs ...client.Object) client.Clie
 			&authzv1alpha1.WebhookAuthorizer{},
 			indexer.WebhookAuthorizerHasNamespaceSelectorField,
 			indexer.WebhookAuthorizerHasNamespaceSelectorFunc,
+		).
+		WithIndex(
+			&authzv1alpha1.BindDefinition{},
+			indexer.BindDefinitionBridgeSubjectField,
+			indexer.BindDefinitionBridgeSubjectFunc,
 		)
 	if len(objs) > 0 {
 		builder = builder.WithObjects(objs...)
@@ -2397,8 +2402,9 @@ func TestEvaluateSAR_NamespaceLabelCache_SingleGetPerNamespace(t *testing.T) {
 			t.Fatalf("evaluateSAR returned unexpected error: %v", err)
 		}
 
+		// No BindDefinitions exist, so the bridge needs no namespace lookup.
 		if got := counter.getCount.Load(); got != 1 {
-			t.Errorf("expected exactly 1 namespace Get() for 3 authorizers targeting the same namespace, got %d", got)
+			t.Errorf("expected one namespace Get() call for scoped authorizers, got %d", got)
 		}
 	})
 

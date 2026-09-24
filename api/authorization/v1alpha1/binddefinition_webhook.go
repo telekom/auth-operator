@@ -513,6 +513,12 @@ func validateNamespaceBindings(kind schema.GroupKind, name string, bindings []Na
 func validateNamespaceBindingsWithLabelGroups(kind schema.GroupKind, name string, bindings []NamespaceBinding, allowedLabelGroups []string) error {
 	allowedLabelGroups = namespaceAdmissionSelectorLabelGroupsOrDefault(allowedLabelGroups)
 	for i, binding := range bindings {
+		if binding.AuthorizeBeforeBinding && (binding.Namespace != "" || len(binding.NamespaceSelector) == 0 ||
+			len(binding.ClusterRoleRefs)+len(binding.RoleRefs) == 0) {
+			return apierrors.NewInvalid(kind, name, field.ErrorList{field.Invalid(
+				field.NewPath("spec", "roleBindings").Index(i).Child("authorizeBeforeBinding"),
+				true, "requires a namespaceSelector and at least one role reference, without an explicit namespace")})
+		}
 		if (len(binding.ClusterRoleRefs) > 0 || len(binding.RoleRefs) > 0) &&
 			binding.Namespace == "" &&
 			len(binding.NamespaceSelector) == 0 {

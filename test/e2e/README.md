@@ -107,6 +107,35 @@ make test-e2e-quick
 
 ## Quick Start
 
+### Real API-server authorization chain
+
+Run `bash test/e2e/run-authorization-chain.sh` (Docker, Kind, Helm, OpenSSL,
+Go and kubectl required). This creates a **new** uniquely named kind cluster,
+builds and loads the current image (including with the Docker Buildx container
+driver), configures kube-apiserver with structured `Node, RBAC, Webhook`
+authorization, disabled webhook decision caching and `NoOpinion` failure policy, installs
+the chart, and runs only the `authorization-chain` Ginkgo label. During kind
+bootstrap, kubeadm's default Node/RBAC authorizers remain active so its admin
+binding can be created before the webhook exists; after chart readiness, the
+runner switches the API-server static pod to the mounted structured config.
+The API server
+trusts the chart rotator's CA and authenticates to `/authorize` with a
+per-run random bearer token; no certificate or token is committed. The script
+deletes **only its own named cluster** and cluster-specific generated files on exit. Set
+`KEEP_CHAIN_CLUSTER=true` to retain it for debugging and delete it explicitly
+with `kind delete cluster --name <printed-name>` when finished; never run this
+script against an existing cluster name or output directory. Override
+`KIND_NODE_IMAGE` to choose another compatible node image.
+
+The test pauses the controller but leaves the webhook running, waits for its
+BindDefinition candidate index to observe a separate probe namespace, confirms
+no RoleBinding exists, then submits an ordered, single-attempt server-side apply
+of Namespace, Secret and ConfigMap as an impersonated ServiceAccount. It also
+checks normal RBAC authorization, negative authorization cases, opt-out denial
+and revocation both during termination and after actual deletion.
+CI runs this script in its own job (not merely the E2E compile check). The
+existing direct `/authorize` handler E2E remains a separate test.
+
 ### Run All Tests (Recommended for CI)
 
 ```bash
@@ -294,6 +323,17 @@ make test-e2e-complex
 - ✓ Cross-namespace bindings
 - ✓ Complex role aggregation
 - ✓ Webhook authorization flows
+
+The `WebhookAuthorizer E2E / BindDefinition authorization before binding`
+scenario pauses the Helm controller on an isolated kind cluster, verifies no
+RoleBinding exists, and calls `/authorize` for matching and forbidden
+User/Group/ServiceAccount, selector, resource, and opt-out cases. It restores
+the controller after the test. This tests webhook decisions, **not** an actual
+API-server namespace-plus-Secret apply: the default kind cluster has no
+authorization webhook in its API-server chain. To verify that flow end to end,
+configure the API server as described in the
+[operator guide](../../docs/operator-guide.md#authorization-before-binding),
+then independently grant the caller permission to create the namespace.
 
 **Run:**
 ```bash

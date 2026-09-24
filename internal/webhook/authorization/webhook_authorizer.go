@@ -18,9 +18,12 @@ import (
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/discovery"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
@@ -50,6 +53,8 @@ const (
 	maxSubjectLimiters         = 4096
 	minSubjectLimiterIdleTTL   = 5 * time.Minute
 	subjectLimiterCleanupEvery = time.Minute
+	maxBridgeDenyAuthorizers   = 256
+	bridgeDenyPageSize         = 64
 )
 
 // maxRequestBodySize is the maximum allowed request body size (1MB).
@@ -83,13 +88,16 @@ type evaluationResult struct {
 }
 
 // Authorizer implements an HTTP handler for SubjectAccessReview requests.
-// The Client field should be a live reader, typically manager.GetAPIReader(),
-// because authorization decisions must not allow requests from stale informer
-// state after rules or namespace labels change.
+// Client is the indexed cache used for WebhookAuthorizer discovery.
+// LiveReader is the API reader used to verify bridge grants.
 type Authorizer struct {
 	Client client.Reader
-	Log    logr.Logger
-	Tracer trace.Tracer
+	// LiveReader verifies bridge decisions against current API state. Client
+	// remains the indexed cache for normal WebhookAuthorizer discovery.
+	LiveReader client.Reader
+	Discovery  discovery.DiscoveryInterfaceWithContext
+	Log        logr.Logger
+	Tracer     trace.Tracer
 	// BearerToken is optional. When set, /authorize requests must include
 	// Authorization: Bearer <token> before the request body is trusted.
 	BearerToken string
@@ -109,6 +117,8 @@ type Authorizer struct {
 	subjectLimitersMu       sync.Mutex
 	subjectLimiters         map[string]*subjectLimiterEntry
 	subjectLimiterCleanupAt time.Time
+	bridgeScopesMu          sync.Mutex
+	bridgeScopes            map[schema.GroupVersionResource]bridgeScopeEntry
 }
 
 type subjectLimiterEntry struct {
@@ -179,6 +189,12 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// namespace. The active-rules gauge still reflects the full set via allRules.
 	if sar.Spec.ResourceAttributes != nil && sar.Spec.ResourceAttributes.Namespace != "" {
 		items = append(items, scopedItems...)
+	} else {
+		for _, item := range scopedItems {
+			if helpers.IsLabelSelectorEmpty(&item.Spec.NamespaceSelector) {
+				items = append(items, item)
+			}
+		}
 	}
 
 	// Sort authorizers by name for deterministic first-match evaluation order
@@ -340,6 +356,9 @@ func (wa *Authorizer) marshalSubjectAccessReviewResponse(ctx context.Context, w 
 func publicAuthorizerReason(result evaluationResult) string {
 	switch result.decision {
 	case pkgmetrics.AuthorizerDecisionAllowed:
+		if result.matchedField == "bindDefinition" {
+			return "Access granted by BindDefinition"
+		}
 		return "Access granted by WebhookAuthorizer"
 	case pkgmetrics.AuthorizerDecisionDenied:
 		return "Access denied by WebhookAuthorizer"
@@ -562,10 +581,10 @@ func (wa *Authorizer) listAuthorizersByIndex(ctx context.Context, hasNamespaceSe
 	}
 
 	items := make([]authorizationv1alpha1.WebhookAuthorizer, 0, len(allAuth.Items))
-	for _, item := range allAuth.Items {
+	for _, candidate := range allAuth.Items {
 		if useFallback {
 			matches := ""
-			if helpers.IsLabelSelectorEmpty(&item.Spec.NamespaceSelector) {
+			if helpers.IsLabelSelectorEmpty(&candidate.Spec.NamespaceSelector) {
 				matches = indexer.WebhookAuthorizerHasNamespaceSelectorFalse
 			} else {
 				matches = indexer.WebhookAuthorizerHasNamespaceSelectorTrue
@@ -575,6 +594,13 @@ func (wa *Authorizer) listAuthorizersByIndex(ctx context.Context, hasNamespaceSe
 			}
 		}
 
+		var item authorizationv1alpha1.WebhookAuthorizer
+		if err := wa.authorizerReader().Get(listCtx, client.ObjectKey{Name: candidate.Name}, &item); err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			return nil, fmt.Errorf("get WebhookAuthorizer %q: %w", candidate.Name, err)
+		}
 		if !authorizerReadyForEvaluation(item) {
 			wa.Log.V(2).Info("skipping unconfigured WebhookAuthorizer",
 				"authorizer", item.Name,
@@ -585,6 +611,13 @@ func (wa *Authorizer) listAuthorizersByIndex(ctx context.Context, hasNamespaceSe
 		items = append(items, item)
 	}
 	return items, nil
+}
+
+func (wa *Authorizer) authorizerReader() client.Reader {
+	if wa.LiveReader != nil {
+		return wa.LiveReader
+	}
+	return wa.Client
 }
 
 func authorizerReadyForEvaluation(item authorizationv1alpha1.WebhookAuthorizer) bool {
@@ -713,6 +746,31 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 		}
 	}
 
+	if sar.Spec.ResourceAttributes != nil {
+		if matched, name := wa.bridgeBindDefinition(ctx, sar); matched {
+			deny, err := wa.liveBridgeDeny(ctx, sar)
+			if err != nil {
+				wa.Log.Error(err, "failed to verify live WebhookAuthorizer denies before bridge allow")
+				return evaluationResult{
+					reason:         "Access denied: bridge deny check unavailable",
+					decision:       pkgmetrics.AuthorizerDecisionNoOpinion,
+					authorizerName: pkgmetrics.AuthorizerNameNone, matchedRule: -1,
+					evaluatedCount: evaluated, skippedCount: skipped,
+				}, nil
+			}
+			if deny.decision == pkgmetrics.AuthorizerDecisionDenied {
+				deny.evaluatedCount += evaluated
+				deny.skippedCount += skipped
+				return deny, nil
+			}
+			return evaluationResult{
+				allowed: true, reason: "Access granted by BindDefinition " + name,
+				decision: pkgmetrics.AuthorizerDecisionAllowed, authorizerName: name,
+				matchedRule: -1, matchedField: "bindDefinition",
+				evaluatedCount: evaluated, skippedCount: skipped,
+			}, nil
+		}
+	}
 	return evaluationResult{
 		allowed:        false,
 		reason:         "Access denied: no matching rules",
@@ -722,6 +780,47 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 		evaluatedCount: evaluated,
 		skippedCount:   skipped,
 	}, nil
+}
+
+func (wa *Authorizer) liveBridgeDeny(ctx context.Context, sar *authzv1.SubjectAccessReview) (evaluationResult, error) {
+	nsCache := make(map[string]namespaceLabelCacheEntry)
+	continuation := ""
+	for range maxBridgeDenyAuthorizers / bridgeDenyPageSize {
+		var authorizers authorizationv1alpha1.WebhookAuthorizerList
+		if err := wa.LiveReader.List(ctx, &authorizers, client.Limit(bridgeDenyPageSize), client.Continue(continuation)); err != nil {
+			return evaluationResult{}, fmt.Errorf("list live WebhookAuthorizers: %w", err)
+		}
+		if len(authorizers.Items) > bridgeDenyPageSize {
+			return evaluationResult{}, fmt.Errorf("live WebhookAuthorizer deny page exceeded %d objects", bridgeDenyPageSize)
+		}
+		for i := range authorizers.Items {
+			item := &authorizers.Items[i]
+			if !wa.principalMatches(sar, item.Spec.DeniedPrincipals) {
+				continue
+			}
+			if !helpers.IsLabelSelectorEmpty(&item.Spec.NamespaceSelector) {
+				matches, err := wa.namespaceMatches(ctx, sar.Spec.ResourceAttributes.Namespace, &item.Spec.NamespaceSelector, nsCache)
+				if err != nil {
+					return evaluationResult{}, fmt.Errorf("WebhookAuthorizer %q namespace selector: %w", item.Name, err)
+				}
+				if !matches {
+					continue
+				}
+			}
+			if ruleIdx := wa.matchRequestRule(item, sar); ruleIdx >= 0 {
+				return evaluationResult{
+					allowed: false, reason: fmt.Sprintf("Access denied by WebhookAuthorizer %s", item.Name),
+					decision: pkgmetrics.AuthorizerDecisionDenied, authorizerName: item.Name,
+					matchedRule: ruleIdx, matchedField: "deniedPrincipal", evaluatedCount: 1,
+				}, nil
+			}
+		}
+		if authorizers.Continue == "" {
+			return evaluationResult{}, nil
+		}
+		continuation = authorizers.Continue
+	}
+	return evaluationResult{}, fmt.Errorf("live WebhookAuthorizer deny check exceeded %d objects", maxBridgeDenyAuthorizers)
 }
 
 // namespaceMatches checks if the namespace matches the selector.
@@ -755,7 +854,7 @@ func (wa *Authorizer) namespaceMatches(ctx context.Context, namespace string, se
 	var ns corev1.Namespace
 	getCtx, cancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
 	defer cancel()
-	if err := wa.Client.Get(getCtx, types.NamespacedName{Name: namespace}, &ns); err != nil {
+	if err := wa.authorizerReader().Get(getCtx, types.NamespacedName{Name: namespace}, &ns); err != nil {
 		wrappedErr := fmt.Errorf("get namespace %q: %w", namespace, err)
 		nsCache[namespace] = namespaceLabelCacheEntry{err: wrappedErr}
 		return false, wrappedErr
@@ -963,6 +1062,9 @@ func (wa *Authorizer) recordMetrics(result *evaluationResult, latency time.Durat
 	pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(result.decision, result.authorizerName).Inc()
 	pkgmetrics.AuthorizerRequestDuration.WithLabelValues(result.decision).Observe(latency.Seconds())
 	pkgmetrics.AuthorizerActiveRules.Set(float64(activeRuleCount))
+	if result.matchedField == "bindDefinition" {
+		pkgmetrics.AuthorizerBridgedAllowsTotal.Inc()
+	}
 
 	if result.matchedField == "deniedPrincipal" {
 		pkgmetrics.AuthorizerDeniedPrincipalHitsTotal.WithLabelValues(result.authorizerName).Inc()

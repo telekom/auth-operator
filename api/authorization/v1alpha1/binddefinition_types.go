@@ -7,6 +7,7 @@ import (
 
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 )
 
 // MissingRolePolicy controls how the controller handles missing role references.
@@ -54,7 +55,14 @@ type ClusterBinding struct {
 
 // NamespaceBinding defines namespace-scoped role bindings.
 // +kubebuilder:validation:XValidation:rule="((!has(self.clusterRoleRefs) || size(self.clusterRoleRefs) == 0) && (!has(self.roleRefs) || size(self.roleRefs) == 0)) || (has(self.namespace) && size(self.namespace) > 0) || (has(self.namespaceSelector) && size(self.namespaceSelector) > 0)",message="roleBindings entries with role refs must specify namespace or namespaceSelector"
+// +kubebuilder:validation:XValidation:rule="!has(self.authorizeBeforeBinding) || !self.authorizeBeforeBinding || ((!has(self.namespace) || size(self.namespace) == 0) && has(self.namespaceSelector) && size(self.namespaceSelector) > 0 && ((has(self.clusterRoleRefs) && size(self.clusterRoleRefs) > 0) || (has(self.roleRefs) && size(self.roleRefs) > 0)))",message="authorizeBeforeBinding requires a selector-backed role reference without an explicit namespace"
 type NamespaceBinding struct {
+	// AuthorizeBeforeBinding permits /authorize to grant matching namespaced
+	// requests while the controller has not yet created this RoleBinding.
+	// Only selector-backed bindings can opt in.
+	// +kubebuilder:validation:Optional
+	AuthorizeBeforeBinding bool `json:"authorizeBeforeBinding,omitempty"`
+
 	// ClusterRoleRefs references an existing ClusterRole
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=64
@@ -77,6 +85,23 @@ type NamespaceBinding struct {
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=16
 	NamespaceSelector []metav1.LabelSelector `json:"namespaceSelector,omitempty"`
+}
+
+// Selectors uses the same OR and empty-selector semantics as RoleBinding reconciliation.
+// An explicit namespace takes precedence over selectors.
+func (b NamespaceBinding) Selectors() ([]labels.Selector, error) {
+	if b.Namespace != "" {
+		return nil, nil
+	}
+	selectors := make([]labels.Selector, 0, len(b.NamespaceSelector))
+	for _, item := range b.NamespaceSelector {
+		selector, err := metav1.LabelSelectorAsSelector(&item)
+		if err != nil {
+			return nil, err
+		}
+		selectors = append(selectors, selector)
+	}
+	return selectors, nil
 }
 
 // BindDefinitionSpec defines the desired state of BindDefinition.

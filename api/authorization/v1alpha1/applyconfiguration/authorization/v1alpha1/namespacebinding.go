@@ -26,6 +26,10 @@ import (
 //
 // NamespaceBinding defines namespace-scoped role bindings.
 type NamespaceBindingApplyConfiguration struct {
+	// AuthorizeBeforeBinding permits /authorize to grant matching namespaced
+	// requests while the controller has not yet created this RoleBinding.
+	// Only selector-backed bindings can opt in.
+	AuthorizeBeforeBinding *bool `json:"authorizeBeforeBinding,omitempty"`
 	// ClusterRoleRefs references an existing ClusterRole
 	ClusterRoleRefs []string `json:"clusterRoleRefs,omitempty"`
 	// RoleRefs references a specific Role that has to exist in the target namespaces
@@ -40,6 +44,14 @@ type NamespaceBindingApplyConfiguration struct {
 // apply.
 func NamespaceBinding() *NamespaceBindingApplyConfiguration {
 	return &NamespaceBindingApplyConfiguration{}
+}
+
+// WithAuthorizeBeforeBinding sets the AuthorizeBeforeBinding field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the AuthorizeBeforeBinding field is set to the value of the last call.
+func (b *NamespaceBindingApplyConfiguration) WithAuthorizeBeforeBinding(value bool) *NamespaceBindingApplyConfiguration {
+	b.AuthorizeBeforeBinding = &value
+	return b
 }
 
 // WithClusterRoleRefs adds the given value to the ClusterRoleRefs field in the declarative configuration

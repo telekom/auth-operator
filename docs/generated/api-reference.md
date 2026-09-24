@@ -417,6 +417,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
+| `authorizeBeforeBinding` _boolean_ | AuthorizeBeforeBinding permits /authorize to grant matching namespaced<br />requests while the controller has not yet created this RoleBinding.<br />Only selector-backed bindings can opt in. |  | Optional: \{\} <br /> |
 | `clusterRoleRefs` _string array_ | ClusterRoleRefs references an existing ClusterRole |  | MaxItems: 64 <br />Optional: \{\} <br />items:MaxLength: 253 <br />items:MinLength: 1 <br /> |
 | `roleRefs` _string array_ | RoleRefs references a specific Role that has to exist in the target namespaces |  | MaxItems: 64 <br />Optional: \{\} <br />items:MaxLength: 253 <br />items:MinLength: 1 <br /> |
 | `namespace` _string_ | Namespace of the Role that should be bound to the subjects. |  | Optional: \{\} <br /> |

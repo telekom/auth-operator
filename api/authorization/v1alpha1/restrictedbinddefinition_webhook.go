@@ -185,6 +185,16 @@ func (v *RestrictedBindDefinitionValidator) defaultPolicyReader() client.Reader 
 func (v *RestrictedBindDefinitionValidator) validateRestrictedBindDefinitionSpec(ctx context.Context, obj *RestrictedBindDefinition) error {
 	logger := log.FromContext(ctx).WithName("restrictedbinddefinition-webhook")
 
+	for i, binding := range obj.Spec.RoleBindings {
+		if binding.AuthorizeBeforeBinding {
+			return apierrors.NewInvalid(
+				schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedBindDefinitionKind},
+				obj.Name, field.ErrorList{field.Forbidden(
+					field.NewPath("spec", "roleBindings").Index(i).Child("authorizeBeforeBinding"),
+					"authorization bridging is only supported on BindDefinition")})
+		}
+	}
+
 	// Check duplicate targetName through the uncached admission reader. Admission
 	// collision checks are a security boundary and must not fail open when the
 	// informer cache lags behind the API server.
