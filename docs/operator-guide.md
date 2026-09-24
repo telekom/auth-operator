@@ -305,8 +305,9 @@ a bridge allow or definitive deny. Resource scope discovery is cached for at
 most five seconds to limit API-server calls, then refreshed so scope changes
 cannot remain stale indefinitely. Cache lag can delay new grants but cannot
 prolong grants after a definition changes or deletion begins. To bound API-server
-work, requests exceeding 64 groups, 64 candidate definitions or 128 role
-reads receive no opinion. Avoid permissive wildcard roles or broad selectors. Limit who
+work, requests exceeding 64 groups, 64 candidate definitions, 128 role
+reads or 256 live WebhookAuthorizers receive no opinion. Live deny checks page
+through at most 64 WebhookAuthorizers at a time. Avoid permissive wildcard roles or broad selectors. Limit who
 can write BindDefinitions and referenced Roles/ClusterRoles, as either can
 expand effective access immediately, before reconciliation or status updates.
 When disabling the bridge, revoke the opt-in; existing RoleBindings must also be removed separately if access

@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -49,6 +50,7 @@ func TestBindDefinitionBridgeLiveDenyNotInCache(t *testing.T) {
 			ResourceRules:     []authzv1.ResourceRule{{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods"}}},
 		}},
 	}
+
 	sar := authzv1.SubjectAccessReview{Spec: authzv1.SubjectAccessReviewSpec{
 		User: "alice", ResourceAttributes: &authzv1.ResourceAttributes{Namespace: "team-a", Verb: "get", Resource: "pods"},
 	}}
@@ -59,6 +61,7 @@ func TestBindDefinitionBridgeLiveDenyNotInCache(t *testing.T) {
 		allow          bool
 		listError      bool
 		namespaceError bool
+		extra          int
 	}{
 		{name: "new deny absent from cache", denied: true},
 		{name: "live deny list unavailable", listError: true},
@@ -66,12 +69,19 @@ func TestBindDefinitionBridgeLiveDenyNotInCache(t *testing.T) {
 		{name: "nonmatching namespace", change: func() {
 			liveObjects[3].(*authz.WebhookAuthorizer).Spec.NamespaceSelector.MatchLabels["env"] = "dev"
 		}, allow: true},
+		{name: "deny list exceeds bound", change: func() {
+			liveObjects[3].(*authz.WebhookAuthorizer).Spec.DeniedPrincipals[0].User = "bob"
+		}, extra: maxBridgeDenyAuthorizers + 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.change != nil {
 				tc.change()
 			}
-			builder := fake.NewClientBuilder().WithScheme(scheme).WithObjects(liveObjects...)
+			objects := append([]client.Object(nil), liveObjects...)
+			for i := range tc.extra {
+				objects = append(objects, &authz.WebhookAuthorizer{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("bulk-%03d", i)}})
+			}
+			builder := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...)
 			namespaceReads := 0
 			builder = builder.WithInterceptorFuncs(interceptor.Funcs{
 				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {

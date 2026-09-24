@@ -53,6 +53,8 @@ const (
 	maxSubjectLimiters         = 4096
 	minSubjectLimiterIdleTTL   = 5 * time.Minute
 	subjectLimiterCleanupEvery = time.Minute
+	maxBridgeDenyAuthorizers   = 256
+	bridgeDenyPageSize         = 64
 )
 
 // maxRequestBodySize is the maximum allowed request body size (1MB).
@@ -775,34 +777,44 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 }
 
 func (wa *Authorizer) liveBridgeDeny(ctx context.Context, sar *authzv1.SubjectAccessReview) (evaluationResult, error) {
-	var authorizers authorizationv1alpha1.WebhookAuthorizerList
-	if err := wa.LiveReader.List(ctx, &authorizers); err != nil {
-		return evaluationResult{}, fmt.Errorf("list live WebhookAuthorizers: %w", err)
-	}
 	nsCache := make(map[string]namespaceLabelCacheEntry)
-	for i := range authorizers.Items {
-		item := &authorizers.Items[i]
-		if !authorizerReadyForEvaluation(*item) || !wa.principalMatches(sar, item.Spec.DeniedPrincipals) {
-			continue
+	continuation := ""
+	for range maxBridgeDenyAuthorizers / bridgeDenyPageSize {
+		var authorizers authorizationv1alpha1.WebhookAuthorizerList
+		if err := wa.LiveReader.List(ctx, &authorizers, client.Limit(bridgeDenyPageSize), client.Continue(continuation)); err != nil {
+			return evaluationResult{}, fmt.Errorf("list live WebhookAuthorizers: %w", err)
 		}
-		if !helpers.IsLabelSelectorEmpty(&item.Spec.NamespaceSelector) {
-			matches, err := wa.namespaceMatches(ctx, sar.Spec.ResourceAttributes.Namespace, &item.Spec.NamespaceSelector, nsCache)
-			if err != nil {
-				return evaluationResult{}, fmt.Errorf("WebhookAuthorizer %q namespace selector: %w", item.Name, err)
-			}
-			if !matches {
+		if len(authorizers.Items) > bridgeDenyPageSize {
+			return evaluationResult{}, fmt.Errorf("live WebhookAuthorizer deny page exceeded %d objects", bridgeDenyPageSize)
+		}
+		for i := range authorizers.Items {
+			item := &authorizers.Items[i]
+			if !authorizerReadyForEvaluation(*item) || !wa.principalMatches(sar, item.Spec.DeniedPrincipals) {
 				continue
 			}
+			if !helpers.IsLabelSelectorEmpty(&item.Spec.NamespaceSelector) {
+				matches, err := wa.namespaceMatches(ctx, sar.Spec.ResourceAttributes.Namespace, &item.Spec.NamespaceSelector, nsCache)
+				if err != nil {
+					return evaluationResult{}, fmt.Errorf("WebhookAuthorizer %q namespace selector: %w", item.Name, err)
+				}
+				if !matches {
+					continue
+				}
+			}
+			if ruleIdx := wa.matchRequestRule(item, sar); ruleIdx >= 0 {
+				return evaluationResult{
+					allowed: false, reason: fmt.Sprintf("Access denied by WebhookAuthorizer %s", item.Name),
+					decision: pkgmetrics.AuthorizerDecisionDenied, authorizerName: item.Name,
+					matchedRule: ruleIdx, matchedField: "deniedPrincipal", evaluatedCount: 1,
+				}, nil
+			}
 		}
-		if ruleIdx := wa.matchRequestRule(item, sar); ruleIdx >= 0 {
-			return evaluationResult{
-				allowed: false, reason: fmt.Sprintf("Access denied by WebhookAuthorizer %s", item.Name),
-				decision: pkgmetrics.AuthorizerDecisionDenied, authorizerName: item.Name,
-				matchedRule: ruleIdx, matchedField: "deniedPrincipal", evaluatedCount: 1,
-			}, nil
+		if authorizers.Continue == "" {
+			return evaluationResult{}, nil
 		}
+		continuation = authorizers.Continue
 	}
-	return evaluationResult{}, nil
+	return evaluationResult{}, fmt.Errorf("live WebhookAuthorizer deny check exceeded %d objects", maxBridgeDenyAuthorizers)
 }
 
 // namespaceMatches checks if the namespace matches the selector.
