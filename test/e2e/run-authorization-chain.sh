@@ -14,17 +14,21 @@ if [[ ! "$name" =~ ^auth-operator-chain-[a-z0-9-]+$ ]]; then
   echo "KIND_CLUSTER must be a dedicated auth-operator-chain-* cluster name" >&2
   exit 1
 fi
-if kind get clusters | grep -Fxq "$name"; then
+clusters="$(kind get clusters)"
+if grep -Fxq "$name" <<<"$clusters"; then
   echo "Refusing to replace existing kind cluster $name" >&2
   exit 1
 fi
 mkdir -p "$dir"
 chmod 700 "$dir"
+cluster_created=false
 cleanup() {
   if [[ "${KEEP_CHAIN_CLUSTER:-false}" != true ]]; then
-    kind delete cluster --name "$name"
+    if [[ "$cluster_created" == true ]]; then
+      kind delete cluster --name "$name"
+    fi
     rm -rf "$dir"
-  else
+  elif [[ "$cluster_created" == true ]]; then
     echo "Cluster retained: $name; remove with kind delete cluster --name $name" >&2
   fi
 }
@@ -77,6 +81,7 @@ nodes:
         pathType: Directory
 EOF
 kind create cluster --name "$name" --config "$dir/kind.yaml" --image "$node_image" --wait 5m
+cluster_created=true
 kubectl config use-context "kind-$name"
 docker buildx build --load -t "$image" .
 kind load docker-image "$image" --name "$name"
