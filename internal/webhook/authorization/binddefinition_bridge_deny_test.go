@@ -56,7 +56,7 @@ func TestBindDefinitionBridgeLiveDenyNotInCache(t *testing.T) {
 	}}
 	for _, tc := range []struct {
 		name           string
-		change         func()
+		change         func(*authz.WebhookAuthorizer)
 		denied         bool
 		allow          bool
 		listError      bool
@@ -66,18 +66,26 @@ func TestBindDefinitionBridgeLiveDenyNotInCache(t *testing.T) {
 		{name: "new deny absent from cache", denied: true},
 		{name: "live deny list unavailable", listError: true},
 		{name: "live deny namespace lookup unavailable", namespaceError: true},
-		{name: "nonmatching namespace", change: func() {
-			liveObjects[3].(*authz.WebhookAuthorizer).Spec.NamespaceSelector.MatchLabels["env"] = "dev"
+		{name: "new deny before status observes generation", change: func(item *authz.WebhookAuthorizer) {
+			item.Generation = 2
+			item.Status.ObservedGeneration = 1
+			item.Status.AuthorizerConfigured = true
+		}, denied: true},
+		{name: "nonmatching namespace", change: func(item *authz.WebhookAuthorizer) {
+			item.Spec.NamespaceSelector.MatchLabels["env"] = "dev"
 		}, allow: true},
-		{name: "deny list exceeds bound", change: func() {
-			liveObjects[3].(*authz.WebhookAuthorizer).Spec.DeniedPrincipals[0].User = "bob"
+		{name: "deny list exceeds bound", change: func(item *authz.WebhookAuthorizer) {
+			item.Spec.DeniedPrincipals[0].User = "bob"
 		}, extra: maxBridgeDenyAuthorizers + 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.change != nil {
-				tc.change()
+			objects := make([]client.Object, len(liveObjects))
+			for i, object := range liveObjects {
+				objects[i] = object.DeepCopyObject().(client.Object)
 			}
-			objects := append([]client.Object(nil), liveObjects...)
+			if tc.change != nil {
+				tc.change(objects[3].(*authz.WebhookAuthorizer))
+			}
 			for i := range tc.extra {
 				objects = append(objects, &authz.WebhookAuthorizer{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("bulk-%03d", i)}})
 			}

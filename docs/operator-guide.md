@@ -299,10 +299,11 @@ permissions. Only resources discovered as namespaced can be bridged; unknown
 resources receive no opinion. An indexed informer cache nominates matching
 opt-in definitions; the selected BindDefinition, namespace labels and
 referenced roles are re-read from the API server before an allow. Explicit-deny
-WebhookAuthorizers are also checked live, even if the indexed cache has not
-observed their creation. A failed bridge deny check produces no opinion, never
-a bridge allow or definitive deny. Resource scope discovery is cached for at
-most five seconds to limit API-server calls, then refreshed so scope changes
+WebhookAuthorizers are also checked against live specs, regardless of cache
+classification or controller readiness, so newly added denies take precedence
+even before status observes the update. A failed bridge deny check produces no
+opinion, never a bridge allow or definitive deny. Resource scope discovery is
+cached for at most five seconds to limit API-server calls, then refreshed so scope changes
 cannot remain stale indefinitely. Cache lag can delay new grants but cannot
 prolong grants after a definition changes or deletion begins. To bound API-server
 work, requests exceeding 64 groups, 64 candidate definitions, 128 role

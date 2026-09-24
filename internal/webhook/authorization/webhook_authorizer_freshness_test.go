@@ -87,3 +87,32 @@ func TestWebhookAuthorizerLiveRevocationWithCachedIndex(t *testing.T) {
 		})
 	}
 }
+
+func TestWebhookAuthorizerLiveGlobalDenyCachedAsScoped(t *testing.T) {
+	scheme := newScheme(t)
+	rule := authzv1.ResourceRule{Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"nodes"}}
+	cached := &authz.WebhookAuthorizer{ObjectMeta: metav1.ObjectMeta{Name: "formerly-scoped"}, Spec: authz.WebhookAuthorizerSpec{
+		NamespaceSelector: metav1.LabelSelector{MatchLabels: map[string]string{"env": "prod"}},
+		ResourceRules:     []authzv1.ResourceRule{rule},
+	}}
+	live := cached.DeepCopy()
+	live.Spec.NamespaceSelector = metav1.LabelSelector{}
+	live.Spec.DeniedPrincipals = []authz.Principal{{User: "alice"}}
+	handler := &Authorizer{
+		Client:     newIndexedClient(scheme, cached),
+		LiveReader: fake.NewClientBuilder().WithScheme(scheme).WithObjects(live).Build(),
+		Log:        logr.Discard(), AllowUnauthenticatedAuthorize: true,
+	}
+	sar := authzv1.SubjectAccessReview{Spec: authzv1.SubjectAccessReviewSpec{
+		User: "alice", ResourceAttributes: &authzv1.ResourceAttributes{Verb: "get", Resource: "nodes"},
+	}}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(marshalSAR(t, sar))))
+	var resp authzv1.SubjectAccessReview
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK || !resp.Status.Denied || resp.Status.Allowed {
+		t.Fatalf("HTTP %d status %+v; expected explicit deny", rec.Code, resp.Status)
+	}
+}

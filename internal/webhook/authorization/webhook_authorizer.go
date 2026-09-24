@@ -189,6 +189,12 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// namespace. The active-rules gauge still reflects the full set via allRules.
 	if sar.Spec.ResourceAttributes != nil && sar.Spec.ResourceAttributes.Namespace != "" {
 		items = append(items, scopedItems...)
+	} else {
+		for _, item := range scopedItems {
+			if helpers.IsLabelSelectorEmpty(&item.Spec.NamespaceSelector) {
+				items = append(items, item)
+			}
+		}
 	}
 
 	// Sort authorizers by name for deterministic first-match evaluation order
@@ -789,7 +795,7 @@ func (wa *Authorizer) liveBridgeDeny(ctx context.Context, sar *authzv1.SubjectAc
 		}
 		for i := range authorizers.Items {
 			item := &authorizers.Items[i]
-			if !authorizerReadyForEvaluation(*item) || !wa.principalMatches(sar, item.Spec.DeniedPrincipals) {
+			if !wa.principalMatches(sar, item.Spec.DeniedPrincipals) {
 				continue
 			}
 			if !helpers.IsLabelSelectorEmpty(&item.Spec.NamespaceSelector) {
