@@ -18,6 +18,7 @@ import (
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
@@ -567,10 +568,10 @@ func (wa *Authorizer) listAuthorizersByIndex(ctx context.Context, hasNamespaceSe
 	}
 
 	items := make([]authorizationv1alpha1.WebhookAuthorizer, 0, len(allAuth.Items))
-	for _, item := range allAuth.Items {
+	for _, candidate := range allAuth.Items {
 		if useFallback {
 			matches := ""
-			if helpers.IsLabelSelectorEmpty(&item.Spec.NamespaceSelector) {
+			if helpers.IsLabelSelectorEmpty(&candidate.Spec.NamespaceSelector) {
 				matches = indexer.WebhookAuthorizerHasNamespaceSelectorFalse
 			} else {
 				matches = indexer.WebhookAuthorizerHasNamespaceSelectorTrue
@@ -580,6 +581,13 @@ func (wa *Authorizer) listAuthorizersByIndex(ctx context.Context, hasNamespaceSe
 			}
 		}
 
+		var item authorizationv1alpha1.WebhookAuthorizer
+		if err := wa.authorizerReader().Get(listCtx, client.ObjectKey{Name: candidate.Name}, &item); err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			return nil, fmt.Errorf("get WebhookAuthorizer %q: %w", candidate.Name, err)
+		}
 		if !authorizerReadyForEvaluation(item) {
 			wa.Log.V(2).Info("skipping unconfigured WebhookAuthorizer",
 				"authorizer", item.Name,
@@ -590,6 +598,13 @@ func (wa *Authorizer) listAuthorizersByIndex(ctx context.Context, hasNamespaceSe
 		items = append(items, item)
 	}
 	return items, nil
+}
+
+func (wa *Authorizer) authorizerReader() client.Reader {
+	if wa.LiveReader != nil {
+		return wa.LiveReader
+	}
+	return wa.Client
 }
 
 func authorizerReadyForEvaluation(item authorizationv1alpha1.WebhookAuthorizer) bool {
@@ -770,7 +785,7 @@ func (wa *Authorizer) namespaceMatches(ctx context.Context, namespace string, se
 	var ns corev1.Namespace
 	getCtx, cancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
 	defer cancel()
-	if err := wa.Client.Get(getCtx, types.NamespacedName{Name: namespace}, &ns); err != nil {
+	if err := wa.authorizerReader().Get(getCtx, types.NamespacedName{Name: namespace}, &ns); err != nil {
 		wrappedErr := fmt.Errorf("get namespace %q: %w", namespace, err)
 		nsCache[namespace] = namespaceLabelCacheEntry{err: wrappedErr}
 		return false, wrappedErr
