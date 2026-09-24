@@ -103,6 +103,12 @@ spec:
                 items:
                   description: NamespaceBinding defines namespace-scoped role bindings.
                   properties:
+                    authorizeBeforeBinding:
+                      description: |-
+                        AuthorizeBeforeBinding permits /authorize to grant matching namespaced
+                        requests while the controller has not yet created this RoleBinding.
+                        Only selector-backed bindings can opt in.
+                      type: boolean
                     clusterRoleRefs:
                       description: ClusterRoleRefs references an existing ClusterRole
                       items:
@@ -186,6 +192,13 @@ spec:
                       == 0) && (!has(self.roleRefs) || size(self.roleRefs) == 0))
                       || (has(self.namespace) && size(self.namespace) > 0) || (has(self.namespaceSelector)
                       && size(self.namespaceSelector) > 0)
+                  - message: authorizeBeforeBinding requires a selector-backed role
+                      reference without an explicit namespace
+                    rule: '!has(self.authorizeBeforeBinding) || !self.authorizeBeforeBinding
+                      || ((!has(self.namespace) || size(self.namespace) == 0) && has(self.namespaceSelector)
+                      && size(self.namespaceSelector) > 0 && ((has(self.clusterRoleRefs)
+                      && size(self.clusterRoleRefs) > 0) || (has(self.roleRefs) &&
+                      size(self.roleRefs) > 0)))'
                 maxItems: 64
                 type: array
               subjects:

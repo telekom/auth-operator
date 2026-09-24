@@ -225,6 +225,14 @@ var (
 		[]string{labelDecision, labelAuthorizer},
 	)
 
+	// AuthorizerBridgedAllowsTotal counts requests granted through opted-in
+	// BindDefinition RoleBindings before reconciliation creates the binding.
+	AuthorizerBridgedAllowsTotal = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: Namespace,
+		Name:      "authorizer_bridged_allows_total",
+		Help:      "SubjectAccessReview allow decisions from BindDefinition RoleBinding bridging",
+	})
+
 	// AuthorizerRequestDuration measures the end-to-end latency of
 	// SubjectAccessReview evaluations in seconds, labeled by decision.
 	AuthorizerRequestDuration = prometheus.NewHistogramVec(
@@ -343,6 +351,7 @@ func allCollectors() []prometheus.Collector {
 		ServiceAccountOwnershipTakeovers,
 		ExternalSAsReferenced,
 		AuthorizerRequestsTotal,
+		AuthorizerBridgedAllowsTotal,
 		AuthorizerRequestDuration,
 		AuthorizerActiveRules,
 		AuthorizerDeniedPrincipalHitsTotal,

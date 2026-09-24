@@ -295,6 +295,17 @@ make test-e2e-complex
 - ✓ Complex role aggregation
 - ✓ Webhook authorization flows
 
+The `WebhookAuthorizer E2E / BindDefinition authorization before binding`
+scenario pauses the Helm controller on an isolated kind cluster, verifies no
+RoleBinding exists, and calls `/authorize` for matching and forbidden
+User/Group/ServiceAccount, selector, resource, and opt-out cases. It restores
+the controller after the test. This tests webhook decisions, **not** an actual
+API-server namespace-plus-Secret apply: the default kind cluster has no
+authorization webhook in its API-server chain. To verify that flow end to end,
+configure the API server as described in the
+[operator guide](../../docs/operator-guide.md#authorization-before-binding),
+then independently grant the caller permission to create the namespace.
+
 **Run:**
 ```bash
 make test-e2e-integration

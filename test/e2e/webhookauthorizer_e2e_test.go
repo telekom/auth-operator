@@ -62,6 +62,7 @@ var _ = Describe("WebhookAuthorizer E2E", Ordered, Label("integration"), func() 
 			"--set", "image.repository=auth-operator",
 			"--set", "image.tag=e2e-test",
 			"--set", "image.pullPolicy=Never",
+			"--set", "webhookServer.allowUnauthenticatedAuthorize=true",
 			"--wait",
 			"--timeout", deployTimeout.String(),
 		)
@@ -680,6 +681,156 @@ spec:
 		})
 	})
 
+	Context("BindDefinition authorization before binding", func() {
+		const (
+			bindingName = "wa-e2e-bridge"
+			roleName    = "wa-e2e-bridge-secret-creator"
+			targetNS    = "wa-e2e-bridge-target"
+		)
+
+		AfterEach(func() {
+			cmd := utils.CommandContext(context.Background(), "kubectl", "delete", "binddefinition",
+				bindingName, bindingName+"-disabled", "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+			cmd = utils.CommandContext(context.Background(), "kubectl", "delete", "clusterrole",
+				roleName, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+			cmd = utils.CommandContext(context.Background(), "kubectl", "delete", "namespace",
+				targetNS, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+			cmd = utils.CommandContext(context.Background(), "kubectl", "scale", "deployment",
+				"-n", waNamespace, "-l", "control-plane=controller-manager", "--replicas=1")
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Could not restore controller: %s", output)
+		})
+
+		It("allows only opted-in namespaced rules before a RoleBinding exists", func() {
+			By("Pausing reconciliation so no RoleBinding can grant the permission")
+			cmd := utils.CommandContext(context.Background(), "kubectl", "scale", "deployment",
+				"-n", waNamespace, "-l", "control-plane=controller-manager", "--replicas=0")
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Could not pause controller: %s", output)
+
+			Eventually(func() string {
+				cmd := utils.CommandContext(context.Background(), "kubectl", "get", "pods",
+					"-n", waNamespace, "-l", "control-plane=controller-manager",
+					"-o", "jsonpath={.items[*].metadata.name}")
+				out, _ := utils.Run(cmd)
+				return strings.TrimSpace(string(out))
+			}, deployTimeout, pollingInt).Should(BeEmpty())
+
+			By("Creating a referenced ClusterRole and opt-in BindDefinition without reconciliation")
+			applyYAML(fmt.Sprintf(`
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: %s
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+---
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: %s
+spec:
+  targetName: %s
+  subjects:
+    - kind: User
+      apiGroup: rbac.authorization.k8s.io
+      name: wa-e2e-bridge-user
+    - kind: Group
+      apiGroup: rbac.authorization.k8s.io
+      name: wa-e2e-bridge-group
+    - kind: ServiceAccount
+      name: wa-e2e-bridge-sa
+      namespace: %s
+  roleBindings:
+    - clusterRoleRefs: ["%s"]
+      namespaceSelector:
+        - matchLabels:
+            t-caas.telekom.com/owner: wa-e2e-bridge
+      authorizeBeforeBinding: true
+---
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: %s-disabled
+spec:
+  targetName: %s-disabled
+  subjects:
+    - kind: User
+      apiGroup: rbac.authorization.k8s.io
+      name: wa-e2e-bridge-disabled
+  roleBindings:
+    - clusterRoleRefs: ["%s"]
+      namespaceSelector:
+        - matchLabels:
+            t-caas.telekom.com/owner: wa-e2e-bridge
+      authorizeBeforeBinding: false
+`, roleName, bindingName, bindingName, testNSPlain, roleName,
+				bindingName, bindingName, roleName))
+
+			localPort, cleanup := startWebhookAuthorizerPortForward(waNamespace, waRelease+"-webhook-service")
+			defer cleanup()
+
+			By("Checking that a selector cannot authorize a namespace before it exists")
+			before := resourceSAR("wa-e2e-bridge-user", nil, "create", "secrets", targetNS)
+			Eventually(func() (authzv1.SubjectAccessReviewStatus, error) {
+				response, requestErr := requestAuthorizer(context.Background(), localPort, before)
+				return response.Status, requestErr
+			}, reconcileWait, pollingInt).Should(And(HaveField("Allowed", false), HaveField("Denied", false)))
+
+			By("Creating the namespace while the controller is still paused")
+			applyYAML(fmt.Sprintf(`
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+  labels:
+    t-caas.telekom.com/owner: wa-e2e-bridge
+`, targetNS))
+
+			By("Verifying there is no RBAC binding to account for an allow")
+			cmd = utils.CommandContext(context.Background(), "kubectl", "get", "rolebindings", "-n", targetNS,
+				"-o", "jsonpath={.items[*].metadata.name}")
+			output, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(strings.TrimSpace(string(output))).To(BeEmpty())
+			cmd = utils.CommandContext(context.Background(), "kubectl", "get", "clusterrolebindings",
+				"-o", "jsonpath={.items[*].roleRef.name}")
+			output, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(strings.Fields(string(output))).NotTo(ContainElement(roleName))
+
+			for _, tc := range []struct {
+				name    string
+				sar     authzv1.SubjectAccessReview
+				allowed bool
+			}{
+				{"user", before, true},
+				{"group", resourceSAR("some-user", []string{"wa-e2e-bridge-group"}, "create", "secrets", targetNS), true},
+				{"service account", resourceSAR("system:serviceaccount:"+testNSPlain+":wa-e2e-bridge-sa", nil, "create", "secrets", targetNS), true},
+				{"wrong user", resourceSAR("wa-e2e-other-user", nil, "create", "secrets", targetNS), false},
+				{"opt-out", resourceSAR("wa-e2e-bridge-disabled", nil, "create", "secrets", targetNS), false},
+				{"selector mismatch", resourceSAR("wa-e2e-bridge-user", nil, "create", "secrets", testNSPlain), false},
+				{"wrong resource", resourceSAR("wa-e2e-bridge-user", nil, "create", "configmaps", targetNS), false},
+				{"wrong verb", resourceSAR("wa-e2e-bridge-user", nil, "delete", "secrets", targetNS), false},
+				{"cluster-scoped", resourceSAR("wa-e2e-bridge-user", nil, "create", "secrets", ""), false},
+			} {
+				By("Checking bridge decision: " + tc.name)
+				Eventually(func() (authzv1.SubjectAccessReviewStatus, error) {
+					response, requestErr := requestAuthorizer(context.Background(), localPort, tc.sar)
+					return response.Status, requestErr
+				}, reconcileWait, pollingInt).Should(And(
+					HaveField("Allowed", tc.allowed),
+					HaveField("Denied", false),
+				))
+			}
+		})
+	})
+
 	Context("Authentication and Rate Limiting", func() {
 		var localPort int
 		var cleanup func()
@@ -700,6 +851,7 @@ spec:
 				"--set", "image.repository=auth-operator",
 				"--set", "image.tag=e2e-test",
 				"--set", "image.pullPolicy=Never",
+				"--set", "webhookServer.allowUnauthenticatedAuthorize=false",
 				"--set", "webhookServer.authorizeRateLimit=2",
 				"--set", "webhookServer.authorizeRateBurst=2",
 				"--set", "webhookServer.authorizeAuth.tokenSecretName="+tokenSecretName,
@@ -823,6 +975,7 @@ func nonResourceSAR(user string, groups []string, verb, path string) authzv1.Sub
 	}
 }
 
+//nolint:unparam // This integration suite deploys the authorizer in one namespace.
 func startWebhookAuthorizerPortForward(namespace, serviceName string) (int, func()) {
 	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	ExpectWithOffset(1, err).NotTo(HaveOccurred())
@@ -834,7 +987,7 @@ func startWebhookAuthorizerPortForward(namespace, serviceName string) (int, func
 		"--address", "127.0.0.1",
 		"-n", namespace,
 		fmt.Sprintf("svc/%s", serviceName),
-		fmt.Sprintf("%d:9443", localPort))
+		fmt.Sprintf("%d:443", localPort))
 	cmd.Stdout = GinkgoWriter
 	cmd.Stderr = GinkgoWriter
 	ExpectWithOffset(1, cmd.Start()).To(Succeed())

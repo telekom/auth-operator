@@ -340,6 +340,9 @@ func (wa *Authorizer) marshalSubjectAccessReviewResponse(ctx context.Context, w 
 func publicAuthorizerReason(result evaluationResult) string {
 	switch result.decision {
 	case pkgmetrics.AuthorizerDecisionAllowed:
+		if result.matchedField == "bindDefinition" {
+			return "Access granted by BindDefinition"
+		}
 		return "Access granted by WebhookAuthorizer"
 	case pkgmetrics.AuthorizerDecisionDenied:
 		return "Access denied by WebhookAuthorizer"
@@ -713,6 +716,16 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 		}
 	}
 
+	if sar.Spec.ResourceAttributes != nil {
+		if matched, name := wa.bridgeBindDefinition(ctx, sar); matched {
+			return evaluationResult{
+				allowed: true, reason: "Access granted by BindDefinition " + name,
+				decision: pkgmetrics.AuthorizerDecisionAllowed, authorizerName: name,
+				matchedRule: -1, matchedField: "bindDefinition",
+				evaluatedCount: evaluated, skippedCount: skipped,
+			}, nil
+		}
+	}
 	return evaluationResult{
 		allowed:        false,
 		reason:         "Access denied: no matching rules",
@@ -963,6 +976,9 @@ func (wa *Authorizer) recordMetrics(result *evaluationResult, latency time.Durat
 	pkgmetrics.AuthorizerRequestsTotal.WithLabelValues(result.decision, result.authorizerName).Inc()
 	pkgmetrics.AuthorizerRequestDuration.WithLabelValues(result.decision).Observe(latency.Seconds())
 	pkgmetrics.AuthorizerActiveRules.Set(float64(activeRuleCount))
+	if result.matchedField == "bindDefinition" {
+		pkgmetrics.AuthorizerBridgedAllowsTotal.Inc()
+	}
 
 	if result.matchedField == "deniedPrincipal" {
 		pkgmetrics.AuthorizerDeniedPrincipalHitsTotal.WithLabelValues(result.authorizerName).Inc()

@@ -352,6 +352,9 @@ var schemaYAML = typed.YAMLObject(`types:
 - name: com.github.telekom.auth-operator.api.authorization.v1alpha1.NamespaceBinding
   map:
     fields:
+    - name: authorizeBeforeBinding
+      type:
+        scalar: boolean
     - name: clusterRoleRefs
       type:
         list:
