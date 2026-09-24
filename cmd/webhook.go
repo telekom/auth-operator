@@ -25,6 +25,7 @@ import (
 	"github.com/open-policy-agent/cert-controller/pkg/rotator"
 	"github.com/spf13/cobra"
 	"golang.org/x/time/rate"
+	"k8s.io/client-go/discovery"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -258,12 +259,17 @@ func configureWebhooks(mgr manager.Manager, tp *tracing.Provider) error {
 	}
 
 	log.Info("registering authorization webhook at /authorize")
+	discoveryClient, err := discovery.NewDiscoveryClientForConfig(mgr.GetConfig())
+	if err != nil {
+		return fmt.Errorf("configure authorization bridge discovery: %w", err)
+	}
 	// Use TracerIfEnabled() so that the webhook handler receives nil when
 	// tracing is disabled, allowing its nil-check guard to skip header
 	// parsing and noop span creation entirely — true zero overhead.
 	authorizer := &authorizationwebhook.Authorizer{
 		Client:     mgr.GetClient(),
 		LiveReader: mgr.GetAPIReader(),
+		Discovery:  discoveryClient,
 		Log:        ctrl.Log.WithName("Authorizer"),
 		Tracer:     tp.TracerIfEnabled(),
 	}

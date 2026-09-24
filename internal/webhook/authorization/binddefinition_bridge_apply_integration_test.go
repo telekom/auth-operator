@@ -24,6 +24,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	corev1apply "k8s.io/client-go/applyconfigurations/core/v1"
+	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -139,7 +140,11 @@ authorizers:
 	if !bridgeCache.WaitForCacheSync(cacheCtx) {
 		t.Fatalf("authorization cache failed to sync: %v", <-cacheErrors)
 	}
-	handler.Store(&webhooks.Authorizer{Client: bridgeCache, LiveReader: admin, Log: zap.New(), AllowUnauthenticatedAuthorize: true})
+	discoveryClient, err := discovery.NewDiscoveryClientForConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler.Store(&webhooks.Authorizer{Client: bridgeCache, LiveReader: admin, Discovery: discoveryClient, Log: zap.New(), AllowUnauthenticatedAuthorize: true})
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 

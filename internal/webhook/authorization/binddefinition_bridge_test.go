@@ -19,6 +19,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/discovery"
+	fakediscovery "k8s.io/client-go/discovery/fake"
+	clientgotesting "k8s.io/client-go/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -27,6 +30,16 @@ import (
 	"github.com/telekom/auth-operator/pkg/indexer"
 	"github.com/telekom/auth-operator/pkg/metrics"
 )
+
+func bridgeTestDiscovery() discovery.DiscoveryInterfaceWithContext {
+	return &fakediscovery.FakeDiscovery{Fake: &clientgotesting.Fake{Resources: []*metav1.APIResourceList{
+		{GroupVersion: "v1", APIResources: []metav1.APIResource{
+			{Name: "pods", Namespaced: true}, {Name: "secrets", Namespaced: true}, {Name: "configmaps", Namespaced: true},
+		}},
+		{GroupVersion: "apps/v1", APIResources: []metav1.APIResource{{Name: "deployments", Namespaced: true}}},
+		{GroupVersion: rbacv1.GroupName + "/v1", APIResources: []metav1.APIResource{{Name: "clusterroles", Namespaced: false}}},
+	}}}
+}
 
 //nolint:gocyclo // The test table covers independent authorization failure modes.
 func TestBindDefinitionBridgeAuthorize(t *testing.T) {
@@ -50,6 +63,7 @@ func TestBindDefinitionBridgeAuthorize(t *testing.T) {
 		explicitDeny bool
 	}{
 		{name: "opted in cluster role", allowed: true},
+		{name: "wildcard SAR API version", attr: authzv1.ResourceAttributes{Namespace: "team-a", Verb: "get", Resource: "pods", Version: "*"}, allowed: true},
 		{name: "opted out", binding: authz.NamespaceBinding{NamespaceSelector: []metav1.LabelSelector{selector}, ClusterRoleRefs: []string{"reader"}}},
 		{name: "explicit namespace cannot opt in", binding: authz.NamespaceBinding{AuthorizeBeforeBinding: true, Namespace: "team-a", NamespaceSelector: []metav1.LabelSelector{selector}, ClusterRoleRefs: []string{"reader"}}},
 		{name: "missing selector cannot opt in", binding: authz.NamespaceBinding{AuthorizeBeforeBinding: true, ClusterRoleRefs: []string{"reader"}}},
@@ -69,6 +83,8 @@ func TestBindDefinitionBridgeAuthorize(t *testing.T) {
 		{name: "absent namespace", attr: authzv1.ResourceAttributes{Namespace: "missing", Verb: "get", Resource: "pods"}},
 		{name: "terminating namespace", namespace: &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a", Labels: map[string]string{authz.LabelKeyTenant: "team-a"}}, Status: corev1.NamespaceStatus{Phase: corev1.NamespaceTerminating}}},
 		{name: "cluster-scoped request", attr: authzv1.ResourceAttributes{Verb: "get", Resource: "pods"}},
+		{name: "cluster resource with forged namespace", attr: authzv1.ResourceAttributes{Namespace: "team-a", Verb: "get", Group: rbacv1.GroupName, Resource: "clusterroles"}, rule: rbacv1.PolicyRule{Verbs: []string{"get"}, APIGroups: []string{rbacv1.GroupName}, Resources: []string{"clusterroles"}}},
+		{name: "unknown resource", attr: authzv1.ResourceAttributes{Namespace: "team-a", Verb: "get", Resource: "unknowns"}, rule: rbacv1.PolicyRule{Verbs: []string{"*"}, APIGroups: []string{"*"}, Resources: []string{"*"}}},
 		{name: "cluster binding only", binding: authz.NamespaceBinding{}},
 		{name: "role ref in target namespace", binding: authz.NamespaceBinding{AuthorizeBeforeBinding: true, NamespaceSelector: []metav1.LabelSelector{selector}, RoleRefs: []string{"local-reader"}}, extra: []client.Object{&rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: "local-reader", Namespace: "team-a"}, Rules: []rbacv1.PolicyRule{baseRule}}}, allowed: true},
 		{name: "role ref in other namespace", binding: authz.NamespaceBinding{AuthorizeBeforeBinding: true, NamespaceSelector: []metav1.LabelSelector{selector}, RoleRefs: []string{"local-reader"}}, extra: []client.Object{&rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: "local-reader", Namespace: "team-b"}, Rules: []rbacv1.PolicyRule{baseRule}}}},
@@ -88,6 +104,7 @@ func TestBindDefinitionBridgeAuthorize(t *testing.T) {
 			if _, ok := list.(*authz.BindDefinitionList); ok {
 				return errors.New("cache unavailable")
 			}
+
 			return c.List(ctx, list, opts...)
 		}}},
 		{name: "role read error", intercept: interceptor.Funcs{Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
@@ -146,7 +163,7 @@ func TestBindDefinitionBridgeAuthorize(t *testing.T) {
 				builder = builder.WithInterceptorFuncs(tc.intercept)
 			}
 			reader := builder.Build()
-			handler := &Authorizer{Client: reader, LiveReader: reader, Log: logr.Discard(), AllowUnauthenticatedAuthorize: true}
+			handler := &Authorizer{Client: reader, LiveReader: reader, Discovery: bridgeTestDiscovery(), Log: logr.Discard(), AllowUnauthenticatedAuthorize: true}
 			sar := authzv1.SubjectAccessReview{Spec: authzv1.SubjectAccessReviewSpec{User: tc.user, Groups: tc.groups, ResourceAttributes: &tc.attr}}
 			before := testutil.ToFloat64(metrics.AuthorizerBridgedAllowsTotal)
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(marshalSAR(t, sar)))

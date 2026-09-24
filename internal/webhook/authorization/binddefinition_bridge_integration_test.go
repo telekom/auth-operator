@@ -14,6 +14,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -52,7 +53,9 @@ var _ = Describe("BindDefinition authorization bridge", func() {
 
 		live, err := client.New(envCfg, client.Options{Scheme: scheme.Scheme})
 		Expect(err).NotTo(HaveOccurred())
-		authorizer := &webhooks.Authorizer{Client: envClient, LiveReader: live, Log: zap.New(zap.WriteTo(io.Discard)), AllowUnauthenticatedAuthorize: true}
+		discoveryClient, err := discovery.NewDiscoveryClientForConfig(envCfg)
+		Expect(err).NotTo(HaveOccurred())
+		authorizer := &webhooks.Authorizer{Client: envClient, LiveReader: live, Discovery: discoveryClient, Log: zap.New(zap.WriteTo(io.Discard)), AllowUnauthenticatedAuthorize: true}
 		sar := authzv1.SubjectAccessReview{Spec: authzv1.SubjectAccessReviewSpec{
 			User: "bridge-user", ResourceAttributes: &authzv1.ResourceAttributes{
 				Namespace: ns.Name, Verb: "get", Resource: "pods",

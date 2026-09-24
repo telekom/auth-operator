@@ -13,6 +13,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	rbacvalidation "k8s.io/component-helpers/auth/rbac/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -29,18 +30,22 @@ const (
 
 // Cached indexes only nominate candidates. A missing cache entry delays an allow;
 // live reads of each candidate, namespace and role prevent stale cache grants.
+//
+//nolint:gocyclo // Fail-closed checks for each independent grant prerequisite.
 func (wa *Authorizer) bridgeBindDefinition(ctx context.Context, sar *authzv1.SubjectAccessReview) (matched bool, name string) {
 	attr := sar.Spec.ResourceAttributes
 	if !bridgeEligible(attr) || wa.LiveReader == nil {
 		return false, ""
 	}
-
 	names, err := wa.bridgeCandidates(ctx, sar)
 	if err != nil {
 		wa.Log.Error(err, "failed to select BindDefinitions for authorization bridge")
 		return false, ""
 	}
 	if len(names) == 0 {
+		return false, ""
+	}
+	if !wa.bridgeResourceNamespaced(ctx, attr) {
 		return false, ""
 	}
 	ns := &corev1.Namespace{}
@@ -89,6 +94,45 @@ func (wa *Authorizer) bridgeBindDefinition(ctx context.Context, sar *authzv1.Sub
 		}
 	}
 	return matchedName != "", matchedName
+}
+
+func (wa *Authorizer) bridgeResourceNamespaced(ctx context.Context, attr *authzv1.ResourceAttributes) bool {
+	if wa.Discovery == nil {
+		return false
+	}
+	version := attr.Version
+	if version == "*" {
+		version = ""
+	}
+	if version == "" && attr.Group == "" {
+		version = "v1"
+	} else if version == "" {
+		groups, err := wa.Discovery.ServerGroupsWithContext(ctx)
+		if err != nil {
+			wa.Log.Error(err, "authorization bridge group discovery failed")
+			return false
+		}
+		for _, group := range groups.Groups {
+			if group.Name == attr.Group {
+				version = group.PreferredVersion.Version
+				break
+			}
+		}
+	}
+	if version == "" {
+		return false
+	}
+	resources, err := wa.Discovery.ServerResourcesForGroupVersionWithContext(ctx, schema.GroupVersion{Group: attr.Group, Version: version}.String())
+	if err != nil {
+		wa.Log.Error(err, "authorization bridge resource discovery failed", "group", attr.Group, "version", version, "resource", attr.Resource)
+		return false
+	}
+	for _, resource := range resources.APIResources {
+		if resource.Name == attr.Resource {
+			return resource.Namespaced
+		}
+	}
+	return false
 }
 
 func (wa *Authorizer) bridgeCandidates(ctx context.Context, sar *authzv1.SubjectAccessReview) ([]string, error) {

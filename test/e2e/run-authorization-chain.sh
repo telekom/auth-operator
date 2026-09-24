@@ -19,7 +19,12 @@ if grep -Fxq "$name" <<<"$clusters"; then
   echo "Refusing to replace existing kind cluster $name" >&2
   exit 1
 fi
-mkdir -p "$dir"
+mkdir -p "$(dirname "$dir")"
+if [[ -e "$dir" || -L "$dir" ]]; then
+  echo "Refusing to replace existing output directory $dir" >&2
+  exit 1
+fi
+mkdir "$dir"
 chmod 700 "$dir"
 cluster_created=false
 cleanup() {

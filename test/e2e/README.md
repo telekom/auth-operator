@@ -124,8 +124,8 @@ per-run random bearer token; no certificate or token is committed. The script
 deletes **only its own named cluster** and cluster-specific generated files on exit. Set
 `KEEP_CHAIN_CLUSTER=true` to retain it for debugging and delete it explicitly
 with `kind delete cluster --name <printed-name>` when finished; never run this
-script against an existing cluster name. Override `KIND_NODE_IMAGE` to choose
-another compatible node image.
+script against an existing cluster name or output directory. Override
+`KIND_NODE_IMAGE` to choose another compatible node image.
 
 The test pauses the controller but leaves the webhook running, waits for its
 BindDefinition candidate index to observe a separate probe namespace, confirms

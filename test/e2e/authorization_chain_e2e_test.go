@@ -7,12 +7,14 @@ package e2e
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	authzv1 "k8s.io/api/authorization/v1"
 
 	"github.com/telekom/auth-operator/test/utils"
 )
@@ -72,6 +74,9 @@ rules:
 - apiGroups: [""]
   resources: ["secrets", "configmaps"]
   verbs: ["create", "patch"]
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources: ["clusterroles"]
+  verbs: ["create"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -175,7 +180,7 @@ spec:
 
 	AfterAll(func() {
 		_, _ = run("delete", "binddefinition", binding, "chain-opt-out", "--ignore-not-found", "--wait=false")
-		_, _ = run("delete", "webhookauthorizer", "chain-webhook-rule", "--ignore-not-found", "--wait=false")
+		_, _ = run("delete", "webhookauthorizer", "chain-webhook-rule", "chain-new-deny", "--ignore-not-found", "--wait=false")
 		_, _ = run("delete", "clusterrolebinding", "chain-create-namespace", "--ignore-not-found")
 		_, _ = run("delete", "clusterrole", role, "chain-create-namespace", "--ignore-not-found")
 		for _, ns := range []string{target, ready, other, protected} {
@@ -250,8 +255,51 @@ data:
 		} {
 			Expect(can(sa, args...)).To(Equal("no"), "unexpected grant for %v", args)
 		}
+		cmd := utils.CommandContext(context.Background(), "kubectl", "create", "--raw", "/apis/authorization.k8s.io/v1/subjectaccessreviews", "-f", "-")
+		cmd.Stdin = strings.NewReader(fmt.Sprintf(`{
+  "apiVersion": "authorization.k8s.io/v1",
+  "kind": "SubjectAccessReview",
+  "spec": {
+    "user": %q,
+    "resourceAttributes": {
+      "namespace": %q,
+      "verb": "create",
+      "group": "rbac.authorization.k8s.io",
+      "resource": "clusterroles"
+    }
+  }
+}`, sa, target))
+		raw, err := utils.Run(cmd)
+		Expect(err).NotTo(HaveOccurred(), "%s", raw)
+		var sar authzv1.SubjectAccessReview
+		Expect(json.Unmarshal(raw, &sar)).To(Succeed())
+		Expect(sar.Status.Allowed).To(BeFalse(), "a forged namespaced SAR must not bridge cluster-scoped resources")
 		out, err = run("create", "secret", "generic", "blocked", "-n", target, "--from-literal=x=y", "--as=system:serviceaccount:"+release+":somebody-else")
 		forbidden(out, err)
+	})
+
+	It("honors a newly created explicit deny even when the bridge matches", func() {
+		out, err := apply(fmt.Sprintf(`apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: WebhookAuthorizer
+metadata:
+  name: chain-new-deny
+spec:
+  namespaceSelector:
+    matchLabels:
+      example.com/tenant: alpha
+  deniedPrincipals:
+  - user: %s
+  resourceRules:
+  - verbs: ["create"]
+    apiGroups: [""]
+    resources: ["secrets"]
+`, sa))
+		Expect(err).NotTo(HaveOccurred(), "%s", out)
+		Expect(can(sa, "create", "secrets", "-n", target)).To(Equal("no"))
+		out, err = run("create", "secret", "generic", "deny-blocked", "-n", target, "--from-literal=x=y", "--as="+sa)
+		forbidden(out, err)
+		out, err = run("delete", "webhookauthorizer", "chain-new-deny")
+		Expect(err).NotTo(HaveOccurred(), "%s", out)
 	})
 
 	It("stops authorizing immediately while deleting and after deletion", func() {

@@ -66,7 +66,7 @@ func TestBindDefinitionBridgeFreshness(t *testing.T) {
 					Verbs: []string{"get"}, APIGroups: []string{""}, Resources: []string{"pods"},
 				}}},
 			).Build()
-			wa := &Authorizer{Client: cached.Build(), LiveReader: live}
+			wa := &Authorizer{Client: cached.Build(), LiveReader: live, Discovery: bridgeTestDiscovery()}
 			allowed, _ := wa.bridgeBindDefinition(t.Context(), sar)
 			if allowed != tc.allow {
 				t.Fatalf("allowed=%v, expected %v", allowed, tc.allow)

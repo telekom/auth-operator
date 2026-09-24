@@ -243,12 +243,12 @@ permit `example.com` if using this example selector; use your own approved
 label domain in production.
 
 An independently authorized namespace creator can then submit a Namespace and
-Secret in one ordered client-side `kubectl apply -f` containing both documents
+Secret in one ordered `kubectl apply --server-side -f` containing both documents
 (Namespace **first**, Secret second). The namespace must exist and its labels
 must match when the Secret request is authorized. Grant namespace creation
 separately and carefully: this bridge does not confer it, and Kubernetes RBAC
 cannot constrain a `create namespaces` grant by `resourceNames`. A
-server-side batch or unordered GitOps execution does not guarantee the
+unordered GitOps execution does not guarantee the
 namespace is visible before the Secret is checked.
 
 The API server needs an `AuthorizationConfiguration` (Kubernetes 1.32+;
@@ -295,9 +295,12 @@ the bridge, and an earlier explicit deny cannot be overridden by it.
 allow; if no other authorizer grants access, the request remains forbidden.
 The bridge returns no opinion for absent namespaces, mismatched subjects or
 selectors, missing referenced roles, and rules outside the referenced
-permissions. An indexed informer cache nominates matching opt-in definitions;
-the selected BindDefinition, namespace labels and referenced roles are re-read
-from the API server before an allow. Cache lag can delay new grants but cannot
+permissions. Only resources discovered as namespaced can be bridged; unknown
+resources receive no opinion. An indexed informer cache nominates matching
+opt-in definitions; the selected BindDefinition, namespace labels and
+referenced roles are re-read from the API server before an allow. Explicit-deny
+WebhookAuthorizers are also checked live, even if the indexed cache has not
+observed their creation. Cache lag can delay new grants but cannot
 prolong grants after a definition changes or deletion begins. To bound API-server
 work, requests exceeding 64 groups, 64 candidate definitions or 128 role
 reads receive no opinion. Avoid permissive wildcard roles or broad selectors. Limit who
