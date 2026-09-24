@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -19,6 +20,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
 	fakediscovery "k8s.io/client-go/discovery/fake"
 	clientgotesting "k8s.io/client-go/testing"
@@ -39,6 +41,29 @@ func bridgeTestDiscovery() discovery.DiscoveryInterfaceWithContext {
 		{GroupVersion: "apps/v1", APIResources: []metav1.APIResource{{Name: "deployments", Namespaced: true}}},
 		{GroupVersion: rbacv1.GroupName + "/v1", APIResources: []metav1.APIResource{{Name: "clusterroles", Namespaced: false}}},
 	}}}
+}
+
+func TestBridgeScopeDiscoveryCacheExpires(t *testing.T) {
+	source := bridgeTestDiscovery().(*fakediscovery.FakeDiscovery)
+	wa := &Authorizer{Discovery: source, Log: logr.Discard()}
+	attr := &authzv1.ResourceAttributes{Resource: "pods"}
+	for range 2 {
+		if !wa.bridgeResourceNamespaced(t.Context(), attr) {
+			t.Fatal("expected namespaced resource")
+		}
+	}
+	if got := len(source.Actions()); got != 1 {
+		t.Fatalf("expected one discovery read for two requests, got %d", got)
+	}
+	source.Resources[0].APIResources[0].Namespaced = false
+	key := schema.GroupVersionResource{Resource: "pods"}
+	wa.bridgeScopes[key] = bridgeScopeEntry{namespaced: true, expiresAt: time.Now().Add(-time.Second)}
+	if wa.bridgeResourceNamespaced(t.Context(), attr) {
+		t.Fatal("stale namespaced scope remained allowed after refresh")
+	}
+	if got := len(source.Actions()); got != 2 {
+		t.Fatalf("expected discovery refresh after expiration, got %d reads", got)
+	}
 }
 
 //nolint:gocyclo // The test table covers independent authorization failure modes.

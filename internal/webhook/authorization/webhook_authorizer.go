@@ -21,6 +21,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/discovery"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -114,6 +115,8 @@ type Authorizer struct {
 	subjectLimitersMu       sync.Mutex
 	subjectLimiters         map[string]*subjectLimiterEntry
 	subjectLimiterCleanupAt time.Time
+	bridgeScopesMu          sync.Mutex
+	bridgeScopes            map[schema.GroupVersionResource]bridgeScopeEntry
 }
 
 type subjectLimiterEntry struct {
@@ -739,7 +742,13 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 		if matched, name := wa.bridgeBindDefinition(ctx, sar); matched {
 			deny, err := wa.liveBridgeDeny(ctx, sar)
 			if err != nil {
-				return evaluationResult{}, fmt.Errorf("check live WebhookAuthorizer denies before bridge allow: %w", err)
+				wa.Log.Error(err, "failed to verify live WebhookAuthorizer denies before bridge allow")
+				return evaluationResult{
+					reason:         "Access denied: bridge deny check unavailable",
+					decision:       pkgmetrics.AuthorizerDecisionNoOpinion,
+					authorizerName: pkgmetrics.AuthorizerNameNone, matchedRule: -1,
+					evaluatedCount: evaluated, skippedCount: skipped,
+				}, nil
 			}
 			if deny.decision == pkgmetrics.AuthorizerDecisionDenied {
 				deny.evaluatedCount += evaluated

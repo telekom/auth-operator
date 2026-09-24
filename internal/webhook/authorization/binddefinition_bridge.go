@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"time"
 
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -26,7 +27,14 @@ const (
 	maxBridgeGroups     = 64
 	maxBridgeCandidates = 64
 	maxBridgeRoleReads  = 128
+	maxBridgeScopeCache = 256
+	bridgeScopeTTL      = 5 * time.Second
 )
+
+type bridgeScopeEntry struct {
+	namespaced bool
+	expiresAt  time.Time
+}
 
 // Cached indexes only nominate candidates. A missing cache entry delays an allow;
 // live reads of each candidate, namespace and role prevent stale cache grants.
@@ -100,6 +108,13 @@ func (wa *Authorizer) bridgeResourceNamespaced(ctx context.Context, attr *authzv
 	if wa.Discovery == nil {
 		return false
 	}
+	key := schema.GroupVersionResource{Group: attr.Group, Version: attr.Version, Resource: attr.Resource}
+	wa.bridgeScopesMu.Lock()
+	entry, found := wa.bridgeScopes[key]
+	wa.bridgeScopesMu.Unlock()
+	if found && time.Now().Before(entry.expiresAt) {
+		return entry.namespaced
+	}
 	version := attr.Version
 	if version == "*" {
 		version = ""
@@ -128,9 +143,19 @@ func (wa *Authorizer) bridgeResourceNamespaced(ctx context.Context, attr *authzv
 		return false
 	}
 	for _, resource := range resources.APIResources {
-		if resource.Name == attr.Resource {
-			return resource.Namespaced
+		if resource.Name != attr.Resource {
+			continue
 		}
+		wa.bridgeScopesMu.Lock()
+		if len(wa.bridgeScopes) >= maxBridgeScopeCache {
+			clear(wa.bridgeScopes)
+		}
+		if wa.bridgeScopes == nil {
+			wa.bridgeScopes = make(map[schema.GroupVersionResource]bridgeScopeEntry)
+		}
+		wa.bridgeScopes[key] = bridgeScopeEntry{namespaced: resource.Namespaced, expiresAt: time.Now().Add(bridgeScopeTTL)}
+		wa.bridgeScopesMu.Unlock()
+		return resource.Namespaced
 	}
 	return false
 }

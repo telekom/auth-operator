@@ -5,7 +5,9 @@ package webhooks
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -17,6 +19,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	authz "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/pkg/indexer"
@@ -50,20 +53,46 @@ func TestBindDefinitionBridgeLiveDenyNotInCache(t *testing.T) {
 		User: "alice", ResourceAttributes: &authzv1.ResourceAttributes{Namespace: "team-a", Verb: "get", Resource: "pods"},
 	}}
 	for _, tc := range []struct {
-		name   string
-		change func()
-		denied bool
+		name           string
+		change         func()
+		denied         bool
+		allow          bool
+		listError      bool
+		namespaceError bool
 	}{
 		{name: "new deny absent from cache", denied: true},
+		{name: "live deny list unavailable", listError: true},
+		{name: "live deny namespace lookup unavailable", namespaceError: true},
 		{name: "nonmatching namespace", change: func() {
 			liveObjects[3].(*authz.WebhookAuthorizer).Spec.NamespaceSelector.MatchLabels["env"] = "dev"
-		}},
+		}, allow: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.change != nil {
 				tc.change()
 			}
-			live := fake.NewClientBuilder().WithScheme(scheme).WithObjects(liveObjects...).Build()
+			builder := fake.NewClientBuilder().WithScheme(scheme).WithObjects(liveObjects...)
+			namespaceReads := 0
+			builder = builder.WithInterceptorFuncs(interceptor.Funcs{
+				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					if tc.listError {
+						if _, ok := list.(*authz.WebhookAuthorizerList); ok {
+							return errors.New("live deny list unavailable")
+						}
+					}
+					return c.List(ctx, list, opts...)
+				},
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					if _, ok := obj.(*corev1.Namespace); ok {
+						namespaceReads++
+						if tc.namespaceError && namespaceReads > 1 {
+							return errors.New("live namespace unavailable")
+						}
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+			})
+			live := builder.Build()
 			handler := &Authorizer{Client: cached, LiveReader: live, Discovery: bridgeTestDiscovery(), Log: logr.Discard(), AllowUnauthenticatedAuthorize: true}
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(marshalSAR(t, sar))))
@@ -71,8 +100,8 @@ func TestBindDefinitionBridgeLiveDenyNotInCache(t *testing.T) {
 			if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 				t.Fatal(err)
 			}
-			if resp.Status.Denied != tc.denied || resp.Status.Allowed == tc.denied {
-				t.Fatalf("HTTP %d status %+v; expected denied=%t", rec.Code, resp.Status, tc.denied)
+			if rec.Code != http.StatusOK || resp.Status.Denied != tc.denied || resp.Status.Allowed != tc.allow {
+				t.Fatalf("HTTP %d status %+v; expected allowed=%t denied=%t", rec.Code, resp.Status, tc.allow, tc.denied)
 			}
 		})
 	}
