@@ -42,7 +42,7 @@ LABEL org.opencontainers.image.title="auth-operator" \
       org.opencontainers.image.source="https://github.com/telekom/auth-operator" \
       org.opencontainers.image.vendor="Deutsche Telekom AG" \
       org.opencontainers.image.licenses="Apache-2.0" \
-      org.opencontainers.image.base.name="gcr.io/distroless/static-debian12"
+      org.opencontainers.image.base.name="scratch"
 
 WORKDIR /
 
