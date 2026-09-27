@@ -33,7 +33,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
 
 # Secure metrics generates certificates below this path at runtime. Keep the
 # directory writable for the non-root runtime user in the scratch image.
-RUN mkdir -p /out/tmp/k8s-metrics-server && chmod 0777 /out/tmp/k8s-metrics-server
+RUN mkdir -p /out/tmp/k8s-metrics-server && chown 65532:65532 /out/tmp/k8s-metrics-server && chmod 0700 /out/tmp/k8s-metrics-server
 
 # Runtime stage: the binary is fully static, so use scratch to avoid shipping
 # an independently-updated Debian package set in the runtime image.
@@ -54,6 +54,6 @@ COPY --from=build /out/auth-operator ./auth-operator
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /src/LICENSE /licenses/LICENSE
 COPY --from=build /src/LICENSES/ /licenses/LICENSES/
-COPY --from=build /out/tmp/ /tmp/
+COPY --from=build --chown=65532:65532 /out/tmp/ /tmp/
 USER 65532:65532
 ENTRYPOINT ["/auth-operator"]
