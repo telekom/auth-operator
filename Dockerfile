@@ -31,6 +31,10 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
 	-X github.com/telekom/auth-operator/pkg/system.Repository=$REPOSITORY" \
 	-o /out/auth-operator ./main.go
 
+# Secure metrics generates certificates below this path at runtime. Keep the
+# directory writable for the non-root runtime user in the scratch image.
+RUN mkdir -p /out/tmp/k8s-metrics-server && chmod 0777 /out/tmp/k8s-metrics-server
+
 # Runtime stage: the binary is fully static, so use scratch to avoid shipping
 # an independently-updated Debian package set in the runtime image.
 FROM scratch
@@ -50,5 +54,6 @@ COPY --from=build /out/auth-operator ./auth-operator
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /src/LICENSE /licenses/LICENSE
 COPY --from=build /src/LICENSES/ /licenses/LICENSES/
+COPY --from=build /out/tmp/ /tmp/
 USER 65532:65532
 ENTRYPOINT ["/auth-operator"]
