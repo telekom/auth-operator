@@ -31,10 +31,9 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
 	-X github.com/telekom/auth-operator/pkg/system.Repository=$REPOSITORY" \
 	-o /out/auth-operator ./main.go
 
-# Runtime stage (distroless)
-# Digest pinned for supply-chain integrity; update with:
-#   docker buildx imagetools inspect gcr.io/distroless/static-debian12
-FROM gcr.io/distroless/static-debian12@sha256:d75cdd72874d4790092fcb1b058493ecf6bb5bf2b2b897045b00ff01d91843f2
+# Runtime stage: the binary is fully static, so use scratch to avoid shipping
+# an independently-updated Debian package set in the runtime image.
+FROM scratch
 
 # OCI image labels (may be overridden by docker/metadata-action in CI)
 LABEL org.opencontainers.image.title="auth-operator" \
@@ -48,6 +47,7 @@ LABEL org.opencontainers.image.title="auth-operator" \
 WORKDIR /
 
 COPY --from=build /out/auth-operator ./auth-operator
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /src/LICENSE /licenses/LICENSE
 COPY --from=build /src/LICENSES/ /licenses/LICENSES/
 USER 65532:65532
