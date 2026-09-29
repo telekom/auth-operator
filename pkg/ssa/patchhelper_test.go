@@ -443,6 +443,28 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			Expect(countingClient.applyCalls).To(Equal(1))
 		})
 
+		It("should prune a previously owned CRB label that is no longer desired", func() {
+			subjects := []rbacv1.Subject{{Kind: "User", Name: "owned", APIGroup: rbacv1.GroupName}}
+			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "ph-binding-target"}
+			ac := ssa.ClusterRoleBindingWithSubjectsAndRoleRef("ph-force-prune-crb",
+				map[string]string{"keep": "true", "remove": "true"}, subjects, roleRef)
+			_, err := ssa.PatchApplyClusterRoleBinding(testCtx, k8sClient, ac, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+
+			ac = ssa.ClusterRoleBindingWithSubjectsAndRoleRef("ph-force-prune-crb",
+				map[string]string{"keep": "true"}, subjects, roleRef)
+			countingClient := &applyCountingClient{Client: k8sClient}
+			result, err := ssa.PatchApplyClusterRoleBinding(testCtx, countingClient, ac, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+			Expect(countingClient.applyCalls).To(Equal(1))
+
+			var binding rbacv1.ClusterRoleBinding
+			Expect(k8sClient.Get(testCtx, types.NamespacedName{Name: "ph-force-prune-crb"}, &binding)).To(Succeed())
+			Expect(binding.Labels).To(HaveKeyWithValue("keep", "true"))
+			Expect(binding.Labels).NotTo(HaveKey("remove"))
+		})
+
 		It("should apply when CRB already matches and Always is requested", func() {
 			subjects := []rbacv1.Subject{{Kind: "User", Name: "bob", APIGroup: rbacv1.GroupName}}
 			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "ph-binding-target"}
@@ -593,6 +615,28 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
 			Expect(countingClient.applyCalls).To(Equal(1))
+		})
+
+		It("should prune a previously owned RoleBinding label that is no longer desired", func() {
+			subjects := []rbacv1.Subject{{Kind: "ServiceAccount", Name: "owned", Namespace: "default"}}
+			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: "ph-rb-target"}
+			ac := ssa.RoleBindingWithSubjectsAndRoleRef("ph-force-prune-rb", "default",
+				map[string]string{"keep": "true", "remove": "true"}, subjects, roleRef)
+			_, err := ssa.PatchApplyRoleBinding(testCtx, k8sClient, ac, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+
+			ac = ssa.RoleBindingWithSubjectsAndRoleRef("ph-force-prune-rb", "default",
+				map[string]string{"keep": "true"}, subjects, roleRef)
+			countingClient := &applyCountingClient{Client: k8sClient}
+			result, err := ssa.PatchApplyRoleBinding(testCtx, countingClient, ac, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+			Expect(countingClient.applyCalls).To(Equal(1))
+
+			var binding rbacv1.RoleBinding
+			Expect(k8sClient.Get(testCtx, types.NamespacedName{Name: "ph-force-prune-rb", Namespace: "default"}, &binding)).To(Succeed())
+			Expect(binding.Labels).To(HaveKeyWithValue("keep", "true"))
+			Expect(binding.Labels).NotTo(HaveKey("remove"))
 		})
 
 		It("should apply when RoleBinding already matches and Always is requested", func() {
