@@ -67,7 +67,7 @@ func applyOptionsForceOwnership(opts []client.ApplyOption) bool {
 }
 
 // applyFieldsOwned reports whether the current field manager owns exactly the
-// fields declared in the desired binding. Extra owned fields must be applied
+// fields declared in the desired configuration. Extra owned fields must be applied
 // again so SSA can prune them; missing or unparseable ownership cannot be skipped.
 func applyFieldsOwned(owned, desired any) bool {
 	ownedFields, desiredFields, ok := applyFieldMaps(owned, desired)
@@ -103,8 +103,7 @@ func applyFieldMapSubset(owned, desired map[string]any) bool {
 	return true
 }
 
-func applyFieldMaps(owned, desired any) (map[string]any, map[string]any, bool) {
-	var ownedFields, desiredFields map[string]any
+func applyFieldMaps(owned, desired any) (ownedFields, desiredFields map[string]any, ok bool) {
 	ownedJSON, err := json.Marshal(owned)
 	if err != nil {
 		return nil, nil, false
@@ -139,7 +138,7 @@ func normalizeBindingApplyFields(fields map[string]any) {
 			}
 			kind, _ := subjectFields["kind"].(string)
 			apiGroup, _ := subjectFields["apiGroup"].(string)
-			if apiGroup == "" && (kind == "User" || kind == "Group") {
+			if apiGroup == "" && (kind == rbacv1.UserKind || kind == rbacv1.GroupKind) {
 				subjectFields["apiGroup"] = rbacv1.GroupName
 			}
 		}
@@ -187,7 +186,7 @@ func normalizeBindingApplyConfiguration(
 ) error {
 	for i := range subjects {
 		subject := &subjects[i]
-		if subject.Kind != nil && (*subject.Kind == "User" || *subject.Kind == "Group") &&
+		if subject.Kind != nil && (*subject.Kind == rbacv1.UserKind || *subject.Kind == rbacv1.GroupKind) &&
 			(subject.APIGroup == nil || *subject.APIGroup == "") {
 			subject.WithAPIGroup(rbacv1.GroupName)
 		}
@@ -360,20 +359,11 @@ func patchApplyClusterRole(
 
 	// Compare managed fields: labels, annotations, rules.
 	forceOwnership := applyOptionsForceOwnership(applyOpts)
-	if clusterRoleMatches(existing, ac) && !prunedLabels && !alwaysApply {
-		skip := !forceOwnership
-		if forceOwnership {
-			options := (&client.ApplyOptions{}).ApplyOptions(applyOpts)
-			if len(options.DryRun) == 0 {
-				owned, extractErr := rbacv1ac.ExtractClusterRole(existing, options.FieldManager)
-				skip = extractErr == nil && applyFieldsOwned(owned, ac)
-			}
-		}
-		if skip {
-			logger.V(3).Info("ClusterRole unchanged, skipping SSA apply",
-				"clusterRole", *ac.Name)
-			return PatchApplyResultSkipped, nil
-		}
+	if clusterRoleMatches(existing, ac) && !prunedLabels && !alwaysApply &&
+		canSkipClusterRoleApply(existing, ac, applyOpts, forceOwnership) {
+		logger.V(3).Info("ClusterRole unchanged, skipping SSA apply",
+			"clusterRole", *ac.Name)
+		return PatchApplyResultSkipped, nil
 	}
 	if clusterRoleMatches(existing, ac) && prunedLabels && !alwaysApply && !forceOwnership {
 		return PatchApplyResultPatched, nil
@@ -392,6 +382,23 @@ func patchApplyClusterRole(
 		return 0, fmt.Errorf("patch ClusterRole %s: %w", *ac.Name, applyErr)
 	}
 	return PatchApplyResultPatched, nil
+}
+
+func canSkipClusterRoleApply(
+	existing *rbacv1.ClusterRole,
+	ac *rbacv1ac.ClusterRoleApplyConfiguration,
+	opts []client.ApplyOption,
+	forceOwnership bool,
+) bool {
+	if !forceOwnership {
+		return true
+	}
+	options := (&client.ApplyOptions{}).ApplyOptions(opts)
+	if len(options.DryRun) != 0 {
+		return false
+	}
+	owned, err := rbacv1ac.ExtractClusterRole(existing, options.FieldManager)
+	return err == nil && applyFieldsOwned(owned, ac)
 }
 
 func getOrCreateClusterRole(
