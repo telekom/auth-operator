@@ -23,6 +23,8 @@ import (
 	"github.com/telekom/auth-operator/test/utils"
 )
 
+const edgeBindingMetricsPort = 18082
+
 // Edge-case E2E tests that verify deletion behaviour with shared resources,
 // RoleRefsValid condition self-healing, and pre-existing resource preservation.
 var _ = Describe("Edge Case - Deletion and Shared Resources", Ordered, Label("complex", "edge-case"), func() {
@@ -179,10 +181,7 @@ var _ = Describe("Edge Case - Deletion and Shared Resources", Ordered, Label("co
 	})
 
 	It("does not send unchanged binding applies on a second BindDefinition reconciliation", func() {
-		const (
-			bindingName = "e2e-edge-noop-view-binding"
-			metricsPort = 18082
-		)
+		const bindingName = "e2e-edge-noop-view-binding"
 		applyYAML(fmt.Sprintf(`
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: BindDefinition
@@ -220,12 +219,12 @@ spec:
 			Expect(err).NotTo(HaveOccurred())
 		}
 
-		stopForward := startEdgeMetricsPortForward(edgeCaseOperatorNS, edgeCaseRelease, metricsPort)
+		stopForward := startEdgeMetricsPortForward(edgeCaseOperatorNS, edgeCaseRelease, edgeBindingMetricsPort)
 		defer stopForward()
 		var baseline [6]float64
 		Eventually(func() error {
 			var err error
-			baseline, err = edgeBindingCounters(metricsPort)
+			baseline, err = edgeBindingCounters()
 			return err
 		}, 30*time.Second, time.Second).Should(Succeed())
 
@@ -234,13 +233,13 @@ spec:
 		_, err := utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred())
 
-		Eventually(func() ([6]float64, error) { return edgeBindingCounters(metricsPort) },
+		Eventually(edgeBindingCounters,
 			reconcileTimeout, time.Second).Should(WithTransform(func(counters [6]float64) bool {
 			return counters[0] == baseline[0] && counters[1] == baseline[1] && counters[2] == baseline[2] &&
 				counters[3] > baseline[3] && counters[4] > baseline[4] && counters[5] > baseline[5]
 		}, BeTrue()), "second reconcile must skip unchanged RB, CRB and ServiceAccount without sending an SSA apply")
 
-		baseline, err = edgeBindingCounters(metricsPort)
+		baseline, err = edgeBindingCounters()
 		Expect(err).NotTo(HaveOccurred())
 		cmd = utils.CommandContext(context.Background(), "kubectl", "patch", "binddefinition", bindingNoopBD,
 			"--type=merge", "-p", fmt.Sprintf(`{"spec":{"subjects":[`+
@@ -248,7 +247,7 @@ spec:
 				`{"kind":"ServiceAccount","name":"e2e-edge-noop-sa","namespace":%q}]}}`, edgeCaseNS))
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred())
-		Eventually(func() ([6]float64, error) { return edgeBindingCounters(metricsPort) },
+		Eventually(edgeBindingCounters,
 			reconcileTimeout, time.Second).Should(WithTransform(func(counters [6]float64) bool {
 			return counters[0] == baseline[0] && counters[1] == baseline[1] && counters[2] == baseline[2] &&
 				counters[3] > baseline[3] && counters[4] > baseline[4] && counters[5] > baseline[5]
@@ -730,10 +729,15 @@ func startEdgeMetricsPortForward(namespace, service string, localPort int) func(
 	}
 }
 
-func edgeBindingCounters(port int) ([6]float64, error) {
+func edgeBindingCounters() ([6]float64, error) {
 	var counters [6]float64
 	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/metrics", port)) // #nosec G107 -- local test port-forward.
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+		fmt.Sprintf("http://127.0.0.1:%d/metrics", edgeBindingMetricsPort), nil)
+	if err != nil {
+		return counters, fmt.Errorf("build controller metrics request: %w", err)
+	}
+	resp, err := client.Do(req) // #nosec G107 -- local test port-forward.
 	if err != nil {
 		return counters, fmt.Errorf("read controller metrics: %w", err)
 	}
