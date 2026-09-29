@@ -17,9 +17,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	metav1ac "k8s.io/client-go/applyconfigurations/meta/v1"
 	rbacv1ac "k8s.io/client-go/applyconfigurations/rbac/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/telekom/auth-operator/pkg/ssa"
 )
@@ -1062,4 +1062,133 @@ func (c *serviceAccountCreateRaceClient) Apply(
 	}
 
 	return c.Client.Apply(ctx, obj, opts...)
+}
+
+type bindingPatchTestCase struct {
+	label       string
+	roleBinding bool
+}
+
+var (
+	roleBindingPatchTestCase        = bindingPatchTestCase{label: "rb", roleBinding: true}
+	clusterRoleBindingPatchTestCase = bindingPatchTestCase{label: "crb"}
+)
+
+func newBindingPatchConfig(
+	binding bindingPatchTestCase,
+	name string,
+	subjects []rbacv1.Subject,
+	roleRef rbacv1.RoleRef,
+	annotations map[string]string,
+	ownerRefs []metav1.OwnerReference,
+	includeSubjects bool,
+	includeRoleRef bool,
+) runtime.ApplyConfiguration {
+	var ac runtime.ApplyConfiguration
+	if binding.roleBinding {
+		roleBinding := ssa.RoleBindingWithSubjectsAndRoleRef(name, "default", nil, subjects, roleRef)
+		if !includeSubjects {
+			roleBinding.Subjects = nil
+		}
+		if !includeRoleRef {
+			roleBinding.RoleRef = nil
+		}
+		if len(annotations) > 0 {
+			roleBinding.WithAnnotations(annotations)
+		}
+		for i := range ownerRefs {
+			ref := ownerRefs[i]
+			roleBinding.WithOwnerReferences(
+				metav1ac.OwnerReference().
+					WithAPIVersion(ref.APIVersion).
+					WithKind(ref.Kind).
+					WithName(ref.Name).
+					WithUID(ref.UID),
+			)
+		}
+		ac = roleBinding
+	} else {
+		clusterRoleBinding := ssa.ClusterRoleBindingWithSubjectsAndRoleRef(name, nil, subjects, roleRef)
+		if !includeSubjects {
+			clusterRoleBinding.Subjects = nil
+		}
+		if !includeRoleRef {
+			clusterRoleBinding.RoleRef = nil
+		}
+		if len(annotations) > 0 {
+			clusterRoleBinding.WithAnnotations(annotations)
+		}
+		for i := range ownerRefs {
+			ref := ownerRefs[i]
+			clusterRoleBinding.WithOwnerReferences(
+				metav1ac.OwnerReference().
+					WithAPIVersion(ref.APIVersion).
+					WithKind(ref.Kind).
+					WithName(ref.Name).
+					WithUID(ref.UID),
+			)
+		}
+		ac = clusterRoleBinding
+	}
+
+	return ac
+}
+
+func (binding bindingPatchTestCase) apply(
+	ctx context.Context,
+	c client.Client,
+	ac runtime.ApplyConfiguration,
+	opts ...client.ApplyOption,
+) (ssa.PatchApplyResult, error) {
+	if binding.roleBinding {
+		return ssa.PatchApplyRoleBinding(ctx, c, ac.(*rbacv1ac.RoleBindingApplyConfiguration), opts...)
+	}
+	return ssa.PatchApplyClusterRoleBinding(ctx, c, ac.(*rbacv1ac.ClusterRoleBindingApplyConfiguration), opts...)
+}
+
+func (binding bindingPatchTestCase) get(ctx context.Context, c client.Client, name string) client.Object {
+	if binding.roleBinding {
+		object := &rbacv1.RoleBinding{}
+		Expect(c.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, object)).To(Succeed())
+		return object
+	}
+	object := &rbacv1.ClusterRoleBinding{}
+	Expect(c.Get(ctx, types.NamespacedName{Name: name}, object)).To(Succeed())
+	return object
+}
+
+func setBindingPrecondition(ac runtime.ApplyConfiguration, precondition string) {
+	switch binding := ac.(type) {
+	case *rbacv1ac.RoleBindingApplyConfiguration:
+		switch precondition {
+		case "uid":
+			binding.WithUID(types.UID("stale-uid"))
+		case "resourceVersion":
+			binding.WithResourceVersion("stale-resource-version")
+		}
+	case *rbacv1ac.ClusterRoleBindingApplyConfiguration:
+		switch precondition {
+		case "uid":
+			binding.WithUID(types.UID("stale-uid"))
+		case "resourceVersion":
+			binding.WithResourceVersion("stale-resource-version")
+		}
+	}
+}
+
+type managedFieldsOmittingClient struct {
+	client.Client
+}
+
+func (c *managedFieldsOmittingClient) Get(
+	ctx context.Context,
+	key client.ObjectKey,
+	obj client.Object,
+	opts ...client.GetOption,
+) error {
+	if err := c.Client.Get(ctx, key, obj, opts...); err != nil {
+		return err
+	}
+	obj.SetManagedFields(nil)
+	return nil
 }
