@@ -13,6 +13,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	rbacv1ac "k8s.io/client-go/applyconfigurations/rbac/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -37,6 +38,19 @@ func roleDefinitionTestOwnerRef(rd *authorizationv1alpha1.RoleDefinition) metav1
 		UID:        rd.UID,
 		Controller: &controller,
 	}
+}
+
+type roleApplyCountingClient struct {
+	client.Client
+	applies int
+}
+
+func (c *roleApplyCountingClient) Apply(ctx context.Context, obj runtime.ApplyConfiguration, opts ...client.ApplyOption) error {
+	switch obj.(type) {
+	case *rbacv1ac.RoleApplyConfiguration, *rbacv1ac.ClusterRoleApplyConfiguration:
+		c.applies++
+	}
+	return c.Client.Apply(ctx, obj, opts...)
 }
 
 var _ = Describe("RoleDefinition Controller", func() {
@@ -225,6 +239,23 @@ var _ = Describe("RoleDefinition Drift Detection and Rollback", func() {
 			}
 		})
 
+		It("should not re-apply an unchanged ClusterRole on the next reconcile", func() {
+			Eventually(func() bool {
+				_, err := resourceTracker.GetAPIResources()
+				return err == nil
+			}, "30s", "1s").Should(BeTrue())
+			countingClient := &roleApplyCountingClient{Client: k8sClient}
+			reconciler.client = countingClient
+			request := reconcile.Request{NamespacedName: types.NamespacedName{Name: roleDef.Name}}
+			_, err := reconciler.Reconcile(ctx, request)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(countingClient.applies).To(Equal(1))
+			countingClient.applies = 0
+			_, err = reconciler.Reconcile(ctx, request)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(countingClient.applies).To(BeZero())
+		})
+
 		It("should restore ClusterRole when rules are modified externally", func() {
 			By("waiting for ResourceTracker to be ready")
 			Eventually(func() bool {
@@ -374,6 +405,23 @@ var _ = Describe("RoleDefinition Drift Detection and Rollback", func() {
 			By("cleaning up")
 			_ = k8sClient.Delete(ctx, roleDef)
 			_ = k8sClient.Delete(ctx, testNamespace)
+		})
+
+		It("should not re-apply an unchanged Role on the next reconcile", func() {
+			Eventually(func() bool {
+				_, err := resourceTracker.GetAPIResources()
+				return err == nil
+			}, "30s", "1s").Should(BeTrue())
+			countingClient := &roleApplyCountingClient{Client: k8sClient}
+			reconciler.client = countingClient
+			request := reconcile.Request{NamespacedName: types.NamespacedName{Name: roleDef.Name}}
+			_, err := reconciler.Reconcile(ctx, request)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(countingClient.applies).To(Equal(1))
+			countingClient.applies = 0
+			_, err = reconciler.Reconcile(ctx, request)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(countingClient.applies).To(BeZero())
 		})
 
 		It("should restore Role when rules are modified externally", func() {

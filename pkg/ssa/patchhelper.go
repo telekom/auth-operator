@@ -70,21 +70,55 @@ func applyOptionsForceOwnership(opts []client.ApplyOption) bool {
 // fields declared in the desired binding. Extra owned fields must be applied
 // again so SSA can prune them; missing or unparseable ownership cannot be skipped.
 func applyFieldsOwned(owned, desired any) bool {
+	ownedFields, desiredFields, ok := applyFieldMaps(owned, desired)
+	if !ok {
+		return false
+	}
+	return reflect.DeepEqual(ownedFields, desiredFields)
+}
+
+func applyFieldsSubset(owned, desired any) bool {
+	ownedFields, desiredFields, ok := applyFieldMaps(owned, desired)
+	if !ok {
+		return false
+	}
+	return applyFieldMapSubset(ownedFields, desiredFields)
+}
+
+func applyFieldMapSubset(owned, desired map[string]any) bool {
+	for key, value := range owned {
+		target, ok := desired[key]
+		if !ok {
+			return false
+		}
+		if nested, ok := value.(map[string]any); ok {
+			targetNested, ok := target.(map[string]any)
+			if !ok || !applyFieldMapSubset(nested, targetNested) {
+				return false
+			}
+		} else if !reflect.DeepEqual(value, target) {
+			return false
+		}
+	}
+	return true
+}
+
+func applyFieldMaps(owned, desired any) (map[string]any, map[string]any, bool) {
 	var ownedFields, desiredFields map[string]any
 	ownedJSON, err := json.Marshal(owned)
 	if err != nil {
-		return false
+		return nil, nil, false
 	}
 	desiredJSON, err := json.Marshal(desired)
 	if err != nil {
-		return false
+		return nil, nil, false
 	}
 	if json.Unmarshal(ownedJSON, &ownedFields) != nil || json.Unmarshal(desiredJSON, &desiredFields) != nil {
-		return false
+		return nil, nil, false
 	}
 	normalizeBindingApplyFields(ownedFields)
 	normalizeBindingApplyFields(desiredFields)
-	return reflect.DeepEqual(ownedFields, desiredFields)
+	return ownedFields, desiredFields, true
 }
 
 func normalizeBindingApplyFields(fields map[string]any) {
@@ -111,6 +145,18 @@ func normalizeBindingApplyFields(fields map[string]any) {
 		}
 		sortApplyList(subjects)
 		fields["subjects"] = subjects
+	}
+	if rules, ok := fields["rules"].([]any); ok {
+		for _, rule := range rules {
+			if value, ok := rule.(map[string]any); ok {
+				for _, key := range []string{"verbs", "apiGroups", "resources", "resourceNames", "nonResourceURLs"} {
+					if entries, ok := value[key].([]any); ok {
+						sortApplyList(entries)
+					}
+				}
+			}
+		}
+		sortApplyList(rules)
 	}
 }
 
@@ -314,10 +360,20 @@ func patchApplyClusterRole(
 
 	// Compare managed fields: labels, annotations, rules.
 	forceOwnership := applyOptionsForceOwnership(applyOpts)
-	if clusterRoleMatches(existing, ac) && !prunedLabels && !alwaysApply && !forceOwnership {
-		logger.V(3).Info("ClusterRole unchanged, skipping SSA apply",
-			"clusterRole", *ac.Name)
-		return PatchApplyResultSkipped, nil
+	if clusterRoleMatches(existing, ac) && !prunedLabels && !alwaysApply {
+		skip := !forceOwnership
+		if forceOwnership {
+			options := (&client.ApplyOptions{}).ApplyOptions(applyOpts)
+			if len(options.DryRun) == 0 {
+				owned, extractErr := rbacv1ac.ExtractClusterRole(existing, options.FieldManager)
+				skip = extractErr == nil && applyFieldsOwned(owned, ac)
+			}
+		}
+		if skip {
+			logger.V(3).Info("ClusterRole unchanged, skipping SSA apply",
+				"clusterRole", *ac.Name)
+			return PatchApplyResultSkipped, nil
+		}
 	}
 	if clusterRoleMatches(existing, ac) && prunedLabels && !alwaysApply && !forceOwnership {
 		return PatchApplyResultPatched, nil
@@ -436,10 +492,20 @@ func patchApplyRole(
 		return 0, fmt.Errorf("get Role %s/%s: %w", *ac.Namespace, *ac.Name, err)
 	}
 
-	if roleMatches(existing, ac) && !alwaysApply && !applyOptionsForceOwnership(applyOpts) {
-		logger.V(3).Info("Role unchanged, skipping SSA apply",
-			"role", *ac.Name, "namespace", *ac.Namespace)
-		return PatchApplyResultSkipped, nil
+	if roleMatches(existing, ac) && !alwaysApply {
+		skip := !applyOptionsForceOwnership(applyOpts)
+		if !skip {
+			options := (&client.ApplyOptions{}).ApplyOptions(applyOpts)
+			if len(options.DryRun) == 0 {
+				owned, extractErr := rbacv1ac.ExtractRole(existing, options.FieldManager)
+				skip = extractErr == nil && applyFieldsOwned(owned, ac)
+			}
+		}
+		if skip {
+			logger.V(3).Info("Role unchanged, skipping SSA apply",
+				"role", *ac.Name, "namespace", *ac.Namespace)
+			return PatchApplyResultSkipped, nil
+		}
 	}
 
 	if applyErr := c.Apply(ctx, ac, applyOpts...); applyErr != nil {
@@ -504,7 +570,11 @@ func patchApplyClusterRoleBinding(
 	if clusterRoleBindingMatches(existing, ac) && !alwaysApply &&
 		!bindingApplyHasPreconditions(ac.UID, ac.ResourceVersion) {
 		options := (&client.ApplyOptions{}).ApplyOptions(applyOpts)
-		skip := len(options.DryRun) == 0 && !applyOptionsForceOwnership(applyOpts)
+		skip := false
+		if len(options.DryRun) == 0 && !applyOptionsForceOwnership(applyOpts) {
+			owned, extractErr := rbacv1ac.ExtractClusterRoleBinding(existing, options.FieldManager)
+			skip = extractErr == nil && applyFieldsSubset(owned, ac)
+		}
 		if len(options.DryRun) == 0 && applyOptionsForceOwnership(applyOpts) {
 			owned, extractErr := rbacv1ac.ExtractClusterRoleBinding(existing, options.FieldManager)
 			skip = extractErr == nil && applyFieldsOwned(owned, ac)
@@ -581,7 +651,11 @@ func patchApplyRoleBinding(
 	if roleBindingMatches(existing, ac) && !alwaysApply &&
 		!bindingApplyHasPreconditions(ac.UID, ac.ResourceVersion) {
 		options := (&client.ApplyOptions{}).ApplyOptions(applyOpts)
-		skip := len(options.DryRun) == 0 && !applyOptionsForceOwnership(applyOpts)
+		skip := false
+		if len(options.DryRun) == 0 && !applyOptionsForceOwnership(applyOpts) {
+			owned, extractErr := rbacv1ac.ExtractRoleBinding(existing, options.FieldManager)
+			skip = extractErr == nil && applyFieldsSubset(owned, ac)
+		}
 		if len(options.DryRun) == 0 && applyOptionsForceOwnership(applyOpts) {
 			owned, extractErr := rbacv1ac.ExtractRoleBinding(existing, options.FieldManager)
 			skip = extractErr == nil && applyFieldsOwned(owned, ac)
@@ -666,9 +740,12 @@ func patchApplyServiceAccount(
 	}
 
 	if serviceAccountMatches(existing, ac) && !alwaysApply {
-		logger.V(3).Info("ServiceAccount unchanged, skipping SSA apply",
-			"serviceAccount", *ac.Name, "namespace", *ac.Namespace)
-		return PatchApplyResultSkipped, nil
+		owned, extractErr := corev1ac.ExtractServiceAccount(existing, fieldOwner)
+		if extractErr == nil && applyFieldsSubset(owned, ac) {
+			logger.V(3).Info("ServiceAccount unchanged, skipping SSA apply",
+				"serviceAccount", *ac.Name, "namespace", *ac.Namespace)
+			return PatchApplyResultSkipped, nil
+		}
 	}
 
 	if applyErr := c.Apply(ctx, ac, applyOpts...); applyErr != nil {

@@ -64,20 +64,48 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			Expect(result).To(Equal(ssa.PatchApplyResultSkipped))
 		})
 
-		It("should not skip matching ClusterRole when ForceOwnership is explicit", func() {
+		It("should reclaim a matching ClusterRole owned by a different manager", func() {
 			rules := []rbacv1.PolicyRule{
 				{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}},
 			}
 			ac := ssa.ClusterRoleWithLabelsAndRules("ph-force-matching-cr",
 				map[string]string{"app": "test"}, rules)
 
-			result, err := ssa.PatchApplyClusterRole(testCtx, k8sClient, ac)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result).To(Equal(ssa.PatchApplyResultCreated))
-
-			result, err = ssa.PatchApplyClusterRole(testCtx, k8sClient, ac, client.ForceOwnership)
+			Expect(k8sClient.Apply(testCtx, ac, client.FieldOwner("external-agent"))).To(Succeed())
+			countingClient := &applyCountingClient{Client: k8sClient}
+			result, err := ssa.PatchApplyClusterRole(testCtx, countingClient, ac, client.ForceOwnership)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+			Expect(countingClient.applyCalls).To(Equal(1))
+		})
+
+		It("should skip an unchanged forced ClusterRole owned by the apply manager", func() {
+			rules := []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}}}
+			ac := ssa.ClusterRoleWithLabelsAndRules("ph-force-owned-cr", map[string]string{"managed": "true"}, rules)
+			_, err := ssa.PatchApplyClusterRole(testCtx, k8sClient, ac, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+
+			countingClient := &applyCountingClient{Client: k8sClient}
+			result, err := ssa.PatchApplyClusterRole(testCtx, countingClient, ac, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultSkipped))
+			Expect(countingClient.applyCalls).To(BeZero())
+		})
+
+		It("should prune a removed label on a forced ClusterRole", func() {
+			rules := []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}}}
+			ac := ssa.ClusterRoleWithLabelsAndRules("ph-force-prune-cr", map[string]string{"remove": "true"}, rules)
+			_, err := ssa.PatchApplyClusterRole(testCtx, k8sClient, ac, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+			ac = ssa.ClusterRoleWithLabelsAndRules("ph-force-prune-cr", nil, rules)
+			countingClient := &applyCountingClient{Client: k8sClient}
+			result, err := ssa.PatchApplyClusterRole(testCtx, countingClient, ac, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+			Expect(countingClient.applyCalls).To(Equal(1))
+			var role rbacv1.ClusterRole
+			Expect(k8sClient.Get(testCtx, types.NamespacedName{Name: "ph-force-prune-cr"}, &role)).To(Succeed())
+			Expect(role.Labels).NotTo(HaveKey("remove"))
 		})
 
 		It("should apply when ClusterRole already matches and Always is requested", func() {
@@ -267,6 +295,46 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 	// Role
 	// -----------------------------------------------------------------------
 	Context("PatchApplyRole", func() {
+		It("should skip an unchanged forced Role owned by the apply manager", func() {
+			rules := []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}}}
+			ac := ssa.RoleWithLabelsAndRules("ph-force-owned-role", "default", map[string]string{"managed": "true"}, rules)
+			_, err := ssa.PatchApplyRole(testCtx, k8sClient, ac, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+
+			countingClient := &applyCountingClient{Client: k8sClient}
+			result, err := ssa.PatchApplyRole(testCtx, countingClient, ac, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultSkipped))
+			Expect(countingClient.applyCalls).To(BeZero())
+		})
+
+		It("should reclaim a matching Role owned by another manager", func() {
+			rules := []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}}}
+			ac := ssa.RoleWithLabelsAndRules("ph-force-foreign-role", "default", nil, rules)
+			Expect(k8sClient.Apply(testCtx, ac, client.FieldOwner("external-agent"))).To(Succeed())
+
+			countingClient := &applyCountingClient{Client: k8sClient}
+			result, err := ssa.PatchApplyRole(testCtx, countingClient, ac, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+			Expect(countingClient.applyCalls).To(Equal(1))
+		})
+
+		It("should prune a removed label on a forced Role", func() {
+			rules := []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}}}
+			ac := ssa.RoleWithLabelsAndRules("ph-force-prune-role", "default", map[string]string{"remove": "true"}, rules)
+			_, err := ssa.PatchApplyRole(testCtx, k8sClient, ac, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+			ac = ssa.RoleWithLabelsAndRules("ph-force-prune-role", "default", nil, rules)
+			countingClient := &applyCountingClient{Client: k8sClient}
+			result, err := ssa.PatchApplyRole(testCtx, countingClient, ac, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+			Expect(countingClient.applyCalls).To(Equal(1))
+			var role rbacv1.Role
+			Expect(k8sClient.Get(testCtx, types.NamespacedName{Name: "ph-force-prune-role", Namespace: "default"}, &role)).To(Succeed())
+			Expect(role.Labels).NotTo(HaveKey("remove"))
+		})
 		It("should create a Role when it does not exist", func() {
 			rules := []rbacv1.PolicyRule{
 				{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"get"}},
@@ -467,6 +535,24 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			Expect(binding.Labels).NotTo(HaveKey("remove"))
 		})
 
+		It("should prune a previously owned CRB label without ForceOwnership", func() {
+			subjects := []rbacv1.Subject{{Kind: "User", Name: "owned", APIGroup: rbacv1.GroupName}}
+			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "ph-binding-target"}
+			ac := ssa.ClusterRoleBindingWithSubjectsAndRoleRef("ph-prune-unforced-crb",
+				map[string]string{"remove": "true"}, subjects, roleRef)
+			_, err := ssa.PatchApplyClusterRoleBinding(testCtx, k8sClient, ac)
+			Expect(err).NotTo(HaveOccurred())
+			ac = ssa.ClusterRoleBindingWithSubjectsAndRoleRef("ph-prune-unforced-crb", nil, subjects, roleRef)
+			countingClient := &applyCountingClient{Client: k8sClient}
+			result, err := ssa.PatchApplyClusterRoleBinding(testCtx, countingClient, ac)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+			Expect(countingClient.applyCalls).To(Equal(1))
+			var binding rbacv1.ClusterRoleBinding
+			Expect(k8sClient.Get(testCtx, types.NamespacedName{Name: "ph-prune-unforced-crb"}, &binding)).To(Succeed())
+			Expect(binding.Labels).NotTo(HaveKey("remove"))
+		})
+
 		It("should apply when CRB already matches and Always is requested", func() {
 			subjects := []rbacv1.Subject{{Kind: "User", Name: "bob", APIGroup: rbacv1.GroupName}}
 			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "ph-binding-target"}
@@ -638,6 +724,24 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			var binding rbacv1.RoleBinding
 			Expect(k8sClient.Get(testCtx, types.NamespacedName{Name: "ph-force-prune-rb", Namespace: "default"}, &binding)).To(Succeed())
 			Expect(binding.Labels).To(HaveKeyWithValue("keep", "true"))
+			Expect(binding.Labels).NotTo(HaveKey("remove"))
+		})
+
+		It("should prune a previously owned RoleBinding label without ForceOwnership", func() {
+			subjects := []rbacv1.Subject{{Kind: "ServiceAccount", Name: "owned", Namespace: "default"}}
+			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: "ph-rb-target"}
+			ac := ssa.RoleBindingWithSubjectsAndRoleRef("ph-prune-unforced-rb", "default",
+				map[string]string{"remove": "true"}, subjects, roleRef)
+			_, err := ssa.PatchApplyRoleBinding(testCtx, k8sClient, ac)
+			Expect(err).NotTo(HaveOccurred())
+			ac = ssa.RoleBindingWithSubjectsAndRoleRef("ph-prune-unforced-rb", "default", nil, subjects, roleRef)
+			countingClient := &applyCountingClient{Client: k8sClient}
+			result, err := ssa.PatchApplyRoleBinding(testCtx, countingClient, ac)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+			Expect(countingClient.applyCalls).To(Equal(1))
+			var binding rbacv1.RoleBinding
+			Expect(k8sClient.Get(testCtx, types.NamespacedName{Name: "ph-prune-unforced-rb", Namespace: "default"}, &binding)).To(Succeed())
 			Expect(binding.Labels).NotTo(HaveKey("remove"))
 		})
 
@@ -976,6 +1080,28 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 	// ServiceAccount
 	// -----------------------------------------------------------------------
 	Context("PatchApplyServiceAccount", func() {
+		It("should prune a removed owned label without taking over unrelated labels", func() {
+			ac := ssa.ServiceAccountWith("ph-prune-sa", "default", map[string]string{"remove": "true"}, false)
+			owner := ssa.FieldOwnerFor("ph-prune-bd")
+			_, err := ssa.PatchApplyServiceAccount(testCtx, k8sClient, ac, owner)
+			Expect(err).NotTo(HaveOccurred())
+
+			var sa corev1.ServiceAccount
+			Expect(k8sClient.Get(testCtx, types.NamespacedName{Name: "ph-prune-sa", Namespace: "default"}, &sa)).To(Succeed())
+			sa.Labels["foreign"] = "keep"
+			Expect(k8sClient.Update(testCtx, &sa)).To(Succeed())
+
+			ac = ssa.ServiceAccountWith("ph-prune-sa", "default", nil, false)
+			countingClient := &applyCountingClient{Client: k8sClient}
+			result, err := ssa.PatchApplyServiceAccount(testCtx, countingClient, ac, owner)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+			Expect(countingClient.applyCalls).To(Equal(1))
+			Expect(k8sClient.Get(testCtx, types.NamespacedName{Name: "ph-prune-sa", Namespace: "default"}, &sa)).To(Succeed())
+			Expect(sa.Labels).NotTo(HaveKey("remove"))
+			Expect(sa.Labels).To(HaveKeyWithValue("foreign", "keep"))
+		})
+
 		It("should apply when ServiceAccount already matches and Always is requested", func() {
 			ac := ssa.ServiceAccountWith("ph-always-sa", "default",
 				map[string]string{"shared": "desired"}, true).
