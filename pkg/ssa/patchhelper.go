@@ -82,15 +82,61 @@ func applyFieldsOwned(owned, desired any) bool {
 	if json.Unmarshal(ownedJSON, &ownedFields) != nil || json.Unmarshal(desiredJSON, &desiredFields) != nil {
 		return false
 	}
-	if metadata, ok := desiredFields["metadata"].(map[string]any); ok {
-		// Apply may populate server-managed metadata on the caller's configuration.
-		delete(metadata, "uid")
-		delete(metadata, "resourceVersion")
-		delete(metadata, "creationTimestamp")
-		delete(metadata, "generation")
-		delete(metadata, "managedFields")
-	}
+	normalizeBindingApplyFields(ownedFields)
+	normalizeBindingApplyFields(desiredFields)
 	return reflect.DeepEqual(ownedFields, desiredFields)
+}
+
+func normalizeBindingApplyFields(fields map[string]any) {
+	if metadata, ok := fields["metadata"].(map[string]any); ok {
+		for _, key := range []string{"uid", "resourceVersion", "creationTimestamp", "generation", "managedFields"} {
+			delete(metadata, key)
+		}
+		if refs, ok := metadata["ownerReferences"].([]any); ok {
+			sortApplyList(refs)
+			metadata["ownerReferences"] = refs
+		}
+	}
+	if subjects, ok := fields["subjects"].([]any); ok {
+		for _, subject := range subjects {
+			subjectFields, ok := subject.(map[string]any)
+			if !ok {
+				continue
+			}
+			kind, _ := subjectFields["kind"].(string)
+			apiGroup, _ := subjectFields["apiGroup"].(string)
+			if apiGroup == "" && (kind == "User" || kind == "Group") {
+				subjectFields["apiGroup"] = rbacv1.GroupName
+			}
+		}
+		sortApplyList(subjects)
+		fields["subjects"] = subjects
+	}
+}
+
+func sortApplyList(items []any) {
+	type keyedItem struct {
+		key   string
+		value any
+	}
+	keyed := make([]keyedItem, len(items))
+	for i, item := range items {
+		encoded, err := json.Marshal(item)
+		if err != nil {
+			return
+		}
+		keyed[i] = keyedItem{key: string(encoded), value: item}
+	}
+	slices.SortFunc(keyed, func(a, b keyedItem) int {
+		return strings.Compare(a.key, b.key)
+	})
+	for i := range keyed {
+		items[i] = keyed[i].value
+	}
+}
+
+func bindingApplyHasPreconditions(uid *types.UID, resourceVersion *string) bool {
+	return uid != nil || resourceVersion != nil
 }
 
 // PatchApplyClusterRole reads the current ClusterRole from cache, compares it to
@@ -365,14 +411,13 @@ func patchApplyClusterRoleBinding(
 		return 0, fmt.Errorf("get ClusterRoleBinding %s: %w", *ac.Name, err)
 	}
 
-	if clusterRoleBindingMatches(existing, ac) && !alwaysApply {
-		skip := !applyOptionsForceOwnership(applyOpts)
-		if !skip {
-			options := (&client.ApplyOptions{}).ApplyOptions(applyOpts)
-			if len(options.DryRun) == 0 && len(ac.Subjects) > 0 && ac.RoleRef != nil {
-				owned, extractErr := rbacv1ac.ExtractClusterRoleBinding(existing, options.FieldManager)
-				skip = extractErr == nil && applyFieldsOwned(owned, ac)
-			}
+	if clusterRoleBindingMatches(existing, ac) && !alwaysApply &&
+		!bindingApplyHasPreconditions(ac.UID, ac.ResourceVersion) {
+		options := (&client.ApplyOptions{}).ApplyOptions(applyOpts)
+		skip := len(options.DryRun) == 0 && !applyOptionsForceOwnership(applyOpts)
+		if len(options.DryRun) == 0 && applyOptionsForceOwnership(applyOpts) {
+			owned, extractErr := rbacv1ac.ExtractClusterRoleBinding(existing, options.FieldManager)
+			skip = extractErr == nil && applyFieldsOwned(owned, ac)
 		}
 		if skip {
 			logger.V(3).Info("ClusterRoleBinding unchanged, skipping SSA apply",
@@ -443,14 +488,13 @@ func patchApplyRoleBinding(
 		return 0, fmt.Errorf("get RoleBinding %s/%s: %w", *ac.Namespace, *ac.Name, err)
 	}
 
-	if roleBindingMatches(existing, ac) && !alwaysApply {
-		skip := !applyOptionsForceOwnership(applyOpts)
-		if !skip {
-			options := (&client.ApplyOptions{}).ApplyOptions(applyOpts)
-			if len(options.DryRun) == 0 && len(ac.Subjects) > 0 && ac.RoleRef != nil {
-				owned, extractErr := rbacv1ac.ExtractRoleBinding(existing, options.FieldManager)
-				skip = extractErr == nil && applyFieldsOwned(owned, ac)
-			}
+	if roleBindingMatches(existing, ac) && !alwaysApply &&
+		!bindingApplyHasPreconditions(ac.UID, ac.ResourceVersion) {
+		options := (&client.ApplyOptions{}).ApplyOptions(applyOpts)
+		skip := len(options.DryRun) == 0 && !applyOptionsForceOwnership(applyOpts)
+		if len(options.DryRun) == 0 && applyOptionsForceOwnership(applyOpts) {
+			owned, extractErr := rbacv1ac.ExtractRoleBinding(existing, options.FieldManager)
+			skip = extractErr == nil && applyFieldsOwned(owned, ac)
 		}
 		if skip {
 			logger.V(3).Info("RoleBinding unchanged, skipping SSA apply",
@@ -776,6 +820,9 @@ func subjectsMatch(existing []rbacv1.Subject, desired []rbacv1ac.SubjectApplyCon
 }
 
 func subjectKey(kind, apiGroup, name, namespace string) string {
+	if apiGroup == "" && (kind == "User" || kind == "Group") {
+		apiGroup = rbacv1.GroupName
+	}
 	return kind + "/" + apiGroup + "/" + name + "/" + namespace
 }
 

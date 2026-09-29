@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,6 +45,7 @@ var _ = Describe("Edge Case - Deletion and Shared Resources", Ordered, Label("co
 		ownershipBD        = "e2e-edge-sa-ownership-transfer"
 		ownershipHelmSA    = "e2e-edge-helm-owned-sa"
 		ownershipUnknownSA = "e2e-edge-unknown-owned-sa"
+		bindingNoopBD      = "e2e-edge-binding-noop"
 	)
 
 	BeforeAll(func() {
@@ -113,7 +115,7 @@ var _ = Describe("Edge Case - Deletion and Shared Resources", Ordered, Label("co
 
 		By("Cleaning up edge-case test resources")
 
-		for _, name := range []string{bdSharedA, bdSharedB, bdMissingRef, bdPreExistingSA, ownershipBD} {
+		for _, name := range []string{bdSharedA, bdSharedB, bdMissingRef, bdPreExistingSA, ownershipBD, bindingNoopBD} {
 			cmd := utils.CommandContext(context.Background(), "kubectl", "delete", "binddefinition", name, "--ignore-not-found=true")
 			_, _ = utils.Run(cmd)
 		}
@@ -137,6 +139,7 @@ var _ = Describe("Edge Case - Deletion and Shared Resources", Ordered, Label("co
 		for _, crbSuffix := range []string{
 			"e2e-shared-a-view-binding",
 			"e2e-shared-b-view-binding",
+			"e2e-edge-noop-view-binding",
 			fmt.Sprintf("e2e-missing-target-%s-binding", healingClusterRole),
 			"e2e-preexisting-target-view-binding",
 		} {
@@ -173,6 +176,83 @@ var _ = Describe("Edge Case - Deletion and Shared Resources", Ordered, Label("co
 			cmd = utils.CommandContext(context.Background(), "kubectl", "delete", "ns", ns, "--ignore-not-found=true")
 			_, _ = utils.Run(cmd)
 		}
+	})
+
+	It("does not send unchanged binding applies on a second BindDefinition reconciliation", func() {
+		const (
+			bindingName = "e2e-edge-noop-view-binding"
+			metricsPort = 18082
+		)
+		applyYAML(fmt.Sprintf(`
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: %s
+spec:
+  targetName: e2e-edge-noop
+  subjects:
+    - kind: ServiceAccount
+      name: e2e-edge-noop-sa
+      namespace: %s
+    - kind: Group
+      name: e2e-edge-noop-group
+      apiGroup: rbac.authorization.k8s.io
+  clusterRoleBindings:
+    clusterRoleRefs: [view]
+  roleBindings:
+    - namespace: %s
+      clusterRoleRefs: [view]
+`, bindingNoopBD, edgeCaseNS, edgeCaseNS))
+
+		Eventually(func() bool {
+			cmd := utils.CommandContext(context.Background(), "kubectl", "get", "binddefinition", bindingNoopBD,
+				"-o", "jsonpath={.status.conditions[?(@.type=='Ready')].status}")
+			out, err := utils.Run(cmd)
+			return err == nil && strings.TrimSpace(string(out)) == statusTrue
+		}, reconcileTimeout, pollInterval).Should(BeTrue())
+		for _, args := range [][]string{
+			{"clusterrolebinding", bindingName},
+			{"rolebinding", bindingName, "-n", edgeCaseNS},
+			{"serviceaccount", "e2e-edge-noop-sa", "-n", edgeCaseNS},
+		} {
+			cmd := utils.CommandContext(context.Background(), "kubectl", append([]string{"get"}, args...)...)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		stopForward := startEdgeMetricsPortForward(edgeCaseOperatorNS, edgeCaseRelease, metricsPort)
+		defer stopForward()
+		var baseline [6]float64
+		Eventually(func() error {
+			var err error
+			baseline, err = edgeBindingCounters(metricsPort)
+			return err
+		}, 30*time.Second, time.Second).Should(Succeed())
+
+		cmd := utils.CommandContext(context.Background(), "kubectl", "annotate", "binddefinition", bindingNoopBD,
+			fmt.Sprintf("e2e.t-caas.telekom.com/reconcile-trigger=%d", time.Now().UnixNano()), "--overwrite")
+		_, err := utils.Run(cmd)
+		Expect(err).NotTo(HaveOccurred())
+
+		Eventually(func() ([6]float64, error) { return edgeBindingCounters(metricsPort) },
+			reconcileTimeout, time.Second).Should(WithTransform(func(counters [6]float64) bool {
+			return counters[0] == baseline[0] && counters[1] == baseline[1] && counters[2] == baseline[2] &&
+				counters[3] > baseline[3] && counters[4] > baseline[4] && counters[5] > baseline[5]
+		}, BeTrue()), "second reconcile must skip unchanged RB, CRB and ServiceAccount without sending an SSA apply")
+
+		baseline, err = edgeBindingCounters(metricsPort)
+		Expect(err).NotTo(HaveOccurred())
+		cmd = utils.CommandContext(context.Background(), "kubectl", "patch", "binddefinition", bindingNoopBD,
+			"--type=merge", "-p", fmt.Sprintf(`{"spec":{"subjects":[`+
+				`{"kind":"Group","name":"e2e-edge-noop-group","apiGroup":"rbac.authorization.k8s.io"},`+
+				`{"kind":"ServiceAccount","name":"e2e-edge-noop-sa","namespace":%q}]}}`, edgeCaseNS))
+		_, err = utils.Run(cmd)
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(func() ([6]float64, error) { return edgeBindingCounters(metricsPort) },
+			reconcileTimeout, time.Second).Should(WithTransform(func(counters [6]float64) bool {
+			return counters[0] == baseline[0] && counters[1] == baseline[1] && counters[2] == baseline[2] &&
+				counters[3] > baseline[3] && counters[4] > baseline[4] && counters[5] > baseline[5]
+		}, BeTrue()), "reordering binding subjects must not cause another SSA apply")
 	})
 
 	Context("Shared ServiceAccount Preservation on Deletion", func() {
@@ -648,4 +728,40 @@ func startEdgeMetricsPortForward(namespace, service string, localPort int) func(
 			_ = cmd.Wait()
 		}
 	}
+}
+
+func edgeBindingCounters(port int) ([6]float64, error) {
+	var counters [6]float64
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/metrics", port)) // #nosec G107 -- local test port-forward.
+	if err != nil {
+		return counters, fmt.Errorf("read controller metrics: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return counters, fmt.Errorf("controller metrics returned HTTP %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return counters, fmt.Errorf("read controller metrics body: %w", err)
+	}
+	names := [6]string{
+		`auth_operator_rbac_resources_applied_total{resource_type="ClusterRoleBinding"}`,
+		`auth_operator_rbac_resources_applied_total{resource_type="RoleBinding"}`,
+		`auth_operator_rbac_resources_applied_total{resource_type="ServiceAccount"}`,
+		`auth_operator_rbac_resources_skipped_total{resource_type="ClusterRoleBinding"}`,
+		`auth_operator_rbac_resources_skipped_total{resource_type="RoleBinding"}`,
+		`auth_operator_rbac_resources_skipped_total{resource_type="ServiceAccount"}`,
+	}
+	for _, line := range strings.Split(string(body), "\n") {
+		for i, name := range names {
+			if value, ok := strings.CutPrefix(line, name+" "); ok {
+				counters[i], err = strconv.ParseFloat(strings.TrimSpace(value), 64)
+				if err != nil {
+					return counters, fmt.Errorf("parse metric %s: %w", name, err)
+				}
+			}
+		}
+	}
+	return counters, nil
 }
