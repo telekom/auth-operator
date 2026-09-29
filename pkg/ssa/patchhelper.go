@@ -66,9 +66,9 @@ func applyOptionsForceOwnership(opts []client.ApplyOption) bool {
 	return applyOpts.Force != nil && *applyOpts.Force
 }
 
-// applyFieldsOwned reports whether the current field manager owns every field
-// declared in the desired binding. Missing or unparseable ownership is not a
-// reason to skip a forced apply.
+// applyFieldsOwned reports whether the current field manager owns exactly the
+// fields declared in the desired binding. Extra owned fields must be applied
+// again so SSA can prune them; missing or unparseable ownership cannot be skipped.
 func applyFieldsOwned(owned, desired any) bool {
 	var ownedFields, desiredFields map[string]any
 	ownedJSON, err := json.Marshal(owned)
@@ -90,25 +90,7 @@ func applyFieldsOwned(owned, desired any) bool {
 		delete(metadata, "generation")
 		delete(metadata, "managedFields")
 	}
-	return containsApplyFields(ownedFields, desiredFields)
-}
-
-func containsApplyFields(owned, desired map[string]any) bool {
-	for key, value := range desired {
-		ownedValue, ok := owned[key]
-		if !ok {
-			return false
-		}
-		if fields, ok := value.(map[string]any); ok {
-			ownedFields, ok := ownedValue.(map[string]any)
-			if !ok || !containsApplyFields(ownedFields, fields) {
-				return false
-			}
-		} else if !reflect.DeepEqual(ownedValue, value) {
-			return false
-		}
-	}
-	return true
+	return reflect.DeepEqual(ownedFields, desiredFields)
 }
 
 // PatchApplyClusterRole reads the current ClusterRole from cache, compares it to
