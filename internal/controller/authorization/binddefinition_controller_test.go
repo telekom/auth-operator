@@ -15,6 +15,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	rbacv1ac "k8s.io/client-go/applyconfigurations/rbac/v1"
 	"k8s.io/client-go/tools/events"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,6 +34,22 @@ import (
 	"github.com/telekom/auth-operator/pkg/metrics"
 	pkgssa "github.com/telekom/auth-operator/pkg/ssa"
 )
+
+type bindingApplyCountingClient struct {
+	client.Client
+	roleBindingApplies        int
+	clusterRoleBindingApplies int
+}
+
+func (c *bindingApplyCountingClient) Apply(ctx context.Context, obj runtime.ApplyConfiguration, opts ...client.ApplyOption) error {
+	switch obj.(type) {
+	case *rbacv1ac.RoleBindingApplyConfiguration:
+		c.roleBindingApplies++
+	case *rbacv1ac.ClusterRoleBindingApplyConfiguration:
+		c.clusterRoleBindingApplies++
+	}
+	return c.Client.Apply(ctx, obj, opts...)
+}
 
 var _ = Describe("BindDefinition Controller", func() {
 	Context("When reconciling a resource", func() {
@@ -178,6 +195,31 @@ var _ = Describe("BindDefinition Controller", func() {
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: rbName, Namespace: targetNS}, rb)).To(Succeed())
 			Expect(rb.Subjects).To(HaveLen(1))
 			Expect(rb.RoleRef.Name).To(Equal("full-test-view"))
+		})
+
+		It("should not re-apply unchanged bindings on the next reconcile", func() {
+			countingClient := &bindingApplyCountingClient{Client: k8sClient}
+			rec := &BindDefinitionReconciler{
+				client:   countingClient,
+				scheme:   k8sClient.Scheme(),
+				recorder: recorder,
+			}
+			request := reconcile.Request{NamespacedName: fullNamespacedName}
+
+			By("reconciling once to create both bindings")
+			_, err := rec.Reconcile(ctx, request)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(countingClient.clusterRoleBindingApplies).To(Equal(1))
+			Expect(countingClient.roleBindingApplies).To(Equal(1))
+
+			countingClient.clusterRoleBindingApplies = 0
+			countingClient.roleBindingApplies = 0
+
+			By("reconciling the unchanged BindDefinition again")
+			_, err = rec.Reconcile(ctx, request)
+			Expect(err).NotTo(HaveOccurred())
+			Expect([]int{countingClient.clusterRoleBindingApplies, countingClient.roleBindingApplies}).
+				To(Equal([]int{0, 0}), "unchanged ClusterRoleBinding and RoleBinding must not send SSA applies")
 		})
 
 		It("should handle reconcile delete with cleanup", func() {
