@@ -59,7 +59,8 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			Expect(result).To(Equal(ssa.PatchApplyResultCreated))
 
 			// Apply again — should skip.
-			result, err = ssa.PatchApplyClusterRole(testCtx, k8sClient, ac)
+			result, err = ssa.PatchApplyClusterRole(testCtx, k8sClient,
+				ssa.ClusterRoleWithLabelsAndRules("ph-skip-cr", map[string]string{"app": "test"}, rules))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal(ssa.PatchApplyResultSkipped))
 		})
@@ -86,7 +87,9 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			countingClient := &applyCountingClient{Client: k8sClient}
-			result, err := ssa.PatchApplyClusterRole(testCtx, countingClient, ac, client.ForceOwnership)
+			result, err := ssa.PatchApplyClusterRole(testCtx, countingClient,
+				ssa.ClusterRoleWithLabelsAndRules("ph-force-owned-cr", map[string]string{"managed": "true"}, rules),
+				client.ForceOwnership)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal(ssa.PatchApplyResultSkipped))
 			Expect(countingClient.applyCalls).To(BeZero())
@@ -106,6 +109,25 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			var role rbacv1.ClusterRole
 			Expect(k8sClient.Get(testCtx, types.NamespacedName{Name: "ph-force-prune-cr"}, &role)).To(Succeed())
 			Expect(role.Labels).NotTo(HaveKey("remove"))
+		})
+
+		It("should forward stale ClusterRole preconditions instead of skipping", func() {
+			rules := []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}}}
+			ac := ssa.ClusterRoleWithLabelsAndRules("ph-force-precondition-cr", nil, rules)
+			_, err := ssa.PatchApplyClusterRole(testCtx, k8sClient, ac, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+			for _, precondition := range []string{"uid", "resourceVersion"} {
+				stale := ssa.ClusterRoleWithLabelsAndRules("ph-force-precondition-cr", nil, rules)
+				if precondition == "uid" {
+					stale.WithUID(types.UID("stale-uid"))
+				} else {
+					stale.WithResourceVersion("stale-resource-version")
+				}
+				countingClient := &applyCountingClient{Client: k8sClient}
+				_, err = ssa.PatchApplyClusterRole(testCtx, countingClient, stale, client.ForceOwnership)
+				Expect(err).To(HaveOccurred())
+				Expect(countingClient.applyCalls).To(Equal(1))
+			}
 		})
 
 		It("should apply when ClusterRole already matches and Always is requested", func() {
@@ -302,7 +324,9 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			countingClient := &applyCountingClient{Client: k8sClient}
-			result, err := ssa.PatchApplyRole(testCtx, countingClient, ac, client.ForceOwnership)
+			result, err := ssa.PatchApplyRole(testCtx, countingClient,
+				ssa.RoleWithLabelsAndRules("ph-force-owned-role", "default", map[string]string{"managed": "true"}, rules),
+				client.ForceOwnership)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal(ssa.PatchApplyResultSkipped))
 			Expect(countingClient.applyCalls).To(BeZero())
@@ -335,6 +359,25 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			Expect(k8sClient.Get(testCtx, types.NamespacedName{Name: "ph-force-prune-role", Namespace: "default"}, &role)).To(Succeed())
 			Expect(role.Labels).NotTo(HaveKey("remove"))
 		})
+
+		It("should forward stale Role preconditions instead of skipping", func() {
+			rules := []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}}}
+			ac := ssa.RoleWithLabelsAndRules("ph-force-precondition-role", "default", nil, rules)
+			_, err := ssa.PatchApplyRole(testCtx, k8sClient, ac, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+			for _, precondition := range []string{"uid", "resourceVersion"} {
+				stale := ssa.RoleWithLabelsAndRules("ph-force-precondition-role", "default", nil, rules)
+				if precondition == "uid" {
+					stale.WithUID(types.UID("stale-uid"))
+				} else {
+					stale.WithResourceVersion("stale-resource-version")
+				}
+				countingClient := &applyCountingClient{Client: k8sClient}
+				_, err = ssa.PatchApplyRole(testCtx, countingClient, stale, client.ForceOwnership)
+				Expect(err).To(HaveOccurred())
+				Expect(countingClient.applyCalls).To(Equal(1))
+			}
+		})
 		It("should create a Role when it does not exist", func() {
 			rules := []rbacv1.PolicyRule{
 				{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"get"}},
@@ -356,7 +399,8 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			_, err := ssa.PatchApplyRole(testCtx, k8sClient, ac)
 			Expect(err).NotTo(HaveOccurred())
 
-			result, err := ssa.PatchApplyRole(testCtx, k8sClient, ac)
+			result, err := ssa.PatchApplyRole(testCtx, k8sClient,
+				ssa.RoleWithLabelsAndRules("ph-skip-role", "default", nil, rules))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal(ssa.PatchApplyResultSkipped))
 		})

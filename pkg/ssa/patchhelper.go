@@ -390,6 +390,9 @@ func canSkipClusterRoleApply(
 	opts []client.ApplyOption,
 	forceOwnership bool,
 ) bool {
+	if bindingApplyHasPreconditions(ac.UID, ac.ResourceVersion) {
+		return false
+	}
 	if !forceOwnership {
 		return true
 	}
@@ -499,7 +502,7 @@ func patchApplyRole(
 		return 0, fmt.Errorf("get Role %s/%s: %w", *ac.Namespace, *ac.Name, err)
 	}
 
-	if roleMatches(existing, ac) && !alwaysApply {
+	if roleMatches(existing, ac) && !alwaysApply && !bindingApplyHasPreconditions(ac.UID, ac.ResourceVersion) {
 		skip := !applyOptionsForceOwnership(applyOpts)
 		if !skip {
 			options := (&client.ApplyOptions{}).ApplyOptions(applyOpts)
