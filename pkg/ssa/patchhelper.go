@@ -135,8 +135,98 @@ func sortApplyList(items []any) {
 	}
 }
 
+func normalizeBindingApplyConfiguration(
+	subjects []rbacv1ac.SubjectApplyConfiguration,
+	metadata *metav1ac.ObjectMetaApplyConfiguration,
+) error {
+	for i := range subjects {
+		subject := &subjects[i]
+		if subject.Kind != nil && (*subject.Kind == "User" || *subject.Kind == "Group") &&
+			(subject.APIGroup == nil || *subject.APIGroup == "") {
+			subject.WithAPIGroup(rbacv1.GroupName)
+		}
+	}
+	if err := sortApplyConfigurations(subjects); err != nil {
+		return fmt.Errorf("sort binding subjects: %w", err)
+	}
+	if metadata != nil {
+		if err := sortApplyConfigurations(metadata.OwnerReferences); err != nil {
+			return fmt.Errorf("sort binding owner references: %w", err)
+		}
+	}
+	return nil
+}
+
+func sortApplyConfigurations[T any](items []T) error {
+	type keyedItem struct {
+		key   string
+		value T
+	}
+	keyed := make([]keyedItem, len(items))
+	for i, item := range items {
+		encoded, err := json.Marshal(item)
+		if err != nil {
+			return fmt.Errorf("marshal ApplyConfiguration list item: %w", err)
+		}
+		keyed[i] = keyedItem{key: string(encoded), value: item}
+	}
+	slices.SortFunc(keyed, func(a, b keyedItem) int {
+		return strings.Compare(a.key, b.key)
+	})
+	for i := range keyed {
+		items[i] = keyed[i].value
+	}
+	return nil
+}
+
 func bindingApplyHasPreconditions(uid *types.UID, resourceVersion *string) bool {
 	return uid != nil || resourceVersion != nil
+}
+
+func cloneApplyConfiguration[T any](ac *T) (*T, error) {
+	data, err := json.Marshal(ac)
+	if err != nil {
+		return nil, fmt.Errorf("marshal ApplyConfiguration: %w", err)
+	}
+	clone := new(T)
+	if err := json.Unmarshal(data, clone); err != nil {
+		return nil, fmt.Errorf("unmarshal ApplyConfiguration: %w", err)
+	}
+	return clone, nil
+}
+
+func applyClusterRoleBinding(
+	ctx context.Context,
+	c client.Client,
+	ac *rbacv1ac.ClusterRoleBindingApplyConfiguration,
+	opts ...client.ApplyOption,
+) error {
+	clone, err := cloneApplyConfiguration(ac)
+	if err != nil {
+		return err
+	}
+	// RBAC subjects are an atomic SSA list. Canonicalize the whole list without
+	// changing its ownership granularity or sorting any semantically ordered data.
+	if err := normalizeBindingApplyConfiguration(clone.Subjects, clone.ObjectMetaApplyConfiguration); err != nil {
+		return err
+	}
+	return c.Apply(ctx, clone, opts...)
+}
+
+func applyRoleBinding(
+	ctx context.Context,
+	c client.Client,
+	ac *rbacv1ac.RoleBindingApplyConfiguration,
+	opts ...client.ApplyOption,
+) error {
+	clone, err := cloneApplyConfiguration(ac)
+	if err != nil {
+		return err
+	}
+	if err := normalizeBindingApplyConfiguration(clone.Subjects, clone.ObjectMetaApplyConfiguration); err != nil {
+		return err
+	}
+	return c.Apply(ctx, clone, opts...)
 }
 
 // PatchApplyClusterRole reads the current ClusterRole from cache, compares it to
@@ -403,7 +493,7 @@ func patchApplyClusterRoleBinding(
 	err := c.Get(ctx, types.NamespacedName{Name: *ac.Name}, existing)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			if applyErr := c.Apply(ctx, ac, applyOpts...); applyErr != nil {
+			if applyErr := applyClusterRoleBinding(ctx, c, ac, applyOpts...); applyErr != nil {
 				return 0, fmt.Errorf("create ClusterRoleBinding %s: %w", *ac.Name, applyErr)
 			}
 			return PatchApplyResultCreated, nil
@@ -426,7 +516,7 @@ func patchApplyClusterRoleBinding(
 		}
 	}
 
-	if applyErr := c.Apply(ctx, ac, applyOpts...); applyErr != nil {
+	if applyErr := applyClusterRoleBinding(ctx, c, ac, applyOpts...); applyErr != nil {
 		return 0, fmt.Errorf("patch ClusterRoleBinding %s: %w", *ac.Name, applyErr)
 	}
 	return PatchApplyResultPatched, nil
@@ -480,7 +570,7 @@ func patchApplyRoleBinding(
 	err := c.Get(ctx, types.NamespacedName{Name: *ac.Name, Namespace: *ac.Namespace}, existing)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			if applyErr := c.Apply(ctx, ac, applyOpts...); applyErr != nil {
+			if applyErr := applyRoleBinding(ctx, c, ac, applyOpts...); applyErr != nil {
 				return 0, fmt.Errorf("create RoleBinding %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 			}
 			return PatchApplyResultCreated, nil
@@ -503,7 +593,7 @@ func patchApplyRoleBinding(
 		}
 	}
 
-	if applyErr := c.Apply(ctx, ac, applyOpts...); applyErr != nil {
+	if applyErr := applyRoleBinding(ctx, c, ac, applyOpts...); applyErr != nil {
 		return 0, fmt.Errorf("patch RoleBinding %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
 	}
 	return PatchApplyResultPatched, nil
@@ -840,7 +930,7 @@ func subjectACKey(s *rbacv1ac.SubjectApplyConfiguration) string {
 	if s.Namespace != nil {
 		ns = *s.Namespace
 	}
-	return kind + "/" + apiGroup + "/" + name + "/" + ns
+	return subjectKey(kind, apiGroup, name, ns)
 }
 
 // policyRulesMatch compares existing policy rules with desired ones from ApplyConfigurations.

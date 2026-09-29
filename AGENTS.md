@@ -45,6 +45,8 @@ test/e2e/                      Ginkgo E2E tests
    - `config/samples/`: structurally valid baseline samples for normal reconciliation paths.
    - `config/samples/broken/`: structurally valid runtime-failure samples that MUST apply and then stall/partially reconcile.
    - Webhook/schema-invalid examples stay outside the broken kustomization apply set.
+14. **SSA no-op regression safety**: When changing binding reconciliation, test both RoleBinding and ClusterRoleBinding against a real API server for unchanged skips, drift correction, foreign field ownership, removed-field pruning, and deterministic order-insensitive subject handling. Assert actual apply requests, not only resource versions (a no-op apply can still invoke admission). Verify that generated ServiceAccounts, Roles, and ClusterRoles keep their existing reconciliation behavior and that intentionally unconditional restricted-resource applies remain unconditional.
+15. **YAGNI and standard tools**: Implement only behavior demonstrated by a regression test; avoid speculative abstractions or broad rewrites. Use Go standard-library helpers and existing Kubernetes/client-go APIs for normalization and managed-field inspection. Run existing `make fmt vet lint`, `make test`, and the relevant isolated kind E2E suite; do not add custom linters or duplicate shared helpers.
 
 ## Testing
 

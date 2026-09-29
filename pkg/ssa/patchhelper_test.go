@@ -719,27 +719,57 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 				_, err := binding.apply(testCtx, k8sClient, desired, client.ForceOwnership)
 				Expect(err).NotTo(HaveOccurred(), "creating %s", name)
 
-				external := newBindingPatchConfig(binding, name, subjects, roleRef, annotations, ownerRefs,
-					field == "subjects", field == "roleRef")
+				var external runtime.ApplyConfiguration
 				switch field {
+				case "subjects":
+					external = newBindingPatchConfig(binding, name,
+						[]rbacv1.Subject{{Kind: "User", Name: "temporary-user", APIGroup: rbacv1.GroupName}},
+						roleRef, nil, nil, true, false)
 				case "annotation":
-					external = newBindingPatchConfig(binding, name, nil, roleRef, annotations, nil, false, false)
+					external = newBindingPatchConfig(binding, name, nil, roleRef,
+						map[string]string{"owned": "temporary"}, nil, false, false)
 				case "ownerReferences":
-					external = newBindingPatchConfig(binding, name, nil, roleRef, nil, ownerRefs, false, false)
+					external = newBindingPatchConfig(binding, name, nil, roleRef, nil,
+						ownerRefs,
+						false, false)
+				case "roleRef":
+					external = newBindingPatchConfig(binding, name, nil, roleRef, nil, nil, false, true)
 				}
 				Expect(k8sClient.Apply(testCtx, external,
 					client.FieldOwner("external-agent"), client.ForceOwnership)).To(Succeed(),
 					"transferring %s ownership", field)
+				if field == "roleRef" || field == "ownerReferences" {
+					releaseOwnerRefs := ownerRefs
+					if field == "ownerReferences" {
+						releaseOwnerRefs = nil
+					}
+					release := newBindingPatchConfig(binding, name, subjects, roleRef, annotations, releaseOwnerRefs,
+						true, field != "roleRef")
+					Expect(k8sClient.Apply(testCtx, release,
+						client.FieldOwner(ssa.FieldOwner))).To(Succeed(), "releasing %s ownership", field)
+				} else {
+					restored := newBindingPatchConfig(binding, name, subjects, roleRef, annotations, ownerRefs,
+						field == "subjects", false)
+					switch field {
+					case "annotation":
+						restored = newBindingPatchConfig(binding, name, nil, roleRef, annotations, nil, false, false)
+					case "ownerReferences":
+						restored = newBindingPatchConfig(binding, name, nil, roleRef, nil, ownerRefs, false, false)
+					}
+					Expect(k8sClient.Apply(testCtx, restored,
+						client.FieldOwner("external-agent"), client.ForceOwnership)).To(Succeed(),
+						"restoring %s ownership under the external manager", field)
+				}
 
 				countingClient := &applyCountingClient{Client: k8sClient}
 				result, err := binding.apply(testCtx, countingClient, desired, client.ForceOwnership)
 				Expect(err).NotTo(HaveOccurred(), "reclaiming %s ownership", field)
-				Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+				Expect(result).To(Equal(ssa.PatchApplyResultPatched), field)
 				Expect(countingClient.applyCalls).To(Equal(1))
 
 				result, err = binding.apply(testCtx, countingClient, desired, client.ForceOwnership)
 				Expect(err).NotTo(HaveOccurred())
-				Expect(result).To(Equal(ssa.PatchApplyResultSkipped))
+				Expect(result).To(Equal(ssa.PatchApplyResultSkipped), field)
 				Expect(countingClient.applyCalls).To(Equal(1), "the re-apply should restore owned fields")
 			}
 		},
@@ -763,6 +793,77 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 				[]rbacv1.Subject{subjects[1], subjects[0]}, roleRef, nil, nil, true, true)
 			countingClient := &applyCountingClient{Client: k8sClient}
 			result, err := binding.apply(testCtx, countingClient, reordered, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultSkipped))
+			Expect(countingClient.applyCalls).To(BeZero())
+		},
+		Entry("RoleBinding", roleBindingPatchTestCase),
+		Entry("ClusterRoleBinding", clusterRoleBindingPatchTestCase),
+	)
+
+	DescribeTable("canonicalize reordered atomic subject lists before applying",
+		func(binding bindingPatchTestCase) {
+			name := "ph-regression-canonical-subjects-" + binding.label
+			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "ph-binding-target"}
+			user := rbacv1.Subject{Kind: "User", APIGroup: rbacv1.GroupName, Name: "alice"}
+			group := rbacv1.Subject{Kind: "Group", APIGroup: rbacv1.GroupName, Name: "admins"}
+
+			initial := newBindingPatchConfig(binding, name, []rbacv1.Subject{user, group}, roleRef,
+				map[string]string{"revision": "one"}, nil, true, true)
+			_, err := binding.apply(testCtx, k8sClient, initial, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+
+			desired := newBindingPatchConfig(binding, name, []rbacv1.Subject{user, group}, roleRef,
+				map[string]string{"revision": "two"}, nil, true, true)
+			result, err := binding.apply(testCtx, k8sClient, desired, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+
+			object := binding.get(testCtx, k8sClient, name)
+			if binding.roleBinding {
+				Expect(object.(*rbacv1.RoleBinding).Subjects).To(Equal([]rbacv1.Subject{group, user}))
+				Expect(*desired.(*rbacv1ac.RoleBindingApplyConfiguration).Subjects[0].Name).To(Equal("alice"))
+			} else {
+				Expect(object.(*rbacv1.ClusterRoleBinding).Subjects).To(Equal([]rbacv1.Subject{group, user}))
+				Expect(*desired.(*rbacv1ac.ClusterRoleBindingApplyConfiguration).Subjects[0].Name).To(Equal("alice"))
+			}
+		},
+		Entry("RoleBinding", roleBindingPatchTestCase),
+		Entry("ClusterRoleBinding", clusterRoleBindingPatchTestCase),
+	)
+
+	DescribeTable("honor restricted binding field managers",
+		func(binding bindingPatchTestCase) {
+			name := "ph-regression-restricted-owner-" + binding.label
+			owner := ssa.FieldOwnerFor("shared-binding", "RestrictedBindDefinition")
+			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "ph-binding-target"}
+			subjects := []rbacv1.Subject{{Kind: "User", Name: "restricted-user", APIGroup: rbacv1.GroupName}}
+			desired := newBindingPatchConfig(binding, name, subjects, roleRef,
+				map[string]string{"owner": "restricted"}, nil, true, true)
+
+			result, err := binding.apply(testCtx, k8sClient, desired,
+				client.FieldOwner(owner), client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultCreated))
+
+			object := binding.get(testCtx, k8sClient, name)
+			if binding.roleBinding {
+				extracted, extractErr := rbacv1ac.ExtractRoleBinding(object.(*rbacv1.RoleBinding), owner)
+				Expect(extractErr).NotTo(HaveOccurred())
+				Expect(extracted.Subjects).To(HaveLen(1))
+				Expect(extracted.RoleRef).NotTo(BeNil())
+				Expect(extracted.Annotations).To(HaveKeyWithValue("owner", "restricted"))
+			} else {
+				extracted, extractErr := rbacv1ac.ExtractClusterRoleBinding(object.(*rbacv1.ClusterRoleBinding), owner)
+				Expect(extractErr).NotTo(HaveOccurred())
+				Expect(extracted.Subjects).To(HaveLen(1))
+				Expect(extracted.RoleRef).NotTo(BeNil())
+				Expect(extracted.Annotations).To(HaveKeyWithValue("owner", "restricted"))
+			}
+
+			countingClient := &applyCountingClient{Client: k8sClient}
+			result, err = binding.apply(testCtx, countingClient, desired,
+				client.FieldOwner(owner), client.ForceOwnership)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal(ssa.PatchApplyResultSkipped))
 			Expect(countingClient.applyCalls).To(BeZero())
