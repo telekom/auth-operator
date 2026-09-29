@@ -16,7 +16,9 @@ package ssa
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -62,6 +64,51 @@ func (r PatchApplyResult) String() string {
 func applyOptionsForceOwnership(opts []client.ApplyOption) bool {
 	applyOpts := (&client.ApplyOptions{}).ApplyOptions(opts)
 	return applyOpts.Force != nil && *applyOpts.Force
+}
+
+// applyFieldsOwned reports whether the current field manager owns every field
+// declared in the desired binding. Missing or unparseable ownership is not a
+// reason to skip a forced apply.
+func applyFieldsOwned(owned, desired any) bool {
+	var ownedFields, desiredFields map[string]any
+	ownedJSON, err := json.Marshal(owned)
+	if err != nil {
+		return false
+	}
+	desiredJSON, err := json.Marshal(desired)
+	if err != nil {
+		return false
+	}
+	if json.Unmarshal(ownedJSON, &ownedFields) != nil || json.Unmarshal(desiredJSON, &desiredFields) != nil {
+		return false
+	}
+	if metadata, ok := desiredFields["metadata"].(map[string]any); ok {
+		// Apply may populate server-managed metadata on the caller's configuration.
+		delete(metadata, "uid")
+		delete(metadata, "resourceVersion")
+		delete(metadata, "creationTimestamp")
+		delete(metadata, "generation")
+		delete(metadata, "managedFields")
+	}
+	return containsApplyFields(ownedFields, desiredFields)
+}
+
+func containsApplyFields(owned, desired map[string]any) bool {
+	for key, value := range desired {
+		ownedValue, ok := owned[key]
+		if !ok {
+			return false
+		}
+		if fields, ok := value.(map[string]any); ok {
+			ownedFields, ok := ownedValue.(map[string]any)
+			if !ok || !containsApplyFields(ownedFields, fields) {
+				return false
+			}
+		} else if !reflect.DeepEqual(ownedValue, value) {
+			return false
+		}
+	}
+	return true
 }
 
 // PatchApplyClusterRole reads the current ClusterRole from cache, compares it to
@@ -336,10 +383,20 @@ func patchApplyClusterRoleBinding(
 		return 0, fmt.Errorf("get ClusterRoleBinding %s: %w", *ac.Name, err)
 	}
 
-	if clusterRoleBindingMatches(existing, ac) && !alwaysApply && !applyOptionsForceOwnership(applyOpts) {
-		logger.V(3).Info("ClusterRoleBinding unchanged, skipping SSA apply",
-			"clusterRoleBinding", *ac.Name)
-		return PatchApplyResultSkipped, nil
+	if clusterRoleBindingMatches(existing, ac) && !alwaysApply {
+		skip := !applyOptionsForceOwnership(applyOpts)
+		if !skip {
+			options := (&client.ApplyOptions{}).ApplyOptions(applyOpts)
+			if len(options.DryRun) == 0 && len(ac.Subjects) > 0 && ac.RoleRef != nil {
+				owned, extractErr := rbacv1ac.ExtractClusterRoleBinding(existing, options.FieldManager)
+				skip = extractErr == nil && applyFieldsOwned(owned, ac)
+			}
+		}
+		if skip {
+			logger.V(3).Info("ClusterRoleBinding unchanged, skipping SSA apply",
+				"clusterRoleBinding", *ac.Name)
+			return PatchApplyResultSkipped, nil
+		}
 	}
 
 	if applyErr := c.Apply(ctx, ac, applyOpts...); applyErr != nil {
@@ -404,10 +461,20 @@ func patchApplyRoleBinding(
 		return 0, fmt.Errorf("get RoleBinding %s/%s: %w", *ac.Namespace, *ac.Name, err)
 	}
 
-	if roleBindingMatches(existing, ac) && !alwaysApply && !applyOptionsForceOwnership(applyOpts) {
-		logger.V(3).Info("RoleBinding unchanged, skipping SSA apply",
-			"roleBinding", *ac.Name, "namespace", *ac.Namespace)
-		return PatchApplyResultSkipped, nil
+	if roleBindingMatches(existing, ac) && !alwaysApply {
+		skip := !applyOptionsForceOwnership(applyOpts)
+		if !skip {
+			options := (&client.ApplyOptions{}).ApplyOptions(applyOpts)
+			if len(options.DryRun) == 0 && len(ac.Subjects) > 0 && ac.RoleRef != nil {
+				owned, extractErr := rbacv1ac.ExtractRoleBinding(existing, options.FieldManager)
+				skip = extractErr == nil && applyFieldsOwned(owned, ac)
+			}
+		}
+		if skip {
+			logger.V(3).Info("RoleBinding unchanged, skipping SSA apply",
+				"roleBinding", *ac.Name, "namespace", *ac.Namespace)
+			return PatchApplyResultSkipped, nil
+		}
 	}
 
 	if applyErr := c.Apply(ctx, ac, applyOpts...); applyErr != nil {
