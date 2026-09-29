@@ -389,6 +389,60 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			Expect(result).To(Equal(ssa.PatchApplyResultSkipped))
 		})
 
+		It("should skip an unchanged forced CRB owned by the apply manager", func() {
+			subjects := []rbacv1.Subject{{Kind: "User", Name: "owned", APIGroup: rbacv1.GroupName}}
+			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "ph-binding-target"}
+			ac := ssa.ClusterRoleBindingWithSubjectsAndRoleRef("ph-force-skip-crb",
+				map[string]string{"managed": "true"}, subjects, roleRef).
+				WithAnnotations(map[string]string{"source": "test"})
+
+			_, err := ssa.PatchApplyClusterRoleBinding(testCtx, k8sClient, ac, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+
+			countingClient := &applyCountingClient{Client: k8sClient}
+			result, err := ssa.PatchApplyClusterRoleBinding(testCtx, countingClient, ac, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultSkipped))
+			Expect(countingClient.applyCalls).To(BeZero())
+		})
+
+		It("should claim a matching CRB owned by another field manager", func() {
+			subjects := []rbacv1.Subject{{Kind: "User", Name: "shared", APIGroup: rbacv1.GroupName}}
+			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "ph-binding-target"}
+			ac := ssa.ClusterRoleBindingWithSubjectsAndRoleRef("ph-force-claim-crb", nil, subjects, roleRef)
+			Expect(k8sClient.Apply(testCtx, ac, client.FieldOwner("external-agent"), client.ForceOwnership)).To(Succeed())
+
+			countingClient := &applyCountingClient{Client: k8sClient}
+			result, err := ssa.PatchApplyClusterRoleBinding(testCtx, countingClient, ac, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+			Expect(countingClient.applyCalls).To(Equal(1))
+		})
+
+		It("should re-apply when another manager takes a desired CRB label", func() {
+			subjects := []rbacv1.Subject{{Kind: "User", Name: "owned", APIGroup: rbacv1.GroupName}}
+			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "ph-binding-target"}
+			ac := ssa.ClusterRoleBindingWithSubjectsAndRoleRef("ph-force-label-crb",
+				map[string]string{"managed": "true"}, subjects, roleRef)
+			_, err := ssa.PatchApplyClusterRoleBinding(testCtx, k8sClient, ac, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+
+			foreign := ssa.ClusterRoleBindingWithSubjectsAndRoleRef("ph-force-label-crb",
+				map[string]string{"managed": "false"}, subjects, roleRef)
+			Expect(k8sClient.Apply(testCtx, foreign, client.FieldOwner("external-agent"), client.ForceOwnership)).To(Succeed())
+			foreign = ssa.ClusterRoleBindingWithSubjectsAndRoleRef("ph-force-label-crb",
+				map[string]string{"managed": "true"}, subjects, roleRef)
+			Expect(k8sClient.Apply(testCtx, foreign, client.FieldOwner("external-agent"), client.ForceOwnership)).To(Succeed())
+
+			ac = ssa.ClusterRoleBindingWithSubjectsAndRoleRef("ph-force-label-crb",
+				map[string]string{"managed": "true"}, subjects, roleRef)
+			countingClient := &applyCountingClient{Client: k8sClient}
+			result, err := ssa.PatchApplyClusterRoleBinding(testCtx, countingClient, ac, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+			Expect(countingClient.applyCalls).To(Equal(1))
+		})
+
 		It("should apply when CRB already matches and Always is requested", func() {
 			subjects := []rbacv1.Subject{{Kind: "User", Name: "bob", APIGroup: rbacv1.GroupName}}
 			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "ph-binding-target"}
@@ -398,7 +452,7 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			countingClient := &applyCountingClient{Client: k8sClient}
-			result, err := ssa.PatchApplyClusterRoleBindingAlways(testCtx, countingClient, ac)
+			result, err := ssa.PatchApplyClusterRoleBindingAlways(testCtx, countingClient, ac, client.ForceOwnership)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
 			Expect(countingClient.applyCalls).To(Equal(1))
@@ -487,6 +541,60 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			Expect(result).To(Equal(ssa.PatchApplyResultSkipped))
 		})
 
+		It("should skip an unchanged forced RoleBinding owned by the apply manager", func() {
+			subjects := []rbacv1.Subject{{Kind: "ServiceAccount", Name: "owned", Namespace: "default"}}
+			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: "ph-rb-target"}
+			ac := ssa.RoleBindingWithSubjectsAndRoleRef("ph-force-skip-rb", "default",
+				map[string]string{"managed": "true"}, subjects, roleRef).
+				WithAnnotations(map[string]string{"source": "test"})
+
+			_, err := ssa.PatchApplyRoleBinding(testCtx, k8sClient, ac, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+
+			countingClient := &applyCountingClient{Client: k8sClient}
+			result, err := ssa.PatchApplyRoleBinding(testCtx, countingClient, ac, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultSkipped))
+			Expect(countingClient.applyCalls).To(BeZero())
+		})
+
+		It("should claim a matching RoleBinding owned by another field manager", func() {
+			subjects := []rbacv1.Subject{{Kind: "ServiceAccount", Name: "shared", Namespace: "default"}}
+			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: "ph-rb-target"}
+			ac := ssa.RoleBindingWithSubjectsAndRoleRef("ph-force-claim-rb", "default", nil, subjects, roleRef)
+			Expect(k8sClient.Apply(testCtx, ac, client.FieldOwner("external-agent"), client.ForceOwnership)).To(Succeed())
+
+			countingClient := &applyCountingClient{Client: k8sClient}
+			result, err := ssa.PatchApplyRoleBinding(testCtx, countingClient, ac, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+			Expect(countingClient.applyCalls).To(Equal(1))
+		})
+
+		It("should re-apply when another manager takes a desired RoleBinding label", func() {
+			subjects := []rbacv1.Subject{{Kind: "ServiceAccount", Name: "owned", Namespace: "default"}}
+			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: "ph-rb-target"}
+			ac := ssa.RoleBindingWithSubjectsAndRoleRef("ph-force-label-rb", "default",
+				map[string]string{"managed": "true"}, subjects, roleRef)
+			_, err := ssa.PatchApplyRoleBinding(testCtx, k8sClient, ac, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+
+			foreign := ssa.RoleBindingWithSubjectsAndRoleRef("ph-force-label-rb", "default",
+				map[string]string{"managed": "false"}, subjects, roleRef)
+			Expect(k8sClient.Apply(testCtx, foreign, client.FieldOwner("external-agent"), client.ForceOwnership)).To(Succeed())
+			foreign = ssa.RoleBindingWithSubjectsAndRoleRef("ph-force-label-rb", "default",
+				map[string]string{"managed": "true"}, subjects, roleRef)
+			Expect(k8sClient.Apply(testCtx, foreign, client.FieldOwner("external-agent"), client.ForceOwnership)).To(Succeed())
+
+			ac = ssa.RoleBindingWithSubjectsAndRoleRef("ph-force-label-rb", "default",
+				map[string]string{"managed": "true"}, subjects, roleRef)
+			countingClient := &applyCountingClient{Client: k8sClient}
+			result, err := ssa.PatchApplyRoleBinding(testCtx, countingClient, ac, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+			Expect(countingClient.applyCalls).To(Equal(1))
+		})
+
 		It("should apply when RoleBinding already matches and Always is requested", func() {
 			subjects := []rbacv1.Subject{{Kind: "ServiceAccount", Name: "sa-always", Namespace: "default"}}
 			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: "ph-rb-target"}
@@ -496,7 +604,7 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			countingClient := &applyCountingClient{Client: k8sClient}
-			result, err := ssa.PatchApplyRoleBindingAlways(testCtx, countingClient, ac)
+			result, err := ssa.PatchApplyRoleBindingAlways(testCtx, countingClient, ac, client.ForceOwnership)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
 			Expect(countingClient.applyCalls).To(Equal(1))
