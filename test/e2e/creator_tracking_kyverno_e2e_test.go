@@ -350,10 +350,11 @@ subjects:
 		deleteAndWait(ctx, "mutatingpolicy", "creator-tracking", "contributor-tracking")
 		deleteAndWait(ctx, "mutatingadmissionpolicy", "mpol-creator-tracking", "mpol-contributor-tracking")
 		deleteAndWait(ctx, "mutatingadmissionpolicybinding", "mpol-creator-tracking-binding", "mpol-contributor-tracking-binding")
-		deleteAndWait(ctx, "clusterpolicy", "creator-tracking", "creator-tracking-benign-label")
-		deleteAndWait(ctx, "binddefinition", "creator-tracking-kyverno-binding")
+		deleteAndWait(ctx, "clusterpolicy", "creator-tracking", "creator-tracking-benign-label", "creator-tracking-binding-updates")
+		deleteAndWait(ctx, "binddefinition", "creator-tracking-kyverno-binding", "creator-tracking-kyverno-noop")
 		deleteAndWait(ctx, "roledefinition", "creator-tracking-kyverno-role", kyvernoLegacyRole)
 		deleteAndWait(ctx, "clusterrolebinding", "creator-tracking-kyverno-binding-creator-tracking-kyverno-reader-binding")
+		deleteAndWait(ctx, "clusterrolebinding", "creator-tracking-kyverno-noop-view-binding")
 		deleteAndWait(ctx, "namespace", kyvernoNamespace, kyvernoPrePolicy, kyvernoLegacy,
 			"creator-tracking-kyverno-legacy-new", "creator-tracking-kyverno-mutating",
 			"creator-tracking-kyverno-benign", "creator-tracking-kyverno-byte-exact",
@@ -684,5 +685,94 @@ spec:
 			}
 			return nil
 		}, 2*time.Minute, 2*time.Second).Should(Succeed())
+	})
+
+	It("skips repeated binding applies while Kyverno watches RBAC updates", func(ctx SpecContext) {
+		const bindingName = "creator-tracking-kyverno-noop-view-binding"
+		apply(ctx, `apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata: {name: creator-tracking-kyverno-noop}
+spec:
+  targetName: creator-tracking-kyverno-noop
+  subjects:
+  - kind: Group
+    name: creator-tracking-kyverno-noop-group
+    apiGroup: rbac.authorization.k8s.io
+  clusterRoleBindings:
+    clusterRoleRefs: [view]
+  roleBindings:
+  - namespace: creator-tracking-kyverno-e2e
+    clusterRoleRefs: [view]
+`)
+		Eventually(func() (string, error) {
+			output, err := runResult(ctx, "kubectl", "get", "binddefinition", "creator-tracking-kyverno-noop",
+				"-o", "jsonpath={.status.conditions[?(@.type=='Ready')].status}")
+			return strings.TrimSpace(string(output)), err
+		}, 3*time.Minute, 2*time.Second).Should(Equal("True"))
+		Eventually(func() error {
+			_, err := get(ctx, "clusterrolebinding", bindingName, "-o", "json")
+			return err
+		}, 2*time.Minute, time.Second).Should(Succeed())
+		Eventually(func() error {
+			_, err := get(ctx, "rolebinding", bindingName, "-n", kyvernoNamespace, "-o", "json")
+			return err
+		}, 2*time.Minute, time.Second).Should(Succeed())
+
+		apply(ctx, `apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata: {name: creator-tracking-binding-updates}
+spec:
+  background: false
+  rules:
+  - name: reject-binding-updates
+    match:
+      any:
+      - resources:
+          kinds: [RoleBinding, ClusterRoleBinding]
+          names: [creator-tracking-kyverno-noop-view-binding]
+          operations: [UPDATE]
+    validate:
+      failureAction: Enforce
+      message: "Kyverno detected a redundant binding apply"
+      pattern:
+        metadata:
+          labels:
+            kyverno-e2e-allow-update: "true"
+`)
+		// Prove the Kyverno webhook is active before checking the operator: a
+		// dry-run UPDATE must be rejected for each managed binding.
+		for _, args := range [][]string{
+			{"clusterrolebinding", bindingName},
+			{"rolebinding", bindingName, "-n", kyvernoNamespace},
+		} {
+			Eventually(func() bool {
+				patchArgs := append([]string{"kubectl", "label"}, args...)
+				patchArgs = append(patchArgs, "kyverno-e2e-probe=true", "--overwrite", "--dry-run=server")
+				output, err := runResult(ctx, patchArgs...)
+				return err != nil && strings.Contains(string(output), "Kyverno detected a redundant binding apply")
+			}, 2*time.Minute, 2*time.Second).Should(BeTrue())
+		}
+
+		stopForward := startEdgeMetricsPortForward("auth-operator-system", "auth-operator", edgeBindingMetricsPort)
+		defer stopForward()
+		var baseline [6]float64
+		Eventually(func() error {
+			var err error
+			baseline, err = edgeBindingCounters()
+			return err
+		}, 30*time.Second, time.Second).Should(Succeed())
+
+		run(ctx, "kubectl", "annotate", "binddefinition", "creator-tracking-kyverno-noop",
+			fmt.Sprintf("e2e.t-caas.telekom.com/reconcile-trigger=%d", time.Now().UnixNano()), "--overwrite")
+		Eventually(func() (bool, error) {
+			counters, err := edgeBindingCounters()
+			return counters[3] > baseline[3] && counters[4] > baseline[4], err
+		}, 2*time.Minute, time.Second).Should(BeTrue(), "both bindings must skip an unchanged reconciliation")
+		baseline, err := edgeBindingCounters()
+		Expect(err).NotTo(HaveOccurred())
+		Consistently(func() (bool, error) {
+			counters, err := edgeBindingCounters()
+			return counters[0] == baseline[0] && counters[1] == baseline[1], err
+		}, 75*time.Second, 3*time.Second).Should(BeTrue(), "periodic reconciliations must not send RBAC updates to Kyverno")
 	})
 })
