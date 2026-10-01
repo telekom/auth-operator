@@ -779,5 +779,39 @@ spec:
 			counters, err := edgeBindingCounters()
 			return counters[0] == baseline[0] && counters[1] == baseline[1], err
 		}, 75*time.Second, 3*time.Second).Should(BeTrue(), "periodic reconciliations must not send RBAC updates to Kyverno")
+
+		for _, args := range [][]string{
+			{"clusterrolebinding", bindingName},
+			{"rolebinding", bindingName, "-n", kyvernoNamespace},
+		} {
+			// Simulate a competing manager changing an owned atomic subject list.
+			// Kyverno adds a separate label on the same UPDATE; the controller
+			// must repair the list without fighting the external label.
+			patchArgs := append([]string{"kubectl", "patch"}, args...)
+			patchArgs = append(patchArgs, "--type=merge", "-p",
+				`{"subjects":[{"kind":"Group","name":"external-drift","apiGroup":"rbac.authorization.k8s.io"}],`+
+					`"metadata":{"labels":{"external-operator":"present"}}}`)
+			run(ctx, patchArgs...)
+			Eventually(func() (bool, error) {
+				object, err := get(ctx, args[0], bindingName, args[2:]...)
+				if err != nil {
+					return false, err
+				}
+				return value(object, "subjects", "0", "name") == "creator-tracking-kyverno-noop-group" &&
+					value(object, "metadata", "labels", "external-operator") == "present" &&
+					value(object, "metadata", "labels", "kyverno-e2e-update-probe") == "true", nil
+			}, 2*time.Minute, time.Second).Should(BeTrue())
+		}
+		afterRepair, err := edgeBindingCounters()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(afterRepair[0]).To(BeNumerically(">", baseline[0]))
+		Expect(afterRepair[1]).To(BeNumerically(">", baseline[1]))
+		run(ctx, "kubectl", "annotate", "binddefinition", "creator-tracking-kyverno-noop",
+			fmt.Sprintf("e2e.t-caas.telekom.com/reconcile-trigger=%d", time.Now().UnixNano()), "--overwrite")
+		Eventually(func() (bool, error) {
+			counters, err := edgeBindingCounters()
+			return counters[0] == afterRepair[0] && counters[1] == afterRepair[1] &&
+				counters[3] > afterRepair[3] && counters[4] > afterRepair[4], err
+		}, 2*time.Minute, time.Second).Should(BeTrue(), "repaired bindings with Kyverno-owned labels must skip subsequent applies")
 	})
 })
