@@ -793,7 +793,7 @@ spec:
 					`"metadata":{"labels":{"external-operator":"present"}}}`)
 			run(ctx, patchArgs...)
 			Eventually(func() (bool, error) {
-				object, err := get(ctx, args...)
+				object, err := get(ctx, append(args, "-o", "json")...)
 				if err != nil {
 					return false, err
 				}
