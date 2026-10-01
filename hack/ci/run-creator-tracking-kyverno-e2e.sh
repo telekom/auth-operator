@@ -310,7 +310,7 @@ chmod 600 "$kubeconfig"
 export KUBECONFIG="$kubeconfig"
 bounded docker tag "$source_image" "$e2e_image"
 bounded kind load docker-image "$e2e_image" --name "$cluster"
-bounded helm upgrade --install auth-operator chart/auth-operator --namespace auth-operator-system --create-namespace --set image.repository=auth-operator --set image.tag=creator-tracking-kyverno-e2e --set image.pullPolicy=Never --set creatorTracking.enabled=true --wait --timeout 5m
+bounded helm upgrade --install auth-operator chart/auth-operator --namespace auth-operator-system --create-namespace --set image.repository=auth-operator --set image.tag=creator-tracking-kyverno-e2e --set image.pullPolicy=Never --set creatorTracking.enabled=true --set metrics.auth.enabled=false --wait --timeout 5m
 KUBECONFIG="$kubeconfig" KIND_CLUSTER="$cluster" IMG="$e2e_image" KYVERNO_E2E_ARCHIVE_DIR="$run_dir" bounded hack/ci/install-kyverno.sh
 KUBECONFIG="$kubeconfig" KIND_CLUSTER="$cluster" IMG="$e2e_image" \
   E2E_EXACT_CLEANUP_ONLY=true SKIP_CLUSTER_SETUP=true \
