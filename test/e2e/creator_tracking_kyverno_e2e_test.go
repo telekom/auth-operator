@@ -724,33 +724,38 @@ metadata: {name: creator-tracking-binding-updates}
 spec:
   background: false
   rules:
-  - name: reject-binding-updates
+  - name: mark-binding-updates
     match:
       any:
       - resources:
           kinds: [RoleBinding, ClusterRoleBinding]
           names: [creator-tracking-kyverno-noop-view-binding]
           operations: [UPDATE]
-    validate:
-      failureAction: Enforce
-      message: "Kyverno detected a redundant binding apply"
-      pattern:
+    mutate:
+      patchStrategicMerge:
         metadata:
           labels:
-            kyverno-e2e-allow-update: "true"
+            kyverno-e2e-update-probe: "true"
 `)
-		// Prove the Kyverno webhook is active before checking the operator: a
-		// dry-run UPDATE must be rejected for each managed binding.
+		// Prove the Kyverno webhook is active before checking the operator:
+		// dry-run updates must carry its mutation without persisting it.
 		for _, args := range [][]string{
 			{"clusterrolebinding", bindingName},
 			{"rolebinding", bindingName, "-n", kyvernoNamespace},
 		} {
-			Eventually(func() bool {
+			Eventually(func() (string, error) {
 				patchArgs := append([]string{"kubectl", "label"}, args...)
-				patchArgs = append(patchArgs, "kyverno-e2e-probe=true", "--overwrite", "--dry-run=server")
+				patchArgs = append(patchArgs, "kyverno-e2e-probe=true", "--overwrite", "--dry-run=server", "-o", "json")
 				output, err := runResult(ctx, patchArgs...)
-				return err != nil && strings.Contains(string(output), "Kyverno detected a redundant binding apply")
-			}, 2*time.Minute, 2*time.Second).Should(BeTrue())
+				if err != nil {
+					return "", fmt.Errorf("probe Kyverno RBAC admission: %w", err)
+				}
+				var object map[string]interface{}
+				if err := json.Unmarshal(output, &object); err != nil {
+					return "", fmt.Errorf("decode Kyverno RBAC probe: %w", err)
+				}
+				return value(object, "metadata", "labels", "kyverno-e2e-update-probe"), nil
+			}, 2*time.Minute, 2*time.Second).Should(Equal("true"))
 		}
 
 		stopForward := startEdgeMetricsPortForward("auth-operator-system", "auth-operator", edgeBindingMetricsPort)
