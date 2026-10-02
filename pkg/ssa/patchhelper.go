@@ -77,6 +77,32 @@ func applyFieldsOwned(owned, desired any) bool {
 	return reflect.DeepEqual(ownedFields, desiredFields)
 }
 
+func applyFieldsSubset(owned, desired any) bool {
+	ownedFields, desiredFields, ok := applyFieldMaps(owned, desired)
+	if !ok {
+		return false
+	}
+	return applyFieldMapSubset(ownedFields, desiredFields)
+}
+
+func applyFieldMapSubset(owned, desired map[string]any) bool {
+	for key, value := range owned {
+		target, ok := desired[key]
+		if !ok {
+			return false
+		}
+		if nested, ok := value.(map[string]any); ok {
+			targetNested, ok := target.(map[string]any)
+			if !ok || !applyFieldMapSubset(nested, targetNested) {
+				return false
+			}
+		} else if !reflect.DeepEqual(value, target) {
+			return false
+		}
+	}
+	return true
+}
+
 func applyFieldMaps(owned, desired any) (ownedFields, desiredFields map[string]any, ok bool) {
 	ownedJSON, err := json.Marshal(owned)
 	if err != nil {
