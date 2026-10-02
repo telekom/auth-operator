@@ -466,6 +466,23 @@ subjects:
 		Eventually(func() map[string]string { return annotations(ctx, "namespace", kyvernoPrePolicy) }, time.Minute, time.Second).ShouldNot(HaveKey(creatorGroupsAnnotation))
 		createNamespace(ctx, reservedUser, "creator-tracking-kyverno-mutating", creatorGroup)
 		waitAnnotation(ctx, "namespace", "creator-tracking-kyverno-mutating", creatorAnnotation, reservedUser)
+		// The contributor policy is separate from the creator policy; its
+		// generated binding may become active later. Probe an UPDATE without
+		// persisting it before making the one-shot editor update.
+		Eventually(func() (string, error) {
+			args := append(impersonated(reservedEditor, editorGroup), "annotate", "namespace",
+				"creator-tracking-kyverno-mutating", "kyverno-editor=probe",
+				"--overwrite", "--dry-run=server", "-o", "json")
+			output, err := runResult(ctx, args...)
+			if err != nil {
+				return "", fmt.Errorf("probe Kyverno contributor activation: %w", err)
+			}
+			var object map[string]interface{}
+			if err := json.Unmarshal(output, &object); err != nil {
+				return "", fmt.Errorf("decode Kyverno contributor probe: %w", err)
+			}
+			return value(object, "metadata", "annotations", updatedAnnotation), nil
+		}, time.Minute, time.Second).Should(Equal("e2e-editor%25%2Ccomma"))
 		run(ctx, append(impersonated(reservedEditor, editorGroup), "annotate", "namespace", "creator-tracking-kyverno-mutating", "kyverno-editor=seen", "--overwrite")...)
 		Eventually(func() string {
 			return annotations(ctx, "namespace", "creator-tracking-kyverno-mutating")[updatedAnnotation]

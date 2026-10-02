@@ -77,32 +77,6 @@ func applyFieldsOwned(owned, desired any) bool {
 	return reflect.DeepEqual(ownedFields, desiredFields)
 }
 
-func applyFieldsSubset(owned, desired any) bool {
-	ownedFields, desiredFields, ok := applyFieldMaps(owned, desired)
-	if !ok {
-		return false
-	}
-	return applyFieldMapSubset(ownedFields, desiredFields)
-}
-
-func applyFieldMapSubset(owned, desired map[string]any) bool {
-	for key, value := range owned {
-		target, ok := desired[key]
-		if !ok {
-			return false
-		}
-		if nested, ok := value.(map[string]any); ok {
-			targetNested, ok := target.(map[string]any)
-			if !ok || !applyFieldMapSubset(nested, targetNested) {
-				return false
-			}
-		} else if !reflect.DeepEqual(value, target) {
-			return false
-		}
-	}
-	return true
-}
-
 func applyFieldMaps(owned, desired any) (ownedFields, desiredFields map[string]any, ok bool) {
 	ownedJSON, err := json.Marshal(owned)
 	if err != nil {
@@ -581,11 +555,7 @@ func patchApplyClusterRoleBinding(
 		!bindingApplyHasPreconditions(ac.UID, ac.ResourceVersion) {
 		options := (&client.ApplyOptions{}).ApplyOptions(applyOpts)
 		skip := false
-		if len(options.DryRun) == 0 && !applyOptionsForceOwnership(applyOpts) {
-			owned, extractErr := rbacv1ac.ExtractClusterRoleBinding(existing, options.FieldManager)
-			skip = extractErr == nil && applyFieldsSubset(owned, ac)
-		}
-		if len(options.DryRun) == 0 && applyOptionsForceOwnership(applyOpts) {
+		if len(options.DryRun) == 0 {
 			owned, extractErr := rbacv1ac.ExtractClusterRoleBinding(existing, options.FieldManager)
 			skip = extractErr == nil && applyFieldsOwned(owned, ac)
 		}
@@ -662,11 +632,7 @@ func patchApplyRoleBinding(
 		!bindingApplyHasPreconditions(ac.UID, ac.ResourceVersion) {
 		options := (&client.ApplyOptions{}).ApplyOptions(applyOpts)
 		skip := false
-		if len(options.DryRun) == 0 && !applyOptionsForceOwnership(applyOpts) {
-			owned, extractErr := rbacv1ac.ExtractRoleBinding(existing, options.FieldManager)
-			skip = extractErr == nil && applyFieldsSubset(owned, ac)
-		}
-		if len(options.DryRun) == 0 && applyOptionsForceOwnership(applyOpts) {
+		if len(options.DryRun) == 0 {
 			owned, extractErr := rbacv1ac.ExtractRoleBinding(existing, options.FieldManager)
 			skip = extractErr == nil && applyFieldsOwned(owned, ac)
 		}
