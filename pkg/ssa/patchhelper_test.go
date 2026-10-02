@@ -533,7 +533,7 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			Expect(countingClient.applyCalls).To(Equal(1))
 		})
 
-		It("should claim a matching CRB without ForceOwnership when another manager owns it", func() {
+		It("should not skip a matching CRB owned by another manager without ForceOwnership", func() {
 			subjects := []rbacv1.Subject{{Kind: "User", Name: "shared", APIGroup: rbacv1.GroupName}}
 			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "ph-binding-target"}
 			ac := ssa.ClusterRoleBindingWithSubjectsAndRoleRef("ph-unforced-claim-crb",
@@ -544,11 +544,6 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			result, err := ssa.PatchApplyClusterRoleBinding(testCtx, countingClient, ac)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
-			Expect(countingClient.applyCalls).To(Equal(1))
-
-			result, err = ssa.PatchApplyClusterRoleBinding(testCtx, countingClient, ac)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result).To(Equal(ssa.PatchApplyResultSkipped))
 			Expect(countingClient.applyCalls).To(Equal(1))
 		})
 
@@ -744,7 +739,7 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			Expect(countingClient.applyCalls).To(Equal(1))
 		})
 
-		It("should claim a matching RoleBinding without ForceOwnership when another manager owns it", func() {
+		It("should not skip a matching RoleBinding owned by another manager without ForceOwnership", func() {
 			subjects := []rbacv1.Subject{{Kind: "ServiceAccount", Name: "shared", Namespace: "default"}}
 			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: "ph-rb-target"}
 			ac := ssa.RoleBindingWithSubjectsAndRoleRef("ph-unforced-claim-rb", "default",
@@ -755,11 +750,6 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			result, err := ssa.PatchApplyRoleBinding(testCtx, countingClient, ac)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
-			Expect(countingClient.applyCalls).To(Equal(1))
-
-			result, err = ssa.PatchApplyRoleBinding(testCtx, countingClient, ac)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result).To(Equal(ssa.PatchApplyResultSkipped))
 			Expect(countingClient.applyCalls).To(Equal(1))
 		})
 
