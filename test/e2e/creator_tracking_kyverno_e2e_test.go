@@ -752,13 +752,16 @@ spec:
 `)
 		// Prove the Kyverno webhook is active before checking the operator:
 		// dry-run updates must carry its mutation without persisting it.
+		// kubectl label prints its locally patched object rather than the
+		// admission-mutated server response, so probe with kubectl patch.
 		for _, args := range [][]string{
 			{"clusterrolebinding", bindingName},
 			{"rolebinding", bindingName, "-n", kyvernoNamespace},
 		} {
 			Eventually(func() (string, error) {
-				patchArgs := append([]string{"kubectl", "label"}, args...)
-				patchArgs = append(patchArgs, "kyverno-e2e-probe=true", "--overwrite", "--dry-run=server", "-o", "json")
+				patchArgs := append([]string{"kubectl", "patch"}, args...)
+				patchArgs = append(patchArgs, "--type=merge", "-p", `{"metadata":{"labels":{"kyverno-e2e-probe":"true"}}}`,
+					"--dry-run=server", "-o", "json")
 				output, err := runResult(ctx, patchArgs...)
 				if err != nil {
 					return "", fmt.Errorf("probe Kyverno RBAC admission: %w", err)
