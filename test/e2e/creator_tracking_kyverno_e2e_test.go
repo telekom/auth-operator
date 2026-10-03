@@ -303,6 +303,22 @@ var _ = Describe("Creator Tracking Kyverno", Label("creator-tracking-kyverno"), 
 	waitAnnotation := func(ctx context.Context, resource, name, key, expected string, namespace ...string) {
 		Eventually(func() string { return annotations(ctx, resource, name, namespace...)[key] }, 2*time.Minute, 2*time.Second).Should(Equal(expected))
 	}
+	// Policy readiness can precede API-server admission activation. Repeat a
+	// server-side dry run until it carries the expected mutation before relying
+	// on a one-shot request that exercises the same admission path.
+	waitDryRunAnnotation := func(ctx context.Context, key, expected string, args ...string) {
+		EventuallyWithOffset(1, func() (string, error) {
+			output, err := runResult(ctx, args...)
+			if err != nil {
+				return "", fmt.Errorf("server-side dry-run probe: %w (%s)", err, output)
+			}
+			var object map[string]interface{}
+			if err := json.Unmarshal(output, &object); err != nil {
+				return "", fmt.Errorf("decode server-side dry-run probe: %w", err)
+			}
+			return value(object, "metadata", "annotations", key), nil
+		}, time.Minute, time.Second).Should(Equal(expected))
+	}
 
 	BeforeAll(func(ctx SpecContext) {
 		setSuiteOutputDir("creator-tracking-kyverno")
@@ -384,6 +400,8 @@ subjects:
 			}, 2*time.Minute, 2*time.Second).Should(Succeed())
 		}
 		identity := whoami(ctx, reservedUser, creatorGroup)
+		waitDryRunAnnotation(ctx, creatorAnnotation, reservedUser,
+			append(impersonated(reservedUser, creatorGroup), "create", "namespace", "creator-tracking-kyverno-activation", "--dry-run=server", "-o", "json")...)
 		createNamespace(ctx, reservedUser, kyvernoNamespace, creatorGroup)
 		waitAnnotation(ctx, "namespace", kyvernoNamespace, creatorAnnotation, reservedUser)
 		a := annotations(ctx, "namespace", kyvernoNamespace)
@@ -449,23 +467,18 @@ subjects:
 		// Source readiness can precede API-server policy activation. A server-side
 		// dry run proves the generated binding is active before the one-shot
 		// pre-existing-object update below.
-		Eventually(func() (string, error) {
-			args := append(impersonated(reservedUser, creatorGroup), "create", "namespace", "creator-tracking-kyverno-activation", "--dry-run=server", "-o", "json")
-			output, err := runResult(ctx, args...)
-			if err != nil {
-				return "", fmt.Errorf("probe generated Kyverno MAP: %w", err)
-			}
-			var object map[string]interface{}
-			if err := json.Unmarshal(output, &object); err != nil {
-				return "", fmt.Errorf("decode generated Kyverno MAP probe: %w", err)
-			}
-			return value(object, "metadata", "annotations", creatorAnnotation), nil
-		}, time.Minute, time.Second).Should(Equal(reservedUser))
+		waitDryRunAnnotation(ctx, creatorAnnotation, reservedUser,
+			append(impersonated(reservedUser, creatorGroup), "create", "namespace", "creator-tracking-kyverno-activation", "--dry-run=server", "-o", "json")...)
 		run(ctx, "kubectl", "annotate", "namespace", kyvernoPrePolicy, creatorAnnotation+"=forged", creatorGroupsAnnotation+"=forged", "--overwrite")
 		Eventually(func() map[string]string { return annotations(ctx, "namespace", kyvernoPrePolicy) }, time.Minute, time.Second).ShouldNot(HaveKey(creatorAnnotation))
 		Eventually(func() map[string]string { return annotations(ctx, "namespace", kyvernoPrePolicy) }, time.Minute, time.Second).ShouldNot(HaveKey(creatorGroupsAnnotation))
 		createNamespace(ctx, reservedUser, "creator-tracking-kyverno-mutating", creatorGroup)
 		waitAnnotation(ctx, "namespace", "creator-tracking-kyverno-mutating", creatorAnnotation, reservedUser)
+		// The creator probe above does not prove that the separate contributor
+		// MAP is active for UPDATE requests yet.
+		waitDryRunAnnotation(ctx, updatedAnnotation, "e2e-editor%25%2Ccomma",
+			append(impersonated(reservedEditor, editorGroup), "annotate", "namespace", "creator-tracking-kyverno-mutating",
+				"kyverno-editor=probe", "--overwrite", "--dry-run=server", "-o", "json")...)
 		run(ctx, append(impersonated(reservedEditor, editorGroup), "annotate", "namespace", "creator-tracking-kyverno-mutating", "kyverno-editor=seen", "--overwrite")...)
 		Eventually(func() string {
 			return annotations(ctx, "namespace", "creator-tracking-kyverno-mutating")[updatedAnnotation]

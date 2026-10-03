@@ -7,6 +7,7 @@ package ssa_test
 import (
 	"context"
 	"errors"
+	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -1120,6 +1121,184 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 		Entry("ClusterRoleBinding", clusterRoleBindingPatchTestCase),
 	)
 
+	DescribeTable("never skip dry-run applies regardless of ownership mode",
+		func(binding bindingPatchTestCase) {
+			name := "ph-regression-dry-run-force-" + binding.label
+			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "ph-binding-target"}
+			subjects := []rbacv1.Subject{{Kind: "User", Name: "dry-run-user", APIGroup: rbacv1.GroupName}}
+			desired := newBindingPatchConfig(binding, name, subjects, roleRef, nil, nil, true, true)
+			_, err := binding.apply(testCtx, k8sClient, desired, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+
+			countingClient := &applyCountingClient{Client: k8sClient}
+			result, err := binding.apply(testCtx, countingClient, desired, client.DryRunAll, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+			Expect(countingClient.applyCalls).To(Equal(1))
+		},
+		Entry("RoleBinding", roleBindingPatchTestCase),
+		Entry("ClusterRoleBinding", clusterRoleBindingPatchTestCase),
+	)
+
+	DescribeTable("converge to a skip when another manager co-owns identical binding fields",
+		func(binding bindingPatchTestCase, foreignManager string) {
+			name := "ph-regression-shared-" + binding.label + "-" + strings.ReplaceAll(foreignManager, "/", "-")
+			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "ph-binding-target"}
+			subjects := []rbacv1.Subject{{Kind: "Group", Name: "shared-group", APIGroup: rbacv1.GroupName}}
+			ownerRefs := []metav1.OwnerReference{{APIVersion: "v1", Kind: "ConfigMap", Name: "owner", UID: "shared-owner-uid"}}
+			desired := func() runtime.ApplyConfiguration {
+				return newBindingPatchConfig(binding, name, subjects, roleRef,
+					map[string]string{"source": "shared"}, ownerRefs, true, true)
+			}
+
+			By("letting the foreign manager create the binding first")
+			Expect(k8sClient.Apply(testCtx, desired(),
+				client.FieldOwner(foreignManager), client.ForceOwnership)).To(Succeed())
+			countingClient := &applyCountingClient{Client: k8sClient}
+			result, err := binding.apply(testCtx, countingClient, desired(), client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched), "the first forced apply claims shared ownership")
+			Expect(countingClient.applyCalls).To(Equal(1))
+
+			By("re-applying identical values from the foreign manager")
+			Expect(k8sClient.Apply(testCtx, desired(),
+				client.FieldOwner(foreignManager), client.ForceOwnership)).To(Succeed())
+			object := binding.get(testCtx, k8sClient, name)
+			managers := make([]string, 0, len(object.GetManagedFields()))
+			for _, entry := range object.GetManagedFields() {
+				managers = append(managers, entry.Manager)
+			}
+			Expect(managers).To(ContainElements(ssa.FieldOwner, foreignManager))
+
+			for range 3 {
+				result, err = binding.apply(testCtx, countingClient, desired(), client.ForceOwnership)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result).To(Equal(ssa.PatchApplyResultSkipped))
+				result, err = binding.apply(testCtx, countingClient, desired())
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result).To(Equal(ssa.PatchApplyResultSkipped))
+			}
+			Expect(countingClient.applyCalls).To(Equal(1), "shared identical ownership must not cause apply loops")
+		},
+		Entry("RoleBinding with an external manager", roleBindingPatchTestCase, "external-agent"),
+		Entry("ClusterRoleBinding with an external manager", clusterRoleBindingPatchTestCase, "external-agent"),
+		Entry("RoleBinding with another auth-operator manager",
+			roleBindingPatchTestCase, ssa.FieldOwnerFor("other-binddefinition")),
+		Entry("ClusterRoleBinding with another auth-operator manager",
+			clusterRoleBindingPatchTestCase, ssa.FieldOwnerFor("other-binddefinition")),
+	)
+
+	DescribeTable("repair force-applied foreign subjects once and then skip",
+		func(binding bindingPatchTestCase) {
+			name := "ph-regression-subject-fight-" + binding.label
+			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "ph-binding-target"}
+			subjects := []rbacv1.Subject{{Kind: "Group", Name: "desired-group", APIGroup: rbacv1.GroupName}}
+			desired := newBindingPatchConfig(binding, name, subjects, roleRef,
+				map[string]string{"owned": "true"}, nil, true, true)
+			_, err := binding.apply(testCtx, k8sClient, desired, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+
+			foreign := newBindingPatchConfig(binding, name,
+				[]rbacv1.Subject{{Kind: "User", Name: "intruder", APIGroup: rbacv1.GroupName}},
+				roleRef, map[string]string{"foreign": "keep"}, nil, true, false)
+			setBindingLabels(foreign, map[string]string{"foreign-label": "keep"})
+			Expect(k8sClient.Apply(testCtx, foreign,
+				client.FieldOwner("external-agent"), client.ForceOwnership)).To(Succeed())
+
+			countingClient := &applyCountingClient{Client: k8sClient}
+			result, err := binding.apply(testCtx, countingClient, desired, client.ForceOwnership)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+			Expect(countingClient.applyCalls).To(Equal(1))
+
+			object := binding.get(testCtx, k8sClient, name)
+			Expect(bindingSubjects(object)).To(Equal(subjects))
+			Expect(object.GetLabels()).To(HaveKeyWithValue("foreign-label", "keep"))
+			Expect(object.GetAnnotations()).To(HaveKeyWithValue("foreign", "keep"))
+
+			for range 3 {
+				result, err = binding.apply(testCtx, countingClient, desired, client.ForceOwnership)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result).To(Equal(ssa.PatchApplyResultSkipped))
+			}
+			Expect(countingClient.applyCalls).To(Equal(1), "a repaired binding must not flip on later reconciles")
+			object = binding.get(testCtx, k8sClient, name)
+			Expect(object.GetLabels()).To(HaveKeyWithValue("foreign-label", "keep"))
+			Expect(object.GetAnnotations()).To(HaveKeyWithValue("foreign", "keep"))
+		},
+		Entry("RoleBinding", roleBindingPatchTestCase),
+		Entry("ClusterRoleBinding", clusterRoleBindingPatchTestCase),
+	)
+
+	DescribeTable("skip semantically identical subject and owner reference representations",
+		func(binding bindingPatchTestCase, forced bool) {
+			mode := "unforced"
+			opts := []client.ApplyOption{}
+			if forced {
+				mode = "forced"
+				opts = append(opts, client.ForceOwnership)
+			}
+			name := "ph-regression-representation-" + binding.label + "-" + mode
+			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "ph-binding-target"}
+			ownerRefs := []metav1.OwnerReference{
+				{APIVersion: "v1", Kind: "ConfigMap", Name: "owner-a", UID: "representation-owner-a"},
+				{APIVersion: "v1", Kind: "ConfigMap", Name: "owner-b", UID: "representation-owner-b"},
+			}
+			initial := newBindingPatchConfig(binding, name, nil, roleRef, nil, ownerRefs, true, true)
+			setBindingSubjects(initial,
+				rbacv1ac.Subject().WithKind(rbacv1.UserKind).WithAPIGroup(rbacv1.GroupName).WithName("alice"),
+				rbacv1ac.Subject().WithKind(rbacv1.GroupKind).WithName("admins"),
+				rbacv1ac.Subject().WithKind(rbacv1.ServiceAccountKind).WithName("robot").WithNamespace("default"),
+			)
+			_, err := binding.apply(testCtx, k8sClient, initial, opts...)
+			Expect(err).NotTo(HaveOccurred())
+
+			permuted := newBindingPatchConfig(binding, name, nil, roleRef, nil,
+				[]metav1.OwnerReference{ownerRefs[1], ownerRefs[0]}, true, true)
+			setBindingSubjects(permuted,
+				rbacv1ac.Subject().WithKind(rbacv1.ServiceAccountKind).WithAPIGroup("").WithName("robot").WithNamespace("default"),
+				rbacv1ac.Subject().WithKind(rbacv1.GroupKind).WithAPIGroup(rbacv1.GroupName).WithName("admins"),
+				rbacv1ac.Subject().WithKind(rbacv1.UserKind).WithName("alice").WithNamespace(""),
+			)
+			countingClient := &applyCountingClient{Client: k8sClient}
+			result, err := binding.apply(testCtx, countingClient, permuted, opts...)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultSkipped))
+			Expect(countingClient.applyCalls).To(BeZero())
+		},
+		Entry("RoleBinding with ForceOwnership", roleBindingPatchTestCase, true),
+		Entry("ClusterRoleBinding with ForceOwnership", clusterRoleBindingPatchTestCase, true),
+		Entry("RoleBinding without ForceOwnership", roleBindingPatchTestCase, false),
+		Entry("ClusterRoleBinding without ForceOwnership", clusterRoleBindingPatchTestCase, false),
+	)
+
+	DescribeTable("apply on drift without ForceOwnership when the field manager owns the field",
+		func(binding bindingPatchTestCase) {
+			name := "ph-regression-unforced-drift-" + binding.label
+			roleRef := rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "ph-binding-target"}
+			user := rbacv1.Subject{Kind: "User", Name: "unforced-user", APIGroup: rbacv1.GroupName}
+			initial := newBindingPatchConfig(binding, name, []rbacv1.Subject{user}, roleRef,
+				map[string]string{"revision": "one"}, nil, true, true)
+			_, err := binding.apply(testCtx, k8sClient, initial)
+			Expect(err).NotTo(HaveOccurred())
+
+			desired := newBindingPatchConfig(binding, name,
+				[]rbacv1.Subject{user, {Kind: "Group", Name: "unforced-group", APIGroup: rbacv1.GroupName}},
+				roleRef, map[string]string{"revision": "two"}, nil, true, true)
+			countingClient := &applyCountingClient{Client: k8sClient}
+			result, err := binding.apply(testCtx, countingClient, desired)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+			result, err = binding.apply(testCtx, countingClient, desired)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultSkipped))
+			Expect(countingClient.applyCalls).To(Equal(1))
+			Expect(bindingSubjects(binding.get(testCtx, k8sClient, name))).To(HaveLen(2))
+		},
+		Entry("RoleBinding", roleBindingPatchTestCase),
+		Entry("ClusterRoleBinding", clusterRoleBindingPatchTestCase),
+	)
+
 	// -----------------------------------------------------------------------
 	// ServiceAccount
 	// -----------------------------------------------------------------------
@@ -1461,5 +1640,35 @@ func (c *managedFieldsOmittingClient) Get(
 		return err
 	}
 	obj.SetManagedFields(nil)
+	return nil
+}
+
+func setBindingLabels(ac runtime.ApplyConfiguration, labels map[string]string) {
+	switch binding := ac.(type) {
+	case *rbacv1ac.RoleBindingApplyConfiguration:
+		binding.WithLabels(labels)
+	case *rbacv1ac.ClusterRoleBindingApplyConfiguration:
+		binding.WithLabels(labels)
+	}
+}
+
+func setBindingSubjects(ac runtime.ApplyConfiguration, subjects ...*rbacv1ac.SubjectApplyConfiguration) {
+	switch binding := ac.(type) {
+	case *rbacv1ac.RoleBindingApplyConfiguration:
+		binding.Subjects = nil
+		binding.WithSubjects(subjects...)
+	case *rbacv1ac.ClusterRoleBindingApplyConfiguration:
+		binding.Subjects = nil
+		binding.WithSubjects(subjects...)
+	}
+}
+
+func bindingSubjects(object client.Object) []rbacv1.Subject {
+	switch binding := object.(type) {
+	case *rbacv1.RoleBinding:
+		return binding.Subjects
+	case *rbacv1.ClusterRoleBinding:
+		return binding.Subjects
+	}
 	return nil
 }

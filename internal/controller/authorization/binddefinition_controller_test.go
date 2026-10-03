@@ -222,6 +222,110 @@ var _ = Describe("BindDefinition Controller", func() {
 				To(Equal([]int{0, 0}), "unchanged ClusterRoleBinding and RoleBinding must not send SSA applies")
 		})
 
+		It("should repair foreign subject drift once and then skip without removing foreign metadata", func() {
+			countingClient := &bindingApplyCountingClient{Client: k8sClient}
+			rec := &BindDefinitionReconciler{
+				client:   countingClient,
+				scheme:   k8sClient.Scheme(),
+				recorder: recorder,
+			}
+			request := reconcile.Request{NamespacedName: fullNamespacedName}
+			_, err := rec.Reconcile(ctx, request)
+			Expect(err).NotTo(HaveOccurred())
+
+			bindingName := helpers.BuildBindingName("full-test", "full-test-view")
+			intruder := rbacv1ac.Subject().WithKind(rbacv1.UserKind).WithAPIGroup(rbacv1.GroupName).WithName("intruder")
+			foreignLabels := map[string]string{"external-operator": "present"}
+			Expect(k8sClient.Apply(ctx, rbacv1ac.ClusterRoleBinding(bindingName).
+				WithLabels(foreignLabels).WithSubjects(intruder),
+				client.FieldOwner("external-operator"), client.ForceOwnership)).To(Succeed())
+			Expect(k8sClient.Apply(ctx, rbacv1ac.RoleBinding(bindingName, targetNS).
+				WithLabels(foreignLabels).WithSubjects(intruder),
+				client.FieldOwner("external-operator"), client.ForceOwnership)).To(Succeed())
+
+			countingClient.clusterRoleBindingApplies = 0
+			countingClient.roleBindingApplies = 0
+			_, err = rec.Reconcile(ctx, request)
+			Expect(err).NotTo(HaveOccurred())
+			Expect([]int{countingClient.clusterRoleBindingApplies, countingClient.roleBindingApplies}).
+				To(Equal([]int{1, 1}), "drifted bindings must be repaired")
+
+			crb := &rbacv1.ClusterRoleBinding{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: bindingName}, crb)).To(Succeed())
+			Expect(crb.Subjects).To(ConsistOf(rbacv1.Subject{Kind: "Group", Name: "devs", APIGroup: rbacv1.GroupName}))
+			Expect(crb.Labels).To(HaveKeyWithValue("external-operator", "present"))
+			rb := &rbacv1.RoleBinding{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: bindingName, Namespace: targetNS}, rb)).To(Succeed())
+			Expect(rb.Subjects).To(ConsistOf(rbacv1.Subject{Kind: "Group", Name: "devs", APIGroup: rbacv1.GroupName}))
+			Expect(rb.Labels).To(HaveKeyWithValue("external-operator", "present"))
+
+			countingClient.clusterRoleBindingApplies = 0
+			countingClient.roleBindingApplies = 0
+			for range 2 {
+				_, err = rec.Reconcile(ctx, request)
+				Expect(err).NotTo(HaveOccurred())
+			}
+			Expect([]int{countingClient.clusterRoleBindingApplies, countingClient.roleBindingApplies}).
+				To(Equal([]int{0, 0}), "repaired bindings must not be re-applied on later reconciles")
+		})
+
+		It("should not let a second BindDefinition with the same targetName take over bindings", func() {
+			// The validating webhook rejects duplicate targetNames; this covers a
+			// bypassed webhook or a create race. Both BindDefinitions would use the
+			// same SSA field manager, so the controller-owner check must stop the
+			// second one before it applies.
+			const duplicateName = "full-reconcile-test-duplicate"
+			duplicate := &authorizationv1alpha1.BindDefinition{
+				ObjectMeta: metav1.ObjectMeta{Name: duplicateName},
+				Spec: authorizationv1alpha1.BindDefinitionSpec{
+					TargetName: "full-test",
+					Subjects:   []rbacv1.Subject{{Kind: "Group", Name: "intruders", APIGroup: rbacv1.GroupName}},
+					ClusterRoleBindings: authorizationv1alpha1.ClusterBinding{
+						ClusterRoleRefs: []string{"full-test-view"},
+					},
+					RoleBindings: []authorizationv1alpha1.NamespaceBinding{
+						{Namespace: targetNS, ClusterRoleRefs: []string{"full-test-view"}},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, duplicate)).To(Succeed())
+			DeferCleanup(func() {
+				bd := &authorizationv1alpha1.BindDefinition{}
+				if err := k8sClient.Get(ctx, types.NamespacedName{Name: duplicateName}, bd); err == nil {
+					bd.Finalizers = nil
+					_ = k8sClient.Update(ctx, bd)
+					_ = k8sClient.Delete(ctx, bd)
+				}
+			})
+
+			countingClient := &bindingApplyCountingClient{Client: k8sClient}
+			rec := &BindDefinitionReconciler{
+				client:   countingClient,
+				scheme:   k8sClient.Scheme(),
+				recorder: recorder,
+			}
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: fullNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+
+			countingClient.clusterRoleBindingApplies = 0
+			countingClient.roleBindingApplies = 0
+			_, err = rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: duplicateName}})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("already exists and is not owned by BindDefinition"))
+			Expect([]int{countingClient.clusterRoleBindingApplies, countingClient.roleBindingApplies}).
+				To(Equal([]int{0, 0}))
+
+			bindingName := helpers.BuildBindingName("full-test", "full-test-view")
+			crb := &rbacv1.ClusterRoleBinding{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: bindingName}, crb)).To(Succeed())
+			Expect(crb.Subjects).To(ConsistOf(rbacv1.Subject{Kind: "Group", Name: "devs", APIGroup: rbacv1.GroupName}))
+
+			_, err = rec.Reconcile(ctx, reconcile.Request{NamespacedName: fullNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+			Expect([]int{countingClient.clusterRoleBindingApplies, countingClient.roleBindingApplies}).
+				To(Equal([]int{0, 0}), "the owning BindDefinition must keep skipping its unchanged bindings")
+		})
+
 		It("should handle reconcile delete with cleanup", func() {
 			rec := &BindDefinitionReconciler{
 				client:   k8sClient,
