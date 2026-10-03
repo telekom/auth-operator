@@ -1383,12 +1383,7 @@ func rbdHasRecoverableGeneratedServiceAccountMarkers(
 		return false
 	}
 	expectedFieldOwner := pkgssa.FieldOwnerFor(rbd.Name, authorizationv1alpha1.RestrictedBindDefinitionKind)
-	for _, field := range existing.ManagedFields {
-		if field.Manager == expectedFieldOwner && field.Operation == metav1.ManagedFieldsOperationApply {
-			return true
-		}
-	}
-	return false
+	return pkgssa.ManagedBy(existing, expectedFieldOwner, metav1.ManagedFieldsOperationApply)
 }
 
 func (r *RestrictedBindDefinitionReconciler) rbdHasLiveGeneratedServiceAccountStatus(
