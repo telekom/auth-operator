@@ -373,6 +373,50 @@ var _ = Describe("Generic Applier", func() {
 			Expect(cm.Labels).To(Equal(map[string]string{"app": "third-party", "foreign": "keep"}))
 		})
 
+		It("does not persist label pruning for dry-run applies", func() {
+			name := "generic-third-party-prune-dryrun-cm"
+			labels := map[string]string{"app": "third-party", "legacy.example.com/owned": "true"}
+			cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+				Name: name, Namespace: genericTestNamespace, Labels: labels,
+			}}
+			Expect(k8sClient.Create(testCtx, cm)).To(Succeed())
+
+			applier := configMapApplier
+			applier.ShouldPruneLabel = func(key string) bool { return key == "legacy.example.com/owned" }
+			_, err := applier.PatchApply(testCtx, k8sClient, desired(name, nil), false,
+				client.FieldOwner(owner), client.DryRunAll)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(k8sClient.Get(testCtx, types.NamespacedName{Name: name, Namespace: genericTestNamespace}, cm)).To(Succeed())
+			Expect(cm.Labels).To(Equal(labels))
+		})
+
+		It("still applies to prune owned fields after pruning labels", func() {
+			name := "generic-third-party-prune-owned-cm"
+			_, err := configMapApplier.PatchApply(testCtx, k8sClient, desired(name, map[string]string{"a": "1", "b": "2"}), false,
+				client.FieldOwner(owner))
+			Expect(err).NotTo(HaveOccurred())
+			cm := &corev1.ConfigMap{}
+			key := types.NamespacedName{Name: name, Namespace: genericTestNamespace}
+			Expect(k8sClient.Get(testCtx, key, cm)).To(Succeed())
+			orig := cm.DeepCopy()
+			cm.Labels["legacy.example.com/owned"] = "true"
+			Expect(k8sClient.Patch(testCtx, cm, client.MergeFrom(orig))).To(Succeed())
+
+			applier := configMapApplier
+			applier.ShouldPruneLabel = func(key string) bool { return key == "legacy.example.com/owned" }
+			counting := &applyCountingClient{Client: k8sClient}
+			result, err := applier.PatchApply(testCtx, counting, desired(name, map[string]string{"a": "1"}), false,
+				client.FieldOwner(owner))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+			Expect(counting.applyCalls).To(Equal(1))
+
+			Expect(k8sClient.Get(testCtx, key, cm)).To(Succeed())
+			Expect(cm.Labels).To(Equal(map[string]string{"app": "third-party"}))
+			Expect(cm.Data).To(Equal(map[string]string{"a": "1"}))
+		})
+
 		It("validates the apply configuration and field owner", func() {
 			_, err := configMapApplier.PatchApply(testCtx, k8sClient, nil, false, client.FieldOwner(owner))
 			Expect(err).To(MatchError("configMap ApplyConfiguration must have a name"))

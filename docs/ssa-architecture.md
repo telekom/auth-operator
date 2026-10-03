@@ -190,7 +190,10 @@ For a descriptor `Applier[T, AC]`, `PatchApply(ctx, c, ac, alwaysApply, opts...)
    `client.FieldOwner` in `opts`.
 2. Gets the live object; if it is missing, applies and returns `created`.
 3. Optionally prunes stale labels selected by `ShouldPruneLabel` with a
-   JSON merge patch (used for labels a previous field manager owned).
+   JSON merge patch (used for labels a previous field manager owned). The
+   patch honours dry-run. If the object then matches and the ownership
+   policy allows a skip, the unforced apply is not sent and `patched` is
+   returned.
 4. Skips (`skipped`, no API call) only when all of the following hold:
    - `Matches(existing, ac)` reports that every desired value is present,
    - `alwaysApply` is false,
@@ -202,6 +205,8 @@ For a descriptor `Applier[T, AC]`, `PatchApply(ctx, c, ac, alwaysApply, opts...)
      unforced applies on value equality alone. Dry-run applies that check
      ownership are never skipped.
 5. Otherwise applies (through `PrepareApply` when set) and returns `patched`.
+   `PrepareApply` may only canonicalize the configuration (sort lists, fill
+   API defaults): the skip decision uses the unprepared configuration.
 
 | Descriptor | Ownership | Hooks |
 |------------|-----------|-------|
