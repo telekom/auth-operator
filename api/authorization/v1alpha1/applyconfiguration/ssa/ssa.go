@@ -9,11 +9,9 @@ package ssa
 
 import (
 	"context"
-	"fmt"
 
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	metav1ac "k8s.io/client-go/applyconfigurations/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -23,17 +21,6 @@ import (
 
 // FieldOwner is the field manager name for the auth-operator controller.
 const FieldOwner = "auth-operator"
-
-// applyStatus applies a typed ApplyConfiguration to the status subresource
-// using the native controller-runtime SubResource("status").Apply() API.
-// This uses Server-Side Apply without any unstructured conversion or workarounds.
-func applyStatus(ctx context.Context, c client.Client, applyConfig runtime.ApplyConfiguration) error {
-	if applyConfig == nil {
-		return fmt.Errorf("applyConfig must not be nil")
-	}
-
-	return c.SubResource("status").Apply(ctx, applyConfig, client.FieldOwner(FieldOwner), client.ForceOwnership)
-}
 
 // ApplyRoleDefinitionStatus applies a status update to a RoleDefinition using native SSA.
 // It delegates to PatchApplyRoleDefinitionStatus which compares against the cache first
