@@ -168,6 +168,88 @@ with `With*()` builder methods for SSA compatibility.
 
 ---
 
+## Skip-if-Unchanged Apply (Generic `Applier`)
+
+Sending an SSA apply for every managed object on every reconcile produces
+thousands of no-op PATCH requests in large clusters. `pkg/ssa` therefore reads
+the live object (normally from the informer cache) and only applies when it
+must. The decision is implemented once by the generic `ssa.Applier` and
+`ssa.StatusApplier` types; the exported `PatchApply*` functions
+(`PatchApplyClusterRole`, `PatchApplyRoleBinding`, `PatchApplyServiceAccount`,
+`PatchApply<CRD>Status`, ...) are thin wrappers over predefined descriptors.
+
+`pkg/ssa` imports only the Go standard library, apimachinery, client-go and
+controller-runtime, so other operators (for example
+[k8s-breakglass](https://github.com/telekom/k8s-breakglass)) can reuse it.
+
+### Apply Decision
+
+For a descriptor `Applier[T, AC]`, `PatchApply(ctx, c, ac, alwaysApply, opts...)`:
+
+1. Validates the name (and namespace when `Namespaced`) and requires a
+   `client.FieldOwner` in `opts`.
+2. Gets the live object; if it is missing, applies and returns `created`.
+3. Optionally prunes stale labels selected by `ShouldPruneLabel` with a
+   JSON merge patch (used for labels a previous field manager owned).
+4. Skips (`skipped`, no API call) only when all of the following hold:
+   - `Matches(existing, ac)` reports that every desired value is present,
+   - `alwaysApply` is false,
+   - `ac` carries no `uid`/`resourceVersion` precondition,
+   - the `Ownership` policy allows it: the field manager's owned fields
+     (`Extract(existing, manager)`) must equal the desired fields for forced
+     applies, and must be a subset of them for unforced applies (otherwise
+     SSA still needs to prune a field). `OwnershipExactWhenForced` skips
+     unforced applies on value equality alone. Dry-run applies that check
+     ownership are never skipped.
+5. Otherwise applies (through `PrepareApply` when set) and returns `patched`.
+
+| Descriptor | Ownership | Hooks |
+|------------|-----------|-------|
+| ClusterRole | `OwnershipExactWhenForced` | RBAC field normalization, optional label pruning |
+| Role | `OwnershipExactWhenForced` | RBAC field normalization |
+| ClusterRoleBinding / RoleBinding | `OwnershipExactOrSubset` | RBAC field normalization, subject/ownerRef canonicalization before apply |
+| ServiceAccount | `OwnershipExactOrSubset` | create conflicts require a requeue |
+
+### Defining a Descriptor in Another Operator
+
+```go
+import (
+    corev1 "k8s.io/api/core/v1"
+    corev1ac "k8s.io/client-go/applyconfigurations/core/v1"
+    "github.com/telekom/auth-operator/pkg/ssa"
+)
+
+var configMapApplier = ssa.Applier[*corev1.ConfigMap, *corev1ac.ConfigMapApplyConfiguration]{
+    Kind:       "ConfigMap",
+    Namespaced: true,
+    New:        func() *corev1.ConfigMap { return &corev1.ConfigMap{} },
+    Matches: func(existing *corev1.ConfigMap, desired *corev1ac.ConfigMapApplyConfiguration) bool {
+        return maps.Equal(existing.Data, desired.Data)
+    },
+    Extract: corev1ac.ExtractConfigMap,
+    // Ownership defaults to OwnershipExactOrSubset.
+}
+
+result, err := configMapApplier.PatchApply(ctx, c, desiredAC, false,
+    client.FieldOwner("my-operator"), client.ForceOwnership)
+```
+
+`Matches` must compare only the fields the descriptor declares; `Extract` is
+the client-go or applyconfiguration-gen `Extract<Kind>` function. Build a fresh
+apply configuration for every call: `client.Apply` writes the server response
+(including `resourceVersion` and `uid`) back into it, which `PatchApply` would
+then treat as a precondition.
+
+Status subresources use `ssa.StatusApplier[T, AC]` with `New`, `Equal`,
+`ApplyConfiguration` and `FieldOwner` (and an optional `BeforeApply` hook).
+It skips the apply when `Equal(cached, desired)` holds and otherwise applies
+the status with `ForceOwnership`. `ssa.ManagedBy(obj, manager, operation)`
+reports whether a field manager has a `managedFields` entry for an operation.
+
+A runnable example lives in `pkg/ssa/example_test.go`.
+
+---
+
 ## Finalizer Management (MergePatch with Optimistic Lock)
 
 Finalizers are **not** managed via SSA. Instead, they use `client.Patch()` with

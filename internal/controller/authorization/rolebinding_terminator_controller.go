@@ -34,6 +34,7 @@ import (
 	conditions "github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/discovery"
 	"github.com/telekom/auth-operator/pkg/metrics"
+	pkgssa "github.com/telekom/auth-operator/pkg/ssa"
 )
 
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions,verbs=get;list
@@ -450,7 +451,7 @@ func (r *RoleBindingTerminator) applyNamespaceTerminationStatus(ctx context.Cont
 		return nil
 	}
 	ac := corev1ac.Namespace(namespace.Name).WithStatus(corev1ac.NamespaceStatus().WithConditions(condAC))
-	if err := r.client.SubResource("status").Apply(ctx, ac, client.FieldOwner("auth-operator"), client.ForceOwnership); err != nil {
+	if err := pkgssa.ApplyStatus(ctx, r.client, ac, pkgssa.FieldOwner); err != nil {
 		return fmt.Errorf("apply Namespace %s status: %w", namespace.Name, err)
 	}
 	return nil

@@ -12,135 +12,94 @@
 //
 // In clusters with many managed RBAC resources, this eliminates thousands of
 // no-op PATCH requests per reconciliation cycle.
+//
+// The exported PatchApply* functions are thin wrappers over the generic
+// Applier configured with the RBAC and ServiceAccount descriptors below.
 package ssa
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"reflect"
 	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	corev1ac "k8s.io/client-go/applyconfigurations/core/v1"
 	metav1ac "k8s.io/client-go/applyconfigurations/meta/v1"
 	rbacv1ac "k8s.io/client-go/applyconfigurations/rbac/v1"
-	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-// PatchApplyResult indicates the outcome of a patch-or-skip operation.
-type PatchApplyResult int
-
-const (
-	// PatchApplyResultSkipped means the resource was already up-to-date (no API call made).
-	PatchApplyResultSkipped PatchApplyResult = iota
-	// PatchApplyResultCreated means the resource did not exist and was created via SSA.
-	PatchApplyResultCreated
-	// PatchApplyResultPatched means the resource existed but differed and was patched via SSA.
-	PatchApplyResultPatched
-)
-
-// String returns a human-readable label for the result.
-func (r PatchApplyResult) String() string {
-	switch r {
-	case PatchApplyResultSkipped:
-		return "skipped"
-	case PatchApplyResultCreated:
-		return "created"
-	case PatchApplyResultPatched:
-		return "patched"
-	default:
-		return "unknown"
+var (
+	clusterRoleApplier = Applier[*rbacv1.ClusterRole, *rbacv1ac.ClusterRoleApplyConfiguration]{
+		Kind:            "ClusterRole",
+		New:             func() *rbacv1.ClusterRole { return &rbacv1.ClusterRole{} },
+		Matches:         clusterRoleMatches,
+		Extract:         rbacv1ac.ExtractClusterRole,
+		Ownership:       OwnershipExactWhenForced,
+		NormalizeFields: normalizeRBACApplyFields,
+		Labels:          func(ac *rbacv1ac.ClusterRoleApplyConfiguration) map[string]string { return ac.Labels },
 	}
-}
-
-func applyOptionsForceOwnership(opts []client.ApplyOption) bool {
-	applyOpts := (&client.ApplyOptions{}).ApplyOptions(opts)
-	return applyOpts.Force != nil && *applyOpts.Force
-}
-
-// applyFieldsOwned reports whether the current field manager owns exactly the
-// fields declared in the desired configuration. Extra owned fields must be applied
-// again so SSA can prune them; missing or unparseable ownership cannot be skipped.
-func applyFieldsOwned(owned, desired any) bool {
-	ownedFields, desiredFields, ok := applyFieldMaps(owned, desired)
-	if !ok {
-		return false
+	roleApplier = Applier[*rbacv1.Role, *rbacv1ac.RoleApplyConfiguration]{
+		Kind:            "Role",
+		Namespaced:      true,
+		New:             func() *rbacv1.Role { return &rbacv1.Role{} },
+		Matches:         roleMatches,
+		Extract:         rbacv1ac.ExtractRole,
+		Ownership:       OwnershipExactWhenForced,
+		NormalizeFields: normalizeRBACApplyFields,
 	}
-	return reflect.DeepEqual(ownedFields, desiredFields)
-}
-
-func applyFieldsSubset(owned, desired any) bool {
-	ownedFields, desiredFields, ok := applyFieldMaps(owned, desired)
-	if !ok {
-		return false
-	}
-	return applyFieldMapSubset(ownedFields, desiredFields)
-}
-
-// bindingOwnershipAllowsSkip reports whether an unchanged binding can skip SSA.
-// Forced applies reclaim fields, so they skip only when the field manager
-// already owns exactly the desired fields. Unforced applies never reclaim, so
-// they skip unless the field manager still owns a field that must be pruned.
-func bindingOwnershipAllowsSkip(owned, desired any, force bool) bool {
-	if force {
-		return applyFieldsOwned(owned, desired)
-	}
-	return applyFieldsSubset(owned, desired)
-}
-
-func applyFieldMapSubset(owned, desired map[string]any) bool {
-	for key, value := range owned {
-		target, ok := desired[key]
-		if !ok {
-			return false
-		}
-		if nested, ok := value.(map[string]any); ok {
-			targetNested, ok := target.(map[string]any)
-			if !ok || !applyFieldMapSubset(nested, targetNested) {
-				return false
+	clusterRoleBindingApplier = Applier[*rbacv1.ClusterRoleBinding, *rbacv1ac.ClusterRoleBindingApplyConfiguration]{
+		Kind:            "ClusterRoleBinding",
+		New:             func() *rbacv1.ClusterRoleBinding { return &rbacv1.ClusterRoleBinding{} },
+		Matches:         clusterRoleBindingMatches,
+		Extract:         rbacv1ac.ExtractClusterRoleBinding,
+		Ownership:       OwnershipExactOrSubset,
+		NormalizeFields: normalizeRBACApplyFields,
+		PrepareApply: func(ac *rbacv1ac.ClusterRoleBindingApplyConfiguration) (*rbacv1ac.ClusterRoleBindingApplyConfiguration, error) {
+			clone, err := cloneApplyConfiguration(ac)
+			if err != nil {
+				return nil, err
 			}
-		} else if !reflect.DeepEqual(value, target) {
-			return false
-		}
+			return clone, normalizeBindingApplyConfiguration(clone.Subjects, clone.ObjectMetaApplyConfiguration)
+		},
 	}
-	return true
+	roleBindingApplier = Applier[*rbacv1.RoleBinding, *rbacv1ac.RoleBindingApplyConfiguration]{
+		Kind:            "RoleBinding",
+		Namespaced:      true,
+		New:             func() *rbacv1.RoleBinding { return &rbacv1.RoleBinding{} },
+		Matches:         roleBindingMatches,
+		Extract:         rbacv1ac.ExtractRoleBinding,
+		Ownership:       OwnershipExactOrSubset,
+		NormalizeFields: normalizeRBACApplyFields,
+		PrepareApply: func(ac *rbacv1ac.RoleBindingApplyConfiguration) (*rbacv1ac.RoleBindingApplyConfiguration, error) {
+			clone, err := cloneApplyConfiguration(ac)
+			if err != nil {
+				return nil, err
+			}
+			return clone, normalizeBindingApplyConfiguration(clone.Subjects, clone.ObjectMetaApplyConfiguration)
+		},
+	}
+	serviceAccountApplier = Applier[*corev1.ServiceAccount, *corev1ac.ServiceAccountApplyConfiguration]{
+		Kind:                    "ServiceAccount",
+		Namespaced:              true,
+		New:                     func() *corev1.ServiceAccount { return &corev1.ServiceAccount{} },
+		Matches:                 serviceAccountMatches,
+		Extract:                 corev1ac.ExtractServiceAccount,
+		Ownership:               OwnershipExactOrSubset,
+		RequeueOnCreateConflict: true,
+	}
+)
+
+func withFieldOwner(opts []client.ApplyOption) []client.ApplyOption {
+	return append([]client.ApplyOption{client.FieldOwner(FieldOwner)}, opts...)
 }
 
-func applyFieldMaps(owned, desired any) (ownedFields, desiredFields map[string]any, ok bool) {
-	ownedJSON, err := json.Marshal(owned)
-	if err != nil {
-		return nil, nil, false
-	}
-	desiredJSON, err := json.Marshal(desired)
-	if err != nil {
-		return nil, nil, false
-	}
-	if json.Unmarshal(ownedJSON, &ownedFields) != nil || json.Unmarshal(desiredJSON, &desiredFields) != nil {
-		return nil, nil, false
-	}
-	normalizeBindingApplyFields(ownedFields)
-	normalizeBindingApplyFields(desiredFields)
-	return ownedFields, desiredFields, true
-}
-
-func normalizeBindingApplyFields(fields map[string]any) {
-	if metadata, ok := fields["metadata"].(map[string]any); ok {
-		for _, key := range []string{"uid", "resourceVersion", "creationTimestamp", "generation", "managedFields"} {
-			delete(metadata, key)
-		}
-		if refs, ok := metadata["ownerReferences"].([]any); ok {
-			sortApplyList(refs)
-			metadata["ownerReferences"] = refs
-		}
-	}
+// normalizeRBACApplyFields canonicalizes RBAC lists the API server treats as
+// unordered so managed-field comparisons are order-insensitive.
+func normalizeRBACApplyFields(fields map[string]any) {
 	if subjects, ok := fields["subjects"].([]any); ok {
 		for _, subject := range subjects {
 			subjectFields, ok := subject.(map[string]any)
@@ -159,44 +118,25 @@ func normalizeBindingApplyFields(fields map[string]any) {
 				subjectFields["apiGroup"] = rbacv1.GroupName
 			}
 		}
-		sortApplyList(subjects)
-		fields["subjects"] = subjects
+		_ = sortByJSON(subjects)
 	}
 	if rules, ok := fields["rules"].([]any); ok {
 		for _, rule := range rules {
 			if value, ok := rule.(map[string]any); ok {
 				for _, key := range []string{"verbs", "apiGroups", "resources", "resourceNames", "nonResourceURLs"} {
 					if entries, ok := value[key].([]any); ok {
-						sortApplyList(entries)
+						_ = sortByJSON(entries)
 					}
 				}
 			}
 		}
-		sortApplyList(rules)
+		_ = sortByJSON(rules)
 	}
 }
 
-func sortApplyList(items []any) {
-	type keyedItem struct {
-		key   string
-		value any
-	}
-	keyed := make([]keyedItem, len(items))
-	for i, item := range items {
-		encoded, err := json.Marshal(item)
-		if err != nil {
-			return
-		}
-		keyed[i] = keyedItem{key: string(encoded), value: item}
-	}
-	slices.SortFunc(keyed, func(a, b keyedItem) int {
-		return strings.Compare(a.key, b.key)
-	})
-	for i := range keyed {
-		items[i] = keyed[i].value
-	}
-}
-
+// normalizeBindingApplyConfiguration canonicalizes binding subjects and owner
+// references. RBAC subjects are an atomic SSA list, so the whole list is sorted
+// without changing its ownership granularity.
 func normalizeBindingApplyConfiguration(
 	subjects []rbacv1ac.SubjectApplyConfiguration,
 	metadata *metav1ac.ObjectMetaApplyConfiguration,
@@ -208,87 +148,15 @@ func normalizeBindingApplyConfiguration(
 			subject.WithAPIGroup(rbacv1.GroupName)
 		}
 	}
-	if err := sortApplyConfigurations(subjects); err != nil {
+	if err := sortByJSON(subjects); err != nil {
 		return fmt.Errorf("sort binding subjects: %w", err)
 	}
 	if metadata != nil {
-		if err := sortApplyConfigurations(metadata.OwnerReferences); err != nil {
+		if err := sortByJSON(metadata.OwnerReferences); err != nil {
 			return fmt.Errorf("sort binding owner references: %w", err)
 		}
 	}
 	return nil
-}
-
-func sortApplyConfigurations[T any](items []T) error {
-	type keyedItem struct {
-		key   string
-		value T
-	}
-	keyed := make([]keyedItem, len(items))
-	for i, item := range items {
-		encoded, err := json.Marshal(item)
-		if err != nil {
-			return fmt.Errorf("marshal ApplyConfiguration list item: %w", err)
-		}
-		keyed[i] = keyedItem{key: string(encoded), value: item}
-	}
-	slices.SortFunc(keyed, func(a, b keyedItem) int {
-		return strings.Compare(a.key, b.key)
-	})
-	for i := range keyed {
-		items[i] = keyed[i].value
-	}
-	return nil
-}
-
-func bindingApplyHasPreconditions(uid *types.UID, resourceVersion *string) bool {
-	return uid != nil || resourceVersion != nil
-}
-
-func cloneApplyConfiguration[T any](ac *T) (*T, error) {
-	data, err := json.Marshal(ac)
-	if err != nil {
-		return nil, fmt.Errorf("marshal ApplyConfiguration: %w", err)
-	}
-	clone := new(T)
-	if err := json.Unmarshal(data, clone); err != nil {
-		return nil, fmt.Errorf("unmarshal ApplyConfiguration: %w", err)
-	}
-	return clone, nil
-}
-
-func applyClusterRoleBinding(
-	ctx context.Context,
-	c client.Client,
-	ac *rbacv1ac.ClusterRoleBindingApplyConfiguration,
-	opts ...client.ApplyOption,
-) error {
-	clone, err := cloneApplyConfiguration(ac)
-	if err != nil {
-		return err
-	}
-	// RBAC subjects are an atomic SSA list. Canonicalize the whole list without
-	// changing its ownership granularity or sorting any semantically ordered data.
-	if err := normalizeBindingApplyConfiguration(clone.Subjects, clone.ObjectMetaApplyConfiguration); err != nil {
-		return err
-	}
-	return c.Apply(ctx, clone, opts...)
-}
-
-func applyRoleBinding(
-	ctx context.Context,
-	c client.Client,
-	ac *rbacv1ac.RoleBindingApplyConfiguration,
-	opts ...client.ApplyOption,
-) error {
-	clone, err := cloneApplyConfiguration(ac)
-	if err != nil {
-		return err
-	}
-	if err := normalizeBindingApplyConfiguration(clone.Subjects, clone.ObjectMetaApplyConfiguration); err != nil {
-		return err
-	}
-	return c.Apply(ctx, clone, opts...)
 }
 
 // PatchApplyClusterRole reads the current ClusterRole from cache, compares it to
@@ -301,7 +169,7 @@ func PatchApplyClusterRole(
 	ac *rbacv1ac.ClusterRoleApplyConfiguration,
 	opts ...client.ApplyOption,
 ) (PatchApplyResult, error) {
-	return patchApplyClusterRole(ctx, c, ac, nil, false, opts...)
+	return clusterRoleApplier.PatchApply(ctx, c, ac, false, withFieldOwner(opts)...)
 }
 
 // PatchApplyClusterRoleAlways behaves like PatchApplyClusterRole but sends the
@@ -313,7 +181,7 @@ func PatchApplyClusterRoleAlways(
 	ac *rbacv1ac.ClusterRoleApplyConfiguration,
 	opts ...client.ApplyOption,
 ) (PatchApplyResult, error) {
-	return patchApplyClusterRole(ctx, c, ac, nil, true, opts...)
+	return clusterRoleApplier.PatchApply(ctx, c, ac, true, withFieldOwner(opts)...)
 }
 
 // PatchApplyClusterRolePruningLabels behaves like PatchApplyClusterRole, but it
@@ -327,7 +195,9 @@ func PatchApplyClusterRolePruningLabels(
 	shouldPruneLabel func(string) bool,
 	opts ...client.ApplyOption,
 ) (PatchApplyResult, error) {
-	return patchApplyClusterRole(ctx, c, ac, shouldPruneLabel, false, opts...)
+	applier := clusterRoleApplier
+	applier.ShouldPruneLabel = shouldPruneLabel
+	return applier.PatchApply(ctx, c, ac, false, withFieldOwner(opts)...)
 }
 
 // PatchApplyClusterRolePruningLabelsAlways combines protected-label pruning
@@ -339,128 +209,9 @@ func PatchApplyClusterRolePruningLabelsAlways(
 	shouldPruneLabel func(string) bool,
 	opts ...client.ApplyOption,
 ) (PatchApplyResult, error) {
-	return patchApplyClusterRole(ctx, c, ac, shouldPruneLabel, true, opts...)
-}
-
-func patchApplyClusterRole(
-	ctx context.Context,
-	c client.Client,
-	ac *rbacv1ac.ClusterRoleApplyConfiguration,
-	shouldPruneLabel func(string) bool,
-	alwaysApply bool,
-	opts ...client.ApplyOption,
-) (PatchApplyResult, error) {
-	if ac == nil || ac.Name == nil {
-		return 0, fmt.Errorf("clusterRole ApplyConfiguration must have a name")
-	}
-	if *ac.Name == "" {
-		return 0, fmt.Errorf("clusterRole ApplyConfiguration name must not be empty")
-	}
-
-	logger := log.FromContext(ctx)
-
-	applyOpts := append([]client.ApplyOption{client.FieldOwner(FieldOwner)}, opts...)
-
-	existing, created, err := getOrCreateClusterRole(ctx, c, ac, applyOpts)
-	if err != nil {
-		return 0, err
-	}
-	if created {
-		return PatchApplyResultCreated, nil
-	}
-
-	prunedLabels, err := pruneClusterRoleLabels(ctx, c, existing, ac.Labels, shouldPruneLabel)
-	if err != nil {
-		return 0, err
-	}
-
-	// Compare managed fields: labels, annotations, rules.
-	forceOwnership := applyOptionsForceOwnership(applyOpts)
-	if clusterRoleMatches(existing, ac) && !prunedLabels && !alwaysApply &&
-		canSkipClusterRoleApply(existing, ac, applyOpts, forceOwnership) {
-		logger.V(3).Info("ClusterRole unchanged, skipping SSA apply",
-			"clusterRole", *ac.Name)
-		return PatchApplyResultSkipped, nil
-	}
-	if clusterRoleMatches(existing, ac) && prunedLabels && !alwaysApply && !forceOwnership {
-		return PatchApplyResultPatched, nil
-	}
-
-	if applyErr := c.Apply(ctx, ac, applyOpts...); applyErr != nil {
-		if prunedLabels && apierrors.IsConflict(applyErr) {
-			patched, retryErr := patchApplyClusterRoleAfterPruneConflict(ctx, c, ac, applyOpts, shouldPruneLabel)
-			if patched {
-				return PatchApplyResultPatched, nil
-			}
-			if retryErr != nil {
-				applyErr = retryErr
-			}
-		}
-		return 0, fmt.Errorf("patch ClusterRole %s: %w", *ac.Name, applyErr)
-	}
-	return PatchApplyResultPatched, nil
-}
-
-func canSkipClusterRoleApply(
-	existing *rbacv1.ClusterRole,
-	ac *rbacv1ac.ClusterRoleApplyConfiguration,
-	opts []client.ApplyOption,
-	forceOwnership bool,
-) bool {
-	if bindingApplyHasPreconditions(ac.UID, ac.ResourceVersion) {
-		return false
-	}
-	if !forceOwnership {
-		return true
-	}
-	options := (&client.ApplyOptions{}).ApplyOptions(opts)
-	if len(options.DryRun) != 0 {
-		return false
-	}
-	owned, err := rbacv1ac.ExtractClusterRole(existing, options.FieldManager)
-	return err == nil && applyFieldsOwned(owned, ac)
-}
-
-func getOrCreateClusterRole(
-	ctx context.Context,
-	c client.Client,
-	ac *rbacv1ac.ClusterRoleApplyConfiguration,
-	applyOpts []client.ApplyOption,
-) (*rbacv1.ClusterRole, bool, error) {
-	existing := &rbacv1.ClusterRole{}
-	err := c.Get(ctx, types.NamespacedName{Name: *ac.Name}, existing)
-	if err == nil {
-		return existing, false, nil
-	}
-	if !apierrors.IsNotFound(err) {
-		return nil, false, fmt.Errorf("get ClusterRole %s: %w", *ac.Name, err)
-	}
-	if applyErr := c.Apply(ctx, ac, applyOpts...); applyErr != nil {
-		return nil, false, fmt.Errorf("create ClusterRole %s: %w", *ac.Name, applyErr)
-	}
-	return nil, true, nil
-}
-
-func patchApplyClusterRoleAfterPruneConflict(
-	ctx context.Context,
-	c client.Client,
-	ac *rbacv1ac.ClusterRoleApplyConfiguration,
-	applyOpts []client.ApplyOption,
-	shouldPruneLabel func(string) bool,
-) (bool, error) {
-	applyErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		return c.Apply(ctx, ac, applyOpts...)
-	})
-	if applyErr == nil {
-		return true, nil
-	}
-	latest := &rbacv1.ClusterRole{}
-	if getErr := c.Get(ctx, types.NamespacedName{Name: *ac.Name}, latest); getErr == nil &&
-		clusterRoleMatches(latest, ac) &&
-		!hasPrunableClusterRoleLabel(latest.Labels, ac.Labels, shouldPruneLabel) {
-		return true, nil
-	}
-	return false, applyErr
+	applier := clusterRoleApplier
+	applier.ShouldPruneLabel = shouldPruneLabel
+	return applier.PatchApply(ctx, c, ac, true, withFieldOwner(opts)...)
 }
 
 // PatchApplyRole reads the current Role from cache, compares it to the desired
@@ -472,7 +223,7 @@ func PatchApplyRole(
 	ac *rbacv1ac.RoleApplyConfiguration,
 	opts ...client.ApplyOption,
 ) (PatchApplyResult, error) {
-	return patchApplyRole(ctx, c, ac, false, opts...)
+	return roleApplier.PatchApply(ctx, c, ac, false, withFieldOwner(opts)...)
 }
 
 // PatchApplyRoleAlways behaves like PatchApplyRole but sends the SSA apply
@@ -483,62 +234,7 @@ func PatchApplyRoleAlways(
 	ac *rbacv1ac.RoleApplyConfiguration,
 	opts ...client.ApplyOption,
 ) (PatchApplyResult, error) {
-	return patchApplyRole(ctx, c, ac, true, opts...)
-}
-
-func patchApplyRole(
-	ctx context.Context,
-	c client.Client,
-	ac *rbacv1ac.RoleApplyConfiguration,
-	alwaysApply bool,
-	opts ...client.ApplyOption,
-) (PatchApplyResult, error) {
-	if ac == nil || ac.Name == nil {
-		return 0, fmt.Errorf("role ApplyConfiguration must have a name")
-	}
-	if *ac.Name == "" {
-		return 0, fmt.Errorf("role ApplyConfiguration name must not be empty")
-	}
-	if ac.Namespace == nil || *ac.Namespace == "" {
-		return 0, fmt.Errorf("role ApplyConfiguration must have a namespace")
-	}
-
-	logger := log.FromContext(ctx)
-
-	applyOpts := append([]client.ApplyOption{client.FieldOwner(FieldOwner)}, opts...)
-
-	existing := &rbacv1.Role{}
-	err := c.Get(ctx, types.NamespacedName{Name: *ac.Name, Namespace: *ac.Namespace}, existing)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			if applyErr := c.Apply(ctx, ac, applyOpts...); applyErr != nil {
-				return 0, fmt.Errorf("create Role %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
-			}
-			return PatchApplyResultCreated, nil
-		}
-		return 0, fmt.Errorf("get Role %s/%s: %w", *ac.Namespace, *ac.Name, err)
-	}
-
-	if roleMatches(existing, ac) && !alwaysApply && !bindingApplyHasPreconditions(ac.UID, ac.ResourceVersion) {
-		skip := !applyOptionsForceOwnership(applyOpts)
-		if !skip {
-			options := (&client.ApplyOptions{}).ApplyOptions(applyOpts)
-			if len(options.DryRun) == 0 {
-				owned, extractErr := rbacv1ac.ExtractRole(existing, options.FieldManager)
-				skip = extractErr == nil && applyFieldsOwned(owned, ac)
-			}
-		}
-		if skip {
-			logger.V(3).Info("Role unchanged, skipping SSA apply",
-				"role", *ac.Name, "namespace", *ac.Namespace)
-			return PatchApplyResultSkipped, nil
-		}
-	}
-
-	if applyErr := c.Apply(ctx, ac, applyOpts...); applyErr != nil {
-		return 0, fmt.Errorf("patch Role %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
-	}
-	return PatchApplyResultPatched, nil
+	return roleApplier.PatchApply(ctx, c, ac, true, withFieldOwner(opts)...)
 }
 
 // PatchApplyClusterRoleBinding reads the current CRB from cache, compares it to
@@ -550,7 +246,7 @@ func PatchApplyClusterRoleBinding(
 	ac *rbacv1ac.ClusterRoleBindingApplyConfiguration,
 	opts ...client.ApplyOption,
 ) (PatchApplyResult, error) {
-	return patchApplyClusterRoleBinding(ctx, c, ac, false, opts...)
+	return clusterRoleBindingApplier.PatchApply(ctx, c, ac, false, withFieldOwner(opts)...)
 }
 
 // PatchApplyClusterRoleBindingAlways behaves like PatchApplyClusterRoleBinding
@@ -561,58 +257,7 @@ func PatchApplyClusterRoleBindingAlways(
 	ac *rbacv1ac.ClusterRoleBindingApplyConfiguration,
 	opts ...client.ApplyOption,
 ) (PatchApplyResult, error) {
-	return patchApplyClusterRoleBinding(ctx, c, ac, true, opts...)
-}
-
-func patchApplyClusterRoleBinding(
-	ctx context.Context,
-	c client.Client,
-	ac *rbacv1ac.ClusterRoleBindingApplyConfiguration,
-	alwaysApply bool,
-	opts ...client.ApplyOption,
-) (PatchApplyResult, error) {
-	if ac == nil || ac.Name == nil {
-		return 0, fmt.Errorf("clusterRoleBinding ApplyConfiguration must have a name")
-	}
-	if *ac.Name == "" {
-		return 0, fmt.Errorf("clusterRoleBinding ApplyConfiguration name must not be empty")
-	}
-
-	logger := log.FromContext(ctx)
-
-	applyOpts := append([]client.ApplyOption{client.FieldOwner(FieldOwner)}, opts...)
-
-	existing := &rbacv1.ClusterRoleBinding{}
-	err := c.Get(ctx, types.NamespacedName{Name: *ac.Name}, existing)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			if applyErr := applyClusterRoleBinding(ctx, c, ac, applyOpts...); applyErr != nil {
-				return 0, fmt.Errorf("create ClusterRoleBinding %s: %w", *ac.Name, applyErr)
-			}
-			return PatchApplyResultCreated, nil
-		}
-		return 0, fmt.Errorf("get ClusterRoleBinding %s: %w", *ac.Name, err)
-	}
-
-	if clusterRoleBindingMatches(existing, ac) && !alwaysApply &&
-		!bindingApplyHasPreconditions(ac.UID, ac.ResourceVersion) {
-		options := (&client.ApplyOptions{}).ApplyOptions(applyOpts)
-		skip := false
-		if len(options.DryRun) == 0 {
-			owned, extractErr := rbacv1ac.ExtractClusterRoleBinding(existing, options.FieldManager)
-			skip = extractErr == nil && bindingOwnershipAllowsSkip(owned, ac, applyOptionsForceOwnership(applyOpts))
-		}
-		if skip {
-			logger.V(3).Info("ClusterRoleBinding unchanged, skipping SSA apply",
-				"clusterRoleBinding", *ac.Name)
-			return PatchApplyResultSkipped, nil
-		}
-	}
-
-	if applyErr := applyClusterRoleBinding(ctx, c, ac, applyOpts...); applyErr != nil {
-		return 0, fmt.Errorf("patch ClusterRoleBinding %s: %w", *ac.Name, applyErr)
-	}
-	return PatchApplyResultPatched, nil
+	return clusterRoleBindingApplier.PatchApply(ctx, c, ac, true, withFieldOwner(opts)...)
 }
 
 // PatchApplyRoleBinding reads the current RB from cache, compares it to the
@@ -624,7 +269,7 @@ func PatchApplyRoleBinding(
 	ac *rbacv1ac.RoleBindingApplyConfiguration,
 	opts ...client.ApplyOption,
 ) (PatchApplyResult, error) {
-	return patchApplyRoleBinding(ctx, c, ac, false, opts...)
+	return roleBindingApplier.PatchApply(ctx, c, ac, false, withFieldOwner(opts)...)
 }
 
 // PatchApplyRoleBindingAlways behaves like PatchApplyRoleBinding but sends the
@@ -635,61 +280,7 @@ func PatchApplyRoleBindingAlways(
 	ac *rbacv1ac.RoleBindingApplyConfiguration,
 	opts ...client.ApplyOption,
 ) (PatchApplyResult, error) {
-	return patchApplyRoleBinding(ctx, c, ac, true, opts...)
-}
-
-func patchApplyRoleBinding(
-	ctx context.Context,
-	c client.Client,
-	ac *rbacv1ac.RoleBindingApplyConfiguration,
-	alwaysApply bool,
-	opts ...client.ApplyOption,
-) (PatchApplyResult, error) {
-	if ac == nil || ac.Name == nil {
-		return 0, fmt.Errorf("roleBinding ApplyConfiguration must have a name")
-	}
-	if *ac.Name == "" {
-		return 0, fmt.Errorf("roleBinding ApplyConfiguration name must not be empty")
-	}
-	if ac.Namespace == nil || *ac.Namespace == "" {
-		return 0, fmt.Errorf("roleBinding ApplyConfiguration must have a namespace")
-	}
-
-	logger := log.FromContext(ctx)
-
-	applyOpts := append([]client.ApplyOption{client.FieldOwner(FieldOwner)}, opts...)
-
-	existing := &rbacv1.RoleBinding{}
-	err := c.Get(ctx, types.NamespacedName{Name: *ac.Name, Namespace: *ac.Namespace}, existing)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			if applyErr := applyRoleBinding(ctx, c, ac, applyOpts...); applyErr != nil {
-				return 0, fmt.Errorf("create RoleBinding %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
-			}
-			return PatchApplyResultCreated, nil
-		}
-		return 0, fmt.Errorf("get RoleBinding %s/%s: %w", *ac.Namespace, *ac.Name, err)
-	}
-
-	if roleBindingMatches(existing, ac) && !alwaysApply &&
-		!bindingApplyHasPreconditions(ac.UID, ac.ResourceVersion) {
-		options := (&client.ApplyOptions{}).ApplyOptions(applyOpts)
-		skip := false
-		if len(options.DryRun) == 0 {
-			owned, extractErr := rbacv1ac.ExtractRoleBinding(existing, options.FieldManager)
-			skip = extractErr == nil && bindingOwnershipAllowsSkip(owned, ac, applyOptionsForceOwnership(applyOpts))
-		}
-		if skip {
-			logger.V(3).Info("RoleBinding unchanged, skipping SSA apply",
-				"roleBinding", *ac.Name, "namespace", *ac.Namespace)
-			return PatchApplyResultSkipped, nil
-		}
-	}
-
-	if applyErr := applyRoleBinding(ctx, c, ac, applyOpts...); applyErr != nil {
-		return 0, fmt.Errorf("patch RoleBinding %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
-	}
-	return PatchApplyResultPatched, nil
+	return roleBindingApplier.PatchApply(ctx, c, ac, true, withFieldOwner(opts)...)
 }
 
 // PatchApplyServiceAccount reads the current SA from cache, compares it to the
@@ -703,7 +294,7 @@ func PatchApplyServiceAccount(
 	ac *corev1ac.ServiceAccountApplyConfiguration,
 	fieldOwner string,
 ) (PatchApplyResult, error) {
-	return patchApplyServiceAccount(ctx, c, ac, fieldOwner, false)
+	return serviceAccountApplier.PatchApply(ctx, c, ac, false, client.FieldOwner(fieldOwner))
 }
 
 // PatchApplyServiceAccountAlways behaves like PatchApplyServiceAccount but
@@ -714,63 +305,7 @@ func PatchApplyServiceAccountAlways(
 	ac *corev1ac.ServiceAccountApplyConfiguration,
 	fieldOwner string,
 ) (PatchApplyResult, error) {
-	return patchApplyServiceAccount(ctx, c, ac, fieldOwner, true)
-}
-
-func patchApplyServiceAccount(
-	ctx context.Context,
-	c client.Client,
-	ac *corev1ac.ServiceAccountApplyConfiguration,
-	fieldOwner string,
-	alwaysApply bool,
-) (PatchApplyResult, error) {
-	if ac == nil || ac.Name == nil {
-		return 0, fmt.Errorf("serviceAccount ApplyConfiguration must have a name")
-	}
-	if *ac.Name == "" {
-		return 0, fmt.Errorf("serviceAccount ApplyConfiguration name must not be empty")
-	}
-	if ac.Namespace == nil || *ac.Namespace == "" {
-		return 0, fmt.Errorf("serviceAccount ApplyConfiguration must have a namespace")
-	}
-	if strings.TrimSpace(fieldOwner) == "" {
-		return 0, fmt.Errorf("fieldOwner must not be empty")
-	}
-
-	logger := log.FromContext(ctx)
-
-	applyOpts := []client.ApplyOption{client.FieldOwner(fieldOwner)}
-
-	existing := &corev1.ServiceAccount{}
-	err := c.Get(ctx, types.NamespacedName{Name: *ac.Name, Namespace: *ac.Namespace}, existing)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			if applyErr := c.Apply(ctx, ac, applyOpts...); applyErr != nil {
-				if apierrors.IsConflict(applyErr) {
-					logger.V(2).Info("ServiceAccount appeared during create apply; requeue required for fresh ownership classification",
-						"serviceAccount", *ac.Name, "namespace", *ac.Namespace)
-					return 0, fmt.Errorf("create ServiceAccount %s/%s conflicted after preflight: %w", *ac.Namespace, *ac.Name, applyErr)
-				}
-				return 0, fmt.Errorf("create ServiceAccount %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
-			}
-			return PatchApplyResultCreated, nil
-		}
-		return 0, fmt.Errorf("get ServiceAccount %s/%s: %w", *ac.Namespace, *ac.Name, err)
-	}
-
-	if serviceAccountMatches(existing, ac) && !alwaysApply {
-		owned, extractErr := corev1ac.ExtractServiceAccount(existing, fieldOwner)
-		if extractErr == nil && applyFieldsSubset(owned, ac) {
-			logger.V(3).Info("ServiceAccount unchanged, skipping SSA apply",
-				"serviceAccount", *ac.Name, "namespace", *ac.Namespace)
-			return PatchApplyResultSkipped, nil
-		}
-	}
-
-	if applyErr := c.Apply(ctx, ac, applyOpts...); applyErr != nil {
-		return 0, fmt.Errorf("patch ServiceAccount %s/%s: %w", *ac.Namespace, *ac.Name, applyErr)
-	}
-	return PatchApplyResultPatched, nil
+	return serviceAccountApplier.PatchApply(ctx, c, ac, true, client.FieldOwner(fieldOwner))
 }
 
 // Comparison helpers — these compare only the fields we own via SSA and ignore
@@ -863,58 +398,6 @@ func mapContains(existing, desired map[string]string) bool {
 		}
 	}
 	return true
-}
-
-func pruneClusterRoleLabels(
-	ctx context.Context,
-	c client.Client,
-	existing *rbacv1.ClusterRole,
-	desired map[string]string,
-	shouldPrune func(string) bool,
-) (bool, error) {
-	if shouldPrune == nil {
-		return false, nil
-	}
-	if len(existing.Labels) == 0 {
-		return false, nil
-	}
-
-	orig := existing.DeepCopy()
-	pruned := false
-	for key := range existing.Labels {
-		if _, stillDesired := desired[key]; stillDesired {
-			continue
-		}
-		if shouldPrune(key) {
-			delete(existing.Labels, key)
-			pruned = true
-		}
-	}
-	if !pruned {
-		return false, nil
-	}
-	if len(existing.Labels) == 0 {
-		existing.Labels = nil
-	}
-	if err := c.Patch(ctx, existing, client.MergeFrom(orig)); err != nil {
-		return false, fmt.Errorf("prune ClusterRole %s labels: %w", existing.Name, err)
-	}
-	return true, nil
-}
-
-func hasPrunableClusterRoleLabel(labels, desired map[string]string, shouldPrune func(string) bool) bool {
-	if shouldPrune == nil {
-		return false
-	}
-	for key := range labels {
-		if _, stillDesired := desired[key]; stillDesired {
-			continue
-		}
-		if shouldPrune(key) {
-			return true
-		}
-	}
-	return false
 }
 
 // ownerRefsMatch checks that all desired OwnerReferences are present in the
