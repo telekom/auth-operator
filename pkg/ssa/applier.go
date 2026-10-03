@@ -101,7 +101,10 @@ type Applier[T client.Object, AC ApplyConfiguration] struct {
 	// Server-populated metadata and owner reference order are always ignored.
 	NormalizeFields func(fields map[string]any)
 	// PrepareApply returns the apply configuration actually sent to the API
-	// server. It must not mutate its argument.
+	// server. Matches, Extract and label pruning see the unprepared
+	// configuration, so PrepareApply may only canonicalize it (e.g. sort lists
+	// or fill API defaults) without changing its semantics. It must not mutate
+	// its argument.
 	PrepareApply func(desired AC) (AC, error)
 	// RequeueOnCreateConflict reports a conflict while creating a missing
 	// object as a dedicated "conflicted after preflight" error, so callers
@@ -146,21 +149,23 @@ func (a Applier[T, AC]) PatchApply(
 		return a.create(ctx, c, ac, target, opts)
 	}
 
-	prunedLabels, err := a.pruneLabels(ctx, c, existing, ac, target.ref)
+	prunedLabels, err := a.pruneLabels(ctx, c, existing, ac, target.ref, options.DryRun)
 	if err != nil {
 		return 0, err
 	}
 
 	force := options.Force != nil && *options.Force
-	matches := a.Matches(existing, ac)
-	if matches && !prunedLabels && !alwaysApply && a.canSkip(existing, ac, options, force) {
+	// Forced applies after a label prune are always sent so they reclaim
+	// ownership on the freshly patched object.
+	if !alwaysApply && (!prunedLabels || !force) && a.Matches(existing, ac) &&
+		a.canSkip(existing, ac, options, force) {
+		if prunedLabels {
+			// The label merge patch already converged an apply that would
+			// otherwise have been skipped.
+			return PatchApplyResultPatched, nil
+		}
 		log.FromContext(ctx).V(3).Info(a.Kind+" unchanged, skipping SSA apply", target.logKV...)
 		return PatchApplyResultSkipped, nil
-	}
-	// The label merge patch already converged an unforced apply that would
-	// otherwise have been skipped.
-	if matches && prunedLabels && !alwaysApply && !force {
-		return PatchApplyResultPatched, nil
 	}
 
 	if applyErr := a.apply(ctx, c, ac, opts); applyErr != nil {
@@ -265,7 +270,14 @@ func (a Applier[T, AC]) canSkip(existing T, ac AC, options *client.ApplyOptions,
 	return applyFieldMapSubset(ownedFields, desiredFields)
 }
 
-func (a Applier[T, AC]) pruneLabels(ctx context.Context, c client.Client, existing T, ac AC, ref string) (bool, error) {
+func (a Applier[T, AC]) pruneLabels(
+	ctx context.Context,
+	c client.Client,
+	existing T,
+	ac AC,
+	ref string,
+	dryRun []string,
+) (bool, error) {
 	if a.ShouldPruneLabel == nil || len(existing.GetLabels()) == 0 {
 		return false, nil
 	}
@@ -291,7 +303,7 @@ func (a Applier[T, AC]) pruneLabels(ctx context.Context, c client.Client, existi
 		labels = nil
 	}
 	existing.SetLabels(labels)
-	if err := c.Patch(ctx, existing, client.MergeFrom(orig)); err != nil {
+	if err := c.Patch(ctx, existing, client.MergeFrom(orig), &client.PatchOptions{DryRun: dryRun}); err != nil {
 		return false, fmt.Errorf("prune %s %s labels: %w", a.Kind, ref, err)
 	}
 	return true, nil
