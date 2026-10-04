@@ -207,6 +207,9 @@ For a descriptor `Applier[T, AC]`, `PatchApply(ctx, c, ac, alwaysApply, opts...)
 5. Otherwise applies (through `PrepareApply` when set) and returns `patched`.
    `PrepareApply` may only canonicalize the configuration (sort lists, fill
    API defaults): the skip decision uses the unprepared configuration.
+   After a label-prune conflict, retries may report convergence only when
+   the same ownership and precondition checks permit skipping. `alwaysApply`
+   conflicts remain errors so authorization boundaries are not bypassed.
 
 | Descriptor | Ownership | Hooks |
 |------------|-----------|-------|
@@ -229,7 +232,13 @@ var configMapApplier = ssa.Applier[*corev1.ConfigMap, *corev1ac.ConfigMapApplyCo
     Namespaced: true,
     New:        func() *corev1.ConfigMap { return &corev1.ConfigMap{} },
     Matches: func(existing *corev1.ConfigMap, desired *corev1ac.ConfigMapApplyConfiguration) bool {
-        return maps.Equal(existing.Data, desired.Data)
+        // Compare only declared keys: SSA keeps foreign-owned data keys.
+        for key, value := range desired.Data {
+            if existing.Data[key] != value {
+                return false
+            }
+        }
+        return true
     },
     Extract: corev1ac.ExtractConfigMap,
     // Ownership defaults to OwnershipExactOrSubset.

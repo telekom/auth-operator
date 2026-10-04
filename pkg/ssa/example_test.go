@@ -7,7 +7,6 @@ package ssa_test
 import (
 	"context"
 	"fmt"
-	"maps"
 
 	corev1 "k8s.io/api/core/v1"
 	corev1ac "k8s.io/client-go/applyconfigurations/core/v1"
@@ -25,7 +24,12 @@ func ExampleApplier() {
 		Namespaced: true,
 		New:        func() *corev1.ConfigMap { return &corev1.ConfigMap{} },
 		Matches: func(existing *corev1.ConfigMap, desired *corev1ac.ConfigMapApplyConfiguration) bool {
-			return maps.Equal(existing.Data, desired.Data)
+			for key, value := range desired.Data {
+				if existing.Data[key] != value {
+					return false
+				}
+			}
+			return true
 		},
 		Extract: corev1ac.ExtractConfigMap,
 	}
