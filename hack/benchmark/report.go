@@ -118,29 +118,6 @@ func WriteCSV(w io.Writer, rs []Result) error {
 	c.Flush()
 	return c.Error()
 }
-func WriteMarkdown(w io.Writer, rs []Result) error {
-	head := append([]string{}, provenanceHeaders...)
-	head = append(head, reportHeaders("throughput_successes_per_sec")...)
-	head = append(head, telemetryHeaders...)
-	head = append(head, "started_at", "ended_at", "error")
-	if e := writeMarkdownHeader(w, head); e != nil {
-		return e
-	}
-	for _, r := range sortedResults(rs) {
-		successes := r.Successes
-		if successes == 0 {
-			successes = r.Samples
-		}
-		v := append(resultProvenance(r), resultValues(r, successes)...)
-		v = append(v, telemetryValues(r)...)
-		v = append(v, r.StartedAt, r.EndedAt, r.Error)
-		if e := writeMarkdownRow(w, v); e != nil {
-			return e
-		}
-	}
-	return nil
-}
-
 func writeMarkdownHeader(w io.Writer, headers []string) error {
 	if _, err := fmt.Fprintln(w, "| "+strings.Join(headers, " | ")+" |"); err != nil {
 		return err
@@ -321,17 +298,4 @@ func WriteReportMarkdown(w io.Writer, rows []ReportRow) error {
 		}
 	}
 	return nil
-}
-
-// MarginalRows filters complete rows without averaging percentiles. Percentiles
-// from unrelated cells cannot be averaged into a meaningful marginal.
-func MarginalRows(rows []ReportRow) []ReportRow {
-	out := make([]ReportRow, 0, len(rows))
-	for _, r := range rows {
-		if r.Status == statusComplete {
-			out = append(out, r)
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return reportKey(out[i]) < reportKey(out[j]) })
-	return out
 }

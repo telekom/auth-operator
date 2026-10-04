@@ -37,6 +37,7 @@ import (
 )
 
 const (
+	creatorClusterName         = "auth-operator-e2e-creator-tracking"
 	creatorReinvocationService = "creator-reinvocation-webhook"
 	creatorReinvocationWebhook = "creator-reinvocation-webhook"
 	creatorReinvocationImage   = "auth-operator/creator-reinvocation-webhook:e2e"
@@ -209,7 +210,7 @@ func creatorPrivateRunDir() (string, error) {
 	if markerErr != nil || strings.TrimSpace(string(marker)) == "" {
 		return "", fmt.Errorf("creator run provenance marker is empty")
 	}
-	if strings.TrimSpace(string(marker)) != "auth-operator-e2e-creator-tracking" {
+	if strings.TrimSpace(string(marker)) != creatorClusterName {
 		return "", fmt.Errorf("creator run provenance marker names a different run")
 	}
 	return runDir, nil
@@ -243,12 +244,9 @@ func creatorPrivateKubeconfig() (string, error) {
 }
 
 func creatorValidateIsolation(ctx context.Context) error {
-	config, err := GetSuiteConfig("creator-tracking")
-	if err != nil {
-		return err
-	}
-	if err := ValidateClusterIsolation(config); err != nil {
-		return err
+	if currentCluster := os.Getenv("KIND_CLUSTER"); currentCluster != creatorClusterName {
+		return fmt.Errorf("cluster isolation violation: creator-tracking should run in cluster %q but running in %q",
+			creatorClusterName, currentCluster)
 	}
 	kubeconfigPath, err := creatorPrivateKubeconfig()
 	if err != nil {
@@ -258,7 +256,7 @@ func creatorValidateIsolation(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("load active creator tracking kubeconfig: %w", err)
 	}
-	expectedContext := "kind-" + config.ClusterName
+	expectedContext := "kind-" + creatorClusterName
 	if active.CurrentContext != expectedContext {
 		return fmt.Errorf("current context = %q, want %q", active.CurrentContext, expectedContext)
 	}
@@ -274,7 +272,7 @@ func creatorValidateIsolation(ctx context.Context) error {
 		return err
 	}
 
-	expectedPort, err := creatorRun(ctx, "", "docker", "port", config.ClusterName+"-control-plane", "6443/tcp")
+	expectedPort, err := creatorRun(ctx, "", "docker", "port", creatorClusterName+"-control-plane", "6443/tcp")
 	if err != nil {
 		return fmt.Errorf("read reserved Kind API port: %w", err)
 	}

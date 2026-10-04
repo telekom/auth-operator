@@ -90,6 +90,9 @@ func TestPluralize(t *testing.T) {
 		{"Service", "services"},
 		{"Ingress", "ingresses"},
 		{"Gateway", "gateways"},
+		{"POLICY", "policies"},
+		{"gAtEwAy", "gateways"},
+		{"INGRESS", "ingresses"},
 	}
 
 	for _, tt := range tests {
@@ -97,52 +100,6 @@ func TestPluralize(t *testing.T) {
 			result := pluralize(tt.kind)
 			if result != tt.expected {
 				t.Errorf("pluralize(%q) = %q, want %q", tt.kind, result, tt.expected)
-			}
-		})
-	}
-}
-
-func TestToLower(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"RoleDefinition", "roledefinition"},
-		{"UPPER", "upper"},
-		{"lower", "lower"},
-		{"MixedCase", "mixedcase"},
-		{"", ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			result := toLower(tt.input)
-			if result != tt.expected {
-				t.Errorf("toLower(%q) = %q, want %q", tt.input, result, tt.expected)
-			}
-		})
-	}
-}
-
-func TestEndsWith(t *testing.T) {
-	tests := []struct {
-		s        string
-		suffix   string
-		expected bool
-	}{
-		{"hello", "lo", true},
-		{"hello", "he", false},
-		{"hello", "hello", true},
-		{"hello", "hellox", false},
-		{"", "", true},
-		{"a", "", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.s+"_"+tt.suffix, func(t *testing.T) {
-			result := endsWith(tt.s, tt.suffix)
-			if result != tt.expected {
-				t.Errorf("endsWith(%q, %q) = %v, want %v", tt.s, tt.suffix, result, tt.expected)
 			}
 		})
 	}

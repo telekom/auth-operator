@@ -260,7 +260,7 @@ kubectl describe validatingwebhookconfigurations auth-operator-validating-webhoo
 kubectl patch namespace <ns> -p '{"metadata":{"finalizers":[]}}' --type=merge
 ```
 
-## New Utilities (if implemented)
+## Shared Utilities
 
 ```go
 // Cleanup
@@ -268,16 +268,11 @@ CleanupForHelmTests(namespace, release)
 CleanupForDevTests(namespace, clusterRoles)
 
 // Progress
-progress := NewTestProgress("Setup", 5)
-done := progress.Step("Building image")
+By("Building image")
 buildImage()
-done()
-progress.Complete()
 
-// Simple progress
-sp := NewSimpleProgress("Waiting for pods")
+By("Waiting for pods")
 waitForPods()
-sp.Done()
 ```
 
 ## Documentation

@@ -1019,27 +1019,6 @@ func writeJournal(path string, journal CellJournal) error {
 	return os.Rename(tmp, path)
 }
 
-func ValidateResumeExact(path, runID, inputHash, environmentID, configHash string) error {
-	b, err := readBenchmarkFile(path)
-	if err != nil {
-		return fmt.Errorf("read journal: %w", err)
-	}
-	var j CellJournal
-	if err := json.Unmarshal(b, &j); err != nil {
-		return fmt.Errorf("decode journal: %w", err)
-	}
-	if j.EnvironmentID != environmentID {
-		return fmt.Errorf("journal environment mismatch")
-	}
-	if j.ConfigHash != configHash {
-		return fmt.Errorf("journal config mismatch")
-	}
-	if j.State != statusComplete || j.RunID != runID || j.InputHash != inputHash {
-		return fmt.Errorf("journal run or input mismatch")
-	}
-	return nil
-}
-
 func deleteOwnedNamespace(ctx context.Context, base *rest.Config, name, runID string) error {
 	cl, err := dynamic.NewForConfig(base)
 	if err != nil {

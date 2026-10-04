@@ -3,6 +3,7 @@ package discovery
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -98,12 +99,12 @@ func crdNameFromGVK(gvk schema.GroupVersionKind) string {
 // pluralize converts a Kind to its lowercase plural form
 // This is a simple heuristic that works for most Kubernetes resource kinds.
 func pluralize(kind string) string {
-	lower := toLower(kind)
+	lower := strings.ToLower(kind)
 	// Handle common cases
 	switch {
-	case endsWith(lower, "s"):
+	case strings.HasSuffix(lower, "s"):
 		return lower + "es"
-	case endsWith(lower, "y"):
+	case strings.HasSuffix(lower, "y"):
 		// Vowel + y: just add 's' (e.g., gateway -> gateways, key -> keys)
 		// Consonant + y: replace with 'ies' (e.g., policy -> policies)
 		if len(lower) >= 2 && isVowel(lower[len(lower)-2]) {
@@ -117,21 +118,4 @@ func pluralize(kind string) string {
 
 func isVowel(c byte) bool {
 	return c == 'a' || c == 'e' || c == 'i' || c == 'o' || c == 'u'
-}
-
-func toLower(s string) string {
-	result := make([]byte, len(s))
-	for i := range len(s) {
-		c := s[i]
-		if c >= 'A' && c <= 'Z' {
-			result[i] = c + 32
-		} else {
-			result[i] = c
-		}
-	}
-	return string(result)
-}
-
-func endsWith(s, suffix string) bool {
-	return len(s) >= len(suffix) && s[len(s)-len(suffix):] == suffix
 }

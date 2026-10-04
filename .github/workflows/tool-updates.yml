@@ -56,8 +56,6 @@ jobs:
               E2E_CALICO_VERSION) echo "e2e_calico=${value}" >> "$GITHUB_OUTPUT" ;;
               E2E_EXTERNAL_SECRETS_VERSION) echo "e2e_external_secrets=${value}" >> "$GITHUB_OUTPUT" ;;
               E2E_VELERO_VERSION) echo "e2e_velero=${value}" >> "$GITHUB_OUTPUT" ;;
-              E2E_UTILS_CERT_MANAGER_VERSION) echo "e2e_utils_cert_manager=${value}" >> "$GITHUB_OUTPUT" ;;
-              E2E_UTILS_PROMETHEUS_OPERATOR_VERSION) echo "e2e_utils_prometheus_operator=${value}" >> "$GITHUB_OUTPUT" ;;
               *) ;;
             esac
           done < <(grep -Ev '^(#|$)' versions.env)
@@ -180,8 +178,6 @@ jobs:
           check_github_release "projectcalico/calico" "${{ steps.versions.outputs.e2e_calico }}" "e2e Calico CRDs"
           check_github_release_matching "external-secrets/external-secrets" "${{ steps.versions.outputs.e2e_external_secrets }}" "e2e External Secrets CRDs" "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
           check_github_release "vmware-tanzu/velero" "${{ steps.versions.outputs.e2e_velero }}" "e2e Velero CRDs"
-          check_github_release "cert-manager/cert-manager" "${{ steps.versions.outputs.e2e_utils_cert_manager }}" "e2e utility cert-manager install"
-          check_github_release "prometheus-operator/prometheus-operator" "${{ steps.versions.outputs.e2e_utils_prometheus_operator }}" "e2e utility Prometheus Operator install"
           check_go_module "golang.org/x/vuln" "${{ steps.versions.outputs.govulncheck }}" "govulncheck"
           check_go_module "github.com/securego/gosec/v2" "${{ steps.versions.outputs.gosec }}" "gosec"
 

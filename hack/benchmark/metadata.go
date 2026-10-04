@@ -65,9 +65,6 @@ func MarshalEnvironment(e Environment) []byte {
 	}
 	return b
 }
-func HostEnvironment() Environment {
-	return EnvironmentFrom(hostEnvironmentValues())
-}
 func hostEnvironmentValues() map[string]string {
 	m := map[string]string{}
 	for _, v := range os.Environ() {

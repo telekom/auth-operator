@@ -6,6 +6,7 @@
 package e2e
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,16 +15,25 @@ import (
 	"github.com/telekom/auth-operator/test/utils"
 )
 
-func TestCreatorTrackingLabelsUseDedicatedCluster(t *testing.T) {
-	const wantCluster = "auth-operator-e2e-creator-tracking"
-	for _, label := range []string{"creator-tracking", "creator-tracking-cleanup", "creator-tracking-upgrade"} {
-		config, err := GetSuiteForLabels([]string{label})
-		if err != nil {
-			t.Fatalf("GetSuiteForLabels(%q): %v", label, err)
-		}
-		if config.ClusterName != wantCluster {
-			t.Fatalf("GetSuiteForLabels(%q) selected %q, want %q", label, config.ClusterName, wantCluster)
-		}
+func TestCreatorTrackingRequiresDedicatedCluster(t *testing.T) {
+	t.Setenv("E2E_CREATOR_TRACKING_RUN_DIR", "")
+	for _, tc := range []struct {
+		name    string
+		cluster string
+		wantErr string
+	}{
+		{"unset", "", "cluster isolation violation"},
+		{"base suite", "auth-operator-e2e", "cluster isolation violation"},
+		{"foreign cluster", "production", "cluster isolation violation"},
+		{"dedicated cluster", "auth-operator-e2e-creator-tracking", "E2E_CREATOR_TRACKING_RUN_DIR is required"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("KIND_CLUSTER", tc.cluster)
+			err := creatorValidateIsolation(context.Background())
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("creatorValidateIsolation() = %v, want %q", err, tc.wantErr)
+			}
+		})
 	}
 }
 

@@ -27,10 +27,7 @@ Welcome to the auth-operator e2e test documentation!
 │                                                                                      │
 │  ┌─────────────────────────────────────────────────────────────────────────────────┐ │
 │  │                            SHARED UTILITIES                                      │ │
-│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────────┐   │ │
-│  │  │cleanup.go│  │progress. │  │debug_    │  │suite_    │  │leak_detector.go  │   │ │
-│  │  │          │  │   go     │  │report.go │  │config.go │  │                  │   │ │
-│  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘  └──────────────────┘   │ │
+│  │  cleanup.go       debug_report.go       Ginkgo By steps                          │ │
 │  └─────────────────────────────────────────────────────────────────────────────────┘ │
 │                                                                                      │
 └─────────────────────────────────────────────────────────────────────────────────────┘
@@ -77,10 +74,7 @@ test/e2e/
 │
 ├── 🔧 Utilities
 │   ├── cleanup.go          # Centralized cleanup functions
-│   ├── progress.go         # Test progress tracking
-│   ├── debug_report.go     # Structured debug reports (JSON)
-│   ├── suite_config.go     # Test suite configuration
-│   └── leak_detector.go    # Resource leak detection
+│   └── debug_report.go     # Structured debug reports (JSON)
 │
 ├── 📦 Test Data
 │   ├── fixtures/           # Basic test manifests
@@ -121,7 +115,7 @@ Each label corresponds to a dedicated Kind cluster:
 
 ---
 
-## 🚀 New Utilities (Optional Enhancements)
+## 🚀 Shared Utilities
 
 ### [cleanup.go](cleanup.go)
 **Centralized cleanup utilities**
@@ -137,19 +131,13 @@ CleanupForDevTests(namespace, clusterRoles)
 
 ---
 
-### [progress.go](progress.go)
-**Test progress tracking**
-- Step-by-step progress indicators
-- Time estimates
-- Slowest step identification
+### Test steps (Ginkgo)
+Use Ginkgo's built-in `By` to identify setup and test steps.
 
 **Usage:**
 ```go
-progress := NewTestProgress("Setup", 5)
-done := progress.Step("Building image")
+By("Building image")
 buildImage()
-done()
-progress.Complete()
 ```
 
 ---
@@ -169,17 +157,15 @@ SaveDebugReport(report, outputDir)
 
 ---
 
-### [suite_config.go](suite_config.go)
-**Test suite configuration**
-- Cluster isolation enforcement
-- Install method mapping
-- Configuration validation
+### [creator_tracking_support_test.go](creator_tracking_support_test.go)
+**Creator-tracking isolation**
+- Requires the dedicated `auth-operator-e2e-creator-tracking` cluster
+- Validates private run provenance and kubeconfig
+- Checks context and exact API endpoint against the reserved Kind container
 
 **Usage:**
 ```go
-config, _ := GetSuiteConfig("helm")
-ValidateClusterIsolation(config)
-PrintSuiteConfig(config)
+Expect(creatorValidateIsolation(ctx)).To(Succeed())
 ```
 
 ---
@@ -390,7 +376,7 @@ When adding new tests:
 3. **Use utilities:**
    ```go
    CleanupForHelmTests(namespace, release)
-   progress := NewTestProgress("Setup", steps)
+   By("Setting up test resources")
    ```
 
 4. **Document test data:**

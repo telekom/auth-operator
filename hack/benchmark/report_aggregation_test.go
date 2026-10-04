@@ -38,23 +38,17 @@ func TestReportFormatsPreserveProvenanceAndTelemetry(t *testing.T) {
 	}
 	assertReportCSV(t, "raw", raw.String())
 	assertReportCSV(t, "aggregate", aggregate.String())
-	var md, aggregateMD strings.Builder
-	if err := WriteMarkdown(&md, []Result{r}); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(md.String(), "throughput_successes_per_sec") {
-		t.Fatalf("markdown header %s", md.String())
-	}
+	var aggregateMD strings.Builder
 	if err := WriteReportMarkdown(&aggregateMD, rows); err != nil {
 		t.Fatal(err)
 	}
-	if md.Len() == 0 || aggregateMD.Len() == 0 {
-		t.Fatalf("Markdown output is empty: raw=%d aggregate=%d", md.Len(), aggregateMD.Len())
+	if aggregateMD.Len() == 0 {
+		t.Fatal("aggregate Markdown output is empty")
 	}
-	for _, value := range []string{"run-7", "input-7", "work-7", "config-7", "env-7", "architecture", "metric_before_state", "webhook_before_sum", "pod_restarts_delta"} {
-		if !strings.Contains(md.String(), value) {
-			t.Errorf("raw Markdown missing %q", value)
-		}
+	for _, value := range []string{
+		"run-7", "input-7", "work-7", "config-7", "env-7", "architecture",
+		"metric_before_state", "webhook_before_sum", "pod_restarts_delta", "throughput_successes_per_sec",
+	} {
 		if !strings.Contains(aggregateMD.String(), value) {
 			t.Errorf("aggregate Markdown missing %q", value)
 		}
@@ -150,18 +144,15 @@ func TestAggregateReportJoinsExcludedVariantToBaseline(t *testing.T) {
 	}
 	t.Fatalf("excluded row missing: %#v", rows)
 }
-func TestAggregateReportStableAndMarginal(t *testing.T) {
+func TestAggregateReportPreservesSortedCellPercentiles(t *testing.T) {
 	rs := []Result{
 		{Cell: Cell{Engine: "z", Tier: "b", Mode: "m", Phase: "create", Concurrency: 1, Variant: "enabled"}, Status: "complete", P50Micros: 20},
 		{Cell: Cell{Engine: "a", Tier: "a", Mode: "m", Phase: "create", Concurrency: 1, Variant: "enabled"}, Status: "complete", P50Micros: 10},
 	}
 	rows := AggregateReport(rs, "env")
-	if rows[0].Cell.Engine != "a" {
-		t.Fatalf("not stable: %#v", rows)
-	}
-	m := MarginalRows(rows)
-	if len(m) != 2 || m[0].Cell.Engine != "a" || m[0].P50Micros != 10 {
-		t.Fatalf("marginal %#v", m)
+	if len(rows) != 2 || rows[0].Cell.Engine != "a" || rows[0].P50Micros != 10 ||
+		rows[1].Cell.Engine != "z" || rows[1].P50Micros != 20 {
+		t.Fatalf("sorted cell percentiles: %#v", rows)
 	}
 }
 

@@ -17,6 +17,8 @@ import (
 	"github.com/telekom/auth-operator/test/utils"
 )
 
+const defaultImageTag = "latest"
+
 var (
 	// skipClusterSetup allows skipping cluster setup when running against an existing cluster
 	skipClusterSetup = os.Getenv("SKIP_CLUSTER_SETUP") == "true"

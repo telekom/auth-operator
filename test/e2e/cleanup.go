@@ -187,16 +187,6 @@ func CleanupForIntegrationTests(namespaces, clusterRoles, clusterRoleBindings []
 	})
 }
 
-// CleanupMinimal performs minimal cleanup (CRDs only, no cluster resources)
-// Use when cluster resources should persist.
-func CleanupMinimal() {
-	CleanupTestResources(CleanupOptions{
-		RemoveCRDs:       true,
-		RemoveFinalizers: true,
-		WaitForDeletion:  true,
-	})
-}
-
 // CleanupComplete performs complete cleanup (everything)
 // Use in AfterAll to ensure clean state.
 func CleanupComplete(namespaces, clusterRoles, clusterRoleBindings []string, webhookSelector string) {
@@ -209,42 +199,4 @@ func CleanupComplete(namespaces, clusterRoles, clusterRoleBindings []string, web
 		WaitForDeletion:     true,
 		WebhookSelector:     webhookSelector,
 	})
-}
-
-// CleanupCRDsByName deletes specific CRD instances by name
-// Use within tests for cleanup between test cases.
-func CleanupCRDsByName(roledefs, binddefs, webhookauthorizers []string) {
-	for _, name := range binddefs {
-		cmd := utils.CommandContext(context.Background(), "kubectl", "delete", "binddefinition", name, "--ignore-not-found=true") // #nosec G204
-		_, _ = utils.Run(cmd)
-	}
-	for _, name := range roledefs {
-		cmd := utils.CommandContext(context.Background(), "kubectl", "delete", "roledefinition", name, "--ignore-not-found=true") // #nosec G204
-		_, _ = utils.Run(cmd)
-	}
-	for _, name := range webhookauthorizers {
-		cmd := utils.CommandContext(context.Background(), "kubectl", "delete", "webhookauthorizer", name, "--ignore-not-found=true") // #nosec G204
-		_, _ = utils.Run(cmd)
-	}
-}
-
-// CleanupAllCRDsInNamespace deletes all auth-operator CRDs in a namespace
-// Useful for cleaning up after golden tests or when namespace isolation is used.
-func CleanupAllCRDsInNamespace(namespace string) {
-	resources := []string{"binddefinition", "roledefinition", "webhookauthorizer"}
-	for _, resource := range resources {
-		if namespace != "" {
-			cmd := utils.CommandContext(context.Background(), "kubectl", "delete", resource, "--all", "-n", namespace, "--ignore-not-found=true") // #nosec G204
-			_, _ = utils.Run(cmd)
-		} else {
-			cmd := utils.CommandContext(context.Background(), "kubectl", "delete", resource, "--all", "--ignore-not-found=true") // #nosec G204
-			_, _ = utils.Run(cmd)
-		}
-	}
-}
-
-// CleanupAllWebhookAuthorizersClusterWide deletes all WebhookAuthorizers (cluster-scoped).
-func CleanupAllWebhookAuthorizersClusterWide() {
-	cmd := utils.CommandContext(context.Background(), "kubectl", "delete", "webhookauthorizer", "--all", "--ignore-not-found=true") // #nosec G204
-	_, _ = utils.Run(cmd)
 }

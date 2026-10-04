@@ -1,13 +1,9 @@
 package conditions
 
-import (
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-)
+import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 // Getter is an interface for objects that have conditions.
 type Getter interface {
-	client.Object
 	GetConditions() []metav1.Condition
 }
 

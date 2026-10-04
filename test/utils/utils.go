@@ -13,30 +13,8 @@ import (
 	. "github.com/onsi/ginkgo/v2" //nolint:revive,staticcheck // dot import is standard Ginkgo convention
 )
 
-const (
-	prometheusOperatorURL = "https://github.com/prometheus-operator/prometheus-operator/" +
-		"releases/download/%s/bundle.yaml"
-
-	certmanagerURLTmpl = "https://github.com/jetstack/cert-manager/releases/download/%s/cert-manager.yaml"
-)
-
 // DebugLevel controls verbosity of debug output (0=minimal, 1=normal, 2=verbose, 3=trace).
 var DebugLevel = getDebugLevel()
-
-func envOrDefault(key, fallback string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return fallback
-}
-
-func prometheusOperatorVersion() string {
-	return envOrDefault("E2E_UTILS_PROMETHEUS_OPERATOR_VERSION", "v0.93.1")
-}
-
-func certmanagerVersion() string {
-	return envOrDefault("E2E_UTILS_CERT_MANAGER_VERSION", "v1.21.1")
-}
 
 // GetE2EOutputDir returns the base output directory for e2e artifacts.
 // Can be overridden via E2E_OUTPUT_DIR; otherwise uses RUN_ID-based folder.
@@ -125,67 +103,6 @@ func DebugLogf(level int, format string, args ...interface{}) {
 	}
 }
 
-// DebugSection prints a visually distinct section header.
-func DebugSection(title string) {
-	_, _ = fmt.Fprintf(GinkgoWriter, "\n")
-	_, _ = fmt.Fprintf(GinkgoWriter, "═══════════════════════════════════════════════════════════════════════════════\n")
-	_, _ = fmt.Fprintf(GinkgoWriter, "  %s\n", title)
-	_, _ = fmt.Fprintf(GinkgoWriter, "═══════════════════════════════════════════════════════════════════════════════\n\n")
-}
-
-// DebugSubSection prints a subsection header.
-func DebugSubSection(title string) {
-	_, _ = fmt.Fprintf(GinkgoWriter, "\n───────────────────────────────────────────────────────────────────────────────\n")
-	_, _ = fmt.Fprintf(GinkgoWriter, "  %s\n", title)
-	_, _ = fmt.Fprintf(GinkgoWriter, "───────────────────────────────────────────────────────────────────────────────\n")
-}
-
-// DebugTable prints data in a table format.
-func DebugTable(headers []string, rows [][]string) {
-	// Calculate column widths
-	widths := make([]int, len(headers))
-	for i, h := range headers {
-		widths[i] = len(h)
-	}
-	for _, row := range rows {
-		for i, cell := range row {
-			if i < len(widths) && len(cell) > widths[i] {
-				widths[i] = len(cell)
-			}
-		}
-	}
-
-	// Print header
-	for i, h := range headers {
-		_, _ = fmt.Fprintf(GinkgoWriter, "%-*s  ", widths[i], h)
-	}
-	_, _ = fmt.Fprintf(GinkgoWriter, "\n")
-
-	// Print separator
-	for _, w := range widths {
-		_, _ = fmt.Fprintf(GinkgoWriter, "%s  ", strings.Repeat("-", w))
-	}
-	_, _ = fmt.Fprintf(GinkgoWriter, "\n")
-
-	// Print rows
-	for _, row := range rows {
-		for i, cell := range row {
-			if i < len(widths) {
-				_, _ = fmt.Fprintf(GinkgoWriter, "%-*s  ", widths[i], cell)
-			}
-		}
-		_, _ = fmt.Fprintf(GinkgoWriter, "\n")
-	}
-}
-
-// InstallPrometheusOperator installs the prometheus Operator to be used to export the enabled metrics.
-func InstallPrometheusOperator() error {
-	url := fmt.Sprintf(prometheusOperatorURL, prometheusOperatorVersion())
-	cmd := CommandContext(context.Background(), "kubectl", "create", "-f", url) // #nosec G204 -- test helper with hardcoded binary and controlled args
-	_, err := Run(cmd)
-	return err
-}
-
 // Run executes the provided command within this context.
 func Run(cmd *exec.Cmd) ([]byte, error) {
 	dir, _ := GetProjectDir()
@@ -208,118 +125,6 @@ func Run(cmd *exec.Cmd) ([]byte, error) {
 	}
 
 	return output, nil
-}
-
-// RunWithTimeout executes a command with a timeout.
-// It rebuilds the command using exec.CommandContext so the OS process is killed // #nosec G204
-// automatically when the timeout expires, avoiding goroutine leaks.
-func RunWithTimeout(cmd *exec.Cmd, timeout time.Duration) ([]byte, error) {
-	dir, _ := GetProjectDir()
-	cmd.Dir = dir
-
-	if err := os.Chdir(cmd.Dir); err != nil {
-		DebugLogf(1, "chdir dir: %s", err)
-	}
-
-	cmd.Env = append(os.Environ(), "GO111MODULE=on")
-	command := strings.Join(cmd.Args, " ")
-	DebugLogf(2, "running with timeout %v: %s", timeout, command)
-
-	// Rebuild the command with a context timeout so CombinedOutput returns
-	// when the deadline expires — no goroutine needed.
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	ctxCmd := CommandContext(ctx, cmd.Args[0], cmd.Args[1:]...) // #nosec G204 -- args come from test code, not user input
-	ctxCmd.Dir = cmd.Dir
-	ctxCmd.Env = cmd.Env
-
-	output, err := ctxCmd.CombinedOutput()
-	if ctx.Err() != nil {
-		return output, fmt.Errorf("command timed out after %v: %s", timeout, command)
-	}
-	if err != nil {
-		DebugLogf(1, "command failed: %s\nerror: %v\noutput: %s", command, err, string(output))
-		return output, fmt.Errorf("%s failed with error: (%w) %s", command, err, string(output))
-	}
-	return output, nil
-}
-
-// UninstallPrometheusOperator uninstalls the prometheus.
-func UninstallPrometheusOperator() {
-	url := fmt.Sprintf(prometheusOperatorURL, prometheusOperatorVersion())
-	cmd := CommandContext(context.Background(), "kubectl", "delete", "-f", url) // #nosec G204 -- test helper with hardcoded binary and controlled args
-	if _, err := Run(cmd); err != nil {
-		warnError(err)
-	}
-}
-
-// UninstallCertManager uninstalls the cert manager.
-func UninstallCertManager() {
-	url := fmt.Sprintf(certmanagerURLTmpl, certmanagerVersion())
-	cmd := CommandContext(context.Background(), "kubectl", "delete", "-f", url) // #nosec G204
-	if _, err := Run(cmd); err != nil {
-		warnError(err)
-	}
-}
-
-// IsCertManagerInstalled checks if cert-manager is already installed.
-func IsCertManagerInstalled() bool {
-	cmd := CommandContext(context.Background(), "kubectl", "get", "deployment", "cert-manager-webhook", // #nosec G204
-		"-n", "cert-manager", "-o", "name")
-	_, err := Run(cmd)
-	return err == nil
-}
-
-// InstallCertManager installs the cert manager bundle with retry logic for network issues.
-func InstallCertManager() error {
-	// Skip if already installed
-	if IsCertManagerInstalled() {
-		_, _ = fmt.Fprintf(GinkgoWriter, "cert-manager already installed, skipping installation\n")
-		// Still wait for it to be ready
-		cmd := CommandContext(context.Background(), "kubectl", "wait", "deployment.apps/cert-manager-webhook", // #nosec G204
-			"--for", "condition=Available",
-			"--namespace", "cert-manager",
-			"--timeout", "5m",
-		)
-		_, err := Run(cmd)
-		return err
-	}
-
-	url := fmt.Sprintf(certmanagerURLTmpl, certmanagerVersion())
-
-	// Retry installation up to 3 times with exponential backoff
-	var lastErr error
-	for attempt := 1; attempt <= 3; attempt++ {
-		_, _ = fmt.Fprintf(GinkgoWriter, "Installing cert-manager (attempt %d/3)\n", attempt)
-		cmd := CommandContext(context.Background(), "kubectl", "apply", "-f", url, "--server-side", "--force-conflicts") // #nosec G204
-		if _, err := Run(cmd); err != nil {
-			lastErr = err
-			if attempt < 3 {
-				backoff := time.Duration(attempt*10) * time.Second
-				_, _ = fmt.Fprintf(GinkgoWriter, "cert-manager install failed, retrying in %v: %v\n", backoff, err)
-				time.Sleep(backoff)
-				continue
-			}
-			return err
-		}
-		break
-	}
-
-	if lastErr != nil {
-		return lastErr
-	}
-
-	// Wait for cert-manager-webhook to be ready, which can take time if cert-manager
-	// was re-installed after uninstalling on a cluster.
-	cmd := CommandContext(context.Background(), "kubectl", "wait", "deployment.apps/cert-manager-webhook", // #nosec G204
-		"--for", "condition=Available",
-		"--namespace", "cert-manager",
-		"--timeout", "5m",
-	)
-
-	_, err := Run(cmd)
-	return err
 }
 
 // LoadImageToKindClusterWithName loads a local docker image to the kind cluster with the specified name.
@@ -358,57 +163,9 @@ func GetProjectDir() (string, error) {
 	return wd, nil
 }
 
-// DeploymentExists checks if a deployment exists for a label selector in a namespace.
-func DeploymentExists(labelSelector, namespace string) bool {
-	cmd := CommandContext(context.Background(), "kubectl", "get", "deployment", // #nosec G204
-		"-l", labelSelector,
-		"-n", namespace,
-		"-o", "name")
-	output, err := Run(cmd)
-	if err != nil {
-		return false
-	}
-	return len(GetNonEmptyLines(string(output))) > 0
-}
-
 // ShouldTeardown controls whether tests should tear down operator/CRDs.
 func ShouldTeardown() bool {
 	return os.Getenv("E2E_TEARDOWN") == "true"
-}
-
-// WaitForResource waits for a Kubernetes resource to exist.
-func WaitForResource(resourceType, name, namespace string, timeout time.Duration) error {
-	args := []string{"get", resourceType, name}
-	if namespace != "" {
-		args = append(args, "-n", namespace)
-	}
-
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		cmd := CommandContext(context.Background(), "kubectl", args...) // #nosec G204
-		if _, err := Run(cmd); err == nil {
-			return nil
-		}
-		time.Sleep(2 * time.Second)
-	}
-	return fmt.Errorf("timeout waiting for %s/%s", resourceType, name)
-}
-
-// WaitForPodRunning waits for a pod matching the label selector to be running.
-func WaitForPodRunning(labelSelector, namespace string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		cmd := CommandContext(context.Background(), "kubectl", "get", "pods", // #nosec G204
-			"-l", labelSelector,
-			"-n", namespace,
-			"-o", "jsonpath={.items[0].status.phase}")
-		output, err := Run(cmd)
-		if err == nil && string(output) == "Running" {
-			return nil
-		}
-		time.Sleep(2 * time.Second)
-	}
-	return fmt.Errorf("timeout waiting for pod with label %s to be running", labelSelector)
 }
 
 // WaitForPodsReady waits for all pods matching the label selector to be Ready.
@@ -659,14 +416,6 @@ func ApplyManifest(manifest string) error {
 	return err
 }
 
-// DeleteManifest deletes resources defined in a YAML manifest.
-func DeleteManifest(manifest string) error {
-	cmd := CommandContext(context.Background(), "kubectl", "delete", "-f", "-", "--ignore-not-found=true") // #nosec G204
-	cmd.Stdin = strings.NewReader(manifest)
-	_, err := Run(cmd)
-	return err
-}
-
 // GetResourceField gets a specific field from a resource using jsonpath.
 func GetResourceField(resourceType, name, namespace, jsonpath string) (string, error) {
 	args := []string{"get", resourceType, name, "-o", fmt.Sprintf("jsonpath=%s", jsonpath)}
@@ -679,45 +428,6 @@ func GetResourceField(resourceType, name, namespace, jsonpath string) (string, e
 		return "", err
 	}
 	return string(output), nil
-}
-
-// KindClusterExists checks if a kind cluster with the given name exists.
-func KindClusterExists(name string) bool {
-	cmd := CommandContext(context.Background(), "kind", "get", "clusters") // #nosec G204
-	output, err := Run(cmd)
-	if err != nil {
-		return false
-	}
-	clusters := GetNonEmptyLines(string(output))
-	for _, cluster := range clusters {
-		if cluster == name {
-			return true
-		}
-	}
-	return false
-}
-
-// CreateKindCluster creates a new kind cluster.
-func CreateKindCluster(name, k8sVersion string) error {
-	if KindClusterExists(name) {
-		_, _ = fmt.Fprintf(GinkgoWriter, "Kind cluster '%s' already exists\n", name)
-		return nil
-	}
-
-	image := fmt.Sprintf("kindest/node:%s", k8sVersion)
-	cmd := CommandContext(context.Background(), "kind", "create", "cluster", // #nosec G204
-		"--name", name,
-		"--image", image,
-		"--wait", "5m")
-	_, err := Run(cmd)
-	return err
-}
-
-// DeleteKindCluster deletes a kind cluster.
-func DeleteKindCluster(name string) error {
-	cmd := CommandContext(context.Background(), "kind", "delete", "cluster", "--name", name) // #nosec G204
-	_, err := Run(cmd)
-	return err
 }
 
 // CleanupWebhooks removes ValidatingWebhookConfigurations and MutatingWebhookConfigurations
@@ -1010,15 +720,6 @@ func CollectOperatorLogs(namespace string, tailLines int) {
 	printSeparatorWithNewline()
 }
 
-// CollectPodDebugInfo collects detailed debug info for a specific pod.
-func CollectPodDebugInfo(namespace, podName string) {
-	_, _ = fmt.Fprintf(GinkgoWriter, "\n=== Pod Debug: %s/%s ===\n", namespace, podName)
-
-	runDebugCommand("kubectl", "get", "pod", podName, "-n", namespace, "-o", "yaml")
-	runDebugCommand("kubectl", "describe", "pod", podName, "-n", namespace)
-	runDebugCommand("kubectl", "logs", podName, "-n", namespace, "--all-containers=true", "--tail=100")
-}
-
 // CollectCRDDebugInfo collects detailed info about auth-operator CRDs and their instances.
 func CollectCRDDebugInfo() {
 	_, _ = fmt.Fprintf(GinkgoWriter, "\n")
@@ -1081,154 +782,6 @@ func CollectDockerDebugInfo() {
 	printSeparator()
 	_, _ = fmt.Fprintf(GinkgoWriter, "=== END DOCKER DEBUG INFO\n")
 	printSeparatorWithNewline()
-}
-
-// TestSummary holds structured test run summary data for JSON output.
-type TestSummary struct {
-	Timestamp   string                 `json:"timestamp"`
-	RunID       string                 `json:"run_id"`
-	Suite       string                 `json:"suite"`
-	TotalTests  int                    `json:"total_tests"`
-	Passed      int                    `json:"passed"`
-	Failed      int                    `json:"failed"`
-	Skipped     int                    `json:"skipped"`
-	Duration    string                 `json:"duration"`
-	DebugLevel  int                    `json:"debug_level"`
-	OutputDir   string                 `json:"output_dir"`
-	ClusterInfo map[string]string      `json:"cluster_info,omitempty"`
-	FailedTests []string               `json:"failed_tests,omitempty"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
-}
-
-// SaveTestSummaryJSON creates a structured JSON summary of the test run.
-func SaveTestSummaryJSON(
-	suite string,
-	passed, failed, skipped int,
-	duration time.Duration,
-	failedTests []string,
-) error {
-	summary := TestSummary{
-		Timestamp:   time.Now().UTC().Format(time.RFC3339),
-		RunID:       os.Getenv("RUN_ID"),
-		Suite:       suite,
-		TotalTests:  passed + failed + skipped,
-		Passed:      passed,
-		Failed:      failed,
-		Skipped:     skipped,
-		Duration:    duration.String(),
-		DebugLevel:  DebugLevel,
-		OutputDir:   GetE2EOutputDir(),
-		FailedTests: failedTests,
-		ClusterInfo: getClusterInfo(),
-		Metadata:    getTestMetadata(),
-	}
-
-	outputDir := GetE2EOutputDirForContext(suite)
-	if err := os.MkdirAll(outputDir, 0o750); err != nil {
-		return err
-	}
-
-	jsonData, err := jsonMarshalIndent(summary, "  ")
-	if err != nil {
-		return err
-	}
-
-	return SaveDebugInfoToFile(outputDir, "test-summary.json", string(jsonData))
-}
-
-// getClusterInfo collects basic cluster information.
-func getClusterInfo() map[string]string {
-	info := make(map[string]string)
-
-	// Kubernetes version
-	cmd := CommandContext(context.Background(), "kubectl", "version", "--client", "--short") // #nosec G204
-	if output, err := Run(cmd); err == nil {
-		info["kubectl_version"] = strings.TrimSpace(string(output))
-	}
-
-	// Server version
-	cmd = CommandContext(context.Background(), "kubectl", "version", "-o", "json") // #nosec G204
-	if output, err := Run(cmd); err == nil {
-		// Extract server version from JSON (simplified)
-		if strings.Contains(string(output), "serverVersion") {
-			info["server_version_available"] = "true"
-		}
-	}
-
-	// Current context
-	cmd = CommandContext(context.Background(), "kubectl", "config", "current-context") // #nosec G204
-	if output, err := Run(cmd); err == nil {
-		info["context"] = strings.TrimSpace(string(output))
-	}
-
-	return info
-}
-
-// getTestMetadata collects environment-based test metadata.
-func getTestMetadata() map[string]interface{} {
-	metadata := make(map[string]interface{})
-
-	// CI information
-	if os.Getenv("CI") != "" {
-		metadata["ci"] = true
-		metadata["ci_job_id"] = os.Getenv("CI_JOB_ID")
-		metadata["ci_pipeline_id"] = os.Getenv("CI_PIPELINE_ID")
-	}
-
-	// Git information
-	if commit := os.Getenv("CI_COMMIT_SHA"); commit != "" {
-		metadata["git_commit"] = commit
-	}
-	if branch := os.Getenv("CI_COMMIT_REF_NAME"); branch != "" {
-		metadata["git_branch"] = branch
-	}
-
-	return metadata
-}
-
-// jsonMarshalIndent is a simple JSON marshal with indentation
-// Uses manual construction to avoid importing encoding/json.
-func jsonMarshalIndent(v interface{}, indent string) ([]byte, error) {
-	summary, ok := v.(TestSummary)
-	if !ok {
-		return nil, fmt.Errorf("unsupported type for JSON marshal")
-	}
-
-	var sb strings.Builder
-	sb.WriteString("{\n")
-	fmt.Fprintf(&sb, "%s\"timestamp\": %q,\n", indent, summary.Timestamp)
-	fmt.Fprintf(&sb, "%s\"run_id\": %q,\n", indent, summary.RunID)
-	fmt.Fprintf(&sb, "%s\"suite\": %q,\n", indent, summary.Suite)
-	fmt.Fprintf(&sb, "%s\"total_tests\": %d,\n", indent, summary.TotalTests)
-	fmt.Fprintf(&sb, "%s\"passed\": %d,\n", indent, summary.Passed)
-	fmt.Fprintf(&sb, "%s\"failed\": %d,\n", indent, summary.Failed)
-	fmt.Fprintf(&sb, "%s\"skipped\": %d,\n", indent, summary.Skipped)
-	fmt.Fprintf(&sb, "%s\"duration\": %q,\n", indent, summary.Duration)
-	fmt.Fprintf(&sb, "%s\"debug_level\": %d,\n", indent, summary.DebugLevel)
-	fmt.Fprintf(&sb, "%s\"output_dir\": %q,\n", indent, summary.OutputDir)
-
-	fmt.Fprintf(&sb, "%s\"cluster_info\": {\n", indent)
-	i := 0
-	for k, v := range summary.ClusterInfo {
-		if i > 0 {
-			sb.WriteString(",\n")
-		}
-		fmt.Fprintf(&sb, "%s%s%q: %q", indent, indent, k, v)
-		i++
-	}
-	fmt.Fprintf(&sb, "\n%s},\n", indent)
-
-	fmt.Fprintf(&sb, "%s\"failed_tests\": [", indent)
-	for j, t := range summary.FailedTests {
-		if j > 0 {
-			sb.WriteString(", ")
-		}
-		fmt.Fprintf(&sb, "%q", t)
-	}
-	sb.WriteString("]\n")
-
-	sb.WriteString("}")
-	return []byte(sb.String()), nil
 }
 
 // SaveDebugInfoToFile saves debug info to a file in the output directory.
@@ -1339,22 +892,5 @@ func runDebugCommand(name string, args ...string) {
 		_, _ = fmt.Fprintf(GinkgoWriter, "$ %s %s\n[error: %v]\n", name, strings.Join(args, " "), err)
 	} else {
 		_, _ = fmt.Fprintf(GinkgoWriter, "$ %s %s\n%s\n", name, strings.Join(args, " "), string(output))
-	}
-}
-
-// OnTestFailure is a helper to be called in AfterEach to collect debug info on failure.
-func OnTestFailure(namespaces ...string) {
-	if CurrentSpecReport().Failed() {
-		debugContext := fmt.Sprintf("Test Failed: %s", CurrentSpecReport().FullText())
-		CollectClusterDebugInfo(debugContext)
-
-		for _, ns := range namespaces {
-			if ns != "" {
-				CollectNamespaceDebugInfo(ns, debugContext)
-				CollectOperatorLogs(ns, 200)
-			}
-		}
-
-		CollectCRDDebugInfo()
 	}
 }

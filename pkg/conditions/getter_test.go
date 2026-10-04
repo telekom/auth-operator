@@ -7,9 +7,6 @@ import (
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
 )
 
 // testObject implements both Getter and Setter interfaces for testing
@@ -24,40 +21,6 @@ func (t *testObject) GetConditions() []metav1.Condition {
 func (t *testObject) SetConditions(conditions []metav1.Condition) {
 	t.conditions = conditions
 }
-
-// Implement client.Object interface requirements
-func (t *testObject) GetObjectKind() schema.ObjectKind                           { return nil }
-func (t *testObject) DeepCopyObject() runtime.Object                             { return nil }
-func (t *testObject) GetNamespace() string                                       { return "" }
-func (t *testObject) SetNamespace(namespace string)                              {}
-func (t *testObject) GetName() string                                            { return "test" }
-func (t *testObject) SetName(name string)                                        {}
-func (t *testObject) GetGenerateName() string                                    { return "" }
-func (t *testObject) SetGenerateName(name string)                                {}
-func (t *testObject) GetUID() types.UID                                          { return "" }
-func (t *testObject) SetUID(uid types.UID)                                       {}
-func (t *testObject) GetResourceVersion() string                                 { return "" }
-func (t *testObject) SetResourceVersion(version string)                          {}
-func (t *testObject) GetGeneration() int64                                       { return 0 }
-func (t *testObject) SetGeneration(generation int64)                             {}
-func (t *testObject) GetSelfLink() string                                        { return "" }
-func (t *testObject) SetSelfLink(selfLink string)                                {}
-func (t *testObject) GetCreationTimestamp() metav1.Time                          { return metav1.Time{} }
-func (t *testObject) SetCreationTimestamp(timestamp metav1.Time)                 {}
-func (t *testObject) GetDeletionTimestamp() *metav1.Time                         { return nil }
-func (t *testObject) SetDeletionTimestamp(timestamp *metav1.Time)                {}
-func (t *testObject) GetDeletionGracePeriodSeconds() *int64                      { return nil }
-func (t *testObject) SetDeletionGracePeriodSeconds(i *int64)                     {}
-func (t *testObject) GetLabels() map[string]string                               { return nil }
-func (t *testObject) SetLabels(labels map[string]string)                         {}
-func (t *testObject) GetAnnotations() map[string]string                          { return nil }
-func (t *testObject) SetAnnotations(annotations map[string]string)               {}
-func (t *testObject) GetFinalizers() []string                                    { return nil }
-func (t *testObject) SetFinalizers(finalizers []string)                          {}
-func (t *testObject) GetOwnerReferences() []metav1.OwnerReference                { return nil }
-func (t *testObject) SetOwnerReferences([]metav1.OwnerReference)                 {}
-func (t *testObject) GetManagedFields() []metav1.ManagedFieldsEntry              { return nil }
-func (t *testObject) SetManagedFields(managedFields []metav1.ManagedFieldsEntry) {}
 
 const (
 	TestConditionType  ConditionType    = "TestCondition"

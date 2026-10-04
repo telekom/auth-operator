@@ -9,8 +9,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -170,8 +171,8 @@ func verifyRole(role roleObject, rendered renderedRBAC) error {
 }
 
 func verifyWebhookServerRole(role roleObject, rendered renderedRBAC) error {
-	missingMutating := copyStringSet(rendered.mutatingWebhookNames)
-	missingValidating := copyStringSet(rendered.validatingWebhookNames)
+	missingMutating := maps.Clone(rendered.mutatingWebhookNames)
+	missingValidating := maps.Clone(rendered.validatingWebhookNames)
 
 	for _, rule := range role.Rules {
 		if !hasAny(rule.APIGroups, "admissionregistration.k8s.io") || !hasAny(rule.Verbs, "patch", "update") {
@@ -191,11 +192,11 @@ func verifyWebhookServerRole(role roleObject, rendered renderedRBAC) error {
 
 	if len(missingMutating) > 0 {
 		return fmt.Errorf("clusterRole %q has no name-scoped write rule for mutating webhook configurations: %s",
-			role.Metadata.Name, strings.Join(sortedKeys(missingMutating), ", "))
+			role.Metadata.Name, strings.Join(slices.Sorted(maps.Keys(missingMutating)), ", "))
 	}
 	if len(missingValidating) > 0 {
 		return fmt.Errorf("clusterRole %q has no name-scoped write rule for validating webhook configurations: %s",
-			role.Metadata.Name, strings.Join(sortedKeys(missingValidating), ", "))
+			role.Metadata.Name, strings.Join(slices.Sorted(maps.Keys(missingValidating)), ", "))
 	}
 	return nil
 }
@@ -209,23 +210,6 @@ func verifyWebhookWriteResourceNames(role roleObject, webhookKind string, resour
 		delete(missing, resourceName)
 	}
 	return nil
-}
-
-func copyStringSet(values map[string]struct{}) map[string]struct{} {
-	result := make(map[string]struct{}, len(values))
-	for value := range values {
-		result[value] = struct{}{}
-	}
-	return result
-}
-
-func sortedKeys(values map[string]struct{}) []string {
-	keys := make([]string, 0, len(values))
-	for value := range values {
-		keys = append(keys, value)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 func verifyBroadAPIServerEgress(networkPolicies []renderedObject) error {
