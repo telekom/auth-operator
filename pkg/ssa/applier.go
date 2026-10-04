@@ -169,8 +169,8 @@ func (a Applier[T, AC]) PatchApply(
 	}
 
 	if applyErr := a.apply(ctx, c, ac, opts); applyErr != nil {
-		if prunedLabels && apierrors.IsConflict(applyErr) {
-			converged, retryErr := a.applyAfterPruneConflict(ctx, c, ac, target.key, opts)
+		if prunedLabels && !alwaysApply && apierrors.IsConflict(applyErr) {
+			converged, retryErr := a.applyAfterPruneConflict(ctx, c, ac, target.key, options, force, opts)
 			if converged {
 				return PatchApplyResultPatched, nil
 			}
@@ -326,12 +326,15 @@ func (a Applier[T, AC]) hasPrunableLabel(labels, desired map[string]string) bool
 
 // applyAfterPruneConflict retries an apply that conflicted with the label
 // merge patch, and treats the object as converged when a concurrent writer
-// already produced the desired state.
+// already produced the desired state and the ownership policy allows a skip.
+// Apply preconditions still require a successful apply.
 func (a Applier[T, AC]) applyAfterPruneConflict(
 	ctx context.Context,
 	c client.Client,
 	ac AC,
 	key types.NamespacedName,
+	options *client.ApplyOptions,
+	force bool,
 	opts []client.ApplyOption,
 ) (bool, error) {
 	applyErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
@@ -343,7 +346,8 @@ func (a Applier[T, AC]) applyAfterPruneConflict(
 	latest := a.New()
 	if getErr := c.Get(ctx, key, latest); getErr == nil &&
 		a.Matches(latest, ac) &&
-		!a.hasPrunableLabel(latest.GetLabels(), a.Labels(ac)) {
+		!a.hasPrunableLabel(latest.GetLabels(), a.Labels(ac)) &&
+		a.canSkip(latest, ac, options, force) {
 		return true, nil
 	}
 	return false, applyErr

@@ -16,6 +16,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	corev1ac "k8s.io/client-go/applyconfigurations/core/v1"
 	metav1ac "k8s.io/client-go/applyconfigurations/meta/v1"
@@ -391,6 +392,79 @@ var _ = Describe("Generic Applier", func() {
 			Expect(cm.Labels).To(Equal(labels))
 		})
 
+		It("does not treat a prune conflict as converged while owned fields still need pruning", func() {
+			name := "generic-third-party-prune-conflict-cm"
+			_, err := configMapApplier.PatchApply(testCtx, k8sClient, desired(name, map[string]string{"a": "1", "b": "2"}), false,
+				client.FieldOwner(owner))
+			Expect(err).NotTo(HaveOccurred())
+			cm := &corev1.ConfigMap{}
+			key := types.NamespacedName{Name: name, Namespace: genericTestNamespace}
+			Expect(k8sClient.Get(testCtx, key, cm)).To(Succeed())
+			orig := cm.DeepCopy()
+			cm.Labels["legacy.example.com/owned"] = "true"
+			Expect(k8sClient.Patch(testCtx, cm, client.MergeFrom(orig))).To(Succeed())
+
+			applier := configMapApplier
+			applier.ShouldPruneLabel = func(key string) bool { return key == "legacy.example.com/owned" }
+			_, err = applier.PatchApply(testCtx, &applyConflictClient{Client: k8sClient}, desired(name, map[string]string{"a": "1"}), false,
+				client.FieldOwner(owner))
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsConflict(err)).To(BeTrue(), "unexpected error: %v", err)
+		})
+
+		It("preserves conflicts when alwaysApply requires an authorization check", func() {
+			name := "generic-third-party-prune-always-cm"
+			_, err := configMapApplier.PatchApply(testCtx, k8sClient, desired(name, map[string]string{"a": "1"}), false,
+				client.FieldOwner(owner))
+			Expect(err).NotTo(HaveOccurred())
+			cm := &corev1.ConfigMap{}
+			key := types.NamespacedName{Name: name, Namespace: genericTestNamespace}
+			Expect(k8sClient.Get(testCtx, key, cm)).To(Succeed())
+			orig := cm.DeepCopy()
+			cm.Labels["legacy.example.com/owned"] = "true"
+			Expect(k8sClient.Patch(testCtx, cm, client.MergeFrom(orig))).To(Succeed())
+
+			applier := configMapApplier
+			applier.ShouldPruneLabel = func(key string) bool { return key == "legacy.example.com/owned" }
+			_, err = applier.PatchApply(testCtx, &applyConflictClient{Client: k8sClient}, desired(name, map[string]string{"a": "1"}), true,
+				client.FieldOwner(owner))
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsConflict(err)).To(BeTrue(), "unexpected error: %v", err)
+		})
+
+		DescribeTable("preserves precondition conflicts after pruning labels",
+			func(precondition string) {
+				name := "generic-third-party-prune-stale-" + precondition
+				_, err := configMapApplier.PatchApply(testCtx, k8sClient, desired(name, map[string]string{"a": "1"}), false,
+					client.FieldOwner(owner))
+				Expect(err).NotTo(HaveOccurred())
+				cm := &corev1.ConfigMap{}
+				key := types.NamespacedName{Name: name, Namespace: genericTestNamespace}
+				Expect(k8sClient.Get(testCtx, key, cm)).To(Succeed())
+				orig := cm.DeepCopy()
+				cm.Labels["legacy.example.com/owned"] = "true"
+				Expect(k8sClient.Patch(testCtx, cm, client.MergeFrom(orig))).To(Succeed())
+
+				ac := desired(name, map[string]string{"a": "1"})
+				if precondition == "uid" {
+					ac.WithUID(types.UID("stale-uid"))
+				} else {
+					ac.WithResourceVersion("1")
+				}
+				applier := configMapApplier
+				applier.ShouldPruneLabel = func(key string) bool { return key == "legacy.example.com/owned" }
+				var c client.Client = k8sClient
+				if precondition == "uid" {
+					c = &applyConflictClient{Client: k8sClient}
+				}
+				_, err = applier.PatchApply(testCtx, c, ac, false, client.FieldOwner(owner))
+				Expect(err).To(HaveOccurred())
+				Expect(apierrors.IsConflict(err)).To(BeTrue(), "unexpected error: %v", err)
+			},
+			Entry("UID", "uid"),
+			Entry("resourceVersion", "resourceversion"),
+		)
+
 		It("still applies to prune owned fields after pruning labels", func() {
 			name := "generic-third-party-prune-owned-cm"
 			_, err := configMapApplier.PatchApply(testCtx, k8sClient, desired(name, map[string]string{"a": "1", "b": "2"}), false,
@@ -476,3 +550,12 @@ var _ = Describe("Generic Applier", func() {
 		})
 	})
 })
+
+// applyConflictClient fails every apply with a Conflict.
+type applyConflictClient struct {
+	client.Client
+}
+
+func (c *applyConflictClient) Apply(context.Context, runtime.ApplyConfiguration, ...client.ApplyOption) error {
+	return apierrors.NewConflict(schema.GroupResource{Resource: "configmaps"}, "conflict", fmt.Errorf("injected"))
+}
