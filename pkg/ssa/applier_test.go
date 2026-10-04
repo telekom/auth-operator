@@ -453,7 +453,7 @@ var _ = Describe("Generic Applier", func() {
 				}
 				applier := configMapApplier
 				applier.ShouldPruneLabel = func(key string) bool { return key == "legacy.example.com/owned" }
-				var c client.Client = k8sClient
+				c := k8sClient
 				if precondition == "uid" {
 					c = &applyConflictClient{Client: k8sClient}
 				}
