@@ -19,77 +19,73 @@ package ssa
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
 
+	libraryssa "github.com/telekom/t-caas-go-library/pkg/ssa"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	corev1ac "k8s.io/client-go/applyconfigurations/core/v1"
 	metav1ac "k8s.io/client-go/applyconfigurations/meta/v1"
 	rbacv1ac "k8s.io/client-go/applyconfigurations/rbac/v1"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// PatchApplyResult is the outcome of a cache-aware apply.
+type PatchApplyResult = libraryssa.PatchApplyResult
+
+const (
+	// PatchApplyResultSkipped means no apply was needed.
+	PatchApplyResultSkipped = libraryssa.PatchApplyResultSkipped
+	// PatchApplyResultCreated means the preflight object was missing.
+	PatchApplyResultCreated = libraryssa.PatchApplyResultCreated
+	// PatchApplyResultPatched means an existing object needed a write.
+	PatchApplyResultPatched = libraryssa.PatchApplyResultPatched
+)
+
 var (
-	clusterRoleApplier = Applier[*rbacv1.ClusterRole, *rbacv1ac.ClusterRoleApplyConfiguration]{
+	clusterRoleApplier = libraryssa.Applier[*rbacv1.ClusterRole, *rbacv1ac.ClusterRoleApplyConfiguration]{
 		Kind:            "ClusterRole",
 		New:             func() *rbacv1.ClusterRole { return &rbacv1.ClusterRole{} },
 		Matches:         clusterRoleMatches,
 		Extract:         rbacv1ac.ExtractClusterRole,
-		Ownership:       OwnershipExactWhenForced,
 		NormalizeFields: normalizeRBACApplyFields,
-		Labels:          func(ac *rbacv1ac.ClusterRoleApplyConfiguration) map[string]string { return ac.Labels },
 	}
-	roleApplier = Applier[*rbacv1.Role, *rbacv1ac.RoleApplyConfiguration]{
+	roleApplier = libraryssa.Applier[*rbacv1.Role, *rbacv1ac.RoleApplyConfiguration]{
 		Kind:            "Role",
 		Namespaced:      true,
 		New:             func() *rbacv1.Role { return &rbacv1.Role{} },
 		Matches:         roleMatches,
 		Extract:         rbacv1ac.ExtractRole,
-		Ownership:       OwnershipExactWhenForced,
 		NormalizeFields: normalizeRBACApplyFields,
 	}
-	clusterRoleBindingApplier = Applier[*rbacv1.ClusterRoleBinding, *rbacv1ac.ClusterRoleBindingApplyConfiguration]{
+	clusterRoleBindingApplier = libraryssa.Applier[*rbacv1.ClusterRoleBinding, *rbacv1ac.ClusterRoleBindingApplyConfiguration]{
 		Kind:            "ClusterRoleBinding",
 		New:             func() *rbacv1.ClusterRoleBinding { return &rbacv1.ClusterRoleBinding{} },
 		Matches:         clusterRoleBindingMatches,
 		Extract:         rbacv1ac.ExtractClusterRoleBinding,
-		Ownership:       OwnershipExactOrSubset,
 		NormalizeFields: normalizeRBACApplyFields,
-		PrepareApply: func(ac *rbacv1ac.ClusterRoleBindingApplyConfiguration) (*rbacv1ac.ClusterRoleBindingApplyConfiguration, error) {
-			clone, err := cloneApplyConfiguration(ac)
-			if err != nil {
-				return nil, err
-			}
-			return clone, normalizeBindingApplyConfiguration(clone.Subjects, clone.ObjectMetaApplyConfiguration)
-		},
 	}
-	roleBindingApplier = Applier[*rbacv1.RoleBinding, *rbacv1ac.RoleBindingApplyConfiguration]{
+	roleBindingApplier = libraryssa.Applier[*rbacv1.RoleBinding, *rbacv1ac.RoleBindingApplyConfiguration]{
 		Kind:            "RoleBinding",
 		Namespaced:      true,
 		New:             func() *rbacv1.RoleBinding { return &rbacv1.RoleBinding{} },
 		Matches:         roleBindingMatches,
 		Extract:         rbacv1ac.ExtractRoleBinding,
-		Ownership:       OwnershipExactOrSubset,
 		NormalizeFields: normalizeRBACApplyFields,
-		PrepareApply: func(ac *rbacv1ac.RoleBindingApplyConfiguration) (*rbacv1ac.RoleBindingApplyConfiguration, error) {
-			clone, err := cloneApplyConfiguration(ac)
-			if err != nil {
-				return nil, err
-			}
-			return clone, normalizeBindingApplyConfiguration(clone.Subjects, clone.ObjectMetaApplyConfiguration)
-		},
 	}
-	serviceAccountApplier = Applier[*corev1.ServiceAccount, *corev1ac.ServiceAccountApplyConfiguration]{
-		Kind:                    "ServiceAccount",
-		Namespaced:              true,
-		New:                     func() *corev1.ServiceAccount { return &corev1.ServiceAccount{} },
-		Matches:                 serviceAccountMatches,
-		Extract:                 corev1ac.ExtractServiceAccount,
-		Ownership:               OwnershipExactOrSubset,
-		RequeueOnCreateConflict: true,
+	serviceAccountApplier = libraryssa.Applier[*corev1.ServiceAccount, *corev1ac.ServiceAccountApplyConfiguration]{
+		Kind:       "ServiceAccount",
+		Namespaced: true,
+		New:        func() *corev1.ServiceAccount { return &corev1.ServiceAccount{} },
+		Matches:    serviceAccountMatches,
+		Extract:    corev1ac.ExtractServiceAccount,
 	}
 )
 
@@ -169,7 +165,7 @@ func PatchApplyClusterRole(
 	ac *rbacv1ac.ClusterRoleApplyConfiguration,
 	opts ...client.ApplyOption,
 ) (PatchApplyResult, error) {
-	return clusterRoleApplier.PatchApply(ctx, c, ac, false, withFieldOwner(opts)...)
+	return patchApplyClusterRole(ctx, c, ac, nil, false, opts...)
 }
 
 // PatchApplyClusterRoleAlways behaves like PatchApplyClusterRole but sends the
@@ -181,7 +177,7 @@ func PatchApplyClusterRoleAlways(
 	ac *rbacv1ac.ClusterRoleApplyConfiguration,
 	opts ...client.ApplyOption,
 ) (PatchApplyResult, error) {
-	return clusterRoleApplier.PatchApply(ctx, c, ac, true, withFieldOwner(opts)...)
+	return patchApplyClusterRole(ctx, c, ac, nil, true, opts...)
 }
 
 // PatchApplyClusterRolePruningLabels behaves like PatchApplyClusterRole, but it
@@ -195,9 +191,7 @@ func PatchApplyClusterRolePruningLabels(
 	shouldPruneLabel func(string) bool,
 	opts ...client.ApplyOption,
 ) (PatchApplyResult, error) {
-	applier := clusterRoleApplier
-	applier.ShouldPruneLabel = shouldPruneLabel
-	return applier.PatchApply(ctx, c, ac, false, withFieldOwner(opts)...)
+	return patchApplyClusterRole(ctx, c, ac, shouldPruneLabel, false, opts...)
 }
 
 // PatchApplyClusterRolePruningLabelsAlways combines protected-label pruning
@@ -209,9 +203,7 @@ func PatchApplyClusterRolePruningLabelsAlways(
 	shouldPruneLabel func(string) bool,
 	opts ...client.ApplyOption,
 ) (PatchApplyResult, error) {
-	applier := clusterRoleApplier
-	applier.ShouldPruneLabel = shouldPruneLabel
-	return applier.PatchApply(ctx, c, ac, true, withFieldOwner(opts)...)
+	return patchApplyClusterRole(ctx, c, ac, shouldPruneLabel, true, opts...)
 }
 
 // PatchApplyRole reads the current Role from cache, compares it to the desired
@@ -223,7 +215,10 @@ func PatchApplyRole(
 	ac *rbacv1ac.RoleApplyConfiguration,
 	opts ...client.ApplyOption,
 ) (PatchApplyResult, error) {
-	return roleApplier.PatchApply(ctx, c, ac, false, withFieldOwner(opts)...)
+	if ac == nil || ac.Name == nil {
+		return roleApplier.PatchApply(ctx, c, ac, false, withFieldOwner(opts)...)
+	}
+	return patchApplyRoleWithLegacySkip(ctx, c, roleApplier, ac, false, ac.UID != nil || ac.ResourceVersion != nil, withFieldOwner(opts)...)
 }
 
 // PatchApplyRoleAlways behaves like PatchApplyRole but sends the SSA apply
@@ -246,7 +241,7 @@ func PatchApplyClusterRoleBinding(
 	ac *rbacv1ac.ClusterRoleBindingApplyConfiguration,
 	opts ...client.ApplyOption,
 ) (PatchApplyResult, error) {
-	return clusterRoleBindingApplier.PatchApply(ctx, c, ac, false, withFieldOwner(opts)...)
+	return patchApplyClusterRoleBinding(ctx, c, ac, false, opts...)
 }
 
 // PatchApplyClusterRoleBindingAlways behaves like PatchApplyClusterRoleBinding
@@ -257,7 +252,7 @@ func PatchApplyClusterRoleBindingAlways(
 	ac *rbacv1ac.ClusterRoleBindingApplyConfiguration,
 	opts ...client.ApplyOption,
 ) (PatchApplyResult, error) {
-	return clusterRoleBindingApplier.PatchApply(ctx, c, ac, true, withFieldOwner(opts)...)
+	return patchApplyClusterRoleBinding(ctx, c, ac, true, opts...)
 }
 
 // PatchApplyRoleBinding reads the current RB from cache, compares it to the
@@ -269,7 +264,7 @@ func PatchApplyRoleBinding(
 	ac *rbacv1ac.RoleBindingApplyConfiguration,
 	opts ...client.ApplyOption,
 ) (PatchApplyResult, error) {
-	return roleBindingApplier.PatchApply(ctx, c, ac, false, withFieldOwner(opts)...)
+	return patchApplyRoleBinding(ctx, c, ac, false, opts...)
 }
 
 // PatchApplyRoleBindingAlways behaves like PatchApplyRoleBinding but sends the
@@ -280,7 +275,7 @@ func PatchApplyRoleBindingAlways(
 	ac *rbacv1ac.RoleBindingApplyConfiguration,
 	opts ...client.ApplyOption,
 ) (PatchApplyResult, error) {
-	return roleBindingApplier.PatchApply(ctx, c, ac, true, withFieldOwner(opts)...)
+	return patchApplyRoleBinding(ctx, c, ac, true, opts...)
 }
 
 // PatchApplyServiceAccount reads the current SA from cache, compares it to the
@@ -294,7 +289,17 @@ func PatchApplyServiceAccount(
 	ac *corev1ac.ServiceAccountApplyConfiguration,
 	fieldOwner string,
 ) (PatchApplyResult, error) {
-	return serviceAccountApplier.PatchApply(ctx, c, ac, false, client.FieldOwner(fieldOwner))
+	if ac != nil && ac.Name != nil && (ac.UID != nil || ac.ResourceVersion != nil) {
+		// Preserve the characterized no-op precondition gap; real writes must
+		// still send the caller's original preconditions to the API server.
+		comparison, err := cloneApplyConfiguration(ac)
+		if err != nil {
+			return 0, err
+		}
+		comparison.UID, comparison.ResourceVersion = nil, nil
+		return patchApplyServiceAccount(ctx, &serviceAccountApplyClient{Client: c, desired: ac}, comparison, false, fieldOwner)
+	}
+	return patchApplyServiceAccount(ctx, c, ac, false, fieldOwner)
 }
 
 // PatchApplyServiceAccountAlways behaves like PatchApplyServiceAccount but
@@ -305,7 +310,204 @@ func PatchApplyServiceAccountAlways(
 	ac *corev1ac.ServiceAccountApplyConfiguration,
 	fieldOwner string,
 ) (PatchApplyResult, error) {
-	return serviceAccountApplier.PatchApply(ctx, c, ac, true, client.FieldOwner(fieldOwner))
+	return patchApplyServiceAccount(ctx, c, ac, true, fieldOwner)
+}
+
+func patchApplyRoleWithLegacySkip[T client.Object, AC libraryssa.ApplyConfiguration](
+	ctx context.Context, c client.Client, applier libraryssa.Applier[T, AC], ac AC,
+	always, preconditions bool, opts ...client.ApplyOption,
+) (PatchApplyResult, error) {
+	options := (&client.ApplyOptions{}).ApplyOptions(opts)
+	force := options.Force != nil && *options.Force
+	// Ordinary roles historically skip equal unforced requests, including
+	// dry-runs and owned-field omissions. Keep that AO policy outside the library.
+	if !always && !preconditions && !force && *ac.GetName() != "" &&
+		(!applier.Namespaced || (ac.GetNamespace() != nil && *ac.GetNamespace() != "")) {
+		key := client.ObjectKey{Name: *ac.GetName()}
+		if applier.Namespaced {
+			key.Namespace = *ac.GetNamespace()
+		}
+		existing := applier.New()
+		err := c.Get(ctx, key, existing)
+		if err == nil && applier.Matches(existing, ac) {
+			return PatchApplyResultSkipped, nil
+		}
+		if err != nil && !apierrors.IsNotFound(err) {
+			return 0, fmt.Errorf("get %s %s: %w", applier.Kind, key, err)
+		}
+	}
+	return applier.PatchApply(ctx, c, ac, always, opts...)
+}
+
+func patchApplyClusterRole(
+	ctx context.Context, c client.Client, ac *rbacv1ac.ClusterRoleApplyConfiguration,
+	shouldPrune func(string) bool, always bool, opts ...client.ApplyOption,
+) (PatchApplyResult, error) {
+	applyOpts := withFieldOwner(opts)
+	if ac == nil || ac.Name == nil {
+		return clusterRoleApplier.PatchApply(ctx, c, ac, always, applyOpts...)
+	}
+	pruned := false
+	if shouldPrune != nil && *ac.Name != "" {
+		existing := &rbacv1.ClusterRole{}
+		getErr := c.Get(ctx, client.ObjectKey{Name: *ac.Name}, existing)
+		if getErr != nil && !apierrors.IsNotFound(getErr) {
+			return 0, fmt.Errorf("get ClusterRole %s: %w", *ac.Name, getErr)
+		}
+		if getErr == nil {
+			var err error
+			pruned, err = pruneClusterRoleLabels(ctx, c, existing, ac.Labels, shouldPrune)
+			if err != nil {
+				return 0, err
+			}
+			options := (&client.ApplyOptions{}).ApplyOptions(applyOpts)
+			if pruned && !always && (options.Force == nil || !*options.Force) && clusterRoleMatches(existing, ac) {
+				return PatchApplyResultPatched, nil
+			}
+		}
+	}
+	result, err := patchApplyRoleWithLegacySkip(ctx, c, clusterRoleApplier, ac, always || pruned,
+		ac.UID != nil || ac.ResourceVersion != nil, applyOpts...)
+	if pruned && apierrors.IsConflict(err) {
+		return patchApplyClusterRoleAfterPruneConflict(ctx, c, ac, shouldPrune, applyOpts...)
+	}
+	return result, err
+}
+
+func patchApplyClusterRoleAfterPruneConflict(
+	ctx context.Context, c client.Client, ac *rbacv1ac.ClusterRoleApplyConfiguration,
+	shouldPrune func(string) bool, opts ...client.ApplyOption,
+) (PatchApplyResult, error) {
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error { return c.Apply(ctx, ac, opts...) })
+	if err == nil {
+		return PatchApplyResultPatched, nil
+	}
+	latest := &rbacv1.ClusterRole{}
+	if getErr := c.Get(ctx, client.ObjectKey{Name: *ac.Name}, latest); getErr == nil &&
+		clusterRoleMatches(latest, ac) && !hasPrunableClusterRoleLabel(latest.Labels, ac.Labels, shouldPrune) {
+		return PatchApplyResultPatched, nil
+	}
+	return 0, fmt.Errorf("patch ClusterRole %s: %w", *ac.Name, err)
+}
+
+func patchApplyClusterRoleBinding(
+	ctx context.Context, c client.Client, ac *rbacv1ac.ClusterRoleBindingApplyConfiguration,
+	always bool, opts ...client.ApplyOption,
+) (PatchApplyResult, error) {
+	if ac == nil {
+		return clusterRoleBindingApplier.PatchApply(ctx, c, ac, always, withFieldOwner(opts)...)
+	}
+	clone, err := cloneApplyConfiguration(ac)
+	if err != nil {
+		return 0, err
+	}
+	if err := normalizeBindingApplyConfiguration(clone.Subjects, clone.ObjectMetaApplyConfiguration); err != nil {
+		return 0, err
+	}
+	return clusterRoleBindingApplier.PatchApply(ctx, c, clone, always, withFieldOwner(opts)...)
+}
+
+func patchApplyRoleBinding(
+	ctx context.Context, c client.Client, ac *rbacv1ac.RoleBindingApplyConfiguration,
+	always bool, opts ...client.ApplyOption,
+) (PatchApplyResult, error) {
+	if ac == nil {
+		return roleBindingApplier.PatchApply(ctx, c, ac, always, withFieldOwner(opts)...)
+	}
+	clone, err := cloneApplyConfiguration(ac)
+	if err != nil {
+		return 0, err
+	}
+	if err := normalizeBindingApplyConfiguration(clone.Subjects, clone.ObjectMetaApplyConfiguration); err != nil {
+		return 0, err
+	}
+	return roleBindingApplier.PatchApply(ctx, c, clone, always, withFieldOwner(opts)...)
+}
+
+type serviceAccountApplyClient struct {
+	client.Client
+	desired *corev1ac.ServiceAccountApplyConfiguration
+}
+
+// Apply sends the original preconditions, not the comparison clone.
+func (c *serviceAccountApplyClient) Apply(ctx context.Context, _ runtime.ApplyConfiguration, opts ...client.ApplyOption) error {
+	return c.Client.Apply(ctx, c.desired, opts...)
+}
+
+func patchApplyServiceAccount(
+	ctx context.Context, c client.Client, ac *corev1ac.ServiceAccountApplyConfiguration, always bool, fieldOwner string,
+) (PatchApplyResult, error) {
+	result, err := serviceAccountApplier.PatchApply(ctx, c, ac, always, client.FieldOwner(fieldOwner))
+	if apierrors.IsConflict(err) && strings.HasPrefix(err.Error(), "create ServiceAccount ") {
+		return 0, fmt.Errorf("create ServiceAccount %s/%s conflicted after preflight: %w", *ac.Namespace, *ac.Name, err)
+	}
+	return result, err
+}
+
+func pruneClusterRoleLabels(
+	ctx context.Context, c client.Client, existing *rbacv1.ClusterRole, desired map[string]string, shouldPrune func(string) bool,
+) (bool, error) {
+	original := existing.DeepCopy()
+	for key := range existing.Labels {
+		if _, declared := desired[key]; !declared && shouldPrune(key) {
+			delete(existing.Labels, key)
+		}
+	}
+	if len(original.Labels) == len(existing.Labels) {
+		return false, nil
+	}
+	if len(existing.Labels) == 0 {
+		existing.Labels = nil
+	}
+	// Preserve the baseline persistent merge patch, including during dry-run.
+	if err := c.Patch(ctx, existing, client.MergeFrom(original)); err != nil {
+		return false, fmt.Errorf("prune ClusterRole %s labels: %w", existing.Name, err)
+	}
+	return true, nil
+}
+
+func hasPrunableClusterRoleLabel(labels, desired map[string]string, shouldPrune func(string) bool) bool {
+	if shouldPrune == nil {
+		return false
+	}
+	for key := range labels {
+		if _, declared := desired[key]; !declared && shouldPrune(key) {
+			return true
+		}
+	}
+	return false
+}
+
+func sortByJSON[T any](items []T) error {
+	type keyedItem struct {
+		key   string
+		value T
+	}
+	keyed := make([]keyedItem, len(items))
+	for i, item := range items {
+		encoded, err := json.Marshal(item)
+		if err != nil {
+			return fmt.Errorf("marshal ApplyConfiguration list item: %w", err)
+		}
+		keyed[i] = keyedItem{key: string(encoded), value: item}
+	}
+	slices.SortFunc(keyed, func(a, b keyedItem) int { return strings.Compare(a.key, b.key) })
+	for i := range keyed {
+		items[i] = keyed[i].value
+	}
+	return nil
+}
+
+func cloneApplyConfiguration[T any](ac *T) (*T, error) {
+	data, err := json.Marshal(ac)
+	if err != nil {
+		return nil, fmt.Errorf("marshal ApplyConfiguration: %w", err)
+	}
+	clone := new(T)
+	if err := json.Unmarshal(data, clone); err != nil {
+		return nil, fmt.Errorf("unmarshal ApplyConfiguration: %w", err)
+	}
+	return clone, nil
 }
 
 // Comparison helpers — these compare only the fields we own via SSA and ignore

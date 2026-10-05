@@ -168,115 +168,80 @@ with `With*()` builder methods for SSA compatibility.
 
 ---
 
-## Skip-if-Unchanged Apply (Generic `Applier`)
+## Library-backed skip-if-unchanged apply
 
 Sending an SSA apply for every managed object on every reconcile produces
 thousands of no-op PATCH requests in large clusters. `pkg/ssa` therefore reads
 the live object (normally from the informer cache) and only applies when it
-must. The decision is implemented once by the generic `ssa.Applier` and
-`ssa.StatusApplier` types; the exported `PatchApply*` functions
+must. The shared gate is provided by
+[`github.com/telekom/t-caas-go-library/pkg/ssa`](https://github.com/telekom/t-caas-go-library/tree/v0.1.0/pkg/ssa)
+at **v0.1.0**, not by a second generic engine in auth-operator.
+The exported `PatchApply*` functions
 (`PatchApplyClusterRole`, `PatchApplyRoleBinding`, `PatchApplyServiceAccount`,
-`PatchApply<CRD>Status`, ...) are thin wrappers over predefined descriptors.
+`PatchApply<CRD>Status`, ...) retain their signatures and result constants.
 
-`pkg/ssa` imports only the Go standard library, apimachinery, client-go and
-controller-runtime, so other operators (for example
-[k8s-breakglass](https://github.com/telekom/k8s-breakglass)) can reuse it.
+RBAC comparators, subject/owner-reference canonicalization, field owners,
+label cleanup and CR-specific status builders remain local. See the library's
+[upstream-first guide](https://github.com/telekom/t-caas-go-library/blob/main/docs/upstream-libraries.md)
+for alternatives and limits.
 
 ### Apply Decision
 
-For a descriptor `Applier[T, AC]`, `PatchApply(ctx, c, ac, alwaysApply, opts...)`:
+The library's `Applier[T, AC]` validates the identity and field manager, reads
+the object, and skips only when values match and ownership permits it. Forced
+applies require exact owned-field equality; unforced applies require the owned
+fields to be a subset of the desired fields, so omitted owned fields are pruned.
+Dry-runs and UID/resourceVersion preconditions normally reach the API server.
+`alwaysApply` bypasses the gate at restricted authorization boundaries.
 
-1. Validates the name (and namespace when `Namespaced`) and requires a
-   `client.FieldOwner` in `opts`.
-2. Gets the live object; if it is missing, applies and returns `created`.
-3. Optionally prunes stale labels selected by `ShouldPruneLabel` with a
-   JSON merge patch (used for labels a previous field manager owned). The
-   patch honours dry-run. If the object then matches and the ownership
-   policy allows a skip, the unforced apply is not sent and `patched` is
-   returned.
-4. Skips (`skipped`, no API call) only when all of the following hold:
-   - `Matches(existing, ac)` reports that every desired value is present,
-   - `alwaysApply` is false,
-   - `ac` carries no `uid`/`resourceVersion` precondition,
-   - the `Ownership` policy allows it: the field manager's owned fields
-     (`Extract(existing, manager)`) must equal the desired fields for forced
-     applies, and must be a subset of them for unforced applies (otherwise
-     SSA still needs to prune a field). `OwnershipExactWhenForced` skips
-     unforced applies on value equality alone. Dry-run applies that check
-     ownership are never skipped.
-5. Otherwise applies (through `PrepareApply` when set) and returns `patched`.
-   `PrepareApply` may only canonicalize the configuration (sort lists, fill
-   API defaults): the skip decision uses the unprepared configuration.
-   After a label-prune conflict, retries may report convergence only when
-   the same ownership and precondition checks permit skipping. `alwaysApply`
-   conflicts remain errors so authorization boundaries are not bypassed.
+AO retains the phase-1 characterized policies rather than silently fixing them:
 
-| Descriptor | Ownership | Hooks |
-|------------|-----------|-------|
-| ClusterRole | `OwnershipExactWhenForced` | RBAC field normalization, optional label pruning |
-| Role | `OwnershipExactWhenForced` | RBAC field normalization |
-| ClusterRoleBinding / RoleBinding | `OwnershipExactOrSubset` | RBAC field normalization, subject/ownerRef canonicalization before apply |
-| ServiceAccount | `OwnershipExactOrSubset` | create conflicts require a requeue |
+- Ordinary Role/ClusterRole unforced equal requests skip, including dry-runs.
+- Ordinary ServiceAccount no-op checks ignore UID/resourceVersion preconditions.
+  A comparison clone omits them, but actual writes send the original configuration
+  and therefore still enforce them. Always variants do not use this adapter.
+- ClusterRole label pruning remains an AO merge patch, including its persistent
+  dry-run behavior and conflict-convergence fallback.
+- Missing-ServiceAccount create conflicts still require fresh ownership
+  classification on the next reconcile.
 
-### Defining a Descriptor in Another Operator
+Build fresh configurations for each reconcile: native `client.Apply` can write
+server response metadata into them. Cached gates cannot observe admission-policy
+or permission changes; the restricted callers always apply.
 
-```go
-import (
-    corev1 "k8s.io/api/core/v1"
-    corev1ac "k8s.io/client-go/applyconfigurations/core/v1"
-    "github.com/telekom/auth-operator/pkg/ssa"
-)
-
-var configMapApplier = ssa.Applier[*corev1.ConfigMap, *corev1ac.ConfigMapApplyConfiguration]{
-    Kind:       "ConfigMap",
-    Namespaced: true,
-    New:        func() *corev1.ConfigMap { return &corev1.ConfigMap{} },
-    Matches: func(existing *corev1.ConfigMap, desired *corev1ac.ConfigMapApplyConfiguration) bool {
-        // Compare only declared keys: SSA keeps foreign-owned data keys.
-        for key, value := range desired.Data {
-            if existing.Data[key] != value {
-                return false
-            }
-        }
-        return true
-    },
-    Extract: corev1ac.ExtractConfigMap,
-    // Ownership defaults to OwnershipExactOrSubset.
-}
-
-result, err := configMapApplier.PatchApply(ctx, c, desiredAC, false,
-    client.FieldOwner("my-operator"), client.ForceOwnership)
-```
-
-`Matches` must compare only the fields the descriptor declares; `Extract` is
-the client-go or applyconfiguration-gen `Extract<Kind>` function. Build a fresh
-apply configuration for every call: `client.Apply` writes the server response
-(including `resourceVersion` and `uid`) back into it, which `PatchApply` would
-then treat as a precondition.
-
-Status subresources use `ssa.StatusApplier[T, AC]` with `New`, `Equal`,
+Status subresources use library `StatusApplier[T, AC]` with `New`, `Equal`,
 `ApplyConfiguration` and `FieldOwner` (and an optional `BeforeApply` hook).
 It skips the apply when `Equal(cached, desired)` holds and otherwise applies
-the status with `ForceOwnership`. `ssa.ManagedBy(obj, manager, operation)`
-reports whether a field manager has a `managedFields` entry for an operation.
-
-A runnable example lives in `pkg/ssa/example_test.go`.
+the status with `ForceOwnership`. AO retains the empty-list status merge patches;
+the Namespace terminator calls library `ApplyStatus` unconditionally when its
+condition exists.
 
 ---
 
 ## Finalizer Management (MergePatch with Optimistic Lock)
 
-Finalizers are **not** managed via SSA. Instead, they use `client.Patch()` with
-a strategic MergePatch and optimistic locking.
+Finalizers are **not** managed via SSA. All ten add/remove sites use
+library `pkg/patch.EnsureFinalizer` / `RemoveFinalizer`, which delegate to
+native JSON merge patches with optimistic locking.
 
 ### How It Works
 
 ```go
-old := bindDefinition.DeepCopy()
-controllerutil.AddFinalizer(bindDefinition, BindDefinitionFinalizer)
-err := r.client.Patch(ctx, bindDefinition,
-    client.MergeFromWithOptions(old, client.MergeFromWithOptimisticLock{}))
+_, err := librarypatch.EnsureFinalizer(ctx, r.client,
+    bindDefinition, authorizationv1alpha1.BindDefinitionFinalizer)
 ```
+
+Conflicts retain each controller's existing error/requeue behavior. The library
+restores in-memory finalizers after failed writes and omits already-satisfied
+finalizer patches; server-side mutation and foreign-finalizer preservation stay
+unchanged. Existing reader selection, retry backoff and consumer mutations
+remain explicit for `pkg/patch.Object` (ServiceAccount
+metadata) and `pkg/patch.Status` (generated-ServiceAccount status cleanup).
+Status cleanup now also treats a parent deleted between its read and patch
+as successful, as it already did for a missing parent at read time; an adoption
+envtest exercises that real-server race.
+Single-shot external-SA tracking and empty RBAC/status array patches keep their
+native merge-patch APIs and existing semantics.
 
 ### Why Not SSA for Finalizers
 
@@ -300,7 +265,9 @@ finalizers because it:
 |-----------|-----------|------|
 | RoleDefinition | `roledefinition.authorization.t-caas.telekom.com/finalizer` | `roledefinition_helpers.go` (2 sites) |
 | BindDefinition | `binddefinition.authorization.t-caas.telekom.com/finalizer` | `binddefinition_controller.go` (2 sites) |
-| RoleBinding Terminator | `rolebinding.authorization.t-caas.telekom.com/finalizer` | `rolebinding_terminator_controller.go` (3 sites) |
+| RoleBinding Terminator | `rolebinding.authorization.t-caas.telekom.com/finalizer` | `rolebinding_terminator_controller.go` (2 sites) |
+| RestrictedRoleDefinition | `restrictedroledefinition.authorization.t-caas.telekom.com/finalizer` | `restrictedroledefinition_controller.go` (2 sites) |
+| RestrictedBindDefinition | `restrictedbinddefinition.authorization.t-caas.telekom.com/finalizer` | `restrictedbinddefinition_controller.go` (2 sites) |
 
 ---
 

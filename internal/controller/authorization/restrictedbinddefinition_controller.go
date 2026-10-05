@@ -11,6 +11,7 @@ import (
 	"slices"
 	"time"
 
+	librarypatch "github.com/telekom/t-caas-go-library/pkg/patch"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -564,9 +565,7 @@ func (r *RestrictedBindDefinitionReconciler) Reconcile(ctx context.Context, req 
 
 	// Step 4: Ensure finalizer.
 	if !controllerutil.ContainsFinalizer(rbd, authorizationv1alpha1.RestrictedBindDefinitionFinalizer) {
-		old := rbd.DeepCopy()
-		controllerutil.AddFinalizer(rbd, authorizationv1alpha1.RestrictedBindDefinitionFinalizer)
-		if err := r.client.Patch(ctx, rbd, client.MergeFromWithOptions(old, client.MergeFromWithOptimisticLock{})); err != nil {
+		if _, err := librarypatch.EnsureFinalizer(ctx, r.client, rbd, authorizationv1alpha1.RestrictedBindDefinitionFinalizer); err != nil {
 			if apierrors.IsConflict(err) {
 				logger.V(1).Info("conflict adding finalizer, requeuing", "name", rbd.Name)
 				return ctrl.Result{Requeue: true}, nil
@@ -1383,7 +1382,9 @@ func rbdHasRecoverableGeneratedServiceAccountMarkers(
 		return false
 	}
 	expectedFieldOwner := pkgssa.FieldOwnerFor(rbd.Name, authorizationv1alpha1.RestrictedBindDefinitionKind)
-	return pkgssa.ManagedBy(existing, expectedFieldOwner, metav1.ManagedFieldsOperationApply)
+	return slices.ContainsFunc(existing.ManagedFields, func(entry metav1.ManagedFieldsEntry) bool {
+		return entry.Manager == expectedFieldOwner && entry.Operation == metav1.ManagedFieldsOperationApply
+	})
 }
 
 func (r *RestrictedBindDefinitionReconciler) rbdHasLiveGeneratedServiceAccountStatus(
@@ -1695,9 +1696,7 @@ func (r *RestrictedBindDefinitionReconciler) reconcileDelete(
 	metrics.ServiceAccountSkippedPreExisting.DeleteLabelValues(rbd.Name)
 
 	// Remove finalizer.
-	old := rbd.DeepCopy()
-	controllerutil.RemoveFinalizer(rbd, authorizationv1alpha1.RestrictedBindDefinitionFinalizer)
-	if err := r.client.Patch(ctx, rbd, client.MergeFromWithOptions(old, client.MergeFromWithOptimisticLock{})); err != nil {
+	if _, err := librarypatch.RemoveFinalizer(ctx, r.client, rbd, authorizationv1alpha1.RestrictedBindDefinitionFinalizer); err != nil {
 		return fmt.Errorf("remove finalizer from RestrictedBindDefinition %s: %w", rbd.Name, err)
 	}
 

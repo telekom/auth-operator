@@ -238,9 +238,6 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			err = k8sClient.Apply(testCtx, externalAC, client.FieldOwner("external-agent"), client.ForceOwnership)
 			Expect(err).NotTo(HaveOccurred())
 
-			// Apply populated ac with preconditions; pruning needs a fresh configuration.
-			ac = ssa.ClusterRoleWithLabelsAndRules("ph-prune-foreign-label-cr",
-				map[string]string{"safe": "true"}, rules)
 			result, err := ssa.PatchApplyClusterRolePruningLabels(testCtx, k8sClient, ac, func(key string) bool {
 				return key == "unsafe"
 			}, client.ForceOwnership)

@@ -1,11 +1,12 @@
+// SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
+// SPDX-License-Identifier: Apache-2.0
+
 // Package ssa provides Server-Side Apply helpers for constructing and applying
 // RBAC and core resource ApplyConfiguration objects (ClusterRoles, Roles,
 // RoleBindings, ServiceAccounts, etc.) with per-BindDefinition field ownership.
 //
-// The generic Applier and StatusApplier types implement skip-if-unchanged
-// SSA for any object type: they read the live object, compare desired values
-// and the field manager's ownership, and only send an apply when needed.
-// The package depends only on the standard library, apimachinery, client-go
-// and controller-runtime, so other operators can define their own
-// descriptors; see docs/ssa-architecture.md and ExampleApplier.
+// Cache and managed-field comparison gates come from
+// github.com/telekom/t-caas-go-library/pkg/ssa. RBAC schema normalization,
+// label cleanup and characterized auth-operator compatibility policies stay
+// here; see docs/ssa-architecture.md.
 package ssa

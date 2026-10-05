@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	librarypatch "github.com/telekom/t-caas-go-library/pkg/patch"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -465,9 +466,7 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if !controllerutil.ContainsFinalizer(bindDefinition, authorizationv1alpha1.BindDefinitionFinalizer) {
 		logger.V(2).Info("Adding finalizer to BindDefinition",
 			"bindDefinition", bindDefinition.Name)
-		old := bindDefinition.DeepCopy()
-		controllerutil.AddFinalizer(bindDefinition, authorizationv1alpha1.BindDefinitionFinalizer)
-		if err := r.client.Patch(ctx, bindDefinition, client.MergeFromWithOptions(old, client.MergeFromWithOptimisticLock{})); err != nil {
+		if _, err := librarypatch.EnsureFinalizer(ctx, r.client, bindDefinition, authorizationv1alpha1.BindDefinitionFinalizer); err != nil {
 			logger.Error(err, "Failed to add finalizer",
 				"bindDefinition", bindDefinition.Name)
 			r.markStalled(ctx, bindDefinition, err)
@@ -1606,29 +1605,21 @@ func (r *BindDefinitionReconciler) clearGeneratedServiceAccountsStatus(
 	ctx context.Context,
 	bindDefinition *authorizationv1alpha1.BindDefinition,
 ) error {
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		fresh := &authorizationv1alpha1.BindDefinition{}
-		if err := r.ownershipReader().Get(ctx, types.NamespacedName{Name: bindDefinition.Name, Namespace: bindDefinition.Namespace}, fresh); err != nil {
-			// The live reader may legitimately observe the BindDefinition after it
-			// has already been removed from the API. Status cleanup is then moot,
-			// and must not turn a successful deletion/cache-race reconcile into an
-			// error.
-			if apierrors.IsNotFound(err) {
-				return nil
+	_, err := librarypatch.Status(ctx, r.client, r.ownershipReader(), retry.DefaultRetry,
+		client.ObjectKeyFromObject(bindDefinition),
+		func() *authorizationv1alpha1.BindDefinition { return &authorizationv1alpha1.BindDefinition{} },
+		func(fresh *authorizationv1alpha1.BindDefinition) (bool, error) {
+			if len(fresh.Status.GeneratedServiceAccounts) == 0 {
+				return false, nil
 			}
-			return err
-		}
-		if len(fresh.Status.GeneratedServiceAccounts) == 0 {
-			return nil
-		}
-		original := fresh.DeepCopy()
-		// Use a non-nil empty slice so the merge patch serializes `[]`, not
-		// `null`/field deletion. This keeps the status shape valid for the CRD's
-		// non-nullable array field.
-		fresh.Status.GeneratedServiceAccounts = make([]rbacv1.Subject, 0)
-		return r.client.Status().Patch(ctx, fresh,
-			client.MergeFromWithOptions(original, client.MergeFromWithOptimisticLock{}))
-	})
+			// Use a non-nil empty slice so the merge patch serializes `[]`, not
+			// `null`/field deletion. This keeps the status shape valid for the CRD's
+			// non-nullable array field.
+			fresh.Status.GeneratedServiceAccounts = make([]rbacv1.Subject, 0)
+			return true, nil
+		})
+	// Cleanup is moot when a fresh read observes the resource already gone.
+	return client.IgnoreNotFound(err)
 }
 
 //nolint:unparam // result is intentionally always nil - requeue via error propagation
@@ -1693,9 +1684,7 @@ func (r *BindDefinitionReconciler) reconcileDelete(
 	if err := r.client.Get(ctx, client.ObjectKeyFromObject(bindDefinition), bindDefinition); err != nil {
 		return ctrl.Result{}, fmt.Errorf("re-fetch BindDefinition %s before finalizer removal: %w", bindDefinition.Name, err)
 	}
-	old := bindDefinition.DeepCopy()
-	controllerutil.RemoveFinalizer(bindDefinition, authorizationv1alpha1.BindDefinitionFinalizer)
-	if err := r.client.Patch(ctx, bindDefinition, client.MergeFromWithOptions(old, client.MergeFromWithOptimisticLock{})); err != nil {
+	if _, err := librarypatch.RemoveFinalizer(ctx, r.client, bindDefinition, authorizationv1alpha1.BindDefinitionFinalizer); err != nil {
 		return ctrl.Result{}, fmt.Errorf("remove finalizer from BindDefinition %s: %w", bindDefinition.Name, err)
 	}
 	logger.V(1).Info("reconcileDelete completed successfully", "bindDefinitionName", bindDefinition.Name)

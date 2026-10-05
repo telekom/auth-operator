@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	librarypatch "github.com/telekom/t-caas-go-library/pkg/patch"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -361,9 +362,7 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 
 	// Step 4: Ensure finalizer.
 	if !controllerutil.ContainsFinalizer(rrd, authorizationv1alpha1.RestrictedRoleDefinitionFinalizer) {
-		old := rrd.DeepCopy()
-		controllerutil.AddFinalizer(rrd, authorizationv1alpha1.RestrictedRoleDefinitionFinalizer)
-		if err := r.client.Patch(ctx, rrd, client.MergeFromWithOptions(old, client.MergeFromWithOptimisticLock{})); err != nil {
+		if _, err := librarypatch.EnsureFinalizer(ctx, r.client, rrd, authorizationv1alpha1.RestrictedRoleDefinitionFinalizer); err != nil {
 			if apierrors.IsConflict(err) {
 				logger.V(1).Info("conflict adding finalizer, requeuing", "name", rrd.Name)
 				return ctrl.Result{Requeue: true}, nil
@@ -896,9 +895,7 @@ func (r *RestrictedRoleDefinitionReconciler) rrdHandleDeletion(
 	metrics.DeletePolicyViolationContribution(metrics.ControllerRestrictedRoleDefinition, rrd.Name)
 
 	// Remove finalizer.
-	old := rrd.DeepCopy()
-	controllerutil.RemoveFinalizer(rrd, authorizationv1alpha1.RestrictedRoleDefinitionFinalizer)
-	if err := r.client.Patch(ctx, rrd, client.MergeFromWithOptions(old, client.MergeFromWithOptimisticLock{})); err != nil {
+	if _, err := librarypatch.RemoveFinalizer(ctx, r.client, rrd, authorizationv1alpha1.RestrictedRoleDefinitionFinalizer); err != nil {
 		return fmt.Errorf("remove finalizer from RestrictedRoleDefinition %s: %w", rrd.Name, err)
 	}
 

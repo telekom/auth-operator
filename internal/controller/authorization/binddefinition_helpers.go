@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	librarypatch "github.com/telekom/t-caas-go-library/pkg/patch"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -266,37 +267,33 @@ func (r *BindDefinitionReconciler) deleteServiceAccount(
 			"bindDefinitionName", bindDef.Name, "serviceAccount", sa.Name, "namespace", sa.Namespace)
 
 		patched := false
-		if patchErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			fresh := &corev1.ServiceAccount{}
-			if getErr := r.client.Get(ctx, types.NamespacedName{Name: sa.Name, Namespace: sa.Namespace}, fresh); getErr != nil {
-				return getErr
-			}
-			sourceNamesChanged := false
-			newSourceNames := ""
-			if fresh.Annotations != nil {
-				oldSourceNames := fresh.Annotations[helpers.SourceNamesAnnotation]
-				newSourceNames = helpers.RemoveSourceName(oldSourceNames, bindDef.Name)
-				if newSourceNames != oldSourceNames {
-					sourceNamesChanged = true
+		_, patchErr := librarypatch.Object(ctx, r.client, r.client, retry.DefaultRetry,
+			sigs_client.ObjectKeyFromObject(sa), func() *corev1.ServiceAccount { return &corev1.ServiceAccount{} },
+			func(fresh *corev1.ServiceAccount) (bool, error) {
+				sourceNamesChanged := false
+				newSourceNames := ""
+				if fresh.Annotations != nil {
+					oldSourceNames := fresh.Annotations[helpers.SourceNamesAnnotation]
+					newSourceNames = helpers.RemoveSourceName(oldSourceNames, bindDef.Name)
+					if newSourceNames != oldSourceNames {
+						sourceNamesChanged = true
+					}
 				}
-			}
-			ownerRefChanged := hasOwnerRef(fresh, bindDef)
-			if !sourceNamesChanged && !ownerRefChanged {
-				return nil
-			}
-			orig := fresh.DeepCopy()
-			if sourceNamesChanged {
-				fresh.Annotations[helpers.SourceNamesAnnotation] = newSourceNames
-			}
-			if ownerRefChanged {
-				removeOwnerRef(fresh, bindDef)
-			}
-			if err := r.client.Patch(ctx, fresh, sigs_client.MergeFromWithOptions(orig, sigs_client.MergeFromWithOptimisticLock{})); err != nil {
-				return err
-			}
-			patched = true
-			return nil
-		}); patchErr != nil {
+				ownerRefChanged := hasOwnerRef(fresh, bindDef)
+				if !sourceNamesChanged && !ownerRefChanged {
+					patched = false
+					return false, nil
+				}
+				if sourceNamesChanged {
+					fresh.Annotations[helpers.SourceNamesAnnotation] = newSourceNames
+				}
+				if ownerRefChanged {
+					removeOwnerRef(fresh, bindDef)
+				}
+				patched = true
+				return true, nil
+			})
+		if patchErr != nil {
 			logger.Error(patchErr, "Failed to update metadata on retained ServiceAccount",
 				"bindDefinitionName", bindDef.Name, "serviceAccount", sa.Name, "namespace", sa.Namespace)
 			// Non-fatal - continue with deletion cleanup
@@ -589,38 +586,31 @@ func (r *BindDefinitionReconciler) detachServiceAccountFromBindDefinition(
 	if reader == nil {
 		reader = r.client
 	}
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		fresh := &corev1.ServiceAccount{}
-		if err := reader.Get(ctx, types.NamespacedName{Name: sa.Name, Namespace: sa.Namespace}, fresh); err != nil {
-			return err
-		}
-
-		orig := fresh.DeepCopy()
-		ownerChanged := removeOwnerRef(fresh, bindDef)
-		sourceNamesChanged := false
-		sourceKindChanged := false
-		if fresh.Annotations != nil {
-			oldSourceNames := fresh.Annotations[helpers.SourceNamesAnnotation]
-			newSourceNames := helpers.RemoveSourceName(oldSourceNames, bindDef.Name)
-			sourceNamesChanged = newSourceNames != oldSourceNames
-			if sourceNamesChanged {
-				if newSourceNames == "" {
-					delete(fresh.Annotations, helpers.SourceNamesAnnotation)
-				} else {
-					fresh.Annotations[helpers.SourceNamesAnnotation] = newSourceNames
-				}
-				if fresh.Annotations[helpers.SourceKindAnnotation] == authorizationv1alpha1.BindDefinitionKind && newSourceNames == "" {
-					delete(fresh.Annotations, helpers.SourceKindAnnotation)
-					sourceKindChanged = true
+	_, err := librarypatch.Object(ctx, r.client, reader, retry.DefaultRetry,
+		sigs_client.ObjectKeyFromObject(sa), func() *corev1.ServiceAccount { return &corev1.ServiceAccount{} },
+		func(fresh *corev1.ServiceAccount) (bool, error) {
+			ownerChanged := removeOwnerRef(fresh, bindDef)
+			sourceNamesChanged := false
+			sourceKindChanged := false
+			if fresh.Annotations != nil {
+				oldSourceNames := fresh.Annotations[helpers.SourceNamesAnnotation]
+				newSourceNames := helpers.RemoveSourceName(oldSourceNames, bindDef.Name)
+				sourceNamesChanged = newSourceNames != oldSourceNames
+				if sourceNamesChanged {
+					if newSourceNames == "" {
+						delete(fresh.Annotations, helpers.SourceNamesAnnotation)
+					} else {
+						fresh.Annotations[helpers.SourceNamesAnnotation] = newSourceNames
+					}
+					if fresh.Annotations[helpers.SourceKindAnnotation] == authorizationv1alpha1.BindDefinitionKind && newSourceNames == "" {
+						delete(fresh.Annotations, helpers.SourceKindAnnotation)
+						sourceKindChanged = true
+					}
 				}
 			}
-		}
-		if !ownerChanged && !sourceNamesChanged && !sourceKindChanged {
-			return nil
-		}
-
-		return r.client.Patch(ctx, fresh, sigs_client.MergeFromWithOptions(orig, sigs_client.MergeFromWithOptimisticLock{}))
-	})
+			return ownerChanged || sourceNamesChanged || sourceKindChanged, nil
+		})
+	return err
 }
 
 // reclassifyServiceAccountAsExternal drops this BindDefinition's historical
@@ -633,38 +623,35 @@ func (r *BindDefinitionReconciler) reclassifyServiceAccountAsExternal(
 	bindDef *authorizationv1alpha1.BindDefinition,
 	fieldManagers []string,
 ) error {
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		fresh := &corev1.ServiceAccount{}
-		if err := r.client.Get(ctx, types.NamespacedName{Name: saName, Namespace: saNamespace}, fresh); err != nil {
-			return err
-		}
-
-		original := fresh.DeepCopy()
-		removeOwnerRef(fresh, bindDef)
-		if fresh.Annotations == nil {
-			fresh.Annotations = make(map[string]string)
-		}
-
-		remainingSources := helpers.RemoveSourceName(fresh.Annotations[helpers.SourceNamesAnnotation], bindDef.Name)
-		if remainingSources == "" {
-			delete(fresh.Annotations, helpers.SourceNamesAnnotation)
-			if fresh.Annotations[helpers.SourceKindAnnotation] == authorizationv1alpha1.BindDefinitionKind {
-				delete(fresh.Annotations, helpers.SourceKindAnnotation)
+	_, err := librarypatch.Object(ctx, r.client, r.client, retry.DefaultRetry,
+		sigs_client.ObjectKey{Name: saName, Namespace: saNamespace}, func() *corev1.ServiceAccount { return &corev1.ServiceAccount{} },
+		func(fresh *corev1.ServiceAccount) (bool, error) {
+			removeOwnerRef(fresh, bindDef)
+			if fresh.Annotations == nil {
+				fresh.Annotations = make(map[string]string)
 			}
-		} else {
-			fresh.Annotations[helpers.SourceNamesAnnotation] = remainingSources
-		}
 
-		refs := parseReferencedBy(fresh.Annotations[authorizationv1alpha1.AnnotationKeyReferencedBy])
-		if !slices.Contains(refs, bindDef.Name) {
-			refs = append(refs, bindDef.Name)
-			slices.Sort(refs)
-			fresh.Annotations[authorizationv1alpha1.AnnotationKeyReferencedBy] = strings.Join(refs, ",")
-		}
-		fresh.Annotations[authorizationv1alpha1.AnnotationKeyExternalFieldManagers] = strings.Join(fieldManagers, ",")
+			remainingSources := helpers.RemoveSourceName(fresh.Annotations[helpers.SourceNamesAnnotation], bindDef.Name)
+			if remainingSources == "" {
+				delete(fresh.Annotations, helpers.SourceNamesAnnotation)
+				if fresh.Annotations[helpers.SourceKindAnnotation] == authorizationv1alpha1.BindDefinitionKind {
+					delete(fresh.Annotations, helpers.SourceKindAnnotation)
+				}
+			} else {
+				fresh.Annotations[helpers.SourceNamesAnnotation] = remainingSources
+			}
 
-		return r.client.Patch(ctx, fresh, sigs_client.MergeFromWithOptions(original, sigs_client.MergeFromWithOptimisticLock{}))
-	})
+			refs := parseReferencedBy(fresh.Annotations[authorizationv1alpha1.AnnotationKeyReferencedBy])
+			if !slices.Contains(refs, bindDef.Name) {
+				refs = append(refs, bindDef.Name)
+				slices.Sort(refs)
+				fresh.Annotations[authorizationv1alpha1.AnnotationKeyReferencedBy] = strings.Join(refs, ",")
+			}
+			fresh.Annotations[authorizationv1alpha1.AnnotationKeyExternalFieldManagers] = strings.Join(fieldManagers, ",")
+
+			return true, nil
+		})
+	return err
 }
 
 // addManagedSAReference merges the BindDefinition name into the managed
@@ -681,32 +668,27 @@ func (r *BindDefinitionReconciler) addManagedSAReference(
 		reader = r.client
 	}
 
-	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		fresh := &corev1.ServiceAccount{}
-		if getErr := reader.Get(ctx, types.NamespacedName{Name: saName, Namespace: saNamespace}, fresh); getErr != nil {
-			return getErr
-		}
+	_, err := librarypatch.Object(ctx, r.client, reader, retry.DefaultRetry,
+		sigs_client.ObjectKey{Name: saName, Namespace: saNamespace}, func() *corev1.ServiceAccount { return &corev1.ServiceAccount{} },
+		func(fresh *corev1.ServiceAccount) (bool, error) {
+			if fresh.Annotations == nil {
+				fresh.Annotations = make(map[string]string)
+			}
 
-		orig := fresh.DeepCopy()
-		if fresh.Annotations == nil {
-			fresh.Annotations = make(map[string]string)
-		}
+			oldSourceNames := fresh.Annotations[helpers.SourceNamesAnnotation]
+			newSourceNames := helpers.MergeSourceNames(oldSourceNames, bdName)
+			if newSourceNames == oldSourceNames &&
+				fresh.Annotations[helpers.SourceKindAnnotation] == authorizationv1alpha1.BindDefinitionKind {
+				patched = false
+				return false, nil
+			}
 
-		oldSourceNames := fresh.Annotations[helpers.SourceNamesAnnotation]
-		newSourceNames := helpers.MergeSourceNames(oldSourceNames, bdName)
-		if newSourceNames == oldSourceNames &&
-			fresh.Annotations[helpers.SourceKindAnnotation] == authorizationv1alpha1.BindDefinitionKind {
-			return nil
-		}
-
-		fresh.Annotations[helpers.SourceKindAnnotation] = authorizationv1alpha1.BindDefinitionKind
-		fresh.Annotations[helpers.SourceNamesAnnotation] = newSourceNames
-		if patchErr := r.client.Patch(ctx, fresh, sigs_client.MergeFromWithOptions(orig, sigs_client.MergeFromWithOptimisticLock{})); patchErr != nil {
-			return patchErr
-		}
-		patched = true
-		return nil
-	}); err != nil {
+			fresh.Annotations[helpers.SourceKindAnnotation] = authorizationv1alpha1.BindDefinitionKind
+			fresh.Annotations[helpers.SourceNamesAnnotation] = newSourceNames
+			patched = true
+			return true, nil
+		})
+	if err != nil {
 		return fmt.Errorf("patch ServiceAccount %s/%s source-names annotation: %w", saNamespace, saName, err)
 	}
 

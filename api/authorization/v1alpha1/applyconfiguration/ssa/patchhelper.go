@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"slices"
 
+	libraryssa "github.com/telekom/t-caas-go-library/pkg/ssa"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -21,7 +22,7 @@ import (
 )
 
 var (
-	roleDefinitionStatusApplier = pkgssa.StatusApplier[*authorizationv1alpha1.RoleDefinition, *ac.RoleDefinitionApplyConfiguration]{
+	roleDefinitionStatusApplier = libraryssa.StatusApplier[*authorizationv1alpha1.RoleDefinition, *ac.RoleDefinitionApplyConfiguration]{
 		Kind:       "RoleDefinition",
 		FieldOwner: FieldOwner,
 		New:        func() *authorizationv1alpha1.RoleDefinition { return &authorizationv1alpha1.RoleDefinition{} },
@@ -32,7 +33,7 @@ var (
 			return ac.RoleDefinition(rd.Name).WithStatus(RoleDefinitionStatusFrom(&rd.Status))
 		},
 	}
-	bindDefinitionStatusApplier = pkgssa.StatusApplier[*authorizationv1alpha1.BindDefinition, *ac.BindDefinitionApplyConfiguration]{
+	bindDefinitionStatusApplier = libraryssa.StatusApplier[*authorizationv1alpha1.BindDefinition, *ac.BindDefinitionApplyConfiguration]{
 		Kind:       "BindDefinition",
 		FieldOwner: FieldOwner,
 		New:        func() *authorizationv1alpha1.BindDefinition { return &authorizationv1alpha1.BindDefinition{} },
@@ -43,7 +44,7 @@ var (
 			return ac.BindDefinition(bd.Name).WithStatus(BindDefinitionStatusFrom(&bd.Status))
 		},
 	}
-	webhookAuthorizerStatusApplier = pkgssa.StatusApplier[*authorizationv1alpha1.WebhookAuthorizer, *ac.WebhookAuthorizerApplyConfiguration]{
+	webhookAuthorizerStatusApplier = libraryssa.StatusApplier[*authorizationv1alpha1.WebhookAuthorizer, *ac.WebhookAuthorizerApplyConfiguration]{
 		Kind:       "WebhookAuthorizer",
 		FieldOwner: FieldOwner,
 		New:        func() *authorizationv1alpha1.WebhookAuthorizer { return &authorizationv1alpha1.WebhookAuthorizer{} },
@@ -54,7 +55,7 @@ var (
 			return ac.WebhookAuthorizer(wa.Name).WithStatus(WebhookAuthorizerStatusFrom(&wa.Status))
 		},
 	}
-	rbacPolicyStatusApplier = pkgssa.StatusApplier[*authorizationv1alpha1.RBACPolicy, *ac.RBACPolicyApplyConfiguration]{
+	rbacPolicyStatusApplier = libraryssa.StatusApplier[*authorizationv1alpha1.RBACPolicy, *ac.RBACPolicyApplyConfiguration]{
 		Kind:       "RBACPolicy",
 		FieldOwner: FieldOwner,
 		New:        func() *authorizationv1alpha1.RBACPolicy { return &authorizationv1alpha1.RBACPolicy{} },
@@ -65,7 +66,7 @@ var (
 			return ac.RBACPolicy(rp.Name).WithStatus(RBACPolicyStatusFrom(&rp.Status))
 		},
 	}
-	restrictedBindDefinitionStatusApplier = pkgssa.StatusApplier[*authorizationv1alpha1.RestrictedBindDefinition, *ac.RestrictedBindDefinitionApplyConfiguration]{
+	restrictedBindDefinitionStatusApplier = libraryssa.StatusApplier[*authorizationv1alpha1.RestrictedBindDefinition, *ac.RestrictedBindDefinitionApplyConfiguration]{
 		Kind:       "RestrictedBindDefinition",
 		FieldOwner: FieldOwner,
 		New: func() *authorizationv1alpha1.RestrictedBindDefinition {
@@ -78,7 +79,7 @@ var (
 			return ac.RestrictedBindDefinition(rbd.Name).WithStatus(RestrictedBindDefinitionStatusFrom(&rbd.Status))
 		},
 	}
-	restrictedRoleDefinitionStatusApplier = pkgssa.StatusApplier[*authorizationv1alpha1.RestrictedRoleDefinition, *ac.RestrictedRoleDefinitionApplyConfiguration]{
+	restrictedRoleDefinitionStatusApplier = libraryssa.StatusApplier[*authorizationv1alpha1.RestrictedRoleDefinition, *ac.RestrictedRoleDefinitionApplyConfiguration]{
 		Kind:       "RestrictedRoleDefinition",
 		FieldOwner: FieldOwner,
 		New: func() *authorizationv1alpha1.RestrictedRoleDefinition {
