@@ -159,7 +159,7 @@ var _ = Describe("SSA wrapper migration characterization", Label("ssa-migration"
 		Expect(sa.AutomountServiceAccountToken).To(HaveValue(BeTrue()))
 	})
 
-	It("pins the current label-pruning dry-run gap without changing RBAC rules", func() {
+	It("honors dry-run for label pruning without changing RBAC rules", func() {
 		name := fmt.Sprintf("ssa-prune-dryrun-%d", time.Now().UnixNano())
 		rules := []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}}}
 		desired := ssa.ClusterRoleWithLabelsAndRules(name, nil, rules)
@@ -171,13 +171,13 @@ var _ = Describe("SSA wrapper migration characterization", Label("ssa-migration"
 		Expect(k8sClient.Get(testCtx, client.ObjectKey{Name: name}, role)).To(Succeed())
 		DeferCleanup(func() { Expect(k8sClient.Delete(testCtx, role)).To(Succeed()) })
 		Expect(role.Labels).To(HaveKey("remove"))
-		result, err := ssa.PatchApplyClusterRolePruningLabels(testCtx, k8sClient, desired,
+		dryRunDesired := ssa.ClusterRoleWithLabelsAndRules(name, nil, rules)
+		result, err := ssa.PatchApplyClusterRolePruningLabels(testCtx, k8sClient, dryRunDesired,
 			func(key string) bool { return key == "remove" }, client.ForceOwnership, client.DryRunAll)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(result).To(Equal(ssa.PatchApplyResultPatched))
 		Expect(k8sClient.Get(testCtx, client.ObjectKey{Name: name}, role)).To(Succeed())
-		// The SSA write is dry-run, but main's preliminary merge patch is not.
-		Expect(role.Labels).NotTo(HaveKey("remove"))
+		Expect(role.Labels).To(HaveKeyWithValue("remove", "foreign"))
 		Expect(role.Rules).To(Equal(rules))
 	})
 })

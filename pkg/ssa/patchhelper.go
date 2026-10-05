@@ -344,6 +344,7 @@ func patchApplyClusterRole(
 	shouldPrune func(string) bool, always bool, opts ...client.ApplyOption,
 ) (PatchApplyResult, error) {
 	applyOpts := withFieldOwner(opts)
+	options := (&client.ApplyOptions{}).ApplyOptions(applyOpts)
 	if ac == nil || ac.Name == nil {
 		return clusterRoleApplier.PatchApply(ctx, c, ac, always, applyOpts...)
 	}
@@ -356,13 +357,19 @@ func patchApplyClusterRole(
 		}
 		if getErr == nil {
 			var err error
-			pruned, err = pruneClusterRoleLabels(ctx, c, existing, ac.Labels, shouldPrune)
+			pruned, err = pruneClusterRoleLabels(
+				ctx, c, existing, ac.Labels, shouldPrune,
+				&client.PatchOptions{DryRun: options.DryRun},
+			)
 			if err != nil {
 				return 0, err
 			}
-			options := (&client.ApplyOptions{}).ApplyOptions(applyOpts)
 			if pruned && !always && (options.Force == nil || !*options.Force) && clusterRoleMatches(existing, ac) {
-				return PatchApplyResultPatched, nil
+				result, err := clusterRoleApplier.PatchApply(ctx, c, ac, false, applyOpts...)
+				if result == PatchApplyResultSkipped {
+					return PatchApplyResultPatched, err
+				}
+				return result, err
 			}
 		}
 	}
@@ -446,6 +453,7 @@ func patchApplyServiceAccount(
 
 func pruneClusterRoleLabels(
 	ctx context.Context, c client.Client, existing *rbacv1.ClusterRole, desired map[string]string, shouldPrune func(string) bool,
+	patchOpts ...client.PatchOption,
 ) (bool, error) {
 	original := existing.DeepCopy()
 	for key := range existing.Labels {
@@ -459,8 +467,7 @@ func pruneClusterRoleLabels(
 	if len(existing.Labels) == 0 {
 		existing.Labels = nil
 	}
-	// Preserve the baseline persistent merge patch, including during dry-run.
-	if err := c.Patch(ctx, existing, client.MergeFrom(original)); err != nil {
+	if err := c.Patch(ctx, existing, client.MergeFrom(original), patchOpts...); err != nil {
 		return false, fmt.Errorf("prune ClusterRole %s labels: %w", existing.Name, err)
 	}
 	return true, nil

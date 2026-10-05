@@ -223,6 +223,44 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			Expect(result).To(Equal(ssa.PatchApplyResultSkipped))
 		})
 
+		It("should still apply when pruning leaves another manager-owned label omitted", func() {
+			rules := []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}}}
+			initial := ssa.ClusterRoleWithLabelsAndRules(
+				"ph-prune-owned-label-cr", map[string]string{"remove": "true", "stale": "true"}, rules)
+			_, err := ssa.PatchApplyClusterRole(testCtx, k8sClient, initial)
+			Expect(err).NotTo(HaveOccurred())
+
+			desired := ssa.ClusterRoleWithLabelsAndRules("ph-prune-owned-label-cr", nil, rules)
+			result, err := ssa.PatchApplyClusterRolePruningLabels(testCtx, k8sClient, desired, func(key string) bool {
+				return key == "remove"
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+
+			var role rbacv1.ClusterRole
+			Expect(k8sClient.Get(testCtx, types.NamespacedName{Name: "ph-prune-owned-label-cr"}, &role)).To(Succeed())
+			Expect(role.Labels).NotTo(HaveKey("remove"))
+			Expect(role.Labels).NotTo(HaveKey("stale"))
+		})
+
+		It("should not persist prunable label removal for dry-run applies", func() {
+			rules := []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}}}
+			initial := ssa.ClusterRoleWithLabelsAndRules(
+				"ph-prune-dry-run-cr", map[string]string{"remove": "true"}, rules)
+			_, err := ssa.PatchApplyClusterRole(testCtx, k8sClient, initial)
+			Expect(err).NotTo(HaveOccurred())
+
+			desired := ssa.ClusterRoleWithLabelsAndRules("ph-prune-dry-run-cr", nil, rules)
+			_, err = ssa.PatchApplyClusterRolePruningLabels(testCtx, k8sClient, desired, func(key string) bool {
+				return key == "remove"
+			}, client.DryRunAll)
+			Expect(err).NotTo(HaveOccurred())
+
+			var role rbacv1.ClusterRole
+			Expect(k8sClient.Get(testCtx, types.NamespacedName{Name: "ph-prune-dry-run-cr"}, &role)).To(Succeed())
+			Expect(role.Labels).To(HaveKeyWithValue("remove", "true"))
+		})
+
 		It("should prune a protected label owned by another field manager", func() {
 			rules := []rbacv1.PolicyRule{
 				{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}},
