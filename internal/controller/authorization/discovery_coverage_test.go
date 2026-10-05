@@ -12,11 +12,14 @@ import (
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -111,6 +114,53 @@ var _ = Describe("Discovery migration characterization", func() {
 		err = waiter.WaitForCRDs(ctx, []schema.GroupVersionKind{gvk}, time.Minute)
 		Expect(errors.Is(err, context.Canceled)).To(BeTrue())
 		Expect(waiter.WaitForCRDs(context.Background(), nil, time.Second)).To(Succeed())
+	})
+
+	It("uses live discovered namespaced resources to block namespace finalization", func() {
+		crd.Spec.Scope = apiextensionsv1.NamespaceScoped
+		Expect(k8sClient.Create(ctx, crd)).To(Succeed())
+		Expect(waiter.WaitForCRDs(ctx, []schema.GroupVersionKind{gvk}, 20*time.Second)).To(Succeed())
+		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{GenerateName: "discovery-blocking-"}}
+		Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+		DeferCleanup(func() {
+			Expect(client.IgnoreNotFound(k8sClient.Delete(context.Background(), ns))).To(Succeed())
+		})
+		dynamicClient, err := dynamic.NewForConfig(cfg)
+		Expect(err).NotTo(HaveOccurred())
+		resource := dynamicClient.Resource(schema.GroupVersionResource{
+			Group: gvk.Group, Version: gvk.Version, Resource: crd.Spec.Names.Plural,
+		}).Namespace(ns.Name)
+		widget := &unstructured.Unstructured{Object: map[string]interface{}{
+			"apiVersion": gvk.GroupVersion().String(), "kind": gvk.Kind,
+			"metadata": map[string]interface{}{"name": "blocking-widget"},
+		}}
+		_, err = resource.Create(ctx, widget, metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func() {
+			Expect(client.IgnoreNotFound(resource.Delete(context.Background(), widget.GetName(), metav1.DeleteOptions{}))).To(Succeed())
+		})
+		tracker := discovery.NewResourceTracker(scheme.Scheme, cfg)
+		tracker.CollectionInterval = time.Hour
+		tracker.FullRescanInterval = time.Hour
+		done := make(chan error, 1)
+		go func() { done <- tracker.Start(ctx) }()
+		DeferCleanup(func() {
+			cancel()
+			Eventually(done).WithTimeout(20 * time.Second).Should(Receive(Succeed()))
+		})
+		Eventually(func() error {
+			_, err := tracker.GetAPIResources()
+			return err
+		}).WithTimeout(20 * time.Second).Should(Succeed())
+		blocking, err := namespaceHasResources(ctx, tracker, dynamicClient, ns.Name)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(blocking).To(ContainElement(namespaceDeletionResourceBlocking{
+			ResourceType: crd.Spec.Names.Plural, APIGroup: gvk.Group, Count: 1,
+		}))
+		Expect(resource.Delete(ctx, widget.GetName(), metav1.DeleteOptions{})).To(Succeed())
+		blocking, err = namespaceHasResources(ctx, tracker, dynamicClient, ns.Name)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(blocking).To(BeEmpty())
 	})
 
 	It("discovers CRD installation and removal and automatically regenerates RBAC", func() {

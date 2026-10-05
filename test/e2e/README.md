@@ -68,7 +68,8 @@ responses against envtest. Limiter eviction and subject-key normalization use
 unit tests because they do not depend on API-server semantics.
 `internal/controller/authorization/discovery_coverage_test.go` exercises CRD
 installation, establishment waits, cancellation, termination and removal,
-including watch-triggered RBAC regeneration by both RoleDefinition controllers.
+including watch-triggered RBAC regeneration by both RoleDefinition controllers
+and live discovered resources blocking namespace finalization.
 
 Run these focused checks from the repository root with an **absolute**
 `KUBEBUILDER_ASSETS` path:
@@ -77,6 +78,7 @@ Run these focused checks from the repository root with an **absolute**
 go test ./internal/webhook/authorization ./internal/controller/authorization \
   -run 'Test(WebhookIntegration|Controllers|SubjectLimiterIdle.*|RateLimitSubjectKeyCanonicalGroups)$' \
   -ginkgo.focus='(Webhook discovery characterization|Discovery migration characterization)'
+go test ./pkg/helpers -run '^TestIsLabelSelectorEmpty$'
 ```
 
 The existing `authorization-chain` E2E label covers API-server authorization
