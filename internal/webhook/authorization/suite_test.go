@@ -35,6 +35,7 @@ import (
 var (
 	envCfg     *rest.Config
 	envClient  client.Client
+	envReader  client.Reader
 	envTestEnv *envtest.Environment
 	envCancel  context.CancelFunc
 )
@@ -110,6 +111,7 @@ var _ = BeforeSuite(func() {
 	Expect(synced).To(BeTrue())
 
 	envClient = mgr.GetClient()
+	envReader = mgr.GetAPIReader()
 	Expect(envClient).NotTo(BeNil())
 })
 
