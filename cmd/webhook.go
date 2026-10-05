@@ -6,24 +6,19 @@ package cmd
 import (
 	"context"
 	"crypto/tls"
-	"errors"
 	"fmt"
 	"math"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
-	"sync/atomic"
-	"time"
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	authorizationwebhook "github.com/telekom/auth-operator/internal/webhook/authorization"
-	"github.com/telekom/auth-operator/internal/webhook/certrotator"
 	"github.com/telekom/auth-operator/pkg/indexer"
 	"github.com/telekom/auth-operator/pkg/system"
 	"github.com/telekom/auth-operator/pkg/tracing"
+	"github.com/telekom/t-caas-go-library/pkg/certrotation"
 
-	"github.com/open-policy-agent/cert-controller/pkg/rotator"
 	"github.com/spf13/cobra"
 	"golang.org/x/time/rate"
 	"k8s.io/client-go/discovery"
@@ -75,8 +70,8 @@ ensuring authorization policies are enforced at creation time.`,
 			"namespace", namespace,
 			"bindDefinitionNamespaceSelectorLabelGroups", bindDefinitionNamespaceSelectorLabelGroups,
 		)
-		ctx, cancel := context.WithCancelCause(ctrl.SetupSignalHandler())
-		defer cancel(nil)
+		ctx, cancel := context.WithCancel(ctrl.SetupSignalHandler())
+		defer cancel()
 
 		// Initialize tracing
 		tracingProvider, err := tracing.Setup(ctx, tracingConfig(), system.Version)
@@ -143,106 +138,38 @@ ensuring authorization policies are enforced at creation time.`,
 			return fmt.Errorf("unable to set up health check: %w", err)
 		}
 
-		startListeners := make(chan struct{})
-		var ready atomic.Bool
+		if !disableCertRotation && webhookCertsDir == "" {
+			return fmt.Errorf("unable to set up cert rotation: certs-dir is undefined. can't enable cert rotator")
+		}
+		certificatesReady, err := certrotation.AddRotator(ctx, mgr, certrotation.Config{
+			Disabled:               disableCertRotation,
+			Namespace:              namespace,
+			SecretName:             certRotationSecretName,
+			DNSName:                certRotationDNSName,
+			CertDir:                webhookCertsDir,
+			CAName:                 "cert",
+			CAOrganization:         "t-caas",
+			MutatingWebhooks:       certRotationMutatingWebhooks,
+			ValidatingWebhooks:     certRotationValidatingWebhooks,
+			RequireLeaderElection:  true,
+			RestartOnSecretRefresh: true,
+		})
+		if err != nil {
+			return fmt.Errorf("unable to set up cert rotation: %w", err)
+		}
+		webhooksReady, err := certrotation.SetupWhenReady(mgr, certificatesReady, func(ctx context.Context) error {
+			return configureWebhooks(ctx, mgr, tracingProvider)
+		})
+		if err != nil {
+			return fmt.Errorf("unable to set up webhook registration: %w", err)
+		}
 
 		//+kubebuilder:scaffold:builder
-		if err := mgr.AddReadyzCheck("readyz", func(req *http.Request) error {
-			if ready.Load() {
-				return nil
-			}
-			return errors.New("webhook server not ready: waiting for certificate setup")
-		}); err != nil {
+		if err := mgr.AddReadyzCheck("readyz", certrotation.ReadyChecker(webhooksReady)); err != nil {
 			return fmt.Errorf("unable to set up ready check: %w", err)
 		}
-
-		go func() {
-			setupLog.Info("waiting for certificate rotation to complete before configuring webhooks")
-			<-startListeners
-			setupLog.Info("certificate rotation complete, configuring webhooks")
-			if err := configureWebhooks(mgr, tracingProvider); err != nil {
-				setupLog.Error(err, "failed to configure webhooks")
-				cancel(fmt.Errorf("error configuring webhooks: %w", err))
-				return
-			}
-			setupLog.Info("webhooks configured successfully, server is ready")
-			ready.Store(true)
-		}()
-
-		webhooks := []rotator.WebhookInfo{}
-		for _, wh := range certRotationMutatingWebhooks {
-			webhooks = append(webhooks, rotator.WebhookInfo{
-				Type: rotator.Mutating,
-				Name: wh,
-			})
-		}
-		for _, wh := range certRotationValidatingWebhooks {
-			webhooks = append(webhooks, rotator.WebhookInfo{
-				Type: rotator.Validating,
-				Name: wh,
-			})
-		}
-
-		// The cert rotator will notify when we can start the webhook
-		// and the metric endpoint.
-		// When leader election is enabled, only the leader runs the cert rotator.
-		// Non-leader replicas detect certificate availability via the Secret
-		// volume mount and become ready independently.
-		if !disableCertRotation {
-			setupLog.Info("enabling certificate rotation",
-				"dnsName", certRotationDNSName,
-				"secretName", certRotationSecretName,
-				"mutatingWebhooks", certRotationMutatingWebhooks,
-				"validatingWebhooks", certRotationValidatingWebhooks,
-			)
-			// Use a separate channel for the cert rotator so we can also
-			// detect cert availability from the Secret volume mount (non-leader pods).
-			certRotatorReady := make(chan struct{})
-			if err := certrotator.Enable(
-				mgr,
-				namespace,
-				webhookCertsDir,
-				certRotationDNSName,
-				certRotationSecretName,
-				webhooks,
-				certRotatorReady,
-			); err != nil {
-				return fmt.Errorf("unable to set up cert rotation: %w", err)
-			}
-
-			// Signal startListeners when certificates are available, either via
-			// the cert rotator (leader) or by detecting cert files on disk (non-leader).
-			go func() {
-				certFile := filepath.Join(webhookCertsDir, "tls.crt")
-				keyFile := filepath.Join(webhookCertsDir, "tls.key")
-				ticker := time.NewTicker(2 * time.Second)
-				defer ticker.Stop()
-				for {
-					select {
-					case <-ctx.Done():
-						return
-					case <-certRotatorReady:
-						setupLog.Info("cert rotator signaled readiness (leader)")
-						close(startListeners)
-						return
-					case <-ticker.C:
-						certInfo, err := os.Stat(certFile)
-						if err != nil || certInfo.Size() == 0 {
-							continue
-						}
-						keyInfo, err := os.Stat(keyFile)
-						if err != nil || keyInfo.Size() == 0 {
-							continue
-						}
-						setupLog.Info("certificate files detected via volume mount, signaling readiness")
-						close(startListeners)
-						return
-					}
-				}
-			}()
-		} else {
-			setupLog.Info("certificate rotation disabled, using existing certificates")
-			close(startListeners)
+		if err := mgr.AddReadyzCheck("webhook-server", webhookServer.StartedChecker()); err != nil {
+			return fmt.Errorf("unable to set up webhook server ready check: %w", err)
 		}
 
 		setupLog.Info("starting manager")
@@ -253,8 +180,8 @@ ensuring authorization policies are enforced at creation time.`,
 	},
 }
 
-func configureWebhooks(mgr manager.Manager, tp *tracing.Provider) error {
-	log := ctrl.Log.WithName("webhook-setup")
+func configureWebhooks(ctx context.Context, mgr manager.Manager, tp *tracing.Provider) error {
+	log := ctrl.LoggerFrom(ctx).WithName("webhook-setup")
 	if err := authorizationv1alpha1.ValidateNamespaceAdmissionSelectorLabelGroups(bindDefinitionNamespaceSelectorLabelGroups); err != nil {
 		return fmt.Errorf("invalid BindDefinition namespace selector label groups: %w", err)
 	}

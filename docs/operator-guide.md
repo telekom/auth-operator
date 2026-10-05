@@ -861,15 +861,35 @@ Kubernetes can restart the pod. Both mutating and validating webhook
 configurations receive the CA bundle.
 
 Non-leader replicas can become ready from the mounted `tls.crt` and `tls.key`
-without acquiring the rotation lease. The current mounted-file gate checks only
-that both files are non-empty; it does not validate the TLS pair. Readiness does
-not independently guarantee a successful TLS handshake or CA injection on that
+without acquiring the rotation lease. Certificate setup uses
+[`t-caas-go-library/pkg/certrotation` v0.1.0](https://github.com/telekom/t-caas-go-library/tree/v0.1.0/pkg/certrotation).
+Unlike the previous non-empty-file gate, mounted readiness now requires a
+matching TLS certificate/key pair with a currently valid leaf certificate.
+Malformed, mismatched, expired, or not-yet-valid pairs keep the replica unready.
+`/readyz` also checks that the webhook server has started after handler
+registration. Mounted readiness does not verify the certificate's DNS names or
+trust chain and does not guarantee that CA injection has completed on that
 replica. With `--disable-cert-rotation`, registration proceeds immediately using
-externally managed certificates. `TestPlatformCertificateLifecycle` runs the
+externally managed certificates; readiness still waits for the webhook server
+to start. Rotation requires an explicit `--certs-dir`, namespace, Secret name,
+DNS name and non-empty webhook configuration names when supplied; incomplete
+rotation configuration fails startup rather than waiting indefinitely.
+`TestPlatformCertificateLifecycle` runs the
 real webhook command against envtest to characterize bootstrap, serving/CA
 renewal, CA injection, readiness gating, disabled rotation, and non-leader
-startup. A future certificate-library adoption that validates mounted TLS pairs
-must explicitly test and document that stronger readiness behavior.
+startup. It remains unchanged across the migration.
+`TestPlatformMountedCertificateValidation` covers the stronger mounted
+readiness contract against envtest, including an actual TLS request after the
+replica becomes ready.
+
+For the adoption policy, see the library's
+[upstream alternatives guide](https://github.com/telekom/t-caas-go-library/blob/main/docs/upstream-libraries.md).
+Condition helpers retain the tested transition-time and ordering semantics
+described in [Condition Lifecycle](condition-lifecycle.md); replacing them with
+Flux/apimachinery setters would change status behavior. Tracing and metrics
+already use OpenTelemetry and Prometheus/controller-runtime APIs directly.
+Their application-specific configuration, attributes, collectors and lifecycle
+policy remain local.
 
 See [Metrics and Alerting](metrics-and-alerting.md) for detailed metric
 descriptions and alerting rules.
