@@ -28,6 +28,7 @@ import (
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	statusssa "github.com/telekom/auth-operator/api/authorization/v1alpha1/applyconfiguration/ssa"
 	"github.com/telekom/auth-operator/pkg/conditions"
+	"github.com/telekom/auth-operator/pkg/discovery"
 	"github.com/telekom/auth-operator/pkg/helpers"
 	"github.com/telekom/auth-operator/pkg/indexer"
 	pkgssa "github.com/telekom/auth-operator/pkg/ssa"
@@ -271,6 +272,208 @@ var _ = Describe("SSA migration characterization", Label("ssa-migration"), func(
 		Expect(err).NotTo(HaveOccurred())
 		Expect(result).To(Equal(pkgssa.PatchApplyResultSkipped))
 	})
+
+	DescribeTable("controller status helper entry points persist their conditions and skip repeated writes",
+		func(kind, operation string) {
+			obj := migrationObject(kind, fmt.Sprintf("helper-%d", time.Now().UnixNano()))
+			Expect(k8sClient.Create(ctx, obj)).To(Succeed())
+			DeferCleanup(func() { Expect(k8sClient.Delete(ctx, obj)).To(Succeed()) })
+			applies := 0
+			c := interceptor.NewClient(k8sClient, interceptor.Funcs{
+				SubResourceApply: func(ctx context.Context, c client.Client, subresource string, ac runtime.ApplyConfiguration, opts ...client.SubResourceApplyOption) error {
+					applies++
+					return c.SubResource(subresource).Apply(ctx, ac, opts...)
+				},
+			})
+			recorder := events.NewFakeRecorder(100)
+			run := func() {
+				switch obj := obj.(type) {
+				case *authorizationv1alpha1.RoleDefinition:
+					r := &RoleDefinitionReconciler{client: c, recorder: recorder}
+					if operation == "deletion-failed" {
+						failure := fmt.Errorf("characterized failure")
+						_, err := r.markDeletionFailed(ctx, obj, failure)
+						Expect(err).To(MatchError(failure))
+					} else {
+						r.markStalled(ctx, obj, fmt.Errorf("characterized failure"))
+					}
+				case *authorizationv1alpha1.BindDefinition:
+					r := &BindDefinitionReconciler{client: c, recorder: recorder}
+					if operation == "nonfatal" {
+						conditions.MarkReady(obj, obj.Generation, "Characterized", "nonfatal")
+						r.applyStatusNonFatal(ctx, obj)
+					} else {
+						r.markStalled(ctx, obj, fmt.Errorf("characterized failure"))
+					}
+				case *authorizationv1alpha1.RestrictedRoleDefinition:
+					r := &RestrictedRoleDefinitionReconciler{client: c, recorder: recorder}
+					if operation == "apply-stalled" {
+						Expect(r.rrdApplyStatusAndMarkStalled(ctx, obj, "characterized failure")).To(Succeed())
+					} else {
+						r.rrdMarkStalled(ctx, obj, fmt.Errorf("characterized failure"))
+					}
+				case *authorizationv1alpha1.RestrictedBindDefinition:
+					r := NewRestrictedBindDefinitionReconciler(c, scheme.Scheme, recorder)
+					switch operation {
+					case "apply-stalled":
+						Expect(r.rbdApplyStatusAndMarkStalled(ctx, obj, "characterized failure")).To(Succeed())
+					case "skipped-sa":
+						obj.Status.SkippedServiceAccounts = []string{namespace + "/absent"}
+						result, err := r.rbdHandleSkippedServiceAccounts(ctx, obj)
+						Expect(err).NotTo(HaveOccurred())
+						Expect(result.RequeueAfter).To(Equal(RoleRefRequeueInterval))
+					case "missing-role":
+						result, err := r.rbdHandleMissingRoleRefs(ctx, obj, []string{"absent"})
+						Expect(err).NotTo(HaveOccurred())
+						Expect(result.RequeueAfter).To(Equal(DefaultRequeueInterval))
+					case "missing-namespace":
+						result, err := r.rbdHandleMissingTargetNamespaces(ctx, obj, []string{"absent"})
+						Expect(err).NotTo(HaveOccurred())
+						Expect(result.RequeueAfter).To(Equal(DefaultRequeueInterval))
+					default:
+						r.rbdMarkStalled(ctx, obj, fmt.Errorf("characterized failure"))
+					}
+				}
+			}
+			run()
+			Expect(applies).To(Equal(1))
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(obj), obj)).To(Succeed())
+			getter := obj.(conditions.Getter)
+			switch operation {
+			case "deletion-failed":
+				Expect(conditions.Get(getter, authorizationv1alpha1.DeleteCondition).Status).To(Equal(metav1.ConditionFalse))
+			case "nonfatal":
+				Expect(conditions.IsReady(getter)).To(BeTrue())
+			case "skipped-sa", "missing-role", "missing-namespace":
+				Expect(conditions.IsReady(getter)).To(BeFalse())
+				Expect(conditions.Get(getter, conditions.ReadyConditionType).Status).To(Equal(metav1.ConditionFalse))
+			default:
+				Expect(conditions.IsStalled(getter)).To(BeTrue())
+			}
+			rv := obj.GetResourceVersion()
+			run()
+			Expect(applies).To(Equal(1))
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(obj), obj)).To(Succeed())
+			Expect(obj.GetResourceVersion()).To(Equal(rv))
+		},
+		Entry("RoleDefinition stalled", "RoleDefinition", "stalled"),
+		Entry("RoleDefinition deletion failed", "RoleDefinition", "deletion-failed"),
+		Entry("BindDefinition stalled", "BindDefinition", "stalled"),
+		Entry("BindDefinition nonfatal apply", "BindDefinition", "nonfatal"),
+		Entry("RestrictedRoleDefinition stalled", "RestrictedRoleDefinition", "stalled"),
+		Entry("RestrictedRoleDefinition apply stalled", "RestrictedRoleDefinition", "apply-stalled"),
+		Entry("RestrictedBindDefinition stalled", "RestrictedBindDefinition", "stalled"),
+		Entry("RestrictedBindDefinition apply stalled", "RestrictedBindDefinition", "apply-stalled"),
+		Entry("RestrictedBindDefinition skipped ServiceAccounts", "RestrictedBindDefinition", "skipped-sa"),
+		Entry("RestrictedBindDefinition missing roles", "RestrictedBindDefinition", "missing-role"),
+		Entry("RestrictedBindDefinition missing namespaces", "RestrictedBindDefinition", "missing-namespace"),
+	)
+
+	DescribeTable("restricted policy evaluation persists violations through its status callback",
+		func(kind string) {
+			policy := migrationObject("RBACPolicy", fmt.Sprintf("denied-%d", time.Now().UnixNano())).(*authorizationv1alpha1.RBACPolicy)
+			policy.Spec.BindingLimits = &authorizationv1alpha1.BindingLimits{AllowClusterRoleBindings: false}
+			policy.Spec.RoleLimits = &authorizationv1alpha1.RoleLimits{AllowClusterRoles: false}
+			Expect(k8sClient.Create(ctx, policy)).To(Succeed())
+			DeferCleanup(func() { Expect(k8sClient.Delete(ctx, policy)).To(Succeed()) })
+			obj := migrationObject(kind, policy.Name+"-resource")
+			switch obj := obj.(type) {
+			case *authorizationv1alpha1.RestrictedBindDefinition:
+				obj.Spec.PolicyRef.Name = policy.Name
+			case *authorizationv1alpha1.RestrictedRoleDefinition:
+				obj.Spec.PolicyRef.Name = policy.Name
+			}
+			Expect(k8sClient.Create(ctx, obj)).To(Succeed())
+			DeferCleanup(func() { Expect(k8sClient.Delete(ctx, obj)).To(Succeed()) })
+			applies := 0
+			c := interceptor.NewClient(k8sClient, interceptor.Funcs{
+				SubResourceApply: func(ctx context.Context, c client.Client, subresource string, ac runtime.ApplyConfiguration, opts ...client.SubResourceApplyOption) error {
+					applies++
+					return c.SubResource(subresource).Apply(ctx, ac, opts...)
+				},
+			})
+			recorder := events.NewFakeRecorder(100)
+			var result ctrl.Result
+			var handled bool
+			var err error
+			switch obj := obj.(type) {
+			case *authorizationv1alpha1.RestrictedBindDefinition:
+				r := NewRestrictedBindDefinitionReconciler(c, scheme.Scheme, recorder)
+				result, handled, err = r.rbdEvaluatePolicy(ctx, obj, policy)
+			case *authorizationv1alpha1.RestrictedRoleDefinition:
+				r := &RestrictedRoleDefinitionReconciler{client: c, reader: k8sClient, recorder: recorder}
+				result, handled, err = r.rrdEvaluatePolicy(ctx, obj, policy)
+			}
+			Expect(err).NotTo(HaveOccurred())
+			Expect(handled).To(BeTrue())
+			Expect(result.RequeueAfter).To(Equal(DefaultRequeueInterval))
+			Expect(applies).To(Equal(1))
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(obj), obj)).To(Succeed())
+			Expect(conditions.Get(obj.(conditions.Getter), authorizationv1alpha1.PolicyCompliantCondition).Status).To(Equal(metav1.ConditionFalse))
+			Expect(conditions.Get(obj.(conditions.Getter), conditions.ReadyConditionType).Status).To(Equal(metav1.ConditionFalse))
+			switch obj := obj.(type) {
+			case *authorizationv1alpha1.RestrictedBindDefinition:
+				Expect(obj.Status.PolicyViolations).NotTo(BeEmpty())
+			case *authorizationv1alpha1.RestrictedRoleDefinition:
+				Expect(obj.Status.PolicyViolations).NotTo(BeEmpty())
+			}
+		},
+		Entry("RestrictedBindDefinition", "RestrictedBindDefinition"),
+		Entry("RestrictedRoleDefinition", "RestrictedRoleDefinition"),
+	)
+
+	DescribeTable("RestrictedRoleDefinition reconciliation persists discovery requeue and rule-budget status",
+		func(startTracker bool) {
+			policy := migrationObject("RBACPolicy", fmt.Sprintf("discovery-%d", time.Now().UnixNano())).(*authorizationv1alpha1.RBACPolicy)
+			limit := int32(1)
+			policy.Spec.RoleLimits = &authorizationv1alpha1.RoleLimits{AllowClusterRoles: true, MaxRulesPerRole: &limit}
+			Expect(k8sClient.Create(ctx, policy)).To(Succeed())
+			DeferCleanup(func() { Expect(k8sClient.Delete(ctx, policy)).To(Succeed()) })
+			rrd := migrationObject("RestrictedRoleDefinition", policy.Name+"-resource").(*authorizationv1alpha1.RestrictedRoleDefinition)
+			rrd.Spec.PolicyRef.Name = policy.Name
+			rrd.Finalizers = []string{authorizationv1alpha1.RestrictedRoleDefinitionFinalizer}
+			Expect(k8sClient.Create(ctx, rrd)).To(Succeed())
+			DeferCleanup(func() {
+				Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(rrd), rrd)).To(Succeed())
+				base := rrd.DeepCopy()
+				rrd.Finalizers = nil
+				Expect(k8sClient.Patch(ctx, rrd, client.MergeFrom(base))).To(Succeed())
+				Expect(k8sClient.Delete(ctx, rrd)).To(Succeed())
+			})
+			tracker := discovery.NewResourceTracker(scheme.Scheme, cfg)
+			if startTracker {
+				trackerCtx, cancel := context.WithCancel(ctx)
+				DeferCleanup(cancel)
+				Expect(tracker.Start(trackerCtx)).To(Succeed())
+			}
+			applies := 0
+			c := interceptor.NewClient(k8sClient, interceptor.Funcs{
+				SubResourceApply: func(ctx context.Context, c client.Client, subresource string, ac runtime.ApplyConfiguration, opts ...client.SubResourceApplyOption) error {
+					applies++
+					return c.SubResource(subresource).Apply(ctx, ac, opts...)
+				},
+			})
+			r := &RestrictedRoleDefinitionReconciler{client: c, reader: k8sClient, recorder: events.NewFakeRecorder(100), resourceTracker: tracker}
+			result, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(rrd)})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(applies).To(Equal(1))
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(rrd), rrd)).To(Succeed())
+			if startTracker {
+				Expect(result.RequeueAfter).To(Equal(DefaultRequeueInterval))
+				Expect(rrd.Status.PolicyViolations).To(ContainElement(ContainSubstring("exceeding maximum")))
+				Expect(conditions.Get(rrd, conditions.ReadyConditionType).Status).To(Equal(metav1.ConditionFalse))
+			} else {
+				Expect(result.RequeueAfter).To(Equal(10 * time.Second))
+				Expect(conditions.IsReconciling(rrd)).To(BeTrue())
+				Expect(rrd.Status.PolicyViolations).To(BeEmpty())
+			}
+			Expect(rrd.Status.RoleReconciled).To(BeFalse())
+			role := &rbacv1.ClusterRole{}
+			Expect(apierrors.IsNotFound(k8sClient.Get(ctx, client.ObjectKey{Name: rrd.Spec.TargetName}, role))).To(BeTrue())
+		},
+		Entry("discovery not started", false),
+		Entry("generated rules exceed policy budget", true),
+	)
 
 	It("retries generated ServiceAccount status cleanup against fresh state after a real conflict", func() {
 		bd := migrationObject("BindDefinition", fmt.Sprintf("cleanup-%d", time.Now().UnixNano())).(*authorizationv1alpha1.BindDefinition)

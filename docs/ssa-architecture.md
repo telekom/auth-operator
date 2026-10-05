@@ -29,6 +29,9 @@ storm guard in `test/e2e/creator_tracking_kyverno_e2e_test.go`, these tests pin
 apply-call counts, field-manager ownership, drift repair, label preservation and
 pruning, status no-ops and empty-list cleanup, and optimistic-lock finalizer and
 ServiceAccount metadata patches under actual concurrent API-server writes.
+Controller status-helper entry points also run against the real status
+subresource, including restricted policy-violation callbacks, degraded binding
+conditions, stalled conditions, nonfatal status applies and deletion failures.
 Restricted RBAC and ServiceAccount paths intentionally **always apply** to
 re-evaluate authorization; ordinary BindDefinition and RoleDefinition paths
 can skip unchanged values. ServiceAccount applies are unforced: a competing
