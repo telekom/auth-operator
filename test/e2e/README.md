@@ -59,6 +59,30 @@ test/e2e/
 └── output/                      # Generated test artifacts
 ```
 
+### Webhook and discovery migration safety net
+
+`internal/webhook/authorization/webhook_discovery_coverage_test.go` characterizes
+namespace selector decisions, immediate live-read revocations despite stale
+indexed candidates, request-local namespace memoization, and rate-limit SAR
+responses against envtest. Limiter eviction and subject-key normalization use
+unit tests because they do not depend on API-server semantics.
+`internal/controller/authorization/discovery_coverage_test.go` exercises CRD
+installation, establishment waits, cancellation, termination and removal,
+including watch-triggered RBAC regeneration by both RoleDefinition controllers.
+
+Run these focused checks from the repository root with an **absolute**
+`KUBEBUILDER_ASSETS` path:
+
+```bash
+go test ./internal/webhook/authorization ./internal/controller/authorization \
+  -run 'Test(WebhookIntegration|Controllers|SubjectLimiterIdle.*|RateLimitSubjectKeyCanonicalGroups)$' \
+  -ginkgo.focus='(Webhook discovery characterization|Discovery migration characterization)'
+```
+
+The existing `authorization-chain` E2E label covers API-server authorization
+chain composition and ordered apply, which direct handler envtests cannot
+replace. The `integration` label also includes WebhookAuthorizer E2E decisions.
+
 ### Test Suite Labels
 
 Tests are organized using Ginkgo labels for selective execution:

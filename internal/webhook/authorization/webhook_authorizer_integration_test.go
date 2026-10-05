@@ -66,6 +66,7 @@ var _ = Describe("WebhookAuthorizer Integration", func() {
 		authorizer = &webhooks.Authorizer{
 			AllowUnauthenticatedAuthorize: true,
 			Client:                        envClient,
+			LiveReader:                    envReader,
 			Log:                           zap.New(zap.WriteTo(io.Discard)),
 		}
 	})
