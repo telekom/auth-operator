@@ -83,7 +83,7 @@ func TestPlatformMountedCertificateValidation(t *testing.T) {
 	g.Expect(err).NotTo(gomega.HaveOccurred())
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
 	dnsName := "webhook." + ns.Name + ".svc"
-	certificate := func(notBefore, notAfter time.Time) []byte {
+	certificate := func(key *ecdsa.PrivateKey, notBefore, notAfter time.Time) []byte {
 		template := &x509.Certificate{
 			SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: dnsName}, DNSNames: []string{dnsName},
 			NotBefore: notBefore, NotAfter: notAfter, KeyUsage: x509.KeyUsageDigitalSignature,
@@ -94,12 +94,12 @@ func TestPlatformMountedCertificateValidation(t *testing.T) {
 		return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 	}
 	now := time.Now()
-	validCert := certificate(now.Add(-time.Hour), now.Add(time.Hour))
-	mount := func(cert, privateKey []byte) {
+	validCert := certificate(key, now.Add(-time.Hour), now.Add(time.Hour))
+	mount := func(cert []byte) {
 		g.Expect(os.WriteFile(filepath.Join(certDir, "tls.crt"), cert, 0o600)).To(gomega.Succeed())
-		g.Expect(os.WriteFile(filepath.Join(certDir, "tls.key"), privateKey, 0o600)).To(gomega.Succeed())
+		g.Expect(os.WriteFile(filepath.Join(certDir, "tls.key"), keyPEM, 0o600)).To(gomega.Succeed())
 	}
-	mount([]byte("non-empty but invalid"), keyPEM)
+	mount([]byte("non-empty but invalid"))
 	probeAddr, webhookAddr := platformFreeAddress(t), platformFreeAddress(t)
 	_, port, err := net.SplitHostPort(webhookAddr)
 	g.Expect(err).NotTo(gomega.HaveOccurred())
@@ -175,24 +175,23 @@ func TestPlatformMountedCertificateValidation(t *testing.T) {
 	g.Eventually(readyStatus, 20*time.Second, 100*time.Millisecond).Should(gomega.Equal(http.StatusInternalServerError))
 	otherKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	g.Expect(err).NotTo(gomega.HaveOccurred())
-	otherKeyDER, err := x509.MarshalECPrivateKey(otherKey)
-	g.Expect(err).NotTo(gomega.HaveOccurred())
 	for _, tc := range []struct {
 		name string
 		cert []byte
-		key  []byte
 	}{
-		{"malformed", []byte("non-empty but invalid"), keyPEM},
-		{"mismatched key", validCert, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: otherKeyDER})},
-		{"expired", certificate(now.Add(-2*time.Hour), now.Add(-time.Hour)), keyPEM},
-		{"not yet valid", certificate(now.Add(time.Hour), now.Add(2*time.Hour)), keyPEM},
+		{"malformed", []byte("non-empty but invalid")},
+		{"mismatched key", certificate(otherKey, now.Add(-time.Hour), now.Add(time.Hour))},
+		{"expired", certificate(key, now.Add(-2*time.Hour), now.Add(-time.Hour))},
+		{"not yet valid", certificate(key, now.Add(time.Hour), now.Add(2*time.Hour))},
 	} {
 		t.Logf("%s mounted certificate must not register webhooks or mark the replica ready", tc.name)
-		mount(tc.cert, tc.key)
+		// Keep the key fixed so replacing an invalid certificate cannot
+		// temporarily produce a valid pair and open the one-shot setup gate.
+		mount(tc.cert)
 		// Cover multiple one-second mount-watcher polls for each invalid pair.
 		g.Consistently(readyStatus, 2500*time.Millisecond, 100*time.Millisecond).Should(gomega.Equal(http.StatusInternalServerError))
 	}
-	mount(validCert, keyPEM)
+	mount(validCert)
 	g.Eventually(readyStatus, 30*time.Second, 100*time.Millisecond).Should(gomega.Equal(http.StatusOK))
 	roots := x509.NewCertPool()
 	g.Expect(roots.AppendCertsFromPEM(validCert)).To(gomega.BeTrue())

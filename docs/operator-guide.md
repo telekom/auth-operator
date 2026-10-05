@@ -866,6 +866,7 @@ without acquiring the rotation lease. Certificate setup uses
 Unlike the previous non-empty-file gate, mounted readiness now requires a
 matching TLS certificate/key pair with a currently valid leaf certificate.
 Malformed, mismatched, expired, or not-yet-valid pairs keep the replica unready.
+This is a one-time startup gate, not continuous certificate health monitoring.
 `/readyz` also checks that the webhook server has started after handler
 registration. Mounted readiness does not verify the certificate's DNS names or
 trust chain and does not guarantee that CA injection has completed on that
