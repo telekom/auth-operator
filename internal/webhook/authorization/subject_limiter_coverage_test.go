@@ -40,6 +40,7 @@ func TestSubjectLimiterIdleTTLIncludesRefill(t *testing.T) {
 		{name: "zero rate", limiter: rate.NewLimiter(0, 1), want: minSubjectLimiterIdleTTL},
 		{name: "short refill", limiter: rate.NewLimiter(100, 1), want: minSubjectLimiterIdleTTL},
 		{name: "slow refill", limiter: rate.NewLimiter(0.001, 1), want: 1000 * time.Second},
+		{name: "whole burst refill", limiter: rate.NewLimiter(0.01, 10), want: 1000 * time.Second},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := subjectLimiterIdleTTL(tc.limiter); got != tc.want {
