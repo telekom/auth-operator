@@ -98,11 +98,29 @@ var _ = Describe("Webhook discovery characterization", func() {
 
 	DescribeTable("uses live state even when indexed candidates and cached objects are stale",
 		func(change string) {
+			indexValue := indexer.WebhookAuthorizerHasNamespaceSelectorTrue
+			if change == "global-to-scoped" {
+				wa.Spec.NamespaceSelector = metav1.LabelSelector{}
+				Expect(envClient.Update(ctx, wa)).To(Succeed())
+				indexValue = indexer.WebhookAuthorizerHasNamespaceSelectorFalse
+				Eventually(func() bool {
+					var global authorizationv1alpha1.WebhookAuthorizerList
+					Expect(envClient.List(ctx, &global, client.MatchingFields{
+						indexer.WebhookAuthorizerHasNamespaceSelectorField: indexValue,
+					})).To(Succeed())
+					for _, candidate := range global.Items {
+						if candidate.Name == wa.Name {
+							return true
+						}
+					}
+					return false
+				}).WithTimeout(10 * time.Second).Should(BeTrue())
+			}
 			// Freeze a real indexed-cache snapshot to make revocation independent
 			// of informer timing; the selected objects still come from envtest.
 			var candidates authorizationv1alpha1.WebhookAuthorizerList
 			Expect(envClient.List(ctx, &candidates, client.MatchingFields{
-				indexer.WebhookAuthorizerHasNamespaceSelectorField: indexer.WebhookAuthorizerHasNamespaceSelectorTrue,
+				indexer.WebhookAuthorizerHasNamespaceSelectorField: indexValue,
 			})).To(Succeed())
 			staleWA, staleNS := wa.DeepCopy(), ns.DeepCopy()
 			snapshotClient, err := client.NewWithWatch(envCfg, client.Options{Scheme: envClient.Scheme()})
@@ -117,7 +135,7 @@ var _ = Describe("Webhook discovery characterization", func() {
 					options.ApplyOptions(opts)
 					snapshot := &authorizationv1alpha1.WebhookAuthorizerList{}
 					if options.FieldSelector.Matches(fields.Set{
-						indexer.WebhookAuthorizerHasNamespaceSelectorField: indexer.WebhookAuthorizerHasNamespaceSelectorTrue,
+						indexer.WebhookAuthorizerHasNamespaceSelectorField: indexValue,
 					}) {
 						snapshot = candidates.DeepCopy()
 					}
@@ -152,16 +170,33 @@ var _ = Describe("Webhook discovery characterization", func() {
 				Expect(envClient.Update(ctx, wa)).To(Succeed())
 			case "delete":
 				Expect(envClient.Delete(ctx, wa)).To(Succeed())
+			case "scoped-to-global":
+				wa.Spec.NamespaceSelector = metav1.LabelSelector{}
+				Expect(envClient.Update(ctx, wa)).To(Succeed())
+			case "global-to-scoped":
+				wa.Spec.NamespaceSelector = metav1.LabelSelector{MatchLabels: map[string]string{"team": "selected"}}
+				Expect(envClient.Update(ctx, wa)).To(Succeed())
 			}
 			response := sendSAR(authorizer, sar)
-			Expect(response.Status.Allowed).To(BeFalse())
+			transition := change == "scoped-to-global" || change == "global-to-scoped"
+			Expect(response.Status.Allowed).To(Equal(transition))
 			Expect(response.Status.Denied).To(Equal(change == "deny"))
+			if transition {
+				// A new live scope must win over the frozen candidate's old index.
+				sar.Spec.ResourceAttributes.Namespace = "default"
+				Expect(sendSAR(authorizer, sar).Status.Allowed).To(Equal(change == "scoped-to-global"))
+				sar.Spec.ResourceAttributes.Namespace = ""
+				sar.Spec.ResourceAttributes.Resource = "nodes"
+				Expect(sendSAR(authorizer, sar).Status.Allowed).To(Equal(change == "scoped-to-global"))
+			}
 		},
 		Entry("namespace label revocation", "labels"),
 		Entry("principal revocation", "principal"),
 		Entry("resource rule revocation", "rules"),
 		Entry("explicit deny", "deny"),
 		Entry("authorizer deletion", "delete"),
+		Entry("scoped candidate becomes global", "scoped-to-global"),
+		Entry("global candidate becomes scoped", "global-to-scoped"),
 	)
 
 	It("returns an HTTP 200 denied SAR when a subject exhausts its burst", func() {
