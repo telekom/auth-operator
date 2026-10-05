@@ -39,15 +39,14 @@ manager's different token setting remains a conflict, not a forced repair.
 Restricted ClusterRole reconciliation deliberately normalizes all labels,
 unlike ordinary roles/bindings which preserve unrelated foreign labels.
 
-The tests explicitly characterize current helper gaps, not desired safety
+The tests characterize the remaining helper gaps, not desired safety
 guarantees: ServiceAccount no-op skipping bypasses UID/resourceVersion
-preconditions, and ClusterRole label pruning performs a persistent preliminary
-merge patch even when the subsequent SSA apply is dry-run. ServiceAccount
-wrappers have no dry-run option. Ordinary Role/ClusterRole wrappers also skip
-unchanged **unforced** dry-runs; changed or forced dry-runs reach the server.
-No controller currently supplies these
-preconditions or a pruning dry-run; fixing either gap during library adoption
-requires an explicit behavior-change note and updated expectations.
+preconditions, and ServiceAccount wrappers have no dry-run option. Ordinary
+Role/ClusterRole wrappers still skip unchanged **unforced** dry-runs when label
+pruning is not involved; changed or forced dry-runs reach the server.
+ClusterRole label pruning now forwards dry-run options to its preliminary merge
+patch, so dry-run requests do not persist the label deletion. No controller
+currently supplies a pruning dry-run.
 
 ---
 
@@ -194,14 +193,17 @@ fields to be a subset of the desired fields, so omitted owned fields are pruned.
 Dry-runs and UID/resourceVersion preconditions normally reach the API server.
 `alwaysApply` bypasses the gate at restricted authorization boundaries.
 
-AO retains the phase-1 characterized policies rather than silently fixing them:
+AO retains the phase-1 characterized policies, with one explicit safety fix
+for ClusterRole label-pruning dry-runs:
 
-- Ordinary Role/ClusterRole unforced equal requests skip, including dry-runs.
+- Ordinary Role/ClusterRole unforced equal requests skip, including dry-runs
+  when label pruning is not involved.
 - Ordinary ServiceAccount no-op checks ignore UID/resourceVersion preconditions.
   A comparison clone omits them, but actual writes send the original configuration
   and therefore still enforce them. Always variants do not use this adapter.
-- ClusterRole label pruning remains an AO merge patch, including its persistent
-  dry-run behavior and conflict-convergence fallback.
+- ClusterRole label pruning remains an AO merge patch, but forwards dry-run
+  options and never converts a persistent apply conflict into apparent
+  convergence based only on matching values.
 - Missing-ServiceAccount create conflicts still require fresh ownership
   classification on the next reconcile.
 

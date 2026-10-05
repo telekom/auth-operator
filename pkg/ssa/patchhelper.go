@@ -376,22 +376,17 @@ func patchApplyClusterRole(
 	result, err := patchApplyRoleWithLegacySkip(ctx, c, clusterRoleApplier, ac, always || pruned,
 		ac.UID != nil || ac.ResourceVersion != nil, applyOpts...)
 	if pruned && apierrors.IsConflict(err) {
-		return patchApplyClusterRoleAfterPruneConflict(ctx, c, ac, shouldPrune, applyOpts...)
+		return patchApplyClusterRoleAfterPruneConflict(ctx, c, ac, applyOpts...)
 	}
 	return result, err
 }
 
 func patchApplyClusterRoleAfterPruneConflict(
 	ctx context.Context, c client.Client, ac *rbacv1ac.ClusterRoleApplyConfiguration,
-	shouldPrune func(string) bool, opts ...client.ApplyOption,
+	opts ...client.ApplyOption,
 ) (PatchApplyResult, error) {
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error { return c.Apply(ctx, ac, opts...) })
 	if err == nil {
-		return PatchApplyResultPatched, nil
-	}
-	latest := &rbacv1.ClusterRole{}
-	if getErr := c.Get(ctx, client.ObjectKey{Name: *ac.Name}, latest); getErr == nil &&
-		clusterRoleMatches(latest, ac) && !hasPrunableClusterRoleLabel(latest.Labels, ac.Labels, shouldPrune) {
 		return PatchApplyResultPatched, nil
 	}
 	return 0, fmt.Errorf("patch ClusterRole %s: %w", *ac.Name, err)
@@ -471,18 +466,6 @@ func pruneClusterRoleLabels(
 		return false, fmt.Errorf("prune ClusterRole %s labels: %w", existing.Name, err)
 	}
 	return true, nil
-}
-
-func hasPrunableClusterRoleLabel(labels, desired map[string]string, shouldPrune func(string) bool) bool {
-	if shouldPrune == nil {
-		return false
-	}
-	for key := range labels {
-		if _, declared := desired[key]; !declared && shouldPrune(key) {
-			return true
-		}
-	}
-	return false
 }
 
 func sortByJSON[T any](items []T) error {
