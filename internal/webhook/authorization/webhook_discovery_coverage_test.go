@@ -180,12 +180,20 @@ var _ = Describe("Webhook discovery characterization", func() {
 		wa.Status.ObservedGeneration = wa.Generation
 		wa.Status.AuthorizerConfigured = false
 		conditions.Set(wa, &metav1.Condition{
-			Type: "Ready", Status: metav1.ConditionFalse, Reason: "Pending", Message: "Not configured",
+			Type: "Ready", Status: metav1.ConditionTrue, Reason: "Configured", Message: "Configured",
 			ObservedGeneration: wa.Generation,
 		})
 		Expect(envClient.Status().Update(ctx, wa)).To(Succeed())
 		Expect(sendSAR(authorizer, sar).Status.Allowed).To(BeFalse())
 		wa.Status.AuthorizerConfigured = true
+		Expect(envClient.Status().Update(ctx, wa)).To(Succeed())
+		Expect(sendSAR(authorizer, sar).Status.Allowed).To(BeTrue())
+		conditions.Set(wa, &metav1.Condition{
+			Type: "Ready", Status: metav1.ConditionFalse, Reason: "Pending", Message: "Not ready",
+			ObservedGeneration: wa.Generation,
+		})
+		Expect(envClient.Status().Update(ctx, wa)).To(Succeed())
+		Expect(sendSAR(authorizer, sar).Status.Allowed).To(BeFalse())
 		conditions.Set(wa, &metav1.Condition{
 			Type: "Ready", Status: metav1.ConditionTrue, Reason: "Configured", Message: "Configured",
 			ObservedGeneration: wa.Generation,
