@@ -109,6 +109,10 @@ func TestResourceTrackerReportsUnchangedOnDiscoveryHTTPError(t *testing.T) {
 	if changed {
 		t.Fatal("discovery HTTP error should not report a change")
 	}
+	var partial *discovery.ErrGroupDiscoveryFailed
+	if !errors.As(err, &partial) {
+		t.Fatalf("empty initial discovery lost its original failure cause: %v", err)
+	}
 }
 
 func TestResourceTrackerPartialDiscoveryRetainsFailedGroup(t *testing.T) {

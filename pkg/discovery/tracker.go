@@ -179,7 +179,7 @@ func (r *ResourceTracker) collectAPIResources(ctx context.Context) (bool, error)
 		}
 	}
 	if snapshot, snapshotErr := r.tracker.Snapshot(); snapshotErr == nil && countAPIResources(snapshot) == 0 {
-		return false, errEmptyDiscovery
+		return false, errors.Join(errEmptyDiscovery, err)
 	}
 	return changed, err
 }
