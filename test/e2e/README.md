@@ -66,10 +66,17 @@ namespace selector decisions, immediate live-read revocations despite stale
 indexed candidates, request-local namespace memoization, and rate-limit SAR
 responses against envtest. Limiter eviction and subject-key normalization use
 unit tests because they do not depend on API-server semantics.
+After shared-library adoption, the idle-eviction unit test uses the library's
+fake-clock API instead of mutating the removed private map; its active/expired
+budget assertions remain intact. All Phase 1 envtest scenarios stay unchanged.
 `internal/controller/authorization/discovery_coverage_test.go` exercises CRD
 installation, establishment waits, cancellation, termination and removal,
 including watch-triggered RBAC regeneration by both RoleDefinition controllers
 and live discovered resources blocking namespace finalization.
+Additional migration tests cover idempotent RBAC augmentation, compatible
+zero-rate/unlimited limiter templates, refill-duration overflow, and CLI rate
+bounds. Both configured discovery refresh intervals remain exercised by the
+existing lifecycle tests and configuration unit tests.
 
 Run these focused checks from the repository root with an **absolute**
 `KUBEBUILDER_ASSETS` path:

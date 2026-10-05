@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"slices"
@@ -14,15 +15,14 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/telekom/t-caas-go-library/pkg/namespaceselector"
+	"github.com/telekom/t-caas-go-library/pkg/ratelimit"
 	"golang.org/x/time/rate"
 	authzv1 "k8s.io/api/authorization/v1"
-	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/discovery"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -50,11 +50,10 @@ const (
 )
 
 const (
-	maxSubjectLimiters         = 4096
-	minSubjectLimiterIdleTTL   = 5 * time.Minute
-	subjectLimiterCleanupEvery = time.Minute
-	maxBridgeDenyAuthorizers   = 256
-	bridgeDenyPageSize         = 64
+	maxSubjectLimiters       = 4096
+	minSubjectLimiterIdleTTL = 5 * time.Minute
+	maxBridgeDenyAuthorizers = 256
+	bridgeDenyPageSize       = 64
 )
 
 // maxRequestBodySize is the maximum allowed request body size (1MB).
@@ -114,16 +113,11 @@ type Authorizer struct {
 	// identity from consuming another identity's authorization budget.
 	Limiter *rate.Limiter
 
-	subjectLimitersMu       sync.Mutex
-	subjectLimiters         map[string]*subjectLimiterEntry
-	subjectLimiterCleanupAt time.Time
-	bridgeScopesMu          sync.Mutex
-	bridgeScopes            map[schema.GroupVersionResource]bridgeScopeEntry
-}
-
-type subjectLimiterEntry struct {
-	limiter  *rate.Limiter
-	lastSeen time.Time
+	subjectLimitersOnce sync.Once
+	subjectLimiters     *ratelimit.Limiter
+	subjectLimiterErr   error
+	bridgeScopesMu      sync.Mutex
+	bridgeScopes        map[schema.GroupVersionResource]bridgeScopeEntry
 }
 
 func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -368,66 +362,46 @@ func publicAuthorizerReason(result evaluationResult) string {
 }
 
 func (wa *Authorizer) allowSubjectRequest(sar *authzv1.SubjectAccessReview) bool {
-	limiter := wa.subjectLimiter(rateLimitSubjectKey(sar))
-	return limiter.Allow()
-}
-
-func (wa *Authorizer) subjectLimiter(subjectKey string) *rate.Limiter {
-	wa.subjectLimitersMu.Lock()
-	defer wa.subjectLimitersMu.Unlock()
-
-	if wa.subjectLimiters == nil {
-		wa.subjectLimiters = make(map[string]*subjectLimiterEntry)
+	if wa.Limiter == nil || wa.Limiter.Limit() == rate.Inf {
+		return true
 	}
-	now := time.Now()
-	if now.After(wa.subjectLimiterCleanupAt) {
-		wa.pruneSubjectLimitersLocked(now)
-		wa.subjectLimiterCleanupAt = now.Add(subjectLimiterCleanupEvery)
-	}
-	if entry, exists := wa.subjectLimiters[subjectKey]; exists {
-		entry.lastSeen = now
-		return entry.limiter
-	}
-	if len(wa.subjectLimiters) >= maxSubjectLimiters {
-		wa.evictOldestSubjectLimiterLocked()
-	}
-	limiter := rate.NewLimiter(wa.Limiter.Limit(), wa.Limiter.Burst())
-	wa.subjectLimiters[subjectKey] = &subjectLimiterEntry{limiter: limiter, lastSeen: now}
-	return limiter
-}
-
-func (wa *Authorizer) pruneSubjectLimitersLocked(now time.Time) {
-	idleTTL := subjectLimiterIdleTTL(wa.Limiter)
-	for key, entry := range wa.subjectLimiters {
-		if now.Sub(entry.lastSeen) > idleTTL {
-			delete(wa.subjectLimiters, key)
+	wa.subjectLimitersOnce.Do(func() {
+		if wa.subjectLimiters != nil {
+			return
 		}
+		limit := wa.Limiter.Limit()
+		// A zero-rate template consumes its initial burst without refilling.
+		// The shared adapter requires a positive rate; the smallest float has
+		// no observable refill within time.Duration's representable lifetime.
+		if limit == 0 {
+			limit = math.SmallestNonzeroFloat64
+		}
+		wa.subjectLimiters, wa.subjectLimiterErr = ratelimit.New(ratelimit.Config{
+			Rate: limit, Burst: wa.Limiter.Burst(), MaxKeys: maxSubjectLimiters,
+			IdleTTL: subjectLimiterIdleTTL(wa.Limiter),
+		})
+	})
+	if wa.subjectLimiterErr != nil {
+		wa.Log.Error(wa.subjectLimiterErr, "invalid subject limiter configuration")
+		return false
 	}
+	allowed, _ := wa.subjectLimiters.Allow(rateLimitSubjectKey(sar))
+	return allowed
 }
 
 func subjectLimiterIdleTTL(limiter *rate.Limiter) time.Duration {
 	if limiter == nil || limiter.Limit() <= 0 || limiter.Burst() <= 0 {
 		return minSubjectLimiterIdleTTL
 	}
-	refill := time.Duration(float64(time.Second) * float64(limiter.Burst()) / float64(limiter.Limit()))
+	refillNanos := float64(time.Second) * float64(limiter.Burst()) / float64(limiter.Limit())
+	if refillNanos >= float64(math.MaxInt64) {
+		return time.Duration(math.MaxInt64)
+	}
+	refill := time.Duration(refillNanos)
 	if refill < minSubjectLimiterIdleTTL {
 		return minSubjectLimiterIdleTTL
 	}
 	return refill
-}
-
-func (wa *Authorizer) evictOldestSubjectLimiterLocked() {
-	oldestKey := ""
-	var oldest time.Time
-	for key, entry := range wa.subjectLimiters {
-		if oldestKey == "" || entry.lastSeen.Before(oldest) {
-			oldestKey = key
-			oldest = entry.lastSeen
-		}
-	}
-	if oldestKey != "" {
-		delete(wa.subjectLimiters, oldestKey)
-	}
 }
 
 func rateLimitSubjectKey(sar *authzv1.SubjectAccessReview) string {
@@ -633,11 +607,6 @@ func authorizerReadyForEvaluation(item authorizationv1alpha1.WebhookAuthorizer) 
 	return item.Status.AuthorizerConfigured
 }
 
-type namespaceLabelCacheEntry struct {
-	labels labels.Set
-	err    error
-}
-
 func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAccessReview, items []authorizationv1alpha1.WebhookAuthorizer) (evaluationResult, error) {
 	evaluated := 0
 	skipped := 0
@@ -646,7 +615,7 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 	// both successful label fetches and Get errors so repeated scoped
 	// authorizers do not repeat the same lookup, while errors still propagate
 	// to the fail-closed HTTP path.
-	var nsLabelCache map[string]namespaceLabelCacheEntry
+	var nsLabelCache *namespaceselector.Request
 
 	for i, webhookAuthorizer := range items {
 		// Skip namespace-scoped authorizers for non-resource or cluster-scoped SARs
@@ -665,7 +634,11 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 				continue
 			}
 			if nsLabelCache == nil {
-				nsLabelCache = make(map[string]namespaceLabelCacheEntry)
+				var err error
+				nsLabelCache, err = namespaceselector.NewRequest(wa.authorizerReader(), authorizationv1alpha1.WebhookCacheTimeout)
+				if err != nil {
+					return evaluationResult{}, fmt.Errorf("create namespace selector request: %w", err)
+				}
 			}
 			matches, err := wa.namespaceMatches(ctx, resourceNS, &webhookAuthorizer.Spec.NamespaceSelector, nsLabelCache)
 			if err != nil {
@@ -783,7 +756,10 @@ func (wa *Authorizer) evaluateSAR(ctx context.Context, sar *authzv1.SubjectAcces
 }
 
 func (wa *Authorizer) liveBridgeDeny(ctx context.Context, sar *authzv1.SubjectAccessReview) (evaluationResult, error) {
-	nsCache := make(map[string]namespaceLabelCacheEntry)
+	nsCache, err := namespaceselector.NewRequest(wa.authorizerReader(), authorizationv1alpha1.WebhookCacheTimeout)
+	if err != nil {
+		return evaluationResult{}, fmt.Errorf("create namespace selector request: %w", err)
+	}
 	continuation := ""
 	for range maxBridgeDenyAuthorizers / bridgeDenyPageSize {
 		var authorizers authorizationv1alpha1.WebhookAuthorizerList
@@ -824,11 +800,11 @@ func (wa *Authorizer) liveBridgeDeny(ctx context.Context, sar *authzv1.SubjectAc
 }
 
 // namespaceMatches checks if the namespace matches the selector.
-// nsCache is a per-request map that avoids redundant Get calls when multiple
+// nsCache is a per-request cache that avoids redundant Get calls when multiple
 // scoped authorizers target the same namespace within one SAR evaluation.
 // Cached Get errors are returned to callers so selector evaluation fails
 // closed instead of silently skipping scoped authorizers.
-func (wa *Authorizer) namespaceMatches(ctx context.Context, namespace string, selector *metav1.LabelSelector, nsCache map[string]namespaceLabelCacheEntry) (bool, error) {
+func (wa *Authorizer) namespaceMatches(ctx context.Context, namespace string, selector *metav1.LabelSelector, nsCache *namespaceselector.Request) (bool, error) {
 	if wa.Tracer != nil {
 		var span trace.Span
 		ctx, span = wa.Tracer.Start(ctx, "webhook.NamespaceMatch",
@@ -836,37 +812,7 @@ func (wa *Authorizer) namespaceMatches(ctx context.Context, namespace string, se
 		defer span.End()
 	}
 
-	if namespace == "" {
-		return false, nil
-	}
-
-	if cached, ok := nsCache[namespace]; ok {
-		if cached.err != nil {
-			return false, cached.err
-		}
-		labelSelector, err := metav1.LabelSelectorAsSelector(selector)
-		if err != nil {
-			return false, fmt.Errorf("parse namespace selector for namespace %q: %w", namespace, err)
-		}
-		return labelSelector.Matches(cached.labels), nil
-	}
-
-	var ns corev1.Namespace
-	getCtx, cancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
-	defer cancel()
-	if err := wa.authorizerReader().Get(getCtx, types.NamespacedName{Name: namespace}, &ns); err != nil {
-		wrappedErr := fmt.Errorf("get namespace %q: %w", namespace, err)
-		nsCache[namespace] = namespaceLabelCacheEntry{err: wrappedErr}
-		return false, wrappedErr
-	}
-	nsLabels := labels.Set(ns.Labels)
-	nsCache[namespace] = namespaceLabelCacheEntry{labels: nsLabels}
-
-	labelSelector, err := metav1.LabelSelectorAsSelector(selector)
-	if err != nil {
-		return false, fmt.Errorf("parse namespace selector for namespace %q: %w", namespace, err)
-	}
-	return labelSelector.Matches(nsLabels), nil
+	return nsCache.Matches(ctx, namespace, selector)
 }
 
 // principalMatches checks whether the SubjectAccessReview subject matches any of

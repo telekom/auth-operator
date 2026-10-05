@@ -30,7 +30,6 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -238,13 +237,11 @@ var _ = Describe("ResourceTracker CRD Deletion Handling", func() {
 })
 
 var _ = Describe("ResourceTracker CRD Watch Handling", func() {
-	It("stops blocking collection when the context is canceled while waiting for the collection lock", func() {
+	It("stops collection when the context is canceled", func() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
 		resourceTracker := NewResourceTracker(scheme.Scheme, cfg)
-		resourceTracker.collectMu.Lock()
-		defer resourceTracker.collectMu.Unlock()
 
 		done := make(chan struct {
 			Changed bool
@@ -252,7 +249,7 @@ var _ = Describe("ResourceTracker CRD Watch Handling", func() {
 		}, 1)
 		go func() {
 			defer GinkgoRecover()
-			changed, err := resourceTracker.collectAPIResourcesBlocking(ctx)
+			changed, err := resourceTracker.collectAPIResources(ctx)
 			done <- struct {
 				Changed bool
 				Err     error
@@ -328,7 +325,10 @@ var _ = Describe("ResourceTracker CRD Watch Handling", func() {
 			_, err := resourceTracker.GetAPIResources()
 			return err == nil
 		}, "30s", "1s").Should(BeTrue())
-		Eventually(started, "1s", "10ms").Should(Receive(BeNil()))
+		DeferCleanup(func() {
+			cancel()
+			Eventually(started, "10s", "10ms").Should(Receive(BeNil()))
+		})
 		for {
 			select {
 			case <-signalReceived:
@@ -363,128 +363,6 @@ var _ = Describe("ResourceTracker CRD Watch Handling", func() {
 			return exists
 		}, "60s", "1s").Should(BeTrue(), "watch startup CRD should be discovered without periodic refresh")
 		Eventually(signalReceived, "10s", "1s").Should(Receive())
-	})
-})
-
-var _ = Describe("ResourceTracker Watch Event Handling", func() {
-	Context("shouldSkipCollectionForTerminatingCRD logic", func() {
-		// These are unit tests for the deletion timestamp skip logic
-
-		It("should skip collection when CRD has deletionTimestamp and event is MODIFIED", func() {
-			now := metav1.Now()
-			crd := &apiextensionsv1.CustomResourceDefinition{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:              "test.example.com",
-					DeletionTimestamp: &now,
-				},
-			}
-
-			// Use the extracted helper function
-			Expect(shouldSkipTerminatingCRD(crd, watch.Modified)).To(BeTrue(),
-				"should skip collection for terminating CRD on MODIFIED event")
-		})
-
-		It("should NOT skip collection when CRD has deletionTimestamp and event is DELETED", func() {
-			now := metav1.Now()
-			crd := &apiextensionsv1.CustomResourceDefinition{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:              "test.example.com",
-					DeletionTimestamp: &now,
-				},
-			}
-
-			// Use the extracted helper function
-			Expect(shouldSkipTerminatingCRD(crd, watch.Deleted)).To(BeFalse(),
-				"should NOT skip collection for terminating CRD on DELETED event")
-		})
-
-		It("should NOT skip collection when CRD has NO deletionTimestamp", func() {
-			crd := &apiextensionsv1.CustomResourceDefinition{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test.example.com",
-					// No DeletionTimestamp
-				},
-			}
-
-			// Use the extracted helper function
-			Expect(shouldSkipTerminatingCRD(crd, watch.Modified)).To(BeFalse(),
-				"should NOT skip collection for non-terminating CRD")
-		})
-
-		It("should skip collection on ADDED event for terminating CRDs", func() {
-			now := metav1.Now()
-			crd := &apiextensionsv1.CustomResourceDefinition{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:              "test.example.com",
-					DeletionTimestamp: &now,
-				},
-			}
-
-			// Use the extracted helper function
-			// ADDED events for terminating CRDs are also skipped to avoid unnecessary collection
-			Expect(shouldSkipTerminatingCRD(crd, watch.Added)).To(BeTrue(),
-				"ADDED events for terminating CRDs are skipped to avoid unnecessary collection")
-		})
-	})
-})
-
-var _ = Describe("ResourceTracker APIResourcesByGroupVersion", func() {
-	Context("Equals comparison", func() {
-		It("should return true for identical maps", func() {
-			a := APIResourcesByGroupVersion{
-				"v1": []metav1.APIResource{
-					{Name: "pods", Namespaced: true, Kind: "Pod", Verbs: []string{"get", "list"}},
-				},
-			}
-			b := APIResourcesByGroupVersion{
-				"v1": []metav1.APIResource{
-					{Name: "pods", Namespaced: true, Kind: "Pod", Verbs: []string{"get", "list"}},
-				},
-			}
-			Expect(a.Equals(b)).To(BeTrue())
-		})
-
-		It("should return true when verbs are in different order", func() {
-			a := APIResourcesByGroupVersion{
-				"v1": []metav1.APIResource{
-					{Name: "pods", Namespaced: true, Kind: "Pod", Verbs: []string{"get", "list", "watch"}},
-				},
-			}
-			b := APIResourcesByGroupVersion{
-				"v1": []metav1.APIResource{
-					{Name: "pods", Namespaced: true, Kind: "Pod", Verbs: []string{"watch", "get", "list"}},
-				},
-			}
-			Expect(a.Equals(b)).To(BeTrue())
-		})
-
-		It("should return false when group version is missing", func() {
-			a := APIResourcesByGroupVersion{
-				"v1":                  []metav1.APIResource{{Name: "pods"}},
-				"test.example.com/v1": []metav1.APIResource{{Name: "testresources"}},
-			}
-			b := APIResourcesByGroupVersion{
-				"v1": []metav1.APIResource{{Name: "pods"}},
-				// test.example.com/v1 is missing - simulates CRD deletion
-			}
-			Expect(a.Equals(b)).To(BeFalse(), "should detect missing group version after CRD deletion")
-		})
-
-		It("should return false when resource is removed from a group version", func() {
-			a := APIResourcesByGroupVersion{
-				"test.example.com/v1": []metav1.APIResource{
-					{Name: "testresources", Namespaced: true, Kind: "TestResource"},
-					{Name: "testresources/status", Namespaced: true, Kind: "TestResource"},
-				},
-			}
-			b := APIResourcesByGroupVersion{
-				"test.example.com/v1": []metav1.APIResource{
-					{Name: "testresources", Namespaced: true, Kind: "TestResource"},
-					// status subresource removed
-				},
-			}
-			Expect(a.Equals(b)).To(BeFalse())
-		})
 	})
 })
 
@@ -614,7 +492,10 @@ var _ = Describe("ResourceTracker Integration - CRD Lifecycle", Ordered, func() 
 			_, err := resourceTracker.GetAPIResources()
 			return err == nil
 		}, "30s", "1s").Should(BeTrue())
-		Eventually(started, "1s", "10ms").Should(Receive(BeNil()))
+		DeferCleanup(func() {
+			cancel()
+			Eventually(started, "10s", "10ms").Should(Receive(BeNil()))
+		})
 		for {
 			select {
 			case <-signalReceived:
@@ -772,119 +653,5 @@ var _ = Describe("ResourceTracker GetAPIResources", func() {
 			resources1["v1"][0].Name = "modified"
 			Expect(resources2["v1"][0].Name).NotTo(Equal("modified"), "GetAPIResources should return deep copies")
 		}
-	})
-})
-
-var _ = Describe("ResourceTracker RefreshUUIDMap", func() {
-	var (
-		ctx             context.Context
-		cancel          context.CancelFunc
-		resourceTracker *ResourceTracker
-		testCRD         *apiextensionsv1.CustomResourceDefinition
-	)
-
-	BeforeEach(func() {
-		ctx, cancel = context.WithCancel(context.Background())
-
-		// Create a test CRD for UUID tracking tests
-		testCRD = &apiextensionsv1.CustomResourceDefinition{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "uuidtestresources.uuid.example.com",
-			},
-			Spec: apiextensionsv1.CustomResourceDefinitionSpec{
-				Group: "uuid.example.com",
-				Names: apiextensionsv1.CustomResourceDefinitionNames{
-					Kind:     "UUIDTestResource",
-					ListKind: "UUIDTestResourceList",
-					Plural:   "uuidtestresources",
-					Singular: "uuidtestresource",
-				},
-				Scope: apiextensionsv1.NamespaceScoped,
-				Versions: []apiextensionsv1.CustomResourceDefinitionVersion{
-					{
-						Name:    "v1",
-						Served:  true,
-						Storage: true,
-						Schema: &apiextensionsv1.CustomResourceValidation{
-							OpenAPIV3Schema: &apiextensionsv1.JSONSchemaProps{
-								Type: "object",
-							},
-						},
-					},
-				},
-			},
-		}
-
-		resourceTracker = NewResourceTracker(scheme.Scheme, cfg)
-	})
-
-	AfterEach(func() {
-		cancel()
-		// Clean up CRD and wait for it to be fully removed to avoid
-		// races when the next test re-creates a CRD with the same name.
-		_ = k8sClient.Delete(context.Background(), testCRD)
-		Eventually(func() bool {
-			err := k8sClient.Get(context.Background(), client.ObjectKeyFromObject(testCRD), &apiextensionsv1.CustomResourceDefinition{})
-			return apierrors.IsNotFound(err)
-		}, "30s", "1s").Should(BeTrue(), "CRD should be fully deleted before next test")
-	})
-
-	It("should refresh UUID map with current CRDs", func() {
-		By("starting the tracker")
-		go func() {
-			defer GinkgoRecover()
-			_ = resourceTracker.Start(ctx)
-		}()
-
-		Eventually(func() bool {
-			_, err := resourceTracker.GetAPIResources()
-			return err == nil
-		}, "30s", "1s").Should(BeTrue())
-
-		initialUUIDCount := resourceTracker.crdUUIDCount()
-
-		By("creating a new CRD")
-		Expect(k8sClient.Create(ctx, testCRD)).To(Succeed())
-		Eventually(func() bool {
-			var crd apiextensionsv1.CustomResourceDefinition
-			err := k8sClient.Get(ctx, client.ObjectKey{Name: testCRD.Name}, &crd)
-			return err == nil && crd.UID != ""
-		}, "30s", "1s").Should(BeTrue())
-
-		By("calling refreshUUIDMap")
-		err := resourceTracker.refreshUUIDMap(ctx)
-		Expect(err).NotTo(HaveOccurred())
-
-		By("verifying the UUID map includes the new CRD")
-		// The map should include the new CRD
-		var crd apiextensionsv1.CustomResourceDefinition
-		Expect(k8sClient.Get(ctx, client.ObjectKey{Name: testCRD.Name}, &crd)).To(Succeed())
-		Expect(resourceTracker.hasCRDUUID(string(crd.UID))).To(BeTrue(), "refreshUUIDMap should include the new CRD's UUID")
-		Expect(resourceTracker.crdUUIDCount()).To(BeNumerically(">=", initialUUIDCount), "UUID map should not shrink unexpectedly")
-	})
-
-	It("should remove stale UUIDs from the map on refresh", func() {
-		By("starting the tracker")
-		go func() {
-			defer GinkgoRecover()
-			_ = resourceTracker.Start(ctx)
-		}()
-
-		Eventually(func() bool {
-			_, err := resourceTracker.GetAPIResources()
-			return err == nil
-		}, "30s", "1s").Should(BeTrue())
-
-		By("adding a fake UUID to simulate a deleted CRD that was missed")
-		fakeUID := "fake-uid-that-doesnt-exist"
-		resourceTracker.addCRDUUID(fakeUID)
-		Expect(resourceTracker.hasCRDUUID(fakeUID)).To(BeTrue())
-
-		By("calling refreshUUIDMap")
-		err := resourceTracker.refreshUUIDMap(ctx)
-		Expect(err).NotTo(HaveOccurred())
-
-		By("verifying the fake UUID is removed")
-		Expect(resourceTracker.hasCRDUUID(fakeUID)).To(BeFalse(), "refreshUUIDMap should remove stale UUIDs")
 	})
 })

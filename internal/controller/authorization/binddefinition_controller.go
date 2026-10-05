@@ -1514,7 +1514,7 @@ func (r *BindDefinitionReconciler) ensureServiceAccounts(
 			return nil, nil, err
 		}
 
-		if !helpers.SubjectExists(generatedSAs, subject) {
+		if !slices.Contains(generatedSAs, subject) {
 			generatedSAs = append(generatedSAs, subject)
 		}
 	}

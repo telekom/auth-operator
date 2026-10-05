@@ -16,6 +16,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/go-logr/logr/funcr"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/telekom/t-caas-go-library/pkg/namespaceselector"
 	"golang.org/x/time/rate"
 	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -1611,25 +1612,25 @@ func TestSubjectLimiterCacheIsBounded(t *testing.T) {
 	handler := &Authorizer{
 		AllowUnauthenticatedAuthorize: true,
 		Log:                           logr.Discard(),
-		Limiter:                       rate.NewLimiter(rate.Limit(1), 1),
-		subjectLimiters:               make(map[string]*subjectLimiterEntry, maxSubjectLimiters),
-		subjectLimiterCleanupAt:       time.Now().Add(time.Hour),
+		Limiter:                       rate.NewLimiter(0, 1),
+	}
+	request := func(user string) bool {
+		return handler.allowSubjectRequest(&authzv1.SubjectAccessReview{Spec: authzv1.SubjectAccessReviewSpec{User: user}})
 	}
 	for i := range maxSubjectLimiters {
-		handler.subjectLimiters[rateLimitSubjectKey(&authzv1.SubjectAccessReview{Spec: authzv1.SubjectAccessReviewSpec{User: "user-" + strconv.Itoa(i)}})] = &subjectLimiterEntry{
-			limiter:  rate.NewLimiter(rate.Limit(1), 1),
-			lastSeen: time.Unix(int64(i), 0),
+		if !request("user-" + strconv.Itoa(i)) {
+			t.Fatal("new subject did not receive its initial burst")
 		}
 	}
 
-	handler.subjectLimiter("new-user")
-	if len(handler.subjectLimiters) != maxSubjectLimiters {
-		t.Fatalf("expected limiter cache size %d, got %d", maxSubjectLimiters, len(handler.subjectLimiters))
+	request("new-user")
+	if got := handler.subjectLimiters.Len(); got != maxSubjectLimiters {
+		t.Fatalf("expected limiter cache size %d, got %d", maxSubjectLimiters, got)
 	}
-	if _, exists := handler.subjectLimiters[rateLimitSubjectKey(&authzv1.SubjectAccessReview{Spec: authzv1.SubjectAccessReviewSpec{User: "user-0"}})]; exists {
+	if !request("user-0") {
 		t.Fatal("expected oldest limiter entry to be evicted")
 	}
-	if _, exists := handler.subjectLimiters["new-user"]; !exists {
+	if request("new-user") {
 		t.Fatal("expected new limiter entry to be present")
 	}
 }
@@ -2415,7 +2416,10 @@ func TestEvaluateSAR_NamespaceLabelCache_SingleGetPerNamespace(t *testing.T) {
 		handler := &Authorizer{
 			AllowUnauthenticatedAuthorize: true, Client: counter, Log: logr.Discard()}
 
-		cache := make(map[string]namespaceLabelCacheEntry)
+		cache, err := namespaceselector.NewRequest(handler.authorizerReader(), authzv1alpha1.WebhookCacheTimeout)
+		if err != nil {
+			t.Fatal(err)
+		}
 		selector := &wa1.Spec.NamespaceSelector
 		for range 2 {
 			matches, err := handler.namespaceMatches(context.Background(), "missing-ns", selector, cache)

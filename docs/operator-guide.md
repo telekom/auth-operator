@@ -374,12 +374,30 @@ must end.
 | `--cert-rotation-validating-webhook` | Validating webhook names to patch with CA bundle | `[]` |
 | `--tdg-migration` | Enable T-DDI to T-CaaS migration mode | `false` |
 | `--binddefinition-namespace-selector-label-group` | DNS label key domain allowed in BindDefinition namespace admission selectors; repeat or comma-separate for multiple domains | `[t-caas.telekom.com]` |
-| `--authorize-rate-limit` | Per-pod sustained requests/second for authorize endpoint | `0` |
+| `--authorize-rate-limit` | Per-subject sustained requests/second per pod for the authorize endpoint; `0` disables limiting, enabled rates must be finite and at most `1e9` | `0` |
 | `--authorize-rate-burst` | Burst size for authorize endpoint rate limiter | `200` |
 | `--authorize-auth-token-file` | Bearer-token file required by `/authorize` callers | `""` |
 | `--allow-unauthenticated-authorize` | Explicit insecure opt-out for unauthenticated `/authorize` callers when no token file is configured | `false` |
 | `--namespace-deletion-protection` | Enable namespace deletion protection (no admin bypass; see [Namespace Deletion Protection](#namespace-deletion-protection)) | `true` |
 | `--protected-namespaces` | Additional namespace names unconditionally protected from deletion, on top of `kube-system`, `kube-public`, `kube-node-lease`, `default` | `[]` |
+
+Authorization uses the tagged `t-caas-go-library` keyed rate limiter and
+request-local namespace selector cache. Subject keys remain the user plus
+canonical groups; each bucket retains its configured burst, with at most 4096
+cached subjects and an idle TTL no shorter than the full-bucket refill time.
+Eviction resets the evicted subject's budget, so rate limiting still requires
+authenticated callers. Namespace selection uses the uncached API reader:
+label/error snapshots last only for the current request, and failed reads deny
+authorization rather than reuse stale grants.
+
+Discovery uses the shared snapshot tracker with local RBAC augmentation
+(finalizers, node metrics, `bind` and `escalate`). Leader-only execution and both
+configured refresh intervals are retained. CRD list/watch reconnects use
+resource versions and trailing-edge debounce; partial discovery retains failed
+group/version snapshots while updating healthy groups. Empty discovery never
+clears a usable snapshot, and returned snapshots isolate nested slices.
+CRD establishment waits continue to use Kubernetes' context-aware backoff.
+See the [upstream-first guide](https://github.com/telekom/t-caas-go-library/blob/main/docs/upstream-libraries.md).
 
 ### Protected Namespaces: Canonical Access Classification
 

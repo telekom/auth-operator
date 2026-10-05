@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -419,6 +420,9 @@ func init() {
 
 // validateRateLimitFlags validates rate-limit and burst flag values.
 func validateRateLimitFlags(limit float64, burst int) error {
+	if math.IsNaN(limit) || math.IsInf(limit, 0) || limit > 1e9 {
+		return fmt.Errorf("--authorize-rate-limit must be finite and at most 1e9, got %v", limit)
+	}
 	if limit < 0 {
 		return fmt.Errorf("--authorize-rate-limit must be non-negative, got %v", limit)
 	}
