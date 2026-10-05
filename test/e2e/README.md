@@ -82,10 +82,10 @@ Run these focused checks from the repository root with an **absolute**
 `KUBEBUILDER_ASSETS` path:
 
 ```bash
-go test ./internal/webhook/authorization ./internal/controller/authorization \
-  -run 'Test(WebhookIntegration|Controllers|SubjectLimiterIdle.*|RateLimitSubjectKeyCanonicalGroups)$' \
+go test -race ./internal/webhook/authorization ./internal/controller/authorization \
+  -run 'Test(WebhookIntegration|Controllers|SubjectLimiter.*|RateLimitSubjectKeyCanonicalGroups|DiscoveryNotificationsCoalesce)$' \
   -ginkgo.focus='(Webhook discovery characterization|Discovery migration characterization)'
-go test ./pkg/helpers -run '^TestIsLabelSelectorEmpty$'
+go test -race ./pkg/helpers ./pkg/discovery ./cmd
 ```
 
 The existing `authorization-chain` E2E label covers API-server authorization
