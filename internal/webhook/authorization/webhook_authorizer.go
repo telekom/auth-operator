@@ -382,7 +382,6 @@ func (wa *Authorizer) allowSubjectRequest(sar *authzv1.SubjectAccessReview) bool
 		})
 	})
 	if wa.subjectLimiterErr != nil {
-		wa.Log.Error(wa.subjectLimiterErr, "invalid subject limiter configuration")
 		return false
 	}
 	allowed, _ := wa.subjectLimiters.Allow(rateLimitSubjectKey(sar))

@@ -5,6 +5,8 @@ package webhooks
 
 import (
 	"math"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -36,6 +38,28 @@ func TestSubjectLimiterTemplateCompatibility(t *testing.T) {
 	t.Run("extremely slow refill", func(t *testing.T) {
 		if ttl := subjectLimiterIdleTTL(rate.NewLimiter(math.SmallestNonzeroFloat64, 1)); ttl != time.Duration(math.MaxInt64) {
 			t.Fatalf("refill overflow shortened the TTL: %v", ttl)
+		}
+	})
+	t.Run("concurrent first budget", func(t *testing.T) {
+		handler := &Authorizer{Limiter: rate.NewLimiter(0, 1)}
+		var allowed atomic.Int32
+		var workers sync.WaitGroup
+		for range 32 {
+			workers.Go(func() {
+				if handler.allowSubjectRequest(sar) {
+					allowed.Add(1)
+				}
+			})
+		}
+		workers.Wait()
+		if got := allowed.Load(); got != 1 {
+			t.Fatalf("concurrent initialization granted %d requests, want 1", got)
+		}
+	})
+	t.Run("unsupported template fails closed", func(t *testing.T) {
+		handler := &Authorizer{Limiter: rate.NewLimiter(1e9+1, 1)}
+		if handler.allowSubjectRequest(sar) {
+			t.Fatal("unsupported template granted a request")
 		}
 	})
 }
