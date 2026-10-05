@@ -790,6 +790,24 @@ verification name override.
 | `/healthz` | 8081 | Liveness probe |
 | `/readyz` | 8081 | Readiness probe |
 
+For the webhook process, `/readyz` returns HTTP 500 until certificate-gated
+webhook registration completes, then HTTP 200. With automatic rotation enabled,
+the TLS Secret must already exist (it may initially be empty). Certificate
+bootstrap and renewal update that Secret and exit the process successfully so
+Kubernetes can restart the pod. Both mutating and validating webhook
+configurations receive the CA bundle.
+
+Non-leader replicas can become ready from the mounted `tls.crt` and `tls.key`
+without acquiring the rotation lease. The current mounted-file gate checks only
+that both files are non-empty; it does not validate the TLS pair. Readiness does
+not independently guarantee a successful TLS handshake or CA injection on that
+replica. With `--disable-cert-rotation`, registration proceeds immediately using
+externally managed certificates. `TestPlatformCertificateLifecycle` runs the
+real webhook command against envtest to characterize bootstrap, serving/CA
+renewal, CA injection, readiness gating, disabled rotation, and non-leader
+startup. A future certificate-library adoption that validates mounted TLS pairs
+must explicitly test and document that stronger readiness behavior.
+
 See [Metrics and Alerting](metrics-and-alerting.md) for detailed metric
 descriptions and alerting rules.
 
