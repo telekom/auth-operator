@@ -47,6 +47,72 @@ test/e2e/                      Ginkgo E2E tests
    - Webhook/schema-invalid examples stay outside the broken kustomization apply set.
 14. **SSA no-op regression safety**: When changing binding reconciliation, test both RoleBinding and ClusterRoleBinding against a real API server for unchanged skips, drift correction, foreign field ownership, removed-field pruning, and deterministic order-insensitive subject handling. Assert actual apply requests, not only resource versions (a no-op apply can still invoke admission). Verify that generated ServiceAccounts, Roles, and ClusterRoles keep their existing reconciliation behavior and that intentionally unconditional restricted-resource applies remain unconditional.
 15. **YAGNI and standard tools**: Implement only behavior demonstrated by a regression test; avoid speculative abstractions or broad rewrites. Use Go standard-library helpers and existing Kubernetes/client-go APIs for normalization and managed-field inspection. Run existing `make fmt vet lint`, `make test`, and the relevant isolated kind E2E suite; do not add custom linters or duplicate shared helpers.
+16. **Reuse upstream libraries before writing helpers**: Follow the decision order and candidates below. Custom code is the last resort; repeated cross-repository glue belongs in `telekom/t-caas-go-library`, not duplicated here.
+
+## Reuse upstream libraries before writing helpers
+
+Before adding a helper or dependency, check in this order: **Go standard
+library → Kubernetes, controller-runtime, client-go, and apimachinery → Flux
+`fluxcd/pkg` → other well-known maintained libraries →
+`telekom/t-caas-go-library` → custom code**. Prefer direct upstream APIs when
+they fit. This table is a shortlist for this operator, not a dependency
+mandate; check Go/Kubernetes compatibility and preserve this project's
+behavior when migrating.
+
+| Concern | Prefer |
+|---|---|
+| Conditions | `github.com/fluxcd/pkg/runtime/conditions`, `github.com/fluxcd/pkg/apis/meta`; `k8s.io/apimachinery/pkg/api/meta` for condition slices |
+| Readiness of arbitrary resources | `sigs.k8s.io/cli-utils/pkg/kstatus/status` |
+| Object status/condition patching | `github.com/fluxcd/pkg/runtime/patch` |
+| Conflict retries and optimistic locking | `k8s.io/client-go/util/retry`, `sigs.k8s.io/controller-runtime/pkg/client` (`MergeFromWithOptimisticLock`) |
+| Server-Side Apply / drift | `github.com/fluxcd/pkg/ssa`, `github.com/fluxcd/pkg/ssa/normalize`; typed apply: `sigs.k8s.io/controller-runtime/pkg/client`, `k8s.io/client-go/applyconfigurations` |
+| Envtest and CRD readiness | `sigs.k8s.io/controller-runtime/pkg/envtest` |
+| Envtest assertions | `sigs.k8s.io/controller-runtime/pkg/envtest/komega`, `github.com/onsi/gomega` |
+| E2E waits and manifest decoding | `sigs.k8s.io/e2e-framework/klient/wait`, `sigs.k8s.io/e2e-framework/klient/decoder` |
+| Predicates, mapping, indexes | `sigs.k8s.io/controller-runtime/pkg/predicate`, `sigs.k8s.io/controller-runtime/pkg/handler`, `sigs.k8s.io/controller-runtime/pkg/client` (`FieldIndexer`) |
+| Owners and finalizers | `sigs.k8s.io/controller-runtime/pkg/controller/controllerutil`, `k8s.io/apimachinery/pkg/apis/meta/v1` |
+| Leader election and workqueues | `k8s.io/client-go/tools/leaderelection`, `k8s.io/client-go/tools/leaderelection/resourcelock`, `k8s.io/client-go/util/workqueue` |
+| Manager probes, cache sync, shutdown | `sigs.k8s.io/controller-runtime/pkg/manager`, `sigs.k8s.io/controller-runtime/pkg/healthz`, `k8s.io/client-go/tools/cache` |
+| Tracing | `go.opentelemetry.io/otel/sdk/trace`, `go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc` |
+| Metrics and events | `github.com/prometheus/client_golang/prometheus`, `github.com/fluxcd/pkg/runtime/metrics`, `github.com/fluxcd/pkg/runtime/events` |
+| Webhook certificates | `github.com/open-policy-agent/cert-controller/pkg/rotator`, `sigs.k8s.io/controller-runtime/pkg/certwatcher` |
+| Discovery and namespace resolution | `k8s.io/client-go/discovery`, `sigs.k8s.io/controller-runtime/pkg/cache`; library candidates `pkg/discovery/tracker`, `pkg/namespaceselector` |
+| Remote client lifecycle and repeated patch glue | `sigs.k8s.io/controller-runtime/pkg/cluster`; library candidates `pkg/remoteclient`, `pkg/patch` |
+
+See [`telekom/t-caas-go-library`'s upstream-library
+guide](https://github.com/telekom/t-caas-go-library/blob/main/docs/upstream-libraries.md)
+for package details and migration caveats. The library repository is currently
+private and is planned to become public; this guidance summarizes relevant
+choices locally so it remains useful before that happens. Its merged packages
+potentially relevant here include `pkg/patch`, `pkg/remoteclient`,
+`pkg/namespaceselector`, and `pkg/discovery/tracker`. The generic SSA helpers
+are under discussion in [library PR #5](https://github.com/telekom/t-caas-go-library/pull/5),
+which is still open; do not treat that package as merged or available yet.
+
+Auth Operator's open [PR #580](https://github.com/telekom/auth-operator/pull/580)
+proposes generic skip-if-unchanged SSA helpers in `pkg/ssa`; this code is not
+yet part of `main`. Compare its proposed typed/cache-based skip behavior with
+Flux `pkg/ssa`'s server-evaluated drift detection before choosing. Do not grow
+another general-purpose SSA framework while PR #580 and library PR #5 remain
+under review.
+
+Existing migration candidates (documentation only; do not change them as part of
+this rule): `pkg/conditions/` can use Flux conditions, apimachinery condition
+helpers, and kstatus while retaining coordinated Ready-condition policy;
+`pkg/ssa/patchhelper.go` can be compared with Flux SSA; generic helpers
+proposed by PR #580 and library PR #5 are not merged; controller/webhook
+envtest suites should keep using native envtest with pinned absolute assets;
+and `test/utils/utils.go` wait, decoder, and apply helpers can use e2e-framework
+and Kubernetes APIs while retaining intentional `ForceOwnership`. The tracing
+package already uses OpenTelemetry directly, and the webhook certificate
+rotator already uses `cert-controller`; neither is a migration candidate.
+Verify current call sites and semantics before proposing any migration.
+
+Only add convenience wrappers when the same glue demonstrably repeats across
+multiple repositories. Contribute that shared glue to `telekom/t-caas-go-library`
+instead of duplicating it here. Keep consumer-specific policy local; if no
+suitable upstream exists, state the missing capability or semantic mismatch
+before implementing custom code.
 
 ## Testing
 
