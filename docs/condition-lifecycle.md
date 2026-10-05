@@ -11,6 +11,34 @@ when each condition is set, and what state transitions to expect.
 
 ---
 
+## Compatibility contract for condition helpers
+
+All six CRDs use `pkg/conditions`. Their status arrays are sorted alphabetically
+by condition type, **not** with `Ready` first. An unchanged condition preserves
+`LastTransitionTime`; a change to **any** of status, reason, message, or
+`observedGeneration` resets it to the current UTC time, truncated to seconds.
+For newly inserted conditions, an explicitly supplied transition time is kept.
+`observedGeneration` is the generation passed by the controller, not a value
+inferred by the helper. A spec update does not itself advance a condition's
+observed generation.
+
+These are observable status semantics, not merely implementation details.
+`platform_conditions_test.go` exercises the shared helpers through real
+API-server status subresources for RoleDefinition, BindDefinition,
+WebhookAuthorizer, RBACPolicy, RestrictedRoleDefinition, and
+RestrictedBindDefinition; the existing controller tests separately exercise
+reconciliation decisions.
+
+Do not replace these helpers with Flux conditions or
+`apimachinery/pkg/api/meta.SetStatusCondition` without preserving this contract.
+Flux's default ordering and transition-time rules differ; apimachinery advances
+transition time only on a status change. kstatus compatibility alone does not
+make those replacements behaviorally equivalent. Any intentional status change
+needs explicit tests and upgrade documentation; conservative upstream adoption
+must leave the local helpers in place until equivalence is established.
+
+---
+
 ## kstatus Standard Conditions
 
 The operator follows [kstatus](https://github.com/kubernetes-sigs/cli-utils/blob/master/pkg/kstatus/README.md)
