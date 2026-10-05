@@ -12,6 +12,40 @@ for resource management, status updates, and conflict resolution.
 
 ---
 
+## Migration characterization coverage
+
+The `ssa-migration` Ginkgo label selects real-apiserver characterization tests
+in `pkg/ssa/migration_envtest_test.go` and
+`internal/controller/authorization/ssa_migration_envtest_test.go`. Run from the
+repository root with an **absolute** `KUBEBUILDER_ASSETS` path:
+
+```bash
+go test ./pkg/ssa ./internal/controller/authorization \
+  -run 'TestSSA|TestControllers' -ginkgo.label-filter=ssa-migration -count=1
+```
+
+Together with the existing SSA/controller suites and the Kyverno binding-update
+storm guard in `test/e2e/creator_tracking_kyverno_e2e_test.go`, these tests pin
+apply-call counts, field-manager ownership, drift repair, label preservation and
+pruning, status no-ops and empty-list cleanup, and optimistic-lock finalizer and
+ServiceAccount metadata patches under actual concurrent API-server writes.
+Restricted RBAC and ServiceAccount paths intentionally **always apply** to
+re-evaluate authorization; ordinary BindDefinition and RoleDefinition paths
+can skip unchanged values. ServiceAccount applies are unforced: a competing
+manager's different token setting remains a conflict, not a forced repair.
+Restricted ClusterRole reconciliation deliberately normalizes all labels,
+unlike ordinary roles/bindings which preserve unrelated foreign labels.
+
+Two tests explicitly characterize current helper gaps, not desired safety
+guarantees: ServiceAccount no-op skipping bypasses UID/resourceVersion
+preconditions, and ClusterRole label pruning performs a persistent preliminary
+merge patch even when the subsequent SSA apply is dry-run. ServiceAccount
+wrappers have no dry-run option. No controller currently supplies these
+preconditions or a pruning dry-run; fixing either gap during library adoption
+requires an explicit behavior-change note and updated expectations.
+
+---
+
 ## Overview
 
 The auth-operator manages RBAC resources (ClusterRoles, Roles, ClusterRoleBindings,
