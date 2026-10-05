@@ -38,28 +38,32 @@ var _ = Describe("SSA wrapper migration characterization", Label("ssa-migration"
 			c := &applyCountingClient{Client: k8sClient}
 			var obj client.Object = &rbacv1.ClusterRole{}
 			var desired runtime.ApplyConfiguration
+			var build func(map[string]string) runtime.ApplyConfiguration
 			var apply func(context.Context, client.Client, []client.ApplyOption) (ssa.PatchApplyResult, error)
 			var always func() (ssa.PatchApplyResult, error)
 			if clusterScoped {
-				ac := ssa.ClusterRoleWithLabelsAndRules(name, nil, rules)
-				desired = ac
+				build = func(labels map[string]string) runtime.ApplyConfiguration {
+					return ssa.ClusterRoleWithLabelsAndRules(name, labels, rules)
+				}
 				apply = func(ctx context.Context, c client.Client, opts []client.ApplyOption) (ssa.PatchApplyResult, error) {
-					return ssa.PatchApplyClusterRole(ctx, c, ac, opts...)
+					return ssa.PatchApplyClusterRole(ctx, c, desired.(*rbacv1ac.ClusterRoleApplyConfiguration), opts...)
 				}
 				always = func() (ssa.PatchApplyResult, error) {
-					return ssa.PatchApplyClusterRoleAlways(testCtx, c, ac, client.ForceOwnership)
+					return ssa.PatchApplyClusterRoleAlways(testCtx, c, desired.(*rbacv1ac.ClusterRoleApplyConfiguration), client.ForceOwnership)
 				}
 			} else {
 				obj = &rbacv1.Role{}
-				ac := ssa.RoleWithLabelsAndRules(name, namespace, nil, rules)
-				desired = ac
+				build = func(labels map[string]string) runtime.ApplyConfiguration {
+					return ssa.RoleWithLabelsAndRules(name, namespace, labels, rules)
+				}
 				apply = func(ctx context.Context, c client.Client, opts []client.ApplyOption) (ssa.PatchApplyResult, error) {
-					return ssa.PatchApplyRole(ctx, c, ac, opts...)
+					return ssa.PatchApplyRole(ctx, c, desired.(*rbacv1ac.RoleApplyConfiguration), opts...)
 				}
 				always = func() (ssa.PatchApplyResult, error) {
-					return ssa.PatchApplyRoleAlways(testCtx, c, ac, client.ForceOwnership)
+					return ssa.PatchApplyRoleAlways(testCtx, c, desired.(*rbacv1ac.RoleApplyConfiguration), client.ForceOwnership)
 				}
 			}
+			desired = build(nil)
 			_, err := apply(testCtx, c, []client.ApplyOption{client.ForceOwnership})
 			Expect(err).NotTo(HaveOccurred())
 			key := client.ObjectKey{Name: name}
@@ -70,7 +74,13 @@ var _ = Describe("SSA wrapper migration characterization", Label("ssa-migration"
 			DeferCleanup(func() { Expect(k8sClient.Delete(testCtx, obj)).To(Succeed()) })
 			rv := obj.GetResourceVersion()
 			c.applyCalls = 0
+			desired = build(nil)
+			result, err := apply(testCtx, c, []client.ApplyOption{client.DryRunAll})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultSkipped), "current unforced no-op role dry-run is skipped")
+			Expect(c.applyCalls).To(BeZero())
 			for _, opts := range [][]client.ApplyOption{{client.DryRunAll}, {client.DryRunAll, client.ForceOwnership}} {
+				desired = build(map[string]string{"dry-run": "only"})
 				result, err := apply(testCtx, c, opts)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(result).To(Equal(ssa.PatchApplyResultPatched))
@@ -78,10 +88,18 @@ var _ = Describe("SSA wrapper migration characterization", Label("ssa-migration"
 			Expect(c.applyCalls).To(Equal(2))
 			Expect(k8sClient.Get(testCtx, key, obj)).To(Succeed())
 			Expect(obj.GetResourceVersion()).To(Equal(rv))
-			result, err := always()
+			Expect(obj.GetLabels()).NotTo(HaveKey("dry-run"))
+			desired = build(nil)
+			result, err = apply(testCtx, c, []client.ApplyOption{client.DryRunAll, client.ForceOwnership})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
-			Expect(c.applyCalls).To(Equal(3))
+			Expect(c.applyCalls).To(Equal(3), "forced unchanged dry-run must reach the server")
+			desired = build(nil)
+			result, err = always()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+			Expect(c.applyCalls).To(Equal(4))
+			desired = build(nil)
 			switch ac := desired.(type) {
 			case *rbacv1ac.ClusterRoleApplyConfiguration:
 				ac.WithResourceVersion("1")
@@ -90,7 +108,8 @@ var _ = Describe("SSA wrapper migration characterization", Label("ssa-migration"
 			}
 			_, err = apply(testCtx, c, []client.ApplyOption{client.ForceOwnership})
 			Expect(apierrors.IsConflict(err)).To(BeTrue())
-			Expect(c.applyCalls).To(Equal(4))
+			Expect(c.applyCalls).To(Equal(5))
+			desired = build(nil)
 			switch ac := desired.(type) {
 			case *rbacv1ac.ClusterRoleApplyConfiguration:
 				ac.ResourceVersion = nil
@@ -101,7 +120,7 @@ var _ = Describe("SSA wrapper migration characterization", Label("ssa-migration"
 			}
 			_, err = apply(testCtx, c, []client.ApplyOption{client.ForceOwnership})
 			Expect(err).To(HaveOccurred())
-			Expect(c.applyCalls).To(Equal(5))
+			Expect(c.applyCalls).To(Equal(6))
 			Expect(k8sClient.Get(testCtx, key, obj)).To(Succeed())
 			Expect(obj.GetUID()).NotTo(Equal(types.UID("wrong-uid")))
 		},

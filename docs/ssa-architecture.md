@@ -36,11 +36,13 @@ manager's different token setting remains a conflict, not a forced repair.
 Restricted ClusterRole reconciliation deliberately normalizes all labels,
 unlike ordinary roles/bindings which preserve unrelated foreign labels.
 
-Two tests explicitly characterize current helper gaps, not desired safety
+The tests explicitly characterize current helper gaps, not desired safety
 guarantees: ServiceAccount no-op skipping bypasses UID/resourceVersion
 preconditions, and ClusterRole label pruning performs a persistent preliminary
 merge patch even when the subsequent SSA apply is dry-run. ServiceAccount
-wrappers have no dry-run option. No controller currently supplies these
+wrappers have no dry-run option. Ordinary Role/ClusterRole wrappers also skip
+unchanged **unforced** dry-runs; changed or forced dry-runs reach the server.
+No controller currently supplies these
 preconditions or a pruning dry-run; fixing either gap during library adoption
 requires an explicit behavior-change note and updated expectations.
 
