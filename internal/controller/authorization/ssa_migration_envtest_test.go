@@ -443,8 +443,18 @@ var _ = Describe("SSA migration characterization", Label("ssa-migration"), func(
 			tracker := discovery.NewResourceTracker(scheme.Scheme, cfg)
 			if startTracker {
 				trackerCtx, cancel := context.WithCancel(ctx)
-				DeferCleanup(cancel)
-				Expect(tracker.Start(trackerCtx)).To(Succeed())
+				trackerDone := make(chan error, 1)
+				go func() {
+					trackerDone <- tracker.Start(trackerCtx)
+				}()
+				DeferCleanup(func() {
+					cancel()
+					Expect(<-trackerDone).To(Succeed())
+				})
+				Eventually(func() error {
+					_, err := tracker.GetAPIResources()
+					return err
+				}).Should(Succeed())
 			}
 			applies := 0
 			c := interceptor.NewClient(k8sClient, interceptor.Funcs{
