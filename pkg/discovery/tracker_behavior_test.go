@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -153,6 +154,56 @@ func TestResourceTrackerPartialDiscoveryRetainsFailedGroup(t *testing.T) {
 		if slices.Contains(resource.Verbs, "modified-copy") {
 			t.Fatal("nested snapshot mutation changed the shared cache")
 		}
+	}
+}
+
+func TestResourceTrackerStartContinuesWithUsablePartialDiscovery(t *testing.T) {
+	server := newDiscoveryTestServer(t)
+	defer server.Close()
+	server.customGroup.Store(true)
+	server.groupError.Store(true)
+
+	tracker := NewResourceTracker(kubescheme.Scheme, server.Config())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	started := make(chan error, 1)
+	go func() {
+		started <- tracker.Start(ctx)
+	}()
+
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if resources, err := tracker.GetAPIResources(); err == nil {
+			if len(resources["v1"]) == 0 {
+				t.Fatal("partial discovery did not retain healthy core resources")
+			}
+			break
+		}
+		select {
+		case err := <-started:
+			t.Fatalf("Start returned before publishing usable resources: %v", err)
+		case <-deadline.C:
+			t.Fatal("partial discovery did not publish a usable snapshot")
+		case <-ticker.C:
+		}
+	}
+	select {
+	case err := <-started:
+		t.Fatalf("Start returned before cancellation: %v", err)
+	default:
+	}
+
+	cancel()
+	select {
+	case err := <-started:
+		if err != nil {
+			t.Fatalf("Start after cancellation: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Start did not stop after cancellation")
 	}
 }
 

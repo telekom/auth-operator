@@ -129,7 +129,14 @@ func (r *ResourceTracker) initialize() error {
 // Start checks initial discovery and runs until cancellation, joining all workers.
 func (r *ResourceTracker) Start(ctx context.Context) error {
 	if _, err := r.collectAPIResources(ctx); err != nil {
-		return err
+		var partial *discovery.ErrGroupDiscoveryFailed
+		if !errors.As(err, &partial) {
+			return err
+		}
+		if _, snapshotErr := r.GetAPIResources(); snapshotErr != nil {
+			return err
+		}
+		log.FromContext(ctx).Error(err, "initial discovery was partial; continuing with usable resources")
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
