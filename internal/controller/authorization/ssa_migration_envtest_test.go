@@ -21,6 +21,7 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
@@ -28,6 +29,7 @@ import (
 	statusssa "github.com/telekom/auth-operator/api/authorization/v1alpha1/applyconfiguration/ssa"
 	"github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/helpers"
+	"github.com/telekom/auth-operator/pkg/indexer"
 	pkgssa "github.com/telekom/auth-operator/pkg/ssa"
 )
 
@@ -145,6 +147,111 @@ var _ = Describe("SSA migration characterization", Label("ssa-migration"), func(
 		Entry("RBACPolicy", "RBACPolicy"),
 		Entry("WebhookAuthorizer", "WebhookAuthorizer"),
 	)
+
+	It("RBACPolicy controller applies counted references, skips unchanged status and persists stalled status", func() {
+		policy := migrationObject("RBACPolicy", fmt.Sprintf("counted-%d", time.Now().UnixNano())).(*authorizationv1alpha1.RBACPolicy)
+		Expect(k8sClient.Create(ctx, policy)).To(Succeed())
+		DeferCleanup(func() { Expect(k8sClient.Delete(ctx, policy)).To(Succeed()) })
+		rrd := migrationObject("RestrictedRoleDefinition", policy.Name+"-reference").(*authorizationv1alpha1.RestrictedRoleDefinition)
+		rrd.Spec.PolicyRef.Name = policy.Name
+		Expect(k8sClient.Create(ctx, rrd)).To(Succeed())
+		DeferCleanup(func() { Expect(k8sClient.Delete(ctx, rrd)).To(Succeed()) })
+		// The API server does not support the controller's custom field selectors;
+		// use an actual informer cache with the production index functions.
+		indexed, err := cache.New(cfg, cache.Options{Scheme: scheme.Scheme})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(indexed.IndexField(ctx, &authorizationv1alpha1.RestrictedBindDefinition{},
+			indexer.RestrictedBindDefinitionPolicyRefField, indexer.RestrictedBindDefinitionPolicyRefFunc)).To(Succeed())
+		Expect(indexed.IndexField(ctx, &authorizationv1alpha1.RestrictedRoleDefinition{},
+			indexer.RestrictedRoleDefinitionPolicyRefField, indexer.RestrictedRoleDefinitionPolicyRefFunc)).To(Succeed())
+		cacheCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		done := make(chan error, 1)
+		go func() { done <- indexed.Start(cacheCtx) }()
+		DeferCleanup(func() { cancel(); Expect(<-done).To(Succeed()) })
+		Expect(indexed.WaitForCacheSync(cacheCtx)).To(BeTrue())
+		applies := 0
+		c := interceptor.NewClient(k8sClient, interceptor.Funcs{
+			List: func(ctx context.Context, _ client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+				return indexed.List(ctx, list, opts...)
+			},
+			SubResourceApply: func(ctx context.Context, c client.Client, subresource string, ac runtime.ApplyConfiguration, opts ...client.SubResourceApplyOption) error {
+				applies++
+				return c.SubResource(subresource).Apply(ctx, ac, opts...)
+			},
+		})
+		r := NewRBACPolicyReconciler(c, scheme.Scheme, events.NewFakeRecorder(100))
+		req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(policy)}
+		_, err = r.Reconcile(ctx, req)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(k8sClient.Get(ctx, req.NamespacedName, policy)).To(Succeed())
+		Expect(policy.Status.BoundResourceCount).To(Equal(int32(1)))
+		Expect(conditions.IsReady(policy)).To(BeTrue())
+		Expect(applies).To(Equal(1))
+		_, err = r.Reconcile(ctx, req)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(applies).To(Equal(1))
+		r.markStalled(ctx, policy, fmt.Errorf("characterized failure"))
+		Expect(applies).To(Equal(2))
+		Expect(k8sClient.Get(ctx, req.NamespacedName, policy)).To(Succeed())
+		Expect(conditions.IsStalled(policy)).To(BeTrue())
+	})
+
+	It("WebhookAuthorizer controller persists reconciling, ready and stalled status through the real subresource", func() {
+		wa := migrationObject("WebhookAuthorizer", fmt.Sprintf("authorizer-%d", time.Now().UnixNano())).(*authorizationv1alpha1.WebhookAuthorizer)
+		Expect(k8sClient.Create(ctx, wa)).To(Succeed())
+		DeferCleanup(func() { Expect(k8sClient.Delete(ctx, wa)).To(Succeed()) })
+		applies := 0
+		c := interceptor.NewClient(k8sClient, interceptor.Funcs{
+			SubResourceApply: func(ctx context.Context, c client.Client, subresource string, ac runtime.ApplyConfiguration, opts ...client.SubResourceApplyOption) error {
+				applies++
+				return c.SubResource(subresource).Apply(ctx, ac, opts...)
+			},
+		})
+		r := NewWebhookAuthorizerReconciler(c, scheme.Scheme, events.NewFakeRecorder(100))
+		req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(wa)}
+		_, err := r.Reconcile(ctx, req)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(applies).To(Equal(2), "Reconciling and Ready are separate status writes")
+		Expect(k8sClient.Get(ctx, req.NamespacedName, wa)).To(Succeed())
+		Expect(wa.Status.AuthorizerConfigured).To(BeTrue())
+		Expect(conditions.IsReady(wa)).To(BeTrue())
+		Expect(r.markStalled(ctx, wa, fmt.Errorf("characterized failure"))).To(Succeed())
+		Expect(applies).To(Equal(3))
+		Expect(k8sClient.Get(ctx, req.NamespacedName, wa)).To(Succeed())
+		Expect(conditions.IsStalled(wa)).To(BeTrue())
+	})
+
+	It("RestrictedBindDefinition complete reconciliations persist generated resources and Ready status", func() {
+		policy := migrationObject("RBACPolicy", fmt.Sprintf("rbd-policy-%d", time.Now().UnixNano())).(*authorizationv1alpha1.RBACPolicy)
+		policy = rbdPolicyWithDefaultAllowances(policy)
+		Expect(k8sClient.Create(ctx, policy)).To(Succeed())
+		DeferCleanup(func() { Expect(k8sClient.Delete(ctx, policy)).To(Succeed()) })
+		rbd := migrationObject("RestrictedBindDefinition", policy.Name+"-binding").(*authorizationv1alpha1.RestrictedBindDefinition)
+		rbd.Spec.PolicyRef.Name = policy.Name
+		rbd.Spec.ClusterRoleBindings.ClusterRoleRefs = []string{"view"}
+		Expect(k8sClient.Create(ctx, rbd)).To(Succeed())
+		DeferCleanup(func() {
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(rbd), rbd)).To(Succeed())
+			base := rbd.DeepCopy()
+			rbd.Finalizers = nil
+			Expect(k8sClient.Patch(ctx, rbd, client.MergeFrom(base))).To(Succeed())
+			Expect(k8sClient.Delete(ctx, rbd)).To(Succeed())
+		})
+		c := &bindingApplyCountingClient{Client: k8sClient}
+		r := NewRestrictedBindDefinitionReconciler(c, scheme.Scheme, events.NewFakeRecorder(100))
+		req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(rbd)}
+		_, err := r.Reconcile(ctx, req)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.clusterRoleBindingApplies).To(Equal(1))
+		crb := &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: helpers.BuildBindingName(rbd.Spec.TargetName, "view")}}
+		DeferCleanup(func() { Expect(k8sClient.Delete(ctx, crb)).To(Succeed()) })
+		Expect(k8sClient.Get(ctx, req.NamespacedName, rbd)).To(Succeed())
+		Expect(rbd.Status.BindReconciled).To(BeTrue())
+		Expect(conditions.IsReady(rbd)).To(BeTrue())
+		_, err = r.Reconcile(ctx, req)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.clusterRoleBindingApplies).To(Equal(2))
+	})
 
 	It("clears RestrictedRoleDefinition status lists through the real status subresource", func() {
 		rrd := migrationObject("RestrictedRoleDefinition", fmt.Sprintf("clear-%d", time.Now().UnixNano())).(*authorizationv1alpha1.RestrictedRoleDefinition)
