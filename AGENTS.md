@@ -81,31 +81,30 @@ behavior when migrating.
 
 See [`telekom/t-caas-go-library`'s upstream-library
 guide](https://github.com/telekom/t-caas-go-library/blob/main/docs/upstream-libraries.md)
-for package details and migration caveats. The library repository is currently
-private and is planned to become public; this guidance summarizes relevant
-choices locally so it remains useful before that happens. Its merged packages
-potentially relevant here include `pkg/patch`, `pkg/remoteclient`,
-`pkg/namespaceselector`, and `pkg/discovery/tracker`. The generic SSA helpers
-are under discussion in [library PR #5](https://github.com/telekom/t-caas-go-library/pull/5),
-which is still open; do not treat that package as merged or available yet.
+for package details and migration caveats. The library is public and its
+`v0.1.0` tag includes `pkg/ssa`, `pkg/patch`, `pkg/remoteclient`,
+`pkg/namespaceselector`, `pkg/discovery/tracker`, `pkg/ratelimit`, and
+`pkg/certrotation`. Inspect the tagged APIs and retain consumer-specific
+policy when adopting these packages; availability does not imply that every
+Auth Operator call site has migrated.
 
 Auth Operator's open [PR #580](https://github.com/telekom/auth-operator/pull/580)
-proposes generic skip-if-unchanged SSA helpers in `pkg/ssa`; this code is not
-yet part of `main`. Compare its proposed typed/cache-based skip behavior with
-Flux `pkg/ssa`'s server-evaluated drift detection before choosing. Do not grow
-another general-purpose SSA framework while PR #580 and library PR #5 remain
-under review.
+adopts the tagged library's typed/cache-based skip-if-unchanged SSA helpers
+through local `pkg/ssa` adapters. Compare that behavior with Flux `pkg/ssa`'s
+server-evaluated drift detection before choosing. Do not grow another
+general-purpose SSA framework beside the public library.
 
 Existing migration candidates (documentation only; do not change them as part of
 this rule): `pkg/conditions/` can use Flux conditions, apimachinery condition
 helpers, and kstatus while retaining coordinated Ready-condition policy;
 `pkg/ssa/patchhelper.go` can be compared with Flux SSA; generic helpers
-proposed by PR #580 and library PR #5 are not merged; controller/webhook
+are available in the public tag, with AO adoption tracked by PR #580; controller/webhook
 envtest suites should keep using native envtest with pinned absolute assets;
 and `test/utils/utils.go` wait, decoder, and apply helpers can use e2e-framework
 and Kubernetes APIs while retaining intentional `ForceOwnership`. The tracing
-package already uses OpenTelemetry directly, and the webhook certificate
-rotator already uses `cert-controller`; neither is a migration candidate.
+package remains OpenTelemetry-based and webhook certificate rotation remains
+`cert-controller`-based; retain those upstream semantics in direct and
+library-backed integrations.
 Verify current call sites and semantics before proposing any migration.
 
 Only add convenience wrappers when the same glue demonstrably repeats across

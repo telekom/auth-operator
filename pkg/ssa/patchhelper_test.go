@@ -223,6 +223,44 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			Expect(result).To(Equal(ssa.PatchApplyResultSkipped))
 		})
 
+		It("should still apply when pruning leaves another manager-owned label omitted", func() {
+			rules := []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}}}
+			initial := ssa.ClusterRoleWithLabelsAndRules(
+				"ph-prune-owned-label-cr", map[string]string{"remove": "true", "stale": "true"}, rules)
+			_, err := ssa.PatchApplyClusterRole(testCtx, k8sClient, initial)
+			Expect(err).NotTo(HaveOccurred())
+
+			desired := ssa.ClusterRoleWithLabelsAndRules("ph-prune-owned-label-cr", nil, rules)
+			result, err := ssa.PatchApplyClusterRolePruningLabels(testCtx, k8sClient, desired, func(key string) bool {
+				return key == "remove"
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ssa.PatchApplyResultPatched))
+
+			var role rbacv1.ClusterRole
+			Expect(k8sClient.Get(testCtx, types.NamespacedName{Name: "ph-prune-owned-label-cr"}, &role)).To(Succeed())
+			Expect(role.Labels).NotTo(HaveKey("remove"))
+			Expect(role.Labels).NotTo(HaveKey("stale"))
+		})
+
+		It("should not persist prunable label removal for dry-run applies", func() {
+			rules := []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}}}
+			initial := ssa.ClusterRoleWithLabelsAndRules(
+				"ph-prune-dry-run-cr", map[string]string{"remove": "true"}, rules)
+			_, err := ssa.PatchApplyClusterRole(testCtx, k8sClient, initial)
+			Expect(err).NotTo(HaveOccurred())
+
+			desired := ssa.ClusterRoleWithLabelsAndRules("ph-prune-dry-run-cr", nil, rules)
+			_, err = ssa.PatchApplyClusterRolePruningLabels(testCtx, k8sClient, desired, func(key string) bool {
+				return key == "remove"
+			}, client.DryRunAll)
+			Expect(err).NotTo(HaveOccurred())
+
+			var role rbacv1.ClusterRole
+			Expect(k8sClient.Get(testCtx, types.NamespacedName{Name: "ph-prune-dry-run-cr"}, &role)).To(Succeed())
+			Expect(role.Labels).To(HaveKeyWithValue("remove", "true"))
+		})
+
 		It("should prune a protected label owned by another field manager", func() {
 			rules := []rbacv1.PolicyRule{
 				{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}},
@@ -238,7 +276,9 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			err = k8sClient.Apply(testCtx, externalAC, client.FieldOwner("external-agent"), client.ForceOwnership)
 			Expect(err).NotTo(HaveOccurred())
 
-			result, err := ssa.PatchApplyClusterRolePruningLabels(testCtx, k8sClient, ac, func(key string) bool {
+			desired := ssa.ClusterRoleWithLabelsAndRules(
+				"ph-prune-foreign-label-cr", map[string]string{"safe": "true"}, rules)
+			result, err := ssa.PatchApplyClusterRolePruningLabels(testCtx, k8sClient, desired, func(key string) bool {
 				return key == "unsafe"
 			}, client.ForceOwnership)
 			Expect(err).NotTo(HaveOccurred())
@@ -277,6 +317,32 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 			var cr rbacv1.ClusterRole
 			Expect(k8sClient.Get(testCtx, types.NamespacedName{Name: "ph-prune-conflict-cr"}, &cr)).To(Succeed())
 			Expect(cr.Labels).NotTo(HaveKey("unsafe"))
+		})
+
+		It("should return a persistent conflict for an always-apply after label pruning", func() {
+			rules := []rbacv1.PolicyRule{
+				{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}},
+			}
+			initial := ssa.ClusterRoleWithLabelsAndRules(
+				"ph-prune-always-conflict-cr", map[string]string{"safe": "true", "unsafe": "true"}, rules)
+			_, err := ssa.PatchApplyClusterRole(testCtx, k8sClient, initial)
+			Expect(err).NotTo(HaveOccurred())
+
+			desired := ssa.ClusterRoleWithLabelsAndRules(
+				"ph-prune-always-conflict-cr", map[string]string{"safe": "true"}, rules)
+			desired.WithUID(types.UID("stale-uid"))
+			conflictClient := &clusterRolePruneConflictClient{
+				Client:         k8sClient,
+				name:           "ph-prune-always-conflict-cr",
+				staleLabels:    map[string]string{"safe": "true"},
+				staleRules:     rules,
+				alwaysConflict: true,
+			}
+			_, err = ssa.PatchApplyClusterRolePruningLabelsAlways(testCtx, conflictClient, desired, func(key string) bool {
+				return key == "unsafe"
+			}, client.ForceOwnership)
+			Expect(apierrors.IsConflict(err)).To(BeTrue())
+			Expect(conflictClient.applyCalls).To(BeNumerically(">=", 2))
 		})
 
 		It("should reject nil ApplyConfiguration", func() {
@@ -1428,12 +1494,13 @@ func (c *applyCountingClient) Apply(
 
 type clusterRolePruneConflictClient struct {
 	client.Client
-	name        string
-	staleLabels map[string]string
-	staleRules  []rbacv1.PolicyRule
-	applyCalls  int
-	conflicted  bool
-	returnStale bool
+	name           string
+	staleLabels    map[string]string
+	staleRules     []rbacv1.PolicyRule
+	applyCalls     int
+	conflicted     bool
+	returnStale    bool
+	alwaysConflict bool
 }
 
 func (c *clusterRolePruneConflictClient) Get(
@@ -1462,7 +1529,7 @@ func (c *clusterRolePruneConflictClient) Apply(
 	opts ...client.ApplyOption,
 ) error {
 	c.applyCalls++
-	if !c.conflicted {
+	if c.alwaysConflict || !c.conflicted {
 		c.conflicted = true
 		c.returnStale = true
 		return apierrors.NewConflict(

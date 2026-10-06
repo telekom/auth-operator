@@ -39,15 +39,14 @@ manager's different token setting remains a conflict, not a forced repair.
 Restricted ClusterRole reconciliation deliberately normalizes all labels,
 unlike ordinary roles/bindings which preserve unrelated foreign labels.
 
-The tests explicitly characterize current helper gaps, not desired safety
+The tests characterize the remaining helper gaps, not desired safety
 guarantees: ServiceAccount no-op skipping bypasses UID/resourceVersion
-preconditions, and ClusterRole label pruning performs a persistent preliminary
-merge patch even when the subsequent SSA apply is dry-run. ServiceAccount
-wrappers have no dry-run option. Ordinary Role/ClusterRole wrappers also skip
-unchanged **unforced** dry-runs; changed or forced dry-runs reach the server.
-No controller currently supplies these
-preconditions or a pruning dry-run; fixing either gap during library adoption
-requires an explicit behavior-change note and updated expectations.
+preconditions, and ServiceAccount wrappers have no dry-run option. Ordinary
+Role/ClusterRole wrappers still skip unchanged **unforced** dry-runs when label
+pruning is not involved; changed or forced dry-runs reach the server.
+ClusterRole label pruning now forwards dry-run options to its preliminary merge
+patch, so dry-run requests do not persist the label deletion. No controller
+currently supplies a pruning dry-run.
 
 ---
 
@@ -168,19 +167,90 @@ with `With*()` builder methods for SSA compatibility.
 
 ---
 
+## Library-backed skip-if-unchanged apply
+
+Sending an SSA apply for every managed object on every reconcile produces
+thousands of no-op PATCH requests in large clusters. `pkg/ssa` therefore reads
+the live object (normally from the informer cache) and only applies when it
+must. The shared gate is provided by
+[`github.com/telekom/t-caas-go-library/pkg/ssa`](https://github.com/telekom/t-caas-go-library/tree/v0.1.0/pkg/ssa)
+at **v0.1.0**, not by a second generic engine in auth-operator.
+The exported `PatchApply*` functions
+(`PatchApplyClusterRole`, `PatchApplyRoleBinding`, `PatchApplyServiceAccount`,
+`PatchApply<CRD>Status`, ...) retain their signatures and result constants.
+
+RBAC comparators, subject/owner-reference canonicalization, field owners,
+label cleanup and CR-specific status builders remain local. Binding configurations
+are cloned and canonicalized only when an apply is sent; unchanged preflight
+comparisons retain order/default-insensitive checks without that extra cloning.
+See the library's
+[upstream-first guide](https://github.com/telekom/t-caas-go-library/blob/main/docs/upstream-libraries.md)
+for alternatives and limits.
+
+ServiceAccounts reclassified as external during reconciliation remain in the
+desired set for pruning. This preserves transferred accounts even when the
+informer cache still contains their former BindDefinition owner reference.
+
+### Apply Decision
+
+The library's `Applier[T, AC]` validates the identity and field manager, reads
+the object, and skips only when values match and ownership permits it. Forced
+applies require exact owned-field equality; unforced applies require the owned
+fields to be a subset of the desired fields, so omitted owned fields are pruned.
+Dry-runs and UID/resourceVersion preconditions normally reach the API server.
+`alwaysApply` bypasses the gate at restricted authorization boundaries.
+
+AO retains the phase-1 characterized policies, with one explicit safety fix
+for ClusterRole label-pruning dry-runs:
+
+- Ordinary Role/ClusterRole unforced equal requests skip, including dry-runs
+  when label pruning is not involved.
+- Ordinary ServiceAccount no-op checks ignore UID/resourceVersion preconditions.
+  A comparison clone omits them, but actual writes send the original configuration
+  and therefore still enforce them. Always variants do not use this adapter.
+- ClusterRole label pruning remains an AO merge patch, but forwards dry-run
+  options and never converts a persistent apply conflict into apparent
+  convergence based only on matching values.
+- Missing-ServiceAccount create conflicts still require fresh ownership
+  classification on the next reconcile.
+
+Build fresh configurations for each reconcile: native `client.Apply` can write
+server response metadata into them. Cached gates cannot observe admission-policy
+or permission changes; the restricted callers always apply.
+
+Status subresources use library `StatusApplier[T, AC]` with `New`, `Equal`,
+`ApplyConfiguration` and `FieldOwner` (and an optional `BeforeApply` hook).
+It skips the apply when `Equal(cached, desired)` holds and otherwise applies
+the status with `ForceOwnership`. AO retains the empty-list status merge patches;
+the Namespace terminator calls library `ApplyStatus` unconditionally when its
+condition exists.
+
+---
+
 ## Finalizer Management (MergePatch with Optimistic Lock)
 
-Finalizers are **not** managed via SSA. Instead, they use `client.Patch()` with
-a strategic MergePatch and optimistic locking.
+Finalizers are **not** managed via SSA. All ten add/remove sites use
+library `pkg/patch.EnsureFinalizer` / `RemoveFinalizer`, which delegate to
+native JSON merge patches with optimistic locking.
 
 ### How It Works
 
 ```go
-old := bindDefinition.DeepCopy()
-controllerutil.AddFinalizer(bindDefinition, BindDefinitionFinalizer)
-err := r.client.Patch(ctx, bindDefinition,
-    client.MergeFromWithOptions(old, client.MergeFromWithOptimisticLock{}))
+_, err := librarypatch.EnsureFinalizer(ctx, r.client,
+    bindDefinition, authorizationv1alpha1.BindDefinitionFinalizer)
 ```
+
+Conflicts retain each controller's existing error/requeue behavior. The library
+restores in-memory finalizers after failed writes and omits already-satisfied
+finalizer patches; server-side mutation and foreign-finalizer preservation stay
+unchanged. Existing reader selection, retry backoff and consumer mutations
+remain explicit for `pkg/patch.Object` (ServiceAccount
+metadata) and `pkg/patch.Status` (generated-ServiceAccount status cleanup).
+Status cleanup now also treats a parent deleted between its read and patch
+as successful, as it already did for a missing parent at read time; an adoption
+envtest exercises that real-server race.
+Single-shot external-SA tracking and empty RBAC/status array patches keep their
+native merge-patch APIs and existing semantics.
 
 ### Why Not SSA for Finalizers
 
@@ -204,7 +274,9 @@ finalizers because it:
 |-----------|-----------|------|
 | RoleDefinition | `roledefinition.authorization.t-caas.telekom.com/finalizer` | `roledefinition_helpers.go` (2 sites) |
 | BindDefinition | `binddefinition.authorization.t-caas.telekom.com/finalizer` | `binddefinition_controller.go` (2 sites) |
-| RoleBinding Terminator | `rolebinding.authorization.t-caas.telekom.com/finalizer` | `rolebinding_terminator_controller.go` (3 sites) |
+| RoleBinding Terminator | `rolebinding.authorization.t-caas.telekom.com/finalizer` | `rolebinding_terminator_controller.go` (2 sites) |
+| RestrictedRoleDefinition | `restrictedroledefinition.authorization.t-caas.telekom.com/finalizer` | `restrictedroledefinition_controller.go` (2 sites) |
+| RestrictedBindDefinition | `restrictedbinddefinition.authorization.t-caas.telekom.com/finalizer` | `restrictedbinddefinition_controller.go` (2 sites) |
 
 ---
 

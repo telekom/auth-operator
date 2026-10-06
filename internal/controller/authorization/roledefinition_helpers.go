@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	librarypatch "github.com/telekom/t-caas-go-library/pkg/patch"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -128,9 +129,7 @@ func (r *RoleDefinitionReconciler) ensureFinalizer(
 	}
 
 	logger.V(2).Info("Adding finalizer to RoleDefinition", "roleDefinitionName", roleDefinition.Name)
-	old := roleDefinition.DeepCopy()
-	controllerutil.AddFinalizer(roleDefinition, authorizationv1alpha1.RoleDefinitionFinalizer)
-	if err := r.client.Patch(ctx, roleDefinition, client.MergeFromWithOptions(old, client.MergeFromWithOptimisticLock{})); err != nil {
+	if _, err := librarypatch.EnsureFinalizer(ctx, r.client, roleDefinition, authorizationv1alpha1.RoleDefinitionFinalizer); err != nil {
 		logger.Error(err, "Failed to add finalizer", "roleDefinitionName", roleDefinition.Name)
 		return fmt.Errorf("add finalizer to RoleDefinition %s: %w", roleDefinition.Name, err)
 	}
@@ -233,9 +232,7 @@ func (r *RoleDefinitionReconciler) removeRoleDefinitionFinalizer(
 	if err := r.client.Get(ctx, client.ObjectKeyFromObject(roleDefinition), roleDefinition); err != nil {
 		return ctrl.Result{}, fmt.Errorf("re-fetch RoleDefinition %s before finalizer removal: %w", roleDefinition.Name, err)
 	}
-	old := roleDefinition.DeepCopy()
-	controllerutil.RemoveFinalizer(roleDefinition, authorizationv1alpha1.RoleDefinitionFinalizer)
-	if err := r.client.Patch(ctx, roleDefinition, client.MergeFromWithOptions(old, client.MergeFromWithOptimisticLock{})); err != nil {
+	if _, err := librarypatch.RemoveFinalizer(ctx, r.client, roleDefinition, authorizationv1alpha1.RoleDefinitionFinalizer); err != nil {
 		logger.Error(err, "Failed to remove finalizer", "roleDefinitionName", roleDefinition.Name)
 		return ctrl.Result{}, err
 	}

@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	librarypatch "github.com/telekom/t-caas-go-library/pkg/patch"
+	libraryssa "github.com/telekom/t-caas-go-library/pkg/ssa"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 	corev1 "k8s.io/api/core/v1"
@@ -26,7 +28,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -34,6 +35,7 @@ import (
 	conditions "github.com/telekom/auth-operator/pkg/conditions"
 	"github.com/telekom/auth-operator/pkg/discovery"
 	"github.com/telekom/auth-operator/pkg/metrics"
+	pkgssa "github.com/telekom/auth-operator/pkg/ssa"
 )
 
 // +kubebuilder:rbac:groups=authorization.t-caas.telekom.com,resources=binddefinitions,verbs=get;list
@@ -420,14 +422,7 @@ func isInvalidBindDefinitionOwnerError(err error) bool {
 }
 
 func (r *RoleBindingTerminator) removeRoleBindingFinalizer(ctx context.Context, roleBinding *rbacv1.RoleBinding) (bool, error) {
-	old := roleBinding.DeepCopy()
-	if !controllerutil.RemoveFinalizer(roleBinding, authorizationv1alpha1.RoleBindingFinalizer) {
-		return false, nil
-	}
-	if err := r.client.Patch(ctx, roleBinding, client.MergeFromWithOptions(old, client.MergeFromWithOptimisticLock{})); err != nil {
-		return false, err
-	}
-	return true, nil
+	return librarypatch.RemoveFinalizer(ctx, r.client, roleBinding, authorizationv1alpha1.RoleBindingFinalizer)
 }
 
 func extractNamespaceCondition(ns *corev1.Namespace, condType authorizationv1alpha1.AuthZConditionType) *corev1ac.NamespaceConditionApplyConfiguration {
@@ -450,7 +445,7 @@ func (r *RoleBindingTerminator) applyNamespaceTerminationStatus(ctx context.Cont
 		return nil
 	}
 	ac := corev1ac.Namespace(namespace.Name).WithStatus(corev1ac.NamespaceStatus().WithConditions(condAC))
-	if err := r.client.SubResource("status").Apply(ctx, ac, client.FieldOwner("auth-operator"), client.ForceOwnership); err != nil {
+	if err := libraryssa.ApplyStatus(ctx, r.client, ac, pkgssa.FieldOwner); err != nil {
 		return fmt.Errorf("apply Namespace %s status: %w", namespace.Name, err)
 	}
 	return nil
@@ -505,9 +500,8 @@ func (r *RoleBindingTerminator) Reconcile(ctx context.Context, req ctrl.Request)
 
 	// ensure finalizer is there if RB is owned by a BindDefinition and the RoleBinding is not being deleted
 	if roleBinding.DeletionTimestamp.IsZero() {
-		old := roleBinding.DeepCopy()
-		if controllerutil.AddFinalizer(&roleBinding, authorizationv1alpha1.RoleBindingFinalizer) {
-			if err := r.client.Patch(ctx, &roleBinding, client.MergeFromWithOptions(old, client.MergeFromWithOptimisticLock{})); err != nil {
+		if added, err := librarypatch.EnsureFinalizer(ctx, r.client, &roleBinding, authorizationv1alpha1.RoleBindingFinalizer); added || err != nil {
+			if err != nil {
 				logger.Error(err, "failed to add finalizer to RoleBinding")
 				metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRoleBindingTerminator, metrics.ResultError).Inc()
 				metrics.ReconcileErrors.WithLabelValues(metrics.ControllerRoleBindingTerminator, metrics.ErrorTypeAPI).Inc()
