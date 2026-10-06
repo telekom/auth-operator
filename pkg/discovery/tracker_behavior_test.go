@@ -38,7 +38,6 @@ func testCRDStatusRefresh(t *testing.T, mode string) {
 	releaseCollection := make(chan struct{})
 	var releaseOnce sync.Once
 	release := func() { releaseOnce.Do(func() { close(releaseCollection) }) }
-	defer release()
 	watchServer := newCRDWatchTestServer(server, events, sent, func(w http.ResponseWriter, r *http.Request) bool {
 		if r.URL.Path != "/api/v1" || !blockCollection.CompareAndSwap(true, false) {
 			return false
@@ -54,6 +53,7 @@ func testCRDStatusRefresh(t *testing.T, mode string) {
 		return true
 	})
 	defer watchServer.Close()
+	defer release()
 
 	config := server.Config()
 	config.Host = watchServer.URL
@@ -63,6 +63,10 @@ func testCRDStatusRefresh(t *testing.T, mode string) {
 	}
 	tracker := NewResourceTracker(testScheme, config)
 	tracker.rateLimit.Interval = 100 * time.Millisecond
+	terminal := isTerminalWatchTest(mode)
+	if terminal {
+		tracker.rateLimit.Interval = time.Minute
+	}
 	if changed, err := tracker.collectAPIResources(context.Background()); err != nil || !changed {
 		t.Fatalf("initial discovery = (%v, %v)", changed, err)
 	}
@@ -123,18 +127,29 @@ func testCRDStatusRefresh(t *testing.T, mode string) {
 		t.Fatal("throttled CRD status events never refreshed discovery or signaled")
 	}
 	assertEstablishedResourceCached(t, tracker)
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("CRD watch did not stop after cancellation")
-	}
+	waitForTestWatchExit(t, terminal, cancel, done)
 	want := 2 // initial snapshot plus one coalesced refresh
 	if mode == "overlapping" {
 		want++
 	}
 	if got := server.RequestCount("/api/v1"); got != want {
 		t.Fatalf("discovery requests = %d, want %d", got, want)
+	}
+}
+
+func isTerminalWatchTest(mode string) bool {
+	return mode == "closed" || mode == "error"
+}
+
+func waitForTestWatchExit(t *testing.T, terminal bool, cancel context.CancelFunc, done <-chan struct{}) {
+	t.Helper()
+	if !terminal {
+		cancel()
+	}
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("CRD watch did not stop after terminal event or cancellation")
 	}
 }
 
