@@ -291,7 +291,7 @@ func (m *NamespaceMutator) collectBindDefinitionLabels(ctx context.Context, nsNa
 								return nil, false, matchErr
 							}
 							namespaceBindingMatched = namespaceBindingMatched || matches
-							if !matches && unchangedNamespace.Labels[authorizationv1alpha1.LabelKeyOwner] == authorizationv1alpha1.OwnerAddon {
+							if !matches {
 								continue
 							}
 						}

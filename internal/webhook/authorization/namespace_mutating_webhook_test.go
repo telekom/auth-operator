@@ -265,7 +265,7 @@ func TestNamespaceMutatorHandle(t *testing.T) {
 			expectPatch: true,
 		},
 		{
-			name:      "User in BindDef specified Group => [NO_LABEL] UPDATE should add label from matching BindDefinition",
+			name:      "User in BindDef specified Group => unlabeled UPDATE must not derive ownership from an unmatched selector",
 			operation: admissionv1.Update,
 			username:  "t628545",
 			groups:    []string{"oidc:s_platform_namespaced_poweruser", "xyzGroup"},
@@ -277,11 +277,8 @@ func TestNamespaceMutatorHandle(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-ns",
 				}},
-			expectAllowed: true,
-			expectLabels: map[string]string{
-				"t-caas.telekom.com/owner": "platform",
-			},
-			expectPatch: true,
+			expectAllowed: false,
+			expectPatch:   false,
 		},
 		{
 			name:      "User in BindDef specified Group => UPDATE rejects submitted ownership changes",
@@ -328,7 +325,7 @@ func TestNamespaceMutatorHandle(t *testing.T) {
 			expectPatch: true,
 		},
 		{
-			name:      "User in BindDef specified ServiceAccount => [NO_LABEL] UPDATE should add label from matching BindDefinition",
+			name:      "User in BindDef specified ServiceAccount => unlabeled UPDATE must not derive ownership from an unmatched selector",
 			operation: admissionv1.Update,
 			username:  "system:serviceaccount:kube-system:m2m-sa-t-caas-platform",
 			groups:    []string{},
@@ -340,11 +337,8 @@ func TestNamespaceMutatorHandle(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-ns",
 				}},
-			expectAllowed: true,
-			expectLabels: map[string]string{
-				"t-caas.telekom.com/owner": "platform",
-			},
-			expectPatch: true,
+			expectAllowed: false,
+			expectPatch:   false,
 		},
 		{
 			name:      "User in BindDef specified ServiceAccount => UPDATE rejects submitted ownership changes",

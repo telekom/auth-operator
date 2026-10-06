@@ -75,6 +75,9 @@ Namespace mutation and validation independently refuse unpinned selectors for
 add-on operations, including unchanged ownership updates, even for legacy
 BindDefinitions or objects created with BindDefinition admission disabled.
 An add-on `a` pin never authorizes an add-on `b` namespace.
+On unchanged UPDATEs, the mutator ignores every selector that does not match the
+existing namespace, preserving exact-ownership ServiceAccount fallback across
+tenant, third-party and add-on categories without deriving unrelated labels.
 ServiceAccounts inherit the owner and identity labels from their namespace.
 
 ```yaml

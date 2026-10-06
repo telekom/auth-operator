@@ -187,6 +187,52 @@ func TestAddonServiceAccountInheritance(t *testing.T) {
 	}
 }
 
+func TestUnmatchedAddonSelectorPreservesServiceAccountFallback(t *testing.T) {
+	scheme := runtime.NewScheme()
+	for _, add := range []func(*runtime.Scheme) error{corev1.AddToScheme, authorizationv1alpha1.AddToScheme} {
+		if err := add(scheme); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for owner, identityKey := range map[string]string{
+		authorizationv1alpha1.OwnerTenant:     authorizationv1alpha1.LabelKeyTenant,
+		authorizationv1alpha1.OwnerThirdParty: authorizationv1alpha1.LabelKeyThirdParty,
+		authorizationv1alpha1.OwnerAddon:      authorizationv1alpha1.LabelKeyAddon,
+	} {
+		t.Run(owner, func(t *testing.T) {
+			source := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: owner + "-system", Labels: map[string]string{
+				authorizationv1alpha1.LabelKeyOwner: owner, identityKey: "team",
+			}}}
+			bd := &authorizationv1alpha1.BindDefinition{ObjectMeta: metav1.ObjectMeta{Name: "unrelated-addon"}, Spec: authorizationv1alpha1.BindDefinitionSpec{
+				Subjects: []rbacv1.Subject{{Kind: rbacv1.ServiceAccountKind, Namespace: source.Name, Name: "controller"}},
+				RoleBindings: []authorizationv1alpha1.NamespaceBinding{{ClusterRoleRefs: []string{"view"}, NamespaceSelector: []metav1.LabelSelector{{
+					MatchLabels: map[string]string{authorizationv1alpha1.LabelKeyAddon: "metrics"},
+				}}}},
+			}}
+			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(source, bd).Build()
+			target := source.DeepCopy()
+			target.Name = owner + "-app"
+			raw, err := json.Marshal(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{
+				Name: target.Name, Kind: metav1.GroupVersionKind{Version: "v1", Kind: "Namespace"}, Operation: admissionv1.Update,
+				Object: runtime.RawExtension{Raw: raw}, OldObject: runtime.RawExtension{Raw: raw},
+				UserInfo: authenticationv1.UserInfo{Username: "system:serviceaccount:" + source.Name + ":controller"},
+			}}
+			validator := &NamespaceValidator{Client: c, Decoder: admission.NewDecoder(scheme)}
+			if resp := validator.Handle(context.Background(), req); !resp.Allowed {
+				t.Fatalf("exact-owner ServiceAccount fallback rejected update: %v", resp.Result)
+			}
+			mutator := &NamespaceMutator{Client: c, Decoder: admission.NewDecoder(scheme)}
+			if resp := mutator.Handle(context.Background(), req); !resp.Allowed || len(resp.Patches) != 0 {
+				t.Fatalf("unmatched selector interfered with unchanged ownership: %v", resp)
+			}
+		})
+	}
+}
+
 func TestAddonMigrationOwnershipImmutable(t *testing.T) {
 	validator := &NamespaceValidator{TDGMigration: true}
 	t.Run("identity immutable without reclassification", func(t *testing.T) {

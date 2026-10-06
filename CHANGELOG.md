@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Preserve exact-ownership ServiceAccount namespace UPDATE fallback when a
+  subject-matching BindDefinition only contains unrelated namespace selectors.
+  Unchanged updates no longer derive labels from selectors that do not match.
 - Give add-on ownership the same non-platform migration behavior as third-party
   ownership: protected-label bypass principals with TDG migration enabled can
   reclassify among tenant, third-party and add-on categories, replacing identity
