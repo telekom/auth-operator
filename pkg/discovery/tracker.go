@@ -109,7 +109,7 @@ func (r *ResourceTracker) initialize() error {
 			Hooks: discoverytracker.Hooks{
 				Collected: func(ctx context.Context, duration time.Duration, err error) {
 					metrics.APIDiscoveryDuration.Observe(duration.Seconds())
-					if err != nil {
+					if err != nil && !errors.Is(err, errEmptyDiscovery) {
 						metrics.APIDiscoveryErrors.Inc()
 					}
 				},

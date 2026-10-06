@@ -12,11 +12,14 @@ import (
 	"testing"
 	"time"
 
+	dto "github.com/prometheus/client_model/go"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
 	kubescheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+
+	"github.com/telekom/auth-operator/pkg/metrics"
 )
 
 func TestResourceTrackerCollectionSignalsOnlyOnChanges(t *testing.T) {
@@ -62,12 +65,16 @@ func TestResourceTrackerKeepsUsableCacheAfterEmptyDiscovery(t *testing.T) {
 	}
 
 	server.SetEmpty(true)
+	errorsBefore := discoveryErrorCount(t)
 	changed, err := tracker.collectAPIResources(context.Background())
 	if err != nil {
 		t.Fatalf("empty refresh: %v", err)
 	}
 	if changed {
 		t.Fatal("empty refresh should not report a change")
+	}
+	if got := discoveryErrorCount(t); got != errorsBefore {
+		t.Fatalf("retained empty discovery counted as an API error: before=%v after=%v", errorsBefore, got)
 	}
 	snapshot, err := tracker.GetAPIResources()
 	if err != nil {
@@ -84,12 +91,16 @@ func TestResourceTrackerFailsWithoutUsableInitialDiscovery(t *testing.T) {
 	server.SetEmpty(true)
 
 	tracker := NewResourceTracker(kubescheme.Scheme, server.Config())
+	errorsBefore := discoveryErrorCount(t)
 	changed, err := tracker.collectAPIResources(context.Background())
 	if err == nil {
 		t.Fatal("empty initial collection should fail")
 	}
 	if changed {
 		t.Fatal("failed initial collection should not report a change")
+	}
+	if got := discoveryErrorCount(t); got != errorsBefore {
+		t.Fatalf("empty startup counted as an upstream API error: before=%v after=%v", errorsBefore, got)
 	}
 	snapshot, _ := tracker.GetAPIResources()
 	if got := countAPIResources(snapshot); got != 0 {
@@ -103,6 +114,7 @@ func TestResourceTrackerReportsUnchangedOnDiscoveryHTTPError(t *testing.T) {
 	server.SetError(true)
 
 	tracker := NewResourceTracker(kubescheme.Scheme, server.Config())
+	errorsBefore := discoveryErrorCount(t)
 	changed, err := tracker.collectAPIResources(context.Background())
 	if err == nil {
 		t.Fatal("discovery HTTP error should fail")
@@ -110,10 +122,22 @@ func TestResourceTrackerReportsUnchangedOnDiscoveryHTTPError(t *testing.T) {
 	if changed {
 		t.Fatal("discovery HTTP error should not report a change")
 	}
+	if got := discoveryErrorCount(t); got != errorsBefore+1 {
+		t.Fatalf("upstream API failure was not counted: before=%v after=%v", errorsBefore, got)
+	}
 	var partial *discovery.ErrGroupDiscoveryFailed
 	if !errors.As(err, &partial) {
 		t.Fatalf("empty initial discovery lost its original failure cause: %v", err)
 	}
+}
+
+func discoveryErrorCount(t *testing.T) float64 {
+	t.Helper()
+	metric := &dto.Metric{}
+	if err := metrics.APIDiscoveryErrors.Write(metric); err != nil {
+		t.Fatal(err)
+	}
+	return metric.GetCounter().GetValue()
 }
 
 func TestResourceTrackerPartialDiscoveryRetainsFailedGroup(t *testing.T) {

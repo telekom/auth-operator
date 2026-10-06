@@ -398,6 +398,8 @@ watch closure/errors and serialize behind overlapping discovery collections,
 so the final establishment update is not dropped. Partial discovery retains failed
 group/version snapshots while updating healthy groups. Empty discovery never
 clears a usable snapshot, and returned snapshots isolate nested slices.
+Handled empty responses do not increment the API-discovery error counter;
+actual upstream discovery errors still do.
 CRD establishment waits continue to use Kubernetes' context-aware backoff.
 See the [upstream-first guide](https://github.com/telekom/t-caas-go-library/blob/main/docs/upstream-libraries.md).
 
