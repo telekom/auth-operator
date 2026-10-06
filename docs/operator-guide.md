@@ -393,7 +393,9 @@ authorization rather than reuse stale grants.
 Discovery uses the shared snapshot tracker with local RBAC augmentation
 (finalizers, node metrics, `bind` and `escalate`). Leader-only execution and both
 configured refresh intervals are retained. CRD list/watch reconnects use
-resource versions and trailing-edge debounce; partial discovery retains failed
+resource versions and trailing-edge debounce. Pending CRD refreshes survive
+watch closure/errors and serialize behind overlapping discovery collections,
+so the final establishment update is not dropped. Partial discovery retains failed
 group/version snapshots while updating healthy groups. Empty discovery never
 clears a usable snapshot, and returned snapshots isolate nested slices.
 CRD establishment waits continue to use Kubernetes' context-aware backoff.
