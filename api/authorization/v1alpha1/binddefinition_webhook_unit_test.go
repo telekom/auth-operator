@@ -322,6 +322,10 @@ func TestProtectedNamespaceSelectorsWithCustomLabelGroups(t *testing.T) {
 	for _, kind := range []string{BindDefinitionKind, RestrictedBindDefinitionKind} {
 		for _, selector := range []metav1.LabelSelector{
 			{MatchLabels: map[string]string{LabelKeyProtected: "tenant-a"}},
+			{MatchLabels: map[string]string{LabelKeyAddon: "metrics"}},
+			{MatchExpressions: []metav1.LabelSelectorRequirement{{
+				Key: LabelKeyAddon, Operator: metav1.LabelSelectorOpIn, Values: []string{"metrics"},
+			}}},
 			{MatchExpressions: []metav1.LabelSelectorRequirement{{
 				Key: LabelKeyProtected, Operator: metav1.LabelSelectorOpIn, Values: []string{"tenant-a"},
 			}}},
@@ -336,7 +340,7 @@ func TestProtectedNamespaceSelectorsWithCustomLabelGroups(t *testing.T) {
 					[]string{"platform.example.com"},
 				)
 				if err != nil {
-					t.Fatalf("built-in protected selector must remain allowed: %v", err)
+					t.Fatalf("built-in namespace selector must remain allowed: %v", err)
 				}
 			})
 		}

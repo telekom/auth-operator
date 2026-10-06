@@ -495,7 +495,7 @@ func isLabelSelectorEmpty(selector *metav1.LabelSelector) bool {
 }
 
 func isAllowedNamespaceAdmissionSelectorKey(key string, allowedLabelGroups []string) bool {
-	if key == LabelKeyOwner || key == LabelKeyTenant || key == LabelKeyThirdParty || key == LabelKeyProtected || key == corev1.LabelMetadataName {
+	if key == LabelKeyOwner || key == LabelKeyTenant || key == LabelKeyThirdParty || key == LabelKeyAddon || key == LabelKeyProtected || key == corev1.LabelMetadataName {
 		return true
 	}
 	for _, group := range namespaceAdmissionSelectorLabelGroupsOrDefault(allowedLabelGroups) {
@@ -560,7 +560,7 @@ func validateNamespaceBindingsWithLabelGroups(kind schema.GroupKind, name string
 						field.ErrorList{field.Invalid(
 							field.NewPath("spec", "roleBindings").Index(i).Child("namespaceSelector").Index(j).Child("matchLabels").Key(key),
 							key,
-							"namespace admission selectors may only use built-in ownership and protection labels ("+LabelKeyOwner+", "+LabelKeyTenant+", "+LabelKeyThirdParty+", "+LabelKeyProtected+"), "+corev1.LabelMetadataName+", or configured label groups matching "+formatNamespaceAdmissionSelectorLabelGroups(allowedLabelGroups))})
+							"namespace admission selectors may only use built-in ownership and protection labels ("+LabelKeyOwner+", "+LabelKeyTenant+", "+LabelKeyThirdParty+", "+LabelKeyAddon+", "+LabelKeyProtected+"), "+corev1.LabelMetadataName+", or configured label groups matching "+formatNamespaceAdmissionSelectorLabelGroups(allowedLabelGroups))})
 				}
 			}
 			for exprIndex, expr := range selector.MatchExpressions {
@@ -571,7 +571,7 @@ func validateNamespaceBindingsWithLabelGroups(kind schema.GroupKind, name string
 						field.ErrorList{field.Invalid(
 							field.NewPath("spec", "roleBindings").Index(i).Child("namespaceSelector").Index(j).Child("matchExpressions").Index(exprIndex).Child("key"),
 							expr.Key,
-							"namespace admission selectors may only use built-in ownership and protection labels ("+LabelKeyOwner+", "+LabelKeyTenant+", "+LabelKeyThirdParty+", "+LabelKeyProtected+"), "+corev1.LabelMetadataName+", or configured label groups matching "+formatNamespaceAdmissionSelectorLabelGroups(allowedLabelGroups))})
+							"namespace admission selectors may only use built-in ownership and protection labels ("+LabelKeyOwner+", "+LabelKeyTenant+", "+LabelKeyThirdParty+", "+LabelKeyAddon+", "+LabelKeyProtected+"), "+corev1.LabelMetadataName+", or configured label groups matching "+formatNamespaceAdmissionSelectorLabelGroups(allowedLabelGroups))})
 				}
 			}
 		}

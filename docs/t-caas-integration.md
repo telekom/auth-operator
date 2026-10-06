@@ -38,7 +38,20 @@ T-CaaS platform recognizes several cluster participants organized in two categor
 
 3. **Third parties** is the third `owner` of resources in the Kubernetes API. Third parties are the secondary users of the T-CaaS platform through which they deliver managed services to the tenant or to the platform team. Third parties cannot be the `owner` of namespaces prefixed with `kube-*` and namespaces which contain the label `t-caas.telekom.com/owner: platform` or namespaces which contain the label `t-caas.telekom.com/owner: tenant`. Instead, third parties are given rights to create namespaces and resources within those namespaces. Third parties also have rights to create some non-namespaced resources deemed safe by the platform team. The naming convention of third party owned resources (both namespaced and non-namespaced) is exclusively determined by the third party. To control access to namespaced resources for third parties, on each namespace `create/update/delete` request to the Kubernetes API, the platform team will inject the proper labels into the namespace indicating the ownership and propagating RBAC to downstream resources. The labels that indicate third party ownership are `t-caas.telekom.com/owner: thirdparty` and `t-caas.telekom.com/thirdparty: $thirdpartyName`, where `$thirdpartyName` is the name of that specific third party. These labels cannot be overwritten by any of the cluster participants and are subject to a `ValidatingWebhook` which will check for validity of the request on namespace `create/update/delete` requests to the Kubernetes API. Each third party team has 3 distinctive roles through which members of the team are managed. These 3 roles are applicable to all clusters, in all sites, in all environments. Further role mappings are explained in more detail in the next chapter.
 
-Inside the cluster, there can be a single platform team, a single tenant and multiple third parties.
+4. **Add-ons** are the fourth namespace owner category. The T-CaaS add-on
+   controller creates namespaces named `t-addon-<addonName>` with
+   `t-caas.telekom.com/owner: addon` and
+   `t-caas.telekom.com/addon: <addonName>`. They must not carry tenant or third-party
+   identity labels. The T-CaaS auth-operator function supplies BindDefinitions
+   selecting `owner=addon`; Kyverno policies and the add-on controller consume
+   the same label contract. Authorized non-bypass principals may update these
+   namespaces without changing their ownership labels. Add-on ownership is
+   immutable, including during tenant/third-party migration. Unlike platform
+   namespaces, add-on namespaces are not implicitly deletion-protected: their
+   controller owns their lifecycle. Explicit deletion-protection opt-in and
+   hard-protected namespace rules still apply.
+
+Inside the cluster, there can be a single platform team, a single tenant, multiple third parties and multiple add-ons.
 
 Namespace admission is opt-in in the Helm chart (`namespaceAdmission.enabled=false`
 by default). Enable it only after the bootstrap `BindDefinition`, `RBACPolicy`,
@@ -47,6 +60,10 @@ installed. The namespace mutator can inject tracked ownership labels only when a
 matching selector is expressed as `matchLabels` or as a `matchExpressions` entry
 with `operator: In` and exactly one value; multi-value selectors must provide
 the ownership labels explicitly.
+An add-on identity selector alone implies `owner=addon`. ServiceAccounts inherit
+both tracked labels from their add-on namespace. An owner-only selector cannot
+derive the add-on identity; the controller must supply both labels. See the
+[namespace label contract](api-reference/namespace-ownership.md).
 
 ### Non-owners
 

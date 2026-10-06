@@ -15,7 +15,7 @@ const (
 	// allowed by default in BindDefinition namespace selectors.
 	DefaultNamespaceAdmissionSelectorLabelGroup = "t-caas.telekom.com"
 
-	// LabelKeyOwner identifies the owner type of a namespace (platform, tenant, or thirdparty).
+	// LabelKeyOwner identifies the owner type of a namespace (platform, tenant, thirdparty, or addon).
 	LabelKeyOwner = "t-caas.telekom.com/owner"
 
 	// LabelKeyTenant identifies the specific tenant that owns the namespace.
@@ -23,6 +23,9 @@ const (
 
 	// LabelKeyThirdParty identifies the specific third party that owns the namespace.
 	LabelKeyThirdParty = "t-caas.telekom.com/thirdparty"
+
+	// LabelKeyAddon identifies the specific add-on that owns the namespace.
+	LabelKeyAddon = "t-caas.telekom.com/addon"
 
 	// LabelKeyDeletionProtection opts a namespace into deletion protection.
 	// Namespaces carrying this label with the value DeletionProtectionEnabled
@@ -74,6 +77,9 @@ const (
 
 	// OwnerThirdParty indicates the namespace is owned by a third party.
 	OwnerThirdParty = "thirdparty"
+
+	// OwnerAddon indicates the namespace is owned by an add-on controller.
+	OwnerAddon = "addon"
 )
 
 // Deletion protection label and annotation values.

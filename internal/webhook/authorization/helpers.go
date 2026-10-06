@@ -20,6 +20,7 @@ var trackedOwnershipKeys = []string{
 	authorizationv1alpha1.LabelKeyOwner,
 	authorizationv1alpha1.LabelKeyTenant,
 	authorizationv1alpha1.LabelKeyThirdParty,
+	authorizationv1alpha1.LabelKeyAddon,
 }
 
 /*
@@ -225,7 +226,7 @@ func IsRestrictedBindDefinition(name string) bool {
 // and returns the tracked ownership labels (owner, tenant, thirdparty) found on it.
 // It validates that the label set is a valid ownership combination:
 //   - The owner label must always be present.
-//   - For tenant/thirdparty owners, the corresponding identifying label must also be present.
+//   - For tenant/thirdparty/addon owners, the corresponding identifying label must also be present.
 //
 // Returns an empty map if the SA is not a ServiceAccount, the namespace has no tracked
 // labels, or the label set is incomplete. Returns a non-nil error only for transient
@@ -277,10 +278,14 @@ func ValidTrackedOwnershipLabels(namespaceLabels map[string]string) bool {
 	}
 
 	// Enforce a valid and non-ambiguous ownership combination:
-	//   - owner=platform    => only owner; no tenant/thirdparty labels
-	//   - owner=tenant      => owner + tenant; no thirdparty label
-	//   - owner=thirdparty  => owner + thirdparty; no tenant label
+	//   - owner=platform    => only owner; no tenant/thirdparty/addon labels
+	//   - owner=tenant      => owner + tenant; no thirdparty/addon labels
+	//   - owner=thirdparty  => owner + thirdparty; no tenant/addon labels
+	//   - owner=addon       => owner + addon; no tenant/thirdparty labels
 	// Any other combination is treated as invalid and results in no tracked labels.
+	if _, hasAddon := result[authorizationv1alpha1.LabelKeyAddon]; hasAddon && ownerVal != authorizationv1alpha1.OwnerAddon {
+		return false
+	}
 	switch ownerVal {
 	case authorizationv1alpha1.OwnerPlatform:
 		if _, ok := result[authorizationv1alpha1.LabelKeyTenant]; ok {
@@ -303,6 +308,17 @@ func ValidTrackedOwnershipLabels(namespaceLabels map[string]string) bool {
 			return false
 		}
 		if _, ok := result[authorizationv1alpha1.LabelKeyTenant]; ok {
+			return false
+		}
+	case authorizationv1alpha1.OwnerAddon:
+		addonVal, hasAddon := result[authorizationv1alpha1.LabelKeyAddon]
+		if !hasAddon || addonVal == "" {
+			return false
+		}
+		if _, ok := result[authorizationv1alpha1.LabelKeyTenant]; ok {
+			return false
+		}
+		if _, ok := result[authorizationv1alpha1.LabelKeyThirdParty]; ok {
 			return false
 		}
 	default:

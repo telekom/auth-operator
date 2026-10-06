@@ -210,6 +210,7 @@ func (v *NamespaceValidator) validateLabelImmutability(logger logr.Logger, req a
 		authorizationv1alpha1.LabelKeyOwner,
 		authorizationv1alpha1.LabelKeyTenant,
 		authorizationv1alpha1.LabelKeyThirdParty,
+		authorizationv1alpha1.LabelKeyAddon,
 		authorizationv1alpha1.LabelKeyProtected,
 	}
 	if v.TDGMigration {
@@ -276,8 +277,8 @@ func (v *NamespaceValidator) validateLabelImmutability(logger logr.Logger, req a
 }
 
 // detectOwnerReclassification returns true if a tenant↔thirdparty reclassification is
-// happening during TDG migration by a protected-label migration bypass. Platform is
-// never reclassifiable.
+// happening during TDG migration by a protected-label migration bypass. Platform
+// and add-on ownership are never reclassifiable.
 func (v *NamespaceValidator) detectOwnerReclassification(logger logr.Logger, req admission.Request, ns, oldNs *corev1.Namespace, bypassResult BypassCheckResult) bool {
 	if !v.TDGMigration || !bypassResult.AllowProtectedLabelChanges {
 		return false
@@ -287,10 +288,9 @@ func (v *NamespaceValidator) detectOwnerReclassification(logger logr.Logger, req
 	if oldOwner == newOwner {
 		return false
 	}
-	// Only tenant↔thirdparty is allowed; platform is always immutable.
-	// Both old and new must be non-empty to prevent label removal from being treated as reclassification.
-	if oldOwner == authorizationv1alpha1.OwnerPlatform || newOwner == authorizationv1alpha1.OwnerPlatform ||
-		oldOwner == "" || newOwner == "" {
+	// Only tenant↔thirdparty is allowed; all other categories remain immutable.
+	if !((oldOwner == authorizationv1alpha1.OwnerTenant && newOwner == authorizationv1alpha1.OwnerThirdParty) ||
+		(oldOwner == authorizationv1alpha1.OwnerThirdParty && newOwner == authorizationv1alpha1.OwnerTenant)) {
 		return false
 	}
 	logger.V(1).Info("AUDIT: tenant/thirdparty reclassification allowed",

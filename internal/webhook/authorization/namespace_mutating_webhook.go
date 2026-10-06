@@ -352,6 +352,12 @@ func getCompleteTrackedLabelsFromNamespaceSelector(selector metav1.LabelSelector
 		}
 		labels[authorizationv1alpha1.LabelKeyOwner] = authorizationv1alpha1.OwnerThirdParty
 	}
+	if addon, ok := labels[authorizationv1alpha1.LabelKeyAddon]; ok && addon != "" {
+		if owner, hasOwner := labels[authorizationv1alpha1.LabelKeyOwner]; hasOwner && owner != authorizationv1alpha1.OwnerAddon {
+			return map[string]string{}
+		}
+		labels[authorizationv1alpha1.LabelKeyOwner] = authorizationv1alpha1.OwnerAddon
+	}
 	if !ValidTrackedOwnershipLabels(labels) {
 		return map[string]string{}
 	}

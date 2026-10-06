@@ -126,6 +126,10 @@ shared bearer token. Keep this opt-out disabled in production.
 The cluster-wide namespace mutating and validating webhooks are disabled by
 default. Enable them only after the bootstrap `BindDefinition` and
 `RBACPolicy` resources that authorize namespace ownership labels are present.
+Supported ownership categories are `platform`, `tenant`, `thirdparty`, and
+`addon`. Add-on namespaces require immutable `owner=addon` and a non-empty
+`t-caas.telekom.com/addon` identity, with no tenant or third-party identity labels.
+See the [namespace label contract](../../docs/api-reference/namespace-ownership.md).
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
@@ -143,6 +147,9 @@ never deletable while protection is enabled. There is **no admin bypass** —
 even `system:masters` must set the annotation; disabling
 `namespaceDeletionProtection.enabled` is the only break-glass for system
 namespaces.
+
+Add-on namespaces are not implicitly protected: the add-on controller owns their
+lifecycle. They may still opt in using the deletion-protection label.
 
 Primary enforcement is a `ValidatingAdmissionPolicy` (Kubernetes ≥ 1.30); the
 namespace validating webhook (`namespaceAdmission.enabled`) enforces the same

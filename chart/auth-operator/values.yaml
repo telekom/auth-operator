@@ -203,6 +203,8 @@ namespaceAdmission:
   # Install cluster-wide Namespace mutating/validating webhooks.
   # Disabled by default so auth-operator installation does not immediately
   # enforce T-CaaS namespace ownership before bootstrap policies exist.
+  # Owners: platform, tenant, thirdparty, addon. Add-on ownership requires a
+  # non-empty t-caas.telekom.com/addon label and no tenant/thirdparty labels.
   enabled: false
 
 namespaceDeletionProtection:
@@ -214,6 +216,8 @@ namespaceDeletionProtection:
   # deletable. There is intentionally NO admin bypass: even system:masters
   # must set the annotation first. Disabling this value is the only break-glass
   # for system namespaces.
+  # Add-on ownership does not imply protection; its controller owns lifecycle.
+  # Add-on namespaces can still opt in with the deletion-protection label.
   # Enforced twice: by a ValidatingAdmissionPolicy (primary, in-process in the
   # API server) and by the namespace validating webhook (fallback for clusters
   # without VAP support; requires namespaceAdmission.enabled).

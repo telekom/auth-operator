@@ -403,6 +403,21 @@ actual upstream discovery errors still do.
 CRD establishment waits continue to use Kubernetes' context-aware backoff.
 See the [upstream-first guide](https://github.com/telekom/t-caas-go-library/blob/main/docs/upstream-libraries.md).
 
+### Add-on Namespace Ownership
+
+Namespace admission recognizes `platform`, `tenant`, `thirdparty`, and `addon`.
+Add-on namespaces require `t-caas.telekom.com/owner=addon` and a non-empty
+`t-caas.telekom.com/addon` identity, with neither tenant nor third-party labels.
+Both labels are immutable on ordinary updates. The add-on identity is a built-in
+BindDefinition selector key even with custom allowed label domains, and can
+derive `owner=addon` during namespace creation. ServiceAccount namespace ownership
+inheritance includes it. Add-on ownership does not grant access by itself:
+matching BindDefinition authorization is still required.
+
+Add-on namespaces are not implicitly deletion-protected; their controller owns
+their lifecycle. Explicit opt-in protection and hard-protected names still
+apply. See the [namespace label contract](api-reference/namespace-ownership.md).
+
 ### Protected Namespaces: Canonical Access Classification
 
 `t-caas.telekom.com/protected` is the canonical namespace label for separating

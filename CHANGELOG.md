@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add `addon` namespace ownership with the `t-caas.telekom.com/addon` identity
+  label, selector-derived ownership and ServiceAccount inheritance. Authorized
+  updates preserve immutable ownership; add-on namespaces are not implicitly
+  deletion-protected.
 - Opt-in creator tracking through Kubernetes `MutatingAdmissionPolicy`, with
   creator and contributor annotations, protected update behavior, and native
   Kubernetes and Kyverno examples. Performance measurements and the default
