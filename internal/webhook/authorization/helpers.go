@@ -223,7 +223,7 @@ func IsRestrictedBindDefinition(name string) bool {
 }
 
 // GetSANamespaceTrackedLabels looks up the namespace where the ServiceAccount resides
-// and returns the tracked ownership labels (owner, tenant, thirdparty) found on it.
+// and returns the tracked ownership labels (owner, tenant, thirdparty, addon) found on it.
 // It validates that the label set is a valid ownership combination:
 //   - The owner label must always be present.
 //   - For tenant/thirdparty/addon owners, the corresponding identifying label must also be present.

@@ -201,16 +201,82 @@ func TestAddonMigrationOwnershipImmutable(t *testing.T) {
 			t.Fatal("migration bypass allowed identity change without owner reclassification")
 		}
 	})
+}
+
+func TestAddonMigrationAdmissionParity(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	ownership := func(owner string) map[string]string {
+		labels := map[string]string{authorizationv1alpha1.LabelKeyOwner: owner}
+		key := map[string]string{
+			authorizationv1alpha1.OwnerTenant:     authorizationv1alpha1.LabelKeyTenant,
+			authorizationv1alpha1.OwnerThirdParty: authorizationv1alpha1.LabelKeyThirdParty,
+			authorizationv1alpha1.OwnerAddon:      authorizationv1alpha1.LabelKeyAddon,
+		}[owner]
+		if key != "" {
+			labels[key] = "identity"
+		}
+		return labels
+	}
+	check := func(t *testing.T, oldLabels, newLabels map[string]string, migration, bypass, allowed bool) {
+		t.Helper()
+		oldNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "migration-ns", Labels: oldLabels}}
+		newNS := oldNS.DeepCopy()
+		newNS.Labels = newLabels
+		oldRaw, err := json.Marshal(oldNS)
+		if err != nil {
+			t.Fatal(err)
+		}
+		newRaw, err := json.Marshal(newNS)
+		if err != nil {
+			t.Fatal(err)
+		}
+		username := "ordinary-user"
+		if bypass {
+			username = helmControllerSA
+		}
+		req := admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{
+			Kind: metav1.GroupVersionKind{Version: "v1", Kind: "Namespace"}, Name: oldNS.Name, Operation: admissionv1.Update,
+			UserInfo: authenticationv1.UserInfo{Username: username},
+			Object:   runtime.RawExtension{Raw: newRaw}, OldObject: runtime.RawExtension{Raw: oldRaw},
+		}}
+		v := &NamespaceValidator{TDGMigration: migration, Decoder: admission.NewDecoder(scheme)}
+		if resp := v.Handle(context.Background(), req); resp.Allowed != allowed {
+			t.Fatalf("migration=%v bypass=%v allowed=%v, want %v: %v", migration, bypass, resp.Allowed, allowed, resp.Result)
+		}
+		if allowed {
+			m := &NamespaceMutator{TDGMigration: migration, Decoder: admission.NewDecoder(scheme)}
+			if resp := m.Handle(context.Background(), req); !resp.Allowed || len(resp.Patches) != 0 {
+				t.Fatalf("migration mutation should preserve submitted replacement labels: %v", resp)
+			}
+		}
+	}
 	for _, other := range []string{authorizationv1alpha1.OwnerTenant, authorizationv1alpha1.OwnerThirdParty, authorizationv1alpha1.OwnerPlatform} {
 		for _, owners := range [][2]string{{authorizationv1alpha1.OwnerAddon, other}, {other, authorizationv1alpha1.OwnerAddon}} {
 			t.Run(owners[0]+" to "+owners[1], func(t *testing.T) {
-				oldNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{authorizationv1alpha1.LabelKeyOwner: owners[0]}}}
-				newNS := oldNS.DeepCopy()
-				newNS.Labels[authorizationv1alpha1.LabelKeyOwner] = owners[1]
-				if resp := validator.validateLabelImmutability(logr.Discard(), admission.Request{}, newNS, oldNS, BypassCheckResult{AllowProtectedLabelChanges: true}); resp == nil || resp.Allowed {
-					t.Fatal("migration bypass allowed add-on owner reclassification")
+				for _, gates := range [][2]bool{{true, true}, {true, false}, {false, true}, {false, false}} {
+					allowed := gates[0] && gates[1] && other != authorizationv1alpha1.OwnerPlatform
+					// Replacing the entire ownership map also exercises removal
+					// of the old category's identity label.
+					check(t, ownership(owners[0]), ownership(owners[1]), gates[0], gates[1], allowed)
 				}
 			})
 		}
 	}
+	for _, legacy := range []string{"cas", "tenant", "thirdparty", "platform", "schiff"} {
+		t.Run("legacy "+legacy+" adopted as addon", func(t *testing.T) {
+			old := map[string]string{legacyOwnerLabel: legacy}
+			for _, gates := range [][2]bool{{true, true}, {true, false}, {false, true}} {
+				allowed := gates[0] && gates[1] && legacy != "platform" && legacy != "schiff"
+				check(t, old, ownership(authorizationv1alpha1.OwnerAddon), gates[0], gates[1], allowed)
+			}
+		})
+	}
+	t.Run("conflicting old identity retained", func(t *testing.T) {
+		newLabels := ownership(authorizationv1alpha1.OwnerAddon)
+		newLabels[authorizationv1alpha1.LabelKeyTenant] = "team"
+		check(t, ownership(authorizationv1alpha1.OwnerTenant), newLabels, true, true, false)
+	})
 }

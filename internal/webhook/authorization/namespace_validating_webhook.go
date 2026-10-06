@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 
 	"github.com/go-logr/logr"
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
@@ -241,10 +242,11 @@ func (v *NamespaceValidator) validateLabelImmutability(logger logr.Logger, req a
 			continue
 		}
 
-		// During tenant↔thirdparty reclassification, allow changes to owner/tenant/thirdparty labels.
+		// During non-platform reclassification, allow replacing all ownership labels.
 		if ownerReclassification && (key == authorizationv1alpha1.LabelKeyOwner ||
 			key == authorizationv1alpha1.LabelKeyTenant ||
-			key == authorizationv1alpha1.LabelKeyThirdParty) {
+			key == authorizationv1alpha1.LabelKeyThirdParty ||
+			key == authorizationv1alpha1.LabelKeyAddon) {
 			logger.V(2).Info("label change allowed during reclassification",
 				"namespace", req.Name, "label", key, "oldValue", oldValue, "newValue", newValue)
 			continue
@@ -276,9 +278,9 @@ func (v *NamespaceValidator) validateLabelImmutability(logger logr.Logger, req a
 	return nil
 }
 
-// detectOwnerReclassification returns true if a tenant↔thirdparty reclassification is
-// happening during TDG migration by a protected-label migration bypass. Platform
-// and add-on ownership are never reclassifiable.
+// detectOwnerReclassification allows transitions among tenant, thirdparty and
+// addon during TDG migration by a protected-label migration bypass. Platform
+// ownership is never reclassifiable.
 func (v *NamespaceValidator) detectOwnerReclassification(logger logr.Logger, req admission.Request, ns, oldNs *corev1.Namespace, bypassResult BypassCheckResult) bool {
 	if !v.TDGMigration || !bypassResult.AllowProtectedLabelChanges {
 		return false
@@ -288,13 +290,11 @@ func (v *NamespaceValidator) detectOwnerReclassification(logger logr.Logger, req
 	if oldOwner == newOwner {
 		return false
 	}
-	// Only tenant↔thirdparty is allowed; all other categories remain immutable.
-	isReclassification := (oldOwner == authorizationv1alpha1.OwnerTenant && newOwner == authorizationv1alpha1.OwnerThirdParty) ||
-		(oldOwner == authorizationv1alpha1.OwnerThirdParty && newOwner == authorizationv1alpha1.OwnerTenant)
-	if !isReclassification {
+	nonPlatformOwners := []string{authorizationv1alpha1.OwnerTenant, authorizationv1alpha1.OwnerThirdParty, authorizationv1alpha1.OwnerAddon}
+	if !slices.Contains(nonPlatformOwners, oldOwner) || !slices.Contains(nonPlatformOwners, newOwner) {
 		return false
 	}
-	logger.V(1).Info("AUDIT: tenant/thirdparty reclassification allowed",
+	logger.V(1).Info("AUDIT: tenant/thirdparty/addon reclassification allowed",
 		"namespace", req.Name, "oldOwner", oldOwner, "newOwner", newOwner)
 	return true
 }

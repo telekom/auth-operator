@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Give add-on ownership the same non-platform migration behavior as third-party
+  ownership: protected-label bypass principals with TDG migration enabled can
+  reclassify among tenant, third-party and add-on categories, replacing identity
+  labels. Legacy non-platform namespaces can be adopted as add-ons; platform
+  transitions and ordinary-user reclassification remain denied.
 - Require BindDefinition and RestrictedBindDefinition namespace-selector terms
   targeting add-ons to pin a single non-empty add-on name. Broad owner
   `Exists`/`NotIn` terms must pin an identity or explicitly exclude add-ons.

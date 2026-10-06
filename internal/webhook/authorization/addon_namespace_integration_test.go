@@ -45,20 +45,28 @@ var _ = Describe("Add-on namespace admission", func() {
 		Expect(err).NotTo(HaveOccurred())
 		userClient, err := client.New(user.Config(), client.Options{Scheme: scheme.Scheme})
 		Expect(err).NotTo(HaveOccurred())
+		migrationUsername := "system:serviceaccount:flux-system:helm-controller"
+		migrationUser, err := envTestEnv.AddUser(envtest.User{Name: migrationUsername}, envCfg)
+		Expect(err).NotTo(HaveOccurred())
+		migrationClient, err := client.New(migrationUser.Config(), client.Options{Scheme: scheme.Scheme})
+		Expect(err).NotTo(HaveOccurred())
 		role := &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{GenerateName: "addon-namespace-"}, Rules: []rbacv1.PolicyRule{{
 			APIGroups: []string{""}, Resources: []string{"namespaces"}, ResourceNames: []string{ns.Name, otherNS.Name}, Verbs: []string{"get", "update", "delete"},
 		}}}
 		Expect(live.Create(ctx, role)).To(Succeed())
 		DeferCleanup(func() { _ = live.Delete(context.Background(), role) })
 		binding := &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{GenerateName: "addon-namespace-"},
-			RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: role.Name},
-			Subjects: []rbacv1.Subject{{APIGroup: rbacv1.GroupName, Kind: rbacv1.UserKind, Name: "addon-controller"}},
+			RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: role.Name},
+			Subjects: []rbacv1.Subject{
+				{APIGroup: rbacv1.GroupName, Kind: rbacv1.UserKind, Name: "addon-controller"},
+				{Kind: rbacv1.ServiceAccountKind, Namespace: "flux-system", Name: "helm-controller"},
+			},
 		}
 		Expect(live.Create(ctx, binding)).To(Succeed())
 		DeferCleanup(func() { _ = live.Delete(context.Background(), binding) })
 		bd := &authorizationv1alpha1.BindDefinition{ObjectMeta: metav1.ObjectMeta{GenerateName: "addon-namespace-", Labels: map[string]string{"test.telekom.com/addon-selector": "true"}}, Spec: authorizationv1alpha1.BindDefinitionSpec{
 			TargetName: "addon-namespace",
-			Subjects:   binding.Subjects,
+			Subjects:   binding.Subjects[:1],
 			RoleBindings: []authorizationv1alpha1.NamespaceBinding{{
 				ClusterRoleRefs: []string{role.Name},
 				NamespaceSelector: []metav1.LabelSelector{{MatchLabels: map[string]string{
@@ -70,8 +78,8 @@ var _ = Describe("Add-on namespace admission", func() {
 		Expect(live.Create(ctx, bd)).To(Succeed())
 		DeferCleanup(func() { _ = live.Delete(context.Background(), bd) })
 
-		validator := &webhooks.NamespaceValidator{Client: envClient, Reader: live, Decoder: crAdmission.NewDecoder(scheme.Scheme), DeletionProtection: true}
-		mutator := &webhooks.NamespaceMutator{Client: envClient, Reader: live, Decoder: crAdmission.NewDecoder(scheme.Scheme)}
+		validator := &webhooks.NamespaceValidator{Client: envClient, Reader: live, Decoder: crAdmission.NewDecoder(scheme.Scheme), DeletionProtection: true, TDGMigration: true}
+		mutator := &webhooks.NamespaceMutator{Client: envClient, Reader: live, Decoder: crAdmission.NewDecoder(scheme.Scheme), TDGMigration: true}
 		mux := http.NewServeMux()
 		mux.Handle("/validate", &crAdmission.Webhook{Handler: validator})
 		mux.Handle("/mutate", &crAdmission.Webhook{Handler: mutator})
@@ -205,6 +213,24 @@ var _ = Describe("Add-on namespace admission", func() {
 			conflicting.Labels[key] = "team"
 			Expect(apierrors.IsForbidden(userClient.Update(ctx, conflicting))).To(BeTrue())
 		}
+
+		By("allowing gated migration from add-on to tenant and back through both webhooks")
+		migrated := &corev1.Namespace{}
+		Expect(migrationClient.Get(ctx, client.ObjectKeyFromObject(ns), migrated)).To(Succeed())
+		migrated.Labels[authorizationv1alpha1.LabelKeyOwner] = authorizationv1alpha1.OwnerTenant
+		migrated.Labels[authorizationv1alpha1.LabelKeyTenant] = "team"
+		delete(migrated.Labels, authorizationv1alpha1.LabelKeyAddon)
+		Expect(migrationClient.Update(ctx, migrated)).To(Succeed())
+		Expect(live.Get(ctx, client.ObjectKeyFromObject(ns), migrated)).To(Succeed())
+		Expect(migrated.Labels).To(HaveKeyWithValue(authorizationv1alpha1.LabelKeyOwner, authorizationv1alpha1.OwnerTenant))
+		Expect(migrated.Labels).NotTo(HaveKey(authorizationv1alpha1.LabelKeyAddon))
+		migrated.Labels[authorizationv1alpha1.LabelKeyOwner] = authorizationv1alpha1.OwnerAddon
+		migrated.Labels[authorizationv1alpha1.LabelKeyAddon] = "a"
+		delete(migrated.Labels, authorizationv1alpha1.LabelKeyTenant)
+		Expect(migrationClient.Update(ctx, migrated)).To(Succeed())
+		Expect(live.Get(ctx, client.ObjectKeyFromObject(ns), persisted)).To(Succeed())
+		Expect(persisted.Labels).To(HaveKeyWithValue(authorizationv1alpha1.LabelKeyAddon, "a"))
+		Expect(persisted.Labels).NotTo(HaveKey(authorizationv1alpha1.LabelKeyTenant))
 
 		By("retaining explicit deletion protection opt-in for add-on namespaces")
 		protected := persisted.DeepCopy()

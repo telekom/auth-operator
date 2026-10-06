@@ -417,6 +417,13 @@ BindDefinition when their source namespace has valid, non-empty tracked ownershi
 labels that exactly match the target; this fallback does not authorize DELETE.
 Kubernetes RBAC authorization still applies to every request.
 
+With `--tdg-migration`, protected-label migration bypass principals may reclassify
+among `tenant`, `thirdparty` and `addon` in every direction, replacing the old
+identity label with the new category's identity. The same principals may adopt
+legacy non-platform namespaces as add-ons. Platform ownership cannot be
+reclassified or adopted as an add-on, and ordinary users cannot reclassify.
+Identity changes without owner reclassification remain denied.
+
 BindDefinition and RestrictedBindDefinition admission require each selector term
 targeting add-ons to pin one non-empty `t-caas.telekom.com/addon` value, via
 `matchLabels` or one single-value `In` expression, without conflicting add-on

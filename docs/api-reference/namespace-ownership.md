@@ -38,8 +38,16 @@ authorization still applies to every request.
 Non-bypass principals can update an authorized add-on
 namespace when ownership is unchanged, but cannot adopt, change, or remove
 tracked ownership labels. Existing privileged bypass rules remain unchanged.
-Migration reclassification is limited to `tenant` ↔ `thirdparty`; neither
-platform nor add-on ownership is reclassifiable.
+With `TDGMigration` enabled, protected-label migration bypass principals may
+reclassify in every direction among `tenant`, `thirdparty`, and `addon`.
+Replace the previous identity label with the new category's non-empty identity
+label; retaining conflicting identity labels is denied. A migration bypass may
+also adopt a legacy non-platform namespace as any of these categories.
+Reclassification remains denied for ordinary principals and when migration mode
+is disabled. Platform ownership is never reclassifiable, and legacy
+`schiff.telekom.de/owner=platform` or `schiff` namespaces cannot be adopted as
+add-ons. Changing an identity without reclassifying the owner remains denied.
+Existing privileged bypass rules remain unchanged.
 
 `t-caas.telekom.com/addon` is a built-in BindDefinition namespace-selector key
 regardless of additional allowed label domains. A selector with this identity

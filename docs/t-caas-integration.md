@@ -46,8 +46,11 @@ T-CaaS platform recognizes several cluster participants organized in two categor
    selecting `owner=addon` **and** pinning `t-caas.telekom.com/addon` to the
    specific add-on name; Kyverno policies and the add-on controller consume
    the same label contract. Authorized non-bypass principals may update these
-   namespaces without changing their ownership labels. Add-on ownership is
-   immutable, including during tenant/third-party migration. Unlike platform
+   namespaces without changing their ownership labels. Protected-label migration
+   bypass principals, with `TDGMigration` enabled, may reclassify among tenant,
+   third-party and add-on ownership in every direction, replacing the identity
+   label. Legacy non-platform namespaces may also be adopted as add-ons;
+   platform ownership cannot be reclassified or adopted as non-platform. Unlike platform
    namespaces, add-on namespaces are not implicitly deletion-protected: their
    controller owns their lifecycle. Explicit deletion-protection opt-in and
    hard-protected namespace rules still apply.
