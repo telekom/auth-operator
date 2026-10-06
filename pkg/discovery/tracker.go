@@ -305,11 +305,15 @@ func (r *ResourceTracker) initUUIDMap(ctx context.Context) error {
 
 // collectAndNotify attempts to collect API resources and notify via signalFunc if there are changes.
 func (r *ResourceTracker) collectAndNotify(ctx context.Context) func() {
+	return r.collectAndNotifyWithCollector(ctx, r.collectAPIResources)
+}
+
+func (r *ResourceTracker) collectAndNotifyWithCollector(ctx context.Context, collect func(context.Context) (bool, error)) func() {
 	return func() {
 		logger := log.FromContext(ctx).WithName("ResourceTracker.collectAndNotify")
 		logger.V(2).Info("triggering API resource collection")
 
-		changed, err := r.collectAPIResources(ctx)
+		changed, err := collect(ctx)
 		if err != nil {
 			logger.Error(err, "failed to collect API resources")
 			return
@@ -657,6 +661,12 @@ func (r *ResourceTracker) watchAPIResources(ctx context.Context, watchReady chan
 	defer refreshTimer.Stop()
 	refreshTimer.Stop()
 	var refresh <-chan time.Time
+	refreshAndNotify := r.collectAndNotifyWithCollector(ctx, r.collectAPIResourcesBlocking)
+	defer func() {
+		if refresh != nil && ctx.Err() == nil {
+			refreshAndNotify()
+		}
+	}()
 
 	logger.Info("starting CRD watch for RoleDefinitionReconciler")
 	if watchReady != nil {
@@ -712,7 +722,7 @@ func (r *ResourceTracker) watchAPIResources(ctx context.Context, watchReady chan
 				// so that RoleDefinitions are reconciled with up-to-date API resources.
 				// ADDED events for pre-existing CRDs are already filtered by hasCRDUUID above,
 				// so only genuinely new CRDs reach this point.
-				r.collectAndNotify(ctx)()
+				refreshAndNotify()
 			default:
 				// MODIFIED events (e.g. status/condition updates) can arrive in bursts,
 				// so coalesce them without dropping the final establishment update.
@@ -724,7 +734,7 @@ func (r *ResourceTracker) watchAPIResources(ctx context.Context, watchReady chan
 
 		case <-refresh:
 			refresh = nil
-			r.collectAndNotify(ctx)()
+			refreshAndNotify()
 		case <-ctx.Done():
 			logger.Info("stopping CRD watch after context done")
 			return
