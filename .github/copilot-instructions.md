@@ -89,7 +89,6 @@ internal/controller/authorization/
   *_helpers.go                       # Controller helpers
 internal/webhook/
   authorization/                     # Webhook handlers
-  certrotator/                       # TLS cert rotation (cert-controller)
 pkg/
   conditions/                        # Condition management utilities
   discovery/                         # API resource discovery & tracking
