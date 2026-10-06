@@ -17,10 +17,11 @@ import (
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	ac "github.com/telekom/auth-operator/api/authorization/v1alpha1/applyconfiguration/authorization/v1alpha1"
+	pkgssa "github.com/telekom/auth-operator/pkg/ssa"
 )
 
 // FieldOwner is the field manager name for the auth-operator controller.
-const FieldOwner = "auth-operator"
+const FieldOwner = pkgssa.FieldOwner
 
 // ApplyRoleDefinitionStatus applies a status update to a RoleDefinition using native SSA.
 // It delegates to PatchApplyRoleDefinitionStatus which compares against the cache first

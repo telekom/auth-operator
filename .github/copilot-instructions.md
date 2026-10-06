@@ -134,7 +134,7 @@ before writing custom code. Add convenience wrappers only for glue repeated
 across repositories, and contribute those to the shared library. See
 [`AGENTS.md`](../AGENTS.md#reuse-upstream-libraries-before-writing-helpers)
 for the operator-specific package table, public tagged-package availability,
-migration candidates, and PR #580 adoption context.
+migration candidates, and adopted-library integration points.
 
 ### After Editing Type Files
 After modifying `api/authorization/v1alpha1/*_types.go` or kubebuilder markers:
@@ -152,7 +152,11 @@ rbacv1.GroupName          "rbac.authorization.k8s.io"
 ```
 
 ### Testing Requirements
-All new features must include tests (target >70% coverage):
+All new features must include tests (target >70% coverage). Prefer isolated
+kind E2E and real-apiserver envtests for integration behavior. Retain tests of
+Auth Operator policy and call sites; do not duplicate upstream/library tests
+or add assertions that merely inspect source/config text.
+
 - Unit tests: `*_test.go` colocated with source
 - Controller tests: `internal/controller/authorization/*_test.go`
 - E2E tests: `test/e2e/` (use Ginkgo labels)

@@ -517,8 +517,8 @@ func cloneApplyConfiguration[T any](ac *T) (*T, error) {
 // clusterRoleMatches returns true if the existing ClusterRole already matches
 // the desired ApplyConfiguration for all SSA-owned fields.
 func clusterRoleMatches(existing *rbacv1.ClusterRole, ac *rbacv1ac.ClusterRoleApplyConfiguration) bool {
-	if !labelsMatch(existing.Labels, ac.Labels) ||
-		!annotationsMatch(existing.Annotations, ac.Annotations) ||
+	if !mapContains(existing.Labels, ac.Labels) ||
+		!mapContains(existing.Annotations, ac.Annotations) ||
 		!ownerRefsMatch(existing.OwnerReferences, ac.OwnerReferences) {
 		return false
 	}
@@ -535,16 +535,16 @@ func clusterRoleMatches(existing *rbacv1.ClusterRole, ac *rbacv1ac.ClusterRoleAp
 
 // roleMatches returns true if the existing Role already matches the desired ApplyConfiguration.
 func roleMatches(existing *rbacv1.Role, ac *rbacv1ac.RoleApplyConfiguration) bool {
-	return labelsMatch(existing.Labels, ac.Labels) &&
-		annotationsMatch(existing.Annotations, ac.Annotations) &&
+	return mapContains(existing.Labels, ac.Labels) &&
+		mapContains(existing.Annotations, ac.Annotations) &&
 		ownerRefsMatch(existing.OwnerReferences, ac.OwnerReferences) &&
 		policyRulesMatch(existing.Rules, ac.Rules)
 }
 
 // clusterRoleBindingMatches returns true if the existing CRB already matches.
 func clusterRoleBindingMatches(existing *rbacv1.ClusterRoleBinding, ac *rbacv1ac.ClusterRoleBindingApplyConfiguration) bool {
-	return labelsMatch(existing.Labels, ac.Labels) &&
-		annotationsMatch(existing.Annotations, ac.Annotations) &&
+	return mapContains(existing.Labels, ac.Labels) &&
+		mapContains(existing.Annotations, ac.Annotations) &&
 		ownerRefsMatch(existing.OwnerReferences, ac.OwnerReferences) &&
 		roleRefMatches(&existing.RoleRef, ac.RoleRef) &&
 		subjectsMatch(existing.Subjects, ac.Subjects)
@@ -552,8 +552,8 @@ func clusterRoleBindingMatches(existing *rbacv1.ClusterRoleBinding, ac *rbacv1ac
 
 // roleBindingMatches returns true if the existing RB already matches.
 func roleBindingMatches(existing *rbacv1.RoleBinding, ac *rbacv1ac.RoleBindingApplyConfiguration) bool {
-	return labelsMatch(existing.Labels, ac.Labels) &&
-		annotationsMatch(existing.Annotations, ac.Annotations) &&
+	return mapContains(existing.Labels, ac.Labels) &&
+		mapContains(existing.Annotations, ac.Annotations) &&
 		ownerRefsMatch(existing.OwnerReferences, ac.OwnerReferences) &&
 		roleRefMatches(&existing.RoleRef, ac.RoleRef) &&
 		subjectsMatch(existing.Subjects, ac.Subjects)
@@ -561,10 +561,10 @@ func roleBindingMatches(existing *rbacv1.RoleBinding, ac *rbacv1ac.RoleBindingAp
 
 // serviceAccountMatches returns true if the existing SA already matches.
 func serviceAccountMatches(existing *corev1.ServiceAccount, ac *corev1ac.ServiceAccountApplyConfiguration) bool {
-	if !labelsMatch(existing.Labels, ac.Labels) {
+	if !mapContains(existing.Labels, ac.Labels) {
 		return false
 	}
-	if !annotationsMatch(existing.Annotations, ac.Annotations) {
+	if !mapContains(existing.Annotations, ac.Annotations) {
 		return false
 	}
 	if !ownerRefsMatch(existing.OwnerReferences, ac.OwnerReferences) {
@@ -581,19 +581,8 @@ func serviceAccountMatches(existing *corev1.ServiceAccount, ac *corev1ac.Service
 
 // Field-level comparators.
 
-// labelsMatch checks that all desired labels are present in the existing object.
-// Extra labels on the existing object (set by other controllers or users) are ignored
-// since SSA only manages the fields we declare.
-func labelsMatch(existing, desired map[string]string) bool {
-	return mapContains(existing, desired)
-}
-
-// annotationsMatch checks that all desired annotations are present in the existing object.
-func annotationsMatch(existing, desired map[string]string) bool {
-	return mapContains(existing, desired)
-}
-
 // mapContains returns true if all entries in desired exist with the same value in existing.
+// Extra labels and annotations are ignored since SSA only manages declared fields.
 func mapContains(existing, desired map[string]string) bool {
 	for k, v := range desired {
 		if ev, ok := existing[k]; !ok || ev != v {
