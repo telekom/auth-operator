@@ -134,8 +134,8 @@ Check Go stdlib, Kubernetes/controller-runtime/client-go/apimachinery, Flux
 before writing custom code. Add convenience wrappers only for glue repeated
 across repositories, and contribute those to the shared library. See
 [`AGENTS.md`](../AGENTS.md#reuse-upstream-libraries-before-writing-helpers)
-for the operator-specific package table, merged-package status, migration
-candidates, and PR #580 / library PR #5 context.
+for the operator-specific package table, public tagged-package availability,
+migration candidates, and PR #580 adoption context.
 
 ### After Editing Type Files
 After modifying `api/authorization/v1alpha1/*_types.go` or kubebuilder markers:

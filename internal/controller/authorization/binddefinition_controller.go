@@ -767,10 +767,15 @@ func (r *BindDefinitionReconciler) reconcileResources(
 		"bindDefinition", bindDefinition.Name,
 		"generatedCount", len(generatedSAs),
 		"externalCount", len(externalSAs))
+	desiredSAs := bindDefinitionDesiredServiceAccountsWithExternalRefs(generatedSAs, bindDefinition.Spec.ExternalServiceAccountRefs)
+	// Ownership transfer may not have reached the informer cache before pruning.
+	for _, externalSA := range externalSAs {
+		desiredSAs[externalSA] = struct{}{}
+	}
 	if err := r.pruneStaleServiceAccounts(
 		ctx,
 		bindDefinition,
-		bindDefinitionDesiredServiceAccountsWithExternalRefs(generatedSAs, bindDefinition.Spec.ExternalServiceAccountRefs),
+		desiredSAs,
 		previousGeneratedSAs,
 	); err != nil {
 		return 0, fmt.Errorf("prune stale ServiceAccounts: %w", err)

@@ -187,6 +187,10 @@ See the library's
 [upstream-first guide](https://github.com/telekom/t-caas-go-library/blob/main/docs/upstream-libraries.md)
 for alternatives and limits.
 
+ServiceAccounts reclassified as external during reconciliation remain in the
+desired set for pruning. This preserves transferred accounts even when the
+informer cache still contains their former BindDefinition owner reference.
+
 ### Apply Decision
 
 The library's `Applier[T, AC]` validates the identity and field manager, reads
