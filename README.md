@@ -10,6 +10,8 @@ A Kubernetes operator for managing dynamic RBAC through Custom Resource Definiti
 
 - 🔐 **Dynamic Role Generation** — Create ClusterRoles/Roles using a deny-list pattern instead of explicit permissions
 - 🔗 **Flexible Bindings** — Bind subjects to roles with dynamic namespace selection via label selectors
+- 🏷️ **Namespace Ownership** — Admission supports `platform`, `tenant`, `thirdparty`,
+  and `addon` ownership; see the [namespace label contract](docs/api-reference/namespace-ownership.md).
 - 🔄 **Auto-Discovery** — Automatically discovers new CRDs and updates roles accordingly
 - 🛡️ **Drift Protection** — Periodically reconciles to prevent unauthorized manual changes
 - 📜 **Self-Signed TLS** — No cert-manager required; uses [cert-controller](https://github.com/open-policy-agent/cert-controller) for automatic certificate rotation

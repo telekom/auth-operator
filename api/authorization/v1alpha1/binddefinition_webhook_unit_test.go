@@ -21,6 +21,70 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
+func TestAddonNamespaceSelectorAdmission(t *testing.T) {
+	expr := func(key string, op metav1.LabelSelectorOperator, values ...string) metav1.LabelSelectorRequirement {
+		return metav1.LabelSelectorRequirement{Key: key, Operator: op, Values: values}
+	}
+	tests := []struct {
+		name     string
+		selector metav1.LabelSelector
+		allowed  bool
+	}{
+		{"identity label", metav1.LabelSelector{MatchLabels: map[string]string{LabelKeyAddon: "a"}}, true},
+		{"identity In", metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{expr(LabelKeyAddon, metav1.LabelSelectorOpIn, "a")}}, true},
+		{"owner and identity", metav1.LabelSelector{MatchLabels: map[string]string{LabelKeyOwner: OwnerAddon, LabelKeyAddon: "a"}}, true},
+		{"consistent label and In", metav1.LabelSelector{MatchLabels: map[string]string{LabelKeyAddon: "a"}, MatchExpressions: []metav1.LabelSelectorRequirement{expr(LabelKeyAddon, metav1.LabelSelectorOpIn, "a")}}, true},
+		{"owner alone", metav1.LabelSelector{MatchLabels: map[string]string{LabelKeyOwner: OwnerAddon}}, false},
+		{"owner In", metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{expr(LabelKeyOwner, metav1.LabelSelectorOpIn, OwnerTenant, OwnerAddon)}}, false},
+		{"owner and Exists", metav1.LabelSelector{MatchLabels: map[string]string{LabelKeyOwner: OwnerAddon}, MatchExpressions: []metav1.LabelSelectorRequirement{expr(LabelKeyAddon, metav1.LabelSelectorOpExists)}}, false},
+		{"identity Exists", metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{expr(LabelKeyAddon, metav1.LabelSelectorOpExists)}}, false},
+		{"identity NotIn", metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{expr(LabelKeyAddon, metav1.LabelSelectorOpNotIn, "b")}}, false},
+		{"multi-value In", metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{expr(LabelKeyAddon, metav1.LabelSelectorOpIn, "a", "b")}}, false},
+		{"empty label", metav1.LabelSelector{MatchLabels: map[string]string{LabelKeyAddon: ""}}, false},
+		{"empty In value", metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{expr(LabelKeyAddon, metav1.LabelSelectorOpIn, "")}}, false},
+		{"conflicting Exists", metav1.LabelSelector{MatchLabels: map[string]string{LabelKeyAddon: "a"}, MatchExpressions: []metav1.LabelSelectorRequirement{expr(LabelKeyAddon, metav1.LabelSelectorOpExists)}}, false},
+		{"conflicting In", metav1.LabelSelector{MatchLabels: map[string]string{LabelKeyAddon: "a"}, MatchExpressions: []metav1.LabelSelectorRequirement{expr(LabelKeyAddon, metav1.LabelSelectorOpIn, "b")}}, false},
+		{"duplicate In", metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{expr(LabelKeyAddon, metav1.LabelSelectorOpIn, "a"), expr(LabelKeyAddon, metav1.LabelSelectorOpIn, "a")}}, false},
+		{"owner Exists", metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{expr(LabelKeyOwner, metav1.LabelSelectorOpExists)}}, false},
+		{"owner NotIn", metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{expr(LabelKeyOwner, metav1.LabelSelectorOpNotIn, OwnerTenant)}}, false},
+		{"owner explicitly excluded", metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{expr(LabelKeyOwner, metav1.LabelSelectorOpNotIn, OwnerAddon)}}, true},
+		{"identity explicitly excluded", metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{expr(LabelKeyAddon, metav1.LabelSelectorOpDoesNotExist)}}, true},
+		{"owner Exists excluding identity", metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{expr(LabelKeyOwner, metav1.LabelSelectorOpExists), expr(LabelKeyAddon, metav1.LabelSelectorOpDoesNotExist)}}, true},
+		{"tenant owner with Exists", metav1.LabelSelector{MatchLabels: map[string]string{LabelKeyOwner: OwnerTenant}, MatchExpressions: []metav1.LabelSelectorRequirement{expr(LabelKeyOwner, metav1.LabelSelectorOpExists)}}, true},
+		{"contradictory addon owner", metav1.LabelSelector{MatchLabels: map[string]string{LabelKeyOwner: OwnerAddon}, MatchExpressions: []metav1.LabelSelectorRequirement{expr(LabelKeyAddon, metav1.LabelSelectorOpDoesNotExist)}}, false},
+		{"unrelated protection", metav1.LabelSelector{MatchLabels: map[string]string{LabelKeyProtected: "true"}}, true},
+	}
+	scheme := runtime.NewScheme()
+	for _, add := range []func(*runtime.Scheme) error{AddToScheme, corev1.AddToScheme, rbacv1.AddToScheme} {
+		if err := add(scheme); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := fake.NewClientBuilder().WithScheme(scheme).Build()
+			subjects := []rbacv1.Subject{{Kind: rbacv1.UserKind, APIGroup: rbacv1.GroupName, Name: "addon-controller"}}
+			bindings := []NamespaceBinding{{ClusterRoleRefs: []string{"view"}, NamespaceSelector: []metav1.LabelSelector{tt.selector}}}
+			bd := bindDefinitionForSanitization("addon-test", subjects, func(spec *BindDefinitionSpec) { spec.RoleBindings = bindings })
+			v := &BindDefinitionValidator{Client: c}
+			_, createErr := v.ValidateCreate(context.Background(), bd)
+			old := bd.DeepCopy()
+			old.Spec.RoleBindings[0].NamespaceSelector = []metav1.LabelSelector{{MatchLabels: map[string]string{LabelKeyAddon: "previous"}}}
+			_, updateErr := v.ValidateUpdate(context.Background(), old, bd)
+			rbd := &RestrictedBindDefinition{ObjectMeta: bd.ObjectMeta, Spec: RestrictedBindDefinitionSpec{TargetName: "addon-test", Subjects: subjects, RoleBindings: bindings}}
+			restrictedErr := (&RestrictedBindDefinitionValidator{Client: c}).validateRestrictedBindDefinitionSpec(context.Background(), rbd)
+			for _, err := range []error{createErr, updateErr, restrictedErr} {
+				if tt.allowed && err != nil {
+					t.Fatalf("valid selector rejected: %v", err)
+				}
+				if !tt.allowed && (err == nil || !apierrors.IsInvalid(err) || !strings.Contains(err.Error(), "spec.roleBindings[0].namespaceSelector[0]")) {
+					t.Fatalf("expected field.Invalid selector error, got %v", err)
+				}
+			}
+		})
+	}
+}
+
 func TestBindDefinitionValidatorSanitizesInternalErrors(t *testing.T) {
 	scheme := runtime.NewScheme()
 	if err := AddToScheme(scheme); err != nil {
@@ -322,6 +386,10 @@ func TestProtectedNamespaceSelectorsWithCustomLabelGroups(t *testing.T) {
 	for _, kind := range []string{BindDefinitionKind, RestrictedBindDefinitionKind} {
 		for _, selector := range []metav1.LabelSelector{
 			{MatchLabels: map[string]string{LabelKeyProtected: "tenant-a"}},
+			{MatchLabels: map[string]string{LabelKeyAddon: "metrics"}},
+			{MatchExpressions: []metav1.LabelSelectorRequirement{{
+				Key: LabelKeyAddon, Operator: metav1.LabelSelectorOpIn, Values: []string{"metrics"},
+			}}},
 			{MatchExpressions: []metav1.LabelSelectorRequirement{{
 				Key: LabelKeyProtected, Operator: metav1.LabelSelectorOpIn, Values: []string{"tenant-a"},
 			}}},
@@ -336,7 +404,7 @@ func TestProtectedNamespaceSelectorsWithCustomLabelGroups(t *testing.T) {
 					[]string{"platform.example.com"},
 				)
 				if err != nil {
-					t.Fatalf("built-in protected selector must remain allowed: %v", err)
+					t.Fatalf("built-in namespace selector must remain allowed: %v", err)
 				}
 			})
 		}

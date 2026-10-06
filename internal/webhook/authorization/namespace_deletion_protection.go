@@ -42,7 +42,8 @@ func isHardProtectedNamespace(name string, extra []string) bool {
 // isDeletionProtected reports whether the namespace is deletion-protected by
 // its labels: platform-owned namespaces are protected implicitly, legacy
 // platform namespaces are protected while TDG migration is active, and any
-// other namespace can opt in via the deletion-protection label.
+// other namespace can opt in via the deletion-protection label. Add-on ownership
+// does not imply protection: the add-on controller owns the namespace lifecycle.
 func isDeletionProtected(ns *corev1.Namespace, tdgMigration bool) bool {
 	if ns.Labels[authorizationv1alpha1.LabelKeyOwner] == authorizationv1alpha1.OwnerPlatform {
 		return true

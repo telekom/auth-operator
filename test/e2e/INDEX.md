@@ -61,6 +61,7 @@ test/e2e/
 │   ├── e2e_suite_test.go   # Ginkgo suite setup + BeforeSuite/AfterSuite
 │   ├── e2e_test.go         # [setup] Prerequisites & debug utilities
 │   ├── helm_e2e_test.go    # [helm] Helm chart installation tests
+│   ├── addon_namespace_e2e_test.go # [helm, addon-namespaces] Add-on ownership admission and isolation
 │   ├── creator_tracking_e2e_test.go # [creator-tracking] Native identity tracking
 │   ├── creator_tracking_support_test.go # Dedicated webhook and cleanup support
 │   ├── dev_e2e_test.go     # [dev] Kustomize/make deploy tests
@@ -104,6 +105,7 @@ Each label corresponds to a dedicated Kind cluster:
 |-------|--------------|----------------|---------|
 | `setup` | `auth-operator-e2e` | Dev | Prerequisites |
 | `helm` | `auth-operator-e2e-helm` | Helm | Chart validation |
+| `addon-namespaces` | `auth-operator-e2e-helm` | Dedicated Helm release | Add-on admission, RBAC isolation, ServiceAccount inheritance, migration and deletion |
 | `creator-tracking` | `auth-operator-e2e-creator-tracking` | Helm | Creator and contributor annotations on stable and beta Kubernetes APIs |
 | `dev` | `auth-operator-e2e-dev` | Kustomize | Manifest validation |
 | `complex` | `auth-operator-e2e-complex` | Helm | Multi-CRD scenarios |

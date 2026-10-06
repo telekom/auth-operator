@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Select compatible namespace ownership on CREATE using the request name and
+  submitted labels instead of merging alternative selector grants. Reject
+  ambiguous derivation so multiple pinned add-on terms cannot choose the wrong
+  add-on identity based on selector order.
+- Preserve exact-ownership ServiceAccount namespace UPDATE fallback when a
+  subject-matching BindDefinition only contains unrelated namespace selectors.
+  Unchanged updates no longer derive labels from selectors that do not match.
+- Give add-on ownership the same non-platform migration behavior as third-party
+  ownership: protected-label bypass principals with TDG migration enabled can
+  reclassify among tenant, third-party and add-on categories, replacing identity
+  labels. Legacy non-platform namespaces can be adopted as add-ons; platform
+  transitions and ordinary-user reclassification remain denied.
+- Require BindDefinition and RestrictedBindDefinition namespace-selector terms
+  targeting add-ons to pin a single non-empty add-on name. Broad owner
+  `Exists`/`NotIn` terms must pin an identity or explicitly exclude add-ons.
+  Namespace webhooks independently block unpinned selectors for add-on
+  operations, including legacy BindDefinitions and unchanged ownership updates.
+  **Security tightening:** replace broad add-on grants with separate pinned
+  terms before upgrading; metadata-only spec-validation fast paths remain.
 - Let BindDefinitions become ready after applying bindings for explicitly external
   ServiceAccounts, even before their provider creates them. Missing external
   subjects remain visible in status without deadlocking providers that depend on
@@ -16,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add `addon` namespace ownership with the `t-caas.telekom.com/addon` identity
+  label, selector-derived ownership and ServiceAccount inheritance. Authorized
+  updates preserve immutable ownership; add-on namespaces are not implicitly
+  deletion-protected.
 - Opt-in creator tracking through Kubernetes `MutatingAdmissionPolicy`, with
   creator and contributor annotations, protected update behavior, and native
   Kubernetes and Kyverno examples. Performance measurements and the default

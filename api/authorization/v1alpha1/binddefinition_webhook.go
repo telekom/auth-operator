@@ -495,7 +495,7 @@ func isLabelSelectorEmpty(selector *metav1.LabelSelector) bool {
 }
 
 func isAllowedNamespaceAdmissionSelectorKey(key string, allowedLabelGroups []string) bool {
-	if key == LabelKeyOwner || key == LabelKeyTenant || key == LabelKeyThirdParty || key == LabelKeyProtected || key == corev1.LabelMetadataName {
+	if key == LabelKeyOwner || key == LabelKeyTenant || key == LabelKeyThirdParty || key == LabelKeyAddon || key == LabelKeyProtected || key == corev1.LabelMetadataName {
 		return true
 	}
 	for _, group := range namespaceAdmissionSelectorLabelGroupsOrDefault(allowedLabelGroups) {
@@ -543,6 +543,11 @@ func validateNamespaceBindingsWithLabelGroups(kind schema.GroupKind, name string
 			if isLabelSelectorEmpty(&selector) {
 				continue
 			}
+			if !AddonNamespaceSelectorIsScoped(&selector) {
+				return apierrors.NewInvalid(kind, name, field.ErrorList{field.Invalid(
+					field.NewPath("spec", "roleBindings").Index(i).Child("namespaceSelector").Index(j),
+					selector, "selectors targeting add-on namespaces must pin "+LabelKeyAddon+" to one non-empty matchLabels value or single-value In expression, without conflicting add-on expressions")})
+			}
 			if _, err := metav1.LabelSelectorAsSelector(&selector); err != nil {
 				return apierrors.NewInvalid(
 					kind,
@@ -560,7 +565,7 @@ func validateNamespaceBindingsWithLabelGroups(kind schema.GroupKind, name string
 						field.ErrorList{field.Invalid(
 							field.NewPath("spec", "roleBindings").Index(i).Child("namespaceSelector").Index(j).Child("matchLabels").Key(key),
 							key,
-							"namespace admission selectors may only use built-in ownership and protection labels ("+LabelKeyOwner+", "+LabelKeyTenant+", "+LabelKeyThirdParty+", "+LabelKeyProtected+"), "+corev1.LabelMetadataName+", or configured label groups matching "+formatNamespaceAdmissionSelectorLabelGroups(allowedLabelGroups))})
+							"namespace admission selectors may only use built-in ownership and protection labels ("+LabelKeyOwner+", "+LabelKeyTenant+", "+LabelKeyThirdParty+", "+LabelKeyAddon+", "+LabelKeyProtected+"), "+corev1.LabelMetadataName+", or configured label groups matching "+formatNamespaceAdmissionSelectorLabelGroups(allowedLabelGroups))})
 				}
 			}
 			for exprIndex, expr := range selector.MatchExpressions {
@@ -571,12 +576,74 @@ func validateNamespaceBindingsWithLabelGroups(kind schema.GroupKind, name string
 						field.ErrorList{field.Invalid(
 							field.NewPath("spec", "roleBindings").Index(i).Child("namespaceSelector").Index(j).Child("matchExpressions").Index(exprIndex).Child("key"),
 							expr.Key,
-							"namespace admission selectors may only use built-in ownership and protection labels ("+LabelKeyOwner+", "+LabelKeyTenant+", "+LabelKeyThirdParty+", "+LabelKeyProtected+"), "+corev1.LabelMetadataName+", or configured label groups matching "+formatNamespaceAdmissionSelectorLabelGroups(allowedLabelGroups))})
+							"namespace admission selectors may only use built-in ownership and protection labels ("+LabelKeyOwner+", "+LabelKeyTenant+", "+LabelKeyThirdParty+", "+LabelKeyAddon+", "+LabelKeyProtected+"), "+corev1.LabelMetadataName+", or configured label groups matching "+formatNamespaceAdmissionSelectorLabelGroups(allowedLabelGroups))})
 				}
 			}
 		}
 	}
 	return nil
+}
+
+// AddonNamespaceSelectorIsScoped rejects selectors targeting add-ons without a
+// single identity. Owner Exists/NotIn also require pinning unless add-ons are
+// explicitly excluded. Selectors unrelated to ownership remain compatible.
+func AddonNamespaceSelectorIsScoped(selector *metav1.LabelSelector) bool {
+	targetsAddon := selector.MatchLabels[LabelKeyOwner] == OwnerAddon
+	explicitAddon := targetsAddon
+	excludesAddon := false
+	addonAbsent := false
+	if owner, ok := selector.MatchLabels[LabelKeyOwner]; ok && owner != OwnerAddon {
+		excludesAddon = true
+	}
+	pin, hasPin := selector.MatchLabels[LabelKeyAddon]
+	addonExpressions := 0
+	validPin := !hasPin || pin != ""
+	for _, expr := range selector.MatchExpressions {
+		switch expr.Key {
+		case LabelKeyOwner:
+			switch expr.Operator {
+			case metav1.LabelSelectorOpIn:
+				if slices.Contains(expr.Values, OwnerAddon) {
+					targetsAddon = true
+					explicitAddon = true
+				} else {
+					excludesAddon = true
+				}
+			case metav1.LabelSelectorOpNotIn:
+				if slices.Contains(expr.Values, OwnerAddon) {
+					excludesAddon = true
+				} else {
+					targetsAddon = true
+				}
+			case metav1.LabelSelectorOpExists:
+				targetsAddon = true
+			case metav1.LabelSelectorOpDoesNotExist:
+				excludesAddon = true
+			}
+		case LabelKeyAddon:
+			if expr.Operator == metav1.LabelSelectorOpDoesNotExist {
+				excludesAddon = true
+				addonAbsent = true
+			}
+			addonExpressions++
+			if expr.Operator != metav1.LabelSelectorOpIn || len(expr.Values) != 1 || expr.Values[0] == "" {
+				validPin = false
+				continue
+			}
+			if hasPin && pin != expr.Values[0] {
+				validPin = false
+			}
+			pin, hasPin = expr.Values[0], true
+		}
+	}
+	if hasPin || addonExpressions > 0 {
+		// DoesNotExist alone is an explicit exclusion, not an add-on grant.
+		if !hasPin && addonExpressions == 1 && addonAbsent && !explicitAddon {
+			return true
+		}
+		return hasPin && validPin && addonExpressions <= 1
+	}
+	return !explicitAddon && (!targetsAddon || excludesAddon)
 }
 
 func namespaceAdmissionSelectorLabelGroupsOrDefault(groups []string) []string {

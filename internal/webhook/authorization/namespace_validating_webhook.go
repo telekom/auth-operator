@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 
 	"github.com/go-logr/logr"
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
@@ -210,6 +211,7 @@ func (v *NamespaceValidator) validateLabelImmutability(logger logr.Logger, req a
 		authorizationv1alpha1.LabelKeyOwner,
 		authorizationv1alpha1.LabelKeyTenant,
 		authorizationv1alpha1.LabelKeyThirdParty,
+		authorizationv1alpha1.LabelKeyAddon,
 		authorizationv1alpha1.LabelKeyProtected,
 	}
 	if v.TDGMigration {
@@ -240,10 +242,11 @@ func (v *NamespaceValidator) validateLabelImmutability(logger logr.Logger, req a
 			continue
 		}
 
-		// During tenant↔thirdparty reclassification, allow changes to owner/tenant/thirdparty labels.
+		// During non-platform reclassification, allow replacing all ownership labels.
 		if ownerReclassification && (key == authorizationv1alpha1.LabelKeyOwner ||
 			key == authorizationv1alpha1.LabelKeyTenant ||
-			key == authorizationv1alpha1.LabelKeyThirdParty) {
+			key == authorizationv1alpha1.LabelKeyThirdParty ||
+			key == authorizationv1alpha1.LabelKeyAddon) {
 			logger.V(2).Info("label change allowed during reclassification",
 				"namespace", req.Name, "label", key, "oldValue", oldValue, "newValue", newValue)
 			continue
@@ -275,9 +278,9 @@ func (v *NamespaceValidator) validateLabelImmutability(logger logr.Logger, req a
 	return nil
 }
 
-// detectOwnerReclassification returns true if a tenant↔thirdparty reclassification is
-// happening during TDG migration by a protected-label migration bypass. Platform is
-// never reclassifiable.
+// detectOwnerReclassification allows transitions among tenant, thirdparty and
+// addon during TDG migration by a protected-label migration bypass. Platform
+// ownership is never reclassifiable.
 func (v *NamespaceValidator) detectOwnerReclassification(logger logr.Logger, req admission.Request, ns, oldNs *corev1.Namespace, bypassResult BypassCheckResult) bool {
 	if !v.TDGMigration || !bypassResult.AllowProtectedLabelChanges {
 		return false
@@ -287,13 +290,11 @@ func (v *NamespaceValidator) detectOwnerReclassification(logger logr.Logger, req
 	if oldOwner == newOwner {
 		return false
 	}
-	// Only tenant↔thirdparty is allowed; platform is always immutable.
-	// Both old and new must be non-empty to prevent label removal from being treated as reclassification.
-	if oldOwner == authorizationv1alpha1.OwnerPlatform || newOwner == authorizationv1alpha1.OwnerPlatform ||
-		oldOwner == "" || newOwner == "" {
+	nonPlatformOwners := []string{authorizationv1alpha1.OwnerTenant, authorizationv1alpha1.OwnerThirdParty, authorizationv1alpha1.OwnerAddon}
+	if !slices.Contains(nonPlatformOwners, oldOwner) || !slices.Contains(nonPlatformOwners, newOwner) {
 		return false
 	}
-	logger.V(1).Info("AUDIT: tenant/thirdparty reclassification allowed",
+	logger.V(1).Info("AUDIT: tenant/thirdparty/addon reclassification allowed",
 		"namespace", req.Name, "oldOwner", oldOwner, "newOwner", newOwner)
 	return true
 }
@@ -481,6 +482,9 @@ func namespaceMatchesSelectorForAdmissionOperation(
 	ns *corev1.Namespace,
 	selector *metav1.LabelSelector,
 ) (bool, error) {
+	if !addonSelectorAuthorizesNamespace(ns, selector) {
+		return false, nil
+	}
 	if operation != admissionv1.Create {
 		return namespaceMatchesSelector(ns, selector)
 	}
@@ -531,6 +535,9 @@ func (v *NamespaceValidator) admissionReader() client.Reader {
 }
 
 func namespaceMatchesSelector(ns *corev1.Namespace, selector *metav1.LabelSelector) (bool, error) {
+	if !addonSelectorAuthorizesNamespace(ns, selector) {
+		return false, nil
+	}
 	// Convert the LabelSelector into a labels.Selector
 	labelSelector, err := metav1.LabelSelectorAsSelector(selector)
 	if err != nil {
@@ -539,4 +546,15 @@ func namespaceMatchesSelector(ns *corev1.Namespace, selector *metav1.LabelSelect
 
 	// Check if the namespace's labels match the selector
 	return labelSelector.Matches(labels.Set(ns.Labels)), nil
+}
+
+func addonSelectorAuthorizesNamespace(ns *corev1.Namespace, selector *metav1.LabelSelector) bool {
+	if !authorizationv1alpha1.AddonNamespaceSelectorIsScoped(selector) {
+		return false
+	}
+	if ns.Labels[authorizationv1alpha1.LabelKeyOwner] == authorizationv1alpha1.OwnerAddon ||
+		ns.Labels[authorizationv1alpha1.LabelKeyAddon] != "" {
+		return getCompleteTrackedLabelsFromNamespaceSelector(*selector)[authorizationv1alpha1.LabelKeyAddon] != ""
+	}
+	return true
 }

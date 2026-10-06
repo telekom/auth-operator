@@ -14,6 +14,7 @@
 make test-e2e-quick          # Health check only (30s)
 make test-e2e-full           # Base CRD tests - kustomize install
 make test-e2e-helm-full      # Helm chart tests - helm install  
+# Includes addon-namespaces: ownership admission, isolation, inheritance and migration.
 make test-e2e-dev            # Dev overlay tests - make deploy
 make test-e2e-complex        # Multi-CRD scenarios
 make test-e2e-creator-tracking-full                         # Kubernetes 1.36 v1
@@ -34,6 +35,16 @@ make test-e2e-helm               # Run failing test
 ```
 
 ---
+
+Run only add-on ownership specs on an isolated cluster prepared with
+`make kind-create kind-load-image KIND_CLUSTER_NAME=auth-operator-e2e-addon`:
+
+```bash
+KIND_CLUSTER=auth-operator-e2e-addon IMG=auth-operator:e2e-test \
+  go test -tags=e2e ./test/e2e -v -ginkgo.v \
+  -ginkgo.label-filter=addon-namespaces -timeout=20m
+make kind-delete KIND_CLUSTER_NAME=auth-operator-e2e-addon
+```
 
 ## 🎯 Cluster Isolation Matrix
 

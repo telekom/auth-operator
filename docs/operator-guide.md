@@ -403,6 +403,47 @@ actual upstream discovery errors still do.
 CRD establishment waits continue to use Kubernetes' context-aware backoff.
 See the [upstream-first guide](https://github.com/telekom/t-caas-go-library/blob/main/docs/upstream-libraries.md).
 
+### Add-on Namespace Ownership
+
+Namespace admission recognizes `platform`, `tenant`, `thirdparty`, and `addon`.
+Add-on namespaces require `t-caas.telekom.com/owner=addon` and a non-empty
+`t-caas.telekom.com/addon` identity, with neither tenant nor third-party labels.
+Both labels are immutable on ordinary updates. The add-on identity is a built-in
+BindDefinition selector key even with custom allowed label domains, and can
+derive `owner=addon` during namespace creation. ServiceAccount namespace ownership
+inheritance includes it. Ordinary users require matching BindDefinition
+authorization. ServiceAccounts may also CREATE/UPDATE without a matching
+BindDefinition when their source namespace has valid, non-empty tracked ownership
+labels that exactly match the target; this fallback does not authorize DELETE.
+Kubernetes RBAC authorization still applies to every request.
+
+With `--tdg-migration`, protected-label migration bypass principals may reclassify
+among `tenant`, `thirdparty` and `addon` in every direction, replacing the old
+identity label with the new category's identity. The same principals may adopt
+legacy non-platform namespaces as add-ons. Platform ownership cannot be
+reclassified or adopted as an add-on, and ordinary users cannot reclassify.
+Identity changes without owner reclassification remain denied.
+
+BindDefinition and RestrictedBindDefinition admission require each selector term
+targeting add-ons to pin one non-empty `t-caas.telekom.com/addon` value, via
+`matchLabels` or one single-value `In` expression, without conflicting add-on
+expressions. Owner-only add-on selectors and add-on `Exists`, `NotIn` or
+multi-value `In` are rejected. Owner `Exists`/`NotIn` selectors must pin an add-on
+or explicitly exclude add-ons (`owner NotIn [addon]` or `addon DoesNotExist`).
+Unrelated selectors remain admissible but cannot authorize add-on namespace
+operations without a pin. Before upgrading, replace broad add-on selectors
+with one pinned term per permitted add-on. Existing metadata-only spec validation
+fast paths remain; namespace webhooks independently block unpinned legacy
+selectors on CREATE, unchanged UPDATE and DELETE. A pin for add-on `a` never
+authorizes add-on `b`.
+
+Add-on namespaces are not implicitly deletion-protected; their controller owns
+their lifecycle. Explicit opt-in protection and hard-protected names still
+apply. See the [namespace label contract](api-reference/namespace-ownership.md).
+The [Kind E2E suite](../test/e2e/README.md#add-on-namespace-ownership) verifies
+admission, per-add-on RBAC isolation, ServiceAccount inheritance, migration
+and deletion against the deployed operator.
+
 ### Protected Namespaces: Canonical Access Classification
 
 `t-caas.telekom.com/protected` is the canonical namespace label for separating

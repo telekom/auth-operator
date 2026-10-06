@@ -20,6 +20,7 @@ var trackedOwnershipKeys = []string{
 	authorizationv1alpha1.LabelKeyOwner,
 	authorizationv1alpha1.LabelKeyTenant,
 	authorizationv1alpha1.LabelKeyThirdParty,
+	authorizationv1alpha1.LabelKeyAddon,
 }
 
 /*
@@ -222,10 +223,10 @@ func IsRestrictedBindDefinition(name string) bool {
 }
 
 // GetSANamespaceTrackedLabels looks up the namespace where the ServiceAccount resides
-// and returns the tracked ownership labels (owner, tenant, thirdparty) found on it.
+// and returns the tracked ownership labels (owner, tenant, thirdparty, addon) found on it.
 // It validates that the label set is a valid ownership combination:
 //   - The owner label must always be present.
-//   - For tenant/thirdparty owners, the corresponding identifying label must also be present.
+//   - For tenant/thirdparty/addon owners, the corresponding identifying label must also be present.
 //
 // Returns an empty map if the SA is not a ServiceAccount, the namespace has no tracked
 // labels, or the label set is incomplete. Returns a non-nil error only for transient
@@ -277,40 +278,27 @@ func ValidTrackedOwnershipLabels(namespaceLabels map[string]string) bool {
 	}
 
 	// Enforce a valid and non-ambiguous ownership combination:
-	//   - owner=platform    => only owner; no tenant/thirdparty labels
-	//   - owner=tenant      => owner + tenant; no thirdparty label
-	//   - owner=thirdparty  => owner + thirdparty; no tenant label
+	//   - owner=platform    => only owner; no tenant/thirdparty/addon labels
+	//   - owner=tenant      => owner + tenant; no thirdparty/addon labels
+	//   - owner=thirdparty  => owner + thirdparty; no tenant/addon labels
+	//   - owner=addon       => owner + addon; no tenant/thirdparty labels
 	// Any other combination is treated as invalid and results in no tracked labels.
+	var identityKey string
 	switch ownerVal {
 	case authorizationv1alpha1.OwnerPlatform:
-		if _, ok := result[authorizationv1alpha1.LabelKeyTenant]; ok {
-			return false
-		}
-		if _, ok := result[authorizationv1alpha1.LabelKeyThirdParty]; ok {
-			return false
-		}
+		return len(result) == 1
 	case authorizationv1alpha1.OwnerTenant:
-		tenantVal, hasTenant := result[authorizationv1alpha1.LabelKeyTenant]
-		if !hasTenant || tenantVal == "" {
-			return false
-		}
-		if _, ok := result[authorizationv1alpha1.LabelKeyThirdParty]; ok {
-			return false
-		}
+		identityKey = authorizationv1alpha1.LabelKeyTenant
 	case authorizationv1alpha1.OwnerThirdParty:
-		tpVal, hasTP := result[authorizationv1alpha1.LabelKeyThirdParty]
-		if !hasTP || tpVal == "" {
-			return false
-		}
-		if _, ok := result[authorizationv1alpha1.LabelKeyTenant]; ok {
-			return false
-		}
+		identityKey = authorizationv1alpha1.LabelKeyThirdParty
+	case authorizationv1alpha1.OwnerAddon:
+		identityKey = authorizationv1alpha1.LabelKeyAddon
 	default:
 		// Unknown owner values are not considered valid tracked ownership.
 		return false
 	}
 
-	return true
+	return len(result) == 2 && result[identityKey] != ""
 }
 
 // FindExtraTrackedKey returns the first tracked ownership label key that exists
