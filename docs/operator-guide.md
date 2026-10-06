@@ -440,6 +440,9 @@ authorizes add-on `b`.
 Add-on namespaces are not implicitly deletion-protected; their controller owns
 their lifecycle. Explicit opt-in protection and hard-protected names still
 apply. See the [namespace label contract](api-reference/namespace-ownership.md).
+The [Kind E2E suite](../test/e2e/README.md#add-on-namespace-ownership) verifies
+admission, per-add-on RBAC isolation, ServiceAccount inheritance, migration
+and deletion against the deployed operator.
 
 ### Protected Namespaces: Canonical Access Classification
 
