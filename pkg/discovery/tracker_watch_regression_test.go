@@ -64,6 +64,7 @@ func testCRDStatusRefresh(t *testing.T, mode string) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("CRD watch never became ready")
 	}
+	waitForCRDWatchStartup(ctx, t, tracker, server)
 	activeCollection := make(chan error, 1)
 	if mode == "overlapping" {
 		blockCollection.Store(true)
@@ -111,6 +112,26 @@ func testCRDStatusRefresh(t *testing.T, mode string) {
 		}
 	}
 	t.Fatal("discovery cache does not contain the final discovery update")
+}
+
+func waitForCRDWatchStartup(ctx context.Context, t *testing.T, tracker *ResourceTracker, server *discoveryTestServer) {
+	t.Helper()
+	deadline := time.NewTimer(3 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	// Start performs two initial collections and a debounced watch-establishment refresh.
+	// Drain that refresh before changing discovery, so it cannot mask dropped CRD events.
+	for server.RequestCount("/api/v1") < 3 {
+		select {
+		case <-deadline.C:
+			t.Fatal("watch-establishment discovery never completed")
+		case <-ticker.C:
+		}
+	}
+	if _, err := tracker.collectAPIResources(ctx); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func interceptCRDDiscovery(
