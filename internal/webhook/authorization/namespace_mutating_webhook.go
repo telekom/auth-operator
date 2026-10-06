@@ -291,6 +291,9 @@ func (m *NamespaceMutator) collectBindDefinitionLabels(ctx context.Context, nsNa
 								return nil, false, matchErr
 							}
 							namespaceBindingMatched = namespaceBindingMatched || matches
+							if !matches && unchangedNamespace.Labels[authorizationv1alpha1.LabelKeyOwner] == authorizationv1alpha1.OwnerAddon {
+								continue
+							}
 						}
 						labels := getCompleteTrackedLabelsFromNamespaceSelector(nsSelector)
 						logger.V(3).Info("extracted labels from selector",
@@ -380,6 +383,9 @@ func getLabelsFromNamespaceSelector(selector metav1.LabelSelector) map[string]st
 }
 
 func getCompleteTrackedLabelsFromNamespaceSelector(selector metav1.LabelSelector) map[string]string {
+	if !authorizationv1alpha1.AddonNamespaceSelectorIsScoped(&selector) {
+		return map[string]string{}
+	}
 	labels := getLabelsFromNamespaceSelector(selector)
 	if len(labels) == 0 {
 		return map[string]string{}

@@ -44,9 +44,37 @@ platform nor add-on ownership is reclassifiable.
 `t-caas.telekom.com/addon` is a built-in BindDefinition namespace-selector key
 regardless of additional allowed label domains. A selector with this identity
 alone derives `owner=addon` during creation. Derivation supports `matchLabels`
-and single-value `In` expressions. An `owner=addon` selector alone cannot infer
-an identity; multi-value selectors also require explicitly supplied labels.
+and single-value `In` expressions. Every selector term targeting add-ons must
+pin `t-caas.telekom.com/addon` to exactly one non-empty value, using `matchLabels`
+or one single-value `In` expression. A label and an identical single-value `In`
+may coexist; multiple add-on expressions, empty values, `Exists`, `NotIn`,
+`DoesNotExist` combined with a pin, and multi-value `In` are rejected.
+This validation applies to both BindDefinition and RestrictedBindDefinition.
+
+`owner=addon` and `owner In [..., addon]` require a pin. `owner Exists` and
+`owner NotIn` also require one unless another requirement explicitly excludes
+add-ons (for example `owner NotIn [addon]` or `addon DoesNotExist`).
+`addon DoesNotExist` alone is an exclusion and remains valid; combining it with
+an explicit add-on owner is rejected. Other add-on-key requirements require
+a pin even when the term is contradictory or excludes add-on owners.
+Selectors unrelated to ownership retain their admission behavior, but cannot
+authorize add-on namespace operations without a pin.
+
+This is a security tightening for new objects and spec-changing updates:
+replace broad add-on selectors with one pinned term per permitted add-on.
+Metadata-only updates retain the existing spec-validation fast path.
+Namespace mutation and validation independently refuse unpinned selectors for
+add-on operations, including unchanged ownership updates, even for legacy
+BindDefinitions or objects created with BindDefinition admission disabled.
+An add-on `a` pin never authorizes an add-on `b` namespace.
 ServiceAccounts inherit the owner and identity labels from their namespace.
+
+```yaml
+namespaceSelector:
+  - matchLabels:
+      t-caas.telekom.com/owner: addon
+      t-caas.telekom.com/addon: metrics
+```
 
 Add-on namespaces are **not implicitly deletion-protected**, because the add-on
 controller owns their lifecycle. Explicit deletion-protection opt-in,

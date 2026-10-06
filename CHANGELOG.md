@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Require BindDefinition and RestrictedBindDefinition namespace-selector terms
+  targeting add-ons to pin a single non-empty add-on name. Broad owner
+  `Exists`/`NotIn` terms must pin an identity or explicitly exclude add-ons.
+  Namespace webhooks independently block unpinned selectors for add-on
+  operations, including legacy BindDefinitions and unchanged ownership updates.
+  **Security tightening:** replace broad add-on grants with separate pinned
+  terms before upgrading; metadata-only spec-validation fast paths remain.
 - Let BindDefinitions become ready after applying bindings for explicitly external
   ServiceAccounts, even before their provider creates them. Missing external
   subjects remain visible in status without deadlocking providers that depend on

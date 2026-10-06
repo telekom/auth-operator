@@ -482,6 +482,9 @@ func namespaceMatchesSelectorForAdmissionOperation(
 	ns *corev1.Namespace,
 	selector *metav1.LabelSelector,
 ) (bool, error) {
+	if !addonSelectorAuthorizesNamespace(ns, selector) {
+		return false, nil
+	}
 	if operation != admissionv1.Create {
 		return namespaceMatchesSelector(ns, selector)
 	}
@@ -532,6 +535,9 @@ func (v *NamespaceValidator) admissionReader() client.Reader {
 }
 
 func namespaceMatchesSelector(ns *corev1.Namespace, selector *metav1.LabelSelector) (bool, error) {
+	if !addonSelectorAuthorizesNamespace(ns, selector) {
+		return false, nil
+	}
 	// Convert the LabelSelector into a labels.Selector
 	labelSelector, err := metav1.LabelSelectorAsSelector(selector)
 	if err != nil {
@@ -540,4 +546,15 @@ func namespaceMatchesSelector(ns *corev1.Namespace, selector *metav1.LabelSelect
 
 	// Check if the namespace's labels match the selector
 	return labelSelector.Matches(labels.Set(ns.Labels)), nil
+}
+
+func addonSelectorAuthorizesNamespace(ns *corev1.Namespace, selector *metav1.LabelSelector) bool {
+	if !authorizationv1alpha1.AddonNamespaceSelectorIsScoped(selector) {
+		return false
+	}
+	if ns.Labels[authorizationv1alpha1.LabelKeyOwner] == authorizationv1alpha1.OwnerAddon ||
+		ns.Labels[authorizationv1alpha1.LabelKeyAddon] != "" {
+		return getCompleteTrackedLabelsFromNamespaceSelector(*selector)[authorizationv1alpha1.LabelKeyAddon] != ""
+	}
+	return true
 }

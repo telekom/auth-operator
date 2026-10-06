@@ -417,6 +417,19 @@ BindDefinition when their source namespace has valid, non-empty tracked ownershi
 labels that exactly match the target; this fallback does not authorize DELETE.
 Kubernetes RBAC authorization still applies to every request.
 
+BindDefinition and RestrictedBindDefinition admission require each selector term
+targeting add-ons to pin one non-empty `t-caas.telekom.com/addon` value, via
+`matchLabels` or one single-value `In` expression, without conflicting add-on
+expressions. Owner-only add-on selectors and add-on `Exists`, `NotIn` or
+multi-value `In` are rejected. Owner `Exists`/`NotIn` selectors must pin an add-on
+or explicitly exclude add-ons (`owner NotIn [addon]` or `addon DoesNotExist`).
+Unrelated selectors remain admissible but cannot authorize add-on namespace
+operations without a pin. Before upgrading, replace broad add-on selectors
+with one pinned term per permitted add-on. Existing metadata-only spec validation
+fast paths remain; namespace webhooks independently block unpinned legacy
+selectors on CREATE, unchanged UPDATE and DELETE. A pin for add-on `a` never
+authorizes add-on `b`.
+
 Add-on namespaces are not implicitly deletion-protected; their controller owns
 their lifecycle. Explicit opt-in protection and hard-protected names still
 apply. See the [namespace label contract](api-reference/namespace-ownership.md).

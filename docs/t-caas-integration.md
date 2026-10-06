@@ -43,7 +43,8 @@ T-CaaS platform recognizes several cluster participants organized in two categor
    `t-caas.telekom.com/owner: addon` and
    `t-caas.telekom.com/addon: <addonName>`. They must not carry tenant or third-party
    identity labels. The T-CaaS auth-operator function supplies BindDefinitions
-   selecting `owner=addon`; Kyverno policies and the add-on controller consume
+   selecting `owner=addon` **and** pinning `t-caas.telekom.com/addon` to the
+   specific add-on name; Kyverno policies and the add-on controller consume
    the same label contract. Authorized non-bypass principals may update these
    namespaces without changing their ownership labels. Add-on ownership is
    immutable, including during tenant/third-party migration. Unlike platform
@@ -61,8 +62,14 @@ matching selector is expressed as `matchLabels` or as a `matchExpressions` entry
 with `operator: In` and exactly one value; multi-value selectors must provide
 the ownership labels explicitly.
 An add-on identity selector alone implies `owner=addon`. ServiceAccounts inherit
-both tracked labels from their add-on namespace. An owner-only selector cannot
-derive the add-on identity; the controller must supply both labels. See the
+both tracked labels from their add-on namespace. BindDefinition and
+RestrictedBindDefinition selector terms targeting add-ons must pin one non-empty
+add-on name using `matchLabels` or one single-value `In`; owner-only, `Exists`,
+`NotIn`, multi-value and conflicting add-on expressions cannot grant access.
+Broad owner `Exists`/`NotIn` terms must pin an add-on or explicitly exclude
+add-ons. Namespace webhooks also refuse unpinned selectors for add-on operations,
+including legacy selectors, so add-on `a` cannot update add-on `b` through its
+selector. Use separate pinned terms when authorizing multiple add-ons. See the
 [namespace label contract](api-reference/namespace-ownership.md).
 
 ### Non-owners
