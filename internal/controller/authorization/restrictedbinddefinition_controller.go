@@ -1287,7 +1287,7 @@ func (r *RestrictedBindDefinitionReconciler) rbdEnsureServiceAccounts(
 		} else {
 			metrics.RBACResourcesApplied.WithLabelValues(metrics.ResourceServiceAccount).Inc()
 		}
-		if !helpers.SubjectExists(generatedSAs, subject) {
+		if !slices.Contains(generatedSAs, subject) {
 			generatedSAs = append(generatedSAs, subject)
 		}
 		effectiveSubjects = append(effectiveSubjects, subject)

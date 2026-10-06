@@ -101,8 +101,7 @@ func NewRestrictedRoleDefinitionReconciler(
 	}
 	trackerEvents := make(chan event.TypedGenericEvent[client.Object], 100)
 	trackerCallback := func() error {
-		trackerEvents <- event.TypedGenericEvent[client.Object]{}
-		return nil
+		return notifyDiscoveryChange(trackerEvents)
 	}
 	resourceTracker.AddSignalFunc(trackerCallback)
 

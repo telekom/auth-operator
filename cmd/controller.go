@@ -334,7 +334,7 @@ func init() {
 			"Use 0 to fall back to the controller's internal default (5 minutes). Negative values are rejected.")
 	controllerCmd.Flags().DurationVar(&trackerResyncInterval, "tracker-resync-interval", 15*time.Minute,
 		"Interval between full rescans by the ResourceTracker to account for missed events. "+
-			"Refreshes the CRD UUID map and API resources cache. Default is 15 minutes. "+
+			"Refreshes the API resources cache. Default is 15 minutes. "+
 			"Use 0 to fall back to the controller's internal default (15 minutes). Negative values are rejected.")
 }
 

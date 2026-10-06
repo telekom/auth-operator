@@ -4,29 +4,43 @@
 package webhooks
 
 import (
+	"math"
 	"testing"
 	"time"
 
+	"github.com/telekom/t-caas-go-library/pkg/ratelimit"
 	"golang.org/x/time/rate"
 	authzv1 "k8s.io/api/authorization/v1"
+	clocktesting "k8s.io/utils/clock/testing"
 )
 
 func TestSubjectLimiterIdleEviction(t *testing.T) {
-	handler := &Authorizer{Limiter: rate.NewLimiter(1, 1)}
-	expired := handler.subjectLimiter("expired")
-	active := handler.subjectLimiter("active")
-	now := time.Now()
-	handler.subjectLimiters["expired"].lastSeen = now.Add(-subjectLimiterIdleTTL(handler.Limiter) - time.Second)
-	handler.subjectLimiters["active"].lastSeen = now
-	handler.pruneSubjectLimitersLocked(now)
-	if _, exists := handler.subjectLimiters["expired"]; exists {
-		t.Fatal("idle entry was not evicted")
+	clock := clocktesting.NewFakeClock(time.Now())
+	handler := &Authorizer{Limiter: rate.NewLimiter(0, 1)}
+	var err error
+	handler.subjectLimiters, err = ratelimit.New(ratelimit.Config{
+		Rate: math.SmallestNonzeroFloat64, Burst: 1, MaxKeys: maxSubjectLimiters,
+		IdleTTL: subjectLimiterIdleTTL(handler.Limiter), Clock: clock,
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if handler.subjectLimiter("active") != active {
+	request := func(user string) bool {
+		return handler.allowSubjectRequest(&authzv1.SubjectAccessReview{Spec: authzv1.SubjectAccessReviewSpec{User: user}})
+	}
+	if !request("expired") || !request("active") {
+		t.Fatal("initial bursts were not available")
+	}
+	clock.Step(minSubjectLimiterIdleTTL - time.Second)
+	if request("active") {
+		t.Fatal("active limiter's exhausted budget was reset")
+	}
+	clock.Step(2 * time.Second)
+	if !request("expired") {
+		t.Fatal("idle limiter was not replaced with a fresh budget")
+	}
+	if request("active") {
 		t.Fatal("active limiter was replaced")
-	}
-	if handler.subjectLimiter("expired") == expired {
-		t.Fatal("expired limiter was reused")
 	}
 }
 

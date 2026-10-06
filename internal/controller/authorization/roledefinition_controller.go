@@ -100,9 +100,7 @@ func NewRoleDefinitionReconciler(cachedClient client.Client, scheme *runtime.Sch
 	}
 	trackerEvents := make(chan event.TypedGenericEvent[client.Object], 100)
 	trackerCallback := func() error {
-		// store empty generic event as we only care about the event to trigger reconciliation (and we don't know exactly what changed)
-		trackerEvents <- event.TypedGenericEvent[client.Object]{}
-		return nil
+		return notifyDiscoveryChange(trackerEvents)
 	}
 	resourceTracker.AddSignalFunc(trackerCallback)
 
@@ -118,6 +116,15 @@ func NewRoleDefinitionReconciler(cachedClient client.Client, scheme *runtime.Sch
 		opt(r)
 	}
 	return r, nil
+}
+
+func notifyDiscoveryChange(notifications chan event.TypedGenericEvent[client.Object]) error {
+	// Pending events already queue all definitions against the latest snapshot.
+	select {
+	case notifications <- event.TypedGenericEvent[client.Object]{}:
+	default:
+	}
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
