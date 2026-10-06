@@ -142,10 +142,10 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 	return admission.Denied(DenialNoOIDCAttributes)
 }
 
-// unchangedUpdateNamespace allows UPDATE authorization without deriving an
-// identity from an owner-only selector, but never adoption or ownership changes.
+// unchangedUpdateNamespace rejects ownership changes before label derivation
+// can restore a removed label and hide the submitted change from validation.
 func (m *NamespaceMutator) unchangedUpdateNamespace(req admission.Request, ns *corev1.Namespace) (*corev1.Namespace, *admission.Response) {
-	if req.Operation != admissionv1.Update || len(req.OldObject.Raw) == 0 || !ValidTrackedOwnershipLabels(ns.Labels) {
+	if req.Operation != admissionv1.Update || len(req.OldObject.Raw) == 0 {
 		return nil, nil
 	}
 	oldNS := &corev1.Namespace{}
@@ -154,8 +154,19 @@ func (m *NamespaceMutator) unchangedUpdateNamespace(req admission.Request, ns *c
 		response := admission.Errored(http.StatusBadRequest, errors.New("unable to decode previous namespace request"))
 		return nil, &response
 	}
-	if !hasExactTrackedLabels(ns.Labels, oldNS.Labels) {
-		return nil, nil
+	for _, key := range trackedOwnershipKeys {
+		oldValue, oldExists := oldNS.Labels[key]
+		newValue, newExists := ns.Labels[key]
+		if oldExists != newExists || oldValue != newValue {
+			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultDenied).Inc()
+			response := admission.Denied(fmt.Sprintf(DenialLabelModificationFmt, key))
+			return nil, &response
+		}
+	}
+	if !ValidTrackedOwnershipLabels(ns.Labels) {
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultDenied).Inc()
+		response := admission.Denied(fmt.Sprintf(DenialInvalidTrackedLabelsFmt, ns.Name))
+		return nil, &response
 	}
 	return oldNS, nil
 }

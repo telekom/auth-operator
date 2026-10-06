@@ -137,14 +137,23 @@ var _ = Describe("Add-on namespace admission", func() {
 		bd.Spec.RoleBindings[0].NamespaceSelector[0].MatchLabels[authorizationv1alpha1.LabelKeyOwner] = authorizationv1alpha1.OwnerAddon
 		Expect(live.Update(ctx, bd)).To(Succeed())
 
-		for _, key := range []string{authorizationv1alpha1.LabelKeyOwner, authorizationv1alpha1.LabelKeyAddon} {
-			By("denying changes and removal of " + key)
-			changed := persisted.DeepCopy()
-			changed.Labels[key] = "other"
-			Expect(apierrors.IsForbidden(userClient.Update(ctx, changed))).To(BeTrue())
-			removed := persisted.DeepCopy()
-			delete(removed.Labels, key)
-			Expect(apierrors.IsForbidden(userClient.Update(ctx, removed))).To(BeTrue())
+		for _, selector := range []map[string]string{
+			{authorizationv1alpha1.LabelKeyOwner: authorizationv1alpha1.OwnerAddon},
+			{authorizationv1alpha1.LabelKeyAddon: "metrics"},
+		} {
+			By("checking immutability with selector " + metav1.FormatLabelSelector(&metav1.LabelSelector{MatchLabels: selector}))
+			bd.Spec.RoleBindings[0].NamespaceSelector[0].MatchLabels = selector
+			Expect(live.Update(ctx, bd)).To(Succeed())
+			Expect(userClient.Update(ctx, persisted)).To(Succeed())
+			for _, key := range []string{authorizationv1alpha1.LabelKeyOwner, authorizationv1alpha1.LabelKeyAddon} {
+				By("denying changes and removal of " + key)
+				changed := persisted.DeepCopy()
+				changed.Labels[key] = "other"
+				Expect(apierrors.IsForbidden(userClient.Update(ctx, changed))).To(BeTrue())
+				removed := persisted.DeepCopy()
+				delete(removed.Labels, key)
+				Expect(apierrors.IsForbidden(userClient.Update(ctx, removed))).To(BeTrue())
+			}
 		}
 		for _, key := range []string{authorizationv1alpha1.LabelKeyTenant, authorizationv1alpha1.LabelKeyThirdParty} {
 			By("denying conflicting " + key)

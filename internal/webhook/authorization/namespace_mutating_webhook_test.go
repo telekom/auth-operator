@@ -284,7 +284,7 @@ func TestNamespaceMutatorHandle(t *testing.T) {
 			expectPatch: true,
 		},
 		{
-			name:      "User in BindDef specified Group => [OVERWRITE_LABEL] UPDATE should NOT add label from matching BindDefinition",
+			name:      "User in BindDef specified Group => UPDATE rejects submitted ownership changes",
 			operation: admissionv1.Update,
 			username:  "t628545",
 			groups:    []string{"oidc:s_platform_namespaced_poweruser", "xyzGroup"},
@@ -299,11 +299,14 @@ func TestNamespaceMutatorHandle(t *testing.T) {
 						"t-caas.telekom.com/owner": "tenant",
 					},
 				}},
-			expectAllowed: true,
-			expectLabels: map[string]string{
-				"t-caas.telekom.com/owner": "platform",
-			},
-			expectPatch: false,
+			oldNamespace: &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+				Name: "test-ns",
+				Labels: map[string]string{
+					authorizationv1alpha1.LabelKeyOwner: authorizationv1alpha1.OwnerPlatform,
+				},
+			}},
+			expectAllowed: false,
+			expectPatch:   false,
 		},
 		{
 			name:      "User in BindDef specified ServiceAccount => CREATE should add label from matching BindDefinition",
@@ -344,7 +347,7 @@ func TestNamespaceMutatorHandle(t *testing.T) {
 			expectPatch: true,
 		},
 		{
-			name:      "User in BindDef specified ServiceAccount => [OVERWRITE_LABEL] UPDATE should NOT add label from matching BindDefinition",
+			name:      "User in BindDef specified ServiceAccount => UPDATE rejects submitted ownership changes",
 			operation: admissionv1.Update,
 			username:  "system:serviceaccount:kube-system:m2m-sa-t-caas-platform",
 			groups:    []string{},
@@ -359,11 +362,14 @@ func TestNamespaceMutatorHandle(t *testing.T) {
 						"t-caas.telekom.com/owner": "tenant",
 					},
 				}},
-			expectAllowed: true,
-			expectLabels: map[string]string{
-				"t-caas.telekom.com/owner": "platform",
-			},
-			expectPatch: false,
+			oldNamespace: &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+				Name: "test-ns",
+				Labels: map[string]string{
+					authorizationv1alpha1.LabelKeyOwner: authorizationv1alpha1.OwnerPlatform,
+				},
+			}},
+			expectAllowed: false,
+			expectPatch:   false,
 		},
 		{
 			name:      "No matching group or SA => CREATE denied",
