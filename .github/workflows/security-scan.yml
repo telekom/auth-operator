@@ -231,6 +231,12 @@ jobs:
           fail-on-severity: high
           # LicenseRef-scancode-google-patent-license-golang is the Google patent
           # grant addendum used by all golang.org/x/* packages (permissive).
+          # OpenTelemetry's combined Apache-2.0/BSD-3-Clause LICENSE is also
+          # reported as LicenseRef-bad-apache-2.0-bsd-3-clause by Dependency Graph.
+          # Verified release licenses (both licenses are already allowed):
+          # https://github.com/open-telemetry/opentelemetry-go-contrib/blob/instrumentation/net/http/otelhttp/v0.72.0/LICENSE
+          # https://github.com/open-telemetry/opentelemetry-go/blob/exporters/otlp/otlptrace/otlptracegrpc/v1.47.0/LICENSE
           allow-licenses: >-
             Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, ISC, CC0-1.0,
-            LicenseRef-scancode-google-patent-license-golang
+            LicenseRef-scancode-google-patent-license-golang,
+            LicenseRef-bad-apache-2.0-bsd-3-clause
