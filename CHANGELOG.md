@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Select compatible namespace ownership on CREATE using the request name and
+  submitted labels instead of merging alternative selector grants. Reject
+  ambiguous derivation so multiple pinned add-on terms cannot choose the wrong
+  add-on identity based on selector order.
 - Preserve exact-ownership ServiceAccount namespace UPDATE fallback when a
   subject-matching BindDefinition only contains unrelated namespace selectors.
   Unchanged updates no longer derive labels from selectors that do not match.

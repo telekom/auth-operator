@@ -80,6 +80,13 @@ existing namespace, preserving exact-ownership ServiceAccount fallback across
 tenant, third-party and add-on categories without deriving unrelated labels.
 ServiceAccounts inherit the owner and identity labels from their namespace.
 
+On CREATE, selector-derived ownership must match the requested namespace name
+and any ownership labels already supplied. Alternative selector terms are never
+merged: if more than one different ownership set is compatible, creation is
+denied as ambiguous. Supply the add-on identity explicitly or constrain each
+term with `kubernetes.io/metadata.name` to select the intended add-on. Identical
+grants may coexist, and selector order does not affect the result.
+
 ```yaml
 namespaceSelector:
   - matchLabels:

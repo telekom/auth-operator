@@ -30,6 +30,8 @@ type NamespaceMutator struct {
 	DisableCAPIOperatorUpdateBypass bool
 }
 
+var errAmbiguousNamespaceOwnership = errors.New("namespace ownership is ambiguous across matching BindDefinition selectors; supply explicit ownership labels")
+
 // Handle mutates the Namespace by adding a label based on user groups or ServiceAccount.
 func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) admission.Response {
 	logger := logf.FromContext(ctx).WithName("namespace-mutator")
@@ -88,7 +90,11 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 	}
 
 	// Collect labels from matching BindDefinitions.
-	labelsToAdd, namespaceBindingMatched, listErr := m.collectBindDefinitionLabels(ctx, req.Name, req.UserInfo.Username, userGroups, saInfo, unchangedNamespace)
+	labelsToAdd, namespaceBindingMatched, listErr := m.collectBindDefinitionLabels(ctx, ns, req.UserInfo.Username, userGroups, saInfo, unchangedNamespace)
+	if errors.Is(listErr, errAmbiguousNamespaceOwnership) {
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultDenied).Inc()
+		return admission.Denied(errAmbiguousNamespaceOwnership.Error())
+	}
 	if listErr != nil {
 		logger.Error(listErr, "failed to collect BindDefinition labels", "namespace", req.Name)
 		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultErrored).Inc()
@@ -237,7 +243,8 @@ func denyConflictingInheritedLabels(
 // from those whose subjects match the requesting user. The boolean return value reports
 // whether an explicit namespace binding or a selector matches unchanged UPDATE
 // ownership. unchangedNamespace is nil for CREATE or changed ownership.
-func (m *NamespaceMutator) collectBindDefinitionLabels(ctx context.Context, nsName, username string, userGroups []string, saInfo ServiceAccountInfo, unchangedNamespace *corev1.Namespace) (labelsToAdd map[string]string, namespaceBindingMatched bool, err error) {
+func (m *NamespaceMutator) collectBindDefinitionLabels(ctx context.Context, ns *corev1.Namespace, username string, userGroups []string, saInfo ServiceAccountInfo, unchangedNamespace *corev1.Namespace) (labelsToAdd map[string]string, namespaceBindingMatched bool, err error) {
+	nsName := ns.Name
 	logger := logf.FromContext(ctx).WithName("namespace-mutator")
 
 	listCtx, cancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
@@ -296,6 +303,16 @@ func (m *NamespaceMutator) collectBindDefinitionLabels(ctx context.Context, nsNa
 							}
 						}
 						labels := getCompleteTrackedLabelsFromNamespaceSelector(nsSelector)
+						if unchangedNamespace == nil {
+							var matchErr error
+							labels, matchErr = getTrackedLabelsForNamespaceCreation(ns, &nsSelector)
+							if matchErr != nil {
+								return nil, false, matchErr
+							}
+							if len(labels) > 0 && len(labelsToAdd) > 0 && !maps.Equal(labelsToAdd, labels) {
+								return nil, false, errAmbiguousNamespaceOwnership
+							}
+						}
 						logger.V(3).Info("extracted labels from selector",
 							"namespace", nsName, "rbIndex", rbIdx,
 							"selectorIndex", nsIdx, "labelCount", len(labels))
@@ -414,4 +431,25 @@ func getCompleteTrackedLabelsFromNamespaceSelector(selector metav1.LabelSelector
 		return map[string]string{}
 	}
 	return labels
+}
+
+func getTrackedLabelsForNamespaceCreation(ns *corev1.Namespace, selector *metav1.LabelSelector) (map[string]string, error) {
+	derived := getCompleteTrackedLabelsFromNamespaceSelector(*selector)
+	if len(derived) == 0 {
+		return derived, nil
+	}
+	candidate := ns.DeepCopy()
+	if candidate.Labels == nil {
+		candidate.Labels = make(map[string]string)
+	}
+	for key, value := range derived {
+		if _, exists := candidate.Labels[key]; !exists {
+			candidate.Labels[key] = value
+		}
+	}
+	matches, err := namespaceMatchesSelectorForAdmissionOperation(admissionv1.Create, candidate, selector)
+	if !matches || err != nil {
+		return nil, err
+	}
+	return derived, nil
 }

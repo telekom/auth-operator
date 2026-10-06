@@ -9,6 +9,7 @@ import (
 	"maps"
 	"testing"
 
+	jsonpatch "github.com/evanphx/json-patch/v5"
 	"github.com/go-logr/logr"
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	admissionv1 "k8s.io/api/admission/v1"
@@ -76,16 +77,100 @@ func TestAddonNamespaceAdmissionSelectorIsolation(t *testing.T) {
 				if resp := validator.Handle(context.Background(), req); resp.Allowed != tt.allowed {
 					t.Fatalf("%s validation allowed=%v, want %v: %v", operation, resp.Allowed, tt.allowed, resp.Result)
 				}
-				// CREATE mutation derives the pinned identity; validation above
-				// independently rejects a submitted different add-on identity.
-				if operation == admissionv1.Create && tt.name == "other identity" {
-					continue
-				}
 				if resp := mutator.Handle(context.Background(), req); resp.Allowed != tt.allowed {
 					t.Fatalf("%s mutation allowed=%v, want %v: %v", operation, resp.Allowed, tt.allowed, resp.Result)
 				}
 			}
 		})
+	}
+}
+
+func TestAddonCreateChoosesCompatibleSelectorOwnership(t *testing.T) {
+	scheme := runtime.NewScheme()
+	for _, add := range []func(*runtime.Scheme) error{corev1.AddToScheme, authorizationv1alpha1.AddToScheme} {
+		if err := add(scheme); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tests := []struct {
+		name      string
+		namespace string
+		submitted map[string]string
+		scopeName bool
+		pins      []string
+		want      string
+	}{
+		{"name selects a", "t-addon-a", nil, true, []string{"a", "b"}, "a"},
+		{"name selects b", "t-addon-b", nil, true, []string{"a", "b"}, "b"},
+		{"submitted identity selects a", "t-addon-a", map[string]string{authorizationv1alpha1.LabelKeyAddon: "a"}, false, []string{"a", "b"}, "a"},
+		{"ambiguous identities", "t-addon-a", nil, false, []string{"a", "b"}, ""},
+		{"ambiguous owner only", "t-addon-a", map[string]string{authorizationv1alpha1.LabelKeyOwner: authorizationv1alpha1.OwnerAddon}, false, []string{"a", "b"}, ""},
+		{"identical grants", "t-addon-a", nil, false, []string{"a", "a"}, "a"},
+		{"unmatched namespace name", "t-addon-c", nil, true, []string{"a", "b"}, ""},
+	}
+	for _, tt := range tests {
+		for _, reverse := range []bool{false, true} {
+			t.Run(tt.name+"/"+map[bool]string{false: "forward", true: "reverse"}[reverse], func(t *testing.T) {
+				pins := append([]string(nil), tt.pins...)
+				if reverse {
+					pins[0], pins[1] = pins[1], pins[0]
+				}
+				selectors := make([]metav1.LabelSelector, 0, len(pins))
+				for _, pin := range pins {
+					matchLabels := map[string]string{authorizationv1alpha1.LabelKeyAddon: pin}
+					if tt.scopeName {
+						matchLabels[corev1.LabelMetadataName] = "t-addon-" + pin
+					}
+					selectors = append(selectors, metav1.LabelSelector{MatchLabels: matchLabels})
+				}
+				bd := &authorizationv1alpha1.BindDefinition{ObjectMeta: metav1.ObjectMeta{Name: "multiple-addon-grants"}, Spec: authorizationv1alpha1.BindDefinitionSpec{
+					Subjects:     []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "addon-controller", APIGroup: rbacv1.GroupName}},
+					RoleBindings: []authorizationv1alpha1.NamespaceBinding{{ClusterRoleRefs: []string{"view"}, NamespaceSelector: selectors}},
+				}}
+				c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bd).Build()
+				ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: tt.namespace, Labels: tt.submitted}}
+				raw, err := json.Marshal(ns)
+				if err != nil {
+					t.Fatal(err)
+				}
+				req := admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{
+					Kind: metav1.GroupVersionKind{Version: "v1", Kind: "Namespace"}, Name: ns.Name, Operation: admissionv1.Create,
+					UserInfo: authenticationv1.UserInfo{Username: "addon-controller"}, Object: runtime.RawExtension{Raw: raw},
+				}}
+				resp := (&NamespaceMutator{Client: c, Decoder: admission.NewDecoder(scheme)}).Handle(context.Background(), req)
+				if tt.want == "" {
+					if resp.Allowed || len(resp.Patches) != 0 {
+						t.Fatalf("ambiguous or unmatched CREATE allowed: %v", resp)
+					}
+					return
+				}
+				if !resp.Allowed {
+					t.Fatalf("compatible CREATE denied: %v", resp.Result)
+				}
+				patchRaw, err := json.Marshal(resp.Patches)
+				if err != nil {
+					t.Fatal(err)
+				}
+				patch, err := jsonpatch.DecodePatch(patchRaw)
+				if err != nil {
+					t.Fatal(err)
+				}
+				mutated, err := patch.Apply(raw)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := json.Unmarshal(mutated, ns); err != nil {
+					t.Fatal(err)
+				}
+				if ns.Labels[authorizationv1alpha1.LabelKeyAddon] != tt.want || !ValidTrackedOwnershipLabels(ns.Labels) {
+					t.Fatalf("incorrect derived ownership: %v", ns.Labels)
+				}
+				req.Object.Raw = mutated
+				if validation := (&NamespaceValidator{Client: c, Decoder: admission.NewDecoder(scheme)}).Handle(context.Background(), req); !validation.Allowed {
+					t.Fatalf("derived ownership not authorized by its selector: %v", validation.Result)
+				}
+			})
+		}
 	}
 }
 
