@@ -304,11 +304,10 @@ func (r *ResourceTracker) initUUIDMap(ctx context.Context) error {
 }
 
 // collectAndNotify attempts to collect API resources and notify via signalFunc if there are changes.
-// it will only run if the rate limiter allows it.
 func (r *ResourceTracker) collectAndNotify(ctx context.Context) func() {
 	return func() {
 		logger := log.FromContext(ctx).WithName("ResourceTracker.collectAndNotify")
-		logger.V(2).Info("triggering rate-limited API resource collection")
+		logger.V(2).Info("triggering API resource collection")
 
 		changed, err := r.collectAPIResources(ctx)
 		if err != nil {
@@ -652,6 +651,12 @@ func (r *ResourceTracker) watchAPIResources(ctx context.Context, watchReady chan
 		logger.Error(err, "unable to start CRD watch")
 		return
 	}
+	defer watcher.Stop()
+
+	refreshTimer := time.NewTimer(r.rateLimit.Interval)
+	defer refreshTimer.Stop()
+	refreshTimer.Stop()
+	var refresh <-chan time.Time
 
 	logger.Info("starting CRD watch for RoleDefinitionReconciler")
 	if watchReady != nil {
@@ -710,10 +715,16 @@ func (r *ResourceTracker) watchAPIResources(ctx context.Context, watchReady chan
 				r.collectAndNotify(ctx)()
 			default:
 				// MODIFIED events (e.g. status/condition updates) can arrive in bursts,
-				// so rate-limit them to avoid overloading the API server with discovery requests.
-				r.rateLimit.Do(r.collectAndNotify(ctx))
+				// so coalesce them without dropping the final establishment update.
+				if refresh == nil {
+					refreshTimer.Reset(r.rateLimit.Interval)
+					refresh = refreshTimer.C
+				}
 			}
 
+		case <-refresh:
+			refresh = nil
+			r.collectAndNotify(ctx)()
 		case <-ctx.Done():
 			logger.Info("stopping CRD watch after context done")
 			return

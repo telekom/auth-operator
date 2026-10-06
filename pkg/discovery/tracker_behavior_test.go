@@ -8,12 +8,112 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/watch"
 	kubescheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 )
+
+func TestResourceTrackerCollectsAfterThrottledCRDStatusEvents(t *testing.T) {
+	server := newDiscoveryTestServer(t)
+	defer server.Close()
+	events := make(chan watch.Event, 2)
+	watchServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("watch") != "true" {
+			if r.URL.Path == "/apis" {
+				version := metav1.GroupVersionForDiscovery{GroupVersion: "apiextensions.k8s.io/v1", Version: "v1"}
+				server.encode(w, metav1.APIGroupList{
+					TypeMeta: metav1.TypeMeta{Kind: "APIGroupList"},
+					Groups:   []metav1.APIGroup{{Name: "apiextensions.k8s.io", Versions: []metav1.GroupVersionForDiscovery{version}, PreferredVersion: version}},
+				})
+				return
+			}
+			if r.URL.Path == "/apis/apiextensions.k8s.io/v1" {
+				server.encode(w, metav1.APIResourceList{
+					TypeMeta:     metav1.TypeMeta{Kind: "APIResourceList"},
+					GroupVersion: "apiextensions.k8s.io/v1",
+					APIResources: []metav1.APIResource{{Name: "customresourcedefinitions", Kind: "CustomResourceDefinition"}},
+				})
+				return
+			}
+			server.handle(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		for {
+			select {
+			case event := <-events:
+				server.encode(w, metav1.WatchEvent{Type: string(event.Type), Object: runtime.RawExtension{Object: event.Object}})
+				w.(http.Flusher).Flush()
+			case <-r.Context().Done():
+				return
+			}
+		}
+	}))
+	defer watchServer.Close()
+
+	config := server.Config()
+	config.Host = watchServer.URL
+	testScheme := runtime.NewScheme()
+	if err := apiextensionsv1.AddToScheme(testScheme); err != nil {
+		t.Fatal(err)
+	}
+	tracker := NewResourceTracker(testScheme, config)
+	tracker.rateLimit.Interval = 100 * time.Millisecond
+	signal := make(chan struct{}, 2)
+	tracker.AddSignalFunc(func() error {
+		signal <- struct{}{}
+		return nil
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	ready := make(chan struct{})
+	go func() {
+		defer close(done)
+		tracker.watchAPIResources(ctx, ready)
+	}()
+	select {
+	case <-ready:
+	case <-done:
+		t.Fatal("CRD watch failed to start")
+	case <-time.After(3 * time.Second):
+		t.Fatal("CRD watch never became ready")
+	}
+	tracker.rateLimit.Do(func() {})
+	crd := &apiextensionsv1.CustomResourceDefinition{
+		TypeMeta: metav1.TypeMeta{APIVersion: "apiextensions.k8s.io/v1", Kind: "CustomResourceDefinition"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "widgets.example.com",
+		},
+	}
+	events <- watch.Event{Type: watch.Modified, Object: crd}
+	events <- watch.Event{Type: watch.Modified, Object: crd}
+	select {
+	case <-signal:
+	case <-done:
+		t.Fatal("CRD watch exited before refreshing discovery")
+	case <-time.After(3 * time.Second):
+		t.Fatal("throttled CRD status events never refreshed discovery or signaled")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("CRD watch did not stop after cancellation")
+	}
+	if got := server.RequestCount("/api/v1"); got != 1 {
+		t.Fatalf("discovery requests = %d, want one collection for the event burst", got)
+	}
+}
 
 func TestResourceTrackerCollectionSignalsOnlyOnChanges(t *testing.T) {
 	server := newDiscoveryTestServer(t)
