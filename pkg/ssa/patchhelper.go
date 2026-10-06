@@ -45,7 +45,8 @@ const (
 	PatchApplyResultSkipped = libraryssa.PatchApplyResultSkipped
 	// PatchApplyResultCreated means the preflight object was missing.
 	PatchApplyResultCreated = libraryssa.PatchApplyResultCreated
-	// PatchApplyResultPatched means an existing object needed a write.
+	// PatchApplyResultPatched means a write request (apply or label cleanup) was
+	// sent for a preflight cache hit, not necessarily a persisted mutation.
 	PatchApplyResultPatched = libraryssa.PatchApplyResultPatched
 )
 
@@ -396,34 +397,44 @@ func patchApplyClusterRoleBinding(
 	ctx context.Context, c client.Client, ac *rbacv1ac.ClusterRoleBindingApplyConfiguration,
 	always bool, opts ...client.ApplyOption,
 ) (PatchApplyResult, error) {
-	if ac == nil {
-		return clusterRoleBindingApplier.PatchApply(ctx, c, ac, always, withFieldOwner(opts)...)
-	}
-	clone, err := cloneApplyConfiguration(ac)
-	if err != nil {
-		return 0, err
-	}
-	if err := normalizeBindingApplyConfiguration(clone.Subjects, clone.ObjectMetaApplyConfiguration); err != nil {
-		return 0, err
-	}
-	return clusterRoleBindingApplier.PatchApply(ctx, c, clone, always, withFieldOwner(opts)...)
+	return clusterRoleBindingApplier.PatchApply(ctx, &bindingApplyClient{Client: c}, ac, always, withFieldOwner(opts)...)
 }
 
 func patchApplyRoleBinding(
 	ctx context.Context, c client.Client, ac *rbacv1ac.RoleBindingApplyConfiguration,
 	always bool, opts ...client.ApplyOption,
 ) (PatchApplyResult, error) {
-	if ac == nil {
-		return roleBindingApplier.PatchApply(ctx, c, ac, always, withFieldOwner(opts)...)
+	return roleBindingApplier.PatchApply(ctx, &bindingApplyClient{Client: c}, ac, always, withFieldOwner(opts)...)
+}
+
+type bindingApplyClient struct {
+	client.Client
+}
+
+// Apply clones and canonicalizes binding lists only after the preflight requires a write.
+func (c *bindingApplyClient) Apply(ctx context.Context, ac runtime.ApplyConfiguration, opts ...client.ApplyOption) error {
+	switch desired := ac.(type) {
+	case *rbacv1ac.ClusterRoleBindingApplyConfiguration:
+		clone, err := cloneApplyConfiguration(desired)
+		if err != nil {
+			return err
+		}
+		if err := normalizeBindingApplyConfiguration(clone.Subjects, clone.ObjectMetaApplyConfiguration); err != nil {
+			return err
+		}
+		return c.Client.Apply(ctx, clone, opts...)
+	case *rbacv1ac.RoleBindingApplyConfiguration:
+		clone, err := cloneApplyConfiguration(desired)
+		if err != nil {
+			return err
+		}
+		if err := normalizeBindingApplyConfiguration(clone.Subjects, clone.ObjectMetaApplyConfiguration); err != nil {
+			return err
+		}
+		return c.Client.Apply(ctx, clone, opts...)
+	default:
+		return c.Client.Apply(ctx, ac, opts...)
 	}
-	clone, err := cloneApplyConfiguration(ac)
-	if err != nil {
-		return 0, err
-	}
-	if err := normalizeBindingApplyConfiguration(clone.Subjects, clone.ObjectMetaApplyConfiguration); err != nil {
-		return 0, err
-	}
-	return roleBindingApplier.PatchApply(ctx, c, clone, always, withFieldOwner(opts)...)
 }
 
 type serviceAccountApplyClient struct {

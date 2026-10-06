@@ -180,7 +180,10 @@ The exported `PatchApply*` functions
 `PatchApply<CRD>Status`, ...) retain their signatures and result constants.
 
 RBAC comparators, subject/owner-reference canonicalization, field owners,
-label cleanup and CR-specific status builders remain local. See the library's
+label cleanup and CR-specific status builders remain local. Binding configurations
+are cloned and canonicalized only when an apply is sent; unchanged preflight
+comparisons retain order/default-insensitive checks without that extra cloning.
+See the library's
 [upstream-first guide](https://github.com/telekom/t-caas-go-library/blob/main/docs/upstream-libraries.md)
 for alternatives and limits.
 
