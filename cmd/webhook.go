@@ -8,7 +8,6 @@ import (
 	"crypto/tls"
 	"fmt"
 	"math"
-	"net/http"
 	"os"
 	"strings"
 
