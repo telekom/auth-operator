@@ -1465,17 +1465,6 @@ var _ = Describe("PatchHelper - cache-aware SSA diff", func() {
 		})
 	})
 
-	// -----------------------------------------------------------------------
-	// PatchApplyResult stringer
-	// -----------------------------------------------------------------------
-	Context("PatchApplyResult.String", func() {
-		It("should return readable labels", func() {
-			Expect(ssa.PatchApplyResultSkipped.String()).To(Equal("skipped"))
-			Expect(ssa.PatchApplyResultCreated.String()).To(Equal("created"))
-			Expect(ssa.PatchApplyResultPatched.String()).To(Equal("patched"))
-			Expect(ssa.PatchApplyResult(99).String()).To(Equal("unknown"))
-		})
-	})
 })
 
 type applyCountingClient struct {

@@ -56,13 +56,14 @@ The auth-operator manages RBAC resources (ClusterRoles, Roles, ClusterRoleBindin
 RoleBindings, ServiceAccounts) entirely through SSA. This replaces traditional
 Create/Update workflows with a declarative, field-ownership-aware model.
 
-Three distinct write patterns are used, each chosen for a specific purpose:
+The write patterns are chosen for their specific purpose:
 
 | Operation | API Method | Field Owner | Conflict Strategy |
 |-----------|-----------|-------------|-------------------|
-| Resource management | `client.Apply()` | `auth-operator` | `ForceOwnership` |
+| RBAC resource management | `client.Apply()` | `auth-operator` or per-resource owner | `ForceOwnership` |
+| ServiceAccount management | `client.Apply()` | Per-resource owner | Unforced; foreign token-setting conflicts are retained |
 | Status updates | `SubResource("status").Apply()` | `auth-operator` | `ForceOwnership` |
-| Finalizer add/remove | `client.Patch()` (MergePatch) | N/A (strategic merge) | Optimistic lock |
+| Finalizer add/remove | `client.Patch()` (JSON MergePatch) | N/A | Optimistic lock |
 
 ---
 
@@ -91,13 +92,18 @@ return c.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership)
 
 | Resource | Builder | Applier |
 |----------|---------|---------|
-| ClusterRole | `ClusterRoleWithLabelsAndRules()` | `ApplyClusterRole()` |
-| Role | `RoleWithLabelsAndRules()` | `ApplyRole()` |
-| ClusterRoleBinding | `ClusterRoleBindingWithSubjectsAndRoleRef()` | `ApplyClusterRoleBinding()` |
-| RoleBinding | `RoleBindingWithSubjectsAndRoleRef()` | `ApplyRoleBinding()` |
-| ServiceAccount | `ServiceAccountWith()` | `ApplyServiceAccount()` |
+| ClusterRole | `ClusterRoleWithLabelsAndRules()` | `PatchApplyClusterRole()` |
+| Role | `RoleWithLabelsAndRules()` | `PatchApplyRole()` |
+| ClusterRoleBinding | `ClusterRoleBindingWithSubjectsAndRoleRef()` | `PatchApplyClusterRoleBinding()` |
+| RoleBinding | `RoleBindingWithSubjectsAndRoleRef()` | `PatchApplyRoleBinding()` |
+| ServiceAccount | `ServiceAccountWith()` | `PatchApplyServiceAccount()` |
 
-All builders and appliers live in `pkg/ssa/ssa.go`.
+Builders live in `pkg/ssa/ssa.go`; cache-aware appliers live in
+`pkg/ssa/patchhelper.go` and use the tagged library's SSA gate. The status
+adapter aliases `pkg/ssa.FieldOwner` so both packages use the same manager.
+ServiceAccount appliers remain unforced and use per-resource field owners;
+restricted-resource call sites use the corresponding `PatchApply*Always`
+entry points to re-evaluate authorization.
 
 ### Why ForceOwnership
 

@@ -85,12 +85,6 @@ var _ = AfterSuite(func() {
 })
 
 var _ = Describe("SSA Helper Functions", func() {
-	Context("FieldOwner constant", func() {
-		It("should be set to auth-operator", func() {
-			Expect(ssa.FieldOwner).To(Equal("auth-operator"))
-		})
-	})
-
 	Context("FieldOwnerFor", func() {
 		It("should return prefixed name for short resource names", func() {
 			result := ssa.FieldOwnerFor("my-binddefinition")

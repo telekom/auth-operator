@@ -36,12 +36,6 @@ func newTestScheme() *runtime.Scheme {
 }
 
 var _ = Describe("SSA Status Apply Functions", func() {
-	Context("FieldOwner constant", func() {
-		It("should be set to auth-operator", func() {
-			Expect(ssa.FieldOwner).To(Equal("auth-operator"))
-		})
-	})
-
 	Context("ApplyRoleDefinitionStatus", func() {
 		It("should successfully apply status to an existing RoleDefinition", func() {
 			scheme := newTestScheme()

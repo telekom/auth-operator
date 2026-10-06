@@ -36,7 +36,7 @@ test/e2e/                      Ginkgo E2E tests
 5. **Error wrapping**: Always use `fmt.Errorf("context: %w", err)` — never `fmt.Errorf("context: %v", err)`.
 6. **Standard library constants**: Use `http.MethodGet` not `"GET"`, `rbacv1.GroupName` not `"rbac.authorization.k8s.io"`.
 7. **REUSE compliance**: All new files must have SPDX headers or be covered by a glob in `REUSE.toml`.
-8. **Test patterns**: Use Ginkgo/Gomega for controller tests, standard `testing` for unit tests. Target >70% coverage.
+8. **Test patterns**: Prefer isolated kind E2E and real-apiserver envtests for integration behavior; use Ginkgo/Gomega for controller tests and standard `testing` for focused unit tests. Keep consumer-specific policy and call-site coverage, not duplicate tests of library implementations or assertions that only inspect source/config text. Target >70% coverage.
 9. **Condition management**: Use `pkg/conditions.SetCondition()` — never set conditions manually on status.
 10. **Server-Side Apply**: Use `pkg/ssa` helpers for RBAC resources — never use `Update()` for managed objects.
 11. **Context-aware logging only**: In production controller/webhook code, derive loggers from context via `log.FromContext(ctx)` (or pass `ctx` and derive inside helpers). Do not pass raw logger instances across helper boundaries.
@@ -88,17 +88,30 @@ for package details and migration caveats. The library is public and its
 policy when adopting these packages; availability does not imply that every
 Auth Operator call site has migrated.
 
-Auth Operator's open [PR #580](https://github.com/telekom/auth-operator/pull/580)
-adopts the tagged library's typed/cache-based skip-if-unchanged SSA helpers
-through local `pkg/ssa` adapters. Compare that behavior with Flux `pkg/ssa`'s
-server-evaluated drift detection before choosing. Do not grow another
-general-purpose SSA framework beside the public library.
+Auth Operator uses the tagged library through these integration points:
+
+- `pkg/ssa` and `api/authorization/v1alpha1/applyconfiguration/ssa` adapt
+  `pkg/ssa` appliers for RBAC and CRD status. RBAC normalization, field ownership,
+  label pruning and intentionally unconditional restricted-resource writes stay local.
+- Controllers use library `pkg/patch` for optimistic-lock finalizers and repeated
+  ServiceAccount metadata/status patches; single-shot domain patches stay native.
+- `pkg/discovery` adapts `pkg/discovery/tracker` with operator-specific RBAC
+  augmentation, metrics, refresh intervals and empty-discovery retention.
+- The authorizer uses `pkg/namespaceselector` for request-local live namespace
+  reads and `pkg/ratelimit` for bounded subject budgets; deny policy, canonical
+  subject keys and refill-aware TTL remain local.
+- `cmd/webhook.go` uses `pkg/certrotation` around `cert-controller`; mounted
+  certificate readiness and webhook registration remain integration-tested.
+
+Compare cache-based SSA gates with Flux `pkg/ssa`'s server-evaluated drift
+detection before changing policy. Do not grow another general-purpose framework
+beside the public library.
 
 Existing migration candidates (documentation only; do not change them as part of
 this rule): `pkg/conditions/` can use Flux conditions, apimachinery condition
 helpers, and kstatus while retaining coordinated Ready-condition policy;
-`pkg/ssa/patchhelper.go` can be compared with Flux SSA; generic helpers
-are available in the public tag, with AO adoption tracked by PR #580; controller/webhook
+`pkg/ssa/patchhelper.go` can be compared with Flux SSA while preserving the
+characterized compatibility policies; controller/webhook
 envtest suites should keep using native envtest with pinned absolute assets;
 and `test/utils/utils.go` wait, decoder, and apply helpers can use e2e-framework
 and Kubernetes APIs while retaining intentional `ForceOwnership`. The tracing
