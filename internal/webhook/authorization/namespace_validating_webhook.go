@@ -289,8 +289,9 @@ func (v *NamespaceValidator) detectOwnerReclassification(logger logr.Logger, req
 		return false
 	}
 	// Only tenant↔thirdparty is allowed; all other categories remain immutable.
-	if !((oldOwner == authorizationv1alpha1.OwnerTenant && newOwner == authorizationv1alpha1.OwnerThirdParty) ||
-		(oldOwner == authorizationv1alpha1.OwnerThirdParty && newOwner == authorizationv1alpha1.OwnerTenant)) {
+	isReclassification := (oldOwner == authorizationv1alpha1.OwnerTenant && newOwner == authorizationv1alpha1.OwnerThirdParty) ||
+		(oldOwner == authorizationv1alpha1.OwnerThirdParty && newOwner == authorizationv1alpha1.OwnerTenant)
+	if !isReclassification {
 		return false
 	}
 	logger.V(1).Info("AUDIT: tenant/thirdparty reclassification allowed",

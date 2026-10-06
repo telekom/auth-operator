@@ -6,6 +6,7 @@ package webhooks_test
 import (
 	"context"
 	"encoding/pem"
+	"net/http"
 	"net/http/httptest"
 	"time"
 
@@ -64,9 +65,13 @@ var _ = Describe("Add-on namespace admission", func() {
 		DeferCleanup(func() { _ = live.Delete(context.Background(), bd) })
 
 		validator := &webhooks.NamespaceValidator{Client: envClient, Reader: live, Decoder: crAdmission.NewDecoder(scheme.Scheme), DeletionProtection: true}
-		server := httptest.NewTLSServer(&crAdmission.Webhook{Handler: validator})
+		mutator := &webhooks.NamespaceMutator{Client: envClient, Reader: live, Decoder: crAdmission.NewDecoder(scheme.Scheme)}
+		mux := http.NewServeMux()
+		mux.Handle("/validate", &crAdmission.Webhook{Handler: validator})
+		mux.Handle("/mutate", &crAdmission.Webhook{Handler: mutator})
+		server := httptest.NewTLSServer(mux)
 		DeferCleanup(server.Close)
-		url := server.URL
+		url := server.URL + "/validate"
 		fail := admissionregistrationv1.Fail
 		sideEffects := admissionregistrationv1.SideEffectClassNone
 		hook := &admissionregistrationv1.ValidatingWebhookConfiguration{ObjectMeta: metav1.ObjectMeta{GenerateName: "addon-namespace-"}, Webhooks: []admissionregistrationv1.ValidatingWebhook{{
@@ -83,6 +88,21 @@ var _ = Describe("Add-on namespace admission", func() {
 		}}}
 		Expect(live.Create(ctx, hook)).To(Succeed())
 		DeferCleanup(func() { _ = live.Delete(context.Background(), hook) })
+		mutationURL := server.URL + "/mutate"
+		mutationHook := &admissionregistrationv1.MutatingWebhookConfiguration{ObjectMeta: metav1.ObjectMeta{GenerateName: "addon-namespace-"}, Webhooks: []admissionregistrationv1.MutatingWebhook{{
+			Name: "addon-namespace-mutation.test.telekom.com",
+			ClientConfig: admissionregistrationv1.WebhookClientConfig{
+				URL: &mutationURL, CABundle: hook.Webhooks[0].ClientConfig.CABundle,
+			},
+			Rules: []admissionregistrationv1.RuleWithOperations{{
+				Operations: []admissionregistrationv1.OperationType{admissionregistrationv1.Update},
+				Rule:       hook.Webhooks[0].Rules[0].Rule,
+			}},
+			ObjectSelector: hook.Webhooks[0].ObjectSelector,
+			FailurePolicy:  &fail, SideEffects: &sideEffects, AdmissionReviewVersions: []string{"v1"},
+		}}}
+		Expect(live.Create(ctx, mutationHook)).To(Succeed())
+		DeferCleanup(func() { _ = live.Delete(context.Background(), mutationHook) })
 
 		// Wait for API-server webhook registration and RBAC propagation by
 		// observing a real denial, not merely a successful update.
@@ -100,7 +120,7 @@ var _ = Describe("Add-on namespace admission", func() {
 				return updateErr
 			}
 			return nil
-		}).WithTimeout(10 * time.Second).Should(MatchError(ContainSubstring("label")))
+		}).WithTimeout(10 * time.Second).Should(MatchError(ContainSubstring("admission webhook")))
 
 		current := &corev1.Namespace{}
 		Expect(userClient.Get(ctx, client.ObjectKeyFromObject(ns), current)).To(Succeed())
@@ -109,6 +129,13 @@ var _ = Describe("Add-on namespace admission", func() {
 		persisted := &corev1.Namespace{}
 		Expect(live.Get(ctx, client.ObjectKeyFromObject(ns), persisted)).To(Succeed())
 		Expect(persisted.Annotations).To(HaveKeyWithValue("test.telekom.com/updated", "true"))
+
+		By("requiring a matching selector for ordinary user updates")
+		bd.Spec.RoleBindings[0].NamespaceSelector[0].MatchLabels[authorizationv1alpha1.LabelKeyOwner] = authorizationv1alpha1.OwnerTenant
+		Expect(live.Update(ctx, bd)).To(Succeed())
+		Expect(apierrors.IsForbidden(userClient.Update(ctx, persisted.DeepCopy()))).To(BeTrue())
+		bd.Spec.RoleBindings[0].NamespaceSelector[0].MatchLabels[authorizationv1alpha1.LabelKeyOwner] = authorizationv1alpha1.OwnerAddon
+		Expect(live.Update(ctx, bd)).To(Succeed())
 
 		for _, key := range []string{authorizationv1alpha1.LabelKeyOwner, authorizationv1alpha1.LabelKeyAddon} {
 			By("denying changes and removal of " + key)

@@ -283,50 +283,22 @@ func ValidTrackedOwnershipLabels(namespaceLabels map[string]string) bool {
 	//   - owner=thirdparty  => owner + thirdparty; no tenant/addon labels
 	//   - owner=addon       => owner + addon; no tenant/thirdparty labels
 	// Any other combination is treated as invalid and results in no tracked labels.
-	if _, hasAddon := result[authorizationv1alpha1.LabelKeyAddon]; hasAddon && ownerVal != authorizationv1alpha1.OwnerAddon {
-		return false
-	}
+	var identityKey string
 	switch ownerVal {
 	case authorizationv1alpha1.OwnerPlatform:
-		if _, ok := result[authorizationv1alpha1.LabelKeyTenant]; ok {
-			return false
-		}
-		if _, ok := result[authorizationv1alpha1.LabelKeyThirdParty]; ok {
-			return false
-		}
+		return len(result) == 1
 	case authorizationv1alpha1.OwnerTenant:
-		tenantVal, hasTenant := result[authorizationv1alpha1.LabelKeyTenant]
-		if !hasTenant || tenantVal == "" {
-			return false
-		}
-		if _, ok := result[authorizationv1alpha1.LabelKeyThirdParty]; ok {
-			return false
-		}
+		identityKey = authorizationv1alpha1.LabelKeyTenant
 	case authorizationv1alpha1.OwnerThirdParty:
-		tpVal, hasTP := result[authorizationv1alpha1.LabelKeyThirdParty]
-		if !hasTP || tpVal == "" {
-			return false
-		}
-		if _, ok := result[authorizationv1alpha1.LabelKeyTenant]; ok {
-			return false
-		}
+		identityKey = authorizationv1alpha1.LabelKeyThirdParty
 	case authorizationv1alpha1.OwnerAddon:
-		addonVal, hasAddon := result[authorizationv1alpha1.LabelKeyAddon]
-		if !hasAddon || addonVal == "" {
-			return false
-		}
-		if _, ok := result[authorizationv1alpha1.LabelKeyTenant]; ok {
-			return false
-		}
-		if _, ok := result[authorizationv1alpha1.LabelKeyThirdParty]; ok {
-			return false
-		}
+		identityKey = authorizationv1alpha1.LabelKeyAddon
 	default:
 		// Unknown owner values are not considered valid tracked ownership.
 		return false
 	}
 
-	return true
+	return len(result) == 2 && result[identityKey] != ""
 }
 
 // FindExtraTrackedKey returns the first tracked ownership label key that exists

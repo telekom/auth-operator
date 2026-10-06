@@ -30,8 +30,12 @@ metadata:
     t-caas.telekom.com/addon: metrics
 ```
 
-Matching BindDefinitions authorize namespace operations; ownership labels alone
-do not grant access. Non-bypass principals can update an authorized add-on
+Matching BindDefinitions authorize namespace operations for ordinary users.
+ServiceAccounts may also CREATE/UPDATE without a matching BindDefinition when
+their source namespace has valid, non-empty tracked ownership labels exactly
+matching the target. This fallback does not authorize DELETE, and Kubernetes RBAC
+authorization still applies to every request.
+Non-bypass principals can update an authorized add-on
 namespace when ownership is unchanged, but cannot adopt, change, or remove
 tracked ownership labels. Existing privileged bypass rules remain unchanged.
 Migration reclassification is limited to `tenant` ↔ `thirdparty`; neither

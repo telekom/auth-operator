@@ -411,8 +411,11 @@ Add-on namespaces require `t-caas.telekom.com/owner=addon` and a non-empty
 Both labels are immutable on ordinary updates. The add-on identity is a built-in
 BindDefinition selector key even with custom allowed label domains, and can
 derive `owner=addon` during namespace creation. ServiceAccount namespace ownership
-inheritance includes it. Add-on ownership does not grant access by itself:
-matching BindDefinition authorization is still required.
+inheritance includes it. Ordinary users require matching BindDefinition
+authorization. ServiceAccounts may also CREATE/UPDATE without a matching
+BindDefinition when their source namespace has valid, non-empty tracked ownership
+labels that exactly match the target; this fallback does not authorize DELETE.
+Kubernetes RBAC authorization still applies to every request.
 
 Add-on namespaces are not implicitly deletion-protected; their controller owns
 their lifecycle. Explicit opt-in protection and hard-protected names still
