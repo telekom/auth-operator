@@ -293,9 +293,16 @@ configuration remains outside this operator.
 
 ## Development
 
+Before adding helpers, follow the [upstream-first guidance](AGENTS.md#reuse-upstream-libraries-before-writing-helpers).
+Auth Operator uses [`t-caas-go-library`](https://github.com/telekom/t-caas-go-library)
+packages `ssa`, `patch`, `discovery/tracker`, `namespaceselector`, `ratelimit`,
+and `certrotation`; operator-specific policy stays local. See
+[the integration points](AGENTS.md#reuse-upstream-libraries-before-writing-helpers)
+before replacing or extending these adapters.
+
 ### Prerequisites
 
-- Go 1.25+
+- Go version specified in [`go.mod`](go.mod)
 - Docker
 - kubectl
 - kind v0.31.0+
