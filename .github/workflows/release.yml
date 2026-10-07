@@ -510,8 +510,8 @@ jobs:
 
       - name: Tag and push image to Artifactory OCI
         env:
-          ARTIFACTORY_URL: artifactory.devops.telekom.de
-          ARTIFACTORY_REPO: cit-t-caas-oci/images/t-caas
+          ARTIFACTORY_URL: ${{ secrets.ARTIFACTORY_URL }}
+          ARTIFACTORY_REPO: ${{ secrets.ARTIFACTORY_REPO }}
           REGISTRY: ${{ env.REGISTRY }}
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
           AF_USER: ${{ secrets.AF_USER }}
@@ -519,9 +519,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Guard: skip if Artifactory credentials are not configured
-          if [ -z "${AF_USER}" ] || [ -z "${AF_TOKEN}" ]; then
-            echo "::warning::AF_USER or AF_TOKEN secrets not set, skipping Artifactory push"
+          # Configure the mirror host (without scheme), repository path, and credentials as secrets.
+          if [ -z "${ARTIFACTORY_URL}" ] || [ -z "${ARTIFACTORY_REPO}" ] || [ -z "${AF_USER}" ] || [ -z "${AF_TOKEN}" ]; then
+            echo "::warning::Artifactory endpoint, repository, or credential secrets not set, skipping mirror push"
             exit 0
           fi
 
@@ -530,6 +530,8 @@ jobs:
 
           # Diagnose Artifactory repo accessibility
           REPO_KEY=$(echo "${ARTIFACTORY_REPO}" | cut -d'/' -f1)
+          # Secret masking does not automatically cover derived substrings.
+          echo "::add-mask::${REPO_KEY}"
           echo "Checking Artifactory storage API for repo key: ${REPO_KEY}"
           HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -u "${AF_USER}:${AF_TOKEN}" "https://${ARTIFACTORY_URL}/artifactory/api/storage/${REPO_KEY}" ) || true
           echo "Artifactory storage API HTTP status: ${HTTP_STATUS}"

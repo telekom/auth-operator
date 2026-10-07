@@ -99,7 +99,7 @@ The auth-operator consists of two main components:
 │   • RoleDefinition    │        │   • CRD validation         │
 │   • BindDefinition    │        │   • Namespace admission    │
 │   • Restricted CRDs   │        │   • Label injection        │
-│   • RBACPolicy        │        │   • TDG migration          │
+│   • RBACPolicy        │        │   • Legacy migration       │
 │   • API Discovery     │        │                            │
 └───────────────────────┘        └────────────────────────────┘
             │                                  │
@@ -372,7 +372,7 @@ must end.
 | `--cert-rotation-secret-name` | Secret name for the rotated certificate | `""` |
 | `--cert-rotation-mutating-webhook` | Mutating webhook names to patch with CA bundle | `[]` |
 | `--cert-rotation-validating-webhook` | Validating webhook names to patch with CA bundle | `[]` |
-| `--tdg-migration` | Enable T-DDI to T-CaaS migration mode | `false` |
+| `--tdg-migration` | Enable legacy namespace ownership migration mode | `false` |
 | `--binddefinition-namespace-selector-label-group` | DNS label key domain allowed in BindDefinition namespace admission selectors; repeat or comma-separate for multiple domains | `[t-caas.telekom.com]` |
 | `--authorize-rate-limit` | Per-subject sustained requests/second per pod for the authorize endpoint; `0` disables limiting, enabled rates must be finite and at most `1e9` | `0` |
 | `--authorize-rate-burst` | Burst size for authorize endpoint rate limiter | `200` |
@@ -654,7 +654,7 @@ controller:
 # Webhook server configuration
 webhookServer:
   replicas: 2
-  tdgMigration: "false"  # Enable for T-DDI to T-CaaS migration
+  tdgMigration: "false"  # Enable for legacy namespace ownership migration
   bindDefinitionNamespaceSelectorLabelGroups:  # Allowed BindDefinition namespace selector domains
     - t-caas.telekom.com
   authorizeRateLimit: 0     # Per-pod sustained requests/second; 0 disables

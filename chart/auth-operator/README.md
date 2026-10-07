@@ -92,7 +92,7 @@ Image reference precedence: `digest` > `tag` > `Chart.AppVersion`
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `webhookServer.replicas` | Number of webhook server replicas | `2` |
-| `webhookServer.tdgMigration` | Enable TDG migration mode | `"false"` |
+| `webhookServer.tdgMigration` | Enable legacy namespace ownership migration mode | `"false"` |
 | `webhookServer.capiOperatorUpdateBypass` | Allow capi-operator-manager to skip BindDefinition authorization for Namespace UPDATE requests; protected-label validation still runs | `"false"` |
 | `webhookServer.bindDefinitionNamespaceSelectorLabelGroups` | DNS label key domains allowed in BindDefinition namespace selectors | `[t-caas.telekom.com]` |
 | `webhookServer.authorizeRateLimit` | Max sustained requests/sec for /authorize endpoint (per pod, 0 to disable; requires caller auth when >0) | `0` |

@@ -51,7 +51,7 @@ KIND_IMAGE="kindest/node:${K8S_VERSION}"
 #   kind build node-image "${K8S_VERSION}" --image "${KIND_IMAGE}"
 # fi
 
-# create the kind cluster with the local registry configured for t-co debugging
+# create the kind cluster with the local registry configured for operator debugging
 KIND_CLUSTER_OPTS="--name ${CLUSTER_NAME} --image ${KIND_IMAGE}"
 cat <<EOF | HTTP_PROXY=$DOCKER_PROXY HTTPS_PROXY=$DOCKER_PROXY NO_PROXY=$DOCKER_NO_PROXY kind create cluster $KIND_CLUSTER_OPTS --config=-
 kind: Cluster

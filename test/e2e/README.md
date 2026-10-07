@@ -1031,9 +1031,12 @@ parallel ::: \
 ## Getting Help
 
 - **Issues:** Check [Troubleshooting](#troubleshooting) section
-- **Questions:** Open a GitLab issue
+- **Questions:** Open a GitHub issue with sanitized debug artifacts
 - **Debug:** Use `E2E_DEBUG_LEVEL=3` and check artifacts
 - **CI Failures:** Download artifacts from CI pipeline
+
+Before sharing logs or artifacts in a public issue, remove credentials, personal
+data, internal endpoints, and identifying cluster or customer information.
 
 **Quick Commands:**
 ```bash

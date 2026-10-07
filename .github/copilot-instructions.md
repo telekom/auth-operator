@@ -342,7 +342,7 @@ Do not pass raw logger instances across helper boundaries when `ctx` is availabl
 | `--cert-rotation-secret-name` | Secret name for the rotated certificate | `""` |
 | `--cert-rotation-mutating-webhook` | Mutating webhook names to patch with CA bundle | `[]` |
 | `--cert-rotation-validating-webhook` | Validating webhook names to patch with CA bundle | `[]` |
-| `--tdg-migration` | Enable T-DDI to T-CaaS migration mode | `false` |
+| `--tdg-migration` | Enable legacy namespace ownership migration mode | `false` |
 | `--capi-operator-update-bypass` | Allow capi-operator-manager to skip BindDefinition authorization for Namespace UPDATE requests; protected-label validation still runs | `false` |
 | `--authorize-rate-limit` | Per-subject sustained requests/second per pod; zero disables limiting, enabled rates must be finite and at most `1e9` | `0` |
 | `--authorize-rate-burst` | Burst size for authorize endpoint rate limiter | `200` |
