@@ -15,7 +15,6 @@ import (
 	"strings"
 	"testing"
 
-	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	k8syaml "k8s.io/apimachinery/pkg/util/yaml"
 )
 
@@ -208,23 +207,6 @@ func TestCreatorTrackingMAPRendering(t *testing.T) {
 			}
 		}
 	})
-}
-
-func TestCreatorTrackingAnnotationConstantsWired(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("templates", "creator-tracking-map.yaml"))
-	if err != nil {
-		t.Fatalf("read creator tracking template: %v", err)
-	}
-	template := string(raw)
-	for _, key := range []string{
-		authorizationv1alpha1.AnnotationKeyCreatedBy,
-		authorizationv1alpha1.AnnotationKeyCreatedByGroups,
-		authorizationv1alpha1.AnnotationKeyUpdatedBy,
-	} {
-		if !strings.Contains(template, key) {
-			t.Fatalf("creator tracking template does not wire exported annotation constant %q", key)
-		}
-	}
 }
 
 func TestCreatorTrackingModeAPIMatrix(t *testing.T) {

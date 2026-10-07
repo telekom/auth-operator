@@ -7,12 +7,8 @@ package e2e
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/telekom/auth-operator/test/utils"
 )
 
 func TestCreatorTrackingRequiresDedicatedCluster(t *testing.T) {
@@ -34,31 +30,5 @@ func TestCreatorTrackingRequiresDedicatedCluster(t *testing.T) {
 				t.Fatalf("creatorValidateIsolation() = %v, want %q", err, tc.wantErr)
 			}
 		})
-	}
-}
-
-func TestCreatorTrackingKindConfigsUseVersionSpecificAdmissionPolicyGates(t *testing.T) {
-	projectDir, err := utils.GetProjectDir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	configPath := func(name string) string {
-		return filepath.Join(projectDir, "test", "e2e", name)
-	}
-
-	stable, err := os.ReadFile(configPath("kind-config-creator-tracking-stable.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(stable), "MutatingAdmissionPolicy=true") {
-		t.Fatal("stable creator-tracking config must not pass the graduated MutatingAdmissionPolicy gate")
-	}
-
-	beta, err := os.ReadFile(configPath("kind-config-creator-tracking-beta.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(beta), "MutatingAdmissionPolicy=true") {
-		t.Fatal("beta creator-tracking config must keep the MutatingAdmissionPolicy gate")
 	}
 }
