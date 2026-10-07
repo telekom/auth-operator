@@ -18,7 +18,7 @@ Forbidden labels must be absent, even when their value would be empty. A
 namespace with no tracked ownership labels remains valid. An identity without
 an owner, an unknown owner, or a missing/empty required identity is invalid.
 
-For example, the T-CaaS add-on controller creates:
+For example, an add-on controller can create:
 
 ```yaml
 apiVersion: v1
@@ -97,5 +97,5 @@ namespaceSelector:
 Add-on namespaces are **not implicitly deletion-protected**, because the add-on
 controller owns their lifecycle. Explicit deletion-protection opt-in,
 hard-protected system names, and configured extra protected names still apply.
-The T-CaaS auth-operator function, Kyverno policies, and the T-CaaS add-on
-controller consume this contract.
+Deployment automation, admission policies, and add-on controllers should use
+the same label contract.

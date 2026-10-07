@@ -301,7 +301,7 @@ See [IMPROVEMENTS.md](IMPROVEMENTS.md) for implementation details.
 ### Issues
 - Check [Common Issues](README.md#troubleshooting)
 - Review [QUICKREF.md](QUICKREF.md)
-- Open GitLab issue with debug artifacts
+- Open a GitHub issue with sanitized debug artifacts
 
 ---
 

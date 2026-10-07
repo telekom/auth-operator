@@ -214,8 +214,6 @@ Dynamically generates ClusterRoles or Roles by discovering all available API res
 - New CRD registrations (to include new resource types)
 - Periodic sync every 60 seconds (drift protection)
 
-![RoleDefinition Flow](docs/images/generator.png)
-
 **Example:** See [config/samples/authorization_v1alpha1_roledefinition.yaml](config/samples/authorization_v1alpha1_roledefinition.yaml)
 
 ---
@@ -236,8 +234,6 @@ Bindings are named as: `{targetName}-{roleName}-binding`
 - Changes to BindDefinition resources
 - New Namespace creation (to apply bindings)
 - Periodic sync every 60 seconds (drift protection)
-
-![BindDefinition Flow](docs/images/binder.png)
 
 **Example:** See [config/samples/authorization_v1alpha1_binddefinition.yaml](config/samples/authorization_v1alpha1_binddefinition.yaml)
 
@@ -262,22 +258,36 @@ authorizers in its chain.
 - **Namespace scoping** - Use `namespaceSelector` to limit resource requests to matching namespaces
 - **Status reporting** - Sets `status.authorizerConfigured=true` and `Ready=True` after reconciliation
 
-![WebhookAuthorizer](docs/images/authorizer.png)
-
 **Example:** See [config/samples/authorization_v1alpha1_webhookauthorizer.yaml](config/samples/authorization_v1alpha1_webhookauthorizer.yaml)
 
 ---
 
 ## Architecture
 
-![Overall Architecture](docs/images/overall-architecture.png)
-
-Architecture diagrams are maintained in [docs/drawio/](docs/drawio/). To update:
-
-```bash
-# Edit docs/drawio/authn-authz-operator.drawio
-make export-images  # Regenerates PNGs
+```mermaid
+flowchart LR
+    RD[RoleDefinition] --> RC[Role controllers]
+    RRD[RestrictedRoleDefinition] --> RC
+    BD[BindDefinition] --> BC[Binding controllers]
+    RBD[RestrictedBindDefinition] --> BC
+    P[RBACPolicy] --> RC
+    P --> BC
+    API[Kubernetes API discovery] --> RC
+    RC --> R[Roles and ClusterRoles]
+    BC --> B[RoleBindings and ClusterRoleBindings]
+    WA[WebhookAuthorizer] --> WC[Authorizer controller]
+    WC --> S[Authorizer status]
+    WA --> W[Webhook server]
+    K[Kubernetes API server] -->|Admission requests| W
+    K -->|SubjectAccessReview at /authorize| W
 ```
+
+Controllers reconcile the six CRDs into RBAC resources and status. Restricted
+definitions are checked against their referenced RBACPolicy. The webhook server
+validates custom resources, optionally manages namespace admission, and evaluates
+authorization requests against WebhookAuthorizer rules. The API server must be
+configured to call `/authorize` for webhook authorization; identity-provider
+configuration remains outside this operator.
 
 ---
 
@@ -356,7 +366,7 @@ For detailed development instructions, see [CONTRIBUTING.md](CONTRIBUTING.md).
 - **[Helm Chart](./chart/auth-operator/README.md)** — Helm installation and configuration
 
 ### Platform
-- **[T-CaaS Integration](./docs/t-caas-integration.md)** — Platform-specific role mappings and group conventions
+- **[Multi-tenant Integration](./docs/t-caas-integration.md)** — Namespace ownership and policy-backed RBAC examples
 - **[k8s-breakglass Integration](./docs/breakglass-integration.md)** — Integration with temporary privilege escalation system
 - **[Security Policy](.github/SECURITY.md)** — Vulnerability reporting
 

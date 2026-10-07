@@ -439,8 +439,8 @@ spec:
     userLimits:
       # Allow only specific users (if set, only these are allowed)
       allowedUsers:
-        - "team-a-admin@company.com"
-        - "team-a-ci@company.com"
+        - "team-a-admin@example.com"
+        - "team-a-ci@example.com"
       
       # Forbidden user prefixes (simple wildcard, NO regex)
       forbiddenPrefixes:
@@ -448,7 +448,7 @@ spec:
       
       # Forbidden user suffixes
       forbiddenSuffixes:
-        - "*@external.com"  # External users
+        - "*@external.example.com"  # External users
       
       # Forbidden exact names
       forbiddenNames:
@@ -756,9 +756,9 @@ status:
   
   # Audit information (set by webhook/controller)
   audit:
-    createdBy: "user:john.doe@company.com"
+    createdBy: "user:john.doe@example.com"
     createdAt: "2026-02-08T10:30:00Z"
-    lastModifiedBy: "user:jane.smith@company.com"
+    lastModifiedBy: "user:jane.smith@example.com"
     lastModifiedAt: "2026-02-08T14:15:00Z"
   
   # Policy compliance
@@ -822,7 +822,7 @@ spec:
 
 status:
   audit:
-    createdBy: "user:john.doe@company.com"
+    createdBy: "user:john.doe@example.com"
     createdAt: "2026-02-08T10:30:00Z"
   
   policyCompliance:
@@ -975,7 +975,7 @@ status:
           - team-a-devs-edit-binding
   
   audit:
-    createdBy: "user:john.doe@company.com"
+    createdBy: "user:john.doe@example.com"
     createdAt: "2026-02-08T10:30:00Z"
   
   policyCompliance:
@@ -1633,8 +1633,8 @@ spec:
               nameSuffix: "-admins"
         require:
           annotations:
-            compliance.company.com/approved-by: "*"  # Any non-empty value
-            compliance.company.com/ticket: "TICKET-*"  # Simple prefix match
+            compliance.example.com/approved-by: "*"  # Any non-empty value
+            compliance.example.com/ticket: "TICKET-*"  # Simple prefix match
   
   escalationPrevention:
     auditViolations: true

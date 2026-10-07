@@ -366,7 +366,7 @@
         },
         "tdgMigration": {
           "type": ["string", "boolean"],
-          "description": "Enable TDG migration mode.",
+          "description": "Enable legacy namespace ownership migration mode.",
           "enum": ["true", "false", true, false],
           "default": "false"
         },

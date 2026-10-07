@@ -504,15 +504,6 @@ build-installer: manifests generate kustomize ## Generate a consolidated YAML wi
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/default > dist/install.yaml
 
-.PHONY: export-images
-export-images: drawio ## Export PNG images from a Draw.io diagram.
-	drawio --export docs/drawio/authn-authz-operator.drawio --output docs/images/overall-architecture.png --format png --page-index=0
-	drawio --export docs/drawio/authn-authz-operator.drawio --output docs/images/generator.png --format png --page-index=1
-	drawio --export docs/drawio/authn-authz-operator.drawio --output docs/images/binder.png --format png --page-index=2
-	drawio --export docs/drawio/authn-authz-operator.drawio --output docs/images/idp.png --format png --page-index=3
-	drawio --export docs/drawio/authn-authz-operator.drawio --output docs/images/authorizer.png --format png --page-index=4
-	drawio --export docs/drawio/authn-authz-operator.drawio --output docs/images/advertiser.png --format png --page-index=5
-
 .PHONY: docs
 docs: crd-ref-docs ## Generate markdown API reference into docs directory.
 	${LOCALBIN}/crd-ref-docs --source-path=api --config=docs/crd-ref-docs-config.yaml --renderer=markdown --output-mode=single --output-path=docs/generated/api-reference.md
@@ -609,10 +600,6 @@ crd-ref-docs: $(LOCALBIN) ## Download crd-ref-docs locally if necessary.
 	$(call go-install-tool,$(CRD_REF_DOCS),github.com/elastic/crd-ref-docs,${CRD_REF_DOCS_VERSION},github.com/elastic/crd-ref-docs)
 $(CRD_REF_DOCS): $(LOCALBIN)
 	$(call go-install-tool,$(CRD_REF_DOCS),github.com/elastic/crd-ref-docs,${CRD_REF_DOCS_VERSION},github.com/elastic/crd-ref-docs)
-
-.PHONY: drawio
-drawio: ## Download Draw.io locally if necessary.
-	echo "Can't check if you downloaded Draw.io. If not please install it manually."
 
 .PHONY: mockgen
 mockgen: $(LOCALBIN) ## Download mockgen locally if necessary.

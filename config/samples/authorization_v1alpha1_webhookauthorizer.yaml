@@ -54,8 +54,8 @@ spec:
   allowedPrincipals:
     # Platform admin group
     - groups:
-        - platform-admins@telekom.de
-        - network-admins@telekom.de
+        - platform-admins@example.com
+        - network-admins@example.com
     # Network automation service account
     - user: system:serviceaccount:t-caas-system:network-controller
       namespace: t-caas-system
@@ -68,7 +68,7 @@ spec:
         - tenant-admins
         - tenant-developers
     # Block known break-glass accounts from automated changes
-    - user: emergency-admin@telekom.de
+    - user: emergency-admin@example.com
   namespaceSelector:
     matchExpressions:
       - key: t-caas.telekom.com/network-policy
@@ -116,8 +116,8 @@ spec:
   allowedPrincipals:
     # Security team
     - groups:
-        - security-team@telekom.de
-        - secret-admins@telekom.de
+        - security-team@example.com
+        - secret-admins@example.com
     # Vault injector
     - user: system:serviceaccount:vault:vault-agent-injector
       namespace: vault
@@ -134,7 +134,7 @@ spec:
     # Block direct secret manipulation by developers
     - groups:
         - developers
-        - tenant-developers@customer.com
+        - tenant-developers@customer.example.com
   namespaceSelector:
     matchLabels:
       t-caas.telekom.com/environment: production
@@ -184,8 +184,8 @@ spec:
   allowedPrincipals:
     # Platform RBAC admins
     - groups:
-        - platform-admins@telekom.de
-        - rbac-admins@telekom.de
+        - platform-admins@example.com
+        - rbac-admins@example.com
     # Auth operator controller
     - user: system:serviceaccount:t-caas-system:auth-operator-controller
       namespace: t-caas-system
@@ -257,8 +257,8 @@ spec:
   allowedPrincipals:
     # Platform operations
     - groups:
-        - platform-ops@telekom.de
-        - sre-team@telekom.de
+        - platform-ops@example.com
+        - sre-team@example.com
     # System components that need privileged access
     - user: system:serviceaccount:kube-system:kube-proxy
       namespace: kube-system
@@ -270,7 +270,7 @@ spec:
     # Developers cannot deploy privileged workloads
     - groups:
         - developers
-        - tenant-developers@customer.com
+        - tenant-developers@customer.example.com
         - contractors
   namespaceSelector:
     matchExpressions:
@@ -343,13 +343,13 @@ spec:
       namespace: monitoring
     # Platform SRE team
     - groups:
-        - sre-team@telekom.de
-        - platform-ops@telekom.de
+        - sre-team@example.com
+        - platform-ops@example.com
   deniedPrincipals:
     # No tenant access to these endpoints
     - groups:
         - tenant-admins
-        - tenant-developers@customer.com
+        - tenant-developers@customer.example.com
 
 ---
 # -----------------------------------------------------------------------------
@@ -378,7 +378,7 @@ spec:
   allowedPrincipals:
     # Platform admins only
     - groups:
-        - platform-admins@telekom.de
+        - platform-admins@example.com
     # Operator controllers
     - user: system:serviceaccount:t-caas-system:auth-operator-controller
       namespace: t-caas-system
@@ -391,7 +391,7 @@ spec:
     # No tenant access to CRDs
     - groups:
         - tenant-admins
-        - tenant-developers@customer.com
+        - tenant-developers@customer.example.com
         - developers
   # CRDs are cluster-scoped, so namespace selector is for resources that create CRDs
   namespaceSelector:

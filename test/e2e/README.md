@@ -1031,7 +1031,7 @@ parallel ::: \
 ## Getting Help
 
 - **Issues:** Check [Troubleshooting](#troubleshooting) section
-- **Questions:** Open a GitLab issue
+- **Questions:** Open a GitHub issue
 - **Debug:** Use `E2E_DEBUG_LEVEL=3` and check artifacts
 - **CI Failures:** Download artifacts from CI pipeline
 
