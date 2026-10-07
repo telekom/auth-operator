@@ -16,7 +16,6 @@ keywords:
   - rbac
   - authorization
   - authentication
-# icon: https://raw.githubusercontent.com/telekom/auth-operator/main/docs/images/logo.svg  # TODO: add logo
 # OCI annotations for registry metadata (applied when pushing to OCI registry)
 annotations:
   # OCI standard annotations
