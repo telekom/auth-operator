@@ -4,6 +4,7 @@ package main
 
 import (
 	"encoding/csv"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -65,7 +66,7 @@ func assertReportCSV(t *testing.T, name, data string) {
 		t.Fatalf("%s shape: %#v", name, records)
 	}
 	for _, field := range append(provenanceHeaders, telemetryHeaders...) {
-		if !containsString(records[0], field) {
+		if !slices.Contains(records[0], field) {
 			t.Errorf("%s missing %s", name, field)
 		}
 	}
@@ -75,15 +76,6 @@ func assertReportCSV(t *testing.T, name, data string) {
 			t.Errorf("%s missing value %q", name, value)
 		}
 	}
-}
-
-func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
 }
 
 func TestReportMetricStatePreservesParsedReset(t *testing.T) {

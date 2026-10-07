@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -33,8 +33,8 @@ func percentile(v []int64, p float64) int64 {
 	if len(v) == 0 {
 		return 0
 	}
-	x := append([]int64(nil), v...)
-	sort.Slice(x, func(i, j int) bool { return x[i] < x[j] })
+	x := slices.Clone(v)
+	slices.Sort(x)
 	n := int(math.Ceil(p*float64(len(x)))) - 1
 	if n < 0 {
 		n = 0
@@ -87,14 +87,6 @@ func statusFor(verb string, e error) int {
 		return http.StatusCreated
 	}
 	return http.StatusOK
-}
-
-func copyAnnotations(in map[string]string) map[string]string {
-	out := make(map[string]string, len(in)+1)
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
 }
 
 func trackingAnnotationsEqual(a, b map[string]string) bool {
@@ -250,7 +242,10 @@ func runPhaseWithClientsProgressOffset(
 						err = getErr
 					} else {
 						request := old.DeepCopy()
-						requestAnnotations := copyAnnotations(old.GetAnnotations())
+						requestAnnotations := request.GetAnnotations()
+						if requestAnnotations == nil {
+							requestAnnotations = make(map[string]string)
+						}
 						requestAnnotations[annotationEditor] = ids[clientIndex%len(ids)]
 						request.SetAnnotations(requestAnnotations)
 						st := time.Now()

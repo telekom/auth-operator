@@ -110,6 +110,17 @@ func TestHas(t *testing.T) {
 	}
 }
 
+func TestGetReturnsDetachedCondition(t *testing.T) {
+	obj := &testObject{conditions: []metav1.Condition{
+		{Type: string(TestConditionType), Status: metav1.ConditionTrue},
+	}}
+	got := Get(obj, TestConditionType)
+	got.Status = metav1.ConditionFalse
+	if obj.conditions[0].Status != metav1.ConditionTrue {
+		t.Fatal("mutating a retrieved condition changed the object's status")
+	}
+}
+
 func TestIsTrue(t *testing.T) {
 	tests := []struct {
 		name       string

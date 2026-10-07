@@ -108,8 +108,11 @@ detection before changing policy. Do not grow another general-purpose framework
 beside the public library.
 
 Existing migration candidates (documentation only; do not change them as part of
-this rule): `pkg/conditions/` can use Flux conditions, apimachinery condition
-helpers, and kstatus while retaining coordinated Ready-condition policy;
+this rule): `pkg/conditions/` already delegates lookup and True/False queries to
+apimachinery. Its setters retain coordinated Ready-condition policy and
+update transition times on reason/message/generation changes, unlike
+`meta.SetStatusCondition`, so replacing setters requires an explicit
+behavioral migration;
 `pkg/ssa/patchhelper.go` can be compared with Flux SSA while preserving the
 characterized compatibility policies; controller/webhook
 envtest suites should keep using native envtest with pinned absolute assets;

@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -79,9 +80,7 @@ func BuildBindingName(targetName, roleRef string) string {
 // It merges the source labels with the standard auth-operator identification labels.
 func BuildResourceLabels(sourceLabels map[string]string) map[string]string {
 	labels := make(map[string]string)
-	for k, v := range sourceLabels {
-		labels[k] = v
-	}
+	maps.Copy(labels, sourceLabels)
 	labels[ManagedByLabelStandard] = ManagedByValue
 	labels[AppNameLabel] = ManagedByValue
 	return labels

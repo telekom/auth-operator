@@ -1,6 +1,9 @@
 package conditions
 
-import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+import (
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
 
 // Getter is an interface for objects that have conditions.
 type Getter interface {
@@ -9,15 +12,9 @@ type Getter interface {
 
 // Get returns the condition with the given type from the object, or nil if not found.
 func Get(from Getter, t ConditionType) *metav1.Condition {
-	conditions := from.GetConditions()
-	if conditions == nil {
-		return nil
-	}
-
-	for _, condition := range conditions {
-		if ConditionType(condition.Type) == t {
-			return &condition
-		}
+	if condition := meta.FindStatusCondition(from.GetConditions(), string(t)); condition != nil {
+		// Keep the returned condition detached from the object's status.
+		return condition.DeepCopy()
 	}
 
 	return nil
@@ -30,18 +27,12 @@ func Has(from Getter, t ConditionType) bool {
 
 // IsTrue returns true if the condition with the given type has status True.
 func IsTrue(from Getter, t ConditionType) bool {
-	if c := Get(from, t); c != nil {
-		return c.Status == metav1.ConditionTrue
-	}
-	return false
+	return meta.IsStatusConditionTrue(from.GetConditions(), string(t))
 }
 
 // IsFalse returns true if the condition with the given type has status False.
 func IsFalse(from Getter, t ConditionType) bool {
-	if c := Get(from, t); c != nil {
-		return c.Status == metav1.ConditionFalse
-	}
-	return false
+	return meta.IsStatusConditionFalse(from.GetConditions(), string(t))
 }
 
 // IsUnknown returns true if the condition with the given type has status Unknown or does not exist.

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -203,7 +204,7 @@ func TestCreatorCleanupUnrelatedFinalizerPreserved(t *testing.T) {
 func TestCreatorCleanupFrontendBarrier(t *testing.T) {
 	plan := creatorCleanupPlan(false, true, true)
 	for _, forbidden := range []string{"admission-policies", "reinvocation-backend", "helm-uninstall", "release-sweep", "namespaces"} {
-		if containsString(plan, forbidden) {
+		if slices.Contains(plan, forbidden) {
 			t.Fatalf("unsafe phase %q in failed frontend plan: %v", forbidden, plan)
 		}
 	}
@@ -211,7 +212,7 @@ func TestCreatorCleanupFrontendBarrier(t *testing.T) {
 
 func TestCreatorCleanupPartialUninstallStillSweeps(t *testing.T) {
 	plan := creatorCleanupPlan(true, true, true)
-	if !containsString(plan, "helm-uninstall") || !containsString(plan, "release-sweep") {
+	if !slices.Contains(plan, "helm-uninstall") || !slices.Contains(plan, "release-sweep") {
 		t.Fatalf("plan = %v, want uninstall and exact sweep", plan)
 	}
 }
@@ -224,7 +225,7 @@ func TestCreatorCleanupReportsIndependentErrors(t *testing.T) {
 	if len(got) != 2 || !errors.Is(got[0], first) || !errors.Is(got[1], second) {
 		t.Fatalf("errors = %v, want both independent errors", got)
 	}
-	if !containsString(creatorCleanupPlan(true, true, true), "release-sweep") {
+	if !slices.Contains(creatorCleanupPlan(true, true, true), "release-sweep") {
 		t.Fatal("safe cleanup phases must remain available after independent errors")
 	}
 }
@@ -242,13 +243,4 @@ func TestCreatorReleaseAdmissionFrontendsAreScoped(t *testing.T) {
 	if got := creatorReleaseFullname("auth-operator-contained"); got != "auth-operator-contained" {
 		t.Fatalf("fullname = %q, want release containing chart name unchanged", got)
 	}
-}
-
-func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
 }
