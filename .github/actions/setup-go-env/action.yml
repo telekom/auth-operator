@@ -42,27 +42,10 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: Extract Go version from toolchain or go directive
-      id: go-version
-      shell: bash
-      env:
-        GO_VERSION_FILE: ${{ inputs.go-version-file }}
-      run: |
-        set -euo pipefail
-        [[ "$GO_VERSION_FILE" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "invalid go-version-file"; exit 1; }
-        GO_MOD="$GO_VERSION_FILE"
-        # Prefer toolchain directive, fall back to go directive
-        VERSION=$(grep -E '^toolchain go' "$GO_MOD" | sed 's/toolchain go//' || true)
-        if [ -z "$VERSION" ]; then
-          VERSION=$(grep -E '^go [0-9]' "$GO_MOD" | awk '{print $2}')
-        fi
-        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-        echo "Using Go version: $VERSION"
-
     - name: Setup Go
       uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
       with:
-        go-version: ${{ steps.go-version.outputs.version }}
+        go-version-file: ${{ inputs.go-version-file }}
         cache: true
         cache-dependency-path: ${{ inputs.cache-dependency-path }}
 
