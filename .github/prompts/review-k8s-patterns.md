@@ -26,7 +26,7 @@ reliability, observability, and production behavior.
 
 ### 3. Condition Management
 
-- All condition updates must use `pkg/conditions.SetCondition()`.
+- All condition updates must use `pkg/conditions.Set()`.
 - Flag any `meta.SetStatusCondition()` or direct `.Status.Conditions`
   manipulation.
 - Verify condition transitions follow the pattern:

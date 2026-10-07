@@ -24,7 +24,7 @@ in the `authorization.t-caas.telekom.com` API group.
   - JSON tags (`json:"fieldName"`)
   - References in `docs/`, design docs, and generated API reference
   - Condition types/reasons (PascalCase, no spaces)
-- Check that `pkg/conditions.SetCondition()` calls use the correct
+- Check that `pkg/conditions.Set()` calls use the correct
   condition type and reason constants — flag any string literal that
   should be a constant.
 

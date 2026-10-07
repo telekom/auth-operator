@@ -19,7 +19,7 @@ is accurate, internally consistent, and synchronized with the actual code.
 
 - List every condition type and reason constant defined in Go code.
 - Verify each one is documented in the API reference and operator guide.
-- Check that condition reasons used in `pkg/conditions.SetCondition()`
+- Check that condition reasons used in `pkg/conditions.Set()`
   calls match the documented values exactly (PascalCase, no spaces).
 
 ### 3. Helm Chart Documentation

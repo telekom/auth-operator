@@ -37,7 +37,7 @@ test/e2e/                      Ginkgo E2E tests
 6. **Standard library constants**: Use `http.MethodGet` not `"GET"`, `rbacv1.GroupName` not `"rbac.authorization.k8s.io"`.
 7. **REUSE compliance**: All new files must have SPDX headers or be covered by a glob in `REUSE.toml`.
 8. **Test patterns**: Prefer isolated kind E2E and real-apiserver envtests for integration behavior; use Ginkgo/Gomega for controller tests and standard `testing` for focused unit tests. Keep consumer-specific policy and call-site coverage, not duplicate tests of library implementations or assertions that only inspect source/config text. Target >70% coverage.
-9. **Condition management**: Use `pkg/conditions.SetCondition()` — never set conditions manually on status.
+9. **Condition management**: Use `pkg/conditions.Set()` — never set conditions manually on status.
 10. **Server-Side Apply**: Use `pkg/ssa` helpers for RBAC resources — never use `Update()` for managed objects.
 11. **Context-aware logging only**: In production controller/webhook code, derive loggers from context via `log.FromContext(ctx)` (or pass `ctx` and derive inside helpers). Do not pass raw logger instances across helper boundaries.
 12. **Tracing attributes**: For reconciler spans, include controller/resource/namespace attributes. For impersonated apply flows, add user attribute to the active span.
