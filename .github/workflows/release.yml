@@ -530,6 +530,8 @@ jobs:
 
           # Diagnose Artifactory repo accessibility
           REPO_KEY=$(echo "${ARTIFACTORY_REPO}" | cut -d'/' -f1)
+          # Secret masking does not automatically cover derived substrings.
+          echo "::add-mask::${REPO_KEY}"
           echo "Checking Artifactory storage API for repo key: ${REPO_KEY}"
           HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -u "${AF_USER}:${AF_TOKEN}" "https://${ARTIFACTORY_URL}/artifactory/api/storage/${REPO_KEY}" ) || true
           echo "Artifactory storage API HTTP status: ${HTTP_STATUS}"
