@@ -361,7 +361,7 @@ func metricDeltaCounter(before, after MetricsSnapshot, name string) Counter {
 	afterCounter := ParseMetricResponse(after.StatusCode, after.Body, name)
 	delta := CounterDelta(beforeCounter, afterCounter)
 	state := metricDeltaState(before, after)
-	// FetchMetrics normally sets Snapshot.State, but retain the more specific
+	// fetchMetrics normally sets Snapshot.State, but retain the more specific
 	// parser result when callers construct a snapshot from just its status code
 	// and body (for example, tests or alternate transport adapters).
 	switch {
@@ -1095,15 +1095,6 @@ func writeCellRun(path string, r CellRun) error {
 		return closeErr
 	}
 	return os.Rename(n, path)
-}
-func cleanupCell(ctx context.Context, cl dynamic.Interface, s resourceSpec, namespace string) error {
-	var r dynamic.ResourceInterface
-	if s.namespaced {
-		r = cl.Resource(s.gvr).Namespace(namespace)
-	} else {
-		r = cl.Resource(s.gvr)
-	}
-	return deleteOwnedCollection(ctx, r, "t-caas.telekom.com/benchmark="+benchmarkLabelValue)
 }
 func cleanupOwnedCell(ctx context.Context, base *rest.Config, s resourceSpec, namespace, runID, cell string) error {
 	cl, e := dynamic.NewForConfig(base)

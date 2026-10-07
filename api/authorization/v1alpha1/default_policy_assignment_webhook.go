@@ -150,11 +150,6 @@ func selectedPolicyAssignment(ctx context.Context, c client.Reader, selectedPoli
 	return requesterMatchesDefaultAssignment(selected.Spec.DefaultAssignment, username, groups), true, false, nil
 }
 
-func selectedPolicyMatchesRequester(ctx context.Context, c client.Reader, selectedPolicy, username string, groups []string) (bool, error) {
-	matches, _, _, err := selectedPolicyAssignment(ctx, c, selectedPolicy, username, groups)
-	return matches, err
-}
-
 func invalidDeletingPolicyRef(groupKind schema.GroupKind, objName, policyName string) error {
 	return apierrors.NewInvalid(
 		groupKind,

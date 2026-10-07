@@ -100,18 +100,6 @@ func metricDeltaState(before, after MetricsSnapshot) MetricState {
 	return MetricAvailable
 }
 
-// FetchMetrics retrieves /metrics using the credentials and TLS settings in config.
-func FetchMetrics(ctx context.Context, config *rest.Config) (MetricsSnapshot, error) {
-	if config == nil {
-		return MetricsSnapshot{State: MetricUnavailable}, fmt.Errorf("metrics: nil REST config")
-	}
-	hc, err := rest.HTTPClientFor(config)
-	if err != nil {
-		return MetricsSnapshot{State: MetricUnavailable}, fmt.Errorf("metrics HTTP client: %w", err)
-	}
-	return fetchMetrics(ctx, hc, config)
-}
-
 // fetchMetrics uses a client prepared by the caller so repeated snapshots can
 // reuse its transport and connection pool while each request remains scoped to
 // its own context.

@@ -1214,14 +1214,14 @@ func TestValidateDefaultPolicyForRequester(t *testing.T) {
 	}
 }
 
-func TestSelectedPolicyMatchesRequesterReturnsNotFound(t *testing.T) {
+func TestSelectedPolicyAssignmentReturnsNotFound(t *testing.T) {
 	scheme := runtime.NewScheme()
 	if err := AddToScheme(scheme); err != nil {
 		t.Fatalf("add scheme: %v", err)
 	}
 
 	client := fake.NewClientBuilder().WithScheme(scheme).Build()
-	matches, err := selectedPolicyMatchesRequester(context.Background(), client, "missing-policy", "alice", nil)
+	matches, _, _, err := selectedPolicyAssignment(context.Background(), client, "missing-policy", "alice", nil)
 	if err == nil {
 		t.Fatal("expected missing selected policy to return an error")
 	}
