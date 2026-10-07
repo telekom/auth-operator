@@ -362,13 +362,14 @@ func TestValidateNamespaceBindingsAllowsWellKnownTCAASLabels(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := validateNamespaceBindings(
+			err := validateNamespaceBindingsWithLabelGroups(
 				schema.GroupKind{Group: GroupVersion.Group, Kind: BindDefinitionKind},
 				"test-binddefinition",
 				[]NamespaceBinding{{
 					ClusterRoleRefs:   []string{"view"},
 					NamespaceSelector: []metav1.LabelSelector{tc.selector},
 				}},
+				nil,
 			)
 			if tc.wantError && err == nil {
 				t.Fatal("expected selector validation error, got nil")
@@ -435,7 +436,7 @@ func TestValidateNamespaceBindingsUsesConfiguredLabelGroups(t *testing.T) {
 
 func TestValidateNamespaceBindingsReportsMatchExpressionIndex(t *testing.T) {
 	kind := schema.GroupKind{Group: GroupVersion.Group, Kind: BindDefinitionKind}
-	err := validateNamespaceBindings(kind, "expression-path", []NamespaceBinding{{
+	err := validateNamespaceBindingsWithLabelGroups(kind, "expression-path", []NamespaceBinding{{
 		ClusterRoleRefs: []string{"view"},
 		NamespaceSelector: []metav1.LabelSelector{{
 			MatchExpressions: []metav1.LabelSelectorRequirement{{
@@ -443,7 +444,7 @@ func TestValidateNamespaceBindingsReportsMatchExpressionIndex(t *testing.T) {
 				Operator: metav1.LabelSelectorOpExists,
 			}},
 		}},
-	}})
+	}}, nil)
 	if err == nil {
 		t.Fatal("expected selector validation error, got nil")
 	}

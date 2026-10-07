@@ -326,9 +326,6 @@ func PlannedFullExecutionCells(q bool, concurrency []int) []Cell {
 	core := PlannedExecutionCells(false, concurrency)
 	return append(core, PlannedAuxiliaryExecutionCells(false, concurrency)...)
 }
-func resultPath(d string, c Cell) string {
-	return filepath.Join(d, cellFilename(c.RunID, c, c.Phase))
-}
 func sanitizeName(value string) string {
 	var b strings.Builder
 	for _, r := range strings.ToLower(value) {
@@ -382,27 +379,6 @@ func executionCell(o options) Cell {
 	}
 }
 
-func writeResult(p string, r Result) error {
-	if e := os.MkdirAll(filepath.Dir(p), 0o700); e != nil {
-		return e
-	}
-	t, e := os.CreateTemp(filepath.Dir(p), ".result-")
-	if e != nil {
-		return e
-	}
-	n := t.Name()
-	defer func() { _ = os.Remove(n) }()
-	x := json.NewEncoder(t)
-	x.SetIndent("", "  ")
-	if e = x.Encode(r); e != nil {
-		_ = t.Close()
-		return e
-	}
-	if closeErr := t.Close(); closeErr != nil {
-		return closeErr
-	}
-	return os.Rename(n, p)
-}
 func writePlan(dir string, cells []Cell) error {
 	if e := os.MkdirAll(dir, 0o700); e != nil {
 		return fmt.Errorf("create plan directory: %w", e)

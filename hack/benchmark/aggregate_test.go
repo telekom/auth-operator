@@ -13,7 +13,7 @@ func TestLoadResultsAndReports(t *testing.T) {
 	if err := os.Chmod(d, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	r := Result{
+	r := CellRun{
 		Cell: Cell{
 			Engine:      "map",
 			Tier:        "t1",
@@ -30,7 +30,7 @@ func TestLoadResultsAndReports(t *testing.T) {
 		InputHash:     "hash",
 		EnvironmentID: "env",
 	}
-	if e := writeResult(filepath.Join(d, "cell-run-1-map-t1-protect-enabled-create-8.json"), r); e != nil {
+	if e := writeCellRun(filepath.Join(d, "cell-run-1-map-t1-protect-enabled-create-8.json"), r); e != nil {
 		t.Fatal(e)
 	}
 	rs, e := LoadResults(d)

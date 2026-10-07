@@ -32,7 +32,12 @@ func TestFetchMetricsUsesAuthenticatedRESTConfig(t *testing.T) {
 		_, _ = w.Write([]byte("metric 3\n"))
 	}))
 	defer s.Close()
-	got, err := FetchMetrics(context.Background(), &rest.Config{Host: s.URL, BearerToken: "secret"})
+	config := &rest.Config{Host: s.URL, BearerToken: "secret"}
+	hc, err := rest.HTTPClientFor(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := fetchMetrics(context.Background(), hc, config)
 	if err != nil || got.State != MetricAvailable || got.Body != "metric 3\n" {
 		t.Fatalf("got %#v, err %v", got, err)
 	}
@@ -43,7 +48,13 @@ func TestFetchMetricsStates(t *testing.T) {
 		state MetricState
 	}{{http.StatusForbidden, MetricUnauthorized}, {http.StatusServiceUnavailable, MetricUnavailable}} {
 		s := testServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(tc.code) }))
-		got, err := FetchMetrics(context.Background(), &rest.Config{Host: s.URL})
+		config := &rest.Config{Host: s.URL}
+		hc, err := rest.HTTPClientFor(config)
+		if err != nil {
+			s.Close()
+			t.Fatal(err)
+		}
+		got, err := fetchMetrics(context.Background(), hc, config)
 		s.Close()
 		if err != nil || got.State != tc.state {
 			t.Errorf("code %d: %#v, %v", tc.code, got, err)

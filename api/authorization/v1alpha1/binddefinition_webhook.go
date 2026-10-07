@@ -506,10 +506,6 @@ func isAllowedNamespaceAdmissionSelectorKey(key string, allowedLabelGroups []str
 	return false
 }
 
-func validateNamespaceBindings(kind schema.GroupKind, name string, bindings []NamespaceBinding) error {
-	return validateNamespaceBindingsWithLabelGroups(kind, name, bindings, nil)
-}
-
 func validateNamespaceBindingsWithLabelGroups(kind schema.GroupKind, name string, bindings []NamespaceBinding, allowedLabelGroups []string) error {
 	allowedLabelGroups = namespaceAdmissionSelectorLabelGroupsOrDefault(allowedLabelGroups)
 	for i, binding := range bindings {

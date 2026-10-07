@@ -22,7 +22,7 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 )
 
-func TestCleanupCellUsesOwnedLabel(t *testing.T) {
+func TestDeleteOwnedCollectionPreservesForeignObjects(t *testing.T) {
 	s, _ := specFor("serviceaccount")
 	u := &unstructured.Unstructured{Object: map[string]interface{}{
 		apiVersionField: "v1", kindField: kindServiceAccount,
@@ -66,7 +66,8 @@ func TestCleanupCellUsesOwnedLabel(t *testing.T) {
 	})
 	_, _ = cl.Resource(s.gvr).Namespace("bench").Create(context.Background(), u, metav1.CreateOptions{})
 	_, _ = cl.Resource(s.gvr).Namespace("bench").Create(context.Background(), foreign, metav1.CreateOptions{})
-	if e := cleanupCell(context.Background(), cl, s, "bench"); e != nil {
+	if e := deleteOwnedCollection(context.Background(), cl.Resource(s.gvr).Namespace("bench"),
+		benchmarkLabelKey+"="+benchmarkLabelValue); e != nil {
 		t.Fatal(e)
 	}
 	if _, e := cl.Resource(s.gvr).Namespace("bench").Get(context.Background(), "owned", metav1.GetOptions{}); !apierrors.IsNotFound(e) {
