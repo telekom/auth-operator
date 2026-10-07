@@ -243,7 +243,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 ### Condition Management
 ```go
 import "github.com/telekom/auth-operator/pkg/conditions"
-conditions.SetCondition(obj, metav1.Condition{
+conditions.Set(obj, &metav1.Condition{
     Type: "Ready", Status: metav1.ConditionTrue, Reason: "Reconciled", Message: "Success",
 })
 ```

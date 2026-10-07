@@ -48,7 +48,7 @@ fields, unused interfaces, and incomplete plumbing.
 
 - For every new condition type or reason constant:
   1. Constant defined in `api/authorization/v1alpha1/`
-  2. Set via `pkg/conditions.SetCondition()` in reconciler
+  2. Set via `pkg/conditions.Set()` in reconciler
   3. Documented in API reference and operator guide
 - Flag condition types that are defined but never set.
 

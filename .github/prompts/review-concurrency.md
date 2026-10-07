@@ -28,7 +28,7 @@ resources and runs in leader-elected, potentially multi-replica deployments.
 
 ### 3. Condition Management
 
-- All condition updates must go through `pkg/conditions.SetCondition()`.
+- All condition updates must go through `pkg/conditions.Set()`.
 - Flag any manual `meta.SetStatusCondition()` or direct append to
   `.Status.Conditions` — this bypasses the standard condition helpers
   and can cause inconsistent condition transitions.

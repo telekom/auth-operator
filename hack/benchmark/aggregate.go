@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 )
 
 var cellResultName = regexp.MustCompile(`^cell-[a-z0-9-]+-\d+\.json$`)
@@ -18,7 +17,6 @@ func LoadResults(dir string) ([]Result, error) {
 	if e != nil {
 		return nil, e
 	}
-	sort.Strings(paths)
 	out := make([]Result, 0, len(paths))
 	for _, p := range paths {
 		if !cellResultName.MatchString(filepath.Base(p)) {

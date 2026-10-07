@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -172,7 +173,7 @@ var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func(
 						verbStrs = append(verbStrs, v.(string))
 					}
 					// Neither "update" nor "create" should be present unless "all" is used
-					if !containsGoldenVerb(verbStrs, "*") {
+					if !slices.Contains(verbStrs, "*") {
 						Expect(verbStrs).NotTo(ContainElement("update"), "update verb should be restricted")
 						Expect(verbStrs).NotTo(ContainElement("create"), "create verb should be restricted")
 					}
@@ -230,7 +231,7 @@ var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func(
 						verbStrs = append(verbStrs, v.(string))
 					}
 					// Neither "get" nor "delete" should be present unless "*" is used
-					if !containsGoldenVerb(verbStrs, "*") {
+					if !slices.Contains(verbStrs, "*") {
 						Expect(verbStrs).NotTo(ContainElement("get"), "get verb should be restricted")
 						Expect(verbStrs).NotTo(ContainElement("delete"), "delete verb should be restricted")
 					}
@@ -645,13 +646,4 @@ func checkGoldenBindDefinitionCreated(name, namespace string) bool {
 		return false
 	}
 	return strings.TrimSpace(string(output)) == statusTrue
-}
-
-func containsGoldenVerb(verbs []string, verb string) bool {
-	for _, v := range verbs {
-		if v == verb {
-			return true
-		}
-	}
-	return false
 }
