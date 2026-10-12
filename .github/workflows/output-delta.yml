@@ -453,7 +453,7 @@ jobs:
           echo "::notice::Skipping latest-tag in-step cleanup; the baseline kind cluster is deleted after artifacts are uploaded."
 
       - name: Upload main output
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: output-delta-main-output
           path: /tmp/main-output/
@@ -462,7 +462,7 @@ jobs:
 
       - name: Upload tag output
         if: steps.tag-output.outputs.tag_success == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: output-delta-tag-output
           path: /tmp/tag-output/
@@ -471,7 +471,7 @@ jobs:
 
       - name: Upload trusted controller logs
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: output-delta-trusted-controller-logs
           path: /tmp/controller-logs/
@@ -1168,7 +1168,7 @@ jobs:
           fi
 
       - name: Upload PR output
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: output-delta-pr-output
           path: /tmp/pr-output/
@@ -1177,7 +1177,7 @@ jobs:
 
       - name: Upload PR controller logs
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: output-delta-pr-controller-logs
           path: /tmp/controller-logs/
@@ -1186,7 +1186,7 @@ jobs:
 
       - name: Upload PR error summary
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: output-delta-pr-error-summary
           path: /tmp/error-summary/
@@ -1208,28 +1208,28 @@ jobs:
     steps:
       - name: Download main output
         if: needs.trusted-baseline.result == 'success'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: output-delta-main-output
           path: /tmp/main-output
 
       - name: Download tag output
         if: needs.trusted-baseline.outputs.tag_success == 'true'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: output-delta-tag-output
           path: /tmp/tag-output
 
       - name: Download PR output
         if: needs.candidate-pr.result == 'success'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: output-delta-pr-output
           path: /tmp/pr-output
 
       - name: Download PR error summary
         if: always()
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         continue-on-error: true
         with:
           name: output-delta-pr-error-summary
@@ -1374,7 +1374,7 @@ jobs:
 
       - name: Upload diff artifacts
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: output-delta-diff-output
           path: /tmp/diff-output/
@@ -1453,7 +1453,7 @@ jobs:
 
       - name: Upload output-delta comment data
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: output-delta-comment-data
           path: /tmp/comment-output/
