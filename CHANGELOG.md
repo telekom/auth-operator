@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Build with Go 1.26.10. Go 1.26.9 is affected by CVE-2026-111943 in the
+  crypto/x509 standard library package (fixed in 1.26.10).
 - Build with Go 1.26.9 and golang.org/x/net 0.61.0. Go 1.26.6 is affected by
   standard library vulnerabilities in net/http, html/template, net/textproto
   and crypto/tls (GO-2026-6617 and others, fixed in 1.26.9); x/net 0.59.0 is
