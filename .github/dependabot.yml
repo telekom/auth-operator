@@ -14,9 +14,6 @@ updates:
     # import the former path, so newer releases cannot be selected here
     # without an upstream import migration.
     ignore:
-      # Hosted Renovate App installation/access is a prerequisite BEFORE MERGE.
-      # Its native Go datasource resolves this untagged nested module via @latest.
-      - dependency-name: "github.com/open-policy-agent/frameworks/constraint"
       - dependency-name: "github.com/google/cel-go"
         versions:
           - ">= 0.32.0"

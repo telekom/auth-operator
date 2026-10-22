@@ -59,12 +59,12 @@ The hosted Renovate companion (`.github/renovate.json`) covers annotated tool
 versions and embedded source images outside native Dependabot manifests. It
 also resolves the untagged OPA constraint submodule via the Go proxy and
 refreshes native Go artifacts for patch updates within the supported Go 1.26
-line. Ordinary Go dependencies remain Dependabot-owned; the narrow Dependabot
-ignore hands only the untagged OPA constraint module to Renovate.
-**Before merging this change**, install/authorize the hosted Renovate App for
-this repository and confirm it can access the repository, so that the handover
-does not create an update-coverage gap. Configuration alone does not activate the App;
-no new secrets or privileged bot workflow are required.
+line. Existing Go dependency ownership remains with Dependabot.
+**Before relying on supplemental coverage**, install/authorize the hosted Renovate
+App for this repository and verify its dependency dashboard and first update PR.
+Only then should a separate change ignore the OPA constraint module in Dependabot.
+Configuration alone does not activate the App; no new secrets or privileged bot
+workflow are required.
 
 Keep `# renovate: datasource=... depName=...` immediately above the pin.
 Repeated pins use the same package identity. CI validates the configuration
