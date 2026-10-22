@@ -55,12 +55,50 @@ workflow actions, all three local composite actions, and the Helm chart in
 `.github/dependabot.yml`. The operator's own deployment image placeholders are
 release inputs, not third-party dependencies.
 
-Tool versions, fixture URLs, image digests and checksums in `versions.env` are
-not native Dependabot manifests. The weekly **Check Tool Updates** workflow
-reports supported tool/fixture updates; maintainers must update related pins and
-checksums together and run the relevant CI jobs. Its versions loader accepts
-digest-pinned image references (`image:tag@sha256:digest`) without evaluating
-shell syntax.
+The hosted Renovate companion (`.github/renovate.json`) covers annotated tool
+versions and embedded source images outside native Dependabot manifests. It
+also resolves the untagged OPA constraint submodule via the Go proxy and
+refreshes native Go artifacts for patch updates within the supported Go 1.26
+line. Ordinary Go dependencies remain Dependabot-owned; the narrow Dependabot
+ignore hands only the untagged OPA constraint module to Renovate.
+**Before merging this change**, install/authorize the hosted Renovate App for
+this repository and confirm it can access the repository, so that the handover
+does not create an update-coverage gap. Configuration alone does not activate the App;
+no new secrets or privileged bot workflow are required.
+
+Keep `# renovate: datasource=... depName=...` immediately above the pin.
+Repeated pins use the same package identity. CI validates the configuration
+with the pinned Renovate CLI on Node 24 and exercises its actual extraction,
+replacement, ownership rules and Go proxy resolution. To repeat these checks
+locally, set `RENOVATE_PACKAGE_DIR` to the pinned installation and run
+`node --test .github/scripts/dependency-updates.test.mjs` under Node 24.
+The weekly **Check Tool Updates**
+workflow remains an additional issue-only signal, not a promise of coverage.
+
+Independent checksums require coordinated integrity review. yq updates require
+the matching Linux/amd64 `YQ_LINUX_AMD64_SHA256`; Kyverno updates require the
+tested app/chart pair, chart archive URL and SHA-256, and the installer allowlist
+to change together. These release-availability updates require dependency
+dashboard approval; never approve or merge an incomplete integrity update.
+The beta Kubernetes 1.34.3 image is an intentional v1beta1 compatibility fixture,
+not an upgrade target. Envtest assets use their own controller-tools
+`envtest-v*` releases independently of kind node releases. Self image/chart
+versions and `controller:latest` placeholders are release-owned, not third-party
+dependencies. Cryptographic checksums and trust material are not auto-replaced.
+The Dockerfile's parameterized Go image is Dependabot-owned; its digest, Go
+directive and fallback need coordinated review. Tilt's delve `@latest` is a
+floating developer install, not a pinned version tracked by this configuration.
+Kind node versions use the Docker `kindest/node` datasource, not Kubernetes
+release tags, because a Kubernetes release does not guarantee a kind image.
+Tag-only kind version variables must stay tag-only (they also feed envtest
+fallbacks); Renovate updates existing image digests but does not append new
+digests to these values. The kubectl pin still follows Kubernetes releases.
+
+Security findings are advisory: scanner failures produce warning annotations
+and the trusted default-branch reporter updates one bot comment per current PR
+head. The reporter reads checks through GitHub APIs without executing PR code
+or downloading PR artifacts. Build, tests, lint, REUSE and license audit remain
+blocking; a successful scanner job alone does not mean a clean scan.
 
 ### 1. Find or Create an Issue
 
@@ -107,10 +145,13 @@ make test-e2e
 All changes require pull request review before merge:
 
 - ✅ At least one approving review
-- ✅ All CI checks passing (tests, linting, security scans)
+- ✅ All blocking CI checks passing (tests, linting, builds and licensing); advisory scan reports reviewed
 - ✅ Up-to-date with base branch
 - ✅ No direct pushes to main branch
 - ✅ Stale approvals dismissed on new commits
+
+Inactive issues may receive the `stale` label after 60 days, but are never
+automatically closed. Maintainers decide whether an issue is resolved.
 
 Any exceptions must be documented in the PR with justification.
 

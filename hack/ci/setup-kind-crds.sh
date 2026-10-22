@@ -29,11 +29,17 @@ load_version_default E2E_EXTERNAL_SECRETS_VERSION
 load_version_default E2E_VELERO_VERSION
 
 KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-auth-operator-e2e}
+# renovate: datasource=github-releases depName=cert-manager/cert-manager
 CERT_MANAGER_VERSION=${CERT_MANAGER_VERSION:-${E2E_CERT_MANAGER_VERSION:-v1.21.1}}
+# renovate: datasource=github-releases depName=kubernetes-sigs/gateway-api
 GATEWAY_API_VERSION=${GATEWAY_API_VERSION:-${E2E_GATEWAY_API_VERSION:-v1.6.1}}
+# renovate: datasource=github-releases depName=prometheus-operator/prometheus-operator
 PROMETHEUS_OPERATOR_VERSION=${PROMETHEUS_OPERATOR_VERSION:-${E2E_PROMETHEUS_OPERATOR_VERSION:-v0.93.1}}
+# renovate: datasource=github-releases depName=projectcalico/calico
 CALICO_VERSION=${CALICO_VERSION:-${E2E_CALICO_VERSION:-v3.32.1}}
+# renovate: datasource=github-releases depName=external-secrets/external-secrets
 EXTERNAL_SECRETS_VERSION=${EXTERNAL_SECRETS_VERSION:-${E2E_EXTERNAL_SECRETS_VERSION:-v2.9.0}}
+# renovate: datasource=github-releases depName=vmware-tanzu/velero
 VELERO_VERSION=${VELERO_VERSION:-${E2E_VELERO_VERSION:-v1.18.2}}
 
 # Use --context to avoid mutating global kubeconfig state

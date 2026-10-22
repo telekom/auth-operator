@@ -47,7 +47,7 @@ git diff --exit-code     # Verify no uncommitted generated changes
 | Build | `go build -v -o bin/auth-operator ./main.go` | ci.yml |
 | Docker | `docker build -t auth-operator:test .` | ci.yml |
 | Helm Lint | `helm lint chart/auth-operator --strict` | ci.yml |
-| Security | `govulncheck ./...` | ci.yml |
+| Security | Advisory: govulncheck, gosec, Trivy, dependency review; dependency license audit blocks | security-scan.yml, ci.yml, release.yml |
 | REUSE | License headers in all files | reuse-compliance.yml |
 
 ### E2E Testing (Requires kind + Docker)

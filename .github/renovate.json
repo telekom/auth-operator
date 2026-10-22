@@ -1,0 +1,83 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "enabledManagers": ["custom.regex", "gomod"],
+  "automerge": false,
+  "dependencyDashboard": true,
+  "prConcurrentLimit": 5,
+  "labels": ["dependencies"],
+  "ignorePaths": ["**/node_modules/**", "**/vendor/**", ".renovate-local/**"],
+  "postUpdateOptions": ["gomodTidy"],
+  "packageRules": [
+    {
+      "description": "Dependabot owns ordinary Go module updates",
+      "matchManagers": ["gomod"],
+      "enabled": false
+    },
+    {
+      "description": "Resolve the untagged OPA submodule through the Go proxy",
+      "matchManagers": ["gomod"],
+      "matchPackageNames": ["github.com/open-policy-agent/frameworks/constraint"],
+      "enabled": true
+    },
+    {
+      "description": "Refresh artifacts when patching the supported Go source floor",
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["golang"],
+      "enabled": true,
+      "rangeStrategy": "bump",
+      "allowedVersions": "<1.27.0"
+    },
+    {
+      "matchDatasources": ["docker"],
+      "pinDigests": true
+    },
+    {
+      "description": "Keep tag-only kind versions valid while updating already-pinned image digests",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["kindest/node"],
+      "pinDigests": false
+    },
+    {
+      "description": "Review independent checksums and compatibility constraints before updating",
+      "matchPackageNames": ["mikefarah/yq", "kyverno/kyverno"],
+      "dependencyDashboardApproval": true
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Annotated tool and embedded image pins outside native Dependabot manifests",
+      "managerFilePatterns": [
+        "/(^|/)(Makefile|versions\\.env|Tiltfile|kind-with-registry\\.sh)$/",
+        "/^\\.github/(workflows|actions)/.*\\.ya?ml$/",
+        "/^(hack|scripts|test)/.*\\.(sh|ya?ml|go)$/"
+      ],
+      "matchStrings": [
+        "(?:#|//) renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?(?: extractVersion=(?<extractVersion>\\S+))?\\r?\\n[^\\r\\n]*?(?<currentValue>v?\\d+\\.\\d+(?:\\.\\d+)?(?:-[0-9A-Za-z.-]+)?)(?:@(?<currentDigest>sha256:[a-f0-9]{64}))?"
+      ],
+      "versioningTemplate": "{{#if versioning}}{{{versioning}}}{{else}}semver-coerced{{/if}}",
+      "extractVersionTemplate": "{{{extractVersion}}}"
+    },
+    {
+      "customType": "regex",
+      "description": "Mutable embedded development image tag without a numeric version",
+      "managerFilePatterns": ["/^Tiltfile$/"],
+      "matchStrings": [
+        "# renovate: datasource=docker depName=(?<depName>\\S+)\\r?\\nFROM [^\\r\\n :]+:(?<currentValue>debug)(?:@(?<currentDigest>sha256:[a-f0-9]{64}))?"
+      ],
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "Embedded registry image with a major-only tag",
+      "managerFilePatterns": ["/^kind-with-registry\\.sh$/"],
+      "matchStrings": [
+        "# renovate: datasource=docker depName=(?<depName>registry)\\r?\\n[^\\r\\n]* registry:(?<currentValue>\\d+(?:\\.\\d+){0,2})(?:@(?<currentDigest>sha256:[a-f0-9]{64}))?"
+      ],
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "docker"
+    }
+  ]
+}

@@ -8,6 +8,7 @@ name="${KIND_CLUSTER:-auth-operator-chain-$$}"
 release=auth-operator-chain
 dir="$PWD/test/e2e/output/$name"
 image="${IMG:-auth-operator:e2e-test}"
+# renovate: datasource=docker depName=kindest/node
 node_image="${KIND_NODE_IMAGE:-kindest/node:v1.36.1}"
 
 if [[ ! "$name" =~ ^auth-operator-chain-[a-z0-9-]+$ ]]; then

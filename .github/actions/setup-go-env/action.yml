@@ -17,6 +17,7 @@ inputs:
   kind-version:
     description: 'Kind version to install'
     required: false
+    # renovate: datasource=go depName=sigs.k8s.io/kind
     default: 'v0.32.0'
   install-helm:
     description: 'Install Helm CLI'
@@ -25,6 +26,7 @@ inputs:
   helm-version:
     description: 'Helm version to install'
     required: false
+    # renovate: datasource=github-releases depName=helm/helm
     default: 'v4.2.3'
   install-golangci-lint:
     description: 'Install golangci-lint'
@@ -33,6 +35,7 @@ inputs:
   golangci-lint-version:
     description: 'golangci-lint version to install'
     required: false
+    # renovate: datasource=go depName=github.com/golangci/golangci-lint/v2
     default: 'v2.12.2'
   cache-dependency-path:
     description: 'Path to go.sum for cache key'

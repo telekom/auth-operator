@@ -192,6 +192,7 @@ def build_binary(comp, build_out_path):
     )
 
 dockerfile_contents = """
+# renovate: datasource=docker depName=golang
 FROM golang:1.25 as tilt-helper
 RUN  export http_proxy={proxy} \
   && export https_proxy={proxy} \
@@ -200,6 +201,7 @@ RUN  export http_proxy={proxy} \
   && go install github.com/go-delve/delve/cmd/dlv@latest \
   && chmod +x /go/bin/dlv
 
+# renovate: datasource=docker depName=gcr.io/distroless/base
 FROM gcr.io/distroless/base:debug as tilt
 WORKDIR /
 COPY --from=tilt-helper /go/bin/dlv .

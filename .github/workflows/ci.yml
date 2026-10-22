@@ -20,12 +20,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  dependency-config:
+    name: Dependency automation config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+      - name: Install pinned validation tool
+        # renovate: datasource=npm depName=renovate
+        run: npm install --prefix .renovate-validation --no-audit --no-fund renovate@44.176.3
+      - name: Validate configuration and exercise updater behavior
+        env:
+          RENOVATE_PACKAGE_DIR: ${{ github.workspace }}/.renovate-validation/node_modules/renovate
+          GITHUB_COM_TOKEN: ${{ github.token }}
+        run: |
+          .renovate-validation/node_modules/.bin/renovate-config-validator --strict .github/renovate.json
+          node --test .github/scripts/dependency-updates.test.mjs
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Test security report
+        run: node --test .github/scripts/security-report.test.cjs
 
       - name: Load versions from versions.env
         run: |
@@ -222,6 +244,8 @@ jobs:
       # govulncheck runs in the dedicated security-scan.yml workflow — not duplicated here.
 
       - name: Run Trivy vulnerability scanner
+        id: scan
+        continue-on-error: true
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: 'fs'
@@ -233,6 +257,10 @@ jobs:
           # Disable the action's DB cache: a restored-then-overlaid vuln DB can
           # produce an inconsistent state that flags already-fixed advisories.
           cache: 'false'
+
+      - name: Report scan status
+        if: always() && steps.scan.outcome != 'success'
+        run: echo '::warning title=Security scan advisory::Trivy reported findings or could not complete. See the scan logs.'
 
       - name: Upload Trivy scan results
         uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
@@ -254,6 +282,7 @@ jobs:
         uses: ./.github/actions/setup-go-env
 
       - name: Install go-licenses
+        # renovate: datasource=go depName=github.com/google/go-licenses/v2
         run: go install github.com/google/go-licenses/v2@v2.0.1
 
       - name: Check dependency licenses
