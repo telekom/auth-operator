@@ -141,7 +141,7 @@ E2E test labels: `helm`, `complex`, `ha`, `leader-election`, `integration`, `gol
 
 ## CI Checks
 
-All PRs must pass: golangci-lint, go vet, go mod tidy check, unit tests (envtest), Docker build, Helm lint, govulncheck, Trivy scan, REUSE compliance.
+All PRs must pass: golangci-lint, go vet, go mod tidy check, unit tests (envtest), Docker build, Helm lint, REUSE compliance, and dependency license audit. govulncheck, gosec, Trivy, and dependency review are advisory scans; PRs receive one bot report, release scans emit warning annotations, and complete findings/errors remain in workflow logs.
 
 ## Reusable Prompts (16 total)
 

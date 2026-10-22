@@ -26,7 +26,6 @@ jobs:
   govulncheck:
     name: Go Vulnerability Check
     runs-on: ubuntu-latest
-    continue-on-error: true # upstream panic in golang.org/x/tools@v0.46.0 vs Go 1.26 (ForEachElement on *types.TypeParam)
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -50,12 +49,22 @@ jobs:
         run: grep -v '^#' versions.env | grep -v '^$' >> "$GITHUB_ENV"
 
       - name: Install govulncheck
+        id: install
+        continue-on-error: true
         run: go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
 
       - name: Run govulncheck
+        id: scan
+        continue-on-error: true
         run: |
-          govulncheck ./...
-          govulncheck -tags=e2e ./test/e2e ./test/utils
+          status=0
+          if ! govulncheck ./...; then status=1; fi
+          if ! govulncheck -tags=e2e ./test/e2e ./test/utils; then status=1; fi
+          exit "$status"
+
+      - name: Report scan status
+        if: always() && (steps.install.outcome != 'success' || steps.scan.outcome != 'success')
+        run: echo '::warning title=Security scan advisory::govulncheck reported findings or could not complete. See the scan logs.'
 
   gosec:
     name: Go Security Checker
@@ -86,10 +95,18 @@ jobs:
         run: grep -v '^#' versions.env | grep -v '^$' >> "$GITHUB_ENV"
 
       - name: Install gosec
+        id: install
+        continue-on-error: true
         run: go install github.com/securego/gosec/v2/cmd/gosec@${{ env.GOSEC_VERSION }}
 
       - name: Run gosec
+        id: scan
+        continue-on-error: true
         run: gosec -fmt sarif -out gosec-results.sarif -exclude=G104,G304 ./...
+
+      - name: Report scan status
+        if: always() && (steps.install.outcome != 'success' || steps.scan.outcome != 'success')
+        run: echo '::warning title=Security scan advisory::gosec reported findings or could not complete. See the scan logs.'
 
       - name: Upload gosec results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
@@ -109,6 +126,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Run Trivy vulnerability scanner (filesystem)
+        id: scan
+        continue-on-error: true
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           version: 'v0.74.0'
@@ -121,6 +140,10 @@ jobs:
           # Disable the action's DB cache: a restored-then-overlaid vuln DB can
           # produce an inconsistent state that flags already-fixed advisories.
           cache: 'false'
+
+      - name: Report scan status
+        if: always() && steps.scan.outcome != 'success'
+        run: echo '::warning title=Security scan advisory::Trivy filesystem scan reported findings or could not complete. See the scan logs.'
 
       - name: Upload Trivy scan results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
@@ -155,6 +178,8 @@ jobs:
             -t auth-operator:scan .
 
       - name: Run Trivy vulnerability scanner (image)
+        id: scan
+        continue-on-error: true
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           version: 'v0.74.0'
@@ -164,6 +189,10 @@ jobs:
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
           cache: 'false'
+
+      - name: Report scan status
+        if: always() && steps.scan.outcome != 'success'
+        run: echo '::warning title=Security scan advisory::Trivy image scan reported findings or could not complete. See the scan logs.'
 
       - name: Upload Trivy scan results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
@@ -191,28 +220,43 @@ jobs:
         run: |
           helm template auth-operator ./chart/auth-operator \
             --set image.tag=v1.0.0 \
-            > /tmp/helm-rendered.yaml
+            > helm-rendered.yaml
 
       - name: Report Trivy MEDIUM Helm findings
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        id: medium-scan
         continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: 'config'
-          scan-ref: '/tmp/helm-rendered.yaml'
+          scan-ref: 'helm-rendered.yaml'
           format: 'table'
           severity: 'MEDIUM'
-          exit-code: '0'
+          exit-code: '1'
           trivyignores: '.trivyignore'
 
+      - name: Report MEDIUM Helm scan status
+        if: always() && steps.medium-scan.outcome != 'success'
+        run: echo '::warning title=Security scan advisory::Trivy Helm MEDIUM scan reported findings or could not complete. See the scan logs.'
+
       - name: Enforce Trivy MEDIUM, HIGH, and CRITICAL Helm findings
+        id: severity-scan
+        continue-on-error: true
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: 'config'
-          scan-ref: '/tmp/helm-rendered.yaml'
+          scan-ref: 'helm-rendered.yaml'
           format: 'table'
           severity: 'CRITICAL,HIGH,MEDIUM'
           exit-code: '1'
           trivyignores: '.trivyignore'
+
+      - name: Report severity Helm scan status
+        if: always() && steps.severity-scan.outcome != 'success'
+        run: echo '::warning title=Security scan advisory::Trivy Helm HIGH/CRITICAL scan reported findings or could not complete. See the scan logs.'
+
+      - name: Remove rendered chart
+        if: always()
+        run: rm -f helm-rendered.yaml
 
   dependency-review:
     name: Dependency Review
@@ -227,6 +271,8 @@ jobs:
 
       - name: Dependency Review
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        id: scan
+        continue-on-error: true
         with:
           fail-on-severity: high
           # LicenseRef-scancode-google-patent-license-golang is the Google patent
@@ -240,3 +286,7 @@ jobs:
             Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, ISC, CC0-1.0,
             LicenseRef-scancode-google-patent-license-golang,
             LicenseRef-bad-apache-2.0-bsd-3-clause
+
+      - name: Report scan status
+        if: always() && steps.scan.outcome != 'success'
+        run: echo '::warning title=Security scan advisory::Dependency review reported findings or could not complete. See the scan logs.'

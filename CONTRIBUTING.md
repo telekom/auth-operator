@@ -55,12 +55,36 @@ workflow actions, all three local composite actions, and the Helm chart in
 `.github/dependabot.yml`. The operator's own deployment image placeholders are
 release inputs, not third-party dependencies.
 
-Tool versions, fixture URLs, image digests and checksums in `versions.env` are
-not native Dependabot manifests. The weekly **Check Tool Updates** workflow
-reports supported tool/fixture updates; maintainers must update related pins and
-checksums together and run the relevant CI jobs. Its versions loader accepts
-digest-pinned image references (`image:tag@sha256:digest`) without evaluating
-shell syntax.
+GitHub Dependabot is the only dependency updater. Tool versions, workflow inputs
+and images embedded in source are outside its supported manifest formats and
+require manual review. The weekly **Check Tool Updates** workflow provides an
+issue-only signal for selected tools, not complete automatic update coverage.
+The untagged OPA constraint submodule may need a manual Go-proxy pseudo-version
+update when Dependabot selects an unrelated parent-module release.
+
+Independent checksums require coordinated integrity review. yq updates require
+the matching Linux/amd64 `YQ_LINUX_AMD64_SHA256`; Kyverno updates require the
+tested app/chart pair, chart archive URL and SHA-256, and the installer allowlist
+to change together. Never approve or merge an incomplete integrity update.
+The beta Kubernetes 1.34.3 image is an intentional v1beta1 compatibility fixture,
+not an upgrade target. Envtest assets use their own controller-tools
+`envtest-v*` releases independently of kind node releases. Self image/chart
+versions and `controller:latest` placeholders are release-owned, not third-party
+dependencies. Cryptographic checksums and trust material are not auto-replaced.
+The Dockerfile's parameterized Go image is Dependabot-owned; its digest, Go
+directive and fallback need coordinated review. Tilt's delve `@latest` is a
+floating developer install, not a pinned version tracked by this configuration.
+Kind node versions must exist as published Docker `kindest/node` images, not just Kubernetes
+release tags, because a Kubernetes release does not guarantee a kind image.
+Tag-only kind version variables must stay tag-only (they also feed envtest
+fallbacks); keep existing image digests synchronized without appending digests
+to tag-only values. The kubectl pin still follows Kubernetes releases.
+
+Security findings are advisory: scanner failures produce warning annotations
+and the trusted default-branch reporter updates one bot comment per current PR
+head. The reporter reads checks through GitHub APIs without executing PR code
+or downloading PR artifacts. Build, tests, lint, REUSE and license audit remain
+blocking; a successful scanner job alone does not mean a clean scan.
 
 ### 1. Find or Create an Issue
 
@@ -107,10 +131,13 @@ make test-e2e
 All changes require pull request review before merge:
 
 - ✅ At least one approving review
-- ✅ All CI checks passing (tests, linting, security scans)
+- ✅ All blocking CI checks passing (tests, linting, builds and licensing); advisory scan reports reviewed
 - ✅ Up-to-date with base branch
 - ✅ No direct pushes to main branch
 - ✅ Stale approvals dismissed on new commits
+
+Inactive issues may receive the `stale` label after 60 days, but are never
+automatically closed. Maintainers decide whether an issue is resolved.
 
 Any exceptions must be documented in the PR with justification.
 
