@@ -55,31 +55,17 @@ workflow actions, all three local composite actions, and the Helm chart in
 `.github/dependabot.yml`. The operator's own deployment image placeholders are
 release inputs, not third-party dependencies.
 
-The hosted Renovate companion (`.github/renovate.json`) covers annotated tool
-versions and embedded source images outside native Dependabot manifests. It
-also resolves the untagged OPA constraint submodule via the Go proxy and
-refreshes native Go artifacts for patch updates within the supported Go 1.26
-line. Existing Go dependency ownership remains with Dependabot.
-**Before relying on supplemental coverage**, install/authorize the hosted Renovate
-App for this repository and verify its dependency dashboard and first update PR.
-Only then should a separate change ignore the OPA constraint module in Dependabot.
-Configuration alone does not activate the App; no new secrets or privileged bot
-workflow are required.
-
-Keep `# renovate: datasource=... depName=...` immediately above the pin.
-Repeated pins use the same package identity. CI validates the configuration
-with the pinned Renovate CLI on Node 24 and exercises its actual extraction,
-replacement, ownership rules and Go proxy resolution. To repeat these checks
-locally, set `RENOVATE_PACKAGE_DIR` to the pinned installation and run
-`node --test .github/scripts/dependency-updates.test.mjs` under Node 24.
-The weekly **Check Tool Updates**
-workflow remains an additional issue-only signal, not a promise of coverage.
+GitHub Dependabot is the only dependency updater. Tool versions, workflow inputs
+and images embedded in source are outside its supported manifest formats and
+require manual review. The weekly **Check Tool Updates** workflow provides an
+issue-only signal for selected tools, not complete automatic update coverage.
+The untagged OPA constraint submodule may need a manual Go-proxy pseudo-version
+update when Dependabot selects an unrelated parent-module release.
 
 Independent checksums require coordinated integrity review. yq updates require
 the matching Linux/amd64 `YQ_LINUX_AMD64_SHA256`; Kyverno updates require the
 tested app/chart pair, chart archive URL and SHA-256, and the installer allowlist
-to change together. These release-availability updates require dependency
-dashboard approval; never approve or merge an incomplete integrity update.
+to change together. Never approve or merge an incomplete integrity update.
 The beta Kubernetes 1.34.3 image is an intentional v1beta1 compatibility fixture,
 not an upgrade target. Envtest assets use their own controller-tools
 `envtest-v*` releases independently of kind node releases. Self image/chart
@@ -88,11 +74,11 @@ dependencies. Cryptographic checksums and trust material are not auto-replaced.
 The Dockerfile's parameterized Go image is Dependabot-owned; its digest, Go
 directive and fallback need coordinated review. Tilt's delve `@latest` is a
 floating developer install, not a pinned version tracked by this configuration.
-Kind node versions use the Docker `kindest/node` datasource, not Kubernetes
+Kind node versions must exist as published Docker `kindest/node` images, not just Kubernetes
 release tags, because a Kubernetes release does not guarantee a kind image.
 Tag-only kind version variables must stay tag-only (they also feed envtest
-fallbacks); Renovate updates existing image digests but does not append new
-digests to these values. The kubectl pin still follows Kubernetes releases.
+fallbacks); keep existing image digests synchronized without appending digests
+to tag-only values. The kubectl pin still follows Kubernetes releases.
 
 Security findings are advisory: scanner failures produce warning annotations
 and the trusted default-branch reporter updates one bot comment per current PR

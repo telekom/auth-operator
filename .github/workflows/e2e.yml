@@ -464,7 +464,6 @@ jobs:
       - name: Setup kubectl
         uses: azure/setup-kubectl@bda439f5f36b99b262ebdcd3613869bddb064c8e # v5.2.0
         with:
-          # renovate: datasource=github-releases depName=kubernetes/kubernetes
           version: v1.36.2
 
       - name: Run full chain E2E tests

@@ -20,25 +20,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  dependency-config:
-    name: Dependency automation config
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '24'
-      - name: Install pinned validation tool
-        # renovate: datasource=npm depName=renovate
-        run: npm install --prefix .renovate-validation --no-audit --no-fund renovate@44.176.3
-      - name: Validate configuration and exercise updater behavior
-        env:
-          RENOVATE_PACKAGE_DIR: ${{ github.workspace }}/.renovate-validation/node_modules/renovate
-          GITHUB_COM_TOKEN: ${{ github.token }}
-        run: |
-          .renovate-validation/node_modules/.bin/renovate-config-validator --strict .github/renovate.json
-          node --test .github/scripts/dependency-updates.test.mjs
-
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -282,7 +263,6 @@ jobs:
         uses: ./.github/actions/setup-go-env
 
       - name: Install go-licenses
-        # renovate: datasource=go depName=github.com/google/go-licenses/v2
         run: go install github.com/google/go-licenses/v2@v2.0.1
 
       - name: Check dependency licenses

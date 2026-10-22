@@ -28,7 +28,6 @@ export KYVERNO_VERSION
 export KYVERNO_CHART_VERSION
 export KYVERNO_CHART_URL
 export KYVERNO_CHART_SHA256
-# renovate: datasource=docker depName=kindest/node
 KIND_K8S_VERSION ?= v1.36.1
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 # Pin it separately because setup-envtest and kindest/node publish patch releases independently.

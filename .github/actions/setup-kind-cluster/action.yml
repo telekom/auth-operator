@@ -18,7 +18,6 @@ inputs:
   k8s-version:
     description: 'Kubernetes version for the cluster'
     required: false
-    # renovate: datasource=docker depName=kindest/node
     default: 'v1.36.1'
   wait-timeout:
     description: 'Timeout for cluster to be ready'
