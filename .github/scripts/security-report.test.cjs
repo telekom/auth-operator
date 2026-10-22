@@ -16,7 +16,7 @@ function fixture() {
     pulls: [pr], comments: [],
     runs: [{ id: 3, name: 'Security Scan' }, { id: 1, name: 'Security Scan' }],
     jobs: [{ name: 'govulncheck', conclusion: 'success', html_url: 'https://github.com/logs', check_run_url: 'https://api.github.com/checks/4' }],
-    annotations: [{ title: 'Security scan advisory', message: '<script>@someone|finding</script>', annotation_level: 'warning' }],
+    annotations: [{ title: 'Security scan advisory', message: '<ScRiPt>@someone|finding</SCRIPT>', annotation_level: 'warning' }],
   };
   const endpoint = key => Object.assign(() => {}, { key });
   const github = {
@@ -49,8 +49,8 @@ test('creates one escaped advisory report using the newest run', async () => {
   assert.equal(f.posted.length, 1);
   assert.equal(f.posted[0].method, 'create');
   assert.match(f.posted[0].body, /success; findings or scanner error \(advisory\)/);
-  assert.match(f.posted[0].body, /&lt;script&gt;&#64;someone&#124;finding/);
-  assert.doesNotMatch(f.posted[0].body, /<script>|@someone/);
+  assert.match(f.posted[0].body, /&lt;ScRiPt&gt;&#64;someone&#124;finding&lt;\/SCRIPT&gt;/);
+  assert.doesNotMatch(f.posted[0].body, /<script>|@someone/i);
 });
 
 test('accepts both CI and Security Scan workflow runs', async () => {
