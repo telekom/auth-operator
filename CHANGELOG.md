@@ -7,51 +7,184 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0-rc.21] — Pre-release
+
+### CI
+
+- Security scanner findings and errors are now advisory: they produce warnings
+  and one current-head PR comment instead of failing CI. Build, test, lint,
+  REUSE and license gates stay blocking. Dependency tracking uses native GitHub
+  Dependabot only; issue auto-close is disabled (#609).
+
+## [0.5.0-rc.20] — Pre-release
+
 ### Security
 
 - Build with Go 1.26.10. Go 1.26.9 is affected by CVE-2026-111943 in the
-  crypto/x509 standard library package (fixed in 1.26.10).
+  crypto/x509 standard library package (fixed in 1.26.10) (#608).
+
+## [0.5.0-rc.19] — Pre-release
+
+No GitHub release was published for this tag: the release image scan failed.
+rc.20 (Go 1.26.10, CVE-2026-111943) passed it.
+
+### Security
+
 - Build with Go 1.26.9 and golang.org/x/net 0.61.0. Go 1.26.6 is affected by
   standard library vulnerabilities in net/http, html/template, net/textproto
   and crypto/tls (GO-2026-6617 and others, fixed in 1.26.9); x/net 0.59.0 is
-  affected by GO-2026-6617 (fixed in 0.60.0).
+  affected by GO-2026-6617 (fixed in 0.60.0) (#606).
 
-### Fixed
+### Changed
 
-- Select compatible namespace ownership on CREATE using the request name and
-  submitted labels instead of merging alternative selector grants. Reject
-  ambiguous derivation so multiple pinned add-on terms cannot choose the wrong
-  add-on identity based on selector order.
-- Preserve exact-ownership ServiceAccount namespace UPDATE fallback when a
-  subject-matching BindDefinition only contains unrelated namespace selectors.
-  Unchanged updates no longer derive labels from selectors that do not match.
-- Give add-on ownership the same non-platform migration behavior as third-party
-  ownership: protected-label bypass principals with TDG migration enabled can
-  reclassify among tenant, third-party and add-on categories, replacing identity
-  labels. Legacy non-platform namespaces can be adopted as add-ons; platform
-  transitions and ordinary-user reclassification remain denied.
-- Require BindDefinition and RestrictedBindDefinition namespace-selector terms
-  targeting add-ons to pin a single non-empty add-on name. Broad owner
-  `Exists`/`NotIn` terms must pin an identity or explicitly exclude add-ons.
-  Namespace webhooks independently block unpinned selectors for add-on
-  operations, including legacy BindDefinitions and unchanged ownership updates.
-  **Security tightening:** replace broad add-on grants with separate pinned
-  terms before upgrading; metadata-only spec-validation fast paths remain.
-- Let BindDefinitions become ready after applying bindings for explicitly external
-  ServiceAccounts, even before their provider creates them. Missing external
-  subjects remain visible in status without deadlocking providers that depend on
-  their RBAC being ready.
+- Dependency and GitHub Actions bumps (#602, #604, #607).
+
+## [0.5.0-rc.18] — Pre-release
+
+### Documentation
+
+- Removed internal deployment references, the architecture diagrams and an
+  unreferenced requirements document from the public repository; examples use
+  reserved domains. The release workflow reads the Artifactory location from
+  repository secrets (#597, #598).
+
+### Refactored
+
+- Reuse standard library and apimachinery helpers for collections and
+  conditions; remove test-only adapters and obsolete benchmark checks; use
+  native `actions/setup-go` Go version detection. No behavior change (#594,
+  #595, #596).
+
+## [0.5.0-rc.17] — Pre-release
+
+### Refactored
+
+- Adopt `t-caas-go-library/certrotation` for webhook certificate rotation (#589).
+- Remove redundant SSA tests and forwarding helpers left after the library
+  adoption (#593).
+
+## [0.5.0-rc.16] — Pre-release
 
 ### Added
 
 - Add `addon` namespace ownership with the `t-caas.telekom.com/addon` identity
   label, selector-derived ownership and ServiceAccount inheritance. Authorized
   updates preserve immutable ownership; add-on namespaces are not implicitly
-  deletion-protected.
+  deletion-protected (#592).
+
+### Fixed
+
+- Select compatible namespace ownership on CREATE using the request name and
+  submitted labels instead of merging alternative selector grants. Reject
+  ambiguous derivation so multiple pinned add-on terms cannot choose the wrong
+  add-on identity based on selector order (#592).
+- Preserve exact-ownership ServiceAccount namespace UPDATE fallback when a
+  subject-matching BindDefinition only contains unrelated namespace selectors.
+  Unchanged updates no longer derive labels from selectors that do not match
+  (#592).
+- Give add-on ownership the same non-platform migration behavior as third-party
+  ownership: protected-label bypass principals with TDG migration enabled can
+  reclassify among tenant, third-party and add-on categories, replacing identity
+  labels. Legacy non-platform namespaces can be adopted as add-ons; platform
+  transitions and ordinary-user reclassification remain denied (#592).
+- Require BindDefinition and RestrictedBindDefinition namespace-selector terms
+  targeting add-ons to pin a single non-empty add-on name. Broad owner
+  `Exists`/`NotIn` terms must pin an identity or explicitly exclude add-ons.
+  Namespace webhooks independently block unpinned selectors for add-on
+  operations, including legacy BindDefinitions and unchanged ownership updates.
+  **Security tightening:** replace broad add-on grants with separate pinned
+  terms before upgrading; metadata-only spec-validation fast paths remain (#592).
+
+### Refactored
+
+- Adopt the `t-caas-go-library` SSA, patch, rate-limit, namespace-selector and
+  discovery-tracker packages (#580, #590).
+
+## [0.5.0-rc.15] — Pre-release
+
+### Changed
+
+- Go dependency bumps (#591).
+
+## [0.5.0-rc.14] — Pre-release
+
+### Tests
+
+- Characterization tests for SSA, webhook/discovery and the certificate,
+  condition and tracing platform code ahead of the library migration (#586,
+  #587, #588).
+
+## [0.5.0-rc.13] — Pre-release
+
+### Refactored
+
+- Remove unused E2E, benchmark and cleanup helpers and prefer the standard
+  library (#581).
+
+### Changed
+
+- Dependency and GitHub Actions bumps (#583, #584, #585).
+
+### Documentation
+
+- Contributor guidance requires reuse of upstream libraries before writing
+  helpers (#582).
+
+## [0.5.0-rc.12] — Pre-release
+
+### Fixed
+
+- Let BindDefinitions become ready after applying bindings for explicitly external
+  ServiceAccounts, even before their provider creates them. Missing external
+  subjects remain visible in status without deadlocking providers that depend on
+  their RBAC being ready (#570).
+- Skip unchanged RoleBinding and ClusterRoleBinding applies when the
+  auth-operator field manager already owns the desired fields, so a steady-state
+  reconciliation sends no writes (#577).
+
+### Changed
+
+- Dependency and GitHub Actions bumps (#572, #573, #578, #579).
+
+## [0.5.0-rc.11] — Pre-release
+
+### Added
+
+- Authorization webhook bridge for BindDefinition RoleBindings opted in with
+  `spec.roleBindings[].authorizeBeforeBinding: true`: `/authorize` grants the
+  access before the RoleBinding exists. Opt-in CRD field and new metric; the
+  API-server authorization webhook must be configured separately (#567).
+
+### Security
+
+- Remove the vulnerable runtime tzdata layer, provide a writable metrics
+  directory for the scratch runtime image, and run release and security scans
+  with the current Trivy engine (#571).
+
+## [0.5.0-rc.10] — Pre-release
+
+No GitHub release was published for this tag; rc.11 repairs the release image
+and scans.
+
+### Changed
+
+- Dependency and GitHub Actions bumps, including `google.golang.org/grpc`
+  1.84.0 and `k8s.io/streaming` 0.37.1 (#560, #561, #562, #565).
+
+### Tests
+
+- End-to-end test for protected namespace admission and access with a custom
+  allowed label domain (#564).
+
+## [0.5.0-rc.9] — Pre-release
+
+### Added
+
 - Opt-in creator tracking through Kubernetes `MutatingAdmissionPolicy`, with
   creator and contributor annotations, protected update behavior, and native
   Kubernetes and Kyverno examples. Performance measurements and the default
-  decision remain pending; see `docs/creator-tracking.md`.
+  decision remain pending; see `docs/creator-tracking.md` (#536, #541, #542,
+  #544).
 - Namespace deletion protection: platform-owned namespaces
   (`t-caas.telekom.com/owner=platform`) and namespaces opted in via the
   `t-caas.telekom.com/deletion-protection=enabled` label can only be deleted
@@ -67,7 +200,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`kubernetes-admin`, `system:masters`, bypass ServiceAccounts) can no longer
   delete protected namespaces without the annotation, and the annotation never
   unlocks system namespaces; disable via
-  `namespaceDeletionProtection.enabled=false` for emergency rollback.
+  `namespaceDeletionProtection.enabled=false` for emergency rollback (#535).
+
+### Fixed
+
+- Accept the built-in `t-caas.telekom.com/protected` selector key even when
+  custom namespace-selector label domains replace the default (#563).
+- API discovery reports errors and empty results as unchanged, keeps the
+  previous cache on an empty refresh, and no longer duplicates core `v1`
+  entries (#549).
+
+### Changed
+
+- Dependency and GitHub Actions bumps (#537, #538, #539, #540, #545, #546,
+  #547, #548, #550, #551, #553, #555, #556, #558).
+
+### CI
+
+- Fix the scheduled tool update check for digest-pinned images, enable
+  indirect Go dependency updates, and keep `github.com/google/cel-go` below
+  0.32.0, which moved to the `cel.dev/cel-go` module path (#557, #559).
+
+## [0.5.0-rc.8] — Pre-release
+
+### Added
+
+- `spec.externalServiceAccountRefs` on BindDefinition: listed ServiceAccounts
+  are used as binding subjects but never created, adopted, updated or deleted
+  (#533).
+- Configurable namespace-selector label groups for BindDefinition and
+  RestrictedBindDefinition admission (webhook flag and Helm value), defaulting
+  to `t-caas.telekom.com` (#531).
+
+### Fixed
+
+- Keep BindDefinitions ready when an external SSA manager (for example Flux)
+  takes over label fields of a generated ServiceAccount: the ServiceAccount is
+  reclassified as external and the takeover is reported through a condition,
+  event, annotation and metric (#532).
+- Allow `t-caas.telekom.com/*` keys in BindDefinition namespace selectors so
+  releases using `t-caas.telekom.com/protected` can be rolled back (#530).
+- Evaluate `t-caas.telekom.com/protected` from the submitted Namespace on
+  CREATE, keep `DoesNotExist` selectors from authorizing protected namespaces,
+  and make the protected classification immutable for non-bypass identities
+  (#534).
+
+### Security
+
+- Build with Go 1.26.6 and golang.org/x/mod 0.40.0 for standard library
+  advisories and CVE-2026-56864/CVE-2026-56865 (#529).
+
+### Changed
+
+- Dependency, base image and GitHub Actions bumps (#524, #525, #526, #527, #528).
 
 ## [0.5.0-rc.7] — Pre-release
 
@@ -248,7 +433,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - CI release workflows for SBOM attestation and image signature verification
 
-[Unreleased]: https://github.com/telekom/auth-operator/compare/v0.5.0-rc.7...HEAD
+[Unreleased]: https://github.com/telekom/auth-operator/compare/v0.5.0-rc.21...HEAD
+[0.5.0-rc.21]: https://github.com/telekom/auth-operator/compare/v0.5.0-rc.20...v0.5.0-rc.21
+[0.5.0-rc.20]: https://github.com/telekom/auth-operator/compare/v0.5.0-rc.19...v0.5.0-rc.20
+[0.5.0-rc.19]: https://github.com/telekom/auth-operator/compare/v0.5.0-rc.18...v0.5.0-rc.19
+[0.5.0-rc.18]: https://github.com/telekom/auth-operator/compare/v0.5.0-rc.17...v0.5.0-rc.18
+[0.5.0-rc.17]: https://github.com/telekom/auth-operator/compare/v0.5.0-rc.16...v0.5.0-rc.17
+[0.5.0-rc.16]: https://github.com/telekom/auth-operator/compare/v0.5.0-rc.15...v0.5.0-rc.16
+[0.5.0-rc.15]: https://github.com/telekom/auth-operator/compare/v0.5.0-rc.14...v0.5.0-rc.15
+[0.5.0-rc.14]: https://github.com/telekom/auth-operator/compare/v0.5.0-rc.13...v0.5.0-rc.14
+[0.5.0-rc.13]: https://github.com/telekom/auth-operator/compare/v0.5.0-rc.12...v0.5.0-rc.13
+[0.5.0-rc.12]: https://github.com/telekom/auth-operator/compare/v0.5.0-rc.11...v0.5.0-rc.12
+[0.5.0-rc.11]: https://github.com/telekom/auth-operator/compare/v0.5.0-rc.10...v0.5.0-rc.11
+[0.5.0-rc.10]: https://github.com/telekom/auth-operator/compare/v0.5.0-rc.9...v0.5.0-rc.10
+[0.5.0-rc.9]: https://github.com/telekom/auth-operator/compare/v0.5.0-rc.8...v0.5.0-rc.9
+[0.5.0-rc.8]: https://github.com/telekom/auth-operator/compare/v0.5.0-rc.7...v0.5.0-rc.8
 [0.5.0-rc.7]: https://github.com/telekom/auth-operator/compare/v0.5.0-rc.6...v0.5.0-rc.7
 [0.5.0-rc.6]: https://github.com/telekom/auth-operator/compare/v0.5.0-rc.5...v0.5.0-rc.6
 [0.5.0-rc.5]: https://github.com/telekom/auth-operator/compare/v0.5.0-rc.4...v0.5.0-rc.5
