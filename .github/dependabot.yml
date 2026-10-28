@@ -176,6 +176,10 @@ updates:
         update-types:
           - "minor"
           - "patch"
+      docker-digests:
+        group-by: dependency-name
+        patterns:
+          - "*"
 
   # Helm Charts (auth-operator chart dependencies)
   - package-ecosystem: "helm"
