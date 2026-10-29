@@ -40,6 +40,36 @@ controller can manage namespace lifecycle; add-on namespaces are not implicitly
 deletion-protected. See the [namespace label contract](api-reference/namespace-ownership.md)
 for validation, migration, and deletion-protection rules.
 
+## Temporary emergency namespace access
+
+An approved temporary emergency session can authorize namespace operations even
+when admission retains the original OIDC identity. For a namespace with valid
+`owner=tenant` and non-empty `tenant` labels, the webhooks submit a fresh
+SubjectAccessReview for `use` on resource `escalationguards`, API group
+`breakglass.t-caas.telekom.com`, resource name `platform-emergency`. The review
+preserves the username, UID, groups and extra claims. It does not query the
+namespace itself, so an authorization webhook does not recurse on that action.
+
+This permission is an administrative trust boundary. Kubernetes `cluster-admin`
+already includes it. Do not delegate it to ordinary tenant roles. The operator
+does not grant it or issue sessions. The cluster authorization chain must include
+the temporary-access service; that service must expire and revoke its grants.
+The operator caches no result. Configure the API server authorization-webhook
+cache duration to meet the required revocation bound.
+
+The permission allows CREATE, UPDATE and DELETE only for valid tenant-owned
+namespaces across the target cluster. It does not infer a configured tenant from
+requester groups. An optional `protected` label must equal the tenant identity. It does
+not admit platform, add-on, third-party or system namespace operations. Ownership
+labels remain immutable. Namespace deletion protection and its explicit
+`allow-deletion` confirmation remain in force, including hard system-namespace
+denials. Normal Kubernetes resource authorization still applies independently.
+Denied, failed, contradictory or incomplete reviews do not grant access.
+
+The webhook ServiceAccount needs `create` on `subjectaccessreviews`. Deploy the
+updated chart or generated RBAC with the binary; do not rely on optional metrics
+authentication permissions. No DebugSession API permission is added.
+
 ## Group Mapping
 
 Choose group names appropriate for your identity provider and use the exact

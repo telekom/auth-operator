@@ -89,6 +89,13 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 		return *decodeResponse
 	}
 
+	// Preserve explicit tenant ownership for an effective emergency identity.
+	// The immutable-label check above and validator deletion guards still apply.
+	if emergencyTenantAuthorization(ctx, m.Client, req, ns) {
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
+		return admission.Allowed("Emergency tenant namespace authorization")
+	}
+
 	// Collect labels from matching BindDefinitions.
 	labelsToAdd, namespaceBindingMatched, listErr := m.collectBindDefinitionLabels(ctx, ns, req.UserInfo.Username, userGroups, saInfo, unchangedNamespace)
 	if errors.Is(listErr, errAmbiguousNamespaceOwnership) {

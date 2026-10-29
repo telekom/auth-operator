@@ -431,6 +431,11 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 		return admission.Allowed("")
 	}
 
+	if emergencyTenantAuthorization(ctx, v.Client, req, ns) {
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
+		return admission.Allowed("Emergency tenant namespace authorization")
+	}
+
 	// Last resort: if the user is a ServiceAccount performing CREATE/UPDATE, check if
 	// its source namespace has the same tracked ownership labels as the target namespace (issue #202).
 	// This is restricted to CREATE/UPDATE — DELETE is intentionally excluded.
