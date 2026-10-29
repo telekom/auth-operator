@@ -142,6 +142,13 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 		return admission.Allowed("Explicit namespace binding matched")
 	}
 
+	// Preserve explicit tenant ownership for an effective emergency identity.
+	// The immutable-label check above and validator deletion guards still apply.
+	if emergencyTenantAuthorization(ctx, m.Client, req, ns) {
+		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
+		return admission.Allowed("Emergency tenant namespace authorization")
+	}
+
 	// If no labels to add, deny the request with a warning
 	logger.V(1).Info("namespace mutation denied - no labels matched", "namespace", req.Name, "username", req.UserInfo.Username)
 	metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultDenied).Inc()

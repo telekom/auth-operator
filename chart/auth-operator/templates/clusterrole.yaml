@@ -183,6 +183,13 @@ metadata:
     app.kubernetes.io/component: webhook-server
   {{- include "auth-operator.labels" . | nindent 4 }}
 rules:
+# Review the original admission identity for temporary emergency namespace access.
+- apiGroups:
+  - authorization.k8s.io
+  resources:
+  - subjectaccessreviews
+  verbs:
+  - create
 # --- Namespace reads (WebhookAuthorizer) ---
 - apiGroups:
   - ""
