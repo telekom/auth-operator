@@ -382,7 +382,7 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 			continue
 		}
 
-		hasNamespaceBindings = hasNamespaceBindings || len(bindDef.Spec.RoleBindings) > 0
+		hasNamespaceBindings = true
 		logger.V(3).Info("user matched in BindDefinition", "namespace", req.Name, "bindDefinition", bindDef.Name)
 
 		for rbIdx, roleBinding := range bindDef.Spec.RoleBindings {

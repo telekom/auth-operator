@@ -274,7 +274,7 @@ func (m *NamespaceMutator) collectBindDefinitionLabels(ctx context.Context, ns *
 			"namespace", nsName, "bindDefinitionName", bindDef.Name, "bdIndex", bdIdx)
 
 		if MatchesSubjects(username, userGroups, saInfo, bindDef.Spec.Subjects) {
-			hasNamespaceBindings = hasNamespaceBindings || len(bindDef.Spec.RoleBindings) > 0
+			hasNamespaceBindings = true
 			logger.V(3).Info("user matched - extracting labels from RoleBindings",
 				"namespace", nsName, "bindDefinition", bindDef.Name)
 
