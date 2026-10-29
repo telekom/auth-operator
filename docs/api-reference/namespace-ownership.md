@@ -31,10 +31,16 @@ metadata:
 ```
 
 Matching BindDefinitions authorize namespace operations for ordinary users.
-ServiceAccounts may also CREATE/UPDATE without a matching BindDefinition when
-their source namespace has valid, non-empty tracked ownership labels exactly
-matching the target. This fallback does not authorize DELETE, and Kubernetes RBAC
-authorization still applies to every request.
+On CREATE, a ServiceAccount with namespace grants in a non-restricted
+BindDefinition must match one of those grants. Its hosting namespace cannot
+widen that scope. This also applies when tenant or third-party Flux identities share a platform-owned
+controller namespace.
+
+ServiceAccounts without such namespace grants may CREATE when their
+source namespace has valid, non-empty tracked ownership labels exactly matching
+the target. Unchanged UPDATEs retain this inheritance fallback even when a
+namespace grant does not match. This fallback does not authorize DELETE, and
+Kubernetes RBAC authorization still applies to every request.
 Non-bypass principals can update an authorized add-on
 namespace when ownership is unchanged, but cannot adopt, change, or remove
 tracked ownership labels. Existing privileged bypass rules remain unchanged.
@@ -78,7 +84,6 @@ An add-on `a` pin never authorizes an add-on `b` namespace.
 On unchanged UPDATEs, the mutator ignores every selector that does not match the
 existing namespace, preserving exact-ownership ServiceAccount fallback across
 tenant, third-party and add-on categories without deriving unrelated labels.
-ServiceAccounts inherit the owner and identity labels from their namespace.
 
 On CREATE, selector-derived ownership must match the requested namespace name
 and any ownership labels already supplied. Alternative selector terms are never

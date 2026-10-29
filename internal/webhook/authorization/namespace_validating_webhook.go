@@ -356,7 +356,7 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 
 	listCtx, cancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
 	defer cancel()
-	bindDefinitions, err := freshBindDefinitionsWithRoleBindings(listCtx, v.Client, v.admissionReader())
+	bindDefinitions, err := freshBindDefinitionsWithRoleBindings(listCtx, v.Client, v.admissionReader(), req.Operation == admissionv1.Create && saInfo.IsServiceAccount)
 	if err != nil {
 		logger.Error(err, "failed to list BindDefinitions", "namespace", req.Name)
 		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()
@@ -367,6 +367,7 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 		"namespace", req.Name, "bindDefinitionCount", len(bindDefinitions))
 
 	isAllowed := false
+	hasNamespaceBindings := false
 	for bdIdx, bindDef := range bindDefinitions {
 		if IsRestrictedBindDefinition(bindDef.Name) {
 			logger.V(4).Info("skipping restricted BindDefinition", "bindDefinitionName", bindDef.Name)
@@ -381,6 +382,7 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 			continue
 		}
 
+		hasNamespaceBindings = true
 		logger.V(3).Info("user matched in BindDefinition", "namespace", req.Name, "bindDefinition", bindDef.Name)
 
 		for rbIdx, roleBinding := range bindDef.Spec.RoleBindings {
@@ -434,7 +436,8 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 	// Last resort: if the user is a ServiceAccount performing CREATE/UPDATE, check if
 	// its source namespace has the same tracked ownership labels as the target namespace (issue #202).
 	// This is restricted to CREATE/UPDATE — DELETE is intentionally excluded.
-	if saInfo.IsServiceAccount &&
+	// On CREATE, explicit namespace grants take precedence over source-namespace inheritance.
+	if (req.Operation != admissionv1.Create || !hasNamespaceBindings) && saInfo.IsServiceAccount &&
 		(req.Operation == admissionv1.Create || req.Operation == admissionv1.Update) {
 		saCtx, saCancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
 		defer saCancel()
