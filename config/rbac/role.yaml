@@ -60,12 +60,6 @@ rules:
   - list
   - watch
 - apiGroups:
-  - authorization.k8s.io
-  resources:
-  - subjectaccessreviews
-  verbs:
-  - create
-- apiGroups:
   - authorization.t-caas.telekom.com
   resources:
   - binddefinitions

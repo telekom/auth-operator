@@ -6,13 +6,6 @@ metadata:
     app.kubernetes.io/component: controller-manager
   {{- include "auth-operator.labels" . | nindent 4 }}
 rules:
-# Review the original admission identity for temporary emergency namespace access.
-- apiGroups:
-  - authorization.k8s.io
-  resources:
-  - subjectaccessreviews
-  verbs:
-  - create
 # --- API server capability detection (constrained impersonation, KEP-5284) ---
 # Read-only access to the API server's own /metrics endpoint so the operator can
 # read the kubernetes_feature_enabled gauge and determine whether the
@@ -190,6 +183,13 @@ metadata:
     app.kubernetes.io/component: webhook-server
   {{- include "auth-operator.labels" . | nindent 4 }}
 rules:
+# Review the original admission identity for temporary emergency namespace access.
+- apiGroups:
+  - authorization.k8s.io
+  resources:
+  - subjectaccessreviews
+  verbs:
+  - create
 # --- Namespace reads (WebhookAuthorizer) ---
 - apiGroups:
   - ""

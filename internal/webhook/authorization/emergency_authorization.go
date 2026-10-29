@@ -14,8 +14,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
-// +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
-
 // emergencyTenantAuthorization checks a dedicated permission with the original
 // request identity. A live authorization webhook can supply that permission for
 // an approved emergency session without changing admission's user information.
