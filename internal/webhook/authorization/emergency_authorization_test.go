@@ -15,6 +15,7 @@ import (
 	authenticationv1 "k8s.io/api/authentication/v1"
 	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -152,5 +153,45 @@ func TestEmergencyPreservesDeletionAndOwnershipGuards(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Existing namespace bindings must not depend on emergency authorization availability.
+func TestEmergencyOrdinaryBindingsDoNotReview(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = api.AddToScheme(scheme)
+	labels := map[string]string{api.LabelKeyOwner: api.OwnerTenant, api.LabelKeyTenant: "tenant-a"}
+	bd := &api.BindDefinition{ObjectMeta: metav1.ObjectMeta{Name: "ordinary"}, Spec: api.BindDefinitionSpec{
+		Subjects:     []rbacv1.Subject{{Kind: rbacv1.UserKind, Name: "oidc:alice", APIGroup: rbacv1.GroupName}},
+		RoleBindings: []api.NamespaceBinding{{ClusterRoleRefs: []string{"view"}, NamespaceSelector: []metav1.LabelSelector{{MatchLabels: labels}}}},
+	}}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bd).WithInterceptorFuncs(interceptor.Funcs{
+		Create: func(context.Context, client.WithWatch, client.Object, ...client.CreateOption) error {
+			t.Fatal("ordinary namespace binding attempted an emergency review")
+			return errors.New("unexpected review")
+		},
+	}).Build()
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "tenant-test", Labels: labels}}
+	raw, err := json.Marshal(ns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, op := range []admissionv1.Operation{admissionv1.Create, admissionv1.Update, admissionv1.Delete} {
+		req := admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{
+			Name: ns.Name, Kind: metav1.GroupVersionKind{Version: "v1", Kind: "Namespace"}, Operation: op,
+			Object: runtime.RawExtension{Raw: raw}, OldObject: runtime.RawExtension{Raw: raw},
+			UserInfo: authenticationv1.UserInfo{Username: "oidc:alice"},
+		}}
+		validator := NamespaceValidator{Client: c, Decoder: admission.NewDecoder(scheme), DeletionProtection: true}
+		if response := validator.Handle(context.Background(), req); !response.Allowed {
+			t.Fatalf("%s validation: %v", op, response.Result)
+		}
+		if op != admissionv1.Delete {
+			mutator := NamespaceMutator{Client: c, Decoder: admission.NewDecoder(scheme)}
+			if response := mutator.Handle(context.Background(), req); !response.Allowed {
+				t.Fatalf("%s mutation: %v", op, response.Result)
+			}
+		}
 	}
 }
