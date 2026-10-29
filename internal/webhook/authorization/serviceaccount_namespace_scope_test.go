@@ -6,6 +6,8 @@ package webhooks_test
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"testing"
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
@@ -69,13 +71,34 @@ func TestServiceAccountNamespaceGrantsBoundInheritance(t *testing.T) {
 						objects = append(objects, binding)
 					}
 					c := fake.NewClientBuilder().WithScheme(scheme).WithIndex(&authorizationv1alpha1.BindDefinition{}, indexer.BindDefinitionHasRoleBindingsField, indexer.BindDefinitionHasRoleBindingsFunc).WithObjects(objects...).Build()
+					// The live grant has not reached the webhook cache yet.
+					cached := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects[0]).Build()
+					oldBinding := binding.DeepCopy()
+					oldBinding.Spec.RoleBindings = nil
+					emptyCached := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects[0], oldBinding).Build()
 					handlers := map[string]crAdmission.Handler{
-						"mutator":   &webhooks.NamespaceMutator{Client: c, Reader: c, Decoder: crAdmission.NewDecoder(scheme)},
-						"validator": &webhooks.NamespaceValidator{Client: c, Reader: c, Decoder: crAdmission.NewDecoder(scheme)},
+						"mutator":                      &webhooks.NamespaceMutator{Client: c, Reader: c, Decoder: crAdmission.NewDecoder(scheme)},
+						"validator":                    &webhooks.NamespaceValidator{Client: c, Reader: c, Decoder: crAdmission.NewDecoder(scheme)},
+						"mutator-stale-cache":          &webhooks.NamespaceMutator{Client: cached, Reader: c, Decoder: crAdmission.NewDecoder(scheme)},
+						"validator-stale-cache":        &webhooks.NamespaceValidator{Client: cached, Reader: c, Decoder: crAdmission.NewDecoder(scheme)},
+						"mutator-empty-cached-grant":   &webhooks.NamespaceMutator{Client: emptyCached, Reader: c, Decoder: crAdmission.NewDecoder(scheme)},
+						"validator-empty-cached-grant": &webhooks.NamespaceValidator{Client: emptyCached, Reader: c, Decoder: crAdmission.NewDecoder(scheme)},
 					}
 					ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "new-namespace", Labels: tc.labels}}
 					op := admissionv1.Create
 					req := crAdmission.Request{AdmissionRequest: admissionv1.AdmissionRequest{Kind: metav1.GroupVersionKind{Version: "v1", Kind: "Namespace"}, Name: ns.Name, Operation: op, UserInfo: authenticationv1.UserInfo{Username: "system:serviceaccount:t-caas-controllers:" + saName}, Object: runtime.RawExtension{Raw: mustMarshalJSON(t, ns)}}}
+					if tc.name == "own" {
+						unavailable := erroringReader{Reader: c, listErr: errors.New("private backend failure")}
+						for name, handler := range map[string]crAdmission.Handler{
+							"mutator":   &webhooks.NamespaceMutator{Client: cached, Reader: unavailable, Decoder: crAdmission.NewDecoder(scheme)},
+							"validator": &webhooks.NamespaceValidator{Client: cached, Reader: unavailable, Decoder: crAdmission.NewDecoder(scheme)},
+						} {
+							response := handler.Handle(context.Background(), req)
+							if response.Allowed || response.Result == nil || response.Result.Code != http.StatusInternalServerError || response.Result.Message != webhooks.ErrNamespaceWebhookInternal.Error() {
+								t.Fatalf("%s did not fail closed with a sanitized live-list error: %+v", name, response)
+							}
+						}
+					}
 					for name, handler := range handlers {
 						t.Run(name+"/"+string(op), func(t *testing.T) {
 							response := handler.Handle(context.Background(), req)
