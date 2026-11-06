@@ -29,6 +29,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Load versions
         run: grep -v '^#' versions.env | grep -v '^$' >> "$GITHUB_ENV"
       - uses: ./.github/actions/setup-go-env
@@ -43,6 +45,8 @@ jobs:
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Load versions
         run: grep -v '^#' versions.env | grep -v '^$' >> "$GITHUB_ENV"
       - uses: ./.github/actions/setup-go-env
