@@ -38,7 +38,6 @@ jobs:
   e2e-authorization-chain:
     name: E2E API server authorization chain
     runs-on: ubuntu-latest
-    needs: e2e-compile
     if: github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'authorization-chain' || github.event.inputs.test_suite == 'all'
     steps:
       - name: Checkout
@@ -99,7 +98,6 @@ jobs:
   e2e-basic:
     name: E2E Basic Tests
     runs-on: ubuntu-latest
-    needs: e2e-compile
     if: github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'basic' || github.event.inputs.test_suite == 'all'
     steps:
       - name: Checkout
@@ -146,7 +144,6 @@ jobs:
   e2e-helm:
     name: E2E Helm Tests
     runs-on: ubuntu-latest
-    needs: e2e-compile
     if: github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'helm' || github.event.inputs.test_suite == 'all'
     steps:
       - name: Checkout
@@ -195,12 +192,10 @@ jobs:
   e2e-creator-tracking:
     name: E2E Creator Tracking (${{ matrix.variant }})
     runs-on: ubuntu-latest
-    needs: e2e-compile
     timeout-minutes: 105
     if: github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'creator-tracking' || github.event.inputs.test_suite == 'all'
     strategy:
       fail-fast: false
-      max-parallel: 1
       matrix:
         variant: [stable, beta]
     steps:
@@ -363,7 +358,6 @@ jobs:
   e2e-complex:
     name: E2E Complex Tests
     runs-on: ubuntu-latest
-    needs: e2e-compile
     if: github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'complex' || github.event.inputs.test_suite == 'all'
     steps:
       - name: Checkout
@@ -412,7 +406,6 @@ jobs:
   e2e-ha:
     name: E2E HA Tests
     runs-on: ubuntu-latest
-    needs: e2e-compile
     if: github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'ha' || github.event.inputs.test_suite == 'all'
     steps:
       - name: Checkout
@@ -461,7 +454,6 @@ jobs:
   e2e-full-chain:
     name: E2E Full Chain (Popular CRDs)
     runs-on: ubuntu-latest
-    needs: e2e-compile
     if: github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'all'
     steps:
       - name: Checkout
@@ -514,7 +506,6 @@ jobs:
     name: E2E Creator Tracking Kyverno
     runs-on: ubuntu-latest
     timeout-minutes: 75
-    needs: e2e-compile
     if: github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'kyverno' || github.event.inputs.test_suite == 'all'
     steps:
       - name: Checkout

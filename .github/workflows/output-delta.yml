@@ -38,9 +38,15 @@ env:
 
 jobs:
   trusted-baseline:
-    name: Trusted Baseline Outputs
+    name: Trusted Baseline Outputs (${{ matrix.source }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # The main and latest-tag baselines each take ~12 minutes, so they run on
+    # separate clusters in parallel. Only the tag leg sets the job outputs.
+    strategy:
+      fail-fast: false
+      matrix:
+        source: [main, tag]
     outputs:
       latest_tag: ${{ steps.latest-tag.outputs.tag }}
       tag_success: ${{ steps.tag-output.outputs.tag_success }}
@@ -274,6 +280,7 @@ jobs:
           chmod +x /tmp/apply-output-delta-samples.sh
 
       - name: Generate outputs from main branch
+        if: matrix.source == 'main'
         id: main-output
         run: |
           set -euo pipefail
@@ -360,6 +367,7 @@ jobs:
           kubectl wait --for=delete pod -l control-plane=webhook-server -n auth-operator-system --timeout=180s 2>/dev/null || true
 
       - name: Get latest release tag
+        if: matrix.source == 'tag'
         id: latest-tag
         run: |
           set -euo pipefail
@@ -453,6 +461,7 @@ jobs:
           echo "::notice::Skipping latest-tag in-step cleanup; the baseline kind cluster is deleted after artifacts are uploaded."
 
       - name: Upload main output
+        if: matrix.source == 'main'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: output-delta-main-output
@@ -473,7 +482,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: output-delta-trusted-controller-logs
+          name: output-delta-trusted-controller-logs-${{ matrix.source }}
           path: /tmp/controller-logs/
           retention-days: 7
           if-no-files-found: warn
