@@ -41,8 +41,8 @@ env:
   CANDIDATE_CLUSTER: output-delta-pr
 
 jobs:
-  # Fail-fast gate: the three kind jobs below only start once the PR builds
-  # and passes go vet (~1 minute).
+  # Fail-fast gate for the candidate job, the only one that builds PR code:
+  # it starts once the PR passes go vet (~2 minutes).
   preflight:
     name: Preflight (go vet)
     runs-on: ubuntu-latest
@@ -63,7 +63,9 @@ jobs:
     name: Trusted Baseline Outputs (${{ matrix.source }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    needs: preflight
+    # Not gated on preflight: the baselines build only trusted main and tag
+    # code, and gating them would add the ~2 minute preflight to the slowest
+    # leg of this workflow.
     # The main and latest-tag baselines each take ~12 minutes, so they run on
     # separate clusters in parallel. Only the tag leg sets the job outputs.
     strategy:
