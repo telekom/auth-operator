@@ -106,7 +106,7 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ steps.go-version.outputs.version }}
-          cache: true
+          cache: false
 
       - name: Generate third-party license notices
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
@@ -161,6 +161,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
       - name: Load versions from versions.env
@@ -238,6 +239,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ github.sha }}
 
       - name: Set up Docker Buildx
@@ -546,7 +548,7 @@ jobs:
           fi
 
           IMAGE=$(echo "${IMAGE_NAME}" | awk -F/ '{print $NF}')
-          TAG=${{ github.ref_name }}
+          TAG=${GITHUB_REF_NAME}
           SRC=${REGISTRY}/${IMAGE_NAME}:${TAG#v}
           DST=${ARTIFACTORY_URL}/${ARTIFACTORY_REPO}/${IMAGE}:${TAG#v}
 
@@ -592,6 +594,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Download prepare artifacts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -644,19 +648,19 @@ jobs:
           DIGEST="${{ needs.assemble.outputs.digest }}"
           CHART_REPO="oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/auth-operator"
           CHART_REF="${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/auth-operator:${VERSION}"
-          CERT_ID="https://github.com/${{ github.repository }}/.github/workflows/release.yml@refs/tags/${{ github.ref_name }}"
+          CERT_ID="https://github.com/${{ github.repository }}/.github/workflows/release.yml@refs/tags/${GITHUB_REF_NAME}"
 
           cat > release-notes.md << EOF
           ## Installation
 
           ### Using kubectl
           \`\`\`bash
-          kubectl apply -f https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/install.yaml
+          kubectl apply -f https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/install.yaml
           \`\`\`
 
           ### CRDs only
           \`\`\`bash
-          kubectl apply -f https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/crds.yaml
+          kubectl apply -f https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/crds.yaml
           \`\`\`
 
           ### Using Helm (OCI)
@@ -736,15 +740,15 @@ jobs:
             PRERELEASE_FLAG="--prerelease"
           fi
 
-          if ! gh release view "${{ github.ref_name }}" > /dev/null 2>&1; then
-            echo "Creating release ${{ github.ref_name }}..."
-            gh release create "${{ github.ref_name }}" \
-              --title "${{ github.ref_name }}" \
+          if ! gh release view "${GITHUB_REF_NAME}" > /dev/null 2>&1; then
+            echo "Creating release ${GITHUB_REF_NAME}..."
+            gh release create "${GITHUB_REF_NAME}" \
+              --title "${GITHUB_REF_NAME}" \
               --notes-file release-notes.md \
               ${PRERELEASE_FLAG}
           else
-            echo "Release ${{ github.ref_name }} already exists, appending notes..."
-            EXISTING_NOTES=$(gh release view "${{ github.ref_name }}" --json body --jq '.body')
+            echo "Release ${GITHUB_REF_NAME} already exists, appending notes..."
+            EXISTING_NOTES=$(gh release view "${GITHUB_REF_NAME}" --json body --jq '.body')
             {
               echo "${EXISTING_NOTES}"
               echo ""
@@ -752,12 +756,12 @@ jobs:
               echo ""
               cat release-notes.md
             } > combined-notes.md
-            gh release edit "${{ github.ref_name }}" --notes-file combined-notes.md ${PRERELEASE_FLAG} || true
+            gh release edit "${GITHUB_REF_NAME}" --notes-file combined-notes.md ${PRERELEASE_FLAG} || true
           fi
 
           UPLOAD_FILES=(sbom.spdx.json install.yaml crds.yaml licenses.tar.gz checksums.txt)
           [ -f third-party-notices.tar.gz ] && UPLOAD_FILES+=(third-party-notices.tar.gz)
-          EXISTING_ASSETS=$(gh release view "${{ github.ref_name }}" --json assets --jq '.assets[].name')
+          EXISTING_ASSETS=$(gh release view "${GITHUB_REF_NAME}" --json assets --jq '.assets[].name')
           for file in "${UPLOAD_FILES[@]}"; do
             asset_name=$(basename "$file")
             if grep -Fxq "$asset_name" <<<"${EXISTING_ASSETS}"; then
@@ -765,8 +769,8 @@ jobs:
               exit 1
             fi
           done
-          echo "Uploading artifacts to release ${{ github.ref_name }}..."
-          gh release upload "${{ github.ref_name }}" "${UPLOAD_FILES[@]}"
+          echo "Uploading artifacts to release ${GITHUB_REF_NAME}..."
+          gh release upload "${GITHUB_REF_NAME}" "${UPLOAD_FILES[@]}"
 
   helm-release:
     name: Release Helm Chart
@@ -788,6 +792,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Load versions from versions.env
@@ -835,7 +840,7 @@ jobs:
           if [[ -n "${PREV_TAG}" ]]; then
             # Use GitHub API to generate release notes from merged PRs
             NOTES=$(gh api repos/${{ github.repository }}/releases/generate-notes \
-              -f tag_name="${{ github.ref_name }}" \
+              -f tag_name="${GITHUB_REF_NAME}" \
               -f previous_tag_name="${PREV_TAG}" \
               --jq '.body' 2>/dev/null || echo "")
           else
@@ -979,8 +984,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Uploading Helm chart to release ${{ github.ref_name }}..."
-          EXISTING_ASSETS=$(gh release view "${{ github.ref_name }}" --json assets --jq '.assets[].name')
+          echo "Uploading Helm chart to release ${GITHUB_REF_NAME}..."
+          EXISTING_ASSETS=$(gh release view "${GITHUB_REF_NAME}" --json assets --jq '.assets[].name')
           for file in auth-operator-*.tgz; do
             asset_name=$(basename "$file")
             if grep -Fxq "$asset_name" <<<"${EXISTING_ASSETS}"; then
@@ -988,4 +993,4 @@ jobs:
               exit 1
             fi
           done
-          gh release upload "${{ github.ref_name }}" auth-operator-*.tgz
+          gh release upload "${GITHUB_REF_NAME}" auth-operator-*.tgz
