@@ -32,15 +32,38 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   BASELINE_CLUSTER: output-delta-baseline
   CANDIDATE_CLUSTER: output-delta-pr
 
 jobs:
+  # Fail-fast gate: the three kind jobs below only start once the PR builds
+  # and passes go vet (~1 minute).
+  preflight:
+    name: Preflight (go vet)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Go Environment
+        uses: ./.github/actions/setup-go-env
+
+      - name: Vet
+        run: go vet ./...
+
   trusted-baseline:
     name: Trusted Baseline Outputs (${{ matrix.source }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    needs: preflight
     # The main and latest-tag baselines each take ~12 minutes, so they run on
     # separate clusters in parallel. Only the tag leg sets the job outputs.
     strategy:
@@ -495,6 +518,7 @@ jobs:
     name: Candidate PR Outputs
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    needs: preflight
     outputs:
       has_errors: ${{ steps.extract-errors.outputs.has_errors }}
     steps:
