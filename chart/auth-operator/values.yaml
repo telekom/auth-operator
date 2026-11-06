@@ -223,6 +223,11 @@ webhookServer:
   service:
     port: 443
     protocol: TCP
+  certificateAuthority:
+    # PEM CA used by the cert rotator instead of a self-generated one.
+    # Must be a self-signed RSA CA with DNS name "cert", PKCS#1 key, valid > 90 days.
+    certificate: ""
+    privateKey: ""
 
 namespaceAdmission:
   # Install cluster-wide Namespace mutating/validating webhooks.

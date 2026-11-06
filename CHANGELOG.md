@@ -171,6 +171,10 @@ rc.20 (Go 1.26.10, CVE-2026-111943) passed it.
 
 ### Added
 
+- Add the optional Helm values `webhookServer.certificateAuthority.certificate`
+  and `webhookServer.certificateAuthority.privateKey`. The webhook cert rotator
+  keeps the provided CA instead of generating one, so the CA can be part of the
+  API server authorization webhook kubeconfig before the cluster is bootstrapped.
 - Add `addon` namespace ownership with the `t-caas.telekom.com/addon` identity
   label, selector-derived ownership and ServiceAccount inheritance. Authorized
   updates preserve immutable ownership; add-on namespaces are not implicitly
