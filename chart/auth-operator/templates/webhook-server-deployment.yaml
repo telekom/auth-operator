@@ -50,6 +50,8 @@ spec:
         - --authorize-rate-limit={{ .Values.webhookServer.authorizeRateLimit }}
         - --authorize-rate-burst={{ .Values.webhookServer.authorizeRateBurst }}
         - --allow-unauthenticated-authorize={{ .Values.webhookServer.allowUnauthenticatedAuthorize }}
+        - --disable-authorize-request-checks={{ .Values.webhookServer.disableAuthorizeRequestChecks }}
+        - --webhook-tls-go-defaults={{ .Values.webhookServer.tlsGoDefaults }}
         {{- if .Values.webhookServer.authorizeAuth.tokenSecretName }}
         - --authorize-auth-token-file=/var/run/auth-operator/authorize-auth/token
         {{- end }}

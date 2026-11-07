@@ -226,8 +226,9 @@ func TestPlatformCertificateLifecycle(t *testing.T) {
 	tlsClient := &http.Client{Timeout: 2 * time.Second, Transport: &http.Transport{
 		TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: dnsName, MinVersion: tls.VersionTLS12},
 	}}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+webhookAddr+"/authorize", nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://"+webhookAddr+"/authorize", nil)
 	g.Expect(err).NotTo(gomega.HaveOccurred())
+	request.Header.Set("Content-Type", "application/json")
 	response, err := tlsClient.Do(request)
 	g.Expect(err).NotTo(gomega.HaveOccurred())
 	g.Expect(response.StatusCode).To(gomega.Equal(http.StatusOK))

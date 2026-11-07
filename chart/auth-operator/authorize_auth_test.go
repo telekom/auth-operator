@@ -91,3 +91,19 @@ func assertNotContains(t *testing.T, haystack, needle string) {
 		t.Fatalf("expected rendered chart not to contain %q", needle)
 	}
 }
+
+func TestWebhookDeploymentTransitionalOptOutRendering(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skipf("helm not installed: %v", err)
+	}
+
+	defaultRender := helmTemplate(t)
+	assertContains(t, defaultRender, "--disable-authorize-request-checks=false")
+	assertContains(t, defaultRender, "--webhook-tls-go-defaults=false")
+
+	optOutRender := helmTemplate(t,
+		"--set", "webhookServer.disableAuthorizeRequestChecks=true",
+		"--set", "webhookServer.tlsGoDefaults=true")
+	assertContains(t, optOutRender, "--disable-authorize-request-checks=true")
+	assertContains(t, optOutRender, "--webhook-tls-go-defaults=true")
+}

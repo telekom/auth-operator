@@ -44,6 +44,8 @@ var (
 	authorizeRateBurst                         int
 	authorizeAuthTokenFile                     string
 	allowUnauthenticatedAuthorize              bool
+	disableAuthorizeRequestChecks              bool
+	webhookTLSGoDefaults                       bool
 	webhookLeaderElect                         bool
 	bindDefinitionNamespaceSelectorLabelGroups []string
 	namespaceDeletionProtection                bool
@@ -93,7 +95,7 @@ ensuring authorization policies are enforced at creation time.`,
 			c.NextProtos = []string{"http/1.1"}
 		}
 
-		tlsOpts := []func(*tls.Config){}
+		tlsOpts := webhookTLSOpts(webhookTLSGoDefaults)
 		if !enableHTTP2 {
 			tlsOpts = append(tlsOpts, disableHTTP2)
 		}
@@ -210,6 +212,10 @@ func configureWebhooks(ctx context.Context, mgr manager.Manager, tp *tracing.Pro
 	authorizer.BearerToken = token
 	authorizer.BearerTokenFile = authorizeAuthTokenFile
 	authorizer.AllowUnauthenticatedAuthorize = allowUnauthenticatedAuthorize
+	authorizer.DisableRequestChecks = disableAuthorizeRequestChecks
+	if disableAuthorizeRequestChecks {
+		log.Info("/authorize method and Content-Type checks disabled (transitional opt-out)")
+	}
 	if allowUnauthenticatedAuthorize && authorizeAuthTokenFile == "" {
 		log.Info("allowing unauthenticated /authorize requests; configure --authorize-auth-token-file for production")
 	}
@@ -328,6 +334,12 @@ func init() {
 	webhookCmd.Flags().BoolVar(&allowUnauthenticatedAuthorize, "allow-unauthenticated-authorize", false,
 		"Allow /authorize requests without a bearer token when no authorize auth token file is configured. "+
 			"Insecure; use only for development or temporary migration.")
+	webhookCmd.Flags().BoolVar(&disableAuthorizeRequestChecks, "disable-authorize-request-checks", false,
+		"Disable the POST-only (405) and application/json Content-Type (415) checks on /authorize. "+
+			"Transitional; may be removed in a future release.")
+	webhookCmd.Flags().BoolVar(&webhookTLSGoDefaults, "webhook-tls-go-defaults", false,
+		"Use Go's default TLS settings for the webhook server instead of TLS 1.2+ with the pinned "+
+			"ECDHE AES-GCM/ChaCha20-Poly1305 cipher suites. Transitional; may be removed in a future release.")
 	webhookCmd.Flags().StringSliceVar(&bindDefinitionNamespaceSelectorLabelGroups, "binddefinition-namespace-selector-label-group",
 		[]string{authorizationv1alpha1.DefaultNamespaceAdmissionSelectorLabelGroup},
 		"DNS label group allowed in BindDefinition namespace admission selectors; repeat or comma-separate to allow multiple groups")
@@ -342,6 +354,30 @@ func init() {
 	webhookCmd.Flags().BoolVar(&webhookLeaderElect, "leader-elect", false,
 		"Enable leader election for the webhook manager. Required when running "+
 			"multiple replicas with cert rotation to prevent concurrent Secret updates.")
+}
+
+// webhookTLSCipherSuites are the TLS 1.2 cipher suites the webhook server
+// accepts: ECDHE key exchange with AES-GCM or ChaCha20-Poly1305 only. Go does
+// not let TLS 1.3 suites be configured, so TLS 1.3 keeps Go's defaults.
+var webhookTLSCipherSuites = []uint16{
+	tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+	tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+	tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+	tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+	tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
+	tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+}
+
+// webhookTLSOpts pins the webhook server to TLS 1.2+ and the approved TLS 1.2
+// cipher suites. goDefaults skips the pinning (transitional opt-out).
+func webhookTLSOpts(goDefaults bool) []func(*tls.Config) {
+	if goDefaults {
+		return []func(*tls.Config){}
+	}
+	return []func(*tls.Config){func(c *tls.Config) {
+		c.MinVersion = tls.VersionTLS12
+		c.CipherSuites = webhookTLSCipherSuites
+	}}
 }
 
 // validateRateLimitFlags validates rate-limit and burst flag values.

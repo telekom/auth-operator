@@ -113,7 +113,7 @@ func TestBindDefinitionBridgeLiveDenyNotInCache(t *testing.T) {
 			live := builder.Build()
 			handler := &Authorizer{Client: cached, LiveReader: live, Discovery: bridgeTestDiscovery(), Log: logr.Discard(), AllowUnauthenticatedAuthorize: true}
 			rec := httptest.NewRecorder()
-			handler.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(marshalSAR(t, sar))))
+			handler.ServeHTTP(rec, newAuthorizeRequest(t.Context(), bytes.NewReader(marshalSAR(t, sar))))
 			var resp authzv1.SubjectAccessReview
 			if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 				t.Fatal(err)

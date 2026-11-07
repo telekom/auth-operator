@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -109,6 +110,120 @@ func marshalSAR(t *testing.T, sar authzv1.SubjectAccessReview) []byte {
 	return body
 }
 
+// newAuthorizeRequest builds a POST /authorize request with a JSON body, as
+// the kube-apiserver sends it.
+func newAuthorizeRequest(ctx context.Context, body io.Reader) *http.Request {
+	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/authorize", body)
+	req.Header.Set("Content-Type", "application/json")
+	return req
+}
+
+func TestServeHTTP_RequestChecks(t *testing.T) {
+	sar := authzv1.SubjectAccessReview{Spec: authzv1.SubjectAccessReviewSpec{
+		User:               "alice",
+		ResourceAttributes: &authzv1.ResourceAttributes{Verb: "get", Resource: "pods"},
+	}}
+	body := marshalSAR(t, sar)
+
+	tests := []struct {
+		name        string
+		method      string
+		contentType string
+		disable     bool
+		wantStatus  int
+		wantAllow   string
+	}{
+		{name: "POST JSON", method: http.MethodPost, contentType: "application/json", wantStatus: http.StatusOK},
+		{name: "POST JSON with charset", method: http.MethodPost, contentType: "application/json; charset=utf-8", wantStatus: http.StatusOK},
+		{name: "POST JSON mixed case", method: http.MethodPost, contentType: "Application/JSON", wantStatus: http.StatusOK},
+		{name: "GET", method: http.MethodGet, contentType: "application/json", wantStatus: http.StatusMethodNotAllowed, wantAllow: http.MethodPost},
+		{name: "PUT", method: http.MethodPut, contentType: "application/json", wantStatus: http.StatusMethodNotAllowed, wantAllow: http.MethodPost},
+		{name: "missing Content-Type", method: http.MethodPost, wantStatus: http.StatusUnsupportedMediaType},
+		{name: "text/plain", method: http.MethodPost, contentType: "text/plain", wantStatus: http.StatusUnsupportedMediaType},
+		{name: "malformed Content-Type", method: http.MethodPost, contentType: "application/json; =", wantStatus: http.StatusUnsupportedMediaType},
+		{name: "opt-out allows GET", method: http.MethodGet, disable: true, wantStatus: http.StatusOK},
+		{name: "opt-out allows text/plain", method: http.MethodPost, contentType: "text/plain", disable: true, wantStatus: http.StatusOK},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := &Authorizer{
+				AllowUnauthenticatedAuthorize: true,
+				DisableRequestChecks:          tt.disable,
+				Client:                        newIndexedClient(newScheme(t)),
+				Log:                           logr.Discard(),
+			}
+			req := httptest.NewRequestWithContext(t.Context(), tt.method, "/authorize", bytes.NewReader(body))
+			if tt.contentType != "" {
+				req.Header.Set("Content-Type", tt.contentType)
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body: %s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+			if got := rec.Header().Get("Allow"); got != tt.wantAllow {
+				t.Fatalf("Allow header = %q, want %q", got, tt.wantAllow)
+			}
+			if tt.wantStatus == http.StatusOK {
+				var resp authzv1.SubjectAccessReview
+				if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+					t.Fatalf("decode SAR response: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestServeHTTP_AccessLogAtV2(t *testing.T) {
+	sar := authzv1.SubjectAccessReview{Spec: authzv1.SubjectAccessReviewSpec{
+		User:               "access-log-user",
+		ResourceAttributes: &authzv1.ResourceAttributes{Verb: "get", Resource: "pods"},
+	}}
+	body := marshalSAR(t, sar)
+
+	serve := func(verbosity int, method string) string {
+		var buf strings.Builder
+		handler := &Authorizer{BearerToken: "secret-token", Client: newIndexedClient(newScheme(t)), Log: capturingLogger(&buf, verbosity)}
+		req := newAuthorizeRequest(t.Context(), bytes.NewReader(body))
+		req.Method = method
+		req.RemoteAddr = "192.0.2.10:4711"
+		req.Header.Set("Authorization", "Bearer secret-token")
+		handler.ServeHTTP(httptest.NewRecorder(), req)
+		return buf.String()
+	}
+
+	if out := serve(1, http.MethodPost); strings.Contains(out, "/authorize request") {
+		t.Fatalf("access log must not be emitted below V(2), got:\n%s", out)
+	}
+
+	out := serve(2, http.MethodGet)
+	var line string
+	for l := range strings.Lines(out) {
+		if strings.Contains(l, "/authorize request") {
+			line = l
+		}
+	}
+	for _, want := range []string{`"remoteAddr"="192.0.2.10:4711"`, `"method"="GET"`, `"status"=405`, `"latency"=`} {
+		if !strings.Contains(line, want) {
+			t.Errorf("access log line missing %s: %q", want, line)
+		}
+	}
+	for _, secret := range []string{"secret-token", "access-log-user"} {
+		if strings.Contains(line, secret) {
+			t.Errorf("access log line must not contain %q: %q", secret, line)
+		}
+	}
+
+	out = serve(2, http.MethodPost)
+	if !strings.Contains(out, `"status"=200`) {
+		t.Errorf("expected status 200 in access log, got:\n%s", out)
+	}
+	if strings.Contains(out, "secret-token") {
+		t.Errorf("logs must not contain the bearer token, got:\n%s", out)
+	}
+}
+
 func TestServeHTTP_EvaluatesMatchingAuthorizersByName(t *testing.T) {
 	scheme := newScheme(t)
 	sar := authzv1.SubjectAccessReview{
@@ -183,7 +298,7 @@ func TestServeHTTP_EvaluatesMatchingAuthorizersByName(t *testing.T) {
 				Log:                           logr.Discard(),
 			}
 
-			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(marshalSAR(t, sar)))
+			req := newAuthorizeRequest(t.Context(), bytes.NewReader(marshalSAR(t, sar)))
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
 			if rec.Code != http.StatusOK {
@@ -236,7 +351,7 @@ func TestServeHTTP_AuthorizerRulesUseLiveClient(t *testing.T) {
 		},
 	}
 
-	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/authorize", bytes.NewReader(marshalSAR(t, sar)))
+	req := newAuthorizeRequest(context.Background(), bytes.NewReader(marshalSAR(t, sar)))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -292,7 +407,7 @@ func TestServeHTTP_ScopedAuthorizerDeniesClusterScopedResourceSAR(t *testing.T) 
 		},
 	}
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(marshalSAR(t, sar)))
+	req := newAuthorizeRequest(t.Context(), bytes.NewReader(marshalSAR(t, sar)))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -340,7 +455,7 @@ func TestAuditLog_DenyDecisionAtV0(t *testing.T) {
 	}
 
 	body := marshalSAR(t, sar)
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := newAuthorizeRequest(t.Context(), bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -395,7 +510,7 @@ func TestAuditLog_AllowDecisionAtV1(t *testing.T) {
 
 	handler0 := &Authorizer{
 		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logger0}
-	req0 := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	req0 := newAuthorizeRequest(t.Context(), bytes.NewReader(body))
 	rec0 := httptest.NewRecorder()
 	handler0.ServeHTTP(rec0, req0)
 
@@ -413,7 +528,7 @@ func TestAuditLog_AllowDecisionAtV1(t *testing.T) {
 	handler1 := &Authorizer{
 		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logger1}
 	body = marshalSAR(t, sar)
-	req1 := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	req1 := newAuthorizeRequest(t.Context(), bytes.NewReader(body))
 	rec1 := httptest.NewRecorder()
 	handler1.ServeHTTP(rec1, req1)
 
@@ -454,7 +569,7 @@ func TestAuditLog_NoOpinionDecisionAtV1(t *testing.T) {
 		},
 	}
 	body := marshalSAR(t, sar)
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := newAuthorizeRequest(t.Context(), bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler0.ServeHTTP(rec, req)
 
@@ -472,7 +587,7 @@ func TestAuditLog_NoOpinionDecisionAtV1(t *testing.T) {
 	handler1 := &Authorizer{
 		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logger1}
 	body = marshalSAR(t, sar)
-	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	req = newAuthorizeRequest(t.Context(), bytes.NewReader(body))
 	rec = httptest.NewRecorder()
 	handler1.ServeHTTP(rec, req)
 
@@ -512,7 +627,7 @@ func TestAuditLog_V2TraceLogs(t *testing.T) {
 		},
 	}
 	body := marshalSAR(t, sar)
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := newAuthorizeRequest(t.Context(), bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -538,7 +653,7 @@ func TestAuditLog_DecodeError(t *testing.T) {
 	handler := &Authorizer{
 		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logger}
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader([]byte("not-json")))
+	req := newAuthorizeRequest(t.Context(), bytes.NewReader([]byte("not-json")))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -578,7 +693,7 @@ func TestAuditLog_NonResourceAttributes(t *testing.T) {
 		},
 	}
 	body := marshalSAR(t, sar)
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := newAuthorizeRequest(t.Context(), bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -795,7 +910,7 @@ func TestServeHTTP_NamespaceGetError_ReturnsDeniedSAR(t *testing.T) {
 	}
 
 	body := marshalSAR(t, sar)
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := newAuthorizeRequest(t.Context(), bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -829,7 +944,7 @@ func TestServeHTTP_OversizedBody(t *testing.T) {
 		oversizedBody[i] = 'A'
 	}
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(oversizedBody))
+	req := newAuthorizeRequest(t.Context(), bytes.NewReader(oversizedBody))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -861,7 +976,7 @@ func TestServeHTTP_InvalidJSON(t *testing.T) {
 	handler := &Authorizer{
 		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logger}
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", strings.NewReader("{invalid json"))
+	req := newAuthorizeRequest(t.Context(), strings.NewReader("{invalid json"))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -926,7 +1041,7 @@ func TestAuditLog_StructuredFieldsComprehensive(t *testing.T) {
 		AllowUnauthenticatedAuthorize: true, Client: cl, Log: logger}
 
 	body := marshalSAR(t, sar)
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := newAuthorizeRequest(t.Context(), bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -1019,7 +1134,7 @@ func TestMetrics_RecordedAfterServeHTTP(t *testing.T) {
 		},
 	}
 	body := marshalSAR(t, denySAR)
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := newAuthorizeRequest(t.Context(), bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -1053,7 +1168,7 @@ func TestMetrics_RecordedAfterServeHTTP(t *testing.T) {
 		},
 	}
 	body = marshalSAR(t, allowSAR)
-	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	req = newAuthorizeRequest(t.Context(), bytes.NewReader(body))
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -1083,7 +1198,7 @@ func TestMetrics_RecordedAfterServeHTTP(t *testing.T) {
 		},
 	}
 	body = marshalSAR(t, noMatchSAR)
-	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	req = newAuthorizeRequest(t.Context(), bytes.NewReader(body))
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -1099,7 +1214,7 @@ func TestMetrics_RecordedAfterServeHTTP(t *testing.T) {
 
 	// --- Error decision (decode failure) ---
 	pkgmetrics.AuthorizerRequestsTotal.Reset()
-	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader([]byte("not-json")))
+	req = newAuthorizeRequest(t.Context(), bytes.NewReader([]byte("not-json")))
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -1183,7 +1298,7 @@ func TestMetrics_ActiveRulesCountsMixedGlobalAndScopedAuthorizers(t *testing.T) 
 			},
 		},
 	}
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(marshalSAR(t, sar)))
+	req := newAuthorizeRequest(t.Context(), bytes.NewReader(marshalSAR(t, sar)))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -1263,7 +1378,7 @@ func TestServeHTTP_RateLimiting(t *testing.T) {
 		pkgmetrics.AuthorizerDecisionDenied, pkgmetrics.AuthorizerNameNone))
 
 	// First request should succeed (uses the burst token).
-	req1 := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	req1 := newAuthorizeRequest(t.Context(), bytes.NewReader(body))
 	rec1 := httptest.NewRecorder()
 	handler.ServeHTTP(rec1, req1)
 
@@ -1274,7 +1389,7 @@ func TestServeHTTP_RateLimiting(t *testing.T) {
 	// Second request should be rate limited (no tokens left, 0 rps).
 	// Per the Kubernetes authorization webhook protocol, the response is HTTP 200
 	// with Allowed=false (non-200 would be treated as a webhook failure).
-	req2 := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	req2 := newAuthorizeRequest(t.Context(), bytes.NewReader(body))
 	rec2 := httptest.NewRecorder()
 	handler.ServeHTTP(rec2, req2)
 
@@ -1349,18 +1464,18 @@ func TestServeHTTP_BearerTokenRequiredBeforeRateLimit(t *testing.T) {
 		}
 	}
 
-	unauthorizedReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	unauthorizedReq := newAuthorizeRequest(t.Context(), bytes.NewReader(body))
 	unauthorizedRec := httptest.NewRecorder()
 	handler.ServeHTTP(unauthorizedRec, unauthorizedReq)
 	assertUnauthorizedDeny("missing bearer token", unauthorizedRec)
 
-	wrongTokenReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	wrongTokenReq := newAuthorizeRequest(t.Context(), bytes.NewReader(body))
 	wrongTokenReq.Header.Set("Authorization", "Bearer wrong-token")
 	wrongTokenRec := httptest.NewRecorder()
 	handler.ServeHTTP(wrongTokenRec, wrongTokenReq)
 	assertUnauthorizedDeny("wrong bearer token", wrongTokenRec)
 
-	authorizedReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	authorizedReq := newAuthorizeRequest(t.Context(), bytes.NewReader(body))
 	authorizedReq.Header.Set("Authorization", "Bearer shared-token")
 	authorizedRec := httptest.NewRecorder()
 	handler.ServeHTTP(authorizedRec, authorizedReq)
@@ -1375,7 +1490,7 @@ func TestServeHTTP_BearerTokenRequiredBeforeRateLimit(t *testing.T) {
 		t.Fatal("unauthorized requests consumed the subject rate-limit bucket")
 	}
 
-	rateLimitedReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	rateLimitedReq := newAuthorizeRequest(t.Context(), bytes.NewReader(body))
 	rateLimitedReq.Header.Set("Authorization", "Bearer shared-token")
 	rateLimitedRec := httptest.NewRecorder()
 	handler.ServeHTTP(rateLimitedRec, rateLimitedReq)
@@ -1393,7 +1508,7 @@ func TestAuthenticateRequest_DeniesEmptyExpectedTokenByDefault(t *testing.T) {
 		Log: logr.Discard(),
 	}
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", nil)
+	req := newAuthorizeRequest(t.Context(), nil)
 	rec := httptest.NewRecorder()
 	if handler.authenticateRequest(rec, req) {
 		t.Fatal("request should not authenticate when no bearer token is configured")
@@ -1407,7 +1522,7 @@ func TestAuthenticateRequest_AllowsEmptyExpectedTokenWithExplicitOptOut(t *testi
 		AllowUnauthenticatedAuthorize: true,
 	}
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", nil)
+	req := newAuthorizeRequest(t.Context(), nil)
 	if !handler.authenticateRequest(httptest.NewRecorder(), req) {
 		t.Fatal("request should authenticate when unauthenticated authorize is explicitly allowed")
 	}
@@ -1419,7 +1534,7 @@ func TestAuthenticateRequest_AcceptsConfiguredBearerToken(t *testing.T) {
 		BearerToken: "shared-token",
 	}
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", nil)
+	req := newAuthorizeRequest(t.Context(), nil)
 	req.Header.Set("Authorization", "Bearer shared-token")
 	if !handler.authenticateRequest(httptest.NewRecorder(), req) {
 		t.Fatal("request should authenticate with the configured bearer token")
@@ -1458,7 +1573,7 @@ func TestAuthenticateRequest_ReloadsBearerTokenFile(t *testing.T) {
 		BearerTokenFile:               tokenFile,
 	}
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", nil)
+	req := newAuthorizeRequest(t.Context(), nil)
 	req.Header.Set("Authorization", "Bearer old-token")
 	if !handler.authenticateRequest(httptest.NewRecorder(), req) {
 		t.Fatal("old token should authenticate before rotation")
@@ -1468,7 +1583,7 @@ func TestAuthenticateRequest_ReloadsBearerTokenFile(t *testing.T) {
 		t.Fatalf("write new token: %v", err)
 	}
 
-	staleReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", nil)
+	staleReq := newAuthorizeRequest(t.Context(), nil)
 	staleReq.Header.Set("Authorization", "Bearer old-token")
 	staleRec := httptest.NewRecorder()
 	if handler.authenticateRequest(staleRec, staleReq) {
@@ -1482,7 +1597,7 @@ func TestAuthenticateRequest_ReloadsBearerTokenFile(t *testing.T) {
 		t.Fatalf("expected stale-token reason %q, got %q", reasonUnauthorized, staleResponse.Status.Reason)
 	}
 
-	rotatedReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", nil)
+	rotatedReq := newAuthorizeRequest(t.Context(), nil)
 	rotatedReq.Header.Set("Authorization", "Bearer new-token")
 	if !handler.authenticateRequest(httptest.NewRecorder(), rotatedReq) {
 		t.Fatal("new token should authenticate after rotation")
@@ -1527,7 +1642,7 @@ func TestAuthenticateRequest_DeniesWhenBearerTokenFileUnavailable(t *testing.T) 
 				t.Fatalf("expected error %q to include token file %q", err.Error(), tokenFile)
 			}
 
-			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", nil)
+			req := newAuthorizeRequest(t.Context(), nil)
 			req.Header.Set("Authorization", "Bearer any-token")
 			rec := httptest.NewRecorder()
 			if handler.authenticateRequest(rec, req) {
@@ -1576,7 +1691,7 @@ func TestServeHTTP_RateLimitingIsPerSubject(t *testing.T) {
 		})
 	}
 	request := func(body []byte) authzv1.SubjectAccessReview {
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+		req := newAuthorizeRequest(t.Context(), bytes.NewReader(body))
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
@@ -1663,7 +1778,7 @@ func TestServeHTTP_NoRateLimiter(t *testing.T) {
 
 	// Multiple requests should all succeed when limiter is nil.
 	for i := range 5 {
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+		req := newAuthorizeRequest(t.Context(), bytes.NewReader(body))
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
@@ -1693,7 +1808,7 @@ func TestServeHTTP_RejectsEmptyIdentity(t *testing.T) {
 		pkgmetrics.AuthorizerDecisionDenied, pkgmetrics.AuthorizerNameNone))
 
 	body := marshalSAR(t, sar)
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := newAuthorizeRequest(t.Context(), bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -1740,7 +1855,7 @@ func TestServeHTTP_AcceptsEmptyUserWithGroups(t *testing.T) {
 		},
 	}
 	body := marshalSAR(t, sar)
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := newAuthorizeRequest(t.Context(), bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -1775,7 +1890,7 @@ func TestServeHTTP_RejectsNoAttributes(t *testing.T) {
 		},
 	}
 	body := marshalSAR(t, sar)
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := newAuthorizeRequest(t.Context(), bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -1818,7 +1933,7 @@ func TestServeHTTP_RejectsBothResourceAndNonResourceAttributes(t *testing.T) {
 		},
 	}
 	body := marshalSAR(t, sar)
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := newAuthorizeRequest(t.Context(), bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -1858,7 +1973,7 @@ func TestServeHTTP_AcceptsNonResourceAttributes(t *testing.T) {
 		},
 	}
 	body := marshalSAR(t, sar)
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := newAuthorizeRequest(t.Context(), bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -1934,7 +2049,7 @@ func TestServeHTTP_UsesSingleEvaluationDeadline(t *testing.T) {
 			},
 		},
 	}
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(marshalSAR(t, sar)))
+	req := newAuthorizeRequest(t.Context(), bytes.NewReader(marshalSAR(t, sar)))
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -1979,7 +2094,7 @@ func TestServeHTTP_DeniedResponseSetsDeniedTrue(t *testing.T) {
 		},
 	}
 	body := marshalSAR(t, sar)
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := newAuthorizeRequest(t.Context(), bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -2018,7 +2133,7 @@ func TestServeHTTP_NoOpinionResponseDoesNotSetDeniedTrue(t *testing.T) {
 		},
 	}
 	body := marshalSAR(t, sar)
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := newAuthorizeRequest(t.Context(), bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -2057,7 +2172,7 @@ func TestServeHTTP_RateLimitResponseSetsDeniedTrue(t *testing.T) {
 		},
 	}
 	body := marshalSAR(t, sar)
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := newAuthorizeRequest(t.Context(), bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -2471,7 +2586,7 @@ func TestServeHTTP_NamespaceLabelCacheError_ReturnsDeniedSAR(t *testing.T) {
 		t.Fatalf("failed to marshal SAR: %v", err)
 	}
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(body))
+	req := newAuthorizeRequest(t.Context(), bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -2550,7 +2665,7 @@ func TestServeHTTP_SkipsUnconfiguredAuthorizers(t *testing.T) {
 			},
 		},
 	}
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(marshalSAR(t, sar)))
+	req := newAuthorizeRequest(t.Context(), bytes.NewReader(marshalSAR(t, sar)))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- The webhook server requires TLS 1.2 or later. For TLS 1.2 it accepts only
+  ECDHE cipher suites with AES-GCM or ChaCha20-Poly1305; TLS 1.3 keeps Go's
+  defaults. Opt out with `--webhook-tls-go-defaults=true` (Helm:
+  `webhookServer.tlsGoDefaults: true`). Transitional; may be removed in a
+  future release.
+- `/authorize` accepts only `POST` (else `405` with `Allow: POST`) with
+  `Content-Type: application/json` (else `415`). Opt out with
+  `--disable-authorize-request-checks=true` (Helm:
+  `webhookServer.disableAuthorizeRequestChecks: true`). Transitional; may be
+  removed in a future release.
+- `/authorize` access log at verbosity 2: caller address, method, status code
+  and latency. The SubjectAccessReview body and tokens are not logged.
+
 ## [0.5.0-rc.21] — Pre-release
 
 ### CI
