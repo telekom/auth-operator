@@ -15,8 +15,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # run_id outside PRs: runs on main, tags and dispatches never share a group,
+  # so none of them is queued behind or cancelled by another.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io
