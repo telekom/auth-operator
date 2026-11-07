@@ -395,7 +395,11 @@ keep Go's defaults.
 Allowed` with `Allow: POST`; other content types get `415 Unsupported Media
 Type`. At verbosity 2 (`--verbosity=2`), each `/authorize` request is logged
 with the caller address, method, status code and latency. The access log never
-contains the SubjectAccessReview body or tokens.
+contains the SubjectAccessReview body or tokens. The caller address is the TCP
+peer (`RemoteAddr`); `X-Forwarded-For` is not trusted. When the API server
+reaches the webhook through a proxy (for example a Konnectivity egress
+selector or a mesh sidecar), the logged address is the proxy's, not the API
+server's.
 
 Authorization uses the tagged `t-caas-go-library` keyed rate limiter and
 request-local namespace selector cache. Subject keys remain the user plus
