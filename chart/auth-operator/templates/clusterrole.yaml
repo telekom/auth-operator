@@ -199,6 +199,7 @@ rules:
   - get
   - list
   - watch
+{{- if .Values.namespaceAdmission.enabled }}
 # --- ServiceAccount reads (transitional inherit-hosting-namespace-ownership annotation) ---
 - apiGroups:
   - ""
@@ -206,6 +207,7 @@ rules:
   - serviceaccounts
   verbs:
   - get
+{{- end }}
 # --- Webhook configuration management (cert-controller) ---
 - apiGroups:
   - admissionregistration.k8s.io
