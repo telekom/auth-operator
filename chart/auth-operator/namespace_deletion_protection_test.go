@@ -128,4 +128,7 @@ func TestStrictSANamespaceOwnershipRendering(t *testing.T) {
 	assertContains(t, defaultRender, "--strict-sa-namespace-ownership=true")
 	assertContains(t, defaultRender, "ServiceAccount reads (transitional inherit-hosting-namespace-ownership annotation)")
 	assertContains(t, helmTemplate(t, "--set", "webhookServer.strictSANamespaceOwnership=false"), "--strict-sa-namespace-ownership=false")
+	assertContains(t, helmTemplate(t, "--set-string", "webhookServer.strictSANamespaceOwnership=false"), "--strict-sa-namespace-ownership=false")
+	// helm upgrade --reuse-values from a release without the value must stay strict.
+	assertContains(t, helmTemplate(t, "--set", "webhookServer.strictSANamespaceOwnership=null"), "--strict-sa-namespace-ownership=true")
 }
