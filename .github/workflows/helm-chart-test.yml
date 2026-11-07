@@ -42,6 +42,12 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # run_id outside PRs: runs on main, tags and dispatches never share a group,
+  # so none of them is queued behind or cancelled by another.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   lint:
     name: Lint Helm Chart
@@ -50,6 +56,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Load versions from versions.env
@@ -80,6 +87,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Load versions from versions.env
         run: grep -v '^#' versions.env | grep -v '^$' >> "$GITHUB_ENV"
@@ -175,6 +184,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Load versions from versions.env

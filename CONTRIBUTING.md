@@ -55,6 +55,10 @@ workflow actions, all three local composite actions, and the Helm chart in
 `.github/dependabot.yml`. The operator's own deployment image placeholders are
 release inputs, not third-party dependencies.
 
+The `CI Gate` workflow merges a Dependabot PR once every other check on it has
+passed, then dispatches the main-branch workflows a merge would normally start.
+Semver-major updates other than GitHub Actions wait for a maintainer.
+
 GitHub Dependabot is the only dependency updater. Tool versions, workflow inputs
 and images embedded in source are outside its supported manifest formats and
 require manual review. The weekly **Check Tool Updates** workflow provides an

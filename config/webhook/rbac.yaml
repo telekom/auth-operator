@@ -11,6 +11,10 @@ metadata:
     authorization.t-caas.telekom.com/component: "webhook"
   name: webhook-server
 rules:
+  # Review the original admission identity for temporary emergency access.
+  - apiGroups: [authorization.k8s.io]
+    resources: [subjectaccessreviews]
+    verbs: [create]
   # Namespace reads for WebhookAuthorizer namespaceSelector evaluation.
   - apiGroups:
       - ""

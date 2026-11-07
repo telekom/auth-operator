@@ -31,7 +31,7 @@ permissions:
 
 # Cancel in-progress runs when a new run is triggered for the same branch/PR
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -43,6 +43,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Load versions
         run: grep -v '^#' versions.env | grep -v '^$' >> "$GITHUB_ENV"
@@ -67,6 +69,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Go Environment
         uses: ./.github/actions/setup-go-env
@@ -74,12 +78,16 @@ jobs:
       - name: Run envtest-based tests
         run: make test
 
+  # Fail-fast gate: every kind E2E job needs this ~1.5 minute compile check,
+  # so a PR that does not build never starts the clusters.
   e2e-compile:
     name: E2E Compile Check
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Go Environment
         uses: ./.github/actions/setup-go-env
@@ -98,6 +106,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Load versions from versions.env
         run: grep -v '^#' versions.env | grep -v '^$' >> "$GITHUB_ENV"
@@ -143,6 +153,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Load versions from versions.env
         run: grep -v '^#' versions.env | grep -v '^$' >> "$GITHUB_ENV"
@@ -190,13 +202,13 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'creator-tracking' || github.event.inputs.test_suite == 'all'
     strategy:
       fail-fast: false
-      max-parallel: 1
       matrix:
         variant: [stable, beta]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Load versions from versions.env
@@ -357,6 +369,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Load versions from versions.env
         run: grep -v '^#' versions.env | grep -v '^$' >> "$GITHUB_ENV"
@@ -404,6 +418,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Load versions from versions.env
         run: grep -v '^#' versions.env | grep -v '^$' >> "$GITHUB_ENV"
@@ -451,6 +467,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Load versions from versions.env
         run: grep -v '^#' versions.env | grep -v '^$' >> "$GITHUB_ENV"
@@ -502,6 +520,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Load versions from versions.env
         run: grep -v '^#' versions.env | grep -v '^$' >> "$GITHUB_ENV"
       - name: Setup Go, Kind, and Helm
