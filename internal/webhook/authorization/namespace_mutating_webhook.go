@@ -93,7 +93,7 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 	}
 
 	// Collect labels from matching BindDefinitions.
-	labelsToAdd, namespaceBindingMatched, hasNamespaceBindings, listErr := m.collectBindDefinitionLabels(ctx, ns, req.UserInfo.Username, userGroups, saInfo, unchangedNamespace, req.Operation == admissionv1.Create && saInfo.IsServiceAccount)
+	labelsToAdd, namespaceBindingMatched, hasNamespaceBindings, listErr := m.collectBindDefinitionLabels(ctx, ns, req.UserInfo.Username, userGroups, saInfo, unchangedNamespace, strictServiceAccountCreate(req.Operation, saInfo, m.DisableStrictSANamespaceOwnership))
 	if errors.Is(listErr, errAmbiguousNamespaceOwnership) {
 		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultDenied).Inc()
 		return admission.Denied(errAmbiguousNamespaceOwnership.Error())
@@ -259,13 +259,13 @@ func denyConflictingInheritedLabels(
 // reports an explicit namespace or unchanged UPDATE match; hasNamespaceBindings
 // reports any namespace grants for the identity, even when the target does not match.
 // unchangedNamespace is nil for CREATE or changed ownership.
-func (m *NamespaceMutator) collectBindDefinitionLabels(ctx context.Context, ns *corev1.Namespace, username string, userGroups []string, saInfo ServiceAccountInfo, unchangedNamespace *corev1.Namespace, serviceAccountCreate bool) (labelsToAdd map[string]string, namespaceBindingMatched, hasNamespaceBindings bool, err error) {
+func (m *NamespaceMutator) collectBindDefinitionLabels(ctx context.Context, ns *corev1.Namespace, username string, userGroups []string, saInfo ServiceAccountInfo, unchangedNamespace *corev1.Namespace, strictSACreate bool) (labelsToAdd map[string]string, namespaceBindingMatched, hasNamespaceBindings bool, err error) {
 	nsName := ns.Name
 	logger := logf.FromContext(ctx).WithName("namespace-mutator")
 
 	listCtx, cancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
 	defer cancel()
-	bindDefinitions, err := freshBindDefinitionsWithRoleBindings(listCtx, m.Client, m.admissionReader(), serviceAccountCreate)
+	bindDefinitions, err := freshBindDefinitionsWithRoleBindings(listCtx, m.Client, m.admissionReader(), strictSACreate)
 	if err != nil {
 		logger.Error(err, "failed to list BindDefinitions", "namespace", nsName)
 		return nil, false, false, err

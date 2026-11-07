@@ -24,6 +24,7 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	crAdmission "sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -145,22 +146,29 @@ func TestServiceAccountHostingNamespaceOptOuts(t *testing.T) {
 		},
 	}
 	cases := []struct {
-		name           string
-		annotation     *string
-		strictDisabled bool
-		allowed        bool
+		name             string
+		annotation       *string
+		cachedAnnotation *string
+		strictDisabled   bool
+		allowed          bool
 	}{
-		{"no-annotation", nil, false, false},
-		{"annotation-true", ptr.To("true"), false, true},
-		{"annotation-false", ptr.To("false"), false, false},
-		{"annotation-other", ptr.To("yes"), false, false},
-		{"global-strict-disabled", nil, true, true},
-		{"global-strict-disabled-annotation-false", ptr.To("false"), true, true},
+		{"no-annotation", nil, nil, false, false},
+		{"annotation-true", ptr.To("true"), nil, false, true},
+		{"annotation-false", ptr.To("false"), nil, false, false},
+		{"annotation-other", ptr.To("yes"), nil, false, false},
+		{"annotation-capitalised", ptr.To("True"), nil, false, false},
+		{"annotation-removed-but-cached-true", nil, ptr.To("true"), false, false},
+		{"global-strict-disabled", nil, nil, true, true},
+		{"global-strict-disabled-annotation-false", ptr.To("false"), nil, true, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Namespace: "t-caas-controllers", Name: "m2m-sa-tenant"}}
-			cached := fake.NewClientBuilder().WithScheme(scheme).WithObjects(hosting, binding, sa.DeepCopy()).Build()
+			cachedSA := sa.DeepCopy()
+			if tc.cachedAnnotation != nil {
+				cachedSA.Annotations = map[string]string{authorizationv1alpha1.AnnotationKeyInheritHostingNamespaceOwnership: *tc.cachedAnnotation}
+			}
+			cached := fake.NewClientBuilder().WithScheme(scheme).WithObjects(hosting, binding, cachedSA).Build()
 			if tc.annotation != nil {
 				sa.Annotations = map[string]string{authorizationv1alpha1.AnnotationKeyInheritHostingNamespaceOwnership: *tc.annotation}
 			}
@@ -196,5 +204,70 @@ func TestServiceAccountHostingNamespaceOptOuts(t *testing.T) {
 		if response.Allowed || response.Result == nil || response.Result.Code != http.StatusInternalServerError {
 			t.Fatalf("%s did not fail closed on a live ServiceAccount read error: %+v", name, response)
 		}
+	}
+}
+
+// The live grant list and the ServiceAccount read only run when strict mode
+// needs them; with the flag off, admission must follow the pre-#617 path.
+func TestServiceAccountHostingNamespaceReadsOnlyWhenNeeded(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(authorizationv1alpha1.AddToScheme(scheme))
+	const prefix = "t-caas.telekom.com/"
+	hosting := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "t-caas-controllers", Labels: map[string]string{prefix + "owner": "platform"}}}
+	tenant := map[string]string{prefix + "owner": "tenant", prefix + "tenant": "team-a"}
+	binding := &authorizationv1alpha1.BindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "delegated-namespace-scope"},
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
+			TargetName:   "delegated-namespace-scope",
+			Subjects:     []rbacv1.Subject{{Kind: rbacv1.ServiceAccountKind, Namespace: "t-caas-controllers", Name: "m2m-sa-tenant"}},
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{{ClusterRoleRefs: []string{"writer"}, NamespaceSelector: []metav1.LabelSelector{{MatchLabels: tenant}}}},
+		},
+	}
+	errSARead := errors.New("unexpected ServiceAccount read")
+	errLiveList := errors.New("unexpected live BindDefinition list")
+	cases := []struct {
+		name           string
+		labels         map[string]string
+		bound          bool
+		strictDisabled bool
+	}{
+		// The grant matches, so the annotation is irrelevant.
+		{"strict-grant-matches", tenant, true, false},
+		// No grants: plain inheritance, no annotation needed.
+		{"strict-no-grants", map[string]string{prefix + "owner": "platform"}, false, false},
+		// Flag off: neither strict read runs.
+		{"strict-disabled", map[string]string{prefix + "owner": "platform"}, true, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			objects := []client.Object{hosting}
+			if tc.bound {
+				objects = append(objects, binding)
+			}
+			cached := fake.NewClientBuilder().WithScheme(scheme).WithIndex(&authorizationv1alpha1.BindDefinition{}, indexer.BindDefinitionHasRoleBindingsField, indexer.BindDefinitionHasRoleBindingsFunc).WithObjects(objects...).Build()
+			live := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					if _, ok := obj.(*corev1.ServiceAccount); ok {
+						return errSARead
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+			}).Build()
+			var reader client.Reader = live
+			if tc.strictDisabled {
+				reader = erroringReader{Reader: live, listErr: errLiveList}
+			}
+			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "new-namespace", Labels: tc.labels}}
+			req := crAdmission.Request{AdmissionRequest: admissionv1.AdmissionRequest{Kind: metav1.GroupVersionKind{Version: "v1", Kind: "Namespace"}, Name: ns.Name, Operation: admissionv1.Create, UserInfo: authenticationv1.UserInfo{Username: "system:serviceaccount:t-caas-controllers:m2m-sa-tenant"}, Object: runtime.RawExtension{Raw: mustMarshalJSON(t, ns)}}}
+			for name, handler := range map[string]crAdmission.Handler{
+				"mutator":   &webhooks.NamespaceMutator{Client: cached, Reader: reader, Decoder: crAdmission.NewDecoder(scheme), DisableStrictSANamespaceOwnership: tc.strictDisabled},
+				"validator": &webhooks.NamespaceValidator{Client: cached, Reader: reader, Decoder: crAdmission.NewDecoder(scheme), DisableStrictSANamespaceOwnership: tc.strictDisabled},
+			} {
+				if response := handler.Handle(context.Background(), req); !response.Allowed {
+					t.Fatalf("%s: performed an unneeded read or denied: %+v", name, response.Result)
+				}
+			}
+		})
 	}
 }

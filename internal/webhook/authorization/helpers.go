@@ -222,6 +222,12 @@ func IsRestrictedBindDefinition(name string) bool {
 	return strings.HasSuffix(name, "-namespaced-reader-restricted")
 }
 
+// strictServiceAccountCreate reports whether a request is a ServiceAccount
+// Namespace CREATE under strict ownership, which needs live BindDefinitions.
+func strictServiceAccountCreate(op admissionv1.Operation, saInfo ServiceAccountInfo, strictDisabled bool) bool {
+	return op == admissionv1.Create && saInfo.IsServiceAccount && !strictDisabled
+}
+
 // mayInheritHostingNamespace reports whether a ServiceAccount may fall back to
 // its hosting namespace's ownership labels. On CREATE, an identity's namespace
 // grants are authoritative and the hosting namespace must not widen them,

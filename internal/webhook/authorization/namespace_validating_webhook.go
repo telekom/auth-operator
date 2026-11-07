@@ -359,7 +359,7 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 
 	listCtx, cancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
 	defer cancel()
-	bindDefinitions, err := freshBindDefinitionsWithRoleBindings(listCtx, v.Client, v.admissionReader(), req.Operation == admissionv1.Create && saInfo.IsServiceAccount)
+	bindDefinitions, err := freshBindDefinitionsWithRoleBindings(listCtx, v.Client, v.admissionReader(), strictServiceAccountCreate(req.Operation, saInfo, v.DisableStrictSANamespaceOwnership))
 	if err != nil {
 		logger.Error(err, "failed to list BindDefinitions", "namespace", req.Name)
 		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()

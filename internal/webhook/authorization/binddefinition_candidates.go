@@ -13,13 +13,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func freshBindDefinitionsWithRoleBindings(ctx context.Context, cachedReader, liveReader client.Reader, serviceAccountCreate bool) ([]authorizationv1alpha1.BindDefinition, error) {
+func freshBindDefinitionsWithRoleBindings(ctx context.Context, cachedReader, liveReader client.Reader, strictServiceAccountCreate bool) ([]authorizationv1alpha1.BindDefinition, error) {
 	if liveReader == nil {
 		liveReader = cachedReader
 	}
 
-	// A newly added grant must constrain ServiceAccount CREATE before it reaches the webhook cache.
-	if serviceAccountCreate {
+	// In strict mode, a newly added grant must constrain ServiceAccount CREATE
+	// before it reaches the webhook cache.
+	if strictServiceAccountCreate {
 		return listAllBindDefinitionsWithRoleBindings(ctx, liveReader)
 	}
 
