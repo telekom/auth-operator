@@ -32,7 +32,9 @@ metadata:
 
 Matching BindDefinitions authorize namespace operations for ordinary users.
 On CREATE, a ServiceAccount with namespace grants in a non-restricted
-BindDefinition must match one of those grants. Its hosting namespace cannot
+BindDefinition must match one of those grants, whether the BindDefinition
+names the ServiceAccount or one of its groups (for example
+`system:serviceaccounts:<namespace>`). Its hosting namespace cannot
 widen that scope. This also applies when tenant or third-party Flux identities share a platform-owned
 controller namespace.
 
@@ -51,14 +53,16 @@ may be removed in a future release:
 - Annotation `t-caas.telekom.com/inherit-hosting-namespace-ownership: "true"`
   on a ServiceAccount applies to that ServiceAccount only. Any other value, or
   no annotation, keeps strict behaviour. The webhook reads the annotation live
-  from the API server.
+  from the API server, so it needs `get` on ServiceAccounts. A failed read
+  denies the request.
 
 The auth-operator does not admit ServiceAccounts, so it does not guard this
 annotation. Anyone who can update ServiceAccounts in a namespace can set it,
-and that ServiceAccount then inherits the namespace's ownership. A ServiceAccount
-without grants that is created there already inherits the same ownership. Limit
-ServiceAccount `update`/`patch` in platform-owned namespaces to platform
-operators, or enforce it with a policy engine.
+and that ServiceAccount then inherits the namespace's ownership, never more.
+Unlike creating a new ServiceAccount there, this re-arms an identity that
+already holds namespace `create` RBAC and credentials, such as a GitOps
+reconciler. Limit ServiceAccount `update`/`patch` in platform-owned namespaces
+to platform operators, or enforce it with a policy engine.
 
 Non-bypass principals can update an authorized add-on
 namespace when ownership is unchanged, but cannot adopt, change, or remove

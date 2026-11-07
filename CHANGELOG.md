@@ -18,9 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `t-caas.telekom.com/inherit-hosting-namespace-ownership: "true"` or, for all
   ServiceAccounts, set `--strict-sa-namespace-ownership=false` (Helm
   `webhookServer.strictSANamespaceOwnership`). Both are transitional and may
-  be removed in a future release. The operator does not guard the annotation,
-  so restrict ServiceAccount updates in platform-owned namespaces. The webhook
-  now needs `get` on ServiceAccounts (#617).
+  be removed in a future release. A match includes group subjects such as
+  `system:serviceaccounts:<namespace>`. The operator does not guard the
+  annotation, so restrict ServiceAccount `update`/`patch` in platform-owned
+  namespaces. **RBAC:** the webhook ClusterRole now needs `get` on
+  ServiceAccounts; the Helm chart grants it when `namespaceAdmission.enabled`
+  and kustomize in `config/webhook/rbac.yaml`. Custom ClusterRoles must add it,
+  otherwise affected CREATEs fail closed with HTTP 500 (#617).
 
 ## [0.5.0-rc.21] — Pre-release
 
