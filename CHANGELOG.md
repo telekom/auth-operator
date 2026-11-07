@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Security tightening:** on Namespace CREATE, a ServiceAccount that matches
+  any non-restricted BindDefinition with RoleBindings no longer inherits
+  ownership from its hosting namespace; its BindDefinition grants are
+  authoritative. Before upgrading, add explicit namespace-selector grants for
+  every owner such ServiceAccounts must create namespaces for (#617).
+
 ## [0.5.0-rc.21] — Pre-release
 
 ### CI
