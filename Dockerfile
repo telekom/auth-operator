@@ -1,10 +1,8 @@
 # Build stage
-# Go version is read from go.mod via GO_VERSION build arg
-# Default fallback if not provided (should match go.mod)
-ARG GO_VERSION=1.26.10
-# Digest pinned for supply-chain integrity; update with:
-#   docker buildx imagetools inspect golang:<version>-alpine
-FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine@sha256:9ce231b28998b32e116927c61aa5c406183061d4f3f2d61b292c88e7f6bdf7ca AS build
+# Literal tag and digest so Dependabot (docker ecosystem) can update both; it
+# cannot resolve build-arg interpolation in FROM. Keep the tag at or above the
+# go.mod Go version.
+FROM --platform=$BUILDPLATFORM golang:1.26.10-alpine@sha256:9ce231b28998b32e116927c61aa5c406183061d4f3f2d61b292c88e7f6bdf7ca AS build
 
 ARG TARGETOS
 ARG TARGETARCH
