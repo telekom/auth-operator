@@ -442,7 +442,7 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 	// its source namespace has the same tracked ownership labels as the target namespace (issue #202).
 	// This is restricted to CREATE/UPDATE — DELETE is intentionally excluded.
 	// On CREATE, explicit namespace grants take precedence over source-namespace inheritance.
-	if (req.Operation != admissionv1.Create || !hasNamespaceBindings) && saInfo.IsServiceAccount &&
+	if mayInheritHostingNamespace(req.Operation, hasNamespaceBindings) && saInfo.IsServiceAccount &&
 		(req.Operation == admissionv1.Create || req.Operation == admissionv1.Update) {
 		saCtx, saCancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
 		defer saCancel()

@@ -105,14 +105,11 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 		return admission.Allowed("Namespace binding matched unchanged ownership")
 	}
 
-	// CREATE grants must not be widened by the ServiceAccount hosting namespace.
-	if req.Operation != admissionv1.Create || !hasNamespaceBindings {
-		var response admission.Response
-		var handled bool
-		labelsToAdd, response, handled = m.inheritServiceAccountNamespaceLabels(ctx, req, ns, labelsToAdd, saInfo)
-		if handled {
-			return response
-		}
+	var response admission.Response
+	var handled bool
+	labelsToAdd, response, handled = m.inheritServiceAccountNamespaceLabels(ctx, req, ns, labelsToAdd, saInfo, hasNamespaceBindings)
+	if handled {
+		return response
 	}
 
 	// If there are labels to add, mutate the namespace
@@ -187,14 +184,22 @@ func (m *NamespaceMutator) unchangedUpdateNamespace(req admission.Request, ns *c
 	return oldNS, nil
 }
 
+// mayInheritHostingNamespace reports whether a ServiceAccount may fall back to
+// its hosting namespace's ownership labels. On CREATE, an identity's namespace
+// grants are authoritative and the hosting namespace must not widen them.
+func mayInheritHostingNamespace(op admissionv1.Operation, hasNamespaceBindings bool) bool {
+	return op != admissionv1.Create || !hasNamespaceBindings
+}
+
 func (m *NamespaceMutator) inheritServiceAccountNamespaceLabels(
 	ctx context.Context,
 	req admission.Request,
 	ns *corev1.Namespace,
 	labelsToAdd map[string]string,
 	saInfo ServiceAccountInfo,
+	hasNamespaceBindings bool,
 ) (map[string]string, admission.Response, bool) {
-	if len(labelsToAdd) > 0 || !saInfo.IsServiceAccount {
+	if len(labelsToAdd) > 0 || !saInfo.IsServiceAccount || !mayInheritHostingNamespace(req.Operation, hasNamespaceBindings) {
 		return labelsToAdd, admission.Response{}, false
 	}
 
