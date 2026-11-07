@@ -31,7 +31,7 @@ permissions:
 
 # Cancel in-progress runs when a new run is triggered for the same branch/PR
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
