@@ -48,32 +48,46 @@ func TestServiceAccountNamespaceGrantsBoundInheritance(t *testing.T) {
 					RoleBindings: []authorizationv1alpha1.NamespaceBinding{{ClusterRoleRefs: []string{"writer"}, NamespaceSelector: []metav1.LabelSelector{{MatchLabels: own, MatchExpressions: []metav1.LabelSelectorRequirement{{Key: prefix + "protected", Operator: metav1.LabelSelectorOpDoesNotExist}}}}}},
 				},
 			}
+			// An explicit namespace grant is still a grant: it must not fall back to the hosting namespace.
+			explicitNamespaceOnly := binding.DeepCopy()
+			explicitNamespaceOnly.Spec.RoleBindings = []authorizationv1alpha1.NamespaceBinding{{ClusterRoleRefs: []string{"writer"}, Namespace: "existing-namespace"}}
+			// Real ServiceAccount tokens carry their namespace group.
+			groupSubject := binding.DeepCopy()
+			groupSubject.Spec.Subjects = []rbacv1.Subject{{Kind: rbacv1.GroupKind, Name: "system:serviceaccounts:t-caas-controllers"}}
 			cases := []struct {
 				name    string
 				labels  map[string]string
 				bound   bool
 				allowed bool
+				grant   *authorizationv1alpha1.BindDefinition
 			}{
-				{"own", own, true, true},
-				{"platform", map[string]string{prefix + "owner": "platform"}, true, owner == "platform"},
-				{"other-identity", map[string]string{prefix + "owner": owner, prefix + owner: "team-b"}, true, false},
-				{"addon", map[string]string{prefix + "owner": "addon", prefix + "addon": "addon-a"}, true, false},
-				{"protected", map[string]string{prefix + "owner": owner, prefix + owner: "team-a", prefix + "protected": "team-a"}, true, false},
-				{"unbound-platform-inheritance", map[string]string{prefix + "owner": "platform"}, false, true},
+				{"own", own, true, true, nil},
+				{"platform", map[string]string{prefix + "owner": "platform"}, true, owner == "platform", nil},
+				{"other-identity", map[string]string{prefix + "owner": owner, prefix + owner: "team-b"}, true, false, nil},
+				{"addon", map[string]string{prefix + "owner": "addon", prefix + "addon": "addon-a"}, true, false, nil},
+				{"protected", map[string]string{prefix + "owner": owner, prefix + owner: "team-a", prefix + "protected": "team-a"}, true, false, nil},
+				{"unbound-platform-inheritance", map[string]string{prefix + "owner": "platform"}, false, true, nil},
+				{"explicit-namespace-only-platform", map[string]string{prefix + "owner": "platform"}, true, false, explicitNamespaceOnly},
+				{"group-subject-own", own, true, true, groupSubject},
+				{"group-subject-platform", map[string]string{prefix + "owner": "platform"}, true, owner == "platform", groupSubject},
 			}
 			for _, tc := range cases {
 				if owner == "platform" && tc.name == "other-identity" {
 					tc.labels = map[string]string{prefix + "owner": "platform", prefix + "tenant": "other"}
 				}
+				grant := binding
+				if tc.grant != nil {
+					grant = tc.grant
+				}
 				t.Run(tc.name, func(t *testing.T) {
 					objects := []client.Object{&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "t-caas-controllers", Labels: map[string]string{prefix + "owner": "platform"}}}}
 					if tc.bound {
-						objects = append(objects, binding)
+						objects = append(objects, grant)
 					}
 					c := fake.NewClientBuilder().WithScheme(scheme).WithIndex(&authorizationv1alpha1.BindDefinition{}, indexer.BindDefinitionHasRoleBindingsField, indexer.BindDefinitionHasRoleBindingsFunc).WithObjects(objects...).Build()
 					// The live grant has not reached the webhook cache yet.
 					cached := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects[0]).Build()
-					oldBinding := binding.DeepCopy()
+					oldBinding := grant.DeepCopy()
 					oldBinding.Spec.RoleBindings = nil
 					emptyCached := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects[0], oldBinding).Build()
 					handlers := map[string]crAdmission.Handler{
@@ -86,7 +100,7 @@ func TestServiceAccountNamespaceGrantsBoundInheritance(t *testing.T) {
 					}
 					ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "new-namespace", Labels: tc.labels}}
 					op := admissionv1.Create
-					req := crAdmission.Request{AdmissionRequest: admissionv1.AdmissionRequest{Kind: metav1.GroupVersionKind{Version: "v1", Kind: "Namespace"}, Name: ns.Name, Operation: op, UserInfo: authenticationv1.UserInfo{Username: "system:serviceaccount:t-caas-controllers:" + saName}, Object: runtime.RawExtension{Raw: mustMarshalJSON(t, ns)}}}
+					req := crAdmission.Request{AdmissionRequest: admissionv1.AdmissionRequest{Kind: metav1.GroupVersionKind{Version: "v1", Kind: "Namespace"}, Name: ns.Name, Operation: op, UserInfo: authenticationv1.UserInfo{Username: "system:serviceaccount:t-caas-controllers:" + saName, Groups: []string{"system:serviceaccounts", "system:serviceaccounts:t-caas-controllers", "system:authenticated"}}, Object: runtime.RawExtension{Raw: mustMarshalJSON(t, ns)}}}
 					if tc.name == "own" {
 						unavailable := erroringReader{Reader: c, listErr: errors.New("private backend failure")}
 						for name, handler := range map[string]crAdmission.Handler{
