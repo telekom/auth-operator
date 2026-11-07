@@ -23,6 +23,12 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # run_id outside PRs: runs on main, tags and dispatches never share a group,
+  # so none of them is queued behind or cancelled by another.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   static:
     name: Benchmark lifecycle static checks

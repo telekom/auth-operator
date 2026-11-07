@@ -78,6 +78,8 @@ jobs:
       - name: Run envtest-based tests
         run: make test
 
+  # Fail-fast gate: every kind E2E job needs this ~1.5 minute compile check,
+  # so a PR that does not build never starts the clusters.
   e2e-compile:
     name: E2E Compile Check
     runs-on: ubuntu-latest
@@ -200,7 +202,6 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'creator-tracking' || github.event.inputs.test_suite == 'all'
     strategy:
       fail-fast: false
-      max-parallel: 1
       matrix:
         variant: [stable, beta]
     steps:
