@@ -288,7 +288,7 @@ jobs:
     name: Verify Release Image Signature
     runs-on: ubuntu-latest
     continue-on-error: true  # Informational — must not block CI if latest release is unsigned
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

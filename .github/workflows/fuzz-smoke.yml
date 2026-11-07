@@ -12,6 +12,7 @@ on:
   schedule:
     # Weekly on Saturdays, after the regular Scorecard run.
     - cron: '15 2 * * 6'
+  workflow_dispatch:
 
 permissions:
   contents: read
