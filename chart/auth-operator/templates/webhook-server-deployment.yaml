@@ -50,8 +50,13 @@ spec:
         - --authorize-rate-limit={{ .Values.webhookServer.authorizeRateLimit }}
         - --authorize-rate-burst={{ .Values.webhookServer.authorizeRateBurst }}
         - --allow-unauthenticated-authorize={{ .Values.webhookServer.allowUnauthenticatedAuthorize }}
-        - --disable-authorize-request-checks={{ .Values.webhookServer.disableAuthorizeRequestChecks }}
-        - --webhook-tls-go-defaults={{ .Values.webhookServer.tlsGoDefaults }}
+        {{- /* Render only when set: helm upgrade --reuse-values from older charts lacks these keys. */}}
+        {{- if .Values.webhookServer.disableAuthorizeRequestChecks }}
+        - --disable-authorize-request-checks=true
+        {{- end }}
+        {{- if .Values.webhookServer.tlsGoDefaults }}
+        - --webhook-tls-go-defaults=true
+        {{- end }}
         {{- if .Values.webhookServer.authorizeAuth.tokenSecretName }}
         - --authorize-auth-token-file=/var/run/auth-operator/authorize-auth/token
         {{- end }}

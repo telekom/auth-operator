@@ -98,8 +98,10 @@ func TestWebhookDeploymentTransitionalOptOutRendering(t *testing.T) {
 	}
 
 	defaultRender := helmTemplate(t)
-	assertContains(t, defaultRender, "--disable-authorize-request-checks=false")
-	assertContains(t, defaultRender, "--webhook-tls-go-defaults=false")
+	// Flags render only when enabled so helm upgrade --reuse-values from
+	// charts without these values keeps working.
+	assertNotContains(t, defaultRender, "--disable-authorize-request-checks")
+	assertNotContains(t, defaultRender, "--webhook-tls-go-defaults")
 
 	optOutRender := helmTemplate(t,
 		"--set", "webhookServer.disableAuthorizeRequestChecks=true",
