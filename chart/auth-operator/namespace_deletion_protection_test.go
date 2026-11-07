@@ -117,3 +117,15 @@ func assertHelmTemplateFails(t *testing.T, wantErrPart string, args ...string) {
 		t.Fatalf("expected helm template failure to contain %q, got: %s", wantErrPart, string(output))
 	}
 }
+
+// TestStrictSANamespaceOwnershipRendering pins the transitional opt-out flag
+// and the webhook's ServiceAccount read permission it relies on.
+func TestStrictSANamespaceOwnershipRendering(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skipf("helm not installed: %v", err)
+	}
+	defaultRender := helmTemplate(t)
+	assertContains(t, defaultRender, "--strict-sa-namespace-ownership=true")
+	assertContains(t, defaultRender, "ServiceAccount reads (transitional inherit-hosting-namespace-ownership annotation)")
+	assertContains(t, helmTemplate(t, "--set", "webhookServer.strictSANamespaceOwnership=false"), "--strict-sa-namespace-ownership=false")
+}

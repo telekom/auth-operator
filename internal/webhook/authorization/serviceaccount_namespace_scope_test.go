@@ -21,6 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	crAdmission "sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -124,5 +125,76 @@ func TestServiceAccountNamespaceGrantsBoundInheritance(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+// The transitional opt-outs restore hosting-namespace inheritance on CREATE.
+// The annotation lives only in the live reader so a stale cache cannot flip it.
+func TestServiceAccountHostingNamespaceOptOuts(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(authorizationv1alpha1.AddToScheme(scheme))
+	const prefix = "t-caas.telekom.com/"
+	hosting := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "t-caas-controllers", Labels: map[string]string{prefix + "owner": "platform"}}}
+	binding := &authorizationv1alpha1.BindDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "delegated-namespace-scope"},
+		Spec: authorizationv1alpha1.BindDefinitionSpec{
+			TargetName:   "delegated-namespace-scope",
+			Subjects:     []rbacv1.Subject{{Kind: rbacv1.ServiceAccountKind, Namespace: "t-caas-controllers", Name: "m2m-sa-tenant"}},
+			RoleBindings: []authorizationv1alpha1.NamespaceBinding{{ClusterRoleRefs: []string{"writer"}, NamespaceSelector: []metav1.LabelSelector{{MatchLabels: map[string]string{prefix + "owner": "tenant", prefix + "tenant": "team-a"}}}}},
+		},
+	}
+	cases := []struct {
+		name           string
+		annotation     *string
+		strictDisabled bool
+		allowed        bool
+	}{
+		{"no-annotation", nil, false, false},
+		{"annotation-true", ptr.To("true"), false, true},
+		{"annotation-false", ptr.To("false"), false, false},
+		{"annotation-other", ptr.To("yes"), false, false},
+		{"global-strict-disabled", nil, true, true},
+		{"global-strict-disabled-annotation-false", ptr.To("false"), true, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Namespace: "t-caas-controllers", Name: "m2m-sa-tenant"}}
+			cached := fake.NewClientBuilder().WithScheme(scheme).WithObjects(hosting, binding, sa.DeepCopy()).Build()
+			if tc.annotation != nil {
+				sa.Annotations = map[string]string{authorizationv1alpha1.AnnotationKeyInheritHostingNamespaceOwnership: *tc.annotation}
+			}
+			live := fake.NewClientBuilder().WithScheme(scheme).WithObjects(hosting, binding, sa).Build()
+			handlers := map[string]crAdmission.Handler{
+				"mutator":   &webhooks.NamespaceMutator{Client: cached, Reader: live, Decoder: crAdmission.NewDecoder(scheme), DisableStrictSANamespaceOwnership: tc.strictDisabled},
+				"validator": &webhooks.NamespaceValidator{Client: cached, Reader: live, Decoder: crAdmission.NewDecoder(scheme), DisableStrictSANamespaceOwnership: tc.strictDisabled},
+			}
+			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "new-namespace", Labels: map[string]string{prefix + "owner": "platform"}}}
+			req := crAdmission.Request{AdmissionRequest: admissionv1.AdmissionRequest{Kind: metav1.GroupVersionKind{Version: "v1", Kind: "Namespace"}, Name: ns.Name, Operation: admissionv1.Create, UserInfo: authenticationv1.UserInfo{Username: "system:serviceaccount:t-caas-controllers:m2m-sa-tenant"}, Object: runtime.RawExtension{Raw: mustMarshalJSON(t, ns)}}}
+			for name, handler := range handlers {
+				t.Run(name, func(t *testing.T) {
+					response := handler.Handle(context.Background(), req)
+					if response.Allowed != tc.allowed {
+						t.Fatalf("allowed=%v, want %v: %+v", response.Allowed, tc.allowed, response.Result)
+					}
+				})
+			}
+		})
+	}
+
+	// A failed live ServiceAccount read fails closed instead of treating the SA as opted in or out.
+	sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Namespace: "t-caas-controllers", Name: "m2m-sa-tenant"}}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(hosting, binding, sa).Build()
+	unavailable := erroringReader{Reader: c, getErr: errors.New("private backend failure")}
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "new-namespace", Labels: map[string]string{prefix + "owner": "platform"}}}
+	req := crAdmission.Request{AdmissionRequest: admissionv1.AdmissionRequest{Kind: metav1.GroupVersionKind{Version: "v1", Kind: "Namespace"}, Name: ns.Name, Operation: admissionv1.Create, UserInfo: authenticationv1.UserInfo{Username: "system:serviceaccount:t-caas-controllers:m2m-sa-tenant"}, Object: runtime.RawExtension{Raw: mustMarshalJSON(t, ns)}}}
+	for name, handler := range map[string]crAdmission.Handler{
+		"mutator":   &webhooks.NamespaceMutator{Client: c, Reader: unavailable, Decoder: crAdmission.NewDecoder(scheme)},
+		"validator": &webhooks.NamespaceValidator{Client: c, Reader: unavailable, Decoder: crAdmission.NewDecoder(scheme)},
+	} {
+		response := handler.Handle(context.Background(), req)
+		if response.Allowed || response.Result == nil || response.Result.Code != http.StatusInternalServerError {
+			t.Fatalf("%s did not fail closed on a live ServiceAccount read error: %+v", name, response)
+		}
 	}
 }

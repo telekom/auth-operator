@@ -130,6 +130,11 @@ webhookServer:
   # authorization for Namespace UPDATE requests. Protected-label validation
   # still runs. Set to "false" to require normal authorization for those updates.
   capiOperatorUpdateBypass: "false"
+  # On Namespace CREATE, a ServiceAccount's BindDefinition namespace grants are
+  # authoritative and its hosting namespace's ownership is not inherited.
+  # Set to "false" to restore the previous inheritance for all ServiceAccounts.
+  # Transitional escape hatch; it may be removed in a future release.
+  strictSANamespaceOwnership: "true"
   # DNS label key domains allowed in BindDefinition namespace selectors.
   # Set multiple domains to allow labels from more than one group.
   # Built-in ownership/protected labels and kubernetes.io/metadata.name

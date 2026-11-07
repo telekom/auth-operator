@@ -376,6 +376,12 @@
           "enum": ["true", "false", true, false],
           "default": "false"
         },
+        "strictSANamespaceOwnership": {
+          "type": ["string", "boolean"],
+          "description": "On Namespace CREATE, do not let ServiceAccounts with BindDefinition namespace grants inherit hosting-namespace ownership. Set to false to restore the previous inheritance. Transitional escape hatch; may be removed in a future release.",
+          "enum": ["true", "false", true, false],
+          "default": "true"
+        },
         "bindDefinitionNamespaceSelectorLabelGroups": {
           "type": "array",
           "description": "DNS label key domains allowed in BindDefinition namespace selectors.",

@@ -65,6 +65,13 @@ const (
 	// AnnotationKeyUpdatedBy records best-effort encoded effective request
 	// usernames observed on resource updates.
 	AnnotationKeyUpdatedBy = "t-caas.telekom.com/updated-by"
+
+	// AnnotationKeyInheritHostingNamespaceOwnership set to "true" on a
+	// ServiceAccount keeps the pre-#617 Namespace CREATE behaviour: the
+	// ServiceAccount inherits its hosting namespace's ownership even when it
+	// matches namespace grants. Transitional escape hatch; it may be removed in
+	// a future release.
+	AnnotationKeyInheritHostingNamespaceOwnership = "t-caas.telekom.com/inherit-hosting-namespace-ownership"
 )
 
 // Owner label values.

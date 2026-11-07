@@ -13,7 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   any non-restricted BindDefinition with RoleBindings no longer inherits
   ownership from its hosting namespace; its BindDefinition grants are
   authoritative. Before upgrading, add explicit namespace-selector grants for
-  every owner such ServiceAccounts must create namespaces for (#617).
+  every owner such ServiceAccounts must create namespaces for. To keep the
+  previous behaviour temporarily, annotate a ServiceAccount with
+  `t-caas.telekom.com/inherit-hosting-namespace-ownership: "true"` or, for all
+  ServiceAccounts, set `--strict-sa-namespace-ownership=false` (Helm
+  `webhookServer.strictSANamespaceOwnership`). Both are transitional and may
+  be removed in a future release. The operator does not guard the annotation,
+  so restrict ServiceAccount updates in platform-owned namespaces. The webhook
+  now needs `get` on ServiceAccounts (#617).
 
 ## [0.5.0-rc.21] — Pre-release
 

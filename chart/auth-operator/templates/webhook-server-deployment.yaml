@@ -40,6 +40,7 @@ spec:
         - --cert-rotation-validating-webhook={{ include "auth-operator.fullname" . }}-binder-validating-webhook-configuration
         - --tdg-migration={{ .Values.webhookServer.tdgMigration }}
         - --capi-operator-update-bypass={{ .Values.webhookServer.capiOperatorUpdateBypass }}
+        - --strict-sa-namespace-ownership={{ .Values.webhookServer.strictSANamespaceOwnership }}
         - --namespace-deletion-protection={{ .Values.namespaceDeletionProtection.enabled }}
         {{- with .Values.namespaceDeletionProtection.extraProtectedNamespaces }}
         - --protected-namespaces={{ join "," . }}

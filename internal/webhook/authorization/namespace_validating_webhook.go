@@ -33,6 +33,9 @@ type NamespaceValidator struct {
 	Decoder                         admission.Decoder
 	TDGMigration                    bool
 	DisableCAPIOperatorUpdateBypass bool
+	// DisableStrictSANamespaceOwnership restores hosting-namespace inheritance
+	// on CREATE for all ServiceAccounts. Transitional; may be removed.
+	DisableStrictSANamespaceOwnership bool
 
 	// DeletionProtection enables namespace deletion protection: platform and
 	// opted-in namespaces require the allow-deletion annotation, and system
@@ -442,11 +445,14 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 	// its source namespace has the same tracked ownership labels as the target namespace (issue #202).
 	// This is restricted to CREATE/UPDATE — DELETE is intentionally excluded.
 	// On CREATE, explicit namespace grants take precedence over source-namespace inheritance.
-	if mayInheritHostingNamespace(req.Operation, hasNamespaceBindings) && saInfo.IsServiceAccount &&
-		(req.Operation == admissionv1.Create || req.Operation == admissionv1.Update) {
+	if saInfo.IsServiceAccount && (req.Operation == admissionv1.Create || req.Operation == admissionv1.Update) {
 		saCtx, saCancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
 		defer saCancel()
-		inheritedLabels, saErr := GetSANamespaceTrackedLabels(saCtx, v.admissionReader(), saInfo)
+		inherit, saErr := mayInheritHostingNamespace(saCtx, v.admissionReader(), req.Operation, saInfo, hasNamespaceBindings, v.DisableStrictSANamespaceOwnership)
+		var inheritedLabels map[string]string
+		if saErr == nil && inherit {
+			inheritedLabels, saErr = GetSANamespaceTrackedLabels(saCtx, v.admissionReader(), saInfo)
+		}
 		if saErr != nil {
 			logger.Error(saErr, "failed to lookup SA namespace labels", "saNamespace", saInfo.Namespace, "targetNamespace", req.Name)
 			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()

@@ -28,6 +28,9 @@ type NamespaceMutator struct {
 	Decoder                         admission.Decoder
 	TDGMigration                    bool
 	DisableCAPIOperatorUpdateBypass bool
+	// DisableStrictSANamespaceOwnership restores hosting-namespace inheritance
+	// on CREATE for all ServiceAccounts. Transitional; may be removed.
+	DisableStrictSANamespaceOwnership bool
 }
 
 var errAmbiguousNamespaceOwnership = errors.New("namespace ownership is ambiguous across matching BindDefinition selectors; supply explicit ownership labels")
@@ -184,13 +187,6 @@ func (m *NamespaceMutator) unchangedUpdateNamespace(req admission.Request, ns *c
 	return oldNS, nil
 }
 
-// mayInheritHostingNamespace reports whether a ServiceAccount may fall back to
-// its hosting namespace's ownership labels. On CREATE, an identity's namespace
-// grants are authoritative and the hosting namespace must not widen them.
-func mayInheritHostingNamespace(op admissionv1.Operation, hasNamespaceBindings bool) bool {
-	return op != admissionv1.Create || !hasNamespaceBindings
-}
-
 func (m *NamespaceMutator) inheritServiceAccountNamespaceLabels(
 	ctx context.Context,
 	req admission.Request,
@@ -199,14 +195,18 @@ func (m *NamespaceMutator) inheritServiceAccountNamespaceLabels(
 	saInfo ServiceAccountInfo,
 	hasNamespaceBindings bool,
 ) (map[string]string, admission.Response, bool) {
-	if len(labelsToAdd) > 0 || !saInfo.IsServiceAccount || !mayInheritHostingNamespace(req.Operation, hasNamespaceBindings) {
+	if len(labelsToAdd) > 0 || !saInfo.IsServiceAccount {
 		return labelsToAdd, admission.Response{}, false
 	}
 
 	logger := logf.FromContext(ctx).WithName("namespace-mutator")
 	saCtx, saCancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
 	defer saCancel()
-	inherited, err := GetSANamespaceTrackedLabels(saCtx, m.admissionReader(), saInfo)
+	inherit, err := mayInheritHostingNamespace(saCtx, m.admissionReader(), req.Operation, saInfo, hasNamespaceBindings, m.DisableStrictSANamespaceOwnership)
+	var inherited map[string]string
+	if err == nil && inherit {
+		inherited, err = GetSANamespaceTrackedLabels(saCtx, m.admissionReader(), saInfo)
+	}
 	if err != nil {
 		logger.Error(err, "failed to lookup SA namespace labels",
 			"saNamespace", saInfo.Namespace, "targetNamespace", req.Name)

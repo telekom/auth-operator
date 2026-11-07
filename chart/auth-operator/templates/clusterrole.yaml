@@ -199,6 +199,13 @@ rules:
   - get
   - list
   - watch
+# --- ServiceAccount reads (transitional inherit-hosting-namespace-ownership annotation) ---
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts
+  verbs:
+  - get
 # --- Webhook configuration management (cert-controller) ---
 - apiGroups:
   - admissionregistration.k8s.io

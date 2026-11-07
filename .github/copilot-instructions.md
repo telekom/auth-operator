@@ -344,6 +344,7 @@ Do not pass raw logger instances across helper boundaries when `ctx` is availabl
 | `--cert-rotation-validating-webhook` | Validating webhook names to patch with CA bundle | `[]` |
 | `--tdg-migration` | Enable legacy namespace ownership migration mode | `false` |
 | `--capi-operator-update-bypass` | Allow capi-operator-manager to skip BindDefinition authorization for Namespace UPDATE requests; protected-label validation still runs | `false` |
+| `--strict-sa-namespace-ownership` | On Namespace CREATE, ServiceAccounts with BindDefinition namespace grants do not inherit hosting-namespace ownership; `false` restores the previous inheritance. Transitional, may be removed in a future release | `true` |
 | `--authorize-rate-limit` | Per-subject sustained requests/second per pod; zero disables limiting, enabled rates must be finite and at most `1e9` | `0` |
 | `--authorize-rate-burst` | Burst size for authorize endpoint rate limiter | `200` |
 | `--authorize-auth-token-file` | Bearer-token file required by `/authorize` callers | `""` |

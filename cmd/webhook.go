@@ -40,6 +40,7 @@ var (
 	certRotationMutatingWebhooks               []string
 	enableTDGMigration                         bool
 	enableCAPIOperatorUpdateBypass             bool
+	strictSANamespaceOwnership                 bool
 	authorizeRateLimit                         float64
 	authorizeRateBurst                         int
 	authorizeAuthTokenFile                     string
@@ -233,29 +234,33 @@ func configureWebhooks(ctx context.Context, mgr manager.Manager, tp *tracing.Pro
 	// Setup Namespace mutator
 	log.Info("setting up Namespace mutator webhook",
 		"tdgMigration", enableTDGMigration,
-		"capiOperatorUpdateBypass", enableCAPIOperatorUpdateBypass)
+		"capiOperatorUpdateBypass", enableCAPIOperatorUpdateBypass,
+		"strictSANamespaceOwnership", strictSANamespaceOwnership)
 	decoder := admission.NewDecoder(mgr.GetScheme())
 	namespaceMutator := &authorizationwebhook.NamespaceMutator{
-		Client:                          mgr.GetClient(),
-		Reader:                          mgr.GetAPIReader(),
-		Decoder:                         decoder,
-		TDGMigration:                    enableTDGMigration,
-		DisableCAPIOperatorUpdateBypass: !enableCAPIOperatorUpdateBypass,
+		Client:                            mgr.GetClient(),
+		Reader:                            mgr.GetAPIReader(),
+		Decoder:                           decoder,
+		TDGMigration:                      enableTDGMigration,
+		DisableCAPIOperatorUpdateBypass:   !enableCAPIOperatorUpdateBypass,
+		DisableStrictSANamespaceOwnership: !strictSANamespaceOwnership,
 	}
 	mgr.GetWebhookServer().Register("/mutate-v1-namespace", &webhook.Admission{Handler: namespaceMutator})
 
 	// Setup Namespace validator
 	log.Info("setting up Namespace validator webhook",
 		"tdgMigration", enableTDGMigration,
-		"capiOperatorUpdateBypass", enableCAPIOperatorUpdateBypass)
+		"capiOperatorUpdateBypass", enableCAPIOperatorUpdateBypass,
+		"strictSANamespaceOwnership", strictSANamespaceOwnership)
 	namespaceValidator := &authorizationwebhook.NamespaceValidator{
-		Client:                          mgr.GetClient(),
-		Reader:                          mgr.GetAPIReader(),
-		Decoder:                         decoder,
-		TDGMigration:                    enableTDGMigration,
-		DisableCAPIOperatorUpdateBypass: !enableCAPIOperatorUpdateBypass,
-		DeletionProtection:              namespaceDeletionProtection,
-		ExtraProtectedNamespaces:        protectedNamespaces,
+		Client:                            mgr.GetClient(),
+		Reader:                            mgr.GetAPIReader(),
+		Decoder:                           decoder,
+		TDGMigration:                      enableTDGMigration,
+		DisableCAPIOperatorUpdateBypass:   !enableCAPIOperatorUpdateBypass,
+		DisableStrictSANamespaceOwnership: !strictSANamespaceOwnership,
+		DeletionProtection:                namespaceDeletionProtection,
+		ExtraProtectedNamespaces:          protectedNamespaces,
 	}
 	mgr.GetWebhookServer().Register("/validate-v1-namespace", &webhook.Admission{Handler: namespaceValidator})
 
@@ -318,6 +323,10 @@ func init() {
 	webhookCmd.Flags().BoolVar(&enableCAPIOperatorUpdateBypass, "capi-operator-update-bypass", false,
 		"Allow the capi-operator-manager ServiceAccount to skip BindDefinition authorization for Namespace UPDATE requests; "+
 			"disabled by default. Protected-label validation still runs when enabled.")
+	webhookCmd.Flags().BoolVar(&strictSANamespaceOwnership, "strict-sa-namespace-ownership", true,
+		"On Namespace CREATE, treat a ServiceAccount's BindDefinition namespace grants as authoritative and do not "+
+			"inherit ownership from its hosting namespace. Set to false to restore the previous inheritance for all "+
+			"ServiceAccounts. Transitional escape hatch; it may be removed in a future release.")
 	webhookCmd.Flags().Float64Var(&authorizeRateLimit, "authorize-rate-limit", 0,
 		"Maximum sustained requests per second for the /authorize endpoint. Set to 0 to disable rate limiting.")
 	webhookCmd.Flags().IntVar(&authorizeRateBurst, "authorize-rate-burst", 200,
