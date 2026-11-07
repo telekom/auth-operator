@@ -95,6 +95,7 @@ Image reference precedence: `digest` > `tag` > `Chart.AppVersion`
 | `webhookServer.tdgMigration` | Enable legacy namespace ownership migration mode | `"false"` |
 | `webhookServer.capiOperatorUpdateBypass` | Allow capi-operator-manager to skip BindDefinition authorization for Namespace UPDATE requests; protected-label validation still runs | `"false"` |
 | `webhookServer.strictSANamespaceOwnership` | On Namespace CREATE, ServiceAccounts with BindDefinition namespace grants do not inherit hosting-namespace ownership; `"false"` restores the previous inheritance. Transitional escape hatch, may be removed in a future release | `"true"` |
+| `webhookServer.inheritHostingNamespaceOwnershipGuard` | VAP rendering mode for the guard that lets only `kubernetes-admin` and `system:masters` set, change or remove the `t-caas.telekom.com/inherit-hosting-namespace-ownership` ServiceAccount annotation: `auto` (render when the cluster supports VAP), `enabled`, or `disabled` (annotation unguarded). With `auto`, offline `helm template` needs `--api-versions admissionregistration.k8s.io/v1/ValidatingAdmissionPolicy` | `auto` |
 | `webhookServer.bindDefinitionNamespaceSelectorLabelGroups` | DNS label key domains allowed in BindDefinition namespace selectors | `[t-caas.telekom.com]` |
 | `webhookServer.authorizeRateLimit` | Max sustained requests/sec for /authorize endpoint (per pod, 0 to disable; requires caller auth when >0) | `0` |
 | `webhookServer.authorizeRateBurst` | Max burst size for /authorize rate limiter | `200` |

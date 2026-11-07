@@ -382,6 +382,12 @@
           "enum": ["true", "false", true, false],
           "default": "true"
         },
+        "inheritHostingNamespaceOwnershipGuard": {
+          "type": "string",
+          "description": "ValidatingAdmissionPolicy that lets only kubernetes-admin and system:masters set, change or remove the t-caas.telekom.com/inherit-hosting-namespace-ownership ServiceAccount annotation: auto (render when the cluster supports it), enabled (always render), or disabled (annotation unguarded).",
+          "enum": ["auto", "enabled", "disabled"],
+          "default": "auto"
+        },
         "bindDefinitionNamespaceSelectorLabelGroups": {
           "type": "array",
           "description": "DNS label key domains allowed in BindDefinition namespace selectors.",

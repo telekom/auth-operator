@@ -70,7 +70,7 @@ const (
 	// ServiceAccount keeps the pre-#617 Namespace CREATE behaviour: the
 	// ServiceAccount inherits its hosting namespace's ownership even when it
 	// matches namespace grants. Transitional escape hatch; it may be removed in
-	// a future release.
+	// a future release. A ValidatingAdmissionPolicy limits who may change it.
 	AnnotationKeyInheritHostingNamespaceOwnership = "t-caas.telekom.com/inherit-hosting-namespace-ownership"
 )
 

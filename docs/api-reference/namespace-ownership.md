@@ -56,13 +56,28 @@ may be removed in a future release:
   from the API server, so it needs `get` on ServiceAccounts. A failed read
   denies the request.
 
-The auth-operator does not admit ServiceAccounts, so it does not guard this
-annotation. Anyone who can update ServiceAccounts in a namespace can set it,
-and that ServiceAccount then inherits the namespace's ownership, never more.
-Unlike creating a new ServiceAccount there, this re-arms an identity that
-already holds namespace `create` RBAC and credentials, such as a GitOps
-reconciler. Limit ServiceAccount `update`/`patch` in platform-owned namespaces
-to platform operators, or enforce it with a policy engine.
+A ValidatingAdmissionPolicy guards the annotation: only `kubernetes-admin` and
+`system:masters`, the identities that may change namespace ownership labels,
+may set, change or remove it on ServiceAccount CREATE or UPDATE. Other edits to
+an annotated ServiceAccount are unaffected. The TDG-migration bypass
+identities are deliberately excluded, because they are GitOps reconcilers that
+apply tenant-sourced content. Without the guard, anyone who can update a
+ServiceAccount in a namespace could re-arm it, an identity that already holds
+namespace `create` RBAC, with that namespace's ownership (never more).
+
+The policy needs Kubernetes 1.30 or later (`admissionregistration.k8s.io/v1`):
+
+- Helm: `webhookServer.inheritHostingNamespaceOwnershipGuard` is `auto` by
+  default and renders the policy only when the cluster serves that API.
+  `enabled` always renders it; `disabled` omits it and leaves the annotation
+  unguarded. Offline `helm template` needs
+  `--api-versions admissionregistration.k8s.io/v1/ValidatingAdmissionPolicy`.
+- Kustomize: `config/webhook` always includes
+  `serviceaccount_ownership_annotation_vap.yaml`. On older clusters, remove it
+  with a `$patch: delete` overlay.
+
+On clusters without the policy, limit ServiceAccount `update`/`patch` in
+platform-owned namespaces to platform operators.
 
 Non-bypass principals can update an authorized add-on
 namespace when ownership is unchanged, but cannot adopt, change, or remove

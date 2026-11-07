@@ -8,6 +8,10 @@ resources:
 - service.yaml
 - secret.yaml
 - deployment.yaml
+# Guards the transitional inherit-hosting-namespace-ownership ServiceAccount
+# annotation (ValidatingAdmissionPolicy, K8s >= 1.30). On older clusters,
+# remove it with a $patch: delete overlay.
+- serviceaccount_ownership_annotation_vap.yaml
 
 # Namespace admission webhooks are intentionally not installed by default.
 # Opt-in overlays must add namespace_webhooks.yaml and matching cert-rotation

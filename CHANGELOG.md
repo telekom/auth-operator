@@ -19,9 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ServiceAccounts, set `--strict-sa-namespace-ownership=false` (Helm
   `webhookServer.strictSANamespaceOwnership`). Both are transitional and may
   be removed in a future release. A match includes group subjects such as
-  `system:serviceaccounts:<namespace>`. The operator does not guard the
-  annotation, so restrict ServiceAccount `update`/`patch` in platform-owned
-  namespaces. **RBAC:** the webhook ClusterRole now needs `get` on
+  `system:serviceaccounts:<namespace>`. A new ValidatingAdmissionPolicy
+  (Kubernetes 1.30+) lets only `kubernetes-admin` and `system:masters` set,
+  change or remove the annotation. It is on by default: Helm
+  `webhookServer.inheritHostingNamespaceOwnershipGuard` (`auto` renders it
+  when the cluster serves the v1 VAP API, `disabled` turns it off) and
+  kustomize `config/webhook/serviceaccount_ownership_annotation_vap.yaml`
+  (remove it on clusters older than 1.30). **RBAC:** the webhook ClusterRole now needs `get` on
   ServiceAccounts; the Helm chart grants it when `namespaceAdmission.enabled`
   and kustomize in `config/webhook/rbac.yaml`. Custom ClusterRoles must add it,
   otherwise affected CREATEs fail closed with HTTP 500 (#617).
