@@ -7,6 +7,7 @@ package e2e
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -84,6 +85,12 @@ var _ = Describe("ServiceAccount namespace ownership", Ordered, Label("helm", "s
 		args := append([]string{"upgrade", release, "chart/auth-operator", "-n", release, "--reuse-values", "--wait", "--timeout", "5m"}, set...)
 		out, err := utils.Run(utils.CommandContext(context.Background(), "helm", args...))
 		Expect(err).NotTo(HaveOccurred(), "%s", out)
+		// helm --wait does not wait for the old pod to terminate; until it is
+		// gone the Service may still route admission requests to it.
+		Eventually(func() ([]string, error) {
+			out, err := run("get", "pods", "-n", release, "-l", "control-plane=webhook-server", "-o", "name")
+			return strings.Fields(out), err
+		}, deployTimeout, pollingInterval).Should(HaveLen(1))
 		Expect(utils.WaitForWebhookReady(deployTimeout)).To(Succeed())
 	}
 
@@ -199,24 +206,31 @@ spec:
 		if CurrentSpecReport().Failed() {
 			utils.CollectOperatorLogs(release, 200)
 		}
+		// Run every step and report all failures at the end, so a stuck
+		// BindDefinition finalizer cannot leave this release's cluster-wide
+		// webhooks behind for later Helm suites.
+		var errs []error
+		step := func(out string, err error) {
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%w: %s", err, out))
+			}
+		}
 		// Keep the controller alive until BindDefinition finalizers have run.
 		for _, sa := range []string{granted, named} {
-			_, err := run("delete", "binddefinition", release+"-"+sa, "--ignore-not-found", "--timeout=60s")
-			Expect(err).NotTo(HaveOccurred())
+			step(run("delete", "binddefinition", release+"-"+sa, "--ignore-not-found", "--timeout=60s"))
 		}
-		_, err := utils.Run(utils.CommandContext(context.Background(), "helm", "uninstall", release, "-n", release, "--wait", "--timeout", "2m"))
-		Expect(err).NotTo(HaveOccurred())
+		out, err := utils.Run(utils.CommandContext(context.Background(), "helm", "uninstall", release, "-n", release, "--wait", "--timeout", "2m"))
+		step(string(out), err)
 		for _, sa := range []string{granted, named, unbound} {
-			_, err = run("delete", "clusterrolebinding", release+"-"+sa, "--ignore-not-found")
-			Expect(err).NotTo(HaveOccurred())
+			step(run("delete", "clusterrolebinding", release+"-"+sa, "--ignore-not-found"))
 		}
-		_, err = run("delete", "clusterrole", release, "--ignore-not-found")
-		Expect(err).NotTo(HaveOccurred())
+		step(run("delete", "clusterrole", release, "--ignore-not-found"))
 		// Deletion protection guards platform namespaces when the webhook is up.
 		_, _ = run("annotate", "namespace", source, authorizationv1alpha1.AnnotationKeyAllowDeletion+"=true", "--overwrite")
 		for _, ns := range []string{source, release} {
 			utils.CleanupNamespace(ns)
 		}
+		Expect(errors.Join(errs...)).NotTo(HaveOccurred())
 	})
 
 	It("limits ServiceAccount namespace CREATE to explicit grants by default", func() {
@@ -264,10 +278,12 @@ spec:
 		Expect(err).NotTo(HaveOccurred(), "auto must render the guard on a cluster that serves the VAP API")
 
 		By("denying an RBAC-authorized non-admin on CREATE and UPDATE")
-		out, err := createAnnotated()
-		Expect(err).To(HaveOccurred(), "%s", out)
-		Expect(out).To(ContainSubstring(guardMsg))
-		out, err = annotate("=true", asAnnotator)
+		// The API server loads new policies asynchronously.
+		Eventually(func() string {
+			out, _ := createAnnotated()
+			return out
+		}, reconcileTimeout, pollingInterval).Should(ContainSubstring(guardMsg))
+		out, err := annotate("=true", asAnnotator)
 		Expect(err).To(HaveOccurred(), "%s", out)
 		Expect(out).To(ContainSubstring(guardMsg))
 
@@ -316,14 +332,8 @@ spec:
 		Expect(err).NotTo(HaveOccurred(), "%s", out)
 		Expect(out).To(ContainSubstring("--strict-sa-namespace-ownership=false"))
 
-		// Old strict webhook pods may still answer until the rollout settles.
-		Eventually(func() error {
-			out, err := probe(granted, release+"-platform", "platform")
-			if err != nil {
-				return fmt.Errorf("%w: %s", err, out)
-			}
-			return nil
-		}, reconcileTimeout, pollingInterval).Should(Succeed())
+		// upgrade waited for the old strict pod to go away.
+		allowed(granted, release+"-platform", "platform")
 		allowed(named, release+"-other", "platform")
 		allowed(granted, release+"-tenant", "tenant")
 		denied(granted, release+"-thirdparty", "thirdparty")

@@ -19,7 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ServiceAccounts, set `--strict-sa-namespace-ownership=false` (Helm
   `webhookServer.strictSANamespaceOwnership`). Both are transitional and may
   be removed in a future release. A match includes group subjects such as
-  `system:serviceaccounts:<namespace>`. A new ValidatingAdmissionPolicy
+  `system:serviceaccounts:<namespace>`, so a BindDefinition with RoleBindings
+  for a broad group (`system:authenticated`, `system:serviceaccounts`) makes
+  every matching ServiceAccount strict. ServiceAccounts without any such grant
+  keep inheriting, and removing a ServiceAccount's last grant re-enables
+  inheritance. A new ValidatingAdmissionPolicy
   (Kubernetes 1.30+) lets only `kubernetes-admin` and `system:masters` set,
   change or remove the annotation. It is on by default: Helm
   `webhookServer.inheritHostingNamespaceOwnershipGuard` (`auto` renders it

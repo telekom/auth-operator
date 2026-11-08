@@ -44,6 +44,15 @@ the target. Unchanged UPDATEs retain this inheritance fallback even when a
 namespace grant does not match. This fallback does not authorize DELETE, and
 Kubernetes RBAC authorization still applies to every request.
 
+Strict mode depends only on whether a ServiceAccount has namespace grants, so
+two effects follow:
+
+- Removing a ServiceAccount's last namespace grant re-enables hosting-namespace
+  inheritance for its CREATEs.
+- A non-restricted BindDefinition with RoleBindings for a broad group, such as
+  `system:authenticated` or `system:serviceaccounts`, gives every matching
+  ServiceAccount namespace grants and therefore makes all of them strict.
+
 Two transitional escape hatches restore the previous CREATE inheritance. Both
 may be removed in a future release:
 
