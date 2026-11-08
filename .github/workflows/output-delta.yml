@@ -772,21 +772,11 @@ jobs:
           GOBIN="$trusted_bin" go install "sigs.k8s.io/kustomize/kustomize/v5@${kustomize_version}"
           kustomize="$trusted_bin/kustomize"
 
-          go_version="$(grep -E '^toolchain go' "$pr_dir/go.mod" | sed 's/toolchain go//' || true)"
-          if [ -z "$go_version" ]; then
-            go_version="$(grep -E '^go [0-9]' "$pr_dir/go.mod" | awk '{print $2}')"
-          fi
-          if [[ ! "$go_version" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
-            echo "::error::Invalid Go version from PR go.mod: $go_version"
-            exit 1
-          fi
-
           # Build the candidate image from the PR Dockerfile so its pinned
-          # toolchain digest stays in sync with the PR's go.mod requirement.
+          # golang tag and digest match the PR's go.mod requirement.
           # The trusted main checkout remains the source for kustomize and
           # all output-delta helpers used by this job.
           docker build \
-            --build-arg GO_VERSION="$go_version" \
             -f "$pr_dir/Dockerfile" \
             -t auth-operator:pr \
             "$pr_dir"

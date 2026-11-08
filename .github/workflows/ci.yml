@@ -49,6 +49,19 @@ jobs:
       - name: Run go vet
         run: go vet ./...
 
+      # The Dockerfile pins a literal golang tag so Dependabot can track it;
+      # fail when it drifts from go.mod's toolchain (or go) directive.
+      - name: Check Dockerfile Go version matches go.mod
+        run: |
+          want=$(awk '$1 == "toolchain" { sub(/^go/, "", $2); print $2; exit }' go.mod)
+          [ -n "$want" ] || want=$(awk '$1 == "go" { print $2; exit }' go.mod)
+          got=$(sed -nE 's/^FROM .*golang:([0-9.]+)-alpine@sha256:.*/\1/p' Dockerfile)
+          if [ -z "$got" ] || [ "$got" != "$want" ]; then
+            echo "::error file=Dockerfile::golang image tag '${got}' does not match go.mod Go version '${want}'; bump both together"
+            exit 1
+          fi
+          echo "Dockerfile golang:${got} matches go.mod"
+
       - name: Check go mod tidy
         run: |
           go mod tidy
