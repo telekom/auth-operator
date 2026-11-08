@@ -8,9 +8,11 @@ Copyright © 2026 Deutsche Telekom AG.
 package cmd
 
 import (
+	"crypto/tls"
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -411,6 +413,8 @@ func TestFlagDefaults(t *testing.T) {
 		{"webhook", "authorize-rate-burst", "200"},
 		{"webhook", "authorize-auth-token-file", ""},
 		{"webhook", "allow-unauthenticated-authorize", "false"},
+		{"webhook", "disable-authorize-request-checks", "false"},
+		{"webhook", "webhook-tls-go-defaults", "false"},
 		{"webhook", "binddefinition-namespace-selector-label-group", "[t-caas.telekom.com]"},
 	}
 
@@ -434,5 +438,29 @@ func TestFlagDefaults(t *testing.T) {
 				t.Errorf("flag %q default = %q, want %q", tt.flag, pf.DefValue, tt.expected)
 			}
 		})
+	}
+}
+
+func TestWebhookTLSOpts(t *testing.T) {
+	if opts := webhookTLSOpts(true); len(opts) != 0 {
+		t.Fatalf("expected no TLS options with Go defaults, got %d", len(opts))
+	}
+
+	cfg := &tls.Config{}
+	for _, opt := range webhookTLSOpts(false) {
+		opt(cfg)
+	}
+	if cfg.MinVersion != tls.VersionTLS12 {
+		t.Fatalf("MinVersion = %x, want TLS 1.2", cfg.MinVersion)
+	}
+	if len(cfg.CipherSuites) == 0 {
+		t.Fatal("expected pinned cipher suites")
+	}
+	for _, id := range cfg.CipherSuites {
+		name := tls.CipherSuiteName(id)
+		aead := strings.Contains(name, "_GCM_") || strings.Contains(name, "CHACHA20_POLY1305")
+		if !strings.HasPrefix(name, "TLS_ECDHE_") || !aead {
+			t.Errorf("cipher suite %s is not ECDHE with AES-GCM or ChaCha20-Poly1305", name)
+		}
 	}
 }

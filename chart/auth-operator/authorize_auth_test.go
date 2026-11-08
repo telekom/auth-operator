@@ -91,3 +91,27 @@ func assertNotContains(t *testing.T, haystack, needle string) {
 		t.Fatalf("expected rendered chart not to contain %q", needle)
 	}
 }
+
+func TestWebhookDeploymentTransitionalOptOutRendering(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skipf("helm not installed: %v", err)
+	}
+
+	defaultRender := helmTemplate(t)
+	// Flags render only when enabled so helm upgrade --reuse-values from
+	// charts without these values keeps working.
+	assertNotContains(t, defaultRender, "--disable-authorize-request-checks")
+	assertNotContains(t, defaultRender, "--webhook-tls-go-defaults")
+	// --reuse-values from an older release leaves both keys absent.
+	missingRender := helmTemplate(t,
+		"--set", "webhookServer.disableAuthorizeRequestChecks=null",
+		"--set", "webhookServer.tlsGoDefaults=null")
+	assertNotContains(t, missingRender, "--disable-authorize-request-checks")
+	assertNotContains(t, missingRender, "--webhook-tls-go-defaults")
+
+	optOutRender := helmTemplate(t,
+		"--set", "webhookServer.disableAuthorizeRequestChecks=true",
+		"--set", "webhookServer.tlsGoDefaults=true")
+	assertContains(t, optOutRender, "--disable-authorize-request-checks=true")
+	assertContains(t, optOutRender, "--webhook-tls-go-defaults=true")
+}

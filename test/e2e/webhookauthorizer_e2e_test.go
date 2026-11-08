@@ -975,7 +975,6 @@ func nonResourceSAR(user string, groups []string, verb, path string) authzv1.Sub
 	}
 }
 
-//nolint:unparam // This integration suite deploys the authorizer in one namespace.
 func startWebhookAuthorizerPortForward(namespace, serviceName string) (int, func()) {
 	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	ExpectWithOffset(1, err).NotTo(HaveOccurred())

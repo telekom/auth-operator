@@ -414,6 +414,16 @@
           "description": "Explicit insecure opt-out that allows /authorize requests without bearer-token authentication when no token Secret is configured. Keep false for production.",
           "default": false
         },
+        "disableAuthorizeRequestChecks": {
+          "type": "boolean",
+          "description": "Disable the POST-only (405) and application/json Content-Type (415) checks on /authorize. Transitional; may be removed in a future release.",
+          "default": false
+        },
+        "tlsGoDefaults": {
+          "type": "boolean",
+          "description": "Use Go's default TLS settings for the webhook server instead of TLS 1.2+ with pinned ECDHE AES-GCM/ChaCha20-Poly1305 cipher suites. Transitional; may be removed in a future release.",
+          "default": false
+        },
         "authorizeAuth": {
           "type": "object",
           "description": "Optional bearer-token authentication for /authorize callers.",

@@ -167,6 +167,14 @@ webhookServer:
   # production; when false and no authorizeAuth.tokenSecretName is set,
   # /authorize requests are denied before their body is decoded.
   allowUnauthenticatedAuthorize: false
+  # /authorize accepts only POST (else 405 with Allow: POST) with
+  # Content-Type application/json (else 415). Set true to disable both checks.
+  # Transitional; may be removed in a future release.
+  disableAuthorizeRequestChecks: false
+  # The webhook server requires TLS 1.2+ and, for TLS 1.2, only ECDHE
+  # AES-GCM/ChaCha20-Poly1305 cipher suites. Set true to restore Go's default
+  # TLS settings. Transitional; may be removed in a future release.
+  tlsGoDefaults: false
   authorizeAuth:
     # Optional existing Secret containing the bearer token required for
     # /authorize requests. Keep empty only with allowUnauthenticatedAuthorize

@@ -191,7 +191,7 @@ func TestBindDefinitionBridgeAuthorize(t *testing.T) {
 			handler := &Authorizer{Client: reader, LiveReader: reader, Discovery: bridgeTestDiscovery(), Log: logr.Discard(), AllowUnauthenticatedAuthorize: true}
 			sar := authzv1.SubjectAccessReview{Spec: authzv1.SubjectAccessReviewSpec{User: tc.user, Groups: tc.groups, ResourceAttributes: &tc.attr}}
 			before := testutil.ToFloat64(metrics.AuthorizerBridgedAllowsTotal)
-			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(marshalSAR(t, sar)))
+			req := newAuthorizeRequest(t.Context(), bytes.NewReader(marshalSAR(t, sar)))
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
 			if rec.Code != http.StatusOK {

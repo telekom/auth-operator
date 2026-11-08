@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"mime"
 	"net/http"
 	"os"
 	"slices"
@@ -108,6 +109,10 @@ type Authorizer struct {
 	// token is configured. This is insecure and intended only for explicit
 	// development or migration opt-outs.
 	AllowUnauthenticatedAuthorize bool
+	// DisableRequestChecks skips the POST-only and application/json
+	// Content-Type checks on /authorize. Transitional opt-out; may be removed
+	// in a future release.
+	DisableRequestChecks bool
 	// Limiter is used as a per-subject limiter template. Each SAR subject gets
 	// an independent token bucket with this limit and burst, preventing one
 	// identity from consuming another identity's authorization budget.
@@ -120,14 +125,24 @@ type Authorizer struct {
 	bridgeScopes        map[schema.GroupVersionResource]bridgeScopeEntry
 }
 
-func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (wa *Authorizer) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	start := time.Now()
+
+	// Access log: connection metadata only, never the SAR body or headers.
+	w := &statusRecorder{ResponseWriter: rw, status: http.StatusOK}
+	defer func() {
+		wa.Log.V(2).Info("/authorize request",
+			"remoteAddr", r.RemoteAddr,
+			"method", r.Method,
+			"status", w.status,
+			"latency", time.Since(start).String())
+	}()
 
 	// Limit request body size to prevent OOM from oversized payloads.
 	// Applied before any other processing so that early-return paths
 	// (rate limiting, decode errors) also benefit from the size cap.
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+	r.Body = http.MaxBytesReader(rw, r.Body, maxRequestBodySize)
 
 	// Ensure request body is closed to prevent resource leaks.
 	defer func() {
@@ -135,6 +150,11 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			wa.Log.Error(err, "failed to close request body")
 		}
 	}()
+
+	if !wa.DisableRequestChecks && !checkAuthorizeRequest(w, r) {
+		wa.recordRejectedMetrics(start)
+		return
+	}
 
 	if !wa.authenticateRequest(w, r) {
 		wa.recordRejectedMetrics(start)
@@ -249,6 +269,34 @@ func (wa *Authorizer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		wa.Log.Error(err, "failed to write SubjectAccessReview response",
 			"latency", time.Since(start).String())
 	}
+}
+
+// statusRecorder captures the response status code for the access log.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+// WriteHeader records the status code before delegating.
+func (s *statusRecorder) WriteHeader(code int) {
+	s.status = code
+	s.ResponseWriter.WriteHeader(code)
+}
+
+// checkAuthorizeRequest enforces the transport contract of the Kubernetes
+// authorization webhook: POST with a JSON body. It writes 405 or 415 and
+// returns false otherwise.
+func checkAuthorizeRequest(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return false
+	}
+	if mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mediaType != "application/json" {
+		http.Error(w, "unsupported media type, expected application/json", http.StatusUnsupportedMediaType)
+		return false
+	}
+	return true
 }
 
 func (wa *Authorizer) startSubjectAccessReviewSpan(ctx context.Context, r *http.Request) (spanCtx context.Context, end func()) {

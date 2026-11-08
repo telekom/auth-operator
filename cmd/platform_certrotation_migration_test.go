@@ -200,8 +200,9 @@ func TestPlatformMountedCertificateValidation(t *testing.T) {
 	}}
 	defer transport.CloseIdleConnections()
 	tlsClient := &http.Client{Timeout: time.Second, Transport: transport}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+webhookAddr+"/authorize", nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://"+webhookAddr+"/authorize", nil)
 	g.Expect(err).NotTo(gomega.HaveOccurred())
+	request.Header.Set("Content-Type", "application/json")
 	response, err := tlsClient.Do(request)
 	g.Expect(err).NotTo(gomega.HaveOccurred())
 	g.Expect(response.StatusCode).To(gomega.Equal(http.StatusOK))

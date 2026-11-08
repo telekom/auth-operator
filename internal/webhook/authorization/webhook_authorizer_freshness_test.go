@@ -72,7 +72,7 @@ func TestWebhookAuthorizerLiveRevocationWithCachedIndex(t *testing.T) {
 				Client: cachedClient, LiveReader: live, Log: logr.Discard(), AllowUnauthenticatedAuthorize: true,
 			}
 			rec := httptest.NewRecorder()
-			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(marshalSAR(t, sar)))
+			req := newAuthorizeRequest(t.Context(), bytes.NewReader(marshalSAR(t, sar)))
 			handler.ServeHTTP(rec, req)
 			if rec.Code != http.StatusOK {
 				t.Fatalf("unexpected HTTP %d: %s", rec.Code, rec.Body.String())
@@ -107,7 +107,7 @@ func TestWebhookAuthorizerLiveGlobalDenyCachedAsScoped(t *testing.T) {
 		User: "alice", ResourceAttributes: &authzv1.ResourceAttributes{Verb: "get", Resource: "nodes"},
 	}}
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/authorize", bytes.NewReader(marshalSAR(t, sar))))
+	handler.ServeHTTP(rec, newAuthorizeRequest(t.Context(), bytes.NewReader(marshalSAR(t, sar))))
 	var resp authzv1.SubjectAccessReview
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatal(err)

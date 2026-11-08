@@ -65,6 +65,7 @@ test/e2e/
 ├── crd_e2e_test.go             # CRD functionality (dev/kustomize)
 ├── helm_e2e_test.go            # Helm chart installation
 ├── addon_namespace_e2e_test.go # Add-on ownership admission and RBAC isolation
+├── authorize_hardening_e2e_test.go # /authorize request checks, webhook TLS pinning and opt-outs
 ├── serviceaccount_namespace_ownership_e2e_test.go # Strict SA namespace ownership, opt-outs, annotation guard
 ├── creator_tracking_e2e_test.go # Native creator and contributor tracking
 ├── creator_tracking_support_test.go # Test webhook and exact cleanup

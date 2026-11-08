@@ -100,6 +100,8 @@ Image reference precedence: `digest` > `tag` > `Chart.AppVersion`
 | `webhookServer.authorizeRateLimit` | Max sustained requests/sec for /authorize endpoint (per pod, 0 to disable; requires caller auth when >0) | `0` |
 | `webhookServer.authorizeRateBurst` | Max burst size for /authorize rate limiter | `200` |
 | `webhookServer.allowUnauthenticatedAuthorize` | Explicit insecure opt-out for unauthenticated /authorize callers when no token Secret is configured | `false` |
+| `webhookServer.disableAuthorizeRequestChecks` | Disable the POST-only (405) and `application/json` Content-Type (415) checks on /authorize. Transitional; may be removed in a future release | `false` |
+| `webhookServer.tlsGoDefaults` | Restore Go's default webhook TLS settings instead of TLS 1.2+ with pinned ECDHE AES-GCM/ChaCha20-Poly1305 cipher suites. Transitional; may be removed in a future release | `false` |
 | `webhookServer.authorizeAuth.tokenSecretName` | Existing Secret with bearer token for /authorize caller authentication | `""` |
 | `webhookServer.authorizeAuth.tokenSecretKey` | Secret key containing the /authorize bearer token | `token` |
 | `webhookServer.resources.limits.cpu` | CPU limit | `150m` |

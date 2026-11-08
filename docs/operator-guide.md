@@ -378,8 +378,28 @@ must end.
 | `--authorize-rate-burst` | Burst size for authorize endpoint rate limiter | `200` |
 | `--authorize-auth-token-file` | Bearer-token file required by `/authorize` callers | `""` |
 | `--allow-unauthenticated-authorize` | Explicit insecure opt-out for unauthenticated `/authorize` callers when no token file is configured | `false` |
+| `--disable-authorize-request-checks` | Disable the POST-only (405 with `Allow: POST`) and `application/json` Content-Type (415) checks on `/authorize`. Transitional; may be removed in a future release | `false` |
+| `--webhook-tls-go-defaults` | Use Go's default TLS settings instead of TLS 1.2+ with the pinned cipher suites (see below). Transitional; may be removed in a future release | `false` |
 | `--namespace-deletion-protection` | Enable namespace deletion protection (no admin bypass; see [Namespace Deletion Protection](#namespace-deletion-protection)) | `true` |
 | `--protected-namespaces` | Additional namespace names unconditionally protected from deletion, on top of `kube-system`, `kube-public`, `kube-node-lease`, `default` | `[]` |
+
+The webhook server accepts TLS 1.2 and TLS 1.3. For TLS 1.2 it accepts only
+ECDHE key exchange with AES-GCM or ChaCha20-Poly1305
+(`TLS_ECDHE_{ECDSA,RSA}_WITH_AES_128_GCM_SHA256`,
+`TLS_ECDHE_{ECDSA,RSA}_WITH_AES_256_GCM_SHA384`,
+`TLS_ECDHE_{ECDSA,RSA}_WITH_CHACHA20_POLY1305_SHA256`). TLS 1.3 cipher suites
+keep Go's defaults.
+
+`/authorize` accepts only `POST` requests with `Content-Type: application/json`
+(parameters such as `charset` are allowed). Other methods get `405 Method Not
+Allowed` with `Allow: POST`; other content types get `415 Unsupported Media
+Type`. At verbosity 2 (`--verbosity=2`), each `/authorize` request is logged
+with the caller address, method, status code and latency. The access log never
+contains the SubjectAccessReview body or tokens. The caller address is the TCP
+peer (`RemoteAddr`); `X-Forwarded-For` is not trusted. When the API server
+reaches the webhook through a proxy (for example a Konnectivity egress
+selector or a mesh sidecar), the logged address is the proxy's, not the API
+server's.
 
 Authorization uses the tagged `t-caas-go-library` keyed rate limiter and
 request-local namespace selector cache. Subject keys remain the user plus
