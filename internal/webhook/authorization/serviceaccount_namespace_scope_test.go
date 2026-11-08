@@ -53,6 +53,12 @@ func TestServiceAccountNamespaceGrantsBoundInheritance(t *testing.T) {
 			// An explicit namespace grant is still a grant: it must not fall back to the hosting namespace.
 			explicitNamespaceOnly := binding.DeepCopy()
 			explicitNamespaceOnly.Spec.RoleBindings = []authorizationv1alpha1.NamespaceBinding{{ClusterRoleRefs: []string{"writer"}, Namespace: "existing-namespace"}}
+			// A name-only selector derives no ownership labels but still grants the namespace.
+			nameSelector := func(name string) *authorizationv1alpha1.BindDefinition {
+				bd := binding.DeepCopy()
+				bd.Spec.RoleBindings = []authorizationv1alpha1.NamespaceBinding{{ClusterRoleRefs: []string{"writer"}, NamespaceSelector: []metav1.LabelSelector{{MatchLabels: map[string]string{corev1.LabelMetadataName: name}}}}}
+				return bd
+			}
 			// Real ServiceAccount tokens carry their namespace group.
 			groupSubject := binding.DeepCopy()
 			groupSubject.Spec.Subjects = []rbacv1.Subject{{Kind: rbacv1.GroupKind, Name: "system:serviceaccounts:t-caas-controllers"}}
@@ -70,6 +76,8 @@ func TestServiceAccountNamespaceGrantsBoundInheritance(t *testing.T) {
 				{"protected", map[string]string{prefix + "owner": owner, prefix + owner: "team-a", prefix + "protected": "team-a"}, true, false, nil},
 				{"unbound-platform-inheritance", map[string]string{prefix + "owner": "platform"}, false, true, nil},
 				{"explicit-namespace-only-platform", map[string]string{prefix + "owner": "platform"}, true, false, explicitNamespaceOnly},
+				{"name-selector-platform", map[string]string{prefix + "owner": "platform"}, true, true, nameSelector("new-namespace")},
+				{"name-selector-other-namespace", map[string]string{prefix + "owner": "platform"}, true, false, nameSelector("other-namespace")},
 				{"group-subject-own", own, true, true, groupSubject},
 				{"group-subject-platform", map[string]string{prefix + "owner": "platform"}, true, owner == "platform", groupSubject},
 			}

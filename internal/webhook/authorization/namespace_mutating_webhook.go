@@ -309,26 +309,13 @@ func (m *NamespaceMutator) collectBindDefinitionLabels(ctx context.Context, ns *
 						"selectorCount", len(roleBinding.NamespaceSelector))
 
 					for nsIdx, nsSelector := range roleBinding.NamespaceSelector {
-						if unchangedNamespace != nil {
-							matches, matchErr := namespaceMatchesSelector(unchangedNamespace, &nsSelector)
-							if matchErr != nil {
-								return nil, false, false, matchErr
-							}
-							namespaceBindingMatched = namespaceBindingMatched || matches
-							if !matches {
-								continue
-							}
+						labels, matches, matchErr := selectorOwnership(ns, unchangedNamespace, &nsSelector, strictSACreate)
+						if matchErr != nil {
+							return nil, false, false, matchErr
 						}
-						labels := getCompleteTrackedLabelsFromNamespaceSelector(nsSelector)
-						if unchangedNamespace == nil {
-							var matchErr error
-							labels, matchErr = getTrackedLabelsForNamespaceCreation(ns, &nsSelector)
-							if matchErr != nil {
-								return nil, false, false, matchErr
-							}
-							if len(labels) > 0 && len(labelsToAdd) > 0 && !maps.Equal(labelsToAdd, labels) {
-								return nil, false, false, errAmbiguousNamespaceOwnership
-							}
+						namespaceBindingMatched = namespaceBindingMatched || matches
+						if unchangedNamespace == nil && len(labels) > 0 && len(labelsToAdd) > 0 && !maps.Equal(labelsToAdd, labels) {
+							return nil, false, false, errAmbiguousNamespaceOwnership
 						}
 						logger.V(3).Info("extracted labels from selector",
 							"namespace", nsName, "rbIndex", rbIdx,
@@ -448,6 +435,44 @@ func getCompleteTrackedLabelsFromNamespaceSelector(selector metav1.LabelSelector
 		return map[string]string{}
 	}
 	return labels
+}
+
+// selectorOwnership returns the ownership labels a selector contributes and
+// whether it grants the namespace. UPDATE evaluates the unchanged namespace.
+// CREATE derives labels; under strict ServiceAccount ownership a selector that
+// derives none (for example kubernetes.io/metadata.name) still grants the
+// submitted ownership, as it does in the validator.
+func selectorOwnership(ns, unchangedNamespace *corev1.Namespace, selector *metav1.LabelSelector, strictSACreate bool) (labels map[string]string, matches bool, err error) {
+	if unchangedNamespace != nil {
+		matches, err = namespaceMatchesSelector(unchangedNamespace, selector)
+		if !matches || err != nil {
+			return nil, false, err
+		}
+		return getCompleteTrackedLabelsFromNamespaceSelector(*selector), true, nil
+	}
+	labels, err = getTrackedLabelsForNamespaceCreation(ns, selector)
+	if err != nil || len(labels) > 0 || !strictSACreate {
+		return labels, false, err
+	}
+	matches, err = selectorMatchesSubmittedNamespace(ns, selector)
+	return nil, matches, err
+}
+
+// selectorMatchesSubmittedNamespace reports whether a CREATE selector matches
+// both as the validator evaluates it and against the submitted labels, so a
+// selector that excludes the submitted ownership (for example owner NotIn)
+// cannot authorize it.
+func selectorMatchesSubmittedNamespace(ns *corev1.Namespace, selector *metav1.LabelSelector) (bool, error) {
+	matches, err := namespaceMatchesSelectorForAdmissionOperation(admissionv1.Create, ns, selector)
+	if !matches || err != nil {
+		return false, err
+	}
+	candidate := ns.DeepCopy()
+	if candidate.Labels == nil {
+		candidate.Labels = make(map[string]string, 1)
+	}
+	candidate.Labels[corev1.LabelMetadataName] = ns.Name
+	return namespaceMatchesSelector(candidate, selector)
 }
 
 func getTrackedLabelsForNamespaceCreation(ns *corev1.Namespace, selector *metav1.LabelSelector) (map[string]string, error) {
