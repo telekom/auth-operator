@@ -240,7 +240,7 @@ spec:
 	})
 
 	It("lets an annotated ServiceAccount inherit its hosting namespace ownership", func() {
-		out, err := annotate(`="true"`)
+		out, err := annotate("=true")
 		Expect(err).NotTo(HaveOccurred(), "%s", out)
 		DeferCleanup(func() { _, _ = annotate("-") })
 		// The annotation is read live, so it takes effect immediately.
@@ -267,7 +267,7 @@ spec:
 		out, err := createAnnotated()
 		Expect(err).To(HaveOccurred(), "%s", out)
 		Expect(out).To(ContainSubstring(guardMsg))
-		out, err = annotate(`="true"`, asAnnotator)
+		out, err = annotate("=true", asAnnotator)
 		Expect(err).To(HaveOccurred(), "%s", out)
 		Expect(out).To(ContainSubstring(guardMsg))
 
@@ -276,7 +276,7 @@ spec:
 		Expect(err).NotTo(HaveOccurred(), "%s", out)
 
 		By("allowing the cluster administrator")
-		out, err = annotate(`="true"`)
+		out, err = annotate("=true")
 		Expect(err).NotTo(HaveOccurred(), "%s", out)
 		DeferCleanup(func() { _, _ = annotate("-") })
 
