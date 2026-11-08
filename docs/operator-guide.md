@@ -412,9 +412,12 @@ Both labels are immutable on ordinary updates. The add-on identity is a built-in
 BindDefinition selector key even with custom allowed label domains, and can
 derive `owner=addon` during namespace creation. ServiceAccount namespace ownership
 inheritance includes it. Ordinary users require matching BindDefinition
-authorization. ServiceAccounts may also CREATE/UPDATE without a matching
+authorization. ServiceAccounts may also UPDATE without a matching
 BindDefinition when their source namespace has valid, non-empty tracked ownership
 labels that exactly match the target; this fallback does not authorize DELETE.
+CREATE uses it only for ServiceAccounts opted in by an administrator or with
+strict ownership disabled (see the
+[namespace label contract](api-reference/namespace-ownership.md)).
 Kubernetes RBAC authorization still applies to every request.
 
 With `--tdg-migration`, protected-label migration bypass principals may reclassify

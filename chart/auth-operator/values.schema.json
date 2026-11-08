@@ -376,6 +376,18 @@
           "enum": ["true", "false", true, false],
           "default": "false"
         },
+        "strictSANamespaceOwnership": {
+          "type": ["string", "boolean"],
+          "description": "On Namespace CREATE, authorize ServiceAccounts through BindDefinition namespace grants and do not let them inherit hosting-namespace ownership, even without any grant, unless the ServiceAccount carries the inherit-hosting-namespace-ownership annotation. Set to false to restore the previous inheritance. Transitional escape hatch; may be removed in a future release.",
+          "enum": ["true", "false", true, false],
+          "default": "true"
+        },
+        "inheritHostingNamespaceOwnershipGuard": {
+          "type": "string",
+          "description": "ValidatingAdmissionPolicy that lets only kubernetes-admin and system:masters set, change or remove the t-caas.telekom.com/inherit-hosting-namespace-ownership ServiceAccount annotation: auto (render when the cluster supports it), enabled (always render), or disabled (annotation unguarded).",
+          "enum": ["auto", "enabled", "disabled"],
+          "default": "auto"
+        },
         "bindDefinitionNamespaceSelectorLabelGroups": {
           "type": "array",
           "description": "DNS label key domains allowed in BindDefinition namespace selectors.",

@@ -31,10 +31,97 @@ metadata:
 ```
 
 Matching BindDefinitions authorize namespace operations for ordinary users.
-ServiceAccounts may also CREATE/UPDATE without a matching BindDefinition when
-their source namespace has valid, non-empty tracked ownership labels exactly
-matching the target. This fallback does not authorize DELETE, and Kubernetes RBAC
-authorization still applies to every request.
+On CREATE, a ServiceAccount is authorized only by namespace grants in a
+non-restricted BindDefinition, whether the BindDefinition names the
+ServiceAccount or one of its groups (for example
+`system:serviceaccounts:<namespace>`). Its hosting namespace never widens that
+scope, so a ServiceAccount without any such grant is denied unless an
+administrator sets the per-ServiceAccount inherit annotation described below,
+or, for tenant namespaces, an approved emergency session authorizes it. Grants in `*-namespaced-reader-restricted` BindDefinitions and
+BindDefinitions with only `clusterRoleBindings` do not count. This also applies
+when tenant or third-party Flux identities share a platform-owned controller
+namespace, and to platform controllers such as
+`flux-system/kustomize-controller` and `flux-system/helm-controller`, which need
+an explicit grant for the owners they create namespaces for:
+
+```yaml
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: flux-platform-namespaces
+spec:
+  targetName: flux-platform-namespaces
+  subjects:
+    - kind: ServiceAccount
+      name: kustomize-controller
+      namespace: flux-system
+    - kind: ServiceAccount
+      name: helm-controller
+      namespace: flux-system
+  # Flux owns these ServiceAccounts; without this list auth-operator would
+  # create and own them if they do not exist yet.
+  externalServiceAccountRefs:
+    - name: kustomize-controller
+      namespace: flux-system
+    - name: helm-controller
+      namespace: flux-system
+  roleBindings:
+    - clusterRoleRefs: ["view"]
+      namespaceSelector:
+        - matchLabels:
+            t-caas.telekom.com/owner: platform
+```
+
+This example also creates a `view` RoleBinding for both controllers in every
+platform-owned namespace.
+
+Removing a ServiceAccount's last grant therefore never widens its access.
+Requests that skip namespace admission through the existing privileged and
+TDG-migration bypasses are unaffected.
+
+UPDATEs keep the hosting-namespace fallback: a ServiceAccount may update a
+namespace whose valid, non-empty tracked ownership labels exactly match its
+source namespace, even without a matching grant. This fallback never
+authorizes DELETE, and Kubernetes RBAC authorization still applies to every
+request.
+
+Two transitional escape hatches restore hosting-namespace inheritance on
+CREATE. Both may be removed in a future release:
+
+- Webhook flag `--strict-sa-namespace-ownership=false` (Helm
+  `webhookServer.strictSANamespaceOwnership: "false"`) applies to every
+  ServiceAccount.
+- Annotation `t-caas.telekom.com/inherit-hosting-namespace-ownership: "true"`
+  on a ServiceAccount applies to that ServiceAccount only. Any other value, or
+  no annotation, keeps strict behaviour. The webhook reads the annotation live
+  from the API server, so it needs `get` on ServiceAccounts. A failed read
+  denies the request.
+
+A ValidatingAdmissionPolicy guards the annotation: only `kubernetes-admin` and
+`system:masters`, the identities that may change namespace ownership labels,
+may set, change or remove it on ServiceAccount CREATE or UPDATE. Other edits to
+an annotated ServiceAccount are unaffected. The TDG-migration bypass
+identities are deliberately excluded, because they are GitOps reconcilers that
+apply tenant-sourced content. Without the guard, anyone who can create or
+update a ServiceAccount in a namespace could arm it, an identity that holds
+namespace `create` RBAC, with that namespace's ownership (never more).
+
+The policy needs Kubernetes 1.30 or later (`admissionregistration.k8s.io/v1`):
+
+- Helm: `webhookServer.inheritHostingNamespaceOwnershipGuard` is `auto` by
+  default and renders the policy only when the cluster serves that API.
+  `enabled` always renders it; `disabled` omits it and leaves the annotation
+  unguarded. Offline `helm template` needs
+  `--api-versions admissionregistration.k8s.io/v1/ValidatingAdmissionPolicy`.
+- Kustomize: `config/webhook` always includes
+  `serviceaccount_ownership_annotation_vap.yaml`. On older clusters, remove it
+  with a `$patch: delete` overlay.
+
+On clusters without the policy, limit ServiceAccount `create`, `update` and
+`patch` in platform-owned namespaces to platform operators. A new
+ServiceAccount can carry the annotation, so `create` alone is enough to opt
+out, even for identities granted through a group-based BindDefinition.
+
 Non-bypass principals can update an authorized add-on
 namespace when ownership is unchanged, but cannot adopt, change, or remove
 tracked ownership labels. Existing privileged bypass rules remain unchanged.
@@ -78,7 +165,6 @@ An add-on `a` pin never authorizes an add-on `b` namespace.
 On unchanged UPDATEs, the mutator ignores every selector that does not match the
 existing namespace, preserving exact-ownership ServiceAccount fallback across
 tenant, third-party and add-on categories without deriving unrelated labels.
-ServiceAccounts inherit the owner and identity labels from their namespace.
 
 On CREATE, selector-derived ownership must match the requested namespace name
 and any ownership labels already supplied. Alternative selector terms are never

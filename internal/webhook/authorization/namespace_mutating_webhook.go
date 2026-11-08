@@ -28,6 +28,9 @@ type NamespaceMutator struct {
 	Decoder                         admission.Decoder
 	TDGMigration                    bool
 	DisableCAPIOperatorUpdateBypass bool
+	// DisableStrictSANamespaceOwnership restores hosting-namespace inheritance
+	// on CREATE for all ServiceAccounts. Transitional; may be removed.
+	DisableStrictSANamespaceOwnership bool
 }
 
 var errAmbiguousNamespaceOwnership = errors.New("namespace ownership is ambiguous across matching BindDefinition selectors; supply explicit ownership labels")
@@ -90,7 +93,7 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 	}
 
 	// Collect labels from matching BindDefinitions.
-	labelsToAdd, namespaceBindingMatched, listErr := m.collectBindDefinitionLabels(ctx, ns, req.UserInfo.Username, userGroups, saInfo, unchangedNamespace)
+	labelsToAdd, namespaceBindingMatched, listErr := m.collectBindDefinitionLabels(ctx, ns, req.UserInfo.Username, userGroups, saInfo, unchangedNamespace, strictServiceAccountCreate(req.Operation, saInfo, m.DisableStrictSANamespaceOwnership))
 	if errors.Is(listErr, errAmbiguousNamespaceOwnership) {
 		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultDenied).Inc()
 		return admission.Denied(errAmbiguousNamespaceOwnership.Error())
@@ -198,7 +201,11 @@ func (m *NamespaceMutator) inheritServiceAccountNamespaceLabels(
 	logger := logf.FromContext(ctx).WithName("namespace-mutator")
 	saCtx, saCancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
 	defer saCancel()
-	inherited, err := GetSANamespaceTrackedLabels(saCtx, m.admissionReader(), saInfo)
+	inherit, err := mayInheritHostingNamespace(saCtx, m.admissionReader(), req.Operation, saInfo, m.DisableStrictSANamespaceOwnership)
+	var inherited map[string]string
+	if err == nil && inherit {
+		inherited, err = GetSANamespaceTrackedLabels(saCtx, m.admissionReader(), saInfo)
+	}
 	if err != nil {
 		logger.Error(err, "failed to lookup SA namespace labels",
 			"saNamespace", saInfo.Namespace, "targetNamespace", req.Name)
@@ -247,16 +254,16 @@ func denyConflictingInheritedLabels(
 }
 
 // collectBindDefinitionLabels iterates over all BindDefinitions and collects labels to add
-// from those whose subjects match the requesting user. The boolean return value reports
-// whether an explicit namespace binding or a selector matches unchanged UPDATE
-// ownership. unchangedNamespace is nil for CREATE or changed ownership.
-func (m *NamespaceMutator) collectBindDefinitionLabels(ctx context.Context, ns *corev1.Namespace, username string, userGroups []string, saInfo ServiceAccountInfo, unchangedNamespace *corev1.Namespace) (labelsToAdd map[string]string, namespaceBindingMatched bool, err error) {
+// from those whose subjects match the requesting user. namespaceBindingMatched
+// reports an explicit namespace or unchanged UPDATE match.
+// unchangedNamespace is nil for CREATE or changed ownership.
+func (m *NamespaceMutator) collectBindDefinitionLabels(ctx context.Context, ns *corev1.Namespace, username string, userGroups []string, saInfo ServiceAccountInfo, unchangedNamespace *corev1.Namespace, strictSACreate bool) (labelsToAdd map[string]string, namespaceBindingMatched bool, err error) {
 	nsName := ns.Name
 	logger := logf.FromContext(ctx).WithName("namespace-mutator")
 
 	listCtx, cancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
 	defer cancel()
-	bindDefinitions, err := freshBindDefinitionsWithRoleBindings(listCtx, m.Client, m.admissionReader())
+	bindDefinitions, err := freshBindDefinitionsWithRoleBindings(listCtx, m.Client, m.admissionReader(), strictSACreate)
 	if err != nil {
 		logger.Error(err, "failed to list BindDefinitions", "namespace", nsName)
 		return nil, false, err
@@ -299,26 +306,13 @@ func (m *NamespaceMutator) collectBindDefinitionLabels(ctx context.Context, ns *
 						"selectorCount", len(roleBinding.NamespaceSelector))
 
 					for nsIdx, nsSelector := range roleBinding.NamespaceSelector {
-						if unchangedNamespace != nil {
-							matches, matchErr := namespaceMatchesSelector(unchangedNamespace, &nsSelector)
-							if matchErr != nil {
-								return nil, false, matchErr
-							}
-							namespaceBindingMatched = namespaceBindingMatched || matches
-							if !matches {
-								continue
-							}
+						labels, matches, matchErr := selectorOwnership(ns, unchangedNamespace, &nsSelector, strictSACreate)
+						if matchErr != nil {
+							return nil, false, matchErr
 						}
-						labels := getCompleteTrackedLabelsFromNamespaceSelector(nsSelector)
-						if unchangedNamespace == nil {
-							var matchErr error
-							labels, matchErr = getTrackedLabelsForNamespaceCreation(ns, &nsSelector)
-							if matchErr != nil {
-								return nil, false, matchErr
-							}
-							if len(labels) > 0 && len(labelsToAdd) > 0 && !maps.Equal(labelsToAdd, labels) {
-								return nil, false, errAmbiguousNamespaceOwnership
-							}
+						namespaceBindingMatched = namespaceBindingMatched || matches
+						if unchangedNamespace == nil && len(labels) > 0 && len(labelsToAdd) > 0 && !maps.Equal(labelsToAdd, labels) {
+							return nil, false, errAmbiguousNamespaceOwnership
 						}
 						logger.V(3).Info("extracted labels from selector",
 							"namespace", nsName, "rbIndex", rbIdx,
@@ -438,6 +432,44 @@ func getCompleteTrackedLabelsFromNamespaceSelector(selector metav1.LabelSelector
 		return map[string]string{}
 	}
 	return labels
+}
+
+// selectorOwnership returns the ownership labels a selector contributes and
+// whether it grants the namespace. UPDATE evaluates the unchanged namespace.
+// CREATE derives labels; under strict ServiceAccount ownership a selector that
+// derives none (for example kubernetes.io/metadata.name) still grants the
+// submitted ownership, as it does in the validator.
+func selectorOwnership(ns, unchangedNamespace *corev1.Namespace, selector *metav1.LabelSelector, strictSACreate bool) (labels map[string]string, matches bool, err error) {
+	if unchangedNamespace != nil {
+		matches, err = namespaceMatchesSelector(unchangedNamespace, selector)
+		if !matches || err != nil {
+			return nil, false, err
+		}
+		return getCompleteTrackedLabelsFromNamespaceSelector(*selector), true, nil
+	}
+	labels, err = getTrackedLabelsForNamespaceCreation(ns, selector)
+	if err != nil || len(labels) > 0 || !strictSACreate {
+		return labels, false, err
+	}
+	matches, err = selectorMatchesSubmittedNamespace(ns, selector)
+	return nil, matches, err
+}
+
+// selectorMatchesSubmittedNamespace reports whether a CREATE selector matches
+// both as the validator evaluates it and against the submitted labels, so a
+// selector that excludes the submitted ownership (for example owner NotIn)
+// cannot authorize it.
+func selectorMatchesSubmittedNamespace(ns *corev1.Namespace, selector *metav1.LabelSelector) (bool, error) {
+	matches, err := namespaceMatchesSelectorForAdmissionOperation(admissionv1.Create, ns, selector)
+	if !matches || err != nil {
+		return false, err
+	}
+	candidate := ns.DeepCopy()
+	if candidate.Labels == nil {
+		candidate.Labels = make(map[string]string, 1)
+	}
+	candidate.Labels[corev1.LabelMetadataName] = ns.Name
+	return namespaceMatchesSelector(candidate, selector)
 }
 
 func getTrackedLabelsForNamespaceCreation(ns *corev1.Namespace, selector *metav1.LabelSelector) (map[string]string, error) {
