@@ -102,6 +102,12 @@ func TestWebhookDeploymentTransitionalOptOutRendering(t *testing.T) {
 	// charts without these values keeps working.
 	assertNotContains(t, defaultRender, "--disable-authorize-request-checks")
 	assertNotContains(t, defaultRender, "--webhook-tls-go-defaults")
+	// --reuse-values from an older release leaves both keys absent.
+	missingRender := helmTemplate(t,
+		"--set", "webhookServer.disableAuthorizeRequestChecks=null",
+		"--set", "webhookServer.tlsGoDefaults=null")
+	assertNotContains(t, missingRender, "--disable-authorize-request-checks")
+	assertNotContains(t, missingRender, "--webhook-tls-go-defaults")
 
 	optOutRender := helmTemplate(t,
 		"--set", "webhookServer.disableAuthorizeRequestChecks=true",
