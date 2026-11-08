@@ -185,7 +185,8 @@ metadata:
   labels:
     t-caas.telekom.com/owner: %s
 %s`, name, target, identityLabel), "--dry-run=server", "--as="+identity)
-				allowed := owner == target || (owner == "unbound" && target == "platform")
+				// Without a grant, strict mode inherits nothing from the platform-owned hosting namespace.
+				allowed := owner == target
 				if allowed {
 					Expect(err).NotTo(HaveOccurred(), "%s -> %s: %s", owner, target, output)
 				} else {

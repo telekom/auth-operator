@@ -3174,6 +3174,11 @@ func TestNamespaceValidatorSANamespaceInheritance(t *testing.T) {
 			if tt.saNamespace != nil {
 				builder = builder.WithObjects(tt.saNamespace)
 			}
+			// These cases exercise the opt-in inheritance mechanics; strict-mode
+			// denial without the annotation is covered in serviceaccount_namespace_scope_test.go.
+			if sa := inheritingServiceAccount(tt.username); sa != nil {
+				builder = builder.WithObjects(sa)
+			}
 			fakeClient := builder.Build()
 
 			validator := &webhooks.NamespaceValidator{

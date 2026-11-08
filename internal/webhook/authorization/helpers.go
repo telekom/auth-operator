@@ -229,14 +229,16 @@ func strictServiceAccountCreate(op admissionv1.Operation, saInfo ServiceAccountI
 }
 
 // mayInheritHostingNamespace reports whether a ServiceAccount may fall back to
-// its hosting namespace's ownership labels. On CREATE, an identity's namespace
-// grants are authoritative and the hosting namespace must not widen them,
-// unless strict mode is disabled globally or the ServiceAccount carries
-// AnnotationKeyInheritHostingNamespaceOwnership="true" (transitional escape
-// hatches). The annotation is read through reader, which must be the live
-// reader so a stale cache cannot change the decision.
-func mayInheritHostingNamespace(ctx context.Context, reader client.Reader, op admissionv1.Operation, saInfo ServiceAccountInfo, hasNamespaceBindings, strictDisabled bool) (bool, error) {
-	if op != admissionv1.Create || !hasNamespaceBindings || strictDisabled {
+// its hosting namespace's ownership labels. On CREATE in strict mode, only
+// BindDefinition grants authorize the ServiceAccount; the hosting namespace
+// must not widen them, and an identity without any grant inherits nothing
+// (removing a ServiceAccount's last grant must never widen its access).
+// Inheritance is restored only when strict mode is disabled globally or the
+// ServiceAccount carries AnnotationKeyInheritHostingNamespaceOwnership="true"
+// (transitional escape hatches). The annotation is read through reader, which
+// must be the live reader so a stale cache cannot change the decision.
+func mayInheritHostingNamespace(ctx context.Context, reader client.Reader, op admissionv1.Operation, saInfo ServiceAccountInfo, strictDisabled bool) (bool, error) {
+	if op != admissionv1.Create || strictDisabled {
 		return true, nil
 	}
 	sa := &corev1.ServiceAccount{}

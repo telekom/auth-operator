@@ -370,7 +370,6 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 		"namespace", req.Name, "bindDefinitionCount", len(bindDefinitions))
 
 	isAllowed := false
-	hasNamespaceBindings := false
 	for bdIdx, bindDef := range bindDefinitions {
 		if IsRestrictedBindDefinition(bindDef.Name) {
 			logger.V(4).Info("skipping restricted BindDefinition", "bindDefinitionName", bindDef.Name)
@@ -385,7 +384,6 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 			continue
 		}
 
-		hasNamespaceBindings = true
 		logger.V(3).Info("user matched in BindDefinition", "namespace", req.Name, "bindDefinition", bindDef.Name)
 
 		for rbIdx, roleBinding := range bindDef.Spec.RoleBindings {
@@ -444,11 +442,11 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 	// Last resort: if the user is a ServiceAccount performing CREATE/UPDATE, check if
 	// its source namespace has the same tracked ownership labels as the target namespace (issue #202).
 	// This is restricted to CREATE/UPDATE — DELETE is intentionally excluded.
-	// On CREATE, explicit namespace grants take precedence over source-namespace inheritance.
+	// On CREATE in strict mode, only the per-ServiceAccount inherit annotation enables it.
 	if saInfo.IsServiceAccount && (req.Operation == admissionv1.Create || req.Operation == admissionv1.Update) {
 		saCtx, saCancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
 		defer saCancel()
-		inherit, saErr := mayInheritHostingNamespace(saCtx, v.admissionReader(), req.Operation, saInfo, hasNamespaceBindings, v.DisableStrictSANamespaceOwnership)
+		inherit, saErr := mayInheritHostingNamespace(saCtx, v.admissionReader(), req.Operation, saInfo, v.DisableStrictSANamespaceOwnership)
 		var inheritedLabels map[string]string
 		if saErr == nil && inherit {
 			inheritedLabels, saErr = GetSANamespaceTrackedLabels(saCtx, v.admissionReader(), saInfo)

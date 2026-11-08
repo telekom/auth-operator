@@ -9,21 +9,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- **Security tightening:** on Namespace CREATE, a ServiceAccount that matches
-  any non-restricted BindDefinition with RoleBindings no longer inherits
-  ownership from its hosting namespace; its BindDefinition grants are
-  authoritative. Before upgrading, add explicit namespace-selector grants for
-  every owner such ServiceAccounts must create namespaces for. To keep the
-  previous behaviour temporarily, annotate a ServiceAccount with
-  `t-caas.telekom.com/inherit-hosting-namespace-ownership: "true"` or, for all
-  ServiceAccounts, set `--strict-sa-namespace-ownership=false` (Helm
-  `webhookServer.strictSANamespaceOwnership`). Both are transitional and may
-  be removed in a future release. A match includes group subjects such as
-  `system:serviceaccounts:<namespace>`, so a BindDefinition with RoleBindings
-  for a broad group (`system:authenticated`, `system:serviceaccounts`) makes
-  every matching ServiceAccount strict. ServiceAccounts without any such grant
-  keep inheriting, and removing a ServiceAccount's last grant re-enables
-  inheritance. A new ValidatingAdmissionPolicy
+- **BREAKING:** on Namespace CREATE, a ServiceAccount is authorized only by
+  namespace grants in non-restricted BindDefinitions with RoleBindings; it no
+  longer inherits ownership from its hosting namespace, **including when it
+  has no BindDefinition grant at all**. Previously a ServiceAccount without
+  grants inherited, so removing its last grant widened its access. A match
+  includes group subjects such as `system:serviceaccounts:<namespace>`;
+  `*-namespaced-reader-restricted` and `clusterRoleBindings`-only
+  BindDefinitions do not count. UPDATE keeps the exact-match hosting-namespace
+  fallback, and the privileged and `tdgMigration` bypasses are unchanged
+  (#617).
+
+  **Upgrade note:** every namespace-creating ServiceAccount without a
+  BindDefinition grant loses inheritance and its namespace CREATEs are denied.
+  This includes platform controllers such as
+  `flux-system/kustomize-controller` and `flux-system/helm-controller` unless
+  `tdgMigration` bypasses them. Before upgrading, for each affected
+  ServiceAccount do one of the following:
+
+  - Add an explicit BindDefinition grant for every owner it creates namespaces
+    for, for example:
+
+    ```yaml
+    apiVersion: authorization.t-caas.telekom.com/v1alpha1
+    kind: BindDefinition
+    metadata:
+      name: flux-platform-namespaces
+    spec:
+      targetName: flux-platform-namespaces
+      subjects:
+        - kind: ServiceAccount
+          name: kustomize-controller
+          namespace: flux-system
+        - kind: ServiceAccount
+          name: helm-controller
+          namespace: flux-system
+      roleBindings:
+        - clusterRoleRefs: ["view"]
+          namespaceSelector:
+            - matchLabels:
+                t-caas.telekom.com/owner: platform
+    ```
+
+  - Or have a cluster administrator annotate it with
+    `t-caas.telekom.com/inherit-hosting-namespace-ownership: "true"`.
+  - Or, temporarily for all ServiceAccounts, set
+    `--strict-sa-namespace-ownership=false` (Helm
+    `webhookServer.strictSANamespaceOwnership: "false"`).
+
+  The annotation and the flag are transitional escape hatches and may be
+  removed in a future release. To find affected ServiceAccounts, search the
+  API server audit log for namespace `create` requests by
+  `system:serviceaccount:*` users, or list ServiceAccounts that may create
+  namespaces but are not a ServiceAccount subject of any grant (group
+  subjects need a manual check):
+
+  ```sh
+  kubectl get binddefinitions -o json | jq -r '.items[]
+    | select(.metadata.name | endswith("-namespaced-reader-restricted") | not)
+    | select((.spec.roleBindings // []) | length > 0)
+    | .spec.subjects[] | select(.kind == "ServiceAccount")
+    | "\(.namespace):\(.name)"' | sort -u > granted.txt
+  kubectl get serviceaccounts -A \
+    -o jsonpath='{range .items[*]}{.metadata.namespace}:{.metadata.name}{"\n"}{end}' |
+    while read -r sa; do
+      grep -qx "$sa" granted.txt && continue
+      [ "$(kubectl auth can-i create namespaces --as="system:serviceaccount:$sa" 2>/dev/null)" = yes ] && echo "$sa"
+    done
+  ```
+
+  A new ValidatingAdmissionPolicy
   (Kubernetes 1.30+) lets only `kubernetes-admin` and `system:masters` set,
   change or remove the annotation. It is on by default: Helm
   `webhookServer.inheritHostingNamespaceOwnershipGuard` (`auto` renders it
@@ -32,7 +87,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (remove it on clusters older than 1.30). **RBAC:** the webhook ClusterRole now needs `get` on
   ServiceAccounts; the Helm chart grants it when `namespaceAdmission.enabled`
   and kustomize in `config/webhook/rbac.yaml`. Custom ClusterRoles must add it,
-  otherwise affected CREATEs fail closed with HTTP 500 (#617).
+  otherwise ServiceAccount namespace CREATEs fail closed with HTTP 500.
 
 ## [0.5.0-rc.21] — Pre-release
 

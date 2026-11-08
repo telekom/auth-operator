@@ -31,30 +31,51 @@ metadata:
 ```
 
 Matching BindDefinitions authorize namespace operations for ordinary users.
-On CREATE, a ServiceAccount with namespace grants in a non-restricted
-BindDefinition must match one of those grants, whether the BindDefinition
-names the ServiceAccount or one of its groups (for example
-`system:serviceaccounts:<namespace>`). Its hosting namespace cannot
-widen that scope. This also applies when tenant or third-party Flux identities share a platform-owned
-controller namespace.
+On CREATE, a ServiceAccount is authorized only by namespace grants in a
+non-restricted BindDefinition, whether the BindDefinition names the
+ServiceAccount or one of its groups (for example
+`system:serviceaccounts:<namespace>`). Its hosting namespace never widens that
+scope, and a ServiceAccount without any such grant cannot CREATE namespaces at
+all. Grants in `*-namespaced-reader-restricted` BindDefinitions and
+BindDefinitions with only `clusterRoleBindings` do not count. This also applies
+when tenant or third-party Flux identities share a platform-owned controller
+namespace, and to platform controllers such as
+`flux-system/kustomize-controller` and `flux-system/helm-controller`, which need
+an explicit grant for the owners they create namespaces for:
 
-ServiceAccounts without such namespace grants may CREATE when their
-source namespace has valid, non-empty tracked ownership labels exactly matching
-the target. Unchanged UPDATEs retain this inheritance fallback even when a
-namespace grant does not match. This fallback does not authorize DELETE, and
-Kubernetes RBAC authorization still applies to every request.
+```yaml
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: flux-platform-namespaces
+spec:
+  targetName: flux-platform-namespaces
+  subjects:
+    - kind: ServiceAccount
+      name: kustomize-controller
+      namespace: flux-system
+    - kind: ServiceAccount
+      name: helm-controller
+      namespace: flux-system
+  roleBindings:
+    - clusterRoleRefs: ["view"]
+      namespaceSelector:
+        - matchLabels:
+            t-caas.telekom.com/owner: platform
+```
 
-Strict mode depends only on whether a ServiceAccount has namespace grants, so
-two effects follow:
+Removing a ServiceAccount's last grant therefore never widens its access.
+Requests that skip namespace admission through the existing privileged and
+TDG-migration bypasses are unaffected.
 
-- Removing a ServiceAccount's last namespace grant re-enables hosting-namespace
-  inheritance for its CREATEs.
-- A non-restricted BindDefinition with RoleBindings for a broad group, such as
-  `system:authenticated` or `system:serviceaccounts`, gives every matching
-  ServiceAccount namespace grants and therefore makes all of them strict.
+UPDATEs keep the hosting-namespace fallback: a ServiceAccount may update a
+namespace whose valid, non-empty tracked ownership labels exactly match its
+source namespace, even without a matching grant. This fallback never
+authorizes DELETE, and Kubernetes RBAC authorization still applies to every
+request.
 
-Two transitional escape hatches restore the previous CREATE inheritance. Both
-may be removed in a future release:
+Two transitional escape hatches restore hosting-namespace inheritance on
+CREATE. Both may be removed in a future release:
 
 - Webhook flag `--strict-sa-namespace-ownership=false` (Helm
   `webhookServer.strictSANamespaceOwnership: "false"`) applies to every

@@ -59,6 +59,12 @@ func TestServiceAccountNamespaceGrantsBoundInheritance(t *testing.T) {
 				bd.Spec.RoleBindings = []authorizationv1alpha1.NamespaceBinding{{ClusterRoleRefs: []string{"writer"}, NamespaceSelector: []metav1.LabelSelector{{MatchLabels: map[string]string{corev1.LabelMetadataName: name}}}}}
 				return bd
 			}
+			// Grants that never authorize a namespace leave the identity unbound.
+			restrictedOnly := binding.DeepCopy()
+			restrictedOnly.Name = "delegated-namespaced-reader-restricted"
+			clusterRoleBindingOnly := binding.DeepCopy()
+			clusterRoleBindingOnly.Spec.RoleBindings = nil
+			clusterRoleBindingOnly.Spec.ClusterRoleBindings = authorizationv1alpha1.ClusterBinding{ClusterRoleRefs: []string{"viewer"}}
 			// Real ServiceAccount tokens carry their namespace group.
 			groupSubject := binding.DeepCopy()
 			groupSubject.Spec.Subjects = []rbacv1.Subject{{Kind: rbacv1.GroupKind, Name: "system:serviceaccounts:t-caas-controllers"}}
@@ -74,7 +80,10 @@ func TestServiceAccountNamespaceGrantsBoundInheritance(t *testing.T) {
 				{"other-identity", map[string]string{prefix + "owner": owner, prefix + owner: "team-b"}, true, false, nil},
 				{"addon", map[string]string{prefix + "owner": "addon", prefix + "addon": "addon-a"}, true, false, nil},
 				{"protected", map[string]string{prefix + "owner": owner, prefix + owner: "team-a", prefix + "protected": "team-a"}, true, false, nil},
-				{"unbound-platform-inheritance", map[string]string{prefix + "owner": "platform"}, false, true, nil},
+				// Removing the last grant must not widen access to the hosting namespace's owner.
+				{"unbound-platform-denied", map[string]string{prefix + "owner": "platform"}, false, false, nil},
+				{"restricted-only-platform-denied", map[string]string{prefix + "owner": "platform"}, true, false, restrictedOnly},
+				{"clusterrolebinding-only-platform-denied", map[string]string{prefix + "owner": "platform"}, true, false, clusterRoleBindingOnly},
 				{"explicit-namespace-only-platform", map[string]string{prefix + "owner": "platform"}, true, false, explicitNamespaceOnly},
 				{"name-selector-platform", map[string]string{prefix + "owner": "platform"}, true, true, nameSelector("new-namespace")},
 				{"name-selector-other-namespace", map[string]string{prefix + "owner": "platform"}, true, false, nameSelector("other-namespace")},
@@ -137,7 +146,8 @@ func TestServiceAccountNamespaceGrantsBoundInheritance(t *testing.T) {
 	}
 }
 
-// The transitional opt-outs restore hosting-namespace inheritance on CREATE.
+// The transitional opt-outs restore hosting-namespace inheritance on CREATE,
+// both for an identity whose grants do not match and for one without grants.
 // The annotation lives only in the live reader so a stale cache cannot flip it.
 func TestServiceAccountHostingNamespaceOptOuts(t *testing.T) {
 	scheme := runtime.NewScheme()
@@ -169,33 +179,43 @@ func TestServiceAccountHostingNamespaceOptOuts(t *testing.T) {
 		{"global-strict-disabled", nil, nil, true, true},
 		{"global-strict-disabled-annotation-false", ptr.To("false"), nil, true, true},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Namespace: "t-caas-controllers", Name: "m2m-sa-tenant"}}
-			cachedSA := sa.DeepCopy()
-			if tc.cachedAnnotation != nil {
-				cachedSA.Annotations = map[string]string{authorizationv1alpha1.AnnotationKeyInheritHostingNamespaceOwnership: *tc.cachedAnnotation}
+	for _, bound := range []bool{true, false} {
+		for _, tc := range cases {
+			name := tc.name + "/unbound"
+			if bound {
+				name = tc.name + "/bound"
 			}
-			cached := fake.NewClientBuilder().WithScheme(scheme).WithObjects(hosting, binding, cachedSA).Build()
-			if tc.annotation != nil {
-				sa.Annotations = map[string]string{authorizationv1alpha1.AnnotationKeyInheritHostingNamespaceOwnership: *tc.annotation}
-			}
-			live := fake.NewClientBuilder().WithScheme(scheme).WithObjects(hosting, binding, sa).Build()
-			handlers := map[string]crAdmission.Handler{
-				"mutator":   &webhooks.NamespaceMutator{Client: cached, Reader: live, Decoder: crAdmission.NewDecoder(scheme), DisableStrictSANamespaceOwnership: tc.strictDisabled},
-				"validator": &webhooks.NamespaceValidator{Client: cached, Reader: live, Decoder: crAdmission.NewDecoder(scheme), DisableStrictSANamespaceOwnership: tc.strictDisabled},
-			}
-			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "new-namespace", Labels: map[string]string{prefix + "owner": "platform"}}}
-			req := crAdmission.Request{AdmissionRequest: admissionv1.AdmissionRequest{Kind: metav1.GroupVersionKind{Version: "v1", Kind: "Namespace"}, Name: ns.Name, Operation: admissionv1.Create, UserInfo: authenticationv1.UserInfo{Username: "system:serviceaccount:t-caas-controllers:m2m-sa-tenant"}, Object: runtime.RawExtension{Raw: mustMarshalJSON(t, ns)}}}
-			for name, handler := range handlers {
-				t.Run(name, func(t *testing.T) {
-					response := handler.Handle(context.Background(), req)
-					if response.Allowed != tc.allowed {
-						t.Fatalf("allowed=%v, want %v: %+v", response.Allowed, tc.allowed, response.Result)
-					}
-				})
-			}
-		})
+			t.Run(name, func(t *testing.T) {
+				sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Namespace: "t-caas-controllers", Name: "m2m-sa-tenant"}}
+				cachedSA := sa.DeepCopy()
+				if tc.cachedAnnotation != nil {
+					cachedSA.Annotations = map[string]string{authorizationv1alpha1.AnnotationKeyInheritHostingNamespaceOwnership: *tc.cachedAnnotation}
+				}
+				objects := []client.Object{hosting}
+				if bound {
+					objects = append(objects, binding)
+				}
+				cached := fake.NewClientBuilder().WithScheme(scheme).WithObjects(append(objects, cachedSA)...).Build()
+				if tc.annotation != nil {
+					sa.Annotations = map[string]string{authorizationv1alpha1.AnnotationKeyInheritHostingNamespaceOwnership: *tc.annotation}
+				}
+				live := fake.NewClientBuilder().WithScheme(scheme).WithObjects(append(objects, sa)...).Build()
+				handlers := map[string]crAdmission.Handler{
+					"mutator":   &webhooks.NamespaceMutator{Client: cached, Reader: live, Decoder: crAdmission.NewDecoder(scheme), DisableStrictSANamespaceOwnership: tc.strictDisabled},
+					"validator": &webhooks.NamespaceValidator{Client: cached, Reader: live, Decoder: crAdmission.NewDecoder(scheme), DisableStrictSANamespaceOwnership: tc.strictDisabled},
+				}
+				ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "new-namespace", Labels: map[string]string{prefix + "owner": "platform"}}}
+				req := crAdmission.Request{AdmissionRequest: admissionv1.AdmissionRequest{Kind: metav1.GroupVersionKind{Version: "v1", Kind: "Namespace"}, Name: ns.Name, Operation: admissionv1.Create, UserInfo: authenticationv1.UserInfo{Username: "system:serviceaccount:t-caas-controllers:m2m-sa-tenant"}, Object: runtime.RawExtension{Raw: mustMarshalJSON(t, ns)}}}
+				for name, handler := range handlers {
+					t.Run(name, func(t *testing.T) {
+						response := handler.Handle(context.Background(), req)
+						if response.Allowed != tc.allowed {
+							t.Fatalf("allowed=%v, want %v: %+v", response.Allowed, tc.allowed, response.Result)
+						}
+					})
+				}
+			})
+		}
 	}
 
 	// A failed live ServiceAccount read fails closed instead of treating the SA as opted in or out.
@@ -242,8 +262,6 @@ func TestServiceAccountHostingNamespaceReadsOnlyWhenNeeded(t *testing.T) {
 	}{
 		// The grant matches, so the annotation is irrelevant.
 		{"strict-grant-matches", tenant, true, false},
-		// No grants: plain inheritance, no annotation needed.
-		{"strict-no-grants", map[string]string{prefix + "owner": "platform"}, false, false},
 		// Flag off: neither strict read runs.
 		{"strict-disabled", map[string]string{prefix + "owner": "platform"}, true, true},
 	}
@@ -278,4 +296,18 @@ func TestServiceAccountHostingNamespaceReadsOnlyWhenNeeded(t *testing.T) {
 			}
 		})
 	}
+}
+
+// inheritingServiceAccount returns the ServiceAccount behind username opted in
+// to hosting-namespace inheritance, or nil when username is not a ServiceAccount.
+func inheritingServiceAccount(username string) *corev1.ServiceAccount {
+	info := webhooks.ParseServiceAccount(username)
+	if !info.IsServiceAccount {
+		return nil
+	}
+	return &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{
+		Namespace:   info.Namespace,
+		Name:        info.Name,
+		Annotations: map[string]string{authorizationv1alpha1.AnnotationKeyInheritHostingNamespaceOwnership: "true"},
+	}}
 }

@@ -68,9 +68,10 @@ var _ = Describe("ServiceAccount namespace ownership", Ordered, Label("helm", "s
 		Expect(err).To(HaveOccurred(), "%s -> %s (%s) unexpectedly succeeded: %s", sa, name, owner, output)
 		Expect(output).To(ContainSubstring("denied the request"), "must fail in namespace admission: %s", output)
 	}
-	annotate := func(value string, as ...string) (string, error) {
-		return run(append([]string{"annotate", "serviceaccount", granted, "-n", source, "--overwrite", annotation + value}, as...)...)
+	annotateSA := func(sa, value string, as ...string) (string, error) {
+		return run(append([]string{"annotate", "serviceaccount", sa, "-n", source, "--overwrite", annotation + value}, as...)...)
 	}
+	annotate := func(value string, as ...string) (string, error) { return annotateSA(granted, value, as...) }
 	asAnnotator := "--as=" + annotator
 	// createAnnotated dry-runs a CREATE of a ServiceAccount carrying the
 	// annotation as the RBAC-authorized non-admin, so retries never persist it.
@@ -248,29 +249,36 @@ spec:
 		allowed(named, namedNS, "platform")
 		allowed(named, namedNS, "tenant")
 		denied(named, release+"-other", "platform")
-		By("keeping hosting-namespace inheritance for ServiceAccounts without any grant")
-		allowed(unbound, release+"-platform", "platform")
+		By("denying hosting-namespace inheritance to ServiceAccounts without any grant")
+		denied(unbound, release+"-platform", "platform")
 		denied(unbound, release+"-tenant", "tenant")
 	})
 
 	It("lets an annotated ServiceAccount inherit its hosting namespace ownership", func() {
-		out, err := annotate("=true")
-		Expect(err).NotTo(HaveOccurred(), "%s", out)
-		DeferCleanup(func() { _, _ = annotate("-") })
+		for _, sa := range []string{granted, unbound} {
+			out, err := annotateSA(sa, "=true")
+			Expect(err).NotTo(HaveOccurred(), "%s", out)
+			DeferCleanup(func() { _, _ = annotateSA(sa, "-") })
+		}
 		// The annotation is read live, so it takes effect immediately.
 		allowed(granted, release+"-platform", "platform")
 		allowed(granted, release+"-tenant", "tenant")
 		denied(granted, release+"-thirdparty", "thirdparty")
+		By("restoring inheritance for a ServiceAccount without any grant")
+		allowed(unbound, release+"-platform", "platform")
+		denied(unbound, release+"-tenant", "tenant")
 
 		By("ignoring values other than true")
-		out, err = annotate("=yes")
+		out, err := annotate("=yes")
 		Expect(err).NotTo(HaveOccurred(), "%s", out)
 		denied(granted, release+"-platform", "platform")
 
 		By("restoring strict ownership once the annotation is removed")
-		out, err = annotate("-")
-		Expect(err).NotTo(HaveOccurred(), "%s", out)
-		denied(granted, release+"-platform", "platform")
+		for _, sa := range []string{granted, unbound} {
+			out, err = annotateSA(sa, "-")
+			Expect(err).NotTo(HaveOccurred(), "%s", out)
+			denied(sa, release+"-platform", "platform")
+		}
 	})
 
 	It("only lets privileged identities set, change or remove the annotation", func() {
@@ -335,6 +343,7 @@ spec:
 		// upgrade waited for the old strict pod to go away.
 		allowed(granted, release+"-platform", "platform")
 		allowed(named, release+"-other", "platform")
+		allowed(unbound, release+"-platform", "platform")
 		allowed(granted, release+"-tenant", "tenant")
 		denied(granted, release+"-thirdparty", "thirdparty")
 	})

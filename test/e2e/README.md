@@ -44,7 +44,7 @@ dedicated release with `namespaceAdmission.enabled=true` and
 Impersonated users and ServiceAccounts exercise the deployed webhooks on the
 Kind API server, covering single-value add-on pins and broad-selector rejection,
 namespace CREATE/UPDATE and RoleBinding isolation, exact ServiceAccount
-inheritance, invalid ownership shapes, label immutability, migration-only
+inheritance (denied until an administrator sets the inherit annotation), invalid ownership shapes, label immutability, migration-only
 non-platform reclassification, and add-on/third-party deletion parity.
 
 To run only these specs on an isolated Kind cluster:
