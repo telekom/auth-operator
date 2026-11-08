@@ -33,7 +33,7 @@ inputs:
   golangci-lint-version:
     description: 'golangci-lint version to install'
     required: false
-    default: 'v2.12.2'
+    default: 'v2.14.0'
   cache-dependency-path:
     description: 'Path to go.sum for cache key'
     required: false

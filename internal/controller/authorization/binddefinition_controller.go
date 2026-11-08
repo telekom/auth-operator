@@ -439,7 +439,7 @@ func (r *BindDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if !bindDefinition.DeletionTimestamp.IsZero() {
 		logger.V(1).Info("BindDefinition marked for deletion, starting delete reconcile",
 			"bindDefinition", bindDefinition.Name,
-			"deletionTimestamp", bindDefinition.DeletionTimestamp)
+			"deletionTimestamp", bindDefinition.DeletionTimestamp.Time)
 		result, err := r.reconcileDelete(ctx, bindDefinition)
 		if err != nil {
 			logger.Error(err, "Delete reconcile failed",

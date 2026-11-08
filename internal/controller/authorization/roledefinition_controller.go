@@ -276,7 +276,7 @@ func (r *RoleDefinitionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if !roleDefinition.DeletionTimestamp.IsZero() {
 		logger.V(1).Info("RoleDefinition marked for deletion, starting delete reconcile",
 			"roleDefinition", roleDefinition.Name,
-			"deletionTimestamp", roleDefinition.DeletionTimestamp)
+			"deletionTimestamp", roleDefinition.DeletionTimestamp.Time)
 		result, err := r.handleDeletion(ctx, roleDefinition, role)
 		if err != nil {
 			logger.Error(err, "Delete reconcile failed",
