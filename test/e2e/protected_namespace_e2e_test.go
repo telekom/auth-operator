@@ -13,6 +13,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/test/utils"
 )
 
@@ -125,7 +126,14 @@ metadata:
     t-caas.telekom.com/owner: platform
 `, source))
 		Expect(err).NotTo(HaveOccurred(), "%s", output)
-		DeferCleanup(func() { utils.CleanupNamespace(source) })
+		// Deletion protection guards owner=platform namespaces, so unlock it and
+		// assert the namespace is gone; CleanupNamespace would ignore a denial.
+		DeferCleanup(func() {
+			cleanupOutput, cleanupErr := run("annotate", "namespace", source, authorizationv1alpha1.AnnotationKeyAllowDeletion+"=true", "--overwrite")
+			Expect(cleanupErr).NotTo(HaveOccurred(), "%s", cleanupOutput)
+			cleanupOutput, cleanupErr = run("delete", "namespace", source, "--ignore-not-found", "--timeout=120s")
+			Expect(cleanupErr).NotTo(HaveOccurred(), "%s", cleanupOutput)
+		})
 		for _, owner := range []string{"tenant", "thirdparty", "platform", "unbound"} {
 			name := release + "-" + owner
 			identity := "system:serviceaccount:" + source + ":" + owner
