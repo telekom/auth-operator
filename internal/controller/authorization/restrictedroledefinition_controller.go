@@ -364,7 +364,7 @@ func (r *RestrictedRoleDefinitionReconciler) Reconcile(ctx context.Context, req 
 		if _, err := librarypatch.EnsureFinalizer(ctx, r.client, rrd, authorizationv1alpha1.RestrictedRoleDefinitionFinalizer); err != nil {
 			if apierrors.IsConflict(err) {
 				logger.V(1).Info("conflict adding finalizer, requeuing", "name", rrd.Name)
-				return ctrl.Result{Requeue: true}, nil
+				return ctrl.Result{Requeue: true}, nil //nolint:staticcheck // SA1019: keep rate-limited backoff on finalizer conflicts; RequeueAfter is a fixed delay
 			}
 			r.rrdMarkStalled(ctx, rrd, err)
 			metrics.ReconcileTotal.WithLabelValues(metrics.ControllerRestrictedRoleDefinition, metrics.ResultError).Inc()
