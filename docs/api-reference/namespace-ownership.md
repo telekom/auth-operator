@@ -35,8 +35,9 @@ On CREATE, a ServiceAccount is authorized only by namespace grants in a
 non-restricted BindDefinition, whether the BindDefinition names the
 ServiceAccount or one of its groups (for example
 `system:serviceaccounts:<namespace>`). Its hosting namespace never widens that
-scope, and a ServiceAccount without any such grant cannot CREATE namespaces at
-all. Grants in `*-namespaced-reader-restricted` BindDefinitions and
+scope, so a ServiceAccount without any such grant is denied unless an
+administrator sets the per-ServiceAccount inherit annotation described below,
+or, for tenant namespaces, an approved emergency session authorizes it. Grants in `*-namespaced-reader-restricted` BindDefinitions and
 BindDefinitions with only `clusterRoleBindings` do not count. This also applies
 when tenant or third-party Flux identities share a platform-owned controller
 namespace, and to platform controllers such as
@@ -57,12 +58,22 @@ spec:
     - kind: ServiceAccount
       name: helm-controller
       namespace: flux-system
+  # Flux owns these ServiceAccounts; without this list auth-operator would
+  # create and own them if they do not exist yet.
+  externalServiceAccountRefs:
+    - name: kustomize-controller
+      namespace: flux-system
+    - name: helm-controller
+      namespace: flux-system
   roleBindings:
     - clusterRoleRefs: ["view"]
       namespaceSelector:
         - matchLabels:
             t-caas.telekom.com/owner: platform
 ```
+
+This example also creates a `view` RoleBinding for both controllers in every
+platform-owned namespace.
 
 Removing a ServiceAccount's last grant therefore never widens its access.
 Requests that skip namespace admission through the existing privileged and

@@ -44,12 +44,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
         - kind: ServiceAccount
           name: helm-controller
           namespace: flux-system
+      # Flux owns these ServiceAccounts; without this list auth-operator
+      # would create and own them if they do not exist yet.
+      externalServiceAccountRefs:
+        - name: kustomize-controller
+          namespace: flux-system
+        - name: helm-controller
+          namespace: flux-system
       roleBindings:
         - clusterRoleRefs: ["view"]
           namespaceSelector:
             - matchLabels:
                 t-caas.telekom.com/owner: platform
     ```
+
+    This also creates a `view` RoleBinding for both controllers in every
+    platform-owned namespace.
 
   - Or have a cluster administrator annotate it with
     `t-caas.telekom.com/inherit-hosting-namespace-ownership: "true"`.

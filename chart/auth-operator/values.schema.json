@@ -378,7 +378,7 @@
         },
         "strictSANamespaceOwnership": {
           "type": ["string", "boolean"],
-          "description": "On Namespace CREATE, authorize ServiceAccounts only through BindDefinition namespace grants and never let them inherit hosting-namespace ownership, even without any grant. Set to false to restore the previous inheritance. Transitional escape hatch; may be removed in a future release.",
+          "description": "On Namespace CREATE, authorize ServiceAccounts through BindDefinition namespace grants and do not let them inherit hosting-namespace ownership, even without any grant, unless the ServiceAccount carries the inherit-hosting-namespace-ownership annotation. Set to false to restore the previous inheritance. Transitional escape hatch; may be removed in a future release.",
           "enum": ["true", "false", true, false],
           "default": "true"
         },

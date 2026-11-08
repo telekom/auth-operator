@@ -324,8 +324,9 @@ func init() {
 		"Allow the capi-operator-manager ServiceAccount to skip BindDefinition authorization for Namespace UPDATE requests; "+
 			"disabled by default. Protected-label validation still runs when enabled.")
 	webhookCmd.Flags().BoolVar(&strictSANamespaceOwnership, "strict-sa-namespace-ownership", true,
-		"On Namespace CREATE, authorize a ServiceAccount only through its BindDefinition namespace grants and never "+
-			"inherit ownership from its hosting namespace, even without any grant. Set to false to restore the previous inheritance for all "+
+		"On Namespace CREATE, authorize a ServiceAccount through its BindDefinition namespace grants and do not "+
+			"inherit ownership from its hosting namespace, even without any grant, unless the ServiceAccount carries the "+
+			"t-caas.telekom.com/inherit-hosting-namespace-ownership=true annotation. Set to false to restore the previous inheritance for all "+
 			"ServiceAccounts. Transitional escape hatch; it may be removed in a future release.")
 	webhookCmd.Flags().Float64Var(&authorizeRateLimit, "authorize-rate-limit", 0,
 		"Maximum sustained requests per second for the /authorize endpoint. Set to 0 to disable rate limiting.")

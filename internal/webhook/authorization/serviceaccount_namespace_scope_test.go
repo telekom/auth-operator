@@ -82,6 +82,8 @@ func TestServiceAccountNamespaceGrantsBoundInheritance(t *testing.T) {
 				{"protected", map[string]string{prefix + "owner": owner, prefix + owner: "team-a", prefix + "protected": "team-a"}, true, false, nil},
 				// Removing the last grant must not widen access to the hosting namespace's owner.
 				{"unbound-platform-denied", map[string]string{prefix + "owner": "platform"}, false, false, nil},
+				// A ServiceAccount the live reader cannot find is never opted in.
+				{"unbound-sa-not-found-denied", map[string]string{prefix + "owner": "platform"}, false, false, nil},
 				{"restricted-only-platform-denied", map[string]string{prefix + "owner": "platform"}, true, false, restrictedOnly},
 				{"clusterrolebinding-only-platform-denied", map[string]string{prefix + "owner": "platform"}, true, false, clusterRoleBindingOnly},
 				{"explicit-namespace-only-platform", map[string]string{prefix + "owner": "platform"}, true, false, explicitNamespaceOnly},
@@ -102,6 +104,11 @@ func TestServiceAccountNamespaceGrantsBoundInheritance(t *testing.T) {
 					objects := []client.Object{&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "t-caas-controllers", Labels: map[string]string{prefix + "owner": "platform"}}}}
 					if tc.bound {
 						objects = append(objects, grant)
+					}
+					// The ServiceAccount exists without the inherit annotation, so
+					// denials do not rely on a failed lookup.
+					if tc.name != "unbound-sa-not-found-denied" {
+						objects = append(objects, &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Namespace: "t-caas-controllers", Name: saName}})
 					}
 					c := fake.NewClientBuilder().WithScheme(scheme).WithIndex(&authorizationv1alpha1.BindDefinition{}, indexer.BindDefinitionHasRoleBindingsField, indexer.BindDefinitionHasRoleBindingsFunc).WithObjects(objects...).Build()
 					// The live grant has not reached the webhook cache yet.
@@ -218,19 +225,26 @@ func TestServiceAccountHostingNamespaceOptOuts(t *testing.T) {
 		}
 	}
 
-	// A failed live ServiceAccount read fails closed instead of treating the SA as opted in or out.
+	// A failed live ServiceAccount read fails closed instead of treating the SA
+	// as opted in or out, with or without grants.
 	sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Namespace: "t-caas-controllers", Name: "m2m-sa-tenant"}}
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(hosting, binding, sa).Build()
-	unavailable := erroringReader{Reader: c, getErr: errors.New("private backend failure")}
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "new-namespace", Labels: map[string]string{prefix + "owner": "platform"}}}
 	req := crAdmission.Request{AdmissionRequest: admissionv1.AdmissionRequest{Kind: metav1.GroupVersionKind{Version: "v1", Kind: "Namespace"}, Name: ns.Name, Operation: admissionv1.Create, UserInfo: authenticationv1.UserInfo{Username: "system:serviceaccount:t-caas-controllers:m2m-sa-tenant"}, Object: runtime.RawExtension{Raw: mustMarshalJSON(t, ns)}}}
-	for name, handler := range map[string]crAdmission.Handler{
-		"mutator":   &webhooks.NamespaceMutator{Client: c, Reader: unavailable, Decoder: crAdmission.NewDecoder(scheme)},
-		"validator": &webhooks.NamespaceValidator{Client: c, Reader: unavailable, Decoder: crAdmission.NewDecoder(scheme)},
-	} {
-		response := handler.Handle(context.Background(), req)
-		if response.Allowed || response.Result == nil || response.Result.Code != http.StatusInternalServerError {
-			t.Fatalf("%s did not fail closed on a live ServiceAccount read error: %+v", name, response)
+	for _, bound := range []bool{true, false} {
+		objects := []client.Object{hosting, sa}
+		if bound {
+			objects = append(objects, binding)
+		}
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
+		unavailable := erroringReader{Reader: c, getErr: errors.New("private backend failure")}
+		for name, handler := range map[string]crAdmission.Handler{
+			"mutator":   &webhooks.NamespaceMutator{Client: c, Reader: unavailable, Decoder: crAdmission.NewDecoder(scheme)},
+			"validator": &webhooks.NamespaceValidator{Client: c, Reader: unavailable, Decoder: crAdmission.NewDecoder(scheme)},
+		} {
+			response := handler.Handle(context.Background(), req)
+			if response.Allowed || response.Result == nil || response.Result.Code != http.StatusInternalServerError {
+				t.Fatalf("%s (bound=%v) did not fail closed on a live ServiceAccount read error: %+v", name, bound, response)
+			}
 		}
 	}
 }
@@ -296,6 +310,36 @@ func TestServiceAccountHostingNamespaceReadsOnlyWhenNeeded(t *testing.T) {
 			}
 		})
 	}
+
+	// Without grants, a strict CREATE must read the ServiceAccount: only its
+	// annotation can authorize inheritance.
+	t.Run("strict-no-grants-reads-service-account", func(t *testing.T) {
+		sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Namespace: "t-caas-controllers", Name: "m2m-sa-tenant"}}
+		cached := fake.NewClientBuilder().WithScheme(scheme).WithIndex(&authorizationv1alpha1.BindDefinition{}, indexer.BindDefinitionHasRoleBindingsField, indexer.BindDefinitionHasRoleBindingsFunc).WithObjects(hosting).Build()
+		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "new-namespace", Labels: map[string]string{prefix + "owner": "platform"}}}
+		req := crAdmission.Request{AdmissionRequest: admissionv1.AdmissionRequest{Kind: metav1.GroupVersionKind{Version: "v1", Kind: "Namespace"}, Name: ns.Name, Operation: admissionv1.Create, UserInfo: authenticationv1.UserInfo{Username: "system:serviceaccount:t-caas-controllers:m2m-sa-tenant"}, Object: runtime.RawExtension{Raw: mustMarshalJSON(t, ns)}}}
+		for _, name := range []string{"mutator", "validator"} {
+			saReads := 0
+			live := fake.NewClientBuilder().WithScheme(scheme).WithObjects(hosting, sa).WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					if _, ok := obj.(*corev1.ServiceAccount); ok {
+						saReads++
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+			}).Build()
+			handler := map[string]crAdmission.Handler{
+				"mutator":   &webhooks.NamespaceMutator{Client: cached, Reader: live, Decoder: crAdmission.NewDecoder(scheme)},
+				"validator": &webhooks.NamespaceValidator{Client: cached, Reader: live, Decoder: crAdmission.NewDecoder(scheme)},
+			}[name]
+			if response := handler.Handle(context.Background(), req); response.Allowed {
+				t.Fatalf("%s: unannotated ServiceAccount without grants was allowed", name)
+			}
+			if saReads == 0 {
+				t.Fatalf("%s: did not read the ServiceAccount", name)
+			}
+		}
+	})
 }
 
 // inheritingServiceAccount returns the ServiceAccount behind username opted in

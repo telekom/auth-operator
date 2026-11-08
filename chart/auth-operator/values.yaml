@@ -130,10 +130,11 @@ webhookServer:
   # authorization for Namespace UPDATE requests. Protected-label validation
   # still runs. Set to "false" to require normal authorization for those updates.
   capiOperatorUpdateBypass: "false"
-  # On Namespace CREATE, only a ServiceAccount's BindDefinition namespace grants
+  # On Namespace CREATE, a ServiceAccount's BindDefinition namespace grants
   # authorize it; its hosting namespace's ownership is not inherited, even when
-  # it has no grant at all. Set to "false" to restore the previous inheritance
-  # for all ServiceAccounts.
+  # it has no grant at all, unless the ServiceAccount carries the
+  # t-caas.telekom.com/inherit-hosting-namespace-ownership: "true" annotation.
+  # Set to "false" to restore the previous inheritance for all ServiceAccounts.
   # Transitional escape hatch; it may be removed in a future release.
   strictSANamespaceOwnership: "true"
   # ValidatingAdmissionPolicy (Kubernetes >= 1.30) that lets only
