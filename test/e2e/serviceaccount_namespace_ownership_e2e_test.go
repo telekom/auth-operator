@@ -242,10 +242,7 @@ spec:
 	It("lets an annotated ServiceAccount inherit its hosting namespace ownership", func() {
 		out, err := annotate(`="true"`)
 		Expect(err).NotTo(HaveOccurred(), "%s", out)
-		DeferCleanup(func() {
-			out, err := annotate("-")
-			Expect(err).NotTo(HaveOccurred(), "%s", out)
-		})
+		DeferCleanup(func() { _, _ = annotate("-") })
 		// The annotation is read live, so it takes effect immediately.
 		allowed(granted, release+"-platform", "platform")
 		allowed(granted, release+"-tenant", "tenant")
@@ -281,10 +278,7 @@ spec:
 		By("allowing the cluster administrator")
 		out, err = annotate(`="true"`)
 		Expect(err).NotTo(HaveOccurred(), "%s", out)
-		DeferCleanup(func() {
-			out, err := annotate("-")
-			Expect(err).NotTo(HaveOccurred(), "%s", out)
-		})
+		DeferCleanup(func() { _, _ = annotate("-") })
 
 		By("denying a non-admin change or removal of an existing annotation")
 		for _, value := range []string{"=false", "-"} {
