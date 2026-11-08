@@ -45,24 +45,32 @@ var _ = Describe("Authorize request and webhook TLS hardening", Ordered, Label("
 		Expect(err).NotTo(HaveOccurred(), "%s", out)
 		return string(out)
 	}
-	// post sends a raw request to /authorize and returns the status, headers and body.
-	post := func(method, contentType string, body []byte) (int, http.Header, []byte) {
-		GinkgoHelper()
+	// send issues a raw request to /authorize and returns the status, headers and body.
+	send := func(method, contentType string, body []byte) (int, http.Header, []byte, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		req, err := http.NewRequestWithContext(ctx, method, fmt.Sprintf("https://127.0.0.1:%d/authorize", port), bytes.NewReader(body))
-		Expect(err).NotTo(HaveOccurred())
+		if err != nil {
+			return 0, nil, nil, err
+		}
 		if contentType != "" {
 			req.Header.Set("Content-Type", contentType)
 		}
 		transport := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}} // #nosec G402 -- self-signed webhook certificate behind a port-forward.
 		defer transport.CloseIdleConnections()
 		resp, err := (&http.Client{Transport: transport}).Do(req)
-		Expect(err).NotTo(HaveOccurred())
+		if err != nil {
+			return 0, nil, nil, err
+		}
 		defer func() { _ = resp.Body.Close() }()
 		respBody, err := io.ReadAll(resp.Body)
+		return resp.StatusCode, resp.Header, respBody, err
+	}
+	post := func(method, contentType string, body []byte) (int, http.Header, []byte) {
+		GinkgoHelper()
+		status, header, respBody, err := send(method, contentType, body)
 		Expect(err).NotTo(HaveOccurred())
-		return resp.StatusCode, resp.Header, respBody
+		return status, header, respBody
 	}
 	sarBody := func(sar authzv1.SubjectAccessReview) []byte {
 		GinkgoHelper()
@@ -196,9 +204,14 @@ var _ = Describe("Authorize request and webhook TLS hardening", Ordered, Label("
 	})
 
 	It("requires TLS 1.2+ and only the pinned TLS 1.2 cipher suites by default", func() {
+		// A fresh port-forward, in case the oversized body reset the previous one.
+		forward()
 		expectTLS12Floor()
+		// Go's default suites accept ECDHE CBC, so this is what proves the pinning.
 		_, err := handshake(tls.VersionTLS12, tls.VersionTLS12, cbcSuites...)
 		refused(err, "ECDHE CBC suites must be refused")
+		// Go's defaults also refuse static RSA key exchange; this only guards
+		// against the pinned list growing to include it.
 		_, err = handshake(tls.VersionTLS12, tls.VersionTLS12, tls.TLS_RSA_WITH_AES_128_GCM_SHA256, tls.TLS_RSA_WITH_AES_256_GCM_SHA384)
 		refused(err, "static RSA key exchange must be refused")
 	})
@@ -212,12 +225,22 @@ var _ = Describe("Authorize request and webhook TLS hardening", Ordered, Label("
 		Expect(args).To(ContainSubstring("--disable-authorize-request-checks=true"))
 		Expect(args).To(ContainSubstring("--webhook-tls-go-defaults=true"))
 
-		// The port-forward may still reach the old pod until it terminates.
-		Eventually(func() error {
-			forward()
-			_, err := handshake(tls.VersionTLS12, tls.VersionTLS12, cbcSuites...)
-			return err
-		}, reconcileTimeout, pollingInterval).Should(Succeed(), "Go's default ECDHE CBC suites must be accepted again")
+		// helm --wait does not wait for the old pod to terminate, and a
+		// port-forward to the Service may pick it until it is gone.
+		Eventually(func() ([]string, error) {
+			out, err := utils.Run(utils.CommandContext(context.Background(), "kubectl", "get", "pods", "-n", release,
+				"-l", "control-plane=webhook-server", "-o", "name"))
+			return strings.Fields(string(out)), err
+		}, deployTimeout, pollingInterval).Should(HaveLen(1))
+		forward()
+		// A GET that is no longer rejected with 405 marks the new pod.
+		Eventually(func() (int, error) {
+			status, _, _, err := send(http.MethodGet, "", nil)
+			return status, err
+		}, reconcileTimeout, pollingInterval).Should(Equal(http.StatusOK))
+
+		_, err = handshake(tls.VersionTLS12, tls.VersionTLS12, cbcSuites...)
+		Expect(err).NotTo(HaveOccurred(), "Go's default ECDHE CBC suites must be accepted again")
 		expectTLS12Floor()
 
 		status, header, body := post(http.MethodGet, "", nil)
