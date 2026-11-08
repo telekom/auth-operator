@@ -62,6 +62,7 @@ test/e2e/
 │   ├── e2e_test.go         # [setup] Prerequisites & debug utilities
 │   ├── helm_e2e_test.go    # [helm] Helm chart installation tests
 │   ├── addon_namespace_e2e_test.go # [helm, addon-namespaces] Add-on ownership admission and isolation
+│   ├── authorize_hardening_e2e_test.go # [helm, authorize-hardening] /authorize request checks and webhook TLS
 │   ├── creator_tracking_e2e_test.go # [creator-tracking] Native identity tracking
 │   ├── creator_tracking_support_test.go # Dedicated webhook and cleanup support
 │   ├── dev_e2e_test.go     # [dev] Kustomize/make deploy tests
