@@ -17,6 +17,9 @@ updates:
       - dependency-name: "github.com/google/cel-go"
         versions:
           - ">= 0.32.0"
+    cooldown:
+      default-days: 3
+      semver-major-days: 14
     schedule:
       interval: "daily"
     open-pull-requests-limit: 10
@@ -59,6 +62,8 @@ updates:
   # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
+    cooldown:
+      default-days: 3
     schedule:
       interval: "daily"
     open-pull-requests-limit: 5
@@ -86,6 +91,8 @@ updates:
   # need their own entries or their pinned actions silently go stale.
   - package-ecosystem: "github-actions"
     directory: "/.github/actions/build-operator-image"
+    cooldown:
+      default-days: 3
     schedule:
       interval: "daily"
     open-pull-requests-limit: 5
@@ -109,6 +116,8 @@ updates:
 
   - package-ecosystem: "github-actions"
     directory: "/.github/actions/setup-go-env"
+    cooldown:
+      default-days: 3
     schedule:
       interval: "daily"
     open-pull-requests-limit: 5
@@ -132,6 +141,8 @@ updates:
 
   - package-ecosystem: "github-actions"
     directory: "/.github/actions/setup-kind-cluster"
+    cooldown:
+      default-days: 3
     schedule:
       interval: "daily"
     open-pull-requests-limit: 5
@@ -156,6 +167,8 @@ updates:
   # Docker
   - package-ecosystem: "docker"
     directory: "/"
+    cooldown:
+      default-days: 3
     schedule:
       interval: "daily"
     open-pull-requests-limit: 3
@@ -180,6 +193,8 @@ updates:
   # Helm Charts (auth-operator chart dependencies)
   - package-ecosystem: "helm"
     directory: "/chart/auth-operator"
+    cooldown:
+      default-days: 3
     schedule:
       interval: "daily"
     open-pull-requests-limit: 3
