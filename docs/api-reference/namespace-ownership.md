@@ -61,8 +61,8 @@ A ValidatingAdmissionPolicy guards the annotation: only `kubernetes-admin` and
 may set, change or remove it on ServiceAccount CREATE or UPDATE. Other edits to
 an annotated ServiceAccount are unaffected. The TDG-migration bypass
 identities are deliberately excluded, because they are GitOps reconcilers that
-apply tenant-sourced content. Without the guard, anyone who can update a
-ServiceAccount in a namespace could re-arm it, an identity that already holds
+apply tenant-sourced content. Without the guard, anyone who can create or
+update a ServiceAccount in a namespace could arm it, an identity that holds
 namespace `create` RBAC, with that namespace's ownership (never more).
 
 The policy needs Kubernetes 1.30 or later (`admissionregistration.k8s.io/v1`):
@@ -76,8 +76,10 @@ The policy needs Kubernetes 1.30 or later (`admissionregistration.k8s.io/v1`):
   `serviceaccount_ownership_annotation_vap.yaml`. On older clusters, remove it
   with a `$patch: delete` overlay.
 
-On clusters without the policy, limit ServiceAccount `update`/`patch` in
-platform-owned namespaces to platform operators.
+On clusters without the policy, limit ServiceAccount `create`, `update` and
+`patch` in platform-owned namespaces to platform operators. A new
+ServiceAccount can carry the annotation, so `create` alone is enough to opt
+out, even for identities granted through a group-based BindDefinition.
 
 Non-bypass principals can update an authorized add-on
 namespace when ownership is unchanged, but cannot adopt, change, or remove
