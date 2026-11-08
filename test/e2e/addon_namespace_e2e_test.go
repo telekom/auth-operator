@@ -213,6 +213,13 @@ var _ = Describe("Add-on namespace ownership", Ordered, Label("helm", "addon-nam
 	It("inherits exact add-on ownership through ServiceAccount fallback", func() {
 		output, err := run("create", "serviceaccount", "fallback", "-n", nsA)
 		Expect(err).NotTo(HaveOccurred(), "%s", output)
+		// Strict ownership gives a ServiceAccount without grants nothing to inherit
+		// until a cluster administrator opts it in.
+		output, err = create(namespace(childNS, nil), append(serviceAccount, "--dry-run=server")...)
+		deny(output, err)
+		output, err = run("annotate", "serviceaccount", "fallback", "-n", nsA,
+			authorizationv1alpha1.AnnotationKeyInheritHostingNamespaceOwnership+"=true")
+		Expect(err).NotTo(HaveOccurred(), "%s", output)
 		output, err = create(namespace(childNS, nil), serviceAccount...)
 		Expect(err).NotTo(HaveOccurred(), "%s", output)
 		labels := readNamespace(childNS).Labels

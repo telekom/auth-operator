@@ -13,9 +13,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func freshBindDefinitionsWithRoleBindings(ctx context.Context, cachedReader, liveReader client.Reader) ([]authorizationv1alpha1.BindDefinition, error) {
+func freshBindDefinitionsWithRoleBindings(ctx context.Context, cachedReader, liveReader client.Reader, strictServiceAccountCreate bool) ([]authorizationv1alpha1.BindDefinition, error) {
 	if liveReader == nil {
 		liveReader = cachedReader
+	}
+
+	// In strict mode, a newly added grant must constrain ServiceAccount CREATE
+	// before it reaches the webhook cache.
+	if strictServiceAccountCreate {
+		return listAllBindDefinitionsWithRoleBindings(ctx, liveReader)
 	}
 
 	candidates, err := cachedBindDefinitionsWithRoleBindings(ctx, cachedReader)
@@ -48,12 +54,12 @@ func cachedBindDefinitionsWithRoleBindings(ctx context.Context, reader client.Re
 		if !isFieldIndexError(err) {
 			return nil, err
 		}
-		return listAllCachedBindDefinitionsWithRoleBindings(ctx, reader)
+		return listAllBindDefinitionsWithRoleBindings(ctx, reader)
 	}
 	return indexed.Items, nil
 }
 
-func listAllCachedBindDefinitionsWithRoleBindings(ctx context.Context, reader client.Reader) ([]authorizationv1alpha1.BindDefinition, error) {
+func listAllBindDefinitionsWithRoleBindings(ctx context.Context, reader client.Reader) ([]authorizationv1alpha1.BindDefinition, error) {
 	all := &authorizationv1alpha1.BindDefinitionList{}
 	if err := reader.List(ctx, all); err != nil {
 		return nil, err

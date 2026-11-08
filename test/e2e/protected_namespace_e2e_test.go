@@ -13,6 +13,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
 	"github.com/telekom/auth-operator/test/utils"
 )
 
@@ -112,6 +113,86 @@ spec:
 		Expect(err).NotTo(HaveOccurred())
 		for _, ns := range []string{ordinaryNS, protectedNS, wrongNS, release} {
 			utils.CleanupNamespace(ns)
+		}
+	})
+
+	It("keeps delegated ServiceAccount CREATE within its namespace grants", func() {
+		source := release + "-controllers"
+		output, err := apply(fmt.Sprintf(`apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+  labels:
+    t-caas.telekom.com/owner: platform
+`, source))
+		Expect(err).NotTo(HaveOccurred(), "%s", output)
+		// Deletion protection guards owner=platform namespaces, so unlock it and
+		// assert the namespace is gone; CleanupNamespace would ignore a denial.
+		DeferCleanup(func() {
+			cleanupOutput, cleanupErr := run("annotate", "namespace", source, authorizationv1alpha1.AnnotationKeyAllowDeletion+"=true", "--overwrite")
+			Expect(cleanupErr).NotTo(HaveOccurred(), "%s", cleanupOutput)
+			cleanupOutput, cleanupErr = run("delete", "namespace", source, "--ignore-not-found", "--timeout=120s")
+			Expect(cleanupErr).NotTo(HaveOccurred(), "%s", cleanupOutput)
+		})
+		for _, owner := range []string{"tenant", "thirdparty", "platform", "unbound"} {
+			name := release + "-" + owner
+			identity := "system:serviceaccount:" + source + ":" + owner
+			output, err = run("create", "clusterrolebinding", name, "--clusterrole="+release, "--serviceaccount="+source+":"+owner)
+			Expect(err).NotTo(HaveOccurred(), "%s", output)
+			DeferCleanup(func() {
+				_, cleanupErr := run("delete", "clusterrolebinding", name, "--ignore-not-found")
+				Expect(cleanupErr).NotTo(HaveOccurred())
+			})
+			if owner != "unbound" {
+				identityLabel := ""
+				if owner != "platform" {
+					identityLabel = "        t-caas.telekom.com/" + owner + ": team-a\n"
+				}
+				output, err = apply(fmt.Sprintf(`apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: BindDefinition
+metadata:
+  name: %s
+spec:
+  targetName: %s
+  subjects:
+  - kind: ServiceAccount
+    name: %s
+    namespace: %s
+  roleBindings:
+  - clusterRoleRefs: ["view"]
+    namespaceSelector:
+    - matchLabels:
+        t-caas.telekom.com/owner: %s
+%s      matchExpressions:
+      - key: t-caas.telekom.com/protected
+        operator: DoesNotExist
+`, name, name, owner, source, owner, identityLabel))
+				Expect(err).NotTo(HaveOccurred(), "%s", output)
+				DeferCleanup(func() {
+					_, cleanupErr := run("delete", "binddefinition", name, "--ignore-not-found", "--timeout=60s")
+					Expect(cleanupErr).NotTo(HaveOccurred())
+				})
+			}
+			for _, target := range []string{"tenant", "thirdparty", "platform"} {
+				identityLabel := ""
+				if target != "platform" {
+					identityLabel = "    t-caas.telekom.com/" + target + ": team-a\n"
+				}
+				output, err = apply(fmt.Sprintf(`apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s-probe
+  labels:
+    t-caas.telekom.com/owner: %s
+%s`, name, target, identityLabel), "--dry-run=server", "--as="+identity)
+				// Without a grant, strict mode inherits nothing from the platform-owned hosting namespace.
+				allowed := owner == target
+				if allowed {
+					Expect(err).NotTo(HaveOccurred(), "%s -> %s: %s", owner, target, output)
+				} else {
+					deny(output, err)
+				}
+			}
 		}
 	})
 

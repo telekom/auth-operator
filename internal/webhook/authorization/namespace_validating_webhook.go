@@ -33,6 +33,9 @@ type NamespaceValidator struct {
 	Decoder                         admission.Decoder
 	TDGMigration                    bool
 	DisableCAPIOperatorUpdateBypass bool
+	// DisableStrictSANamespaceOwnership restores hosting-namespace inheritance
+	// on CREATE for all ServiceAccounts. Transitional; may be removed.
+	DisableStrictSANamespaceOwnership bool
 
 	// DeletionProtection enables namespace deletion protection: platform and
 	// opted-in namespaces require the allow-deletion annotation, and system
@@ -356,7 +359,7 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 
 	listCtx, cancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
 	defer cancel()
-	bindDefinitions, err := freshBindDefinitionsWithRoleBindings(listCtx, v.Client, v.admissionReader())
+	bindDefinitions, err := freshBindDefinitionsWithRoleBindings(listCtx, v.Client, v.admissionReader(), strictServiceAccountCreate(req.Operation, saInfo, v.DisableStrictSANamespaceOwnership))
 	if err != nil {
 		logger.Error(err, "failed to list BindDefinitions", "namespace", req.Name)
 		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()
@@ -439,11 +442,15 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 	// Last resort: if the user is a ServiceAccount performing CREATE/UPDATE, check if
 	// its source namespace has the same tracked ownership labels as the target namespace (issue #202).
 	// This is restricted to CREATE/UPDATE — DELETE is intentionally excluded.
-	if saInfo.IsServiceAccount &&
-		(req.Operation == admissionv1.Create || req.Operation == admissionv1.Update) {
+	// On CREATE in strict mode, only the per-ServiceAccount inherit annotation enables it.
+	if saInfo.IsServiceAccount && (req.Operation == admissionv1.Create || req.Operation == admissionv1.Update) {
 		saCtx, saCancel := context.WithTimeout(ctx, authorizationv1alpha1.WebhookCacheTimeout)
 		defer saCancel()
-		inheritedLabels, saErr := GetSANamespaceTrackedLabels(saCtx, v.admissionReader(), saInfo)
+		inherit, saErr := mayInheritHostingNamespace(saCtx, v.admissionReader(), req.Operation, saInfo, v.DisableStrictSANamespaceOwnership)
+		var inheritedLabels map[string]string
+		if saErr == nil && inherit {
+			inheritedLabels, saErr = GetSANamespaceTrackedLabels(saCtx, v.admissionReader(), saInfo)
+		}
 		if saErr != nil {
 			logger.Error(saErr, "failed to lookup SA namespace labels", "saNamespace", saInfo.Namespace, "targetNamespace", req.Name)
 			metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultErrored).Inc()

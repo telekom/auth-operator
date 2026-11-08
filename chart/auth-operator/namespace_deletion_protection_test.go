@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -74,12 +75,12 @@ func TestNamespaceDeletionProtectionVAPRendering(t *testing.T) {
 	// disabled suppresses rendering even with cluster VAP support.
 	disabledRender := helmTemplate(t, "--api-versions", vapAPIVersionsFlag,
 		"--set", "namespaceDeletionProtection.vap=disabled")
-	assertNotContains(t, disabledRender, "kind: ValidatingAdmissionPolicy")
+	assertNotContains(t, disabledRender, "name: auth-operator-namespace-deletion-protection")
 
 	// Feature kill switch suppresses the VAP and turns the webhook flag off.
 	offRender := helmTemplate(t, "--api-versions", vapAPIVersionsFlag,
 		"--set", "namespaceDeletionProtection.enabled=false")
-	assertNotContains(t, offRender, "kind: ValidatingAdmissionPolicy")
+	assertNotContains(t, offRender, "name: auth-operator-namespace-deletion-protection")
 	assertContains(t, offRender, "--namespace-deletion-protection=false")
 
 	// Extra protected namespaces are JSON-serialized into the CEL list, so
@@ -116,4 +117,56 @@ func assertHelmTemplateFails(t *testing.T, wantErrPart string, args ...string) {
 	if !strings.Contains(string(output), wantErrPart) {
 		t.Fatalf("expected helm template failure to contain %q, got: %s", wantErrPart, string(output))
 	}
+}
+
+// TestStrictSANamespaceOwnershipRendering pins the transitional opt-out flag
+// and the webhook's ServiceAccount read permission it relies on.
+func TestStrictSANamespaceOwnershipRendering(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skipf("helm not installed: %v", err)
+	}
+	defaultRender := helmTemplate(t)
+	assertContains(t, defaultRender, "--strict-sa-namespace-ownership=true")
+	// Only the namespace webhooks read ServiceAccounts.
+	assertNotContains(t, defaultRender, "ServiceAccount reads (transitional inherit-hosting-namespace-ownership annotation)")
+	assertContains(t, helmTemplate(t, "--set", "namespaceAdmission.enabled=true"), "ServiceAccount reads (transitional inherit-hosting-namespace-ownership annotation)")
+	assertContains(t, helmTemplate(t, "--set", "webhookServer.strictSANamespaceOwnership=false"), "--strict-sa-namespace-ownership=false")
+	assertContains(t, helmTemplate(t, "--set-string", "webhookServer.strictSANamespaceOwnership=false"), "--strict-sa-namespace-ownership=false")
+	// helm upgrade --reuse-values from a release without the value must stay strict.
+	assertContains(t, helmTemplate(t, "--set", "webhookServer.strictSANamespaceOwnership=null"), "--strict-sa-namespace-ownership=true")
+}
+
+// TestInheritHostingNamespaceOwnershipGuardRendering pins the VAP that guards
+// the transitional ServiceAccount annotation. Keep it in sync with
+// config/webhook/serviceaccount_ownership_annotation_vap.yaml.
+func TestInheritHostingNamespaceOwnershipGuardRendering(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skipf("helm not installed: %v", err)
+	}
+	const policy = "auth-operator-serviceaccount-ownership-annotation-guard"
+	// auto without VAP support renders nothing.
+	assertNotContains(t, helmTemplate(t), policy)
+
+	autoRender := helmTemplate(t, "--api-versions", vapAPIVersionsFlag)
+	assertContains(t, autoRender, "name: "+policy)
+	assertContains(t, autoRender, "policyName: "+policy)
+	assertContains(t, autoRender, `operations: ["CREATE", "UPDATE"]`)
+	assertContains(t, autoRender, `resources: ["serviceaccounts"]`)
+	assertContains(t, autoRender, "'t-caas.telekom.com/inherit-hosting-namespace-ownership'")
+	assertContains(t, autoRender, `expression: "!variables.changed || variables.privileged"`)
+	assertContains(t, autoRender, "request.userInfo.username == 'kubernetes-admin'")
+	assertContains(t, autoRender, "'system:masters' in request.userInfo.groups")
+	// The kustomize manifest, exercised by test/admissionpolicy, must match.
+	kustomize, err := os.ReadFile(filepath.Join("..", "..", "config", "webhook", "serviceaccount_ownership_annotation_vap.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	policySpec, _, _ := strings.Cut(string(kustomize[strings.Index(string(kustomize), "spec:\n  failurePolicy"):]), "\n---")
+	assertContains(t, autoRender, policySpec)
+
+	assertContains(t, helmTemplate(t, "--set", "webhookServer.inheritHostingNamespaceOwnershipGuard=enabled"), "name: "+policy)
+	assertNotContains(t, helmTemplate(t, "--api-versions", vapAPIVersionsFlag,
+		"--set", "webhookServer.inheritHostingNamespaceOwnershipGuard=disabled"), policy)
+	assertHelmTemplateFails(t, "value must be one of 'auto', 'enabled', 'disabled'",
+		"--set", "webhookServer.inheritHostingNamespaceOwnershipGuard=sometimes")
 }

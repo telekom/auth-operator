@@ -44,7 +44,7 @@ dedicated release with `namespaceAdmission.enabled=true` and
 Impersonated users and ServiceAccounts exercise the deployed webhooks on the
 Kind API server, covering single-value add-on pins and broad-selector rejection,
 namespace CREATE/UPDATE and RoleBinding isolation, exact ServiceAccount
-inheritance, invalid ownership shapes, label immutability, migration-only
+inheritance (denied until an administrator sets the inherit annotation), invalid ownership shapes, label immutability, migration-only
 non-platform reclassification, and add-on/third-party deletion parity.
 
 To run only these specs on an isolated Kind cluster:
@@ -66,6 +66,7 @@ test/e2e/
 ├── helm_e2e_test.go            # Helm chart installation
 ├── addon_namespace_e2e_test.go # Add-on ownership admission and RBAC isolation
 ├── authorize_hardening_e2e_test.go # /authorize request checks, webhook TLS pinning and opt-outs
+├── serviceaccount_namespace_ownership_e2e_test.go # Strict SA namespace ownership, opt-outs, annotation guard
 ├── creator_tracking_e2e_test.go # Native creator and contributor tracking
 ├── creator_tracking_support_test.go # Test webhook and exact cleanup
 ├── dev_e2e_test.go             # Dev overlay deployment

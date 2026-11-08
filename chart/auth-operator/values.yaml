@@ -130,6 +130,23 @@ webhookServer:
   # authorization for Namespace UPDATE requests. Protected-label validation
   # still runs. Set to "false" to require normal authorization for those updates.
   capiOperatorUpdateBypass: "false"
+  # On Namespace CREATE, a ServiceAccount's BindDefinition namespace grants
+  # authorize it; its hosting namespace's ownership is not inherited, even when
+  # it has no grant at all, unless the ServiceAccount carries the
+  # t-caas.telekom.com/inherit-hosting-namespace-ownership: "true" annotation.
+  # Set to "false" to restore the previous inheritance for all ServiceAccounts.
+  # Transitional escape hatch; it may be removed in a future release.
+  strictSANamespaceOwnership: "true"
+  # ValidatingAdmissionPolicy (Kubernetes >= 1.30) that lets only
+  # kubernetes-admin and system:masters set, change or remove the
+  # t-caas.telekom.com/inherit-hosting-namespace-ownership ServiceAccount
+  # annotation.
+  #   auto     - render when the cluster serves the v1 VAP API (default).
+  #              Offline `helm template` needs
+  #              `--api-versions admissionregistration.k8s.io/v1/ValidatingAdmissionPolicy`.
+  #   enabled  - always render (install fails on clusters without VAP).
+  #   disabled - never render; the annotation is then unguarded.
+  inheritHostingNamespaceOwnershipGuard: auto
   # DNS label key domains allowed in BindDefinition namespace selectors.
   # Set multiple domains to allow labels from more than one group.
   # Built-in ownership/protected labels and kubernetes.io/metadata.name

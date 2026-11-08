@@ -222,6 +222,35 @@ func IsRestrictedBindDefinition(name string) bool {
 	return strings.HasSuffix(name, "-namespaced-reader-restricted")
 }
 
+// strictServiceAccountCreate reports whether a request is a ServiceAccount
+// Namespace CREATE under strict ownership, which needs live BindDefinitions.
+func strictServiceAccountCreate(op admissionv1.Operation, saInfo ServiceAccountInfo, strictDisabled bool) bool {
+	return op == admissionv1.Create && saInfo.IsServiceAccount && !strictDisabled
+}
+
+// mayInheritHostingNamespace reports whether a ServiceAccount may fall back to
+// its hosting namespace's ownership labels. On CREATE in strict mode, only
+// BindDefinition grants authorize the ServiceAccount; the hosting namespace
+// must not widen them, and an identity without any grant inherits nothing
+// (removing a ServiceAccount's last grant must never widen its access).
+// Inheritance is restored only when strict mode is disabled globally or the
+// ServiceAccount carries AnnotationKeyInheritHostingNamespaceOwnership="true"
+// (transitional escape hatches). The annotation is read through reader, which
+// must be the live reader so a stale cache cannot change the decision.
+func mayInheritHostingNamespace(ctx context.Context, reader client.Reader, op admissionv1.Operation, saInfo ServiceAccountInfo, strictDisabled bool) (bool, error) {
+	if op != admissionv1.Create || strictDisabled {
+		return true, nil
+	}
+	sa := &corev1.ServiceAccount{}
+	if err := reader.Get(ctx, types.NamespacedName{Namespace: saInfo.Namespace, Name: saInfo.Name}, sa); err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("unable to get ServiceAccount %s/%s: %w", saInfo.Namespace, saInfo.Name, err)
+	}
+	return sa.Annotations[authorizationv1alpha1.AnnotationKeyInheritHostingNamespaceOwnership] == "true", nil
+}
+
 // GetSANamespaceTrackedLabels looks up the namespace where the ServiceAccount resides
 // and returns the tracked ownership labels (owner, tenant, thirdparty, addon) found on it.
 // It validates that the label set is a valid ownership combination:

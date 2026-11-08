@@ -17,6 +17,9 @@ updates:
       - dependency-name: "github.com/google/cel-go"
         versions:
           - ">= 0.32.0"
+    cooldown:
+      default-days: 3
+      semver-major-days: 14
     schedule:
       interval: "daily"
     open-pull-requests-limit: 10
@@ -55,83 +58,22 @@ updates:
         update-types:
           - "minor"
           - "patch"
+      go-security:
+        applies-to: "security-updates"
+        patterns:
+          - "*"
 
-  # GitHub Actions
+  # GitHub Actions in workflows and in the local composite actions. Dependabot
+  # only scans actions referenced directly in each configured directory; the
+  # glob covers every composite action under .github/actions/, including new
+  # ones. One entry groups an action bumped in several directories into a
+  # single PR.
   - package-ecosystem: "github-actions"
-    directory: "/"
-    schedule:
-      interval: "daily"
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: "ci"
-    labels:
-      - "dependencies"
-      - "github-actions"
-    groups:
-      actions-major:
-        patterns:
-          - "*"
-        update-types:
-          - "major"
-      actions-minor-patch:
-        patterns:
-          - "*"
-        update-types:
-          - "minor"
-          - "patch"
-
-  # GitHub Actions used inside local composite actions. Dependabot's
-  # github-actions ecosystem only scans the actions referenced directly in
-  # each configured directory, so composite actions under .github/actions/
-  # need their own entries or their pinned actions silently go stale.
-  - package-ecosystem: "github-actions"
-    directory: "/.github/actions/build-operator-image"
-    schedule:
-      interval: "daily"
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: "ci"
-    labels:
-      - "dependencies"
-      - "github-actions"
-    groups:
-      actions-major:
-        patterns:
-          - "*"
-        update-types:
-          - "major"
-      actions-minor-patch:
-        patterns:
-          - "*"
-        update-types:
-          - "minor"
-          - "patch"
-
-  - package-ecosystem: "github-actions"
-    directory: "/.github/actions/setup-go-env"
-    schedule:
-      interval: "daily"
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: "ci"
-    labels:
-      - "dependencies"
-      - "github-actions"
-    groups:
-      actions-major:
-        patterns:
-          - "*"
-        update-types:
-          - "major"
-      actions-minor-patch:
-        patterns:
-          - "*"
-        update-types:
-          - "minor"
-          - "patch"
-
-  - package-ecosystem: "github-actions"
-    directory: "/.github/actions/setup-kind-cluster"
+    directories:
+      - "/"
+      - "/.github/actions/*"
+    cooldown:
+      default-days: 3
     schedule:
       interval: "daily"
     open-pull-requests-limit: 5
@@ -156,6 +98,8 @@ updates:
   # Docker
   - package-ecosystem: "docker"
     directory: "/"
+    cooldown:
+      default-days: 3
     schedule:
       interval: "daily"
     open-pull-requests-limit: 3
@@ -165,6 +109,15 @@ updates:
       - "dependencies"
       - "docker"
     groups:
+      # The golang builder tag must match go.mod's toolchain directive (CI
+      # Lint enforces it), so a Go release needs a coordinated change. Keep it
+      # out of the other image updates so it cannot hold them back.
+      golang-builder:
+        patterns:
+          - "golang"
+        update-types:
+          - "minor"
+          - "patch"
       docker-major:
         patterns:
           - "*"
@@ -180,6 +133,8 @@ updates:
   # Helm Charts (auth-operator chart dependencies)
   - package-ecosystem: "helm"
     directory: "/chart/auth-operator"
+    cooldown:
+      default-days: 3
     schedule:
       interval: "daily"
     open-pull-requests-limit: 3

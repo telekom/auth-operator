@@ -46,6 +46,13 @@ nameReference:
   - kind: ClusterRole
     group: rbac.authorization.k8s.io
     path: rules/resourceNames
+- kind: ValidatingAdmissionPolicy
+  group: admissionregistration.k8s.io
+  version: v1
+  fieldSpecs:
+  - kind: ValidatingAdmissionPolicyBinding
+    group: admissionregistration.k8s.io
+    path: spec/policyName
 - kind: MutatingAdmissionPolicy
   group: admissionregistration.k8s.io
   version: v1

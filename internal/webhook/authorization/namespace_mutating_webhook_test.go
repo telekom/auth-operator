@@ -841,6 +841,11 @@ func TestNamespaceMutatorSANamespaceInheritance(t *testing.T) {
 			if tt.saNamespace != nil {
 				builder = builder.WithObjects(tt.saNamespace)
 			}
+			// These cases exercise the opt-in inheritance mechanics; strict-mode
+			// denial without the annotation is covered in serviceaccount_namespace_scope_test.go.
+			if sa := inheritingServiceAccount(tt.username); sa != nil {
+				builder = builder.WithObjects(sa)
+			}
 			fakeClient := builder.Build()
 
 			mutator := &webhooks.NamespaceMutator{
@@ -905,7 +910,7 @@ func TestNamespaceMutatorUsesLiveReaderForSANamespaceInheritance(t *testing.T) {
 					"t-caas.telekom.com/tenant": "team-alpha",
 				},
 			},
-		}).
+		}, inheritingServiceAccount("system:serviceaccount:tenant-alpha:my-operator")).
 		Build()
 
 	mutator := &webhooks.NamespaceMutator{

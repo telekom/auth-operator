@@ -24,6 +24,14 @@ rules:
       - get
       - list
       - watch
+  # Live ServiceAccount reads for the transitional
+  # t-caas.telekom.com/inherit-hosting-namespace-ownership annotation.
+  - apiGroups:
+      - ""
+    resources:
+      - serviceaccounts
+    verbs:
+      - get
   # Admission webhook configuration watches for cert rotation CA bundles.
   - apiGroups:
       - admissionregistration.k8s.io
