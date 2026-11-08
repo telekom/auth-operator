@@ -64,16 +64,14 @@ updates:
           - "*"
 
   # GitHub Actions in workflows and in the local composite actions. Dependabot
-  # only scans actions referenced directly in each configured directory, so
-  # every composite action under .github/actions/ is listed or its pinned
-  # actions silently go stale. One entry groups an action bumped in several
-  # directories into a single PR.
+  # only scans actions referenced directly in each configured directory; the
+  # glob covers every composite action under .github/actions/, including new
+  # ones. One entry groups an action bumped in several directories into a
+  # single PR.
   - package-ecosystem: "github-actions"
     directories:
       - "/"
-      - "/.github/actions/build-operator-image"
-      - "/.github/actions/setup-go-env"
-      - "/.github/actions/setup-kind-cluster"
+      - "/.github/actions/*"
     cooldown:
       default-days: 3
     schedule:

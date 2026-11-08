@@ -51,7 +51,7 @@ Documentation must be updated for every user-facing change:
 ### Dependency Updates
 
 Dependabot tracks direct and indirect Go modules, root Dockerfile base images,
-workflow actions, all three local composite actions, and the Helm chart in
+workflow actions, every local composite action, and the Helm chart in
 `.github/dependabot.yml`. The operator's own deployment image placeholders are
 release inputs, not third-party dependencies.
 
@@ -75,8 +75,10 @@ not an upgrade target. Envtest assets use their own controller-tools
 `envtest-v*` releases independently of kind node releases. Self image/chart
 versions and `controller:latest` placeholders are release-owned, not third-party
 dependencies. Cryptographic checksums and trust material are not auto-replaced.
-The Dockerfile's parameterized Go image is Dependabot-owned; its digest, Go
-directive and fallback need coordinated review. Tilt's delve `@latest` is a
+The Dockerfile's literal `golang` builder tag and digest are Dependabot-owned.
+The tag must match go.mod's toolchain (or go) directive, which CI Lint enforces,
+so Go releases arrive in their own `golang-builder` group and need a coordinated
+go.mod update. Tilt's delve `@latest` is a
 floating developer install, not a pinned version tracked by this configuration.
 Kind node versions must exist as published Docker `kindest/node` images, not just Kubernetes
 release tags, because a Kubernetes release does not guarantee a kind image.
