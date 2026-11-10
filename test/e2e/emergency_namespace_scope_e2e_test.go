@@ -21,7 +21,7 @@ import (
 // the transitional cross-tenant opt-out restores the cluster-wide scope.
 // cluster-admin satisfies the emergency review through its wildcard rule,
 // which is how the cross-tenant regression surfaced. The specs are ordered:
-// the last one upgrades the release to flip the opt-out.
+// the later ones upgrade the release to change the scope.
 var _ = Describe("Emergency namespace tenant scope", Ordered, Label("helm", "emergency-namespace"), func() {
 	const (
 		release   = "auth-operator-emergency-e2e"
@@ -180,6 +180,20 @@ subjects:
 		denied(emergency, otherNS, "team-b")
 		By("denying an identity without the emergency permission")
 		denied(plain, ownNS, "team-a")
+		By("denying a relabel that would pull another tenant's namespace into scope")
+		out, err := run("label", "namespace", otherNS, "t-caas.telekom.com/tenant=team-a", "--overwrite",
+			"--dry-run=server", "--as="+emergency)
+		Expect(err).To(HaveOccurred(), "relabel unexpectedly succeeded: %s", out)
+		Expect(out).To(ContainSubstring("denied the request"), "must fail in namespace admission: %s", out)
+	})
+
+	It("admits no namespace when the cluster tenant is unset", func() {
+		upgrade("--set", "webhookServer.emergencyNamespaceTenant=")
+		Expect(webhookArgs()).NotTo(ContainSubstring("--emergency-namespace-tenant"))
+		denied(emergency, ownNS, "team-a")
+
+		upgrade("--set", "webhookServer.emergencyNamespaceTenant=team-a")
+		allowed(emergency, ownNS, "team-a")
 	})
 
 	It("restores cross-tenant emergency authority with the transitional opt-out", func() {

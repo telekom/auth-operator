@@ -19,8 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   namespaces regardless of its BindDefinition scope (#640).
 
   **Upgrade note:** emergency authorization admits nothing until
-  `webhookServer.emergencyNamespaceTenant` is set. BindDefinition grants are
-  unaffected. Set `webhookServer.emergencyNamespaceCrossTenant: "true"`
+  `webhookServer.emergencyNamespaceTenant` is set; the webhook logs a startup
+  warning while it is unset and refuses to start when the value is not a valid
+  label value. BindDefinition grants are unaffected. Set `webhookServer.emergencyNamespaceCrossTenant: "true"`
   (`--emergency-namespace-cross-tenant=true`) to restore the cluster-wide
   scope; this is a transitional escape hatch and may be removed in a future
   release.

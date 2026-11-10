@@ -145,7 +145,7 @@ func TestEmergencyNamespaceScopeRendering(t *testing.T) {
 	defaultRender := helmTemplate(t)
 	assertContains(t, defaultRender, "--emergency-namespace-cross-tenant=false")
 	assertNotContains(t, defaultRender, "--emergency-namespace-tenant")
-	assertContains(t, helmTemplate(t, "--set", "webhookServer.emergencyNamespaceTenant=team-a"), "--emergency-namespace-tenant=team-a")
+	assertContains(t, helmTemplate(t, "--set", "webhookServer.emergencyNamespaceTenant=team-a"), `- "--emergency-namespace-tenant=team-a"`)
 	assertContains(t, helmTemplate(t, "--set", "webhookServer.emergencyNamespaceCrossTenant=true"), "--emergency-namespace-cross-tenant=true")
 	assertContains(t, helmTemplate(t, "--set-string", "webhookServer.emergencyNamespaceCrossTenant=true"), "--emergency-namespace-cross-tenant=true")
 	// helm upgrade --reuse-values from a release without the value must stay tenant-scoped.

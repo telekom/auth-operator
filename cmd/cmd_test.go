@@ -177,6 +177,17 @@ func TestValidateTrackerIntervals(t *testing.T) {
 	}
 }
 
+func TestValidateEmergencyNamespaceTenant(t *testing.T) {
+	for tenant, valid := range map[string]bool{
+		"": true, "team-a": true, "Team_a.1": true,
+		"team a": false, "-team": false, "team/a": false, strings.Repeat("a", 64): false,
+	} {
+		if err := validateEmergencyNamespaceTenant(tenant); (err == nil) != valid {
+			t.Errorf("validateEmergencyNamespaceTenant(%q) = %v, want valid=%v", tenant, err, valid)
+		}
+	}
+}
+
 func TestValidateRateLimitFlags(t *testing.T) {
 	tests := []struct {
 		name        string

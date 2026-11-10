@@ -20,6 +20,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"golang.org/x/time/rate"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/discovery"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -73,6 +74,9 @@ ensuring authorization policies are enforced at creation time.`,
 			"namespace", namespace,
 			"bindDefinitionNamespaceSelectorLabelGroups", bindDefinitionNamespaceSelectorLabelGroups,
 		)
+		if err := validateEmergencyNamespaceTenant(emergencyNamespaceScope.Tenant); err != nil {
+			return err
+		}
 		ctx, cancel := context.WithCancel(ctrl.SetupSignalHandler())
 		defer cancel()
 
@@ -238,6 +242,10 @@ func configureWebhooks(ctx context.Context, mgr manager.Manager, tp *tracing.Pro
 	if err := (&authorizationv1alpha1.BindDefinition{}).SetupWebhookWithManager(mgr, bindDefinitionNamespaceSelectorLabelGroups...); err != nil {
 		return fmt.Errorf("unable to create webhook for BindDefinition: %w", err)
 	}
+	if emergencyNamespaceScope.Tenant == "" && !emergencyNamespaceScope.AllowCrossTenant {
+		log.Info("WARNING: emergency namespace authorization disabled: --emergency-namespace-tenant unset")
+	}
+
 	// Setup Namespace mutator
 	log.Info("setting up Namespace mutator webhook",
 		"tdgMigration", enableTDGMigration,
@@ -401,6 +409,14 @@ func webhookTLSOpts(goDefaults bool) []func(*tls.Config) {
 		c.MinVersion = tls.VersionTLS12
 		c.CipherSuites = webhookTLSCipherSuites
 	}}
+}
+
+// validateEmergencyNamespaceTenant rejects a tenant that no tenant label can carry.
+func validateEmergencyNamespaceTenant(tenant string) error {
+	if errs := validation.IsValidLabelValue(tenant); len(errs) > 0 {
+		return fmt.Errorf("invalid --emergency-namespace-tenant %q: %s", tenant, strings.Join(errs, "; "))
+	}
+	return nil
 }
 
 // validateRateLimitFlags validates rate-limit and burst flag values.

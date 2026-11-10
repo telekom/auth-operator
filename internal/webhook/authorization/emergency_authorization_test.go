@@ -170,6 +170,37 @@ func TestEmergencyPreservesDeletionAndOwnershipGuards(t *testing.T) {
 	}
 }
 
+// An emergency identity scoped to tenant-a must not pull another tenant's
+// namespace into its scope by relabelling it to tenant-a.
+func TestEmergencyDeniesRelabelIntoScope(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = api.AddToScheme(scheme)
+	_ = authorizationv1.AddToScheme(scheme)
+	calls := 0
+	c := fake.NewClientBuilder().WithScheme(scheme).WithInterceptorFuncs(interceptor.Funcs{Create: func(_ context.Context, _ client.WithWatch, obj client.Object, _ ...client.CreateOption) error {
+		calls++
+		obj.(*authorizationv1.SubjectAccessReview).Status.Allowed = true
+		return nil
+	}}).Build()
+	old, _ := json.Marshal(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "tenant-test", Labels: map[string]string{api.LabelKeyOwner: api.OwnerTenant, api.LabelKeyTenant: "tenant-b"}}})
+	raw, _ := json.Marshal(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "tenant-test", Labels: map[string]string{api.LabelKeyOwner: api.OwnerTenant, api.LabelKeyTenant: "tenant-a"}}})
+	req := admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{Name: "tenant-test", Kind: metav1.GroupVersionKind{Version: "v1", Kind: "Namespace"}, Operation: admissionv1.Update,
+		Object: runtime.RawExtension{Raw: raw}, OldObject: runtime.RawExtension{Raw: old}, UserInfo: authenticationv1.UserInfo{Username: "oidc:alice"}}}
+	scope := EmergencyNamespaceScope{Tenant: "tenant-a"}
+	v := NamespaceValidator{Client: c, Decoder: admission.NewDecoder(scheme), DeletionProtection: true, Emergency: scope}
+	if r := v.Handle(context.Background(), req); r.Allowed {
+		t.Error("validator allowed relabelling tenant-b into tenant-a")
+	}
+	m := NamespaceMutator{Client: c, Decoder: admission.NewDecoder(scheme), Emergency: scope}
+	if r := m.Handle(context.Background(), req); r.Allowed {
+		t.Error("mutator allowed relabelling tenant-b into tenant-a")
+	}
+	if calls != 0 {
+		t.Errorf("SAR calls=%d, want 0", calls)
+	}
+}
+
 // Existing namespace bindings must not depend on emergency authorization availability.
 func TestEmergencyOrdinaryBindingsDoNotReview(t *testing.T) {
 	scheme := runtime.NewScheme()
