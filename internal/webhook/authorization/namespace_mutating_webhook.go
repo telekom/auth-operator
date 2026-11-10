@@ -31,6 +31,8 @@ type NamespaceMutator struct {
 	// DisableStrictSANamespaceOwnership restores hosting-namespace inheritance
 	// on CREATE for all ServiceAccounts. Transitional; may be removed.
 	DisableStrictSANamespaceOwnership bool
+	// Emergency limits emergency authorization to the cluster's own tenant.
+	Emergency EmergencyNamespaceScope
 }
 
 var errAmbiguousNamespaceOwnership = errors.New("namespace ownership is ambiguous across matching BindDefinition selectors; supply explicit ownership labels")
@@ -147,7 +149,7 @@ func (m *NamespaceMutator) Handle(ctx context.Context, req admission.Request) ad
 
 	// Preserve explicit tenant ownership for an effective emergency identity.
 	// The immutable-label check above and validator deletion guards still apply.
-	if emergencyTenantAuthorization(ctx, m.Client, req, ns) {
+	if emergencyTenantAuthorization(ctx, m.Client, req, ns, m.Emergency) {
 		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceMutator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
 		return admission.Allowed("Emergency tenant namespace authorization")
 	}

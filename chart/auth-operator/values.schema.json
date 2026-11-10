@@ -382,6 +382,18 @@
           "enum": ["true", "false", true, false],
           "default": "true"
         },
+        "emergencyNamespaceTenant": {
+          "type": "string",
+          "description": "The cluster's own tenant. Emergency namespace authorization (use on escalationguards/platform-emergency) admits only tenant namespaces whose t-caas.telekom.com/tenant label equals it; empty admits none.",
+          "pattern": "^$|^([A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?)$",
+          "default": ""
+        },
+        "emergencyNamespaceCrossTenant": {
+          "type": ["string", "boolean"],
+          "description": "Let emergency namespace authorization admit every tenant's namespaces, as in v0.5.0-rc.22 to rc.24. Transitional escape hatch; may be removed in a future release.",
+          "enum": ["true", "false", true, false],
+          "default": "false"
+        },
         "inheritHostingNamespaceOwnershipGuard": {
           "type": "string",
           "description": "ValidatingAdmissionPolicy that lets only kubernetes-admin and system:masters set, change or remove the t-caas.telekom.com/inherit-hosting-namespace-ownership ServiceAccount annotation: auto (render when the cluster supports it), enabled (always render), or disabled (annotation unguarded).",

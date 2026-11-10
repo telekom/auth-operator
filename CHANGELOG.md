@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **BREAKING:** emergency namespace authorization (`use` on
+  `escalationguards.breakglass.t-caas.telekom.com/platform-emergency`, #616)
+  now admits only namespaces of the cluster's own tenant, set with
+  `--emergency-namespace-tenant` (Helm `webhookServer.emergencyNamespaceTenant`).
+  Since v0.5.0-rc.22 it admitted CREATE, UPDATE and DELETE of every tenant's
+  namespaces, and `cluster-admin` satisfies the review through its wildcard
+  rule, so any cluster-admin binding could change or delete other tenants'
+  namespaces regardless of its BindDefinition scope (#640).
+
+  **Upgrade note:** emergency authorization admits nothing until
+  `webhookServer.emergencyNamespaceTenant` is set. BindDefinition grants are
+  unaffected. Set `webhookServer.emergencyNamespaceCrossTenant: "true"`
+  (`--emergency-namespace-cross-tenant=true`) to restore the cluster-wide
+  scope; this is a transitional escape hatch and may be removed in a future
+  release.
+
 - **BREAKING:** on Namespace CREATE, a ServiceAccount is authorized only by
   namespace grants in non-restricted BindDefinitions with RoleBindings; it no
   longer inherits ownership from its hosting namespace, **including when it

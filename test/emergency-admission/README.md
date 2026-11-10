@@ -7,7 +7,9 @@ SPDX-License-Identifier: Apache-2.0
 
 Run this matrix only on a disposable cluster with namespace admission enabled.
 Install the candidate auth-operator chart and image with
-`metrics.auth.enabled=false`. The webhook ServiceAccount must be able to create
+`metrics.auth.enabled=false` and
+`webhookServer.emergencyNamespaceTenant=emergency-runtime`, the tenant of the
+fixture namespaces. The webhook ServiceAccount must be able to create
 SubjectAccessReviews; the controller-manager ServiceAccount must not receive
 that permission from the operator chart. This isolates the new review permission
 from the optional `system:auth-delegator` metrics binding.

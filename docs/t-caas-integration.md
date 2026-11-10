@@ -58,13 +58,26 @@ The operator caches no result. Configure the API server authorization-webhook
 cache duration to meet the required revocation bound.
 
 The permission allows CREATE, UPDATE and DELETE only for valid tenant-owned
-namespaces across the target cluster. It does not infer a configured tenant from
-requester groups. An optional `protected` label must equal the tenant identity. It does
+namespaces of the cluster's own tenant, set with the webhook flag
+`--emergency-namespace-tenant` (Helm `webhookServer.emergencyNamespaceTenant`).
+A namespace qualifies only when its `tenant` label equals that value; when it is
+unset, emergency authorization admits no namespace. Any wildcard RBAC grant such
+as `cluster-admin` also satisfies the review, so without this scope every
+cluster-admin could change or delete every tenant's namespaces. It does not
+infer a tenant from requester groups. An optional `protected` label must equal
+the tenant identity. It does
 not admit platform, add-on, third-party or system namespace operations. Ownership
 labels remain immutable. Namespace deletion protection and its explicit
 `allow-deletion` confirmation remain in force, including hard system-namespace
 denials. Normal Kubernetes resource authorization still applies independently.
 Denied, failed, contradictory or incomplete reviews do not grant access.
+
+v0.5.0-rc.22 to rc.24 admitted every tenant's namespaces. The webhook flag
+`--emergency-namespace-cross-tenant=true` (Helm
+`webhookServer.emergencyNamespaceCrossTenant: "true"`) restores that
+cluster-wide scope. It is a transitional escape hatch and may be removed in a
+future release. There is no per-namespace opt-out: an emergency must not depend
+on a tenant having opted in beforehand.
 
 The webhook ServiceAccount needs `create` on `subjectaccessreviews`. Deploy the
 updated chart or generated RBAC with the binary; do not rely on optional metrics

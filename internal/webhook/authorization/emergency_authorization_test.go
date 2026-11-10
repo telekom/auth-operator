@@ -39,10 +39,20 @@ func TestEmergencyTenantAdmission(t *testing.T) {
 		err     error
 		allowed bool
 		calls   bool
+		scope   *EmergencyNamespaceScope // default: own tenant tenant-a
 	}{
 		{name: "approved", status: authorizationv1.SubjectAccessReviewStatus{Allowed: true}, allowed: true, calls: true},
 		{name: "protected approved", modify: func(n *corev1.Namespace) { n.Labels[api.LabelKeyProtected] = "tenant-a" }, status: authorizationv1.SubjectAccessReviewStatus{Allowed: true}, allowed: true, calls: true},
-		{name: "cluster-wide tenant scope", modify: func(n *corev1.Namespace) { n.Labels[api.LabelKeyTenant] = "tenant-b" }, status: authorizationv1.SubjectAccessReviewStatus{Allowed: true}, allowed: true, calls: true},
+		{name: "other tenant", modify: func(n *corev1.Namespace) { n.Labels[api.LabelKeyTenant] = "tenant-b" }, status: authorizationv1.SubjectAccessReviewStatus{Allowed: true}},
+		{name: "other protected tenant", modify: func(n *corev1.Namespace) {
+			n.Labels[api.LabelKeyTenant] = "tenant-b"
+			n.Labels[api.LabelKeyProtected] = "tenant-b"
+		}, status: authorizationv1.SubjectAccessReviewStatus{Allowed: true}},
+		{name: "unconfigured tenant", scope: &EmergencyNamespaceScope{}, status: authorizationv1.SubjectAccessReviewStatus{Allowed: true}},
+		{name: "cross-tenant opt-out", scope: &EmergencyNamespaceScope{Tenant: "tenant-a", AllowCrossTenant: true}, modify: func(n *corev1.Namespace) { n.Labels[api.LabelKeyTenant] = "tenant-b" }, status: authorizationv1.SubjectAccessReviewStatus{Allowed: true}, allowed: true, calls: true},
+		{name: "cross-tenant opt-out without tenant", scope: &EmergencyNamespaceScope{AllowCrossTenant: true}, modify: func(n *corev1.Namespace) { n.Labels[api.LabelKeyTenant] = "tenant-b" }, status: authorizationv1.SubjectAccessReviewStatus{Allowed: true}, allowed: true, calls: true},
+		{name: "cross-tenant opt-out keeps review", scope: &EmergencyNamespaceScope{AllowCrossTenant: true}, modify: func(n *corev1.Namespace) { n.Labels[api.LabelKeyTenant] = "tenant-b" }, status: authorizationv1.SubjectAccessReviewStatus{Denied: true}, calls: true},
+		{name: "cross-tenant opt-out keeps platform denial", scope: &EmergencyNamespaceScope{AllowCrossTenant: true}, modify: func(n *corev1.Namespace) { n.Labels = map[string]string{api.LabelKeyOwner: api.OwnerPlatform} }, status: authorizationv1.SubjectAccessReviewStatus{Allowed: true}},
 		{name: "empty tenant", modify: func(n *corev1.Namespace) { n.Labels[api.LabelKeyTenant] = "" }, status: authorizationv1.SubjectAccessReviewStatus{Allowed: true}},
 		{name: "empty protected", modify: func(n *corev1.Namespace) { n.Labels[api.LabelKeyProtected] = "" }, status: authorizationv1.SubjectAccessReviewStatus{Allowed: true}},
 		{name: "expired", calls: true},
@@ -88,15 +98,19 @@ func TestEmergencyTenantAdmission(t *testing.T) {
 			if tc.modify != nil {
 				tc.modify(ns)
 			}
+			scope := EmergencyNamespaceScope{Tenant: "tenant-a"}
+			if tc.scope != nil {
+				scope = *tc.scope
+			}
 			raw, _ := json.Marshal(ns)
 			for _, op := range []admissionv1.Operation{admissionv1.Create, admissionv1.Update, admissionv1.Delete} {
 				req := admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{Name: ns.Name, Kind: metav1.GroupVersionKind{Version: "v1", Kind: "Namespace"}, Operation: op, Object: runtime.RawExtension{Raw: raw}, OldObject: runtime.RawExtension{Raw: raw}, UserInfo: identity}}
-				v := NamespaceValidator{Client: c, Decoder: admission.NewDecoder(scheme), DeletionProtection: true}
+				v := NamespaceValidator{Client: c, Decoder: admission.NewDecoder(scheme), DeletionProtection: true, Emergency: scope}
 				if r := v.Handle(context.Background(), req); r.Allowed != tc.allowed {
 					t.Errorf("%s validator allowed=%v want %v: %v", op, r.Allowed, tc.allowed, r.Result)
 				}
 				if op != admissionv1.Delete {
-					m := NamespaceMutator{Client: c, Decoder: admission.NewDecoder(scheme)}
+					m := NamespaceMutator{Client: c, Decoder: admission.NewDecoder(scheme), Emergency: scope}
 					if r := m.Handle(context.Background(), req); r.Allowed != tc.allowed {
 						t.Errorf("%s mutator allowed=%v want %v: %v", op, r.Allowed, tc.allowed, r.Result)
 					}
@@ -142,12 +156,12 @@ func TestEmergencyPreservesDeletionAndOwnershipGuards(t *testing.T) {
 				old = raw
 			}
 			req := admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{Name: ns.Name, Kind: metav1.GroupVersionKind{Version: "v1", Kind: "Namespace"}, Operation: tc.op, Object: runtime.RawExtension{Raw: raw}, OldObject: runtime.RawExtension{Raw: old}, UserInfo: authenticationv1.UserInfo{Username: "oidc:alice"}}}
-			v := NamespaceValidator{Client: c, Decoder: admission.NewDecoder(scheme), DeletionProtection: true}
+			v := NamespaceValidator{Client: c, Decoder: admission.NewDecoder(scheme), DeletionProtection: true, Emergency: EmergencyNamespaceScope{Tenant: "tenant-a"}}
 			if r := v.Handle(context.Background(), req); r.Allowed != tc.allowed {
 				t.Fatalf("allowed=%v want %v: %v", r.Allowed, tc.allowed, r.Result)
 			}
 			if tc.op == admissionv1.Update && tc.name != "strip deletion protection" {
-				m := NamespaceMutator{Client: c, Decoder: admission.NewDecoder(scheme)}
+				m := NamespaceMutator{Client: c, Decoder: admission.NewDecoder(scheme), Emergency: EmergencyNamespaceScope{Tenant: "tenant-a", AllowCrossTenant: true}}
 				if r := m.Handle(context.Background(), req); r.Allowed {
 					t.Fatal("mutator allowed ownership transfer")
 				}

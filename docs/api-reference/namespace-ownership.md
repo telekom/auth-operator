@@ -37,7 +37,8 @@ ServiceAccount or one of its groups (for example
 `system:serviceaccounts:<namespace>`). Its hosting namespace never widens that
 scope, so a ServiceAccount without any such grant is denied unless an
 administrator sets the per-ServiceAccount inherit annotation described below,
-or, for tenant namespaces, an approved emergency session authorizes it. Grants in `*-namespaced-reader-restricted` BindDefinitions and
+or, for namespaces of the cluster's own tenant, an approved emergency session
+authorizes it (see [temporary emergency namespace access](../t-caas-integration.md#temporary-emergency-namespace-access)). Grants in `*-namespaced-reader-restricted` BindDefinitions and
 BindDefinitions with only `clusterRoleBindings` do not count. This also applies
 when tenant or third-party Flux identities share a platform-owned controller
 namespace, and to platform controllers such as
