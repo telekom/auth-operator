@@ -183,8 +183,14 @@ func TestEmergencyDeniesRelabelIntoScope(t *testing.T) {
 		obj.(*authorizationv1.SubjectAccessReview).Status.Allowed = true
 		return nil
 	}}).Build()
-	old, _ := json.Marshal(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "tenant-test", Labels: map[string]string{api.LabelKeyOwner: api.OwnerTenant, api.LabelKeyTenant: "tenant-b"}}})
-	raw, _ := json.Marshal(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "tenant-test", Labels: map[string]string{api.LabelKeyOwner: api.OwnerTenant, api.LabelKeyTenant: "tenant-a"}}})
+	encode := func(tenant string) []byte {
+		raw, err := json.Marshal(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "tenant-test", Labels: map[string]string{api.LabelKeyOwner: api.OwnerTenant, api.LabelKeyTenant: tenant}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	old, raw := encode("tenant-b"), encode("tenant-a")
 	req := admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{Name: "tenant-test", Kind: metav1.GroupVersionKind{Version: "v1", Kind: "Namespace"}, Operation: admissionv1.Update,
 		Object: runtime.RawExtension{Raw: raw}, OldObject: runtime.RawExtension{Raw: old}, UserInfo: authenticationv1.UserInfo{Username: "oidc:alice"}}}
 	scope := EmergencyNamespaceScope{Tenant: "tenant-a"}
