@@ -63,6 +63,7 @@ test/e2e/
 │   ├── helm_e2e_test.go    # [helm] Helm chart installation tests
 │   ├── addon_namespace_e2e_test.go # [helm, addon-namespaces] Add-on ownership admission and isolation
 │   ├── authorize_hardening_e2e_test.go # [helm, authorize-hardening] /authorize request checks and webhook TLS
+│   ├── emergency_namespace_scope_e2e_test.go # [helm, emergency-namespace] Emergency namespace tenant scope and cross-tenant opt-out
 │   ├── serviceaccount_namespace_ownership_e2e_test.go # [helm, sa-namespace-ownership] Strict SA namespace ownership and opt-outs
 │   ├── creator_tracking_e2e_test.go # [creator-tracking] Native identity tracking
 │   ├── creator_tracking_support_test.go # Dedicated webhook and cleanup support

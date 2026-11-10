@@ -42,6 +42,11 @@ spec:
         - --capi-operator-update-bypass={{ .Values.webhookServer.capiOperatorUpdateBypass }}
         {{- /* Missing under helm upgrade --reuse-values from older releases: stay strict. */}}
         - --strict-sa-namespace-ownership={{ ne (toString .Values.webhookServer.strictSANamespaceOwnership) "false" }}
+        {{- with .Values.webhookServer.emergencyNamespaceTenant }}
+        - {{ printf "--emergency-namespace-tenant=%s" . | quote }}
+        {{- end }}
+        {{- /* Missing under helm upgrade --reuse-values from older releases: stay tenant-scoped. */}}
+        - --emergency-namespace-cross-tenant={{ eq (toString .Values.webhookServer.emergencyNamespaceCrossTenant) "true" }}
         - --namespace-deletion-protection={{ .Values.namespaceDeletionProtection.enabled }}
         {{- with .Values.namespaceDeletionProtection.extraProtectedNamespaces }}
         - --protected-namespaces={{ join "," . }}

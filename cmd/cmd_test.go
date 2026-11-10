@@ -177,6 +177,17 @@ func TestValidateTrackerIntervals(t *testing.T) {
 	}
 }
 
+func TestValidateEmergencyNamespaceTenant(t *testing.T) {
+	for tenant, valid := range map[string]bool{
+		"": true, "team-a": true, "Team_a.1": true,
+		"team a": false, "-team": false, "team/a": false, strings.Repeat("a", 64): false,
+	} {
+		if err := validateEmergencyNamespaceTenant(tenant); (err == nil) != valid {
+			t.Errorf("validateEmergencyNamespaceTenant(%q) = %v, want valid=%v", tenant, err, valid)
+		}
+	}
+}
+
 func TestValidateRateLimitFlags(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -344,6 +355,8 @@ func TestWebhookCmdFlags(t *testing.T) {
 		"tdg-migration",
 		"capi-operator-update-bypass",
 		"strict-sa-namespace-ownership",
+		"emergency-namespace-tenant",
+		"emergency-namespace-cross-tenant",
 		"authorize-rate-limit",
 		"authorize-rate-burst",
 		"authorize-auth-token-file",
@@ -409,6 +422,8 @@ func TestFlagDefaults(t *testing.T) {
 		{"webhook", "tdg-migration", "false"},
 		{"webhook", "capi-operator-update-bypass", "false"},
 		{"webhook", "strict-sa-namespace-ownership", "true"},
+		{"webhook", "emergency-namespace-tenant", ""},
+		{"webhook", "emergency-namespace-cross-tenant", "false"},
 		{"webhook", "authorize-rate-limit", "0"},
 		{"webhook", "authorize-rate-burst", "200"},
 		{"webhook", "authorize-auth-token-file", ""},

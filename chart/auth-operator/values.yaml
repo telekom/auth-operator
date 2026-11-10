@@ -137,6 +137,16 @@ webhookServer:
   # Set to "false" to restore the previous inheritance for all ServiceAccounts.
   # Transitional escape hatch; it may be removed in a future release.
   strictSANamespaceOwnership: "true"
+  # The cluster's own tenant. An identity allowed `use` on
+  # escalationguards.breakglass.t-caas.telekom.com/platform-emergency (an
+  # approved emergency session, but also any wildcard grant such as
+  # cluster-admin) may create, update and delete tenant namespaces whose
+  # t-caas.telekom.com/tenant label equals this value. Empty admits none.
+  emergencyNamespaceTenant: ""
+  # Set to "true" to let that emergency authorization reach every tenant's
+  # namespaces, as in v0.5.0-rc.22 to rc.24. Transitional escape hatch; it may
+  # be removed in a future release.
+  emergencyNamespaceCrossTenant: "false"
   # ValidatingAdmissionPolicy (Kubernetes >= 1.30) that lets only
   # kubernetes-admin and system:masters set, change or remove the
   # t-caas.telekom.com/inherit-hosting-namespace-ownership ServiceAccount

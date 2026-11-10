@@ -36,6 +36,8 @@ type NamespaceValidator struct {
 	// DisableStrictSANamespaceOwnership restores hosting-namespace inheritance
 	// on CREATE for all ServiceAccounts. Transitional; may be removed.
 	DisableStrictSANamespaceOwnership bool
+	// Emergency limits emergency authorization to the cluster's own tenant.
+	Emergency EmergencyNamespaceScope
 
 	// DeletionProtection enables namespace deletion protection: platform and
 	// opted-in namespaces require the allow-deletion annotation, and system
@@ -434,7 +436,7 @@ func (v *NamespaceValidator) authorizeViaBindDefinitions(ctx context.Context, lo
 		return admission.Allowed("")
 	}
 
-	if emergencyTenantAuthorization(ctx, v.Client, req, ns) {
+	if emergencyTenantAuthorization(ctx, v.Client, req, ns, v.Emergency) {
 		metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookNamespaceValidator, string(req.Operation), metrics.WebhookResultAllowed).Inc()
 		return admission.Allowed("Emergency tenant namespace authorization")
 	}

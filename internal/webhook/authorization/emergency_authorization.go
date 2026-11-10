@@ -14,13 +14,30 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
+// EmergencyNamespaceScope limits which tenant namespaces emergency
+// authorization may admit.
+type EmergencyNamespaceScope struct {
+	// Tenant is the cluster's own tenant. Emergency authorization admits only
+	// namespaces whose tenant label equals it; empty admits none.
+	Tenant string
+	// AllowCrossTenant admits every tenant's namespaces, restoring the
+	// cluster-wide scope of v0.5.0-rc.22 to rc.24. Transitional; may be removed.
+	AllowCrossTenant bool
+}
+
+func (s EmergencyNamespaceScope) admits(ns *corev1.Namespace) bool {
+	return s.AllowCrossTenant || (s.Tenant != "" && ns.Labels[authorizationv1alpha1.LabelKeyTenant] == s.Tenant)
+}
+
 // emergencyTenantAuthorization checks a dedicated permission with the original
 // request identity. A live authorization webhook can supply that permission for
 // an approved emergency session without changing admission's user information.
 // It is not a deletion-protection bypass and cannot transfer namespace ownership.
-func emergencyTenantAuthorization(ctx context.Context, c client.Client, req admission.Request, ns *corev1.Namespace) bool {
+// Any wildcard RBAC grant such as cluster-admin also satisfies the review, so
+// scope keeps it from reaching other tenants' namespaces.
+func emergencyTenantAuthorization(ctx context.Context, c client.Client, req admission.Request, ns *corev1.Namespace, scope EmergencyNamespaceScope) bool {
 	if c == nil || req.UserInfo.Username == "" || !ValidTrackedOwnershipLabels(ns.Labels) ||
-		ns.Labels[authorizationv1alpha1.LabelKeyOwner] != authorizationv1alpha1.OwnerTenant {
+		ns.Labels[authorizationv1alpha1.LabelKeyOwner] != authorizationv1alpha1.OwnerTenant || !scope.admits(ns) {
 		return false
 	}
 	switch ns.Name {

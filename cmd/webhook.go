@@ -20,6 +20,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"golang.org/x/time/rate"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/discovery"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -41,6 +42,7 @@ var (
 	enableTDGMigration                         bool
 	enableCAPIOperatorUpdateBypass             bool
 	strictSANamespaceOwnership                 bool
+	emergencyNamespaceScope                    authorizationwebhook.EmergencyNamespaceScope
 	authorizeRateLimit                         float64
 	authorizeRateBurst                         int
 	authorizeAuthTokenFile                     string
@@ -72,6 +74,9 @@ ensuring authorization policies are enforced at creation time.`,
 			"namespace", namespace,
 			"bindDefinitionNamespaceSelectorLabelGroups", bindDefinitionNamespaceSelectorLabelGroups,
 		)
+		if err := validateEmergencyNamespaceTenant(emergencyNamespaceScope.Tenant); err != nil {
+			return err
+		}
 		ctx, cancel := context.WithCancel(ctrl.SetupSignalHandler())
 		defer cancel()
 
@@ -237,11 +242,17 @@ func configureWebhooks(ctx context.Context, mgr manager.Manager, tp *tracing.Pro
 	if err := (&authorizationv1alpha1.BindDefinition{}).SetupWebhookWithManager(mgr, bindDefinitionNamespaceSelectorLabelGroups...); err != nil {
 		return fmt.Errorf("unable to create webhook for BindDefinition: %w", err)
 	}
+	if emergencyNamespaceScope.Tenant == "" && !emergencyNamespaceScope.AllowCrossTenant {
+		log.Info("WARNING: emergency namespace authorization disabled: --emergency-namespace-tenant unset")
+	}
+
 	// Setup Namespace mutator
 	log.Info("setting up Namespace mutator webhook",
 		"tdgMigration", enableTDGMigration,
 		"capiOperatorUpdateBypass", enableCAPIOperatorUpdateBypass,
-		"strictSANamespaceOwnership", strictSANamespaceOwnership)
+		"strictSANamespaceOwnership", strictSANamespaceOwnership,
+		"emergencyNamespaceTenant", emergencyNamespaceScope.Tenant,
+		"emergencyNamespaceCrossTenant", emergencyNamespaceScope.AllowCrossTenant)
 	decoder := admission.NewDecoder(mgr.GetScheme())
 	namespaceMutator := &authorizationwebhook.NamespaceMutator{
 		Client:                            mgr.GetClient(),
@@ -250,6 +261,7 @@ func configureWebhooks(ctx context.Context, mgr manager.Manager, tp *tracing.Pro
 		TDGMigration:                      enableTDGMigration,
 		DisableCAPIOperatorUpdateBypass:   !enableCAPIOperatorUpdateBypass,
 		DisableStrictSANamespaceOwnership: !strictSANamespaceOwnership,
+		Emergency:                         emergencyNamespaceScope,
 	}
 	mgr.GetWebhookServer().Register("/mutate-v1-namespace", &webhook.Admission{Handler: namespaceMutator})
 
@@ -257,7 +269,9 @@ func configureWebhooks(ctx context.Context, mgr manager.Manager, tp *tracing.Pro
 	log.Info("setting up Namespace validator webhook",
 		"tdgMigration", enableTDGMigration,
 		"capiOperatorUpdateBypass", enableCAPIOperatorUpdateBypass,
-		"strictSANamespaceOwnership", strictSANamespaceOwnership)
+		"strictSANamespaceOwnership", strictSANamespaceOwnership,
+		"emergencyNamespaceTenant", emergencyNamespaceScope.Tenant,
+		"emergencyNamespaceCrossTenant", emergencyNamespaceScope.AllowCrossTenant)
 	namespaceValidator := &authorizationwebhook.NamespaceValidator{
 		Client:                            mgr.GetClient(),
 		Reader:                            mgr.GetAPIReader(),
@@ -265,6 +279,7 @@ func configureWebhooks(ctx context.Context, mgr manager.Manager, tp *tracing.Pro
 		TDGMigration:                      enableTDGMigration,
 		DisableCAPIOperatorUpdateBypass:   !enableCAPIOperatorUpdateBypass,
 		DisableStrictSANamespaceOwnership: !strictSANamespaceOwnership,
+		Emergency:                         emergencyNamespaceScope,
 		DeletionProtection:                namespaceDeletionProtection,
 		ExtraProtectedNamespaces:          protectedNamespaces,
 	}
@@ -334,6 +349,12 @@ func init() {
 			"inherit ownership from its hosting namespace, even without any grant, unless the ServiceAccount carries the "+
 			"t-caas.telekom.com/inherit-hosting-namespace-ownership=true annotation. Set to false to restore the previous inheritance for all "+
 			"ServiceAccounts. Transitional escape hatch; it may be removed in a future release.")
+	webhookCmd.Flags().StringVar(&emergencyNamespaceScope.Tenant, "emergency-namespace-tenant", "",
+		"The cluster's own tenant. Emergency namespace authorization (use on escalationguards/platform-emergency) "+
+			"admits only tenant namespaces whose t-caas.telekom.com/tenant label equals it; empty admits none.")
+	webhookCmd.Flags().BoolVar(&emergencyNamespaceScope.AllowCrossTenant, "emergency-namespace-cross-tenant", false,
+		"Let emergency namespace authorization admit every tenant's namespaces, as in v0.5.0-rc.22 to rc.24. "+
+			"Transitional escape hatch; it may be removed in a future release.")
 	webhookCmd.Flags().Float64Var(&authorizeRateLimit, "authorize-rate-limit", 0,
 		"Maximum sustained requests per second for the /authorize endpoint. Set to 0 to disable rate limiting.")
 	webhookCmd.Flags().IntVar(&authorizeRateBurst, "authorize-rate-burst", 200,
@@ -388,6 +409,14 @@ func webhookTLSOpts(goDefaults bool) []func(*tls.Config) {
 		c.MinVersion = tls.VersionTLS12
 		c.CipherSuites = webhookTLSCipherSuites
 	}}
+}
+
+// validateEmergencyNamespaceTenant rejects a tenant that no tenant label can carry.
+func validateEmergencyNamespaceTenant(tenant string) error {
+	if errs := validation.IsValidLabelValue(tenant); len(errs) > 0 {
+		return fmt.Errorf("invalid --emergency-namespace-tenant %q: %s", tenant, strings.Join(errs, "; "))
+	}
+	return nil
 }
 
 // validateRateLimitFlags validates rate-limit and burst flag values.

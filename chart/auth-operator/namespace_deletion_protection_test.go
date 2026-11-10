@@ -136,6 +136,22 @@ func TestStrictSANamespaceOwnershipRendering(t *testing.T) {
 	assertContains(t, helmTemplate(t, "--set", "webhookServer.strictSANamespaceOwnership=null"), "--strict-sa-namespace-ownership=true")
 }
 
+// TestEmergencyNamespaceScopeRendering pins the emergency tenant scope and its
+// transitional cross-tenant opt-out.
+func TestEmergencyNamespaceScopeRendering(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skipf("helm not installed: %v", err)
+	}
+	defaultRender := helmTemplate(t)
+	assertContains(t, defaultRender, "--emergency-namespace-cross-tenant=false")
+	assertNotContains(t, defaultRender, "--emergency-namespace-tenant")
+	assertContains(t, helmTemplate(t, "--set", "webhookServer.emergencyNamespaceTenant=team-a"), `- "--emergency-namespace-tenant=team-a"`)
+	assertContains(t, helmTemplate(t, "--set", "webhookServer.emergencyNamespaceCrossTenant=true"), "--emergency-namespace-cross-tenant=true")
+	assertContains(t, helmTemplate(t, "--set-string", "webhookServer.emergencyNamespaceCrossTenant=true"), "--emergency-namespace-cross-tenant=true")
+	// helm upgrade --reuse-values from a release without the value must stay tenant-scoped.
+	assertContains(t, helmTemplate(t, "--set", "webhookServer.emergencyNamespaceCrossTenant=null"), "--emergency-namespace-cross-tenant=false")
+}
+
 // TestInheritHostingNamespaceOwnershipGuardRendering pins the VAP that guards
 // the transitional ServiceAccount annotation. Keep it in sync with
 // config/webhook/serviceaccount_ownership_annotation_vap.yaml.
