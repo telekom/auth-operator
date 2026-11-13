@@ -205,6 +205,8 @@ var _ = Describe("Authorize request and webhook TLS hardening", Ordered, Label("
 
 	It("logs a denied authorization decision as one JSON object with global.logFormat=json", func() {
 		Expect(webhookArgs()).To(ContainSubstring("--log-format=json"))
+		// A fresh port-forward, in case the oversized body reset the previous one.
+		forward()
 		const user = "e2e-json-log-denied-user"
 		applyYAML(`apiVersion: authorization.t-caas.telekom.com/v1alpha1
 kind: WebhookAuthorizer
