@@ -19,6 +19,14 @@ unknown field, which would leave the guard unscoped and deny every Pod delete. *
 {{- if not (or .groups .usernames .matchConditions) }}
 {{- fail "podDeletionGuard needs at least one of groups, usernames or matchConditions: an unscoped guard would deny every Pod delete in the cluster" }}
 {{- end }}
+{{- $conditionNames := list }}
+{{- if or .groups .usernames }}{{- $conditionNames = append $conditionNames "delegated-identity" }}{{- end }}
+{{- range .matchConditions }}
+{{- if has .name $conditionNames }}
+{{- fail (printf "podDeletionGuard.matchConditions: duplicate name %q (delegated-identity is generated from groups/usernames)" .name) }}
+{{- end }}
+{{- $conditionNames = append $conditionNames .name }}
+{{- end }}
 {{- $fullname := include "auth-operator.fullname" $ }}
 {{- $name := printf "%s-pod-deletion-guard" $fullname }}
 {{- $caBundle := include "auth-operator.webhookCABundle" (dict "root" $ "kind" "ValidatingWebhookConfiguration" "name" $name) | trim }}

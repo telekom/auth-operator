@@ -622,10 +622,10 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "namespace": { "type": "string", "description": "Namespace of the target ConfigMap.", "default": "kube-system" },
-            "name": { "type": "string", "description": "Name of the target ConfigMap; required when enabled.", "default": "" },
-            "nodeKey": { "type": "string", "minLength": 1, "description": "Data key holding the node name.", "default": "node" },
-            "userKey": { "type": "string", "minLength": 1, "description": "Data key holding the username allowed to delete Pods on that node.", "default": "user" }
+            "namespace": { "type": "string", "description": "Namespace of the target ConfigMap (must exist; the chart creates a Role there).", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "maxLength": 63, "default": "kube-system" },
+            "name": { "type": "string", "description": "Name of the target ConfigMap; required when enabled.", "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$", "maxLength": 253, "default": "" },
+            "nodeKey": { "type": "string", "pattern": "^[-._a-zA-Z0-9]+$", "maxLength": 253, "description": "Data key holding the node name.", "default": "node" },
+            "userKey": { "type": "string", "pattern": "^[-._a-zA-Z0-9]+$", "maxLength": 253, "description": "Data key holding the username allowed to delete Pods on that node.", "default": "user" }
           }
         },
         "groups": {
@@ -642,13 +642,14 @@
         },
         "matchConditions": {
           "type": "array",
-          "description": "Additional CEL matchConditions; all must match.",
+          "description": "Additional CEL matchConditions; all must match. Names are unique qualified names; at most 63 (the API server allows 64, one is generated from groups/usernames).",
+          "maxItems": 63,
           "items": {
             "type": "object",
             "additionalProperties": false,
             "required": ["name", "expression"],
             "properties": {
-              "name": { "type": "string", "minLength": 1 },
+              "name": { "type": "string", "pattern": "^([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]$", "maxLength": 63 },
               "expression": { "type": "string", "minLength": 1 }
             }
           },

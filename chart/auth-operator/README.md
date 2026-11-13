@@ -198,7 +198,7 @@ the conditions and leave the guard unscoped. The guard handles Pod DELETE only. 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `podDeletionGuard.enabled` | Render the guard webhook and enable its handler | `false` |
-| `podDeletionGuard.configMap.namespace` | Namespace of the target ConfigMap | `kube-system` |
+| `podDeletionGuard.configMap.namespace` | Namespace of the target ConfigMap (must exist: the chart creates the read Role there) | `kube-system` |
 | `podDeletionGuard.configMap.name` | Name of the target ConfigMap (required when enabled) | `""` |
 | `podDeletionGuard.configMap.nodeKey` | Data key holding the node name | `node` |
 | `podDeletionGuard.configMap.userKey` | Data key holding the username | `user` |

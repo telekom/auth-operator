@@ -80,6 +80,17 @@ func TestPodDeletionGuardRendering(t *testing.T) {
 
 	// Fail closed at render time: no unscoped guard, no guard without a target.
 	assertHelmTemplateFails(t, "an unscoped guard would deny every Pod delete", on...)
+	// Invalid names would make the API server reject the generated Role and RoleBinding.
+	for _, bad := range []string{"podDeletionGuard.configMap.namespace=Kube_System", "podDeletionGuard.configMap.name=Bad_Name", "podDeletionGuard.configMap.nodeKey=a/b"} {
+		assertHelmTemplateFails(t, "podDeletionGuard/configMap", append(on, "--set", "podDeletionGuard.groups={a}", "--set", bad)...)
+	}
+	// The API server rejects a webhook with duplicate matchCondition names.
+	assertHelmTemplateFails(t, `duplicate name "delegated-identity"`, append(on, "--set", "podDeletionGuard.groups={a}",
+		"--set", "podDeletionGuard.matchConditions[0].name=delegated-identity",
+		"--set-string", "podDeletionGuard.matchConditions[0].expression=true")...)
+	assertHelmTemplateFails(t, "podDeletionGuard/matchConditions/0/name", append(on,
+		"--set", "podDeletionGuard.matchConditions[0].name=not a name",
+		"--set-string", "podDeletionGuard.matchConditions[0].expression=true")...)
 	// An API server without webhook matchConditions would prune them and leave the guard unscoped.
 	assertHelmTemplateFails(t, "podDeletionGuard needs Kubernetes >= 1.30",
 		append(on, "--set", "podDeletionGuard.groups={a}", "--kube-version", "1.29.0")...)
