@@ -36,10 +36,7 @@ func TestDefaultContainerPodAnnotationsOverride(t *testing.T) {
 
 // The kustomize manifests carry the same annotation and must stay consistent.
 func TestKustomizeDefaultContainerAnnotationMatchesContainer(t *testing.T) {
-	if _, err := exec.LookPath("kustomize"); err != nil {
-		t.Skipf("kustomize not installed: %v", err)
-	}
-	cmd := exec.CommandContext(t.Context(), "kustomize", "build", "../../config/default") // #nosec G204
+	cmd := exec.CommandContext(t.Context(), findKustomize(t), "build", "../../config/default") // #nosec G204
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("kustomize build failed: %v", err)
