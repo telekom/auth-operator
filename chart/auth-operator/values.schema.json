@@ -624,8 +624,8 @@
           "properties": {
             "namespace": { "type": "string", "description": "Namespace of the target ConfigMap (must exist; the chart creates a Role there).", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "maxLength": 63, "default": "kube-system" },
             "name": { "type": "string", "description": "Name of the target ConfigMap; required when enabled.", "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$", "maxLength": 253, "default": "" },
-            "nodeKey": { "type": "string", "pattern": "^[-._a-zA-Z0-9]+$", "maxLength": 253, "description": "Data key holding the node name.", "default": "node" },
-            "userKey": { "type": "string", "pattern": "^[-._a-zA-Z0-9]+$", "maxLength": 253, "description": "Data key holding the username allowed to delete Pods on that node.", "default": "user" }
+            "nodeKey": { "type": "string", "pattern": "^[-._a-zA-Z0-9]+$", "not": { "pattern": "^\\.\\.|^\\.$" }, "maxLength": 253, "description": "Data key holding the node name. Must differ from the other key.", "default": "node" },
+            "userKey": { "type": "string", "pattern": "^[-._a-zA-Z0-9]+$", "not": { "pattern": "^\\.\\.|^\\.$" }, "maxLength": 253, "description": "Data key holding the username allowed to delete Pods on that node. Must differ from the other key.", "default": "user" }
           }
         },
         "groups": {

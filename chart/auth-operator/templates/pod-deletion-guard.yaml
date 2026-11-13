@@ -16,6 +16,10 @@ unknown field, which would leave the guard unscoped and deny every Pod delete. *
 {{- $cm := .configMap | default dict }}
 {{- $cmName := required "podDeletionGuard.configMap.name is required when podDeletionGuard.enabled is true" $cm.name }}
 {{- $cmNamespace := $cm.namespace | default "kube-system" }}
+{{- /* Mirrors podDeletionGuardConfig.validate() in cmd/webhook.go: a value it rejects would crashloop the webhook server. */}}
+{{- if eq ($cm.nodeKey | default "node") ($cm.userKey | default "user") }}
+{{- fail "podDeletionGuard.configMap.nodeKey and podDeletionGuard.configMap.userKey must differ" }}
+{{- end }}
 {{- if not (or .groups .usernames .matchConditions) }}
 {{- fail "podDeletionGuard needs at least one of groups, usernames or matchConditions: an unscoped guard would deny every Pod delete in the cluster" }}
 {{- end }}

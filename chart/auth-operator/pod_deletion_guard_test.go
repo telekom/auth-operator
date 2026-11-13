@@ -4,6 +4,7 @@
 package authoperator_test
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -217,6 +218,49 @@ func TestPodDeletionGuardNumericNames(t *testing.T) {
 	for _, arg := range []string{"--pod-deletion-guard-configmap-name=123\n", "--pod-deletion-guard-configmap-namespace=456\n",
 		"--pod-deletion-guard-node-key=1\n", "--pod-deletion-guard-user-key=2\n"} {
 		assertContains(t, out, arg)
+	}
+}
+
+// guardConfigCase is a row of testdata/pod-deletion-guard-config-cases.json,
+// shared with cmd's TestPodDeletionGuardConfigCases: every configuration the
+// chart renders must pass the webhook server's flag validation, or the server
+// crashloops and takes every auth-operator webhook down.
+type guardConfigCase struct {
+	Name      string  `json:"name"`
+	Namespace *string `json:"namespace"`
+	ConfigMap *string `json:"configMap"`
+	NodeKey   *string `json:"nodeKey"`
+	UserKey   *string `json:"userKey"`
+	Valid     bool    `json:"valid"`
+}
+
+func TestPodDeletionGuardConfigCases(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skipf("helm not installed: %v", err)
+	}
+	raw, err := os.ReadFile("testdata/pod-deletion-guard-config-cases.json")
+	if err != nil {
+		t.Fatalf("read cases: %v", err)
+	}
+	var cases []guardConfigCase
+	if err := json.Unmarshal(raw, &cases); err != nil {
+		t.Fatalf("parse cases: %v", err)
+	}
+	for _, c := range cases {
+		t.Run(c.Name, func(t *testing.T) {
+			args := []string{"template", "auth-operator", ".", "--namespace", "auth-operator-system",
+				"--set", "podDeletionGuard.enabled=true", "--set", "podDeletionGuard.groups={a}",
+				"--set-string", "podDeletionGuard.configMap.name=target"}
+			for key, value := range map[string]*string{"namespace": c.Namespace, "name": c.ConfigMap, "nodeKey": c.NodeKey, "userKey": c.UserKey} {
+				if value != nil {
+					args = append(args, "--set-string", "podDeletionGuard.configMap."+key+"="+*value)
+				}
+			}
+			out, err := exec.CommandContext(t.Context(), "helm", args...).CombinedOutput() // #nosec G204
+			if (err == nil) != c.Valid {
+				t.Fatalf("helm template succeeded=%v, want %v (the webhook server accepts it: %v)\n%s", err == nil, c.Valid, c.Valid, out)
+			}
+		})
 	}
 }
 

@@ -9,6 +9,7 @@ package cmd
 
 import (
 	"crypto/tls"
+	"encoding/json"
 	"flag"
 	"os"
 	"path/filepath"
@@ -208,6 +209,41 @@ func TestPodDeletionGuardConfigValidate(t *testing.T) {
 			tt.mutate(&c)
 			if err := c.validate(); (err != nil) != tt.wantErr {
 				t.Fatalf("validate() = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestPodDeletionGuardConfigCases checks the cases the chart test renders
+// (chart/auth-operator/testdata/pod-deletion-guard-config-cases.json): the
+// chart must render exactly the configurations validate() accepts.
+func TestPodDeletionGuardConfigCases(t *testing.T) {
+	raw, err := os.ReadFile("../chart/auth-operator/testdata/pod-deletion-guard-config-cases.json")
+	if err != nil {
+		t.Fatalf("read cases: %v", err)
+	}
+	var cases []struct {
+		Name      string  `json:"name"`
+		Namespace *string `json:"namespace"`
+		ConfigMap *string `json:"configMap"`
+		NodeKey   *string `json:"nodeKey"`
+		UserKey   *string `json:"userKey"`
+		Valid     bool    `json:"valid"`
+	}
+	if err := json.Unmarshal(raw, &cases); err != nil {
+		t.Fatalf("parse cases: %v", err)
+	}
+	for _, c := range cases {
+		t.Run(c.Name, func(t *testing.T) {
+			// The chart's defaults.
+			cfg := podDeletionGuardConfig{Enabled: true, Namespace: "kube-system", Name: "target", NodeKey: "node", UserKey: "user"}
+			for field, value := range map[*string]*string{&cfg.Namespace: c.Namespace, &cfg.Name: c.ConfigMap, &cfg.NodeKey: c.NodeKey, &cfg.UserKey: c.UserKey} {
+				if value != nil {
+					*field = *value
+				}
+			}
+			if err := cfg.validate(); (err == nil) != c.Valid {
+				t.Fatalf("validate() = %v, want valid=%v", err, c.Valid)
 			}
 		})
 	}
