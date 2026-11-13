@@ -152,6 +152,16 @@ func TestBinariesLogJSON(t *testing.T) {
 			if !slices.Contains(msgs, b.message) {
 				t.Errorf("error messages %q do not include %q", msgs, b.message)
 			}
+
+			// Rejected logging options are still reported, not swallowed by
+			// the logger built from them.
+			bad := exec.CommandContext(ctx, bin, append([]string{"--log-format=json", "--verbosity=-3"}, b.smoke...)...) // #nosec G204
+			bad.Dir = tmp
+			bad.Env = cmd.Env
+			out, err := bad.CombinedOutput()
+			if err == nil || !strings.Contains(string(out), "must not be negative") {
+				t.Errorf("--verbosity=-3: err = %v, want a failure that names the rejected verbosity, output:\n%s", err, out)
+			}
 		})
 	}
 }
