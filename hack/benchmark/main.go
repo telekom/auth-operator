@@ -17,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/telekom/auth-operator/pkg/logging"
 )
 
 type Cell struct {
@@ -442,6 +444,7 @@ type options struct {
 	excluded, quick, resume                                     bool
 	sustained                                                   time.Duration
 	report                                                      bool
+	log                                                         logging.Options
 }
 
 func parseOptions(args []string) (options, error) {
@@ -467,7 +470,11 @@ func parseOptions(args []string) (options, error) {
 	fs.BoolVar(&o.quick, "quick", false, "explicitly reduce operations and duration")
 	fs.BoolVar(&o.report, "report", false, "validate planned cell results and write deterministic reports")
 	fs.BoolVar(&o.resume, "resume", false, "resume a matching incomplete cell journal")
+	o.log.BindFlags(fs, 0)
 	if err := fs.Parse(args); err != nil {
+		return o, fmt.Errorf("parse options: %w", err)
+	}
+	if err := o.log.Resolve(logging.Visited(fs)); err != nil {
 		return o, fmt.Errorf("parse options: %w", err)
 	}
 	for _, s := range strings.Split(cs, ",") {
@@ -548,16 +555,23 @@ func main() {
 
 func runMain(args []string) int {
 	o, e := parseOptions(args)
-	if e != nil {
-		fmt.Fprintln(os.Stderr, e)
+	log, logErr := o.log.Logger(os.Stderr)
+	if logErr != nil {
+		fmt.Fprintln(os.Stderr, logErr)
 		return 2
+	}
+	fail := func(err error, code int) int {
+		log.Error(err, "creator-tracking benchmark failed")
+		return code
+	}
+	if e != nil {
+		return fail(e, 2)
 	}
 	if o.runID == "" {
 		o.runID = defaultRunID(time.Now())
 	}
 	if e = validateRunID(o.runID); e != nil {
-		fmt.Fprintln(os.Stderr, e)
-		return 2
+		return fail(e, 2)
 	}
 	if o.out == "" {
 		o.out = filepath.Join("benchmarks", "data", o.runID)
@@ -575,40 +589,34 @@ func runMain(args []string) int {
 			}
 		}
 		if reportErr != nil {
-			fmt.Fprintln(os.Stderr, reportErr)
-			return 1
+			return fail(reportErr, 1)
 		}
 		return 0
 	}
 	planPath := filepath.Join(filepath.Clean(o.out), "plan.json")
 	if _, statErr := os.Stat(planPath); os.IsNotExist(statErr) {
 		if e = writePlan(filepath.Clean(o.out), PlannedFullExecutionCells(o.quick, o.concurrency)); e != nil {
-			fmt.Fprintln(os.Stderr, e)
-			return 1
+			return fail(e, 1)
 		}
 	} else if statErr != nil {
-		fmt.Fprintln(os.Stderr, statErr)
-		return 1
+		return fail(statErr, 1)
 	}
 	base, e := loadConfig(o.kubeconfig)
 	if e != nil {
-		fmt.Fprintln(os.Stderr, e)
-		return 1
+		return fail(e, 1)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), executionTimeout(o))
 	c := executionCell(o)
 	if o.inputHash != "" {
 		computedInputHash := cellInputHash(c)
 		if o.inputHash != computedInputHash {
-			fmt.Fprintln(os.Stderr, inputHashMismatchError(o.inputHash, computedInputHash))
 			cancel()
-			return 2
+			return fail(inputHashMismatchError(o.inputHash, computedInputHash), 2)
 		}
 	}
 	if e = executeBenchmark(ctx, base, c, o, filepath.Clean(o.out)); e != nil {
-		fmt.Fprintln(os.Stderr, e)
 		cancel()
-		return 1
+		return fail(e, 1)
 	}
 	cancel()
 	return 0

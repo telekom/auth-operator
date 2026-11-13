@@ -42,6 +42,7 @@ type PodDeletionGuard struct {
 // Handle implements admission.Handler.
 func (g *PodDeletionGuard) Handle(ctx context.Context, req admission.Request) admission.Response {
 	start := time.Now()
+	logger := logf.FromContext(ctx).WithName("pod-deletion-guard")
 	allowed, reason, podNode, targetNode, readErr := g.decide(ctx, req)
 	result := metrics.WebhookResultDenied
 	if allowed {
@@ -70,7 +71,8 @@ func (g *PodDeletionGuard) Handle(ctx context.Context, req admission.Request) ad
 		// Kept in the server log only; the caller gets a sanitized reason.
 		fields = append(fields, "error", readErr.Error())
 	}
-	logf.FromContext(ctx).WithName("pod-deletion-guard").Info("pod deletion guard decision", fields...)
+	// V(0) for allows too: every decision of this delegated-access guard is audited.
+	logger.Info("pod deletion guard decision", fields...)
 	if allowed {
 		return admission.Allowed(reason)
 	}

@@ -439,6 +439,8 @@ func TestRootCmdPersistentFlags(t *testing.T) {
 	expectedFlags := []string{
 		"namespace",
 		"verbosity",
+		"log-format",
+		"log-level",
 		"health-probe-bind-address",
 		"metrics-bind-address",
 		"metrics-secure",
@@ -449,6 +451,10 @@ func TestRootCmdPersistentFlags(t *testing.T) {
 		if f == nil {
 			t.Errorf("expected persistent flag %q not found on root command", name)
 		}
+	}
+
+	if flags.ShorthandLookup("v") == nil {
+		t.Error("expected -v shorthand for --verbosity on root command")
 	}
 
 	// Verify metrics-secure defaults to false.

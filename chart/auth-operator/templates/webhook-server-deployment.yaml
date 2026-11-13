@@ -82,7 +82,12 @@ spec:
         {{- if gt (int .Values.webhookServer.replicas) 1 }}
         - --leader-elect=true
         {{- end }}
+        {{- if kindIs "string" .Values.global.logLevel }}
+        - --log-level={{ .Values.global.logLevel }}
+        {{- else }}
         - --verbosity={{ .Values.global.logLevel }}
+        {{- end }}
+        - --log-format={{ .Values.global.logFormat | default "text" }}
         {{- if .Values.metrics.auth.enabled }}
         - --metrics-secure
         {{- end }}

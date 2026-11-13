@@ -59,11 +59,18 @@
       "additionalProperties": false,
       "properties": {
         "logLevel": {
-          "type": "integer",
-          "description": "Log verbosity level (0-9, higher is more verbose).",
-          "minimum": 0,
-          "maximum": 9,
+          "description": "Log verbosity (0-9, higher is more verbose, rendered as --verbosity) or a named level (error, warn, info, debug, rendered as --log-level).",
+          "oneOf": [
+            { "type": "integer", "minimum": 0, "maximum": 9 },
+            { "type": "string", "enum": ["error", "warn", "info", "debug"] }
+          ],
           "default": 2
+        },
+        "logFormat": {
+          "type": "string",
+          "description": "Log output format: text (klog, default) or json (one JSON object per line).",
+          "enum": ["text", "json"],
+          "default": "text"
         }
       }
     },
