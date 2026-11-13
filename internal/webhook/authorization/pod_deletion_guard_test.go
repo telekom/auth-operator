@@ -70,27 +70,29 @@ func TestPodDeletionGuard(t *testing.T) {
 		wantReason  string
 	}{
 		{name: "allows the target user on the target node", objects: []client.Object{target},
-			req: func(t *testing.T) admission.Request { return guardPodDelete(t, "alice", "node-a") }, wantAllowed: true},
+			req: func(t *testing.T) admission.Request { t.Helper(); return guardPodDelete(t, "alice", "node-a") }, wantAllowed: true},
 		{name: "denies a pod on another node", objects: []client.Object{target},
-			req: func(t *testing.T) admission.Request { return guardPodDelete(t, "alice", "node-b") }, wantReason: `not on the target node "node-a"`},
+			req: func(t *testing.T) admission.Request { t.Helper(); return guardPodDelete(t, "alice", "node-b") }, wantReason: `not on the target node "node-a"`},
 		{name: "denies an unscheduled pod", objects: []client.Object{target},
-			req: func(t *testing.T) admission.Request { return guardPodDelete(t, "alice", "") }, wantReason: "not on the target node"},
+			req: func(t *testing.T) admission.Request { t.Helper(); return guardPodDelete(t, "alice", "") }, wantReason: "not on the target node"},
 		{name: "denies another user", objects: []client.Object{target},
-			req: func(t *testing.T) admission.Request { return guardPodDelete(t, "bob", "node-a") }, wantReason: "belongs to another user"},
+			req: func(t *testing.T) admission.Request { t.Helper(); return guardPodDelete(t, "bob", "node-a") }, wantReason: "belongs to another user"},
 		{name: "denies when no target node is set", objects: []client.Object{guardConfigMap(map[string]string{"user": "alice"})},
-			req: func(t *testing.T) admission.Request { return guardPodDelete(t, "alice", "") }, wantReason: "no target node set"},
+			req: func(t *testing.T) admission.Request { t.Helper(); return guardPodDelete(t, "alice", "") }, wantReason: "no target node set"},
 		{name: "denies when the ConfigMap is missing",
-			req: func(t *testing.T) admission.Request { return guardPodDelete(t, "alice", "node-a") }, wantReason: "not found; denied (fail closed)"},
+			req: func(t *testing.T) admission.Request { t.Helper(); return guardPodDelete(t, "alice", "node-a") }, wantReason: "not found; denied (fail closed)"},
 		{name: "denies when the ConfigMap is unreadable", objects: []client.Object{target}, getErr: errors.New("cache not synced"),
-			req: func(t *testing.T) admission.Request { return guardPodDelete(t, "alice", "node-a") }, wantReason: "cannot read target ConfigMap"},
+			req: func(t *testing.T) admission.Request { t.Helper(); return guardPodDelete(t, "alice", "node-a") }, wantReason: "cannot read target ConfigMap"},
 		{name: "denies an undecodable pod", objects: []client.Object{target},
 			req: func(t *testing.T) admission.Request {
+				t.Helper()
 				r := guardPodDelete(t, "alice", "node-a")
 				r.OldObject.Raw = []byte("{")
 				return r
 			}, wantReason: "cannot decode the pod"},
 		{name: "denies other operations", objects: []client.Object{target},
 			req: func(t *testing.T) admission.Request {
+				t.Helper()
 				r := guardPodDelete(t, "alice", "node-a")
 				r.Operation = admissionv1.Create
 				r.SubResource = "eviction"
