@@ -37,7 +37,10 @@ func TestResolve(t *testing.T) {
 		{name: "defaults", want: Options{Format: "text", Verbosity: 2}},
 		{name: "flags", args: []string{"--log-format=json", "-v=4"}, want: Options{Format: "json", Verbosity: 4}},
 		{name: "env", env: map[string]string{EnvFormat: "json", EnvVerbosity: "3"}, want: Options{Format: "json", Verbosity: 3}},
-		{name: "flag wins over env", args: []string{"--verbosity=1", "--log-format=text"}, env: map[string]string{EnvFormat: "json", EnvVerbosity: "3"}, want: Options{Format: "text", Verbosity: 1}},
+		{
+			name: "flag wins over env", args: []string{"--verbosity=1", "--log-format=text"},
+			env: map[string]string{EnvFormat: "json", EnvVerbosity: "3"}, want: Options{Format: "text", Verbosity: 1},
+		},
 		{name: "named level", args: []string{"--log-level=error"}, want: Options{Format: "text", Level: "error", Verbosity: ErrorsOnly}},
 		{name: "named level from env", env: map[string]string{EnvLevel: "debug"}, want: Options{Format: "text", Level: "debug", Verbosity: 4}},
 		{name: "level agrees with verbosity", args: []string{"--log-level=info", "--verbosity=0"}, want: Options{Format: "text", Level: "info", Verbosity: 0}},
@@ -108,8 +111,9 @@ func TestJSONLoggerLevels(t *testing.T) {
 		log.V(2).Info("v2")
 		log.V(3).Info("v3")
 		log.Error(nil, "error")
-		var got []string
-		for _, l := range jsonLines(t, &buf) {
+		lines := jsonLines(t, &buf)
+		got := make([]string, 0, len(lines))
+		for _, l := range lines {
 			got = append(got, l["msg"].(string))
 		}
 		if strings.Join(got, ",") != strings.Join(tc.want, ",") {

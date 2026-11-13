@@ -111,134 +111,167 @@ func message(fset *token.FileSet, e ast.Expr) (string, bool) {
 	return "", false
 }
 
-// collect parses the production sources and returns every logr Info and
-// Error call, or the problems that stop it from being documented.
+type collector struct {
+	fset       *token.FileSet
+	entries    []entry
+	withValues map[string][]string
+	problems   []string
+}
+
+// collect parses the sources and returns every logr Info and Error call, or
+// fails with the call sites that cannot be documented.
 func collect(t *testing.T) ([]entry, map[string][]string) {
 	t.Helper()
-	fset := token.NewFileSet()
-	var entries []entry
-	withValues := map[string][]string{}
-	var problems []string
+	c := &collector{fset: token.NewFileSet(), withValues: map[string][]string{}}
 	for _, dir := range sourceDirs {
 		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d fs.DirEntry, err error) error {
 			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 				return err
 			}
-			rel, _ := filepath.Rel(root, path)
-			rel = filepath.ToSlash(rel)
-			file, err := parser.ParseFile(fset, path, nil, 0)
-			if err != nil {
-				return err
-			}
-			// Each top-level function, or function literal in a declaration
-			// such as a cobra hook, is the scope for spread key/value slices.
-			var bodies []*ast.BlockStmt
-			for _, decl := range file.Decls {
-				if fn, ok := decl.(*ast.FuncDecl); ok {
-					if fn.Body != nil {
-						bodies = append(bodies, fn.Body)
-					}
-					continue
-				}
-				ast.Inspect(decl, func(n ast.Node) bool {
-					if lit, ok := n.(*ast.FuncLit); ok {
-						bodies = append(bodies, lit.Body)
-						return false
-					}
-					return true
-				})
-			}
-			for _, body := range bodies {
-				ast.Inspect(body, func(n ast.Node) bool {
-					call, ok := n.(*ast.CallExpr)
-					if !ok {
-						return true
-					}
-					sel, ok := call.Fun.(*ast.SelectorExpr)
-					if !ok {
-						return true
-					}
-					pos := fset.Position(call.Pos())
-					where := fmt.Sprintf("%s:%d", rel, pos.Line)
-					if sel.Sel.Name == "WithValues" && loggerBase.MatchString(render(fset, sel.X)) {
-						for i := 0; i < len(call.Args); i += 2 {
-							if k, ok := stringLit(call.Args[i]); ok {
-								withValues[rel] = append(withValues[rel], k)
-							}
-						}
-						return true
-					}
-					if sel.Sel.Name != "Info" && sel.Sel.Name != "Error" {
-						return true
-					}
-					base, level := sel.X, "V(0)"
-					if v, ok := base.(*ast.CallExpr); ok {
-						if vs, ok := v.Fun.(*ast.SelectorExpr); ok && vs.Sel.Name == "V" && len(v.Args) == 1 {
-							lit, ok := v.Args[0].(*ast.BasicLit)
-							if !ok {
-								problems = append(problems, where+": V() level is not a literal")
-								return true
-							}
-							base, level = vs.X, "V("+lit.Value+")"
-						}
-					}
-					args := call.Args
-					if sel.Sel.Name == "Error" {
-						if len(args) < 2 {
-							return true // err.Error()
-						}
-						level, args = "error", args[1:]
-					}
-					if len(args) == 0 {
-						return true
-					}
-					if !loggerBase.MatchString(render(fset, base)) {
-						if _, isLit := stringLit(args[0]); isLit && render(fset, base) != "http" {
-							problems = append(problems, where+": log-shaped call on unknown receiver "+render(fset, base))
-						}
-						return true
-					}
-					msg, ok := message(fset, args[0])
-					if !ok {
-						problems = append(problems, where+": message is not a literal, fmt.Sprintf format or variable")
-						return true
-					}
-					e := entry{file: rel, level: level, msg: msg}
-					kv := args[1:]
-					for i := 0; i < len(kv); i += 2 {
-						if call.Ellipsis.IsValid() && i == len(kv)-1 {
-							id, ok := kv[i].(*ast.Ident)
-							if !ok {
-								problems = append(problems, where+": spread key/value argument is not a local variable")
-								continue
-							}
-							e.keys = append(e.keys, sliceKeys(body, id.Name)...)
-							continue
-						}
-						k, ok := stringLit(kv[i])
-						if !ok {
-							problems = append(problems, where+": key is not a string literal")
-							continue
-						}
-						e.keys = append(e.keys, k)
-					}
-					if _, _, ok := componentOf(rel); !ok {
-						problems = append(problems, where+": file has no entry in the components map")
-					}
-					entries = append(entries, e)
-					return true
-				})
-			}
-			return nil
+			return c.file(path)
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
-	if len(problems) > 0 {
-		t.Fatalf("log call sites cannot be documented:\n%s", strings.Join(problems, "\n"))
+	if len(c.problems) > 0 {
+		t.Fatalf("log call sites cannot be documented:\n%s", strings.Join(c.problems, "\n"))
 	}
-	return entries, withValues
+	return c.entries, c.withValues
+}
+
+// file inspects every function body in path. Each top-level function, or
+// function literal in a declaration such as a cobra hook, is the scope for
+// spread key/value slices.
+func (c *collector) file(path string) error {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return err
+	}
+	rel = filepath.ToSlash(rel)
+	file, err := parser.ParseFile(c.fset, path, nil, 0)
+	if err != nil {
+		return err
+	}
+	var bodies []*ast.BlockStmt
+	for _, decl := range file.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok {
+			if fn.Body != nil {
+				bodies = append(bodies, fn.Body)
+			}
+			continue
+		}
+		ast.Inspect(decl, func(n ast.Node) bool {
+			if lit, ok := n.(*ast.FuncLit); ok {
+				bodies = append(bodies, lit.Body)
+				return false
+			}
+			return true
+		})
+	}
+	for _, body := range bodies {
+		ast.Inspect(body, func(n ast.Node) bool {
+			if call, ok := n.(*ast.CallExpr); ok {
+				c.call(rel, body, call)
+			}
+			return true
+		})
+	}
+	return nil
+}
+
+func (c *collector) problem(call *ast.CallExpr, rel, msg string) {
+	c.problems = append(c.problems, fmt.Sprintf("%s:%d: %s", rel, c.fset.Position(call.Pos()).Line, msg))
+}
+
+// call records call if it is a logger Info, Error or WithValues call.
+func (c *collector) call(rel string, body *ast.BlockStmt, call *ast.CallExpr) {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return
+	}
+	if sel.Sel.Name == "WithValues" && loggerBase.MatchString(render(c.fset, sel.X)) {
+		for i := 0; i < len(call.Args); i += 2 {
+			if k, ok := stringLit(call.Args[i]); ok {
+				c.withValues[rel] = append(c.withValues[rel], k)
+			}
+		}
+		return
+	}
+	if sel.Sel.Name != "Info" && sel.Sel.Name != "Error" {
+		return
+	}
+	base, level, ok := c.level(rel, call, sel)
+	if !ok {
+		return
+	}
+	args := call.Args
+	if sel.Sel.Name == "Error" {
+		if len(args) < 2 {
+			return // err.Error()
+		}
+		level, args = "error", args[1:]
+	}
+	if len(args) == 0 {
+		return
+	}
+	if !loggerBase.MatchString(render(c.fset, base)) {
+		if _, isLit := stringLit(args[0]); isLit && render(c.fset, base) != "http" {
+			c.problem(call, rel, "log-shaped call on unknown receiver "+render(c.fset, base))
+		}
+		return
+	}
+	msg, ok := message(c.fset, args[0])
+	if !ok {
+		c.problem(call, rel, "message is not a literal, fmt.Sprintf format or variable")
+		return
+	}
+	if _, _, ok := componentOf(rel); !ok {
+		c.problem(call, rel, "file has no entry in the components map")
+	}
+	c.entries = append(c.entries, entry{file: rel, level: level, msg: msg, keys: c.keys(rel, body, call, args[1:])})
+}
+
+// level splits a V(n) receiver into its base logger and level.
+func (c *collector) level(rel string, call *ast.CallExpr, sel *ast.SelectorExpr) (ast.Expr, string, bool) {
+	v, ok := sel.X.(*ast.CallExpr)
+	if !ok {
+		return sel.X, "V(0)", true
+	}
+	vs, ok := v.Fun.(*ast.SelectorExpr)
+	if !ok || vs.Sel.Name != "V" || len(v.Args) != 1 {
+		return sel.X, "V(0)", true
+	}
+	lit, ok := v.Args[0].(*ast.BasicLit)
+	if !ok {
+		c.problem(call, rel, "V() level is not a literal")
+		return nil, "", false
+	}
+	return vs.X, "V(" + lit.Value + ")", true
+}
+
+// keys returns the literal keys of the key/value arguments kv, expanding a
+// trailing spread slice from its assignments in body.
+func (c *collector) keys(rel string, body *ast.BlockStmt, call *ast.CallExpr, kv []ast.Expr) []string {
+	var keys []string
+	for i := 0; i < len(kv); i += 2 {
+		if call.Ellipsis.IsValid() && i == len(kv)-1 {
+			id, ok := kv[i].(*ast.Ident)
+			if !ok {
+				c.problem(call, rel, "spread key/value argument is not a local variable")
+				continue
+			}
+			keys = append(keys, sliceKeys(body, id.Name)...)
+			continue
+		}
+		k, ok := stringLit(kv[i])
+		if !ok {
+			c.problem(call, rel, "key is not a string literal")
+			continue
+		}
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // sliceKeys returns the literal keys assigned to the []any key/value slice

@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -43,21 +44,21 @@ func mainDirs(t *testing.T) []string {
 	t.Helper()
 	var dirs []string
 	fset := token.NewFileSet()
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() && path != root && (strings.HasPrefix(d.Name(), ".") || d.Name() == "bin" || d.Name() == "vendor") {
+		if d.IsDir() && p != root && (strings.HasPrefix(d.Name(), ".") || d.Name() == "bin" || d.Name() == "vendor") {
 			return filepath.SkipDir
 		}
-		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+		if d.IsDir() || !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
 			return nil
 		}
-		f, err := parser.ParseFile(fset, path, nil, parser.PackageClauseOnly)
+		f, err := parser.ParseFile(fset, p, nil, parser.PackageClauseOnly)
 		if err != nil {
 			return err
 		}
-		rel, _ := filepath.Rel(root, filepath.Dir(path))
+		rel, _ := filepath.Rel(root, filepath.Dir(p))
 		if f.Name.Name == "main" && !slices.Contains(dirs, filepath.ToSlash(rel)) {
 			dirs = append(dirs, filepath.ToSlash(rel))
 		}
@@ -97,22 +98,29 @@ func TestBinariesLogJSON(t *testing.T) {
 		t.Skip("builds every binary")
 	}
 	tmp := t.TempDir()
-	built := map[string]string{}
+	// One build for all binaries; go build -o <dir>/ names each after its
+	// package directory.
+	pkgs := map[string]string{}
+	for _, b := range binaries {
+		if b.smoke != nil {
+			pkgs["./"+b.dir] = filepath.Join(tmp, path.Base(path.Join("github.com/telekom/auth-operator", b.dir)))
+		}
+	}
+	args := []string{"build", "-o", tmp + string(filepath.Separator)}
+	for p := range pkgs {
+		args = append(args, p)
+	}
+	build := exec.CommandContext(t.Context(), "go", args...) // #nosec G204
+	build.Dir = root
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
 	for _, b := range binaries {
 		if b.smoke == nil {
 			continue
 		}
 		t.Run(b.name, func(t *testing.T) {
-			bin, ok := built[b.dir]
-			if !ok {
-				bin = filepath.Join(tmp, strings.ReplaceAll(b.dir, "/", "_")+".bin")
-				build := exec.CommandContext(t.Context(), "go", "build", "-o", bin, "./"+b.dir) // #nosec G204
-				build.Dir = root
-				if out, err := build.CombinedOutput(); err != nil {
-					t.Fatalf("build %s: %v\n%s", b.dir, err, out)
-				}
-				built[b.dir] = bin
-			}
+			bin := pkgs["./"+b.dir]
 			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 			defer cancel()
 			cmd := exec.CommandContext(ctx, bin, append([]string{"--log-format=json"}, b.smoke...)...) // #nosec G204

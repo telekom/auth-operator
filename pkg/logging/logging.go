@@ -128,14 +128,18 @@ func (o Options) Logger(w io.Writer) (logr.Logger, error) {
 // errorsOnly drops Info lines at every level and keeps Error lines.
 type errorsOnly struct{ logr.LogSink }
 
+// Enabled reports false so that no Info line is written.
 func (errorsOnly) Enabled(int) bool { return false }
 
+// WithValues keeps the wrapper on the derived sink.
 func (s errorsOnly) WithValues(kv ...any) logr.LogSink {
 	return errorsOnly{s.LogSink.WithValues(kv...)}
 }
 
+// WithName keeps the wrapper on the derived sink.
 func (s errorsOnly) WithName(name string) logr.LogSink { return errorsOnly{s.LogSink.WithName(name)} }
 
+// WithCallDepth forwards call depth so klog reports the caller's file and line.
 func (s errorsOnly) WithCallDepth(depth int) logr.LogSink {
 	if c, ok := s.LogSink.(logr.CallDepthLogSink); ok {
 		return errorsOnly{c.WithCallDepth(depth)}
