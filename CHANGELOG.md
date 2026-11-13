@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `auth-operator` reports command errors (for example a missing kubeconfig)
   as an error log line, `command failed`, instead of cobra's `Error:` text
   and usage.
+- `hack/verify-rendered-rbac.go` and `hack/benchmark` report failures as klog
+  error lines (`E<date> ... "rendered RBAC verification failed" err="..."`,
+  `"creator-tracking benchmark failed"`) instead of the bare error text;
+  `verify-rendered-rbac` logs a missing argument as `invalid arguments` and
+  exits with status 2. Use `--log-format=json` for machine-readable output.
 
 ### Security
 

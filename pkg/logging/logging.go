@@ -15,10 +15,12 @@ import (
 	"strconv"
 
 	"github.com/go-logr/logr"
+	"github.com/go-logr/zapr"
+	"go.opentelemetry.io/otel"
 	uberzap "go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"k8s.io/klog/v2"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	ctrlzap "sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
 // Environment variables used when the matching flag is not given.
@@ -108,14 +110,9 @@ func (o Options) Logger(w io.Writer) (logr.Logger, error) {
 		return logr.Logger{}, fmt.Errorf("set klog verbosity: %w", err)
 	}
 	if o.Format == "json" {
-		v := o.Verbosity
-		log := zap.New(
-			zap.WriteTo(w),
-			// logr V(n) is zap level -n; ErrorsOnly leaves warn and error.
-			zap.Level(uberzap.LevelEnablerFunc(func(l zapcore.Level) bool { return int(l) >= -v })),
-			func(o *zap.Options) { o.TimeEncoder = zapcore.RFC3339NanoTimeEncoder },
-		)
+		log := jsonLogger(w, o.Verbosity)
 		klog.SetLogger(log)
+		otel.SetLogger(log.WithName("otel"))
 		return log, nil
 	}
 	log := klog.NewKlogr()
@@ -123,6 +120,28 @@ func (o Options) Logger(w io.Writer) (logr.Logger, error) {
 		log = logr.New(errorsOnly{log.GetSink()})
 	}
 	return log, nil
+}
+
+// jsonLogger writes one JSON object per line to w. It builds the zap core
+// directly because controller-runtime's zap.New samples (drops repeated
+// messages) below V(2), and authorization decisions are audit records that
+// must never be dropped. It also redirects the standard library log, which
+// net/http servers without an ErrorLog (controller-runtime's webhook and
+// metrics servers) use for errors such as TLS handshake failures.
+func jsonLogger(w io.Writer, v int) logr.Logger {
+	cfg := uberzap.NewProductionEncoderConfig()
+	cfg.EncodeTime = zapcore.RFC3339NanoTimeEncoder
+	sink := zapcore.Lock(zapcore.AddSync(w))
+	core := zapcore.NewCore(
+		&ctrlzap.KubeAwareEncoder{Encoder: zapcore.NewJSONEncoder(cfg)},
+		sink,
+		// logr V(n) is zap level -n; ErrorsOnly leaves warn and error.
+		uberzap.LevelEnablerFunc(func(l zapcore.Level) bool { return int(l) >= -v }),
+	)
+	zl := uberzap.New(core, uberzap.ErrorOutput(sink), uberzap.AddStacktrace(zapcore.ErrorLevel))
+	// Standard library lines are errors without a useful stack trace.
+	_, _ = uberzap.RedirectStdLogAt(zl.Named("stdlib").WithOptions(uberzap.AddStacktrace(zapcore.FatalLevel)), zapcore.ErrorLevel)
+	return zapr.NewLogger(zl)
 }
 
 // errorsOnly drops Info lines at every level and keeps Error lines.

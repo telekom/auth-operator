@@ -47,9 +47,20 @@ fails at startup unless they name the same verbosity. In the chart,
 `global.logLevel` renders `--verbosity` for a number and `--log-level` for a
 name.
 
-Both formats write to stderr. With `json`, klog (client-go) lines are also
-JSON. With `text` and `--log-level=error`, client-go's own `V(0)` lines can
-still appear.
+Both formats write to stderr. With `json`, every line is JSON:
+
+- klog (client-go) lines go through the same logger.
+- Go standard library `log` lines are error lines with logger `stdlib`. That
+  includes the `http: TLS handshake error` lines of controller-runtime's
+  webhook and metrics servers, which have no `ErrorLog` of their own (this
+  repository creates no other `http.Server`).
+- OpenTelemetry's internal messages use logger `otel`.
+
+JSON output is never sampled: 1000 identical `authorization decision` calls
+write 1000 lines. klog text output is not sampled either.
+
+With `text`, standard library and OpenTelemetry lines keep their plain format,
+and with `--log-level=error` client-go's own `V(0)` lines can still appear.
 
 ## Levels
 
@@ -74,7 +85,7 @@ call and of the logger context:
 |-----|------|---------|
 | `level` | string | See [Levels](#levels) |
 | `ts` | string | RFC 3339 timestamp with sub-second precision |
-| `logger` | string | Logger name, e.g. `Authorizer`, `setup` (omitted when unnamed) |
+| `logger` | string | Logger name, e.g. `Authorizer`, `setup`, `stdlib`, `otel` (omitted when unnamed) |
 | `msg` | string | Message from the catalog |
 | `error` | string | Error text (error lines only; klog text uses `err`) |
 | `stacktrace` | string | Go stack trace (error lines only, JSON only) |
@@ -121,12 +132,22 @@ JSON (`--log-format=json`):
 
 The webhook server logs one `authorization decision` line per evaluated
 SubjectAccessReview (logger `Authorizer`): `denied` at `V(0)`, `allowed` and
-`no-opinion` at `V(1)`. Requests rejected before evaluation are logged instead
-as `rejecting malformed SubjectAccessReview`, `rate limit exceeded, rejecting
-request` (both `V(1)`) or, on evaluation errors, as an error line whose
-message is one of `failed to list global WebhookAuthorizers`, `failed to list
-scoped WebhookAuthorizers` or `failed to evaluate SubjectAccessReview` (shown
-as `<message>` in the catalog).
+`no-opinion` at `V(1)`.
+
+Requests answered before evaluation have no decision line. They are logged as:
+
+| Level | Message | Response |
+|-------|---------|----------|
+| `V(0)` | `failed to decode SubjectAccessReview request` | Denied, `invalid request body` |
+| `V(1)` | `rejecting unauthenticated SubjectAccessReview request because no bearer token is configured` | Denied, `unauthorized` |
+| `V(1)` | `rejecting unauthorized SubjectAccessReview request` | Denied, `unauthorized` |
+| `V(1)` | `rejecting malformed SubjectAccessReview` | Denied with the validation reason |
+| `V(1)` | `rate limit exceeded, rejecting request` | Denied, `rate limit exceeded` |
+
+Evaluation errors are error lines whose message is `failed to list global
+WebhookAuthorizers`, `failed to list scoped WebhookAuthorizers` or `failed to
+evaluate SubjectAccessReview` (shown as `<message>` in the catalog); the
+response is denied.
 
 ### Authorization decision fields
 
@@ -157,6 +178,9 @@ run at `--verbosity=1` or higher.
 
 These keys can carry user identities, group memberships, namespace names or
 client IP addresses. Treat logs that contain them as personal data.
+`go test ./hack/logref` fails when a logged key that looks like one of these
+is missing here. Free-text values such as `reason`, `error` and `msg` can
+also quote a user or namespace.
 
 | Key | Content |
 |-----|---------|
@@ -169,6 +193,9 @@ client IP addresses. Treat logs that contain them as personal data.
 | `namespace` | Namespace name, which can name a team or person |
 | `saNamespace` | ServiceAccount namespace |
 | `targetNamespace` | Target namespace name |
+| `bindingNamespace` | Namespace of a generated RoleBinding |
+| `explicitNamespace` | Namespace named explicitly in a BindDefinition |
+| `objectNamespace` | Namespace of the object that triggered a reconcile |
 | `activeNamespaceNames` | Namespace names a BindDefinition selects |
 | `path` | Non-resource URL path |
 | `remoteAddr` | Client IP address and port of `/authorize` callers (`V(2)`) |
@@ -949,6 +976,7 @@ Runs in: `verify-rendered-rbac`.
 
 | Level | Message | Keys |
 |-------|---------|------|
+| error | `invalid arguments` | — |
 | error | `rendered RBAC verification failed` | — |
 
 ### Creator-tracking benchmark

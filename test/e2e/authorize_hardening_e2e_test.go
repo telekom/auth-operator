@@ -293,4 +293,21 @@ spec:
 		status, _, body = post(http.MethodPost, "text/plain", sarBody(validSAR))
 		noOpinion(status, body)
 	})
+
+	It("writes only JSON lines, including TLS handshake errors, with global.logFormat=json", func() {
+		out, err := utils.Run(utils.CommandContext(context.Background(), "kubectl", "logs", "-n", release,
+			"-l", "control-plane=webhook-server", "--tail=-1"))
+		Expect(err).NotTo(HaveOccurred(), "%s", out)
+		handshakeErrors := 0
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			var entry map[string]any
+			Expect(json.Unmarshal([]byte(line), &entry)).To(Succeed(), "webhook log line is not JSON: %s", line)
+			if msg, _ := entry["msg"].(string); strings.Contains(msg, "TLS handshake error") {
+				Expect(entry).To(HaveKeyWithValue("logger", "stdlib"))
+				handshakeErrors++
+			}
+		}
+		// The refused TLS 1.0/1.1 handshakes of the previous spec.
+		Expect(handshakeErrors).To(BeNumerically(">", 0))
+	})
 })

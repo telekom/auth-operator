@@ -9,10 +9,16 @@ import (
 	"bytes"
 	"encoding/json"
 	"flag"
+	"io"
+	stdlog "log"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/go-logr/logr/funcr"
@@ -119,6 +125,91 @@ func TestJSONLoggerLevels(t *testing.T) {
 		if strings.Join(got, ",") != strings.Join(tc.want, ",") {
 			t.Errorf("verbosity %d logged %v, want %v", tc.verbosity, got, tc.want)
 		}
+	}
+}
+
+// TestJSONLoggerDoesNotSample guards against zap sampling, which drops
+// repeated messages after the first 100 per second.
+func TestJSONLoggerDoesNotSample(t *testing.T) {
+	for _, v := range []int{ErrorsOnly, 0, 1} {
+		var buf bytes.Buffer
+		log, err := Options{Format: "json", Verbosity: v}.Logger(&buf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for range 1000 {
+			log.Info("authorization decision", "decision", "denied", "user", "alice")
+			log.Error(nil, "repeated error")
+		}
+		want := 2000
+		if v == ErrorsOnly {
+			want = 1000
+		}
+		if got := len(jsonLines(t, &buf)); got != want {
+			t.Errorf("verbosity %d: 1000 identical calls of each message wrote %d lines, want %d", v, got, want)
+		}
+	}
+}
+
+// lockedBuffer is written by the HTTP server goroutine and read by the test.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// TestJSONLoggerStdlibAndTLSHandshakeErrors checks that net/http servers
+// without an ErrorLog, like controller-runtime's webhook and metrics servers,
+// log TLS handshake errors as JSON.
+func TestJSONLoggerStdlibAndTLSHandshakeErrors(t *testing.T) {
+	t.Cleanup(func() {
+		stdlog.SetOutput(os.Stderr)
+		stdlog.SetFlags(stdlog.LstdFlags)
+	})
+	var out lockedBuffer
+	if _, err := (Options{Format: "json"}).Logger(&out); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewUnstartedServer(http.NotFoundHandler())
+	srv.StartTLS()
+	defer srv.Close()
+
+	conn, err := net.Dial("tcp", srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = conn.Write([]byte("GET / HTTP/1.0\r\n\r\n"))
+	_, _ = io.Copy(io.Discard, conn)
+	_ = conn.Close()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for !strings.Contains(out.String(), "TLS handshake error") && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	var found bool
+	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			t.Fatalf("log line is not JSON: %v\n%s", err, line)
+		}
+		msg, _ := entry["msg"].(string)
+		if strings.Contains(msg, "TLS handshake error") && entry["logger"] == "stdlib" && entry["level"] == "error" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no JSON TLS handshake error line, got:\n%s", out.String())
 	}
 }
 

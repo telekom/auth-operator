@@ -87,7 +87,9 @@ func main() {
 	}
 
 	if flag.NArg() < 1 {
-		exitf("usage: go run hack/verify-rendered-rbac.go [--impersonation generic|none|scoped|clusterwide] [--serviceaccount name] <rendered-yaml>...")
+		log.Error(errors.New("usage: go run hack/verify-rendered-rbac.go [--impersonation generic|none|scoped|clusterwide] [--serviceaccount name] <rendered-yaml>..."),
+			"invalid arguments")
+		os.Exit(2)
 	}
 
 	for _, path := range flag.Args() {

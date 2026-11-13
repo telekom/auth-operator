@@ -366,6 +366,30 @@ func catalog(entries []entry, withValues map[string][]string) string {
 	return b.String()
 }
 
+var (
+	// personalData matches log keys that can hold a user identity, group,
+	// namespace name, URL path or client address.
+	personalData = regexp.MustCompile(`(?i)user|groups$|namespace|addr|^path$|serviceaccount$|^saname$`)
+	// notPersonalData excludes counts, flags, listen addresses and
+	// configuration among them.
+	notPersonalData = regexp.MustCompile(`Count$|^total|^is[A-Z]|(?i:tenant|selector|ownership|-bind-address$|^matchingnamespaces$)`)
+)
+
+// assertSameKeys fails unless the documented keys equal the code keys.
+func assertSameKeys(t *testing.T, heading string, documented []string, code map[string]bool) {
+	t.Helper()
+	for _, k := range documented {
+		if !code[k] {
+			t.Errorf("%q is documented under %q but not logged", k, heading)
+		}
+	}
+	for k := range code {
+		if !slices.Contains(documented, k) {
+			t.Errorf("%q is logged but missing under %q", k, heading)
+		}
+	}
+}
+
 // tableKeys returns the backticked names in the first column of the markdown
 // table that follows heading.
 func tableKeys(t *testing.T, doc, heading string) []string {
@@ -439,14 +463,37 @@ func TestLoggingReference(t *testing.T) {
 		}
 	}
 
-	// Every documented decision and PII field is a key the code logs.
-	for _, heading := range []string{"### Authorization decision fields", "## Fields that can hold personal data"} {
-		for _, k := range tableKeys(t, doc, heading) {
-			if !codeKeys[k] {
-				t.Errorf("%q under %q is not a key in any log call", k, heading)
+	// The decision field table lists exactly the keys of the decision log.
+	decisionKeys := map[string]bool{}
+	for _, e := range entries {
+		if e.msg == "authorization decision" {
+			for _, k := range e.keys {
+				decisionKeys[k] = true
 			}
 		}
 	}
+	assertSameKeys(t, "### Authorization decision fields", tableKeys(t, doc, "### Authorization decision fields"), decisionKeys)
+
+	// Every /authorize rejection before evaluation is described next to the
+	// decision log.
+	decisions := doc[strings.Index(doc, "## Authorization decisions"):strings.Index(doc, "### Authorization decision fields")]
+	for _, e := range entries {
+		if e.file == "internal/webhook/authorization/webhook_authorizer.go" && e.level != "error" &&
+			(strings.HasPrefix(e.msg, "rejecting") || strings.Contains(e.msg, "rejecting request") || strings.Contains(e.msg, "failed to decode")) &&
+			!strings.Contains(decisions, "| `"+e.level+"` | `"+e.msg+"` |") {
+			t.Errorf("rejection %s %q is not in the table under \"## Authorization decisions\"", e.level, e.msg)
+		}
+	}
+
+	// The personal-data table lists exactly the logged keys that can hold an
+	// identity, group, namespace name, path or client address.
+	pii := map[string]bool{}
+	for k := range codeKeys {
+		if personalData.MatchString(k) && !notPersonalData.MatchString(k) {
+			pii[k] = true
+		}
+	}
+	assertSameKeys(t, "## Fields that can hold personal data", tableKeys(t, doc, "## Fields that can hold personal data"), pii)
 
 	// Nothing that names a credential is logged.
 	secret := regexp.MustCompile(`(?i)token|password|passphrase|secret|credential|bearer|private`)
