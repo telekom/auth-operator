@@ -649,7 +649,7 @@
             "additionalProperties": false,
             "required": ["name", "expression"],
             "properties": {
-              "name": { "type": "string", "pattern": "^([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]$", "maxLength": 63 },
+              "name": { "type": "string", "description": "A Kubernetes qualified name: optional DNS subdomain prefix and '/', then at most 63 characters.", "pattern": "^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$", "maxLength": 317 },
               "expression": { "type": "string", "minLength": 1 }
             }
           },

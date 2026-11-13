@@ -88,6 +88,10 @@ func TestPodDeletionGuardRendering(t *testing.T) {
 	assertHelmTemplateFails(t, `duplicate name "delegated-identity"`, append(on, "--set", "podDeletionGuard.groups={a}",
 		"--set", "podDeletionGuard.matchConditions[0].name=delegated-identity",
 		"--set-string", "podDeletionGuard.matchConditions[0].expression=true")...)
+	// Prefixed qualified names are valid matchCondition names.
+	prefixed := helmTemplate(t, append(on, "--set", "podDeletionGuard.matchConditions[0].name=example.com/holds-marker",
+		"--set-string", "podDeletionGuard.matchConditions[0].expression=true")...)
+	assertContains(t, prefixed, `- name: "example.com/holds-marker"`)
 	assertHelmTemplateFails(t, "podDeletionGuard/matchConditions/0/name", append(on,
 		"--set", "podDeletionGuard.matchConditions[0].name=not a name",
 		"--set-string", "podDeletionGuard.matchConditions[0].expression=true")...)
