@@ -20,10 +20,8 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       annotations:
-        kubectl.kubernetes.io/default-container: webhook
-      {{- with .Values.podAnnotations }}
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- /* podAnnotations wins (merge keeps the first value) so the key is never duplicated. */}}
+        {{- toYaml (merge (dict) (.Values.podAnnotations | default dict) (dict "kubectl.kubernetes.io/default-container" "webhook")) | nindent 8 }}
     spec:
       containers:
       - args: 
