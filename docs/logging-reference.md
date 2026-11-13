@@ -134,12 +134,15 @@ The webhook server logs one `authorization decision` line per evaluated
 SubjectAccessReview (logger `Authorizer`): `denied` at `V(0)`, `allowed` and
 `no-opinion` at `V(1)`.
 
-Requests answered before evaluation have no decision line:
+The `V(2)` access line `/authorize request` (`remoteAddr`, `method`,
+`status`, `latency`) is deferred in the handler, so it is written for every
+request, including every row below. Requests answered before evaluation have
+no decision line:
 
 | Level | Message | Response |
 |-------|---------|----------|
-| — | no log line | HTTP 405 Method Not Allowed for a method other than POST |
-| — | no log line | HTTP 415 Unsupported Media Type for a Content-Type other than `application/json` |
+| `V(2)` | only the access line `/authorize request` | HTTP 405 Method Not Allowed for a method other than POST |
+| `V(2)` | only the access line `/authorize request` | HTTP 415 Unsupported Media Type for a Content-Type other than `application/json` |
 | `error` | `failed to load /authorize bearer token` | Denied, `unauthorized` |
 | `V(1)` | `rejecting unauthenticated SubjectAccessReview request because no bearer token is configured` | Denied, `unauthorized` |
 | `V(1)` | `rejecting unauthorized SubjectAccessReview request` | Denied, `unauthorized` |

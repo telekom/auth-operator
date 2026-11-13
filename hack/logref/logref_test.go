@@ -65,6 +65,7 @@ var loggerBase = regexp.MustCompile(`^(logger|log|setupLog|wa\.Log|w\.log|log\.F
 type entry struct {
 	file, level, msg string
 	keys             []string
+	deferred         bool // logged from a deferred function, so on every return path
 }
 
 func componentOf(file string) (name, process string, ok bool) {
@@ -112,6 +113,7 @@ func message(fset *token.FileSet, e ast.Expr) (string, bool) {
 }
 
 type collector struct {
+	deferred   []*ast.DeferStmt // in the file being collected
 	fset       *token.FileSet
 	entries    []entry
 	withValues map[string][]string
@@ -169,6 +171,13 @@ func (c *collector) file(path string) error {
 			return true
 		})
 	}
+	c.deferred = nil
+	ast.Inspect(file, func(n ast.Node) bool {
+		if d, ok := n.(*ast.DeferStmt); ok {
+			c.deferred = append(c.deferred, d)
+		}
+		return true
+	})
 	for _, body := range bodies {
 		ast.Inspect(body, func(n ast.Node) bool {
 			if call, ok := n.(*ast.CallExpr); ok {
@@ -229,7 +238,8 @@ func (c *collector) call(rel string, body *ast.BlockStmt, call *ast.CallExpr) {
 	if _, _, ok := componentOf(rel); !ok {
 		c.problem(call, rel, "file has no entry in the components map")
 	}
-	c.entries = append(c.entries, entry{file: rel, level: level, msg: msg, keys: c.keys(rel, body, call, args[1:])})
+	deferred := slices.ContainsFunc(c.deferred, func(d *ast.DeferStmt) bool { return d.Pos() <= call.Pos() && call.End() <= d.End() })
+	c.entries = append(c.entries, entry{file: rel, level: level, msg: msg, keys: c.keys(rel, body, call, args[1:]), deferred: deferred})
 }
 
 // level splits a V(n) receiver into its base logger and level.
@@ -504,6 +514,7 @@ func checkDecisions(t *testing.T, doc string, entries []entry) {
 	// to the decision log; rejections before evaluation are table rows.
 	section := doc[strings.Index(doc, "## Authorization decisions"):strings.Index(doc, "### Authorization decision fields")]
 	prose := strings.Join(strings.Fields(section), " ")
+	checkRejectionRows(t, section, entries)
 	for _, e := range entries {
 		if e.file != "internal/webhook/authorization/webhook_authorizer.go" || strings.HasPrefix(e.msg, "<") {
 			continue
@@ -511,10 +522,32 @@ func checkDecisions(t *testing.T, doc string, entries []entry) {
 		rejection := strings.HasPrefix(e.msg, "rejecting") || strings.Contains(e.msg, "rejecting request") ||
 			strings.Contains(e.msg, "failed to decode") || strings.Contains(e.msg, "bearer token")
 		switch {
+		case e.deferred && e.level != "error" && (!strings.Contains(prose, "access line `"+e.msg+"`") || !strings.Contains(prose, "every request")):
+			t.Errorf("deferred /authorize line %s %q must be described as written for every request", e.level, e.msg)
 		case rejection && !strings.Contains(section, "| `"+e.level+"` | `"+e.msg+"` |"):
 			t.Errorf("rejection %s %q is not a row of the table under \"## Authorization decisions\"", e.level, e.msg)
 		case !strings.Contains(prose, "`"+e.msg+"`"):
 			t.Errorf("/authorize line %s %q is not described under \"## Authorization decisions\"", e.level, e.msg)
+		}
+	}
+}
+
+// checkRejectionRows requires every row of the pre-evaluation table to name
+// a message the /authorize handler logs: a deferred access line is written
+// even for responses without a line of their own.
+func checkRejectionRows(t *testing.T, section string, entries []entry) {
+	t.Helper()
+	if strings.Contains(section, "no log line") {
+		t.Errorf("\"## Authorization decisions\" says \"no log line\", but the deferred access line is written for every request")
+	}
+	for _, row := range strings.Split(section, "\n") {
+		if !strings.HasPrefix(row, "| `") {
+			continue
+		}
+		if !slices.ContainsFunc(entries, func(e entry) bool {
+			return e.file == "internal/webhook/authorization/webhook_authorizer.go" && strings.Contains(row, "`"+e.msg+"`")
+		}) {
+			t.Errorf("row %q under \"## Authorization decisions\" names no message the /authorize handler logs", row)
 		}
 	}
 }
