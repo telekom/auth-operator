@@ -104,6 +104,7 @@ func TestJSONLoggerLevels(t *testing.T) {
 		want      []string
 	}{
 		{ErrorsOnly, []string{"error"}},
+		{-3, []string{"error"}}, // rejected by Resolve; errors must still be written
 		{0, []string{"v0", "error"}},
 		{2, []string{"v0", "v1", "v2", "error"}},
 	} {

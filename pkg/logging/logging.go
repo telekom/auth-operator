@@ -109,14 +109,17 @@ func (o Options) Logger(w io.Writer) (logr.Logger, error) {
 	if err := klogFlags.Set("v", strconv.Itoa(max(o.Verbosity, 0))); err != nil {
 		return logr.Logger{}, fmt.Errorf("set klog verbosity: %w", err)
 	}
+	// Error lines are always written, even for options Resolve rejected, so
+	// that a binary can still report that error.
+	v := max(o.Verbosity, ErrorsOnly)
 	if o.Format == "json" {
-		log := jsonLogger(w, o.Verbosity)
+		log := jsonLogger(w, v)
 		klog.SetLogger(log)
 		otel.SetLogger(log.WithName("otel"))
 		return log, nil
 	}
 	log := klog.NewKlogr()
-	if o.Verbosity == ErrorsOnly {
+	if v == ErrorsOnly {
 		log = logr.New(errorsOnly{log.GetSink()})
 	}
 	return log, nil
