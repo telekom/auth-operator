@@ -500,12 +500,21 @@ func checkDecisions(t *testing.T, doc string, entries []entry) {
 	}
 	assertSameKeys(t, "### Authorization decision fields", tableKeys(t, doc, "### Authorization decision fields"), decisionKeys)
 
+	// Every line the /authorize handler logs, at any level, is described next
+	// to the decision log; rejections before evaluation are table rows.
 	section := doc[strings.Index(doc, "## Authorization decisions"):strings.Index(doc, "### Authorization decision fields")]
+	prose := strings.Join(strings.Fields(section), " ")
 	for _, e := range entries {
-		rejection := strings.HasPrefix(e.msg, "rejecting") || strings.Contains(e.msg, "rejecting request") || strings.Contains(e.msg, "failed to decode")
-		if e.file == "internal/webhook/authorization/webhook_authorizer.go" && e.level != "error" && rejection &&
-			!strings.Contains(section, "| `"+e.level+"` | `"+e.msg+"` |") {
-			t.Errorf("rejection %s %q is not in the table under \"## Authorization decisions\"", e.level, e.msg)
+		if e.file != "internal/webhook/authorization/webhook_authorizer.go" || strings.HasPrefix(e.msg, "<") {
+			continue
+		}
+		rejection := strings.HasPrefix(e.msg, "rejecting") || strings.Contains(e.msg, "rejecting request") ||
+			strings.Contains(e.msg, "failed to decode") || strings.Contains(e.msg, "bearer token")
+		switch {
+		case rejection && !strings.Contains(section, "| `"+e.level+"` | `"+e.msg+"` |"):
+			t.Errorf("rejection %s %q is not a row of the table under \"## Authorization decisions\"", e.level, e.msg)
+		case !strings.Contains(prose, "`"+e.msg+"`"):
+			t.Errorf("/authorize line %s %q is not described under \"## Authorization decisions\"", e.level, e.msg)
 		}
 	}
 }

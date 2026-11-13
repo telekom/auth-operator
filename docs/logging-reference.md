@@ -134,20 +134,40 @@ The webhook server logs one `authorization decision` line per evaluated
 SubjectAccessReview (logger `Authorizer`): `denied` at `V(0)`, `allowed` and
 `no-opinion` at `V(1)`.
 
-Requests answered before evaluation have no decision line. They are logged as:
+Requests answered before evaluation have no decision line:
 
 | Level | Message | Response |
 |-------|---------|----------|
-| `V(0)` | `failed to decode SubjectAccessReview request` | Denied, `invalid request body` |
+| — | no log line | HTTP 405 Method Not Allowed for a method other than POST |
+| — | no log line | HTTP 415 Unsupported Media Type for a Content-Type other than `application/json` |
+| `error` | `failed to load /authorize bearer token` | Denied, `unauthorized` |
 | `V(1)` | `rejecting unauthenticated SubjectAccessReview request because no bearer token is configured` | Denied, `unauthorized` |
 | `V(1)` | `rejecting unauthorized SubjectAccessReview request` | Denied, `unauthorized` |
+| `V(0)` | `failed to decode SubjectAccessReview request` | Denied, `invalid request body` |
 | `V(1)` | `rejecting malformed SubjectAccessReview` | Denied with the validation reason |
 | `V(1)` | `rate limit exceeded, rejecting request` | Denied, `rate limit exceeded` |
+
+The 405 and 415 checks are skipped with `--disable-authorize-request-checks`.
 
 Evaluation errors are error lines whose message is `failed to list global
 WebhookAuthorizers`, `failed to list scoped WebhookAuthorizers` or `failed to
 evaluate SubjectAccessReview` (shown as `<message>` in the catalog); the
-response is denied.
+response is denied. `failed to verify live WebhookAuthorizer denies before
+bridge allow` is followed by a `no-opinion` decision line.
+
+Errors writing the answer are error lines without a decision change:
+`failed to encode SubjectAccessReview response` (HTTP 500),
+`failed to write SubjectAccessReview response`, `failed to encode denied
+response`, `failed to encode rate-limit response` and `failed to close request
+body`.
+
+Other per-request lines of logger `Authorizer`: `allowing unauthenticated
+SubjectAccessReview request` (`V(1)`, only with
+`--allow-unauthenticated-authorize`), and at `V(2)` `received
+SubjectAccessReview`, `evaluating WebhookAuthorizer`, `namespace selector did
+not match, skipping`, `skipping namespace-scoped authorizer for non-namespaced
+SAR`, `skipping unconfigured WebhookAuthorizer` and the access line
+`/authorize request`.
 
 ### Authorization decision fields
 
