@@ -190,7 +190,9 @@ target takes effect immediately. Every decision is logged as
 `pod deletion guard decision` with the authorization decision log fields and
 counted in `auth_operator_webhook_requests_total{webhook="pod_deletion_guard"}`.
 
-The guard handles Pod DELETE only. Do not grant `pods/eviction` or
+Requires Kubernetes 1.30 or newer (webhook `matchConditions`); the chart
+refuses to render the guard for older clusters, where the API server would drop
+the conditions and leave the guard unscoped. The guard handles Pod DELETE only. Do not grant `pods/eviction` or
 `deletecollection` to guarded identities.
 
 | Parameter | Description | Default |

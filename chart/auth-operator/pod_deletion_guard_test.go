@@ -80,6 +80,9 @@ func TestPodDeletionGuardRendering(t *testing.T) {
 
 	// Fail closed at render time: no unscoped guard, no guard without a target.
 	assertHelmTemplateFails(t, "an unscoped guard would deny every Pod delete", on...)
+	// An API server without webhook matchConditions would prune them and leave the guard unscoped.
+	assertHelmTemplateFails(t, "podDeletionGuard needs Kubernetes >= 1.30",
+		append(on, "--set", "podDeletionGuard.groups={a}", "--kube-version", "1.29.0")...)
 	assertHelmTemplateFails(t, "podDeletionGuard.configMap.name is required",
 		"--set", "podDeletionGuard.enabled=true", "--set", "podDeletionGuard.groups={a}")
 }

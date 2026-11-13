@@ -8,6 +8,11 @@ ConfigMap is unavailable. The webhook server reads only the target ConfigMap.
 {{- /* Defaults repeated here: helm upgrade --reuse-values keeps the old values, which lack them. */}}
 {{- with .Values.podDeletionGuard }}
 {{- if .enabled }}
+{{- /* Webhook matchConditions are GA in Kubernetes 1.30. An older API server prunes the
+unknown field, which would leave the guard unscoped and deny every Pod delete. */}}
+{{- if semverCompare "<1.30.0-0" $.Capabilities.KubeVersion.Version }}
+{{- fail (printf "podDeletionGuard needs Kubernetes >= 1.30 (webhook matchConditions); this cluster is %s" $.Capabilities.KubeVersion.Version) }}
+{{- end }}
 {{- $cm := .configMap | default dict }}
 {{- $cmName := required "podDeletionGuard.configMap.name is required when podDeletionGuard.enabled is true" $cm.name }}
 {{- $cmNamespace := $cm.namespace | default "kube-system" }}
