@@ -11,8 +11,11 @@ imagePullSecrets: []
 
 # Global settings applied to all components
 global:
-  # Log verbosity level (0-9, higher is more verbose)
+  # Log verbosity level (0-9, higher is more verbose), or a named level:
+  # error (errors only), warn/info (V(0)), debug (V(4))
   logLevel: 2
+  # Log output format: "text" (klog, default) or "json" (one JSON object per line)
+  logFormat: text
 
 serviceAccount:
   annotations: {}

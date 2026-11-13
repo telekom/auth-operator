@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Every binary takes `--log-format` (`text`, the default, or `json` with one
+  JSON object per line), `--log-level` (`error`, `warn`, `info`, `debug`)
+  next to `--verbosity`, and the `LOG_FORMAT`, `LOG_LEVEL` and
+  `LOG_VERBOSITY` environment variables. Helm: `global.logFormat`, and
+  `global.logLevel` now also accepts a level name. Defaults are unchanged.
+- [Logging Reference](docs/logging-reference.md): every log message by binary,
+  component and level, the authorization decision fields, personal data and
+  verbosity guidance, kept in sync with the code by `go test ./hack/logref`.
+
+### Changed
+
+- `auth-operator` reports command errors (for example a missing kubeconfig)
+  as an error log line, `command failed`, instead of cobra's `Error:` text
+  and usage.
+- `hack/verify-rendered-rbac.go` and `hack/benchmark` report failures as klog
+  error lines (`E<date> ... "rendered RBAC verification failed" err="..."`,
+  `"creator-tracking benchmark failed"`) instead of the bare error text;
+  `verify-rendered-rbac` logs a missing argument as `invalid arguments` and
+  exits with status 2. Use `--log-format=json` for machine-readable output.
+
 ### Security
 
 - **BREAKING:** emergency namespace authorization (`use` on

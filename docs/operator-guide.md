@@ -1378,6 +1378,7 @@ overhead on the hot path.
 ## See Also
 
 - [Debugging Guide](debugging-guide.md) — Troubleshooting and diagnostics
+- [Logging Reference](logging-reference.md) — Log levels, messages and fields
 - [Metrics and Alerting](metrics-and-alerting.md) — Metric reference and alerts
 - [SSA Architecture](ssa-architecture.md) — Server-Side Apply internals
 - [Condition Lifecycle](condition-lifecycle.md) — Status condition reference

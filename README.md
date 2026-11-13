@@ -361,6 +361,7 @@ For detailed development instructions, see [CONTRIBUTING.md](CONTRIBUTING.md).
 - **[Protected Namespaces](./docs/operator-guide.md#protected-namespaces-canonical-access-classification)** — Canonical access classification, selector contract, lifecycle, and upgrade guidance
 - **[Operator Guide](./docs/operator-guide.md)** — Installation, configuration, HA, upgrades, and day-to-day operations
 - **[Debugging Guide](./docs/debugging-guide.md)** — Troubleshooting, diagnostics, and log analysis
+- **[Logging Reference](./docs/logging-reference.md)** — Log levels, messages, fields, JSON format and PII
 - **[Metrics and Alerting](./docs/metrics-and-alerting.md)** — Prometheus metrics and recommended alert rules
 
 ### Reference

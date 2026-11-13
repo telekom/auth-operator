@@ -51,6 +51,13 @@ helm install auth-operator ./chart/auth-operator \
 
 ## Configuration
 
+### Global Configuration
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `global.logLevel` | Log verbosity (0-9, higher is more verbose), or a named level `error`, `warn`, `info` or `debug` | `2` |
+| `global.logFormat` | Log output format: `text` (klog) or `json` (one JSON object per line, see [Logging Reference](../../docs/logging-reference.md)) | `text` |
+
 ### Image Configuration
 
 Image reference precedence: `digest` > `tag` > `Chart.AppVersion`
