@@ -34,7 +34,7 @@ import (
 // because generated Roles and ClusterRoles affect real Kubernetes RBAC.
 // Use RestrictedRoleDefinition under an RBACPolicy for delegated workflows.
 type RoleDefinitionApplyConfiguration struct {
-	v1.TypeMetaApplyConfiguration    `json:",inline"`
+	v1.TypeMetaApplyConfiguration    `json:""`
 	*v1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	Spec                             *RoleDefinitionSpecApplyConfiguration   `json:"spec,omitempty"`
 	Status                           *RoleDefinitionStatusApplyConfiguration `json:"status,omitempty"`

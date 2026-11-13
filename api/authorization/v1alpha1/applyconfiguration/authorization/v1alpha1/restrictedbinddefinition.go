@@ -33,7 +33,7 @@ import (
 // It is similar to BindDefinition but requires a policy reference and enforces
 // RBAC guardrails defined by the referenced RBACPolicy.
 type RestrictedBindDefinitionApplyConfiguration struct {
-	v1.TypeMetaApplyConfiguration    `json:",inline"`
+	v1.TypeMetaApplyConfiguration    `json:""`
 	*v1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	Spec                             *RestrictedBindDefinitionSpecApplyConfiguration   `json:"spec,omitempty"`
 	Status                           *RestrictedBindDefinitionStatusApplyConfiguration `json:"status,omitempty"`
