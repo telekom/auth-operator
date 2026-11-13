@@ -26,7 +26,8 @@ import (
 // ConfigMap or an unavailable webhook cannot block controllers, the kubelet or
 // the garbage collector.
 type PodDeletionGuard struct {
-	// Reader reads the target ConfigMap; a cache restricted to that object.
+	// Reader reads the target ConfigMap. Use a live (uncached) reader so that
+	// revocations apply immediately and an unreadable target denies.
 	Reader client.Reader
 	// Decoder decodes the Pod in the request's oldObject.
 	Decoder admission.Decoder

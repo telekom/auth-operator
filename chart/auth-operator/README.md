@@ -184,8 +184,9 @@ identities (`groups`, `usernames`, and/or CEL `matchConditions`, which may use
 webhook, so other identities (controllers, the kubelet, the garbage collector,
 node drains) never reach it, and `failurePolicy: Fail` denies only guarded
 requests when the webhook is unavailable. The chart refuses to render an
-unscoped guard. The webhook server reads only the target ConfigMap
-(namespaced Role with `resourceNames`). Every decision is logged as
+unscoped guard. The webhook server reads only the target ConfigMap (namespaced Role,
+`get` with `resourceNames`), live on every decision, so a cleared or deleted
+target takes effect immediately. Every decision is logged as
 `pod deletion guard decision` with the authorization decision log fields and
 counted in `auth_operator_webhook_requests_total{webhook="pod_deletion_guard"}`.
 

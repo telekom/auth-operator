@@ -20,14 +20,10 @@ import (
 
 	"github.com/spf13/cobra"
 	"golang.org/x/time/rate"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/discovery"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -137,7 +133,6 @@ ensuring authorization policies are enforced at creation time.`,
 		}
 		mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 			Scheme: scheme,
-			Cache:  podDeletionGuard.cacheOptions(),
 			Metrics: metricsserver.Options{
 				BindAddress:    metricsAddr,
 				SecureServing:  metricsSecure,
@@ -333,13 +328,10 @@ func configureWebhooks(ctx context.Context, mgr manager.Manager, tp *tracing.Pro
 			"targetConfigMap", podDeletionGuard.Namespace+"/"+podDeletionGuard.Name,
 			"nodeKey", podDeletionGuard.NodeKey,
 			"userKey", podDeletionGuard.UserKey)
-		// Start the target ConfigMap informer now instead of on the first request.
-		// Do not block: until it syncs, reads wait and time out, so requests deny.
-		if _, err := mgr.GetCache().GetInformer(ctx, &corev1.ConfigMap{}, cache.BlockUntilSynced(false)); err != nil {
-			return fmt.Errorf("unable to start the pod deletion guard ConfigMap informer: %w", err)
-		}
 		mgr.GetWebhookServer().Register("/validate-v1-pod-deletion-guard", &webhook.Admission{Handler: &authorizationwebhook.PodDeletionGuard{
-			Reader:    mgr.GetClient(),
+			// Live reads: a cleared, reassigned or deleted target takes effect at once,
+			// and an unreadable target denies (a cache would serve the last target).
+			Reader:    mgr.GetAPIReader(),
 			Decoder:   decoder,
 			ConfigMap: types.NamespacedName{Namespace: podDeletionGuard.Namespace, Name: podDeletionGuard.Name},
 			NodeKey:   podDeletionGuard.NodeKey,
@@ -482,20 +474,6 @@ func (c podDeletionGuardConfig) validate() error {
 		return fmt.Errorf("--pod-deletion-guard-node-key and --pod-deletion-guard-user-key must differ")
 	}
 	return nil
-}
-
-// cacheOptions restricts the manager's ConfigMap informer to the guard's target
-// ConfigMap, so the webhook needs only a namespaced, resourceNames-scoped grant.
-func (c podDeletionGuardConfig) cacheOptions() cache.Options {
-	if !c.Enabled {
-		return cache.Options{}
-	}
-	return cache.Options{ByObject: map[client.Object]cache.ByObject{
-		&corev1.ConfigMap{}: {
-			Namespaces: map[string]cache.Config{c.Namespace: {}},
-			Field:      fields.OneTermEqualSelector("metadata.name", c.Name),
-		},
-	}}
 }
 
 // validateEmergencyNamespaceTenant rejects a tenant that no tenant label can carry.

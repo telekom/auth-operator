@@ -17,13 +17,11 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -100,18 +98,12 @@ func TestPodDeletionGuardEnvtest(t *testing.T) {
 		}),
 		Metrics:                metricsserver.Options{BindAddress: "0"},
 		HealthProbeBindAddress: "0",
-		Cache: cache.Options{ByObject: map[client.Object]cache.ByObject{
-			&corev1.ConfigMap{}: {
-				Namespaces: map[string]cache.Config{target.Namespace: {}},
-				Field:      fields.OneTermEqualSelector("metadata.name", target.Name),
-			},
-		}},
 	})
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
 	}
 	mgr.GetWebhookServer().Register(guardPath, &webhook.Admission{Handler: &authorizationwebhook.PodDeletionGuard{
-		Reader:    mgr.GetClient(),
+		Reader:    mgr.GetAPIReader(),
 		Decoder:   admission.NewDecoder(mgr.GetScheme()),
 		ConfigMap: target,
 		NodeKey:   "node",
@@ -226,7 +218,7 @@ func expectDenied(t *testing.T, err error, want string) {
 	}
 }
 
-// expectEventuallyDenied waits for the guard's cache to see a ConfigMap change.
+// expectEventuallyDenied retries until the denial carries the wanted reason.
 func expectEventuallyDenied(t *testing.T, call func() error, want string) {
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)

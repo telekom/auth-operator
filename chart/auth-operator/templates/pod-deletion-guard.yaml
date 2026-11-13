@@ -67,8 +67,7 @@ webhooks:
   sideEffects: None
   timeoutSeconds: {{ .timeoutSeconds }}
 ---
-# Read access to the target ConfigMap only: the webhook's informer lists and
-# watches it with a metadata.name field selector, which resourceNames authorize.
+# Read access to the target ConfigMap only; the guard reads it live on every decision.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -86,8 +85,6 @@ rules:
   - {{ .configMap.name }}
   verbs:
   - get
-  - list
-  - watch
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

@@ -50,6 +50,8 @@ func TestPodDeletionGuardRendering(t *testing.T) {
 	role := renderedDocument(t, scoped, "kind: Role\n", "name: auth-operator-pod-deletion-guard")
 	assertContains(t, role, "namespace: kube-system")
 	assertContains(t, role, "resourceNames:\n  - recovery-target")
+	assertContains(t, role, "verbs:\n  - get\n")
+	assertNotContains(t, role, "- list")
 	assertNotContains(t, role, "- update")
 	// The cert rotator injects the CA bundle into the guard webhook configuration.
 	webhookRole := renderedDocument(t, scoped, "kind: ClusterRole\n", "name: auth-operator-webhook-server")

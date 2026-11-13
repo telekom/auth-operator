@@ -211,12 +211,6 @@ func TestPodDeletionGuardConfigValidate(t *testing.T) {
 			}
 		})
 	}
-	if opts := (podDeletionGuardConfig{}).cacheOptions(); opts.ByObject != nil {
-		t.Fatalf("disabled guard must not restrict the cache, got %v", opts.ByObject)
-	}
-	if opts := valid.cacheOptions(); len(opts.ByObject) != 1 {
-		t.Fatalf("enabled guard must restrict the ConfigMap informer, got %v", opts.ByObject)
-	}
 }
 
 func TestValidateRateLimitFlags(t *testing.T) {
