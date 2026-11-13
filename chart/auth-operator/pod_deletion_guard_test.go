@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"sigs.k8s.io/yaml"
 )
 
 // TestPodDeletionGuardRendering pins the scoping of the pod deletion guard:
@@ -34,7 +36,7 @@ func TestPodDeletionGuardRendering(t *testing.T) {
 		"--set", "podDeletionGuard.objectSelector.matchLabels.app=web",
 		"--set", "podDeletionGuard.timeoutSeconds=3",
 	)...)
-	guard := renderedDocument(t, scoped, "kind: ValidatingWebhookConfiguration", "name: auth-operator-pod-deletion-guard")
+	guard := renderedDocument(t, scoped, "kind: ValidatingWebhookConfiguration", `name: "auth-operator-pod-deletion-guard"`)
 	for _, want := range []string{
 		"path: /validate-v1-pod-deletion-guard",
 		"failurePolicy: Fail",
@@ -49,9 +51,9 @@ func TestPodDeletionGuardRendering(t *testing.T) {
 	} {
 		assertContains(t, guard, want)
 	}
-	role := renderedDocument(t, scoped, "kind: Role\n", "name: auth-operator-pod-deletion-guard")
-	assertContains(t, role, "namespace: kube-system")
-	assertContains(t, role, "resourceNames:\n  - recovery-target")
+	role := renderedDocument(t, scoped, "kind: Role\n", `name: "auth-operator-pod-deletion-guard"`)
+	assertContains(t, role, `namespace: "kube-system"`)
+	assertContains(t, role, "resourceNames:\n  - \"recovery-target\"")
 	assertContains(t, role, "verbs:\n  - get\n")
 	assertNotContains(t, role, "- list")
 	assertNotContains(t, role, "- update")
@@ -144,12 +146,78 @@ func TestPodDeletionGuardReuseValues(t *testing.T) {
 		"--pod-deletion-guard-node-key=node\n",
 		"--pod-deletion-guard-user-key=user\n",
 		"timeoutSeconds: 5\n",
-		"namespace: kube-system\n",
+		`namespace: "kube-system"`,
 	} {
 		assertContains(t, out, want)
 	}
 	assertNotContains(t, out, "timeoutSeconds: <nil>")
 	assertNotContains(t, out, "--pod-deletion-guard-node-key=\n")
+}
+
+// TestPodDeletionGuardNumericNames: valid but numeric-looking names must stay
+// YAML strings, or the API server rejects the Role and RoleBinding.
+func TestPodDeletionGuardNumericNames(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skipf("helm not installed: %v", err)
+	}
+	out := helmTemplate(t, "--set", "podDeletionGuard.enabled=true",
+		"--set-string", "podDeletionGuard.configMap.name=123",
+		"--set-string", "podDeletionGuard.configMap.namespace=456",
+		"--set-string", "podDeletionGuard.configMap.nodeKey=1",
+		"--set-string", "podDeletionGuard.configMap.userKey=2",
+		"--set-string", "podDeletionGuard.groups[0]=789",
+		"--set-string", "podDeletionGuard.usernames[0]=1e3",
+		"--set-string", "podDeletionGuard.matchConditions[0].name=10",
+		"--set-string", "podDeletionGuard.matchConditions[0].expression=true")
+	for _, kind := range []string{"kind: Role\n", "kind: RoleBinding\n"} {
+		doc := renderedDocument(t, out, kind, `name: "auth-operator-pod-deletion-guard"`)
+		var obj struct {
+			Metadata struct {
+				Namespace any `json:"namespace"`
+			} `json:"metadata"`
+			Rules []struct {
+				ResourceNames []any `json:"resourceNames"`
+			} `json:"rules"`
+		}
+		if err := yaml.Unmarshal([]byte(doc), &obj); err != nil {
+			t.Fatalf("parse %s: %v", kind, err)
+		}
+		if ns, ok := obj.Metadata.Namespace.(string); !ok || ns != "456" {
+			t.Fatalf("%s namespace = %#v, want string \"456\"", kind, obj.Metadata.Namespace)
+		}
+		for _, rule := range obj.Rules {
+			for _, name := range rule.ResourceNames {
+				if s, ok := name.(string); !ok || s != "123" {
+					t.Fatalf("%s resourceNames = %#v, want string \"123\"", kind, rule.ResourceNames)
+				}
+			}
+		}
+	}
+	webhook := renderedDocument(t, out, "kind: ValidatingWebhookConfiguration", `name: "auth-operator-pod-deletion-guard"`)
+	var vwc struct {
+		Webhooks []struct {
+			MatchConditions []struct {
+				Name       any `json:"name"`
+				Expression any `json:"expression"`
+			} `json:"matchConditions"`
+		} `json:"webhooks"`
+	}
+	if err := yaml.Unmarshal([]byte(webhook), &vwc); err != nil {
+		t.Fatalf("parse webhook configuration: %v", err)
+	}
+	for _, c := range vwc.Webhooks[0].MatchConditions {
+		if _, ok := c.Name.(string); !ok {
+			t.Fatalf("matchCondition name %#v is not a string", c.Name)
+		}
+		if _, ok := c.Expression.(string); !ok {
+			t.Fatalf("matchCondition expression %#v is not a string", c.Expression)
+		}
+	}
+	assertContains(t, out, `request.userInfo.username in [\"1e3\"] || request.userInfo.groups.exists(g, g in [\"789\"])`)
+	for _, arg := range []string{"--pod-deletion-guard-configmap-name=123\n", "--pod-deletion-guard-configmap-namespace=456\n",
+		"--pod-deletion-guard-node-key=1\n", "--pod-deletion-guard-user-key=2\n"} {
+		assertContains(t, out, arg)
+	}
 }
 
 func renderedDocument(t *testing.T, render string, markers ...string) string {

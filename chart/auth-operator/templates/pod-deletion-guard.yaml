@@ -33,7 +33,7 @@ unknown field, which would leave the guard unscoped and deny every Pod delete. *
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:
-  name: {{ $name }}
+  name: {{ $name | quote }}
   labels:
   {{- include "auth-operator.labels" $ | nindent 4 }}
 webhooks:
@@ -85,8 +85,8 @@ webhooks:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: {{ $name }}
-  namespace: {{ $cmNamespace }}
+  name: {{ $name | quote }}
+  namespace: {{ $cmNamespace | quote }}
   labels:
     app.kubernetes.io/component: webhook-server
   {{- include "auth-operator.labels" $ | nindent 4 }}
@@ -96,22 +96,22 @@ rules:
   resources:
   - configmaps
   resourceNames:
-  - {{ $cmName }}
+  - {{ $cmName | quote }}
   verbs:
   - get
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: {{ $name }}
-  namespace: {{ $cmNamespace }}
+  name: {{ $name | quote }}
+  namespace: {{ $cmNamespace | quote }}
   labels:
     app.kubernetes.io/component: webhook-server
   {{- include "auth-operator.labels" $ | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: {{ $name }}
+  name: {{ $name | quote }}
 subjects:
 - kind: ServiceAccount
   name: '{{ $fullname }}-webhook-server'
