@@ -232,7 +232,7 @@ spec:
 			g.Expect(sar.Status.Denied).To(BeTrue(), "%s", body)
 
 			out, err := utils.Run(utils.CommandContext(context.Background(), "kubectl", "logs", "-n", release,
-				"-l", "control-plane=webhook-server", "--tail=-1"))
+				"-l", "control-plane=webhook-server", "-c", "webhook", "--tail=-1"))
 			g.Expect(err).NotTo(HaveOccurred(), "%s", out)
 			var decision map[string]any
 			for _, line := range strings.Split(string(out), "\n") {
@@ -296,7 +296,7 @@ spec:
 
 	It("writes only JSON lines, including TLS handshake errors, with global.logFormat=json", func() {
 		out, err := utils.Run(utils.CommandContext(context.Background(), "kubectl", "logs", "-n", release,
-			"-l", "control-plane=webhook-server", "--tail=-1"))
+			"-l", "control-plane=webhook-server", "-c", "webhook", "--tail=-1"))
 		Expect(err).NotTo(HaveOccurred(), "%s", out)
 		handshakeErrors := 0
 		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
