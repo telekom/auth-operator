@@ -5,7 +5,6 @@ package cmd
 
 import (
 	"flag"
-	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -13,6 +12,7 @@ import (
 	"strings"
 
 	authorizationv1alpha1 "github.com/telekom/auth-operator/api/authorization/v1alpha1"
+	"github.com/telekom/auth-operator/pkg/logging"
 	"github.com/telekom/auth-operator/pkg/system"
 	"github.com/telekom/auth-operator/pkg/tracing"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -36,7 +36,7 @@ var sensitivePattern = regexp.MustCompile(`(?i)(token|secret|password|passphrase
 var (
 	setupLog    logr.Logger
 	scheme      *runtime.Scheme
-	verbosity   int
+	logOpts     logging.Options
 	probeAddr   string
 	metricsAddr string
 	namespace   string
@@ -88,17 +88,21 @@ The operator watches for changes in the cluster's API resources and automaticall
 updates the generated roles to reflect the current state of available APIs.
 
 For more information, visit: https://github.com/telekom/auth-operator`,
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		// Set the verbosity level for klog
-		if err := flag.Set("v", fmt.Sprintf("%d", verbosity)); err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "warning: failed to set klog verbosity level: %v\n", err)
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if err := logOpts.Resolve(cmd.Flags().Changed); err != nil {
+			return err
 		}
-
-		ctrl.SetLogger(klog.NewKlogr())
-		log := klog.NewKlogr()
+		log, err := logOpts.Logger(os.Stderr)
+		if err != nil {
+			return err
+		}
+		ctrl.SetLogger(log)
+		// From here on, errors go through the logger (see Execute), so that
+		// --log-format=json output stays one JSON object per line.
+		cmd.SilenceErrors, cmd.SilenceUsage = true, true
 
 		log.Info("app info", "name", system.Name, "version", system.Version, "commit", system.Commit)
-		log.Info("startup flags", "verbosity", verbosity, "namespace", namespace,
+		log.Info("startup flags", "verbosity", logOpts.Verbosity, "logFormat", logOpts.Format, "namespace", namespace,
 			"health-probe-bind-address", probeAddr, "metrics-bind-address", metricsAddr)
 
 		// Log all flags with redaction of sensitive values
@@ -106,6 +110,7 @@ For more information, visit: https://github.com/telekom/auth-operator`,
 		for flagName, flagValue := range redactedFlags {
 			log.V(3).Info("flag", "name", flagName, "value", flagValue)
 		}
+		return nil
 	},
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
@@ -115,8 +120,11 @@ For more information, visit: https://github.com/telekom/auth-operator`,
 // Execute adds all child commands to the root command and sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
-	err := rootCmd.Execute()
+	cmd, err := rootCmd.ExecuteC()
 	if err != nil {
+		if cmd.SilenceErrors {
+			setupLog.Error(err, "command failed")
+		}
 		os.Exit(1)
 	}
 }
@@ -127,7 +135,9 @@ func init() {
 	cobra.OnInitialize(initScheme)
 
 	rootCmd.PersistentFlags().StringVar(&namespace, "namespace", os.Getenv("POD_NAMESPACE"), "operator namespace")
-	rootCmd.PersistentFlags().IntVarP(&verbosity, "verbosity", "v", 2, "Log level (0-9)")
+	logFlags := flag.NewFlagSet("logging", flag.ContinueOnError)
+	logOpts.BindFlags(logFlags, 2)
+	rootCmd.PersistentFlags().AddGoFlagSet(logFlags)
 	rootCmd.PersistentFlags().StringVar(&probeAddr, "health-probe-bind-address", ":8081",
 		"The address the probe endpoint binds to.")
 	rootCmd.PersistentFlags().StringVar(&metricsAddr, "metrics-bind-address", ":8080",

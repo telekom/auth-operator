@@ -149,7 +149,7 @@ var _ = Describe("Authorize request and webhook TLS hardening", Ordered, Label("
 		Expect(utils.LoadImageToKindClusterWithName(projectImage)).To(Succeed())
 		args := append([]string{"upgrade", "--install", release, "chart/auth-operator", "-n", release, "--create-namespace"}, imageSetArgs()...)
 		args = append(args, "--set", "controller.replicas=1", "--set", "webhookServer.replicas=1",
-			"--set", "webhookServer.allowUnauthenticatedAuthorize=true", "--wait", "--timeout", "5m")
+			"--set", "webhookServer.allowUnauthenticatedAuthorize=true", "--set", "global.logFormat=json", "--wait", "--timeout", "5m")
 		out, err := utils.Run(utils.CommandContext(context.Background(), "helm", args...))
 		Expect(err).NotTo(HaveOccurred(), "%s", out)
 		forward()
@@ -201,6 +201,48 @@ var _ = Describe("Authorize request and webhook TLS hardening", Ordered, Label("
 		oversized.Spec.Extra = map[string]authzv1.ExtraValue{"padding": {strings.Repeat("x", 1<<20)}}
 		status, _, body = post(http.MethodPost, "application/json", sarBody(oversized))
 		deniedWith(status, body, "invalid request body")
+	})
+
+	It("logs a denied authorization decision as one JSON object with global.logFormat=json", func() {
+		Expect(webhookArgs()).To(ContainSubstring("--log-format=json"))
+		const user = "e2e-json-log-denied-user"
+		applyYAML(`apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: WebhookAuthorizer
+metadata:
+  name: e2e-json-log-deny
+spec:
+  resourceRules:
+    - apiGroups: [""]
+      resources: ["pods"]
+      verbs: ["get"]
+  deniedPrincipals:
+    - user: ` + user + "\n")
+		DeferCleanup(func() {
+			_, _ = utils.Run(utils.CommandContext(context.Background(), "kubectl", "delete", "webhookauthorizer", "e2e-json-log-deny", "--ignore-not-found"))
+		})
+
+		Eventually(func(g Gomega) {
+			status, _, body, err := send(http.MethodPost, "application/json", sarBody(resourceSAR(user, nil, "get", "pods", "default")))
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(status).To(Equal(http.StatusOK))
+			var sar authzv1.SubjectAccessReview
+			g.Expect(json.Unmarshal(body, &sar)).To(Succeed())
+			g.Expect(sar.Status.Denied).To(BeTrue(), "%s", body)
+
+			out, err := utils.Run(utils.CommandContext(context.Background(), "kubectl", "logs", "-n", release,
+				"-l", "control-plane=webhook-server", "--tail=-1"))
+			g.Expect(err).NotTo(HaveOccurred(), "%s", out)
+			var decision map[string]any
+			for _, line := range strings.Split(string(out), "\n") {
+				if !strings.Contains(line, user) || !strings.Contains(line, "authorization decision") {
+					continue
+				}
+				g.Expect(json.Unmarshal([]byte(line), &decision)).To(Succeed(), "decision line is not JSON: %s", line)
+			}
+			g.Expect(decision).To(And(HaveKeyWithValue("msg", "authorization decision"),
+				HaveKeyWithValue("decision", "denied"), HaveKeyWithValue("user", user),
+				HaveKeyWithValue("authorizer", "e2e-json-log-deny")))
+		}, reconcileTimeout, pollingInterval).Should(Succeed())
 	})
 
 	It("requires TLS 1.2+ and only the pinned TLS 1.2 cipher suites by default", func() {

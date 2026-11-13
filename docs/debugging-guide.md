@@ -589,7 +589,22 @@ helm upgrade auth-operator <chart-ref> \
 | `Finalizer added` | Resource acquired finalizer |
 | `Cleanup complete` | Deletion finalizer finished |
 
+### JSON Log Format
+
+Both components log klog text by default. Set `global.logFormat: json`
+(`--log-format=json`) to emit one JSON object per line on stderr. The
+[Logging Reference](logging-reference.md) lists every message, its level and
+its keys, including the `authorization decision` fields for SIEM parsers.
+
+```bash
+# Denied requests per user
+kubectl logs -n auth-operator-system -l control-plane=webhook-server | \
+  jq -c 'select(.msg == "authorization decision" and .decision == "denied") | {ts, user, verb, resource, namespace, authorizer}'
+```
+
 ### Structured Log Query
+
+The queries below need `global.logFormat: json`.
 
 ```bash
 # Find errors
@@ -817,6 +832,7 @@ match a ServiceAccount subject.
 
 - [Operator Guide](operator-guide.md) — Installation and configuration
 - [Metrics and Alerting](metrics-and-alerting.md) — Metric reference
+- [Logging Reference](logging-reference.md) — Log levels, messages and fields
 - [Condition Lifecycle](condition-lifecycle.md) — Status condition details
 - [SSA Architecture](ssa-architecture.md) — Server-Side Apply internals
 - [E2E Testing Guide](../test/e2e/README.md) — Test suite debugging

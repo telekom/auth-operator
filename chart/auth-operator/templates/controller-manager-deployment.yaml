@@ -39,7 +39,12 @@ spec:
         - --restrictedroledefinition-concurrency={{ .Values.controller.restrictedRoleDefinitionConcurrency }}
         - --tracker-sync-interval={{ .Values.controller.tracker.syncInterval }}
         - --tracker-resync-interval={{ .Values.controller.tracker.resyncInterval }}
+        {{- if kindIs "string" .Values.global.logLevel }}
+        - --log-level={{ .Values.global.logLevel }}
+        {{- else }}
         - --verbosity={{ .Values.global.logLevel }}
+        {{- end }}
+        - --log-format={{ .Values.global.logFormat | default "text" }}
         {{- if .Values.metrics.auth.enabled }}
         - --metrics-secure
         {{- end }}

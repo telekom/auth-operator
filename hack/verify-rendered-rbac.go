@@ -14,9 +14,12 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/util/yaml"
+
+	"github.com/telekom/auth-operator/pkg/logging"
 )
 
 const (
@@ -72,7 +75,16 @@ func main() {
 	impersonationMode := flag.String("impersonation", "generic", "impersonation mode to verify: generic, none, scoped, clusterwide")
 	expectedServiceAccount := flag.String("serviceaccount", "", "expected ServiceAccount resourceName for scoped impersonation mode")
 	requireBroadAPIServerEgress := flag.Bool("require-broad-apiserver-egress", false, "require every rendered NetworkPolicy to contain broad TCP 443/6443 egress")
+	var logOpts logging.Options
+	logOpts.BindFlags(flag.CommandLine, 0)
 	flag.Parse()
+	if err := logOpts.Resolve(logging.Visited(flag.CommandLine)); err != nil {
+		exitf("%v", err)
+	}
+	var err error
+	if log, err = logOpts.Logger(os.Stderr); err != nil {
+		exitf("%v", err)
+	}
 
 	if flag.NArg() < 1 {
 		exitf("usage: go run hack/verify-rendered-rbac.go [--impersonation generic|none|scoped|clusterwide] [--serviceaccount name] <rendered-yaml>...")
@@ -340,7 +352,14 @@ func hasAny(values []string, needles ...string) bool {
 	return false
 }
 
+// log is set from --log-format, --log-level and --verbosity in main.
+var log logr.Logger
+
 func exitf(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, format+"\n", args...)
+	if log.GetSink() == nil {
+		fmt.Fprintf(os.Stderr, format+"\n", args...)
+	} else {
+		log.Error(fmt.Errorf(format, args...), "rendered RBAC verification failed")
+	}
 	os.Exit(1)
 }
