@@ -106,7 +106,7 @@ func TestBinariesLogJSON(t *testing.T) {
 			pkgs["./"+b.dir] = filepath.Join(tmp, path.Base(path.Join("github.com/telekom/auth-operator", b.dir)))
 		}
 	}
-	args := []string{"build", "-o", tmp + string(filepath.Separator)}
+	args := append(make([]string, 0, 3+len(pkgs)), "build", "-o", tmp+string(filepath.Separator))
 	for p := range pkgs {
 		args = append(args, p)
 	}
