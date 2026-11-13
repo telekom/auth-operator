@@ -33,7 +33,7 @@ import (
 // It defines RBAC guardrails that RestrictedBindDefinitions and
 // RestrictedRoleDefinitions must comply with.
 type RBACPolicyApplyConfiguration struct {
-	v1.TypeMetaApplyConfiguration    `json:",inline"`
+	v1.TypeMetaApplyConfiguration    `json:""`
 	*v1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	Spec                             *RBACPolicySpecApplyConfiguration   `json:"spec,omitempty"`
 	Status                           *RBACPolicyStatusApplyConfiguration `json:"status,omitempty"`

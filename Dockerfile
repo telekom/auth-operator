@@ -2,7 +2,7 @@
 # Literal tag and digest so Dependabot (docker ecosystem) can update both; it
 # cannot resolve build-arg interpolation in FROM. The tag must equal go.mod's
 # toolchain (or go) version; CI's Lint job enforces this.
-FROM --platform=$BUILDPLATFORM golang:1.27.2-alpine@sha256:f92b6ef800e499660581efdabdf25d9d817a9d124eaf900924f0504e7e27e12d AS build
+FROM --platform=$BUILDPLATFORM golang:1.27.4-alpine@sha256:0a5f7fe796599ff487605987432e7619ae45beeb2fba4c2ce0b907879932aebf AS build
 
 ARG TARGETOS
 ARG TARGETARCH
