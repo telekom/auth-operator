@@ -111,6 +111,14 @@ jobs:
           ./bin/kustomize version
           go test ./chart/auth-operator/ -run TestCreatorTracking -count=1
 
+      - name: Test default-container annotations
+        env:
+          REQUIRE_CHART_TOOLS: "true"
+        run: |
+          go test ./chart/auth-operator/ -run DefaultContainer -count=1 -v | tee /tmp/default-container.log
+          # Fail if any of the three tests did not actually run (e.g. skipped).
+          test "$(grep -c '^--- PASS: .*DefaultContainer' /tmp/default-container.log)" -eq 3
+
       - name: Validate default values
         run: |
           helm template auth-operator ./chart/auth-operator --debug > /tmp/auth-operator-default.yaml

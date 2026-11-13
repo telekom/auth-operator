@@ -828,9 +828,20 @@ func findKustomize(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join("..", "..", "bin", "kustomize")
 	if _, err := os.Stat(path); err != nil {
-		t.Skipf("kustomize not installed: %v", err)
+		skipOrFailMissingTool(t, "kustomize not installed: %v", err)
 	}
 	return path
+}
+
+// skipOrFailMissingTool skips locally, but fails when REQUIRE_CHART_TOOLS=true
+// (set by the helm-chart-test workflow, which installs helm and kustomize) so a
+// missing binary cannot silently hide a test.
+func skipOrFailMissingTool(t *testing.T, format string, args ...any) {
+	t.Helper()
+	if os.Getenv("REQUIRE_CHART_TOOLS") == "true" {
+		t.Fatalf(format, args...)
+	}
+	t.Skipf(format, args...)
 }
 
 func requireHelm(t *testing.T) {
