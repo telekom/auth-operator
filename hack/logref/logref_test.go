@@ -532,23 +532,72 @@ func checkDecisions(t *testing.T, doc string, entries []entry) {
 	}
 }
 
-// checkRejectionRows requires every row of the pre-evaluation table to name
-// a message the /authorize handler logs: a deferred access line is written
-// even for responses without a line of their own.
+// checkRejectionRows reports rejectionRowProblems as test errors.
 func checkRejectionRows(t *testing.T, section string, entries []entry) {
 	t.Helper()
+	for _, p := range rejectionRowProblems(section, entries) {
+		t.Error(p)
+	}
+}
+
+// rejectionRowProblems requires every row of the pre-evaluation table to name,
+// in its message cell, a message the /authorize handler logs at the level in
+// its level cell. A deferred access line is written even for responses
+// without a line of their own, so "no log line" is wrong.
+func rejectionRowProblems(section string, entries []entry) []string {
+	var problems []string
 	if strings.Contains(section, "no log line") {
-		t.Errorf("\"## Authorization decisions\" says \"no log line\", but the deferred access line is written for every request")
+		problems = append(problems, `"## Authorization decisions" says "no log line", but the deferred access line is written for every request`)
 	}
 	for _, row := range strings.Split(section, "\n") {
-		if !strings.HasPrefix(row, "| `") {
+		cells := strings.Split(row, "|")
+		if !strings.HasPrefix(row, "| ") || len(cells) < 4 || strings.TrimSpace(cells[1]) == "Level" {
 			continue
 		}
+		level, msgCell := strings.Trim(strings.TrimSpace(cells[1]), "`"), cells[2]
 		if !slices.ContainsFunc(entries, func(e entry) bool {
-			return e.file == "internal/webhook/authorization/webhook_authorizer.go" && strings.Contains(row, "`"+e.msg+"`")
+			return e.file == "internal/webhook/authorization/webhook_authorizer.go" && e.level == level &&
+				strings.Contains(msgCell, "`"+e.msg+"`")
 		}) {
-			t.Errorf("row %q under \"## Authorization decisions\" names no message the /authorize handler logs", row)
+			problems = append(problems, fmt.Sprintf("row %q under \"## Authorization decisions\" names no message the /authorize handler logs at %s", row, level))
 		}
+	}
+	return problems
+}
+
+// TestRejectionRowsCheckLevels mutates the level of each pre-evaluation row
+// and expects rejectionRowProblems to report it.
+func TestRejectionRowsCheckLevels(t *testing.T) {
+	entries, _ := collect(t)
+	data, err := os.ReadFile(docPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := string(data)
+	section := doc[strings.Index(doc, "## Authorization decisions"):strings.Index(doc, "### Authorization decision fields")]
+	if p := rejectionRowProblems(section, entries); len(p) > 0 {
+		t.Fatalf("unmutated section has problems: %v", p)
+	}
+	rows := 0
+	for _, row := range strings.Split(section, "\n") {
+		cells := strings.Split(row, "|")
+		if !strings.HasPrefix(row, "| `") || len(cells) < 4 {
+			continue
+		}
+		rows++
+		level := strings.TrimSpace(cells[1])
+		for _, wrong := range []string{"`error`", "`V(0)`", "`V(1)`", "`V(2)`", "—"} {
+			if wrong == level {
+				continue
+			}
+			mutated := strings.Replace(section, row, strings.Replace(row, level, wrong, 1), 1)
+			if len(rejectionRowProblems(mutated, entries)) == 0 {
+				t.Errorf("changing the level of %q to %s was not detected", row, wrong)
+			}
+		}
+	}
+	if rows == 0 {
+		t.Fatal("no pre-evaluation rows found")
 	}
 }
 
