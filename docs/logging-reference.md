@@ -976,7 +976,7 @@ Runs in: `verify-rendered-rbac`.
 
 | Level | Message | Keys |
 |-------|---------|------|
-| error | `invalid arguments` | — |
+| error | `invalid arguments` | `usage` |
 | error | `rendered RBAC verification failed` | — |
 
 ### Creator-tracking benchmark

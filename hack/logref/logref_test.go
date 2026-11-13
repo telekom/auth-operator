@@ -426,25 +426,12 @@ func TestLoggingReference(t *testing.T) {
 		t.Fatal(err)
 	}
 	doc := string(data)
-	begin, end := strings.Index(doc, beginMark), strings.Index(doc, endMark)
-	if begin < 0 || end < begin {
-		t.Fatalf("%s: generated catalog markers missing", docPath)
-	}
-	want := catalog(entries, withValues)
-	if got := doc[begin : end+len(endMark)]; got != want {
-		if *update {
-			if err := os.WriteFile(docPath, []byte(doc[:begin]+want+doc[end+len(endMark):]), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			return
-		}
-		t.Fatalf("%s is out of date with the logger call sites; run: go test ./hack/logref -update", docPath)
+	if !checkCatalog(t, doc, catalog(entries, withValues)) {
+		return
 	}
 
 	codeKeys := map[string]bool{}
-	levels := map[string]bool{}
 	for _, e := range entries {
-		levels[e.level] = true
 		for _, k := range e.keys {
 			codeKeys[k] = true
 		}
@@ -454,16 +441,55 @@ func TestLoggingReference(t *testing.T) {
 			codeKeys[k] = true
 		}
 	}
+	checkLevels(t, doc, entries)
+	checkDecisions(t, doc, entries)
+	checkPersonalData(t, doc, codeKeys)
 
-	// Every level in the code is described in the level table.
-	documented := tableKeys(t, doc, "## Levels")
-	for l := range levels {
-		if !slices.Contains(documented, l) {
-			t.Errorf("level %s is used in code but not described under \"## Levels\"", l)
+	// Nothing that names a credential is logged.
+	secret := regexp.MustCompile(`(?i)token|password|passphrase|secret|credential|bearer|private`)
+	for k := range codeKeys {
+		if secret.MatchString(k) {
+			t.Errorf("log key %q names a credential; see \"## Never logged\"", k)
 		}
 	}
+}
 
-	// The decision field table lists exactly the keys of the decision log.
+// checkCatalog compares the generated catalog with the doc, or rewrites it
+// with -update. It reports whether the remaining checks should run.
+func checkCatalog(t *testing.T, doc, want string) bool {
+	t.Helper()
+	begin, end := strings.Index(doc, beginMark), strings.Index(doc, endMark)
+	if begin < 0 || end < begin {
+		t.Fatalf("%s: generated catalog markers missing", docPath)
+	}
+	if doc[begin:end+len(endMark)] == want {
+		return true
+	}
+	if !*update {
+		t.Fatalf("%s is out of date with the logger call sites; run: go test ./hack/logref -update", docPath)
+	}
+	if err := os.WriteFile(docPath, []byte(doc[:begin]+want+doc[end+len(endMark):]), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return false
+}
+
+// checkLevels requires every level used in code in the level table.
+func checkLevels(t *testing.T, doc string, entries []entry) {
+	t.Helper()
+	documented := tableKeys(t, doc, "## Levels")
+	for _, e := range entries {
+		if !slices.Contains(documented, e.level) {
+			t.Errorf("level %s is used in code but not described under \"## Levels\"", e.level)
+		}
+	}
+}
+
+// checkDecisions compares the decision field table exactly with the keys of
+// the decision log, and requires every /authorize rejection before
+// evaluation in the decision section.
+func checkDecisions(t *testing.T, doc string, entries []entry) {
+	t.Helper()
 	decisionKeys := map[string]bool{}
 	for _, e := range entries {
 		if e.msg == "authorization decision" {
@@ -474,19 +500,20 @@ func TestLoggingReference(t *testing.T) {
 	}
 	assertSameKeys(t, "### Authorization decision fields", tableKeys(t, doc, "### Authorization decision fields"), decisionKeys)
 
-	// Every /authorize rejection before evaluation is described next to the
-	// decision log.
-	decisions := doc[strings.Index(doc, "## Authorization decisions"):strings.Index(doc, "### Authorization decision fields")]
+	section := doc[strings.Index(doc, "## Authorization decisions"):strings.Index(doc, "### Authorization decision fields")]
 	for _, e := range entries {
-		if e.file == "internal/webhook/authorization/webhook_authorizer.go" && e.level != "error" &&
-			(strings.HasPrefix(e.msg, "rejecting") || strings.Contains(e.msg, "rejecting request") || strings.Contains(e.msg, "failed to decode")) &&
-			!strings.Contains(decisions, "| `"+e.level+"` | `"+e.msg+"` |") {
+		rejection := strings.HasPrefix(e.msg, "rejecting") || strings.Contains(e.msg, "rejecting request") || strings.Contains(e.msg, "failed to decode")
+		if e.file == "internal/webhook/authorization/webhook_authorizer.go" && e.level != "error" && rejection &&
+			!strings.Contains(section, "| `"+e.level+"` | `"+e.msg+"` |") {
 			t.Errorf("rejection %s %q is not in the table under \"## Authorization decisions\"", e.level, e.msg)
 		}
 	}
+}
 
-	// The personal-data table lists exactly the logged keys that can hold an
-	// identity, group, namespace name, path or client address.
+// checkPersonalData compares the personal-data table exactly with the logged
+// keys that can hold an identity, group, namespace name, path or address.
+func checkPersonalData(t *testing.T, doc string, codeKeys map[string]bool) {
+	t.Helper()
 	pii := map[string]bool{}
 	for k := range codeKeys {
 		if personalData.MatchString(k) && !notPersonalData.MatchString(k) {
@@ -494,12 +521,4 @@ func TestLoggingReference(t *testing.T) {
 		}
 	}
 	assertSameKeys(t, "## Fields that can hold personal data", tableKeys(t, doc, "## Fields that can hold personal data"), pii)
-
-	// Nothing that names a credential is logged.
-	secret := regexp.MustCompile(`(?i)token|password|passphrase|secret|credential|bearer|private`)
-	for k := range codeKeys {
-		if secret.MatchString(k) {
-			t.Errorf("log key %q names a credential; see \"## Never logged\"", k)
-		}
-	}
 }

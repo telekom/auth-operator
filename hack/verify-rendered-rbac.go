@@ -87,8 +87,8 @@ func main() {
 	}
 
 	if flag.NArg() < 1 {
-		log.Error(errors.New("usage: go run hack/verify-rendered-rbac.go [--impersonation generic|none|scoped|clusterwide] [--serviceaccount name] <rendered-yaml>..."),
-			"invalid arguments")
+		log.Error(errors.New("no rendered YAML file given"), "invalid arguments",
+			"usage", "go run hack/verify-rendered-rbac.go [--impersonation generic|none|scoped|clusterwide] [--serviceaccount name] <rendered-yaml>...")
 		os.Exit(2)
 	}
 
