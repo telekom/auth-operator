@@ -34,7 +34,7 @@ import (
 // because generated bindings affect real Kubernetes RBAC.
 // Use RestrictedBindDefinition under an RBACPolicy for delegated workflows.
 type BindDefinitionApplyConfiguration struct {
-	v1.TypeMetaApplyConfiguration    `json:",inline"`
+	v1.TypeMetaApplyConfiguration    `json:""`
 	*v1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	Spec                             *BindDefinitionSpecApplyConfiguration   `json:"spec,omitempty"`
 	Status                           *BindDefinitionStatusApplyConfiguration `json:"status,omitempty"`

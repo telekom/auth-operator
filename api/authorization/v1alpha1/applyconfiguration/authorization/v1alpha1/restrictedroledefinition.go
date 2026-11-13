@@ -33,7 +33,7 @@ import (
 // It is similar to RoleDefinition but requires a policy reference and enforces
 // RBAC guardrails defined by the referenced RBACPolicy.
 type RestrictedRoleDefinitionApplyConfiguration struct {
-	v1.TypeMetaApplyConfiguration    `json:",inline"`
+	v1.TypeMetaApplyConfiguration    `json:""`
 	*v1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	Spec                             *RestrictedRoleDefinitionSpecApplyConfiguration   `json:"spec,omitempty"`
 	Status                           *RestrictedRoleDefinitionStatusApplyConfiguration `json:"status,omitempty"`

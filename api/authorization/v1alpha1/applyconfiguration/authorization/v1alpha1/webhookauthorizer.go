@@ -31,7 +31,7 @@ import (
 //
 // WebhookAuthorizer is the Schema for the webhookauthorizers API.
 type WebhookAuthorizerApplyConfiguration struct {
-	v1.TypeMetaApplyConfiguration    `json:",inline"`
+	v1.TypeMetaApplyConfiguration    `json:""`
 	*v1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
 	Spec                             *WebhookAuthorizerSpecApplyConfiguration   `json:"spec,omitempty"`
 	Status                           *WebhookAuthorizerStatusApplyConfiguration `json:"status,omitempty"`
