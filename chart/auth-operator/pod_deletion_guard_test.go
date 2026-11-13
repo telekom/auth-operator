@@ -4,7 +4,9 @@
 package authoperator_test
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -80,6 +82,56 @@ func TestPodDeletionGuardRendering(t *testing.T) {
 	assertHelmTemplateFails(t, "an unscoped guard would deny every Pod delete", on...)
 	assertHelmTemplateFails(t, "podDeletionGuard.configMap.name is required",
 		"--set", "podDeletionGuard.enabled=true", "--set", "podDeletionGuard.groups={a}")
+}
+
+// TestPodDeletionGuardReuseValues renders the guard as `helm upgrade
+// --reuse-values` does after an upgrade from a release without
+// podDeletionGuard: the new defaults are absent, only --set values exist.
+func TestPodDeletionGuardReuseValues(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skipf("helm not installed: %v", err)
+	}
+	chartCopy := filepath.Join(t.TempDir(), "auth-operator")
+	if err := os.CopyFS(chartCopy, os.DirFS(".")); err != nil {
+		t.Fatalf("copy chart: %v", err)
+	}
+	previousValues, err := os.ReadFile("testdata/values-before-creator-tracking.yaml")
+	if err != nil {
+		t.Fatalf("read previous values: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(chartCopy, "values.yaml"), previousValues, 0o600); err != nil {
+		t.Fatalf("replace copied values.yaml: %v", err)
+	}
+	render := func(args ...string) (string, error) {
+		allArgs := append([]string{"template", "auth-operator", chartCopy, "--namespace", "auth-operator-system"}, args...)
+		out, err := exec.CommandContext(t.Context(), "helm", allArgs...).CombinedOutput() // #nosec G204
+		return string(out), err
+	}
+
+	// Only enabled=true: a clear render error, never empty flags that crash the webhook server.
+	out, err := render("--set", "podDeletionGuard.enabled=true")
+	if err == nil || !strings.Contains(out, "podDeletionGuard.configMap.name is required") {
+		t.Fatalf("enabled=true alone: want the required-name error, got err=%v\n%s", err, out)
+	}
+
+	out, err = render("--set", "podDeletionGuard.enabled=true",
+		"--set", "podDeletionGuard.configMap.name=recovery-target",
+		"--set", "podDeletionGuard.groups={team-a}")
+	if err != nil {
+		t.Fatalf("helm template failed: %v\n%s", err, out)
+	}
+	for _, want := range []string{
+		"--pod-deletion-guard-configmap-namespace=kube-system\n",
+		"--pod-deletion-guard-configmap-name=recovery-target\n",
+		"--pod-deletion-guard-node-key=node\n",
+		"--pod-deletion-guard-user-key=user\n",
+		"timeoutSeconds: 5\n",
+		"namespace: kube-system\n",
+	} {
+		assertContains(t, out, want)
+	}
+	assertNotContains(t, out, "timeoutSeconds: <nil>")
+	assertNotContains(t, out, "--pod-deletion-guard-node-key=\n")
 }
 
 func renderedDocument(t *testing.T, render string, markers ...string) string {

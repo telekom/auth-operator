@@ -42,10 +42,12 @@ spec:
         {{- if .enabled }}
         - --cert-rotation-validating-webhook={{ include "auth-operator.fullname" $ }}-pod-deletion-guard
         - --pod-deletion-guard=true
-        - --pod-deletion-guard-configmap-namespace={{ .configMap.namespace }}
-        - --pod-deletion-guard-configmap-name={{ .configMap.name }}
-        - --pod-deletion-guard-node-key={{ .configMap.nodeKey }}
-        - --pod-deletion-guard-user-key={{ .configMap.userKey }}
+        {{- /* Defaults repeated: --reuse-values upgrades keep old values without them. */}}
+        {{- $cm := .configMap | default dict }}
+        - --pod-deletion-guard-configmap-namespace={{ $cm.namespace | default "kube-system" }}
+        - --pod-deletion-guard-configmap-name={{ required "podDeletionGuard.configMap.name is required when podDeletionGuard.enabled is true" $cm.name }}
+        - --pod-deletion-guard-node-key={{ $cm.nodeKey | default "node" }}
+        - --pod-deletion-guard-user-key={{ $cm.userKey | default "user" }}
         {{- end }}
         {{- end }}
         - --tdg-migration={{ .Values.webhookServer.tdgMigration }}

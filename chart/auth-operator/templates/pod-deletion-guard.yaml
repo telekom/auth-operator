@@ -5,11 +5,12 @@ before calling the webhook, so only guarded identities reach it, and its
 failurePolicy Fail denies only their requests when the webhook or the target
 ConfigMap is unavailable. The webhook server reads only the target ConfigMap.
 */ -}}
+{{- /* Defaults repeated here: helm upgrade --reuse-values keeps the old values, which lack them. */}}
 {{- with .Values.podDeletionGuard }}
 {{- if .enabled }}
-{{- if not .configMap.name }}
-{{- fail "podDeletionGuard.configMap.name is required when podDeletionGuard.enabled is true" }}
-{{- end }}
+{{- $cm := .configMap | default dict }}
+{{- $cmName := required "podDeletionGuard.configMap.name is required when podDeletionGuard.enabled is true" $cm.name }}
+{{- $cmNamespace := $cm.namespace | default "kube-system" }}
 {{- if not (or .groups .usernames .matchConditions) }}
 {{- fail "podDeletionGuard needs at least one of groups, usernames or matchConditions: an unscoped guard would deny every Pod delete in the cluster" }}
 {{- end }}
@@ -65,14 +66,14 @@ webhooks:
     - pods
     scope: Namespaced
   sideEffects: None
-  timeoutSeconds: {{ .timeoutSeconds }}
+  timeoutSeconds: {{ .timeoutSeconds | default 5 }}
 ---
 # Read access to the target ConfigMap only; the guard reads it live on every decision.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: {{ $name }}
-  namespace: {{ .configMap.namespace }}
+  namespace: {{ $cmNamespace }}
   labels:
     app.kubernetes.io/component: webhook-server
   {{- include "auth-operator.labels" $ | nindent 4 }}
@@ -82,7 +83,7 @@ rules:
   resources:
   - configmaps
   resourceNames:
-  - {{ .configMap.name }}
+  - {{ $cmName }}
   verbs:
   - get
 ---
@@ -90,7 +91,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: {{ $name }}
-  namespace: {{ .configMap.namespace }}
+  namespace: {{ $cmNamespace }}
   labels:
     app.kubernetes.io/component: webhook-server
   {{- include "auth-operator.labels" $ | nindent 4 }}
