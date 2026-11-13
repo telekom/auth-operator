@@ -152,6 +152,7 @@ metadata:
 spec:
   allowedPrincipals:
     - groups: ["oidc:wa-e2e-group"]
+    - groups: ["oidc:dttcaas-ZAM-Tenant.123_tcaas-mgmt-nord-1.prd.b_reader-restricted"]
   resourceRules:
     - verbs: ["get"]
       apiGroups: [""]
@@ -257,6 +258,22 @@ spec:
 					allowed: true,
 					denied:  false,
 					reason:  "Access granted by WebhookAuthorizer",
+				},
+				{
+					// Production ZAM role group at the 64-character LDAP CN limit,
+					// as the apiserver presents it with --oidc-groups-prefix=oidc:.
+					name:    "ZAM group principal allow",
+					sar:     resourceSAR("e2e-zam-user", []string{"oidc:dttcaas-ZAM-Tenant.123_tcaas-mgmt-nord-1.prd.b_reader-restricted"}, "get", "configmaps", testNSPlain),
+					allowed: true,
+					denied:  false,
+					reason:  "Access granted by WebhookAuthorizer",
+				},
+				{
+					name:    "ZAM group match is case-sensitive",
+					sar:     resourceSAR("e2e-zam-user", []string{"oidc:dttcaas-zam-tenant.123_tcaas-mgmt-nord-1.prd.b_reader-restricted"}, "get", "configmaps", testNSPlain),
+					allowed: false,
+					denied:  false,
+					reason:  "Access denied: no matching rules",
 				},
 				{
 					name: "service account principal allow",
