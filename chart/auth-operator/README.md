@@ -174,6 +174,48 @@ rules as fallback on clusters without VAP support.
 | `namespaceDeletionProtection.extraProtectedNamespaces` | Additional namespace names unconditionally protected from deletion | `[]` |
 | `namespaceDeletionProtection.vap` | VAP rendering mode: `auto` (render when the cluster supports it), `enabled`, or `disabled`. With `auto`, offline `helm template` needs `--api-versions admissionregistration.k8s.io/v1/ValidatingAdmissionPolicy` to render the VAP | `auto` |
 
+### Node-Scoped Pod Deletion Guard for Delegated Identities
+
+Opt-in (`podDeletionGuard.enabled`, default `false`). Lets you delegate Pod
+deletion to an identity, for example a break-glass session, but only on one
+node at a time. A guarded Pod DELETE is allowed only when the target ConfigMap
+names the Pod's node (`data.<nodeKey>`) and the requesting user
+(`data.<userKey>`). Every other guarded delete is denied, also when the
+ConfigMap is missing or unreadable (fail closed). The guard narrows what RBAC
+grants; it never grants anything.
+
+Scoping happens in the API server: the chart renders a
+`ValidatingWebhookConfiguration` whose `matchConditions` select the guarded
+identities (`groups`, `usernames`, and/or CEL `matchConditions`, which may use
+`request` and `authorizer`). The API server evaluates them before it calls the
+webhook, so other identities (controllers, the kubelet, the garbage collector,
+node drains) never reach it, and `failurePolicy: Fail` denies only guarded
+requests when the webhook is unavailable. The chart refuses to render an
+unscoped guard. The webhook server reads only the target ConfigMap (namespaced Role,
+`get` with `resourceNames`), live on every decision, so a cleared or deleted
+target takes effect immediately. Every decision is logged as
+`pod deletion guard decision` with the authorization decision log fields and
+counted in `auth_operator_webhook_requests_total{webhook="pod_deletion_guard"}`.
+
+Requires Kubernetes 1.30 or newer (webhook `matchConditions`); the chart
+refuses to render the guard for older clusters, where the API server would drop
+the conditions and leave the guard unscoped. The guard handles Pod DELETE only. Do not grant `pods/eviction` or
+`deletecollection` to guarded identities.
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `podDeletionGuard.enabled` | Render the guard webhook and enable its handler | `false` |
+| `podDeletionGuard.configMap.namespace` | Namespace of the target ConfigMap (must exist: the chart creates the read Role there) | `kube-system` |
+| `podDeletionGuard.configMap.name` | Name of the target ConfigMap (required when enabled) | `""` |
+| `podDeletionGuard.configMap.nodeKey` | Data key holding the node name | `node` |
+| `podDeletionGuard.configMap.userKey` | Data key holding the username | `user` |
+| `podDeletionGuard.groups` | Guard users in any of these groups | `[]` |
+| `podDeletionGuard.usernames` | Guard these usernames | `[]` |
+| `podDeletionGuard.matchConditions` | Additional CEL match conditions (`name`, `expression`); all must match | `[]` |
+| `podDeletionGuard.namespaceSelector` | Webhook `namespaceSelector` | `{}` |
+| `podDeletionGuard.objectSelector` | Webhook `objectSelector` | `{}` |
+| `podDeletionGuard.timeoutSeconds` | Webhook timeout (failurePolicy is always `Fail`) | `5` |
+
 ### Creator Tracking
 
 Creator tracking is opt-in until performance tests are complete. Set

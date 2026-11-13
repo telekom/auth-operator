@@ -20,6 +20,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"golang.org/x/time/rate"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/discovery"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -53,7 +54,17 @@ var (
 	bindDefinitionNamespaceSelectorLabelGroups []string
 	namespaceDeletionProtection                bool
 	protectedNamespaces                        []string
+	podDeletionGuard                           podDeletionGuardConfig
 )
+
+// podDeletionGuardConfig configures the optional node-scoped pod deletion guard.
+type podDeletionGuardConfig struct {
+	Enabled   bool
+	Namespace string
+	Name      string
+	NodeKey   string
+	UserKey   string
+}
 
 // webhookCmd represents the webhook command.
 var webhookCmd = &cobra.Command{
@@ -117,6 +128,9 @@ ensuring authorization policies are enforced at creation time.`,
 			return fmt.Errorf("unable to get kubeconfig: %w", err)
 		}
 
+		if err := podDeletionGuard.validate(); err != nil {
+			return err
+		}
 		mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 			Scheme: scheme,
 			Metrics: metricsserver.Options{
@@ -309,6 +323,22 @@ func configureWebhooks(ctx context.Context, mgr manager.Manager, tp *tracing.Pro
 		return fmt.Errorf("unable to create webhook for RestrictedRoleDefinition: %w", err)
 	}
 
+	if podDeletionGuard.Enabled {
+		log.Info("setting up pod deletion guard validating webhook",
+			"targetConfigMap", podDeletionGuard.Namespace+"/"+podDeletionGuard.Name,
+			"nodeKey", podDeletionGuard.NodeKey,
+			"userKey", podDeletionGuard.UserKey)
+		mgr.GetWebhookServer().Register("/validate-v1-pod-deletion-guard", &webhook.Admission{Handler: &authorizationwebhook.PodDeletionGuard{
+			// Live reads: a cleared, reassigned or deleted target takes effect at once,
+			// and an unreadable target denies (a cache would serve the last target).
+			Reader:    mgr.GetAPIReader(),
+			Decoder:   decoder,
+			ConfigMap: types.NamespacedName{Namespace: podDeletionGuard.Namespace, Name: podDeletionGuard.Name},
+			NodeKey:   podDeletionGuard.NodeKey,
+			UserKey:   podDeletionGuard.UserKey,
+		}})
+	}
+
 	log.Info("all webhooks configured successfully")
 	return nil
 }
@@ -382,6 +412,19 @@ func init() {
 		"Additional namespace names that are unconditionally protected from deletion, "+
 			"on top of the built-in system namespaces; repeat or comma-separate for multiple names")
 
+	webhookCmd.Flags().BoolVar(&podDeletionGuard.Enabled, "pod-deletion-guard", false,
+		"Serve the node-scoped pod deletion guard at /validate-v1-pod-deletion-guard: a Pod DELETE that reaches it "+
+			"is allowed only on the node named in the target ConfigMap and only for the user named there; a missing "+
+			"or unreadable ConfigMap denies. Scope it to delegated identities with webhook matchConditions.")
+	webhookCmd.Flags().StringVar(&podDeletionGuard.Namespace, "pod-deletion-guard-configmap-namespace", "kube-system",
+		"Namespace of the pod deletion guard target ConfigMap.")
+	webhookCmd.Flags().StringVar(&podDeletionGuard.Name, "pod-deletion-guard-configmap-name", "",
+		"Name of the pod deletion guard target ConfigMap; required with --pod-deletion-guard.")
+	webhookCmd.Flags().StringVar(&podDeletionGuard.NodeKey, "pod-deletion-guard-node-key", "node",
+		"Target ConfigMap data key holding the node name.")
+	webhookCmd.Flags().StringVar(&podDeletionGuard.UserKey, "pod-deletion-guard-user-key", "user",
+		"Target ConfigMap data key holding the username allowed to delete Pods on that node.")
+
 	webhookCmd.Flags().BoolVar(&webhookLeaderElect, "leader-elect", false,
 		"Enable leader election for the webhook manager. Required when running "+
 			"multiple replicas with cert rotation to prevent concurrent Secret updates.")
@@ -409,6 +452,28 @@ func webhookTLSOpts(goDefaults bool) []func(*tls.Config) {
 		c.MinVersion = tls.VersionTLS12
 		c.CipherSuites = webhookTLSCipherSuites
 	}}
+}
+
+// validate rejects an enabled guard without a usable target ConfigMap.
+func (c podDeletionGuardConfig) validate() error {
+	if !c.Enabled {
+		return nil
+	}
+	if errs := validation.IsDNS1123Subdomain(c.Name); len(errs) > 0 {
+		return fmt.Errorf("invalid --pod-deletion-guard-configmap-name %q: %s", c.Name, strings.Join(errs, "; "))
+	}
+	if errs := validation.IsDNS1123Label(c.Namespace); len(errs) > 0 {
+		return fmt.Errorf("invalid --pod-deletion-guard-configmap-namespace %q: %s", c.Namespace, strings.Join(errs, "; "))
+	}
+	for flag, key := range map[string]string{"--pod-deletion-guard-node-key": c.NodeKey, "--pod-deletion-guard-user-key": c.UserKey} {
+		if errs := validation.IsConfigMapKey(key); len(errs) > 0 {
+			return fmt.Errorf("invalid %s %q: %s", flag, key, strings.Join(errs, "; "))
+		}
+	}
+	if c.NodeKey == c.UserKey {
+		return fmt.Errorf("--pod-deletion-guard-node-key and --pod-deletion-guard-user-key must differ")
+	}
+	return nil
 }
 
 // validateEmergencyNamespaceTenant rejects a tenant that no tenant label can carry.

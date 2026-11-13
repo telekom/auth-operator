@@ -1,0 +1,124 @@
+{{- /*
+Node-scoped pod deletion guard for delegated identities (podDeletionGuard).
+The webhook entry is scoped with matchConditions: the API server evaluates them
+before calling the webhook, so only guarded identities reach it, and its
+failurePolicy Fail denies only their requests when the webhook or the target
+ConfigMap is unavailable. The webhook server reads only the target ConfigMap.
+*/ -}}
+{{- /* Defaults repeated here: helm upgrade --reuse-values keeps the old values, which lack them. */}}
+{{- with .Values.podDeletionGuard }}
+{{- if .enabled }}
+{{- /* Webhook matchConditions are GA in Kubernetes 1.30. An older API server prunes the
+unknown field, which would leave the guard unscoped and deny every Pod delete. */}}
+{{- if semverCompare "<1.30.0-0" $.Capabilities.KubeVersion.Version }}
+{{- fail (printf "podDeletionGuard needs Kubernetes >= 1.30 (webhook matchConditions); this cluster is %s" $.Capabilities.KubeVersion.Version) }}
+{{- end }}
+{{- $cm := .configMap | default dict }}
+{{- $cmName := required "podDeletionGuard.configMap.name is required when podDeletionGuard.enabled is true" $cm.name }}
+{{- $cmNamespace := $cm.namespace | default "kube-system" }}
+{{- /* Mirrors podDeletionGuardConfig.validate() in cmd/webhook.go: a value it rejects would crashloop the webhook server. */}}
+{{- if eq ($cm.nodeKey | default "node") ($cm.userKey | default "user") }}
+{{- fail "podDeletionGuard.configMap.nodeKey and podDeletionGuard.configMap.userKey must differ" }}
+{{- end }}
+{{- if not (or .groups .usernames .matchConditions) }}
+{{- fail "podDeletionGuard needs at least one of groups, usernames or matchConditions: an unscoped guard would deny every Pod delete in the cluster" }}
+{{- end }}
+{{- $conditionNames := list }}
+{{- if or .groups .usernames }}{{- $conditionNames = append $conditionNames "delegated-identity" }}{{- end }}
+{{- range .matchConditions }}
+{{- if has .name $conditionNames }}
+{{- fail (printf "podDeletionGuard.matchConditions: duplicate name %q (delegated-identity is generated from groups/usernames)" .name) }}
+{{- end }}
+{{- $conditionNames = append $conditionNames .name }}
+{{- end }}
+{{- $fullname := include "auth-operator.fullname" $ }}
+{{- $name := printf "%s-pod-deletion-guard" $fullname }}
+{{- $caBundle := include "auth-operator.webhookCABundle" (dict "root" $ "kind" "ValidatingWebhookConfiguration" "name" $name) | trim }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ $name | quote }}
+  labels:
+  {{- include "auth-operator.labels" $ | nindent 4 }}
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    {{- if $caBundle }}
+    caBundle: {{ $caBundle | quote }}
+    {{- end }}
+    service:
+      name: '{{ $fullname }}-webhook-service'
+      namespace: '{{ $.Release.Namespace }}'
+      path: /validate-v1-pod-deletion-guard
+      port: {{ $.Values.webhookServer.service.port | default 443 }}
+  failurePolicy: Fail
+  matchPolicy: Equivalent
+  name: pod-deletion-guard.validating.webhook.auth.t-caas.telekom.de
+  matchConditions:
+  {{- if or .groups .usernames }}
+  - name: delegated-identity
+    expression: {{ printf "request.userInfo.username in %s || request.userInfo.groups.exists(g, g in %s)" (toJson (.usernames | default list)) (toJson (.groups | default list)) | quote }}
+  {{- end }}
+  {{- range .matchConditions }}
+  - name: {{ .name | quote }}
+    expression: {{ .expression | quote }}
+  {{- end }}
+  {{- with .namespaceSelector }}
+  namespaceSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .objectSelector }}
+  objectSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+  - apiGroups:
+    - ""
+    apiVersions:
+    - v1
+    operations:
+    - DELETE
+    resources:
+    - pods
+    scope: Namespaced
+  sideEffects: None
+  timeoutSeconds: {{ .timeoutSeconds | default 5 }}
+---
+# Read access to the target ConfigMap only; the guard reads it live on every decision.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name | quote }}
+  namespace: {{ $cmNamespace | quote }}
+  labels:
+    app.kubernetes.io/component: webhook-server
+  {{- include "auth-operator.labels" $ | nindent 4 }}
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  resourceNames:
+  - {{ $cmName | quote }}
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name | quote }}
+  namespace: {{ $cmNamespace | quote }}
+  labels:
+    app.kubernetes.io/component: webhook-server
+  {{- include "auth-operator.labels" $ | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name | quote }}
+subjects:
+- kind: ServiceAccount
+  name: '{{ $fullname }}-webhook-server'
+  namespace: '{{ $.Release.Namespace }}'
+{{- end }}
+{{- end }}

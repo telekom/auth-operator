@@ -336,6 +336,7 @@ Runs in: `webhook`.
 | V(0) | `setting up RestrictedRoleDefinition validating webhook` | — |
 | V(0) | `setting up RoleDefinition webhook` | — |
 | V(0) | `setting up WebhookAuthorizer validating webhook` | — |
+| V(0) | `setting up pod deletion guard validating webhook` | `targetConfigMap`, `nodeKey`, `userKey` |
 | V(0) | `starting manager` | — |
 | V(0) | `starting webhook server` | `port`, `certsDir`, `enableHTTP2`, `disableCertRotation`, `namespace`, `bindDefinitionNamespaceSelectorLabelGroups` |
 | V(0) | `tracing enabled` | `endpoint`, `samplingRate` |
@@ -868,6 +869,12 @@ Runs in: `webhook`.
 | V(4) | `skipping restricted BindDefinition` | `bindDefinitionName` |
 | V(4) | `user not found in BindDefinition subjects` | `namespace`, `bindDefinitionName` |
 | V(4) | `webhook request for non-Namespace resource - ignoring` | `kind` |
+
+#### `internal/webhook/authorization/pod_deletion_guard.go`
+
+| Level | Message | Keys |
+|-------|---------|------|
+| V(0) | `pod deletion guard decision` | `decision`, `allowed`, `reason`, `user`, `groups`, `verb`, `apiGroup`, `resource`, `namespace`, `name`, `node`, `targetNode`, `targetConfigMap`, `latency`, `error` |
 
 ### CRD validation webhooks
 

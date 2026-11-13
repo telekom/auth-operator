@@ -1,0 +1,85 @@
+[
+  {
+    "name": "defaults",
+    "valid": true
+  },
+  {
+    "name": "numeric names",
+    "namespace": "456",
+    "configMap": "123",
+    "nodeKey": "1",
+    "userKey": "2",
+    "valid": true
+  },
+  {
+    "name": "dotted key",
+    "nodeKey": ".node",
+    "valid": true
+  },
+  {
+    "name": "dotted name",
+    "configMap": "t-caas.target",
+    "valid": true
+  },
+  {
+    "name": "equal keys",
+    "userKey": "node",
+    "valid": false
+  },
+  {
+    "name": "equal custom keys",
+    "nodeKey": "k",
+    "userKey": "k",
+    "valid": false
+  },
+  {
+    "name": "dot key",
+    "nodeKey": ".",
+    "valid": false
+  },
+  {
+    "name": "dot-dot key",
+    "userKey": "..",
+    "valid": false
+  },
+  {
+    "name": "dot-dot prefixed key",
+    "nodeKey": "..node",
+    "valid": false
+  },
+  {
+    "name": "slash in key",
+    "nodeKey": "a/b",
+    "valid": false
+  },
+  {
+    "name": "key too long",
+    "userKey": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+    "valid": false
+  },
+  {
+    "name": "invalid namespace",
+    "namespace": "Kube_System",
+    "valid": false
+  },
+  {
+    "name": "namespace too long",
+    "namespace": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+    "valid": false
+  },
+  {
+    "name": "invalid name",
+    "configMap": "Bad_Name",
+    "valid": false
+  },
+  {
+    "name": "name too long",
+    "configMap": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "valid": false
+  },
+  {
+    "name": "empty name",
+    "configMap": "",
+    "valid": false
+  }
+]

@@ -615,6 +615,72 @@
         }
       }
     },
+    "podDeletionGuard": {
+      "type": "object",
+      "description": "Node-scoped pod deletion guard for delegated identities: a guarded Pod DELETE is allowed only on the node and for the user named in the target ConfigMap; a missing or unreadable ConfigMap denies. Scoped by webhook matchConditions.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Render the guard webhook and enable its handler.",
+          "default": false
+        },
+        "configMap": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "namespace": { "type": "string", "description": "Namespace of the target ConfigMap (must exist; the chart creates a Role there).", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "maxLength": 63, "default": "kube-system" },
+            "name": { "type": "string", "description": "Name of the target ConfigMap; required when enabled.", "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$", "maxLength": 253, "default": "" },
+            "nodeKey": { "type": "string", "pattern": "^[-._a-zA-Z0-9]+$", "not": { "pattern": "^\\.\\.|^\\.$" }, "maxLength": 253, "description": "Data key holding the node name. Must differ from the other key.", "default": "node" },
+            "userKey": { "type": "string", "pattern": "^[-._a-zA-Z0-9]+$", "not": { "pattern": "^\\.\\.|^\\.$" }, "maxLength": 253, "description": "Data key holding the username allowed to delete Pods on that node. Must differ from the other key.", "default": "user" }
+          }
+        },
+        "groups": {
+          "type": "array",
+          "description": "Guard requests whose user is in any of these groups.",
+          "items": { "type": "string", "minLength": 1 },
+          "default": []
+        },
+        "usernames": {
+          "type": "array",
+          "description": "Guard requests of these usernames.",
+          "items": { "type": "string", "minLength": 1 },
+          "default": []
+        },
+        "matchConditions": {
+          "type": "array",
+          "description": "Additional CEL matchConditions; all must match. Names are unique qualified names; at most 63 (the API server allows 64, one is generated from groups/usernames).",
+          "maxItems": 63,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "expression"],
+            "properties": {
+              "name": { "type": "string", "description": "A Kubernetes qualified name: optional DNS subdomain prefix and '/', then at most 63 characters.", "pattern": "^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$", "maxLength": 317 },
+              "expression": { "type": "string", "minLength": 1 }
+            }
+          },
+          "default": []
+        },
+        "namespaceSelector": {
+          "type": "object",
+          "description": "Webhook namespaceSelector.",
+          "default": {}
+        },
+        "objectSelector": {
+          "type": "object",
+          "description": "Webhook objectSelector.",
+          "default": {}
+        },
+        "timeoutSeconds": {
+          "type": "integer",
+          "description": "Webhook timeout in seconds; failurePolicy is always Fail.",
+          "minimum": 1,
+          "maximum": 30,
+          "default": 5
+        }
+      }
+    },
     "creatorTracking": {
       "type": ["object", "null"],
       "description": "Creator and contributor annotation tracking through MutatingAdmissionPolicy.",

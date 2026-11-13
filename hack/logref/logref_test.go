@@ -381,8 +381,8 @@ var (
 	// namespace name, URL path or client address.
 	personalData = regexp.MustCompile(`(?i)user|groups$|namespace|addr|^path$|serviceaccount$|^saname$`)
 	// notPersonalData excludes counts, flags, listen addresses and
-	// configuration among them.
-	notPersonalData = regexp.MustCompile(`Count$|^total|^is[A-Z]|(?i:tenant|selector|ownership|-bind-address$|^matchingnamespaces$)`)
+	// configuration among them (userKey: the name of a ConfigMap data key).
+	notPersonalData = regexp.MustCompile(`Count$|^total|^is[A-Z]|^userKey$|(?i:tenant|selector|ownership|-bind-address$|^matchingnamespaces$)`)
 )
 
 // assertSameKeys fails unless the documented keys equal the code keys.

@@ -415,6 +415,7 @@ const (
 const (
 	WebhookNamespaceValidator = "namespace_validator"
 	WebhookNamespaceMutator   = "namespace_mutator"
+	WebhookPodDeletionGuard   = "pod_deletion_guard"
 )
 
 // WebhookResult constants.

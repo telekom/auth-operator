@@ -124,7 +124,7 @@ resources:
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `auth_operator_webhook_requests_total` | Counter | `webhook`, `operation`, `result` | Total webhook admission requests. `webhook`: `namespace_validator`, `namespace_mutator`. `operation`: `CREATE`, `UPDATE`, `DELETE`. `result`: `allowed`, `denied`, `errored`. |
+| `auth_operator_webhook_requests_total` | Counter | `webhook`, `operation`, `result` | Total webhook admission requests. `webhook`: `namespace_validator`, `namespace_mutator`, `pod_deletion_guard`. `operation`: `CREATE`, `UPDATE`, `DELETE`. `result`: `allowed`, `denied`, `errored`. |
 
 ### WebhookAuthorizer (Authorization Webhook)
 
