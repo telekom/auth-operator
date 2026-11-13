@@ -42,7 +42,7 @@ type PodDeletionGuard struct {
 // Handle implements admission.Handler.
 func (g *PodDeletionGuard) Handle(ctx context.Context, req admission.Request) admission.Response {
 	start := time.Now()
-	allowed, reason, podNode, targetNode := g.decide(ctx, req)
+	allowed, reason, podNode, targetNode, readErr := g.decide(ctx, req)
 	result := metrics.WebhookResultDenied
 	if allowed {
 		result = metrics.WebhookResultAllowed
@@ -50,7 +50,7 @@ func (g *PodDeletionGuard) Handle(ctx context.Context, req admission.Request) ad
 	metrics.WebhookRequestsTotal.WithLabelValues(metrics.WebhookPodDeletionGuard, string(req.Operation), result).Inc()
 
 	// Same fields as the authorization decision log, plus the node scope.
-	logf.FromContext(ctx).WithName("pod-deletion-guard").Info("pod deletion guard decision",
+	fields := []any{
 		"decision", result,
 		"allowed", allowed,
 		"reason", reason,
@@ -65,40 +65,46 @@ func (g *PodDeletionGuard) Handle(ctx context.Context, req admission.Request) ad
 		"targetNode", targetNode,
 		"targetConfigMap", g.ConfigMap.String(),
 		"latency", time.Since(start).String(),
-	)
+	}
+	if readErr != nil {
+		// Kept in the server log only; the caller gets a sanitized reason.
+		fields = append(fields, "error", readErr.Error())
+	}
+	logf.FromContext(ctx).WithName("pod-deletion-guard").Info("pod deletion guard decision", fields...)
 	if allowed {
 		return admission.Allowed(reason)
 	}
 	return admission.Denied(reason)
 }
 
-// decide returns the decision, its reason, the Pod's node and the target node.
-func (g *PodDeletionGuard) decide(ctx context.Context, req admission.Request) (allowed bool, reason, podNode, targetNode string) {
+// decide returns the decision, its caller-facing reason, the Pod's node, the
+// target node and, for a failed ConfigMap read, the error (logged only).
+func (g *PodDeletionGuard) decide(ctx context.Context, req admission.Request) (allowed bool, reason, podNode, targetNode string, readErr error) {
 	if req.Operation != admissionv1.Delete || req.Resource.Group != "" || req.Resource.Resource != "pods" || req.SubResource != "" {
-		return false, fmt.Sprintf("pod deletion guard only handles pod DELETE, got %s %s/%s", req.Operation, req.Resource.Resource, req.SubResource), "", ""
+		return false, fmt.Sprintf("pod deletion guard only handles pod DELETE, got %s %s/%s", req.Operation, req.Resource.Resource, req.SubResource), "", "", nil
 	}
 	pod := &corev1.Pod{}
 	if err := g.Decoder.DecodeRaw(req.OldObject, pod); err != nil {
-		return false, fmt.Sprintf("pod deletion guard: cannot decode the pod: %v", err), "", ""
+		return false, fmt.Sprintf("pod deletion guard: cannot decode the pod: %v", err), "", "", nil
 	}
 	podNode = pod.Spec.NodeName
 
 	cm := &corev1.ConfigMap{}
 	if err := g.Reader.Get(ctx, g.ConfigMap, cm); err != nil {
 		if apierrors.IsNotFound(err) {
-			return false, fmt.Sprintf("pod deletion guard: target ConfigMap %s not found; denied (fail closed)", g.ConfigMap), podNode, ""
+			return false, fmt.Sprintf("pod deletion guard: target ConfigMap %s not found; denied (fail closed)", g.ConfigMap), podNode, "", nil
 		}
-		return false, fmt.Sprintf("pod deletion guard: cannot read target ConfigMap %s; denied (fail closed): %v", g.ConfigMap, err), podNode, ""
+		return false, fmt.Sprintf("pod deletion guard: cannot read target ConfigMap %s; denied (fail closed), see the webhook log", g.ConfigMap), podNode, "", err
 	}
 	targetNode = cm.Data[g.NodeKey]
 	targetUser := cm.Data[g.UserKey]
 	switch {
 	case targetNode == "":
-		return false, fmt.Sprintf("pod deletion guard: no target node set in ConfigMap %s data.%s", g.ConfigMap, g.NodeKey), podNode, targetNode
+		return false, fmt.Sprintf("pod deletion guard: no target node set in ConfigMap %s data.%s", g.ConfigMap, g.NodeKey), podNode, targetNode, nil
 	case targetUser != req.UserInfo.Username:
-		return false, fmt.Sprintf("pod deletion guard: the target in ConfigMap %s belongs to another user (data.%s); set your own target", g.ConfigMap, g.UserKey), podNode, targetNode
+		return false, fmt.Sprintf("pod deletion guard: the target in ConfigMap %s belongs to another user (data.%s); set your own target", g.ConfigMap, g.UserKey), podNode, targetNode, nil
 	case podNode != targetNode:
-		return false, fmt.Sprintf("pod deletion guard: pod %s/%s is on node %q, not on the target node %q", req.Namespace, req.Name, podNode, targetNode), podNode, targetNode
+		return false, fmt.Sprintf("pod deletion guard: pod %s/%s is on node %q, not on the target node %q", req.Namespace, req.Name, podNode, targetNode), podNode, targetNode, nil
 	}
-	return true, fmt.Sprintf("pod is on the target node %q of %s", targetNode, req.UserInfo.Username), podNode, targetNode
+	return true, fmt.Sprintf("pod is on the target node %q of %s", targetNode, req.UserInfo.Username), podNode, targetNode, nil
 }

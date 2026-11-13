@@ -81,7 +81,7 @@ func TestPodDeletionGuard(t *testing.T) {
 			req: func(t *testing.T) admission.Request { t.Helper(); return guardPodDelete(t, "alice", "") }, wantReason: "no target node set"},
 		{name: "denies when the ConfigMap is missing",
 			req: func(t *testing.T) admission.Request { t.Helper(); return guardPodDelete(t, "alice", "node-a") }, wantReason: "not found; denied (fail closed)"},
-		{name: "denies when the ConfigMap is unreadable", objects: []client.Object{target}, getErr: errors.New("cache not synced"),
+		{name: "denies when the ConfigMap is unreadable", objects: []client.Object{target}, getErr: errors.New("Get \"https://10.0.0.1/api/v1\": forbidden: system:serviceaccount:x:y"),
 			req: func(t *testing.T) admission.Request { t.Helper(); return guardPodDelete(t, "alice", "node-a") }, wantReason: "cannot read target ConfigMap"},
 		{name: "denies an undecodable pod", objects: []client.Object{target},
 			req: func(t *testing.T) admission.Request {
@@ -115,6 +115,9 @@ func TestPodDeletionGuard(t *testing.T) {
 			}
 			if !tt.wantAllowed && !strings.Contains(resp.Result.Message, tt.wantReason) {
 				t.Fatalf("message %q does not contain %q", resp.Result.Message, tt.wantReason)
+			}
+			if tt.getErr != nil && strings.Contains(resp.Result.Message, tt.getErr.Error()) {
+				t.Fatalf("message %q leaks the read error", resp.Result.Message)
 			}
 		})
 	}
