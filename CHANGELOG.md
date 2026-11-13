@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Optional node-scoped pod deletion guard for delegated identities
+  (`podDeletionGuard`, `--pod-deletion-guard`, default off): a Pod DELETE by an
+  identity selected by the webhook's `matchConditions` is allowed only on the
+  node and for the user named in a target ConfigMap; a missing or unreadable
+  ConfigMap denies (fail closed). Other identities never reach the webhook.
+
 ### Security
 
 - **BREAKING:** emergency namespace authorization (`use` on

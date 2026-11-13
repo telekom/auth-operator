@@ -270,6 +270,37 @@ namespaceDeletionProtection:
   #   disabled - never render; webhook-only enforcement.
   vap: auto
 
+podDeletionGuard:
+  # Node-scoped pod deletion guard for delegated identities. A Pod DELETE by a
+  # guarded identity is allowed only when the target ConfigMap names the Pod's
+  # node (data.<nodeKey>) and the requesting user (data.<userKey>); anything
+  # else, a missing or unreadable ConfigMap included, is denied (fail closed).
+  # The webhook entry selects guarded identities with matchConditions, which
+  # the API server evaluates before calling the webhook, so other identities
+  # (controllers, kubelet, garbage collector) are never affected. Set at least
+  # one of groups, usernames or matchConditions. The guard narrows only what
+  # RBAC already grants. It does not cover pods/eviction: do not grant
+  # eviction to guarded identities.
+  enabled: false
+  configMap:
+    namespace: kube-system
+    # Required when enabled. The webhook gets read access to this ConfigMap only.
+    name: ""
+    nodeKey: node
+    userKey: user
+  # Guard requests whose user is in one of these groups (from authentication).
+  groups: []
+  # Guard requests of these usernames.
+  usernames: []
+  # Additional CEL matchConditions ({name, expression}); all must match, and
+  # groups/usernames (if set) are ANDed as one more condition. Expressions may
+  # use request and authorizer, e.g. to select identities by a permission.
+  matchConditions: []
+  namespaceSelector: {}
+  objectSelector: {}
+  # failurePolicy is always Fail: an unreachable webhook denies guarded requests only.
+  timeoutSeconds: 5
+
 creatorTracking:
   # Record creator identity at admission. Protect mode restores creator data
   # after tampering; DELETE is not tracked. Contributors mode also records

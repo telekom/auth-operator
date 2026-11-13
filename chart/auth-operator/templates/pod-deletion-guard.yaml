@@ -1,0 +1,109 @@
+{{- /*
+Node-scoped pod deletion guard for delegated identities (podDeletionGuard).
+The webhook entry is scoped with matchConditions: the API server evaluates them
+before calling the webhook, so only guarded identities reach it, and its
+failurePolicy Fail denies only their requests when the webhook or the target
+ConfigMap is unavailable. The webhook server reads only the target ConfigMap.
+*/ -}}
+{{- with .Values.podDeletionGuard }}
+{{- if .enabled }}
+{{- if not .configMap.name }}
+{{- fail "podDeletionGuard.configMap.name is required when podDeletionGuard.enabled is true" }}
+{{- end }}
+{{- if not (or .groups .usernames .matchConditions) }}
+{{- fail "podDeletionGuard needs at least one of groups, usernames or matchConditions: an unscoped guard would deny every Pod delete in the cluster" }}
+{{- end }}
+{{- $fullname := include "auth-operator.fullname" $ }}
+{{- $name := printf "%s-pod-deletion-guard" $fullname }}
+{{- $caBundle := include "auth-operator.webhookCABundle" (dict "root" $ "kind" "ValidatingWebhookConfiguration" "name" $name) | trim }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ $name }}
+  labels:
+  {{- include "auth-operator.labels" $ | nindent 4 }}
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    {{- if $caBundle }}
+    caBundle: {{ $caBundle | quote }}
+    {{- end }}
+    service:
+      name: '{{ $fullname }}-webhook-service'
+      namespace: '{{ $.Release.Namespace }}'
+      path: /validate-v1-pod-deletion-guard
+      port: {{ $.Values.webhookServer.service.port | default 443 }}
+  failurePolicy: Fail
+  matchPolicy: Equivalent
+  name: pod-deletion-guard.validating.webhook.auth.t-caas.telekom.de
+  matchConditions:
+  {{- if or .groups .usernames }}
+  - name: delegated-identity
+    expression: {{ printf "request.userInfo.username in %s || request.userInfo.groups.exists(g, g in %s)" (toJson (.usernames | default list)) (toJson (.groups | default list)) | quote }}
+  {{- end }}
+  {{- range .matchConditions }}
+  - name: {{ .name | quote }}
+    expression: {{ .expression | quote }}
+  {{- end }}
+  {{- with .namespaceSelector }}
+  namespaceSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .objectSelector }}
+  objectSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+  - apiGroups:
+    - ""
+    apiVersions:
+    - v1
+    operations:
+    - DELETE
+    resources:
+    - pods
+    scope: Namespaced
+  sideEffects: None
+  timeoutSeconds: {{ .timeoutSeconds }}
+---
+# Read access to the target ConfigMap only: the webhook's informer lists and
+# watches it with a metadata.name field selector, which resourceNames authorize.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  namespace: {{ .configMap.namespace }}
+  labels:
+    app.kubernetes.io/component: webhook-server
+  {{- include "auth-operator.labels" $ | nindent 4 }}
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  resourceNames:
+  - {{ .configMap.name }}
+  verbs:
+  - get
+  - list
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  namespace: {{ .configMap.namespace }}
+  labels:
+    app.kubernetes.io/component: webhook-server
+  {{- include "auth-operator.labels" $ | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+- kind: ServiceAccount
+  name: '{{ $fullname }}-webhook-server'
+  namespace: '{{ $.Release.Namespace }}'
+{{- end }}
+{{- end }}

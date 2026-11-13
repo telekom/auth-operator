@@ -188,6 +188,37 @@ func TestValidateEmergencyNamespaceTenant(t *testing.T) {
 	}
 }
 
+func TestPodDeletionGuardConfigValidate(t *testing.T) {
+	valid := podDeletionGuardConfig{Enabled: true, Namespace: "kube-system", Name: "target", NodeKey: "node", UserKey: "user"}
+	tests := []struct {
+		name    string
+		mutate  func(*podDeletionGuardConfig)
+		wantErr bool
+	}{
+		{name: "valid", mutate: func(*podDeletionGuardConfig) {}},
+		{name: "disabled skips validation", mutate: func(c *podDeletionGuardConfig) { *c = podDeletionGuardConfig{} }},
+		{name: "missing name", mutate: func(c *podDeletionGuardConfig) { c.Name = "" }, wantErr: true},
+		{name: "invalid namespace", mutate: func(c *podDeletionGuardConfig) { c.Namespace = "Kube_System" }, wantErr: true},
+		{name: "invalid key", mutate: func(c *podDeletionGuardConfig) { c.NodeKey = "a/b" }, wantErr: true},
+		{name: "same keys", mutate: func(c *podDeletionGuardConfig) { c.UserKey = "node" }, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := valid
+			tt.mutate(&c)
+			if err := c.validate(); (err != nil) != tt.wantErr {
+				t.Fatalf("validate() = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+	if opts := (podDeletionGuardConfig{}).cacheOptions(); opts.ByObject != nil {
+		t.Fatalf("disabled guard must not restrict the cache, got %v", opts.ByObject)
+	}
+	if opts := valid.cacheOptions(); len(opts.ByObject) != 1 {
+		t.Fatalf("enabled guard must restrict the ConfigMap informer, got %v", opts.ByObject)
+	}
+}
+
 func TestValidateRateLimitFlags(t *testing.T) {
 	tests := []struct {
 		name        string
