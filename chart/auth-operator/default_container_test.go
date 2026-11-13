@@ -13,7 +13,7 @@ import (
 // same pod, otherwise kubectl logs/exec warns and falls back.
 func TestDeploymentDefaultContainerAnnotationMatchesContainer(t *testing.T) {
 	if _, err := exec.LookPath("helm"); err != nil {
-		skipOrFailMissingTool(t, "helm not installed: %v", err)
+		skipOrFailMissingToolf(t, "helm not installed: %v", err)
 	}
 	assertDefaultContainers(t, decodeYAMLDocuments(t, []byte(helmTemplate(t))), "")
 }
@@ -22,7 +22,7 @@ func TestDeploymentDefaultContainerAnnotationMatchesContainer(t *testing.T) {
 // rendering a duplicate key (helm template output is parsed strictly here).
 func TestDefaultContainerPodAnnotationsOverride(t *testing.T) {
 	if _, err := exec.LookPath("helm"); err != nil {
-		skipOrFailMissingTool(t, "helm not installed: %v", err)
+		skipOrFailMissingToolf(t, "helm not installed: %v", err)
 	}
 	out := helmTemplate(t, "--set", `podAnnotations.kubectl\.kubernetes\.io/default-container=custom`, "--set", "podAnnotations.foo=bar")
 	if n := strings.Count(out, "kubectl.kubernetes.io/default-container:"); n != 2 {
