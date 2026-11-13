@@ -8,7 +8,7 @@ name="${KIND_CLUSTER:-auth-operator-chain-$$}"
 release=auth-operator-chain
 dir="$PWD/test/e2e/output/$name"
 image="${IMG:-auth-operator:e2e-test}"
-node_image="${KIND_NODE_IMAGE:-kindest/node:v1.36.1}"
+node_image="${KIND_NODE_IMAGE:-kindest/node:v1.36.4}"
 
 if [[ ! "$name" =~ ^auth-operator-chain-[a-z0-9-]+$ ]]; then
   echo "KIND_CLUSTER must be a dedicated auth-operator-chain-* cluster name" >&2
