@@ -113,6 +113,8 @@ Image reference precedence: `digest` > `tag` > `Chart.AppVersion`
 | `webhookServer.tlsGoDefaults` | Restore Go's default webhook TLS settings instead of TLS 1.2+ with pinned ECDHE AES-GCM/ChaCha20-Poly1305 cipher suites. Transitional; may be removed in a future release | `false` |
 | `webhookServer.authorizeAuth.tokenSecretName` | Existing Secret with bearer token for /authorize caller authentication | `""` |
 | `webhookServer.authorizeAuth.tokenSecretKey` | Secret key containing the /authorize bearer token | `token` |
+| `webhookServer.certificateAuthority.certificate` | PEM CA certificate the cert rotator uses instead of a self-generated CA; set together with `privateKey` | `""` |
+| `webhookServer.certificateAuthority.privateKey` | PEM private key of `certificateAuthority.certificate` (PKCS#1 RSA) | `""` |
 | `webhookServer.resources.limits.cpu` | CPU limit | `150m` |
 | `webhookServer.resources.limits.memory` | Memory limit | `256Mi` |
 | `webhookServer.resources.requests.cpu` | CPU request | `50m` |
@@ -133,6 +135,13 @@ By default, `/authorize` rejects callers unless
 development installs that intentionally need unauthenticated callers can set
 `webhookServer.allowUnauthenticatedAuthorize=true` while migrating clients to a
 shared bearer token. Keep this opt-out disabled in production.
+
+By default, the webhook cert rotator generates its own CA after installation.
+Set `webhookServer.certificateAuthority` when the CA must be known in advance,
+for example to put it into the API server authorization webhook kubeconfig
+before the cluster is bootstrapped. The rotator keeps the provided CA and only
+issues the serving certificate. It replaces a CA that is not a self-signed RSA
+CA with the DNS name `cert` and a PKCS#1 key, or that expires within 90 days.
 
 ### Namespace Admission
 

@@ -461,6 +461,33 @@
             }
           }
         },
+        "certificateAuthority": {
+          "type": "object",
+          "description": "PEM CA used by the cert rotator instead of a self-generated one. Must be a self-signed RSA CA with DNS name \"cert\" and a PKCS#1 key, valid for more than 90 days; otherwise the rotator replaces it.",
+          "additionalProperties": false,
+          "properties": {
+            "certificate": {
+              "type": "string",
+              "description": "PEM-encoded CA certificate.",
+              "default": ""
+            },
+            "privateKey": {
+              "type": "string",
+              "description": "PEM-encoded private key for the CA certificate.",
+              "default": ""
+            }
+          },
+          "allOf": [
+            {
+              "if":   { "properties": { "certificate": { "minLength": 1 } }, "required": ["certificate"] },
+              "then": { "properties": { "privateKey":  { "minLength": 1 } }, "required": ["privateKey"] }
+            },
+            {
+              "if":   { "properties": { "privateKey":  { "minLength": 1 } }, "required": ["privateKey"] },
+              "then": { "properties": { "certificate": { "minLength": 1 } }, "required": ["certificate"] }
+            }
+          ]
+        },
         "podDisruptionBudget": {
           "type": "object",
           "description": "PodDisruptionBudget configuration.",

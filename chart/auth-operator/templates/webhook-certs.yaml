@@ -1,3 +1,7 @@
+{{- $ca := .Values.webhookServer.certificateAuthority | default dict }}
+{{- if ne (empty $ca.certificate) (empty $ca.privateKey) }}
+{{- fail "webhookServer.certificateAuthority.certificate and webhookServer.certificateAuthority.privateKey must be set together" }}
+{{- end }}
 apiVersion: v1
 kind: Secret
 metadata:
@@ -5,3 +9,9 @@ metadata:
   labels:
     authorization.t-caas.telekom.com/component: webhook
   {{- include "auth-operator.labels" . | nindent 4 }}
+{{- if $ca.certificate }}
+# The cert rotator keeps a valid CA from this Secret and only issues the serving certificate (tls.crt/tls.key).
+data:
+  ca.crt: {{ $ca.certificate | b64enc }}
+  ca.key: {{ $ca.privateKey | b64enc }}
+{{- end }}

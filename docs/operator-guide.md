@@ -297,6 +297,52 @@ access to the endpoint; never enable unauthenticated `/authorize` in production.
 The chart installs neither this API-server configuration nor the token in the
 API server. The API server must be able to reach the webhook Service.
 
+#### Providing the Webhook CA
+
+The webhook cert rotator generates its CA after the chart is installed, so it
+is not known when the API server starts. If the API server must trust the
+webhook from its first start, for example when the authorization configuration
+is part of the node bootstrap data, generate the CA beforehand and pass it to
+the chart:
+
+```yaml
+webhookServer:
+  certificateAuthority:
+    certificate: |
+      -----BEGIN CERTIFICATE-----
+      ...
+    privateKey: |
+      -----BEGIN RSA PRIVATE KEY-----
+      ...
+```
+
+Put the same certificate, base64-encoded, into `certificate-authority-data` of
+the webhook kubeconfig. The chart writes the CA into the webhook certificate
+Secret and into the `caBundle` of the webhook configurations. The rotator keeps
+it and only issues the serving certificate. Set both values or neither.
+
+The rotator only keeps a CA that meets all of these requirements, otherwise it
+silently replaces it with a self-generated CA that the API server does not trust:
+
+- self-signed CA certificate with the DNS name `cert`
+- RSA key in PKCS#1 encoding (`BEGIN RSA PRIVATE KEY`)
+- valid for more than 90 days
+
+Treat the private key like any other Secret: pass it from a Secret, for example
+with Flux `valuesFrom`, instead of committing it to a values file. To replace the
+CA, update both values; the rotator then issues a new serving certificate.
+Restart or re-bootstrap the API servers so they trust the new CA. Do not remove
+the values once API servers trust the CA: Helm then deletes `ca.crt` and
+`ca.key` from the Secret, and the rotator silently generates a new CA that the
+API servers do not trust.
+
+The rotator writes `ca.crt`, `ca.key` and the `caBundle` fields with server-side
+apply. Once it has generated or replaced a CA, for example in an installation
+that did not provide one before, a Helm 4 upgrade that sets
+`certificateAuthority` conflicts with the rotator on these fields. Run
+`helm upgrade` with `--force-conflicts` in this case. Flux helm-controller
+forces these conflicts with server-side apply by default.
+
 The first definitive allow/deny in the chain wins: Node/RBAC allows bypass
 the bridge, and an earlier explicit deny cannot be overridden by it.
 `failurePolicy: NoOpinion` makes transport errors fall through, **not**
@@ -686,6 +732,9 @@ webhookServer:
   authorizeAuth:
     tokenSecretName: ""     # Existing Secret with the /authorize bearer token
     tokenSecretKey: token
+  certificateAuthority:     # Optional CA for the webhook serving certificate
+    certificate: ""         # PEM CA certificate
+    privateKey: ""          # PEM PKCS#1 RSA private key
   resources:
     limits:
       cpu: 150m
