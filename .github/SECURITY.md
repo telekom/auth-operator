@@ -150,14 +150,23 @@ This project adheres to:
 
 ---
 
-## Version Support
+## Supported Versions
 
-Only the latest version receives security updates. We recommend:
+Releases are tagged from `main`; there are no maintenance branches. Security
+fixes land on `main` and ship in the next release. They are not backported.
 
-- Staying on the latest stable release
-- Monitoring GitHub releases for security patches
-- Testing updates in a staging environment before production deployment
-- Subscribing to GitHub notifications for critical security updates
+| Version | Supported |
+|---------|-----------|
+| Newest release on the [Releases page](https://github.com/telekom/auth-operator/releases), including a pre-release (`-rc.N`) | :white_check_mark: |
+| Every older release, including earlier release candidates of the same version | :x: |
+
+A release stops receiving security fixes as soon as a newer release is
+published. To get a fix, update to the newest release.
+
+Security advisories are published as
+[GitHub Security Advisories](https://github.com/telekom/auth-operator/security/advisories)
+for this repository. The release that contains a fix is linked from its
+advisory; watch the repository for releases to be notified.
 
 ---
 
@@ -169,6 +178,6 @@ For other inquiries: See [Contributing Guidelines](../CONTRIBUTING.md)
 
 ---
 
-**Last Updated:** February 2026
+**Last Updated:** November 2026
 
 This security policy is subject to change. Check back regularly for updates.
