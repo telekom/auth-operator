@@ -7,7 +7,7 @@ A Kubernetes operator for managing RBAC with RoleDefinitions, BindDefinitions, W
 - Kubernetes 1.28+
 - Helm 3.17+
 
-> **Note:** cert-manager is **NOT required**. The auth-operator uses [cert-controller](https://github.com/open-policy-agent/cert-controller) to self-sign and automatically rotate TLS certificates.
+> **Note:** cert-manager is **NOT required**. The auth-operator uses [cert-controller](https://github.com/open-policy-agent/cert-controller) to self-sign and automatically rotate TLS certificates. For the defaults, a manual rotation and the steps after a key compromise, see [Webhook Certificate Rotation](../../docs/operator-guide.md#webhook-certificate-rotation).
 
 ## Installation
 
