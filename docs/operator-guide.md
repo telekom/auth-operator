@@ -61,6 +61,100 @@ make deploy OVERLAY=default
 > **⚠️ WARNING:** The Kustomize `default` overlay provides a basic installation but does **not** include the production-hardening primitives (split ServiceAccounts, NetworkPolicies, PodDisruptionBudgets, secure-metrics) provided by the Helm chart. For production environments, the Helm chart is the **only** recommended and fully hardened installation path.
 ```
 
+### Verify Release Signatures
+
+The release workflow signs the operator image and the OCI Helm chart keyless
+with [cosign](https://github.com/sigstore/cosign), using the workflow's GitHub
+OIDC identity. It also publishes an SPDX SBOM attestation (cosign) and SLSA
+build provenance (GitHub artifact attestations) for the image, and provenance
+for `install.yaml` and `crds.yaml`. Branch and pull request builds are not
+signed.
+
+Every signature names the signing workflow and tag as certificate identity,
+for example
+`https://github.com/telekom/auth-operator/.github/workflows/release.yml@refs/tags/v0.5.0-rc.26`.
+Pin both the identity and the issuer. The anchored expression below accepts
+only release tags of `release.yml` in this repository:
+
+```bash
+VERSION=0.5.0-rc.26   # release tag without the leading "v"
+ISSUER=https://token.actions.githubusercontent.com
+IDENTITY='^https://github\.com/telekom/auth-operator/\.github/workflows/release\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
+```
+
+The commands need cosign v3 and, for provenance, the GitHub CLI (`gh`).
+
+```bash
+# Image signature
+cosign verify "ghcr.io/telekom/auth-operator:${VERSION}" \
+  --certificate-identity-regexp "${IDENTITY}" \
+  --certificate-oidc-issuer "${ISSUER}"
+
+# Helm chart signature
+cosign verify "ghcr.io/telekom/charts/auth-operator:${VERSION}" \
+  --certificate-identity-regexp "${IDENTITY}" \
+  --certificate-oidc-issuer "${ISSUER}"
+
+# SBOM attestation of the image
+cosign verify-attestation "ghcr.io/telekom/auth-operator:${VERSION}" \
+  --type spdxjson \
+  --certificate-identity-regexp "${IDENTITY}" \
+  --certificate-oidc-issuer "${ISSUER}" > /dev/null
+
+# SLSA build provenance of the image
+gh attestation verify "oci://ghcr.io/telekom/auth-operator:${VERSION}" \
+  --repo telekom/auth-operator \
+  --cert-identity-regex "${IDENTITY}" \
+  --deny-self-hosted-runners
+
+# Provenance of the release manifests
+gh release download "v${VERSION}" -R telekom/auth-operator -p install.yaml -p crds.yaml
+gh attestation verify install.yaml --repo telekom/auth-operator --cert-identity-regex "${IDENTITY}"
+gh attestation verify crds.yaml --repo telekom/auth-operator --cert-identity-regex "${IDENTITY}"
+```
+
+Each command exits non-zero if the artifact is unsigned, for example a branch
+build, or signed by another identity. Tags are mutable, so deploy the
+verified digest: the release notes list it, and published charts pin
+`image.digest` by default.
+
+To enforce the signature in the cluster, use an admission policy with the same
+identity. Example for Kyverno 1.13 or later (`type: SigstoreBundle` is required
+because the signatures are stored as Sigstore bundles):
+
+```yaml
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-auth-operator-image
+spec:
+  validationFailureAction: Enforce
+  webhookTimeoutSeconds: 30
+  rules:
+    - name: verify-release-signature
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      verifyImages:
+        - type: SigstoreBundle
+          imageReferences:
+            - "ghcr.io/telekom/auth-operator:*"
+            - "ghcr.io/telekom/auth-operator@*"
+          mutateDigest: true
+          attestors:
+            - entries:
+                - keyless:
+                    issuer: "https://token.actions.githubusercontent.com"
+                    subjectRegExp: '^https://github\.com/telekom/auth-operator/\.github/workflows/release\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
+                    rekor:
+                      url: https://rekor.sigstore.dev
+```
+
+Kyverno 1.19 marks `ClusterPolicy` as deprecated in favour of
+`ImageValidatingPolicy`; the identity and issuer stay the same.
+
 ### Verify Installation
 
 ```bash
