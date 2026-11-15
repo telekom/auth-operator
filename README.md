@@ -62,6 +62,9 @@ helm install auth-operator oci://ghcr.io/telekom/charts/auth-operator \
 
 For configuration options, see the [Helm Chart README](./chart/auth-operator/README.md).
 
+Release images and charts are signed with cosign. To verify them before
+installing, see [Verify Release Signatures](docs/operator-guide.md#verify-release-signatures).
+
 ### Using Kustomize
 
 ```bash
