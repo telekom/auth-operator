@@ -1040,6 +1040,11 @@ for c in $(kubectl get validatingwebhookconfigurations,mutatingwebhookconfigurat
 done
 ```
 
+No output means that the selector matched no webhook configuration. The
+Kustomize installation sets no `app.kubernetes.io/instance` label; select its
+webhook configurations with `-l app.kubernetes.io/name=auth-operator`
+instead.
+
 To check the certificate the webhook Service serves, run
 `kubectl -n "${NS}" port-forward "svc/${FULLNAME}-webhook-service" 9443:443` in a
 second shell, save `ca.crt` to a file, and run:
