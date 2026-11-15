@@ -951,13 +951,16 @@ API server authorizers may still allow the request.
 
 The webhook server generates its own CA and serving certificate with
 [cert-controller](https://github.com/open-policy-agent/cert-controller). Both
-are stored in the Secret `<release>-webhook-certs` in the release namespace
-(`auth-operator-webhook-certs` for Kustomize installations):
+are stored in the Secret `<fullname>-webhook-certs` in the release namespace.
+`<fullname>` is the chart's full name: `fullnameOverride` if set, otherwise
+the release name if it contains `auth-operator`, otherwise
+`<release>-auth-operator`. The release `auth-operator` and the Kustomize
+installation both use `auth-operator-webhook-certs`.
 
 | Key | Content |
 |-----|---------|
 | `ca.crt` / `ca.key` | Self-signed CA (`CN=cert`, `O=t-caas`) and its private key |
-| `tls.crt` / `tls.key` | Serving certificate for `<release>-webhook-service.<namespace>.svc` and its private key |
+| `tls.crt` / `tls.key` | Serving certificate for `<fullname>-webhook-service.<namespace>.svc` and its private key |
 
 The rotator runs on the elected webhook-server replica. It uses
 cert-controller's defaults:
@@ -989,7 +992,7 @@ that the API server trusts for these webhooks. With the chart defaults, this
 includes:
 
 - the webhook-server ServiceAccount, through the Role
-  `<release>-webhook-secrets` (`get`, `patch`, `update` on this Secret, and
+  `<fullname>-webhook-secrets` (`get`, `patch`, `update` on this Secret, and
   `list`/`watch` on Secrets in the namespace for the informer);
 - the controller-manager ServiceAccount, whose ClusterRole grants `get`,
   `list` and `watch` on all resources;
@@ -1009,8 +1012,9 @@ kubectl auth can-i list secrets -n "${NS}" --as="system:serviceaccount:<namespac
 
 ```bash
 NS=auth-operator-system
-SECRET=auth-operator-webhook-certs
-RELEASE=auth-operator
+RELEASE=auth-operator            # Helm release name
+FULLNAME=auth-operator           # chart full name, see above
+SECRET="${FULLNAME}-webhook-certs"
 
 # CA and serving certificate: subject, issuer, validity, fingerprint
 kubectl -n "${NS}" get secret "${SECRET}" -o jsonpath='{.data.ca\.crt}' | base64 -d | \
@@ -1018,26 +1022,31 @@ kubectl -n "${NS}" get secret "${SECRET}" -o jsonpath='{.data.ca\.crt}' | base64
 kubectl -n "${NS}" get secret "${SECRET}" -o jsonpath='{.data.tls\.crt}' | base64 -d | \
   openssl x509 -noout -subject -issuer -dates
 
-# Every webhook configuration of the release must carry the current CA
+# Every webhook configuration of the release must carry the current CA.
+# Expect one line per configuration; anything but "ok" needs attention.
 CA=$(kubectl -n "${NS}" get secret "${SECRET}" -o jsonpath='{.data.ca\.crt}')
+[ -n "${CA}" ] || echo "ERROR ${SECRET} has no ca.crt"
 for c in $(kubectl get validatingwebhookconfigurations,mutatingwebhookconfigurations \
     -l app.kubernetes.io/instance="${RELEASE}" -o name); do
-  if kubectl get "${c}" -o jsonpath='{range .webhooks[*]}{.clientConfig.caBundle}{"\n"}{end}' | \
-      grep -qvxF "${CA}"; then
-    echo "STALE ${c}"
-  else
+  if ! bundles=$(kubectl get "${c}" \
+      -o jsonpath='{range .webhooks[*]}{.clientConfig.caBundle}{"\n"}{end}'); then
+    echo "ERROR ${c}"
+  elif [ -n "${CA}" ] && [ -n "${bundles}" ] && \
+      ! printf '%s\n' "${bundles}" | grep -qvxF "${CA}"; then
     echo "ok    ${c}"
+  else
+    echo "STALE ${c}"
   fi
 done
 ```
 
 To check the certificate the webhook Service serves, run
-`kubectl -n "${NS}" port-forward svc/${RELEASE}-webhook-service 9443:443` in a
+`kubectl -n "${NS}" port-forward "svc/${FULLNAME}-webhook-service" 9443:443` in a
 second shell, save `ca.crt` to a file, and run:
 
 ```bash
 openssl s_client -connect 127.0.0.1:9443 \
-  -servername "${RELEASE}-webhook-service.${NS}.svc" \
+  -servername "${FULLNAME}-webhook-service.${NS}.svc" \
   -CAfile ca.crt -verify_return_error </dev/null | grep 'Verify return code'
 ```
 
@@ -1060,8 +1069,8 @@ example after a change of personnel with Secret access:
    none serves the old certificate:
 
    ```bash
-   kubectl -n "${NS}" rollout restart deployment/"${RELEASE}-webhook-server"
-   kubectl -n "${NS}" rollout status deployment/"${RELEASE}-webhook-server"
+   kubectl -n "${NS}" rollout restart "deployment/${FULLNAME}-webhook-server"
+   kubectl -n "${NS}" rollout status "deployment/${FULLNAME}-webhook-server"
    ```
 
 3. Run the inspection commands above: the CA fingerprint changed, and every
@@ -1069,10 +1078,14 @@ example after a change of personnel with Secret access:
 4. If the API servers use `/authorize`, update their kubeconfig with the new
    `ca.crt`.
 
-Until the new `caBundle` is injected, the API server rejects the old
-certificate. The webhooks use `failurePolicy: Fail`, so writes to auth-operator
-resources, and to Namespaces when namespace admission is enabled, fail during
-this window. Rotate in a maintenance window.
+The rotation has two windows in which admission calls fail. Until the new
+`caBundle` is injected, the API server still trusts only the old CA and
+rejects replicas that already serve the new certificate, starting with the
+restarted leader. After the injection, it rejects replicas that still serve
+the old certificate, until they reload or restart. The outage ends when the
+rollout in step 2 has finished. The webhooks use `failurePolicy: Fail`, so
+writes to auth-operator resources, and to Namespaces when namespace admission
+is enabled, can fail in both windows. Rotate in a maintenance window.
 
 #### Suspected Key Compromise
 
@@ -1085,15 +1098,21 @@ API server trusts:
 2. Rotate as in [Planned Rotation](#planned-rotation). Replacing `caBundle`
    removes the API server's trust in the old CA and in every certificate it
    signed.
-3. Rotate the `/authorize` bearer token Secret
-   (`webhookServer.authorizeAuth.tokenSecretName`) too if it lives in the same
-   namespace: the same access path usually exposes it.
+3. If the `/authorize` bearer token Secret
+   (`webhookServer.authorizeAuth.tokenSecretName`) lives in the same
+   namespace, the same access path usually exposes it. Rotate it: write the
+   new token into the Secret and into the authorization webhook kubeconfig of
+   every API server, reload the API servers, and confirm that authorization
+   works once all webhook replicas have picked up the new token. The webhook
+   denies requests that carry the old token.
 4. Search the API server audit logs for reads of the Secret before the
-   rotation: `get` on `secrets/<release>-webhook-certs`, and `list` or `watch`
-   on `secrets` in the release namespace or cluster-wide, by subjects other
-   than the two operator ServiceAccounts. A copy of the old key cannot be
-   revoked, only made worthless by the rotation, so the audit trail decides
-   how far back to investigate.
+   rotation: `get` on `secrets/<fullname>-webhook-certs`, and `list` or `watch`
+   on `secrets` in the release namespace or cluster-wide. Include the two
+   operator ServiceAccounts: stolen tokens or a compromised operator pod read
+   as these identities. Tell their regular informer traffic apart from
+   unusual reads by source IP, user agent and time. A copy of the old key
+   cannot be revoked, only made worthless by the rotation, so the audit trail
+   decides how far back to investigate.
 
 ### Network Policies
 
