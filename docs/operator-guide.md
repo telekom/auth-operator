@@ -489,10 +489,12 @@ Do not remove the values once API servers trust the CA: Helm then deletes
 `ca.crt` and `ca.key` from the Secret, and the rotator silently generates a new
 CA that the API servers do not trust.
 
-The rotator writes `ca.crt`, `ca.key` and the `caBundle` fields with server-side
-apply. Once it has generated or replaced a CA, for example in an installation
-that did not provide one before, a Helm 4 upgrade that sets
-`certificateAuthority` conflicts with the rotator on these fields. Run
+The rotator writes `ca.crt`, `ca.key` and the `caBundle` fields with ordinary
+updates, not server-side apply, but the API server still records it as the
+field manager of every value it changes. Once it has generated or replaced a
+CA, for example in an installation that did not provide one before, a Helm 4
+upgrade with server-side apply that sets `certificateAuthority` conflicts with
+the rotator on these fields. Run
 `helm upgrade` with `--force-conflicts` in this case. Flux helm-controller
 forces these conflicts with server-side apply by default.
 
