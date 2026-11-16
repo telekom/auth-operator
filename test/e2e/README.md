@@ -136,6 +136,8 @@ Tests are organized using Ginkgo labels for selective execution:
 | `ha` | High availability tests | Multi-node (auth-operator-e2e-ha-multi) |
 | `leader-election` | Leader election tests | Multi-node (auth-operator-e2e-ha-multi) |
 | `kustomize` | Kustomize validation (no cluster) | N/A |
+| `authorization-chain` | API-server authorization chain | Dedicated (`run-authorization-chain.sh`) |
+| `provided-ca` | Webhook CA from Helm values, staged CA rotation | Dedicated (`PROVIDED_CA=true run-authorization-chain.sh`) |
 
 ---
 
@@ -173,7 +175,7 @@ Go and kubectl required). This creates a **new** uniquely named kind cluster,
 builds and loads the current image (including with the Docker Buildx container
 driver), configures kube-apiserver with structured `Node, RBAC, Webhook`
 authorization, disabled webhook decision caching and `NoOpinion` failure policy, installs
-the chart, and runs only the `authorization-chain` Ginkgo label. During kind
+the chart, and runs the `authorization-chain` Ginkgo label without `provided-ca`. During kind
 bootstrap, kubeadm's default Node/RBAC authorizers remain active so its admin
 binding can be created before the webhook exists; after chart readiness, the
 runner switches the API-server static pod to the mounted structured config.
@@ -194,6 +196,19 @@ checks normal RBAC authorization, negative authorization cases, opt-out denial
 and revocation both during termination and after actual deletion.
 CI runs this script in its own job (not merely the E2E compile check). The
 existing direct `/authorize` handler E2E remains a separate test.
+
+`PROVIDED_CA=true bash test/e2e/run-authorization-chain.sh` runs the
+`provided-ca` label instead, in the CI job "E2E Provided Webhook CA". The
+script generates two CAs before it creates the cluster, configures the API
+server to trust both for `/authorize`, and installs the chart with the first
+CA in `webhookServer.certificateAuthority` and two webhook replicas. The test
+checks that the rotator keeps the CA and issues the serving certificate with
+it, that every admission webhook's `caBundle` is the CA, and that both
+replicas serve a certificate from it; it then sends an admission and an
+`/authorize` request. Finally it trusts the second CA through
+`additionalTrustedCertificates`, rotates to it with the first one in
+`additionalTrustedCertificates`, sends admission requests during the whole
+rotation and fails on any TLS error, and drops the first CA.
 
 ### Run All Tests (Recommended for CI)
 

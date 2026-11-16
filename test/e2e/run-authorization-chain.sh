@@ -9,6 +9,9 @@ release=auth-operator-chain
 dir="$PWD/test/e2e/output/$name"
 image="${IMG:-auth-operator:e2e-test}"
 node_image="${KIND_NODE_IMAGE:-kindest/node:v1.36.4}"
+# PROVIDED_CA=true passes CAs generated beforehand to the chart and runs only
+# the provided-ca specs instead of the authorization chain specs.
+provided_ca="${PROVIDED_CA:-false}"
 
 if [[ ! "$name" =~ ^auth-operator-chain-[a-z0-9-]+$ ]]; then
   echo "KIND_CLUSTER must be a dedicated auth-operator-chain-* cluster name" >&2
@@ -38,6 +41,33 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
+
+label_filter='authorization-chain && !provided-ca'
+chart_args=(--set webhookServer.replicas=1)
+if [[ "$provided_ca" == true ]]; then
+  # Generate the CAs before the cluster exists, as for a CA that is part of the
+  # node bootstrap data: the chart starts with ca1 and the test rotates to ca2.
+  # The API server trusts both from its start, which is step 1 of the staged
+  # rotation. The cert rotator only keeps a self-signed RSA CA with a PKCS#1
+  # key, the DNS name "cert" and more than 90 days of validity.
+  printf '%s\n' '[req]' 'distinguished_name = dn' 'x509_extensions = ca' 'prompt = no' \
+    '[dn]' 'CN = cert' \
+    '[ca]' 'basicConstraints = critical,CA:TRUE' 'keyUsage = critical,keyCertSign,digitalSignature' \
+    'subjectAltName = DNS:cert' 'subjectKeyIdentifier = hash' >"$dir/ca.cnf"
+  for ca in ca1 ca2; do
+    openssl req -x509 -config "$dir/ca.cnf" -newkey rsa:2048 -nodes -days 365 \
+      -keyout "$dir/$ca.pkcs8" -out "$dir/$ca.crt" 2>/dev/null
+    openssl rsa -in "$dir/$ca.pkcs8" -out "$dir/$ca.key" -traditional 2>/dev/null
+    grep -q -- '-----BEGIN RSA PRIVATE KEY-----' "$dir/$ca.key"
+  done
+  cat "$dir/ca1.crt" "$dir/ca2.crt" >"$dir/ca.crt"
+  # Two replicas keep admission available while the rotator restarts the
+  # leader after it has issued the new serving certificate.
+  chart_args=(--set webhookServer.replicas=2
+    --set-file webhookServer.certificateAuthority.certificate="$dir/ca1.crt"
+    --set-file webhookServer.certificateAuthority.privateKey="$dir/ca1.key")
+  label_filter=provided-ca
+fi
 
 # Bootstrap with kubeadm's ordinary Node/RBAC chain: kubeadm itself needs to
 # create its admin binding before the webhook Service exists. Enable the
@@ -96,14 +126,16 @@ kubectl -n "$release" create secret generic "$release-authorize-token" --from-li
 helm upgrade --install "$release" chart/auth-operator -n "$release" \
   --set image.repository="${image%:*}" --set image.tag="${image##*:}" \
   --set image.pullPolicy=Never --set controller.replicas=1 \
-  --set webhookServer.replicas=1 \
+  "${chart_args[@]}" \
   --set webhookServer.bindDefinitionNamespaceSelectorLabelGroups[0]=example.com \
   --set webhookServer.authorizeAuth.tokenSecretName="$release-authorize-token" \
   --wait --timeout 5m
 
-ca="$(kubectl -n "$release" get secret "$release-webhook-certs" -o jsonpath='{.data.ca\.crt}')"
-test -n "$ca"
-printf '%s' "$ca" | base64 -d > "$dir/ca.crt"
+if [[ "$provided_ca" != true ]]; then
+  ca="$(kubectl -n "$release" get secret "$release-webhook-certs" -o jsonpath='{.data.ca\.crt}')"
+  test -n "$ca"
+  printf '%s' "$ca" | base64 -d > "$dir/ca.crt"
+fi
 ip="$(kubectl -n "$release" get service "$release-webhook-service" -o jsonpath='{.spec.clusterIP}')"
 # The node's host-network API server cannot resolve *.svc through cluster DNS.
 # Connect to the Service IP but validate the service DNS name against its CA.
@@ -145,6 +177,6 @@ for ((attempt=0; attempt<60; attempt++)); do
   sleep 2
 done
 kubectl get --raw /readyz >/dev/null
-KIND_CLUSTER="$name" IMG="$image" SKIP_CLUSTER_SETUP=true E2E_DEBUG_ON_FAILURE=false \
+KIND_CLUSTER="$name" IMG="$image" SKIP_CLUSTER_SETUP=true E2E_DEBUG_ON_FAILURE=false E2E_PROVIDED_CA_DIR="$dir" \
   go test -v -tags=e2e ./test/e2e -run '^TestE2E$' -count=1 -timeout=15m \
-  -ginkgo.label-filter='authorization-chain' -ginkgo.v
+  -ginkgo.label-filter="$label_filter" -ginkgo.v

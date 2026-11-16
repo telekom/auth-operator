@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add the optional Helm values `webhookServer.certificateAuthority.certificate`
+  and `webhookServer.certificateAuthority.privateKey`. The webhook cert rotator
+  keeps the provided CA instead of generating one, so the CA can be part of the
+  API server authorization webhook kubeconfig before the cluster is bootstrapped.
+  The private key must be a PKCS#1 RSA key; the chart rejects other key formats (#642).
+- Add the optional Helm value
+  `webhookServer.certificateAuthority.additionalTrustedCertificates`. The
+  admission webhooks trust these CA certificates in addition to the provided
+  CA, so a staged CA rotation keeps admission working while webhook replicas
+  still serve a certificate from the old CA (#658).
 - Optional node-scoped pod deletion guard for delegated identities
   (`podDeletionGuard`, `--pod-deletion-guard`, default off): a Pod DELETE by an
   identity selected by the webhook's `matchConditions` is allowed only on the
@@ -155,6 +165,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `/authorize` access log at verbosity 2: caller address, method, status code
   and latency. The SubjectAccessReview body and tokens are not logged.
 
+### CI
+
+- New E2E job "E2E Provided Webhook CA": installs the chart with a CA generated
+  beforehand through a real API server authorization chain, checks the rotator
+  keeps it and every webhook trusts it, and rotates to a new CA without TLS
+  failures of admission requests (#658).
+- Fix a race in the benchmark lifecycle static checks: the signal test read the
+  build child PID before the Docker shim had written it. Failing static checks
+  now name the failing line.
+
 ## [0.5.0-rc.21] — Pre-release
 
 ### CI
@@ -215,11 +235,6 @@ rc.20 (Go 1.26.10, CVE-2026-111943) passed it.
 
 ### Added
 
-- Add the optional Helm values `webhookServer.certificateAuthority.certificate`
-  and `webhookServer.certificateAuthority.privateKey`. The webhook cert rotator
-  keeps the provided CA instead of generating one, so the CA can be part of the
-  API server authorization webhook kubeconfig before the cluster is bootstrapped.
-  The private key must be a PKCS#1 RSA key; the chart rejects other key formats.
 - Add `addon` namespace ownership with the `t-caas.telekom.com/addon` identity
   label, selector-derived ownership and ServiceAccount inheritance. Authorized
   updates preserve immutable ownership; add-on namespaces are not implicitly

@@ -26,6 +26,7 @@ const (
 	webhookCertsSecretName = "auth-operator-webhook-certs"
 	caCertificateValue     = "webhookServer.certificateAuthority.certificate"
 	caPrivateKeyValue      = "webhookServer.certificateAuthority.privateKey"
+	caAdditionalValue      = "webhookServer.certificateAuthority.additionalTrustedCertificates"
 )
 
 func TestWebhookCertificateAuthoritySchemaDefaults(t *testing.T) {
@@ -46,7 +47,7 @@ func TestWebhookCertificateAuthoritySchemaDefaults(t *testing.T) {
 	if !strings.Contains(description, `DNS name "cert"`) || !strings.Contains(description, "PKCS#1") {
 		t.Fatalf("certificateAuthority description should document the cert rotator requirements, got %q", description)
 	}
-	for _, name := range []string{"certificate", "privateKey"} {
+	for _, name := range []string{"certificate", "privateKey", "additionalTrustedCertificates"} {
 		prop := nestedMap(t, ca, "properties", name)
 		if prop["type"] != "string" || prop["default"] != "" {
 			t.Fatalf("certificateAuthority.%s should be a string defaulting to empty, got type %v default %v",
@@ -115,6 +116,63 @@ func TestWebhookConfigurationsShouldTrustTheProvidedCertificateAuthority(t *test
 			t.Fatalf("webhook %v should trust the provided CA, got caBundle %q", webhook["name"], got)
 		}
 	}
+}
+
+// During a staged CA rotation the admission webhooks must trust both CAs. The cert rotator signs with the
+// first certificate in ca.crt, keeps the rest unchanged and injects the whole ca.crt as caBundle, so the
+// chart must render the signing CA first and the same bundle everywhere.
+func TestWebhookCertificateAuthorityShouldTrustAdditionalCertificates(t *testing.T) {
+	requireHelm(t)
+	certificatePath, privateKeyPath := writeTestCertificateAuthority(t)
+	previousPath, _ := writeTestCertificateAuthority(t)
+	certificate := readFile(t, certificatePath)
+	previous := readFile(t, previousPath)
+	want := strings.TrimSpace(certificate) + "\n" + strings.TrimSpace(previous) + "\n"
+
+	documents := decodeYAMLDocuments(t, []byte(helmTemplate(t,
+		"--set", "namespaceAdmission.enabled=true",
+		"--set-file", caCertificateValue+"="+certificatePath,
+		"--set-file", caPrivateKeyValue+"="+privateKeyPath,
+		"--set-file", caAdditionalValue+"="+previousPath,
+	)))
+
+	data := nestedObject(t, selectCreatorDocument(t, documents, "Secret", webhookCertsSecretName), "data")
+	if got := decodeBase64(t, data["ca.crt"]); got != want {
+		t.Fatalf("ca.crt should contain the signing CA followed by the additional CA, got %q", got)
+	}
+	if got := decodeBase64(t, data["ca.key"]); got != readFile(t, privateKeyPath) {
+		t.Fatal("ca.key should contain the provided private key")
+	}
+	webhooks := renderedWebhooks(t, documents)
+	if len(webhooks) == 0 {
+		t.Fatal("expected rendered webhooks")
+	}
+	for _, webhook := range webhooks {
+		if got := decodeBase64(t, nestedObject(t, webhook, "clientConfig")["caBundle"]); got != want {
+			t.Fatalf("webhook %v should trust both CAs, got caBundle %q", webhook["name"], got)
+		}
+	}
+}
+
+func TestWebhookCertificateAuthorityShouldRequireCertificateForAdditionalCertificates(t *testing.T) {
+	requireHelm(t)
+	previousPath, _ := writeTestCertificateAuthority(t)
+	args := []string{"--set-file", caAdditionalValue + "=" + previousPath}
+
+	t.Run("schema", func(t *testing.T) {
+		assertHelmTemplateFails(t, "minLength", args...)
+	})
+	t.Run("template when the schema is skipped", func(t *testing.T) {
+		assertHelmTemplateFails(t, "additionalTrustedCertificates requires", append([]string{"--skip-schema-validation"}, args...)...)
+	})
+	t.Run("schema rejects a private key", func(t *testing.T) {
+		certificatePath, privateKeyPath := writeTestCertificateAuthority(t)
+		assertHelmTemplateFails(t, "does not match pattern",
+			"--set-file", caCertificateValue+"="+certificatePath,
+			"--set-file", caPrivateKeyValue+"="+privateKeyPath,
+			"--set-file", caAdditionalValue+"="+privateKeyPath,
+		)
+	})
 }
 
 func TestWebhookCertificateAuthorityShouldRequireCertificateAndPrivateKeyTogether(t *testing.T) {

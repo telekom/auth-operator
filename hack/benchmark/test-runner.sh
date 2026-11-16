@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: 2026 Deutsche Telekom AG
 # SPDX-License-Identifier: Apache-2.0
 set -Eeuo pipefail
+trap 'echo "test-runner.sh: line $LINENO failed: $BASH_COMMAND" >&2' ERR
 
 # Static lifecycle guard. This deliberately does not require Docker, Kind,
 # Helm, a cluster, or network access; live lifecycle is exercised separately.
@@ -279,7 +280,7 @@ mkdir -p "$signal_bin"
 printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"$signal_bin/flock"
 printf '%s\n' '#!/usr/bin/env bash' 'shift 3; exec "$@"' >"$signal_bin/timeout"
 # shellcheck disable=SC2016
-printf '%s\n' '#!/usr/bin/env bash' 'case "${1:-}" in info) exit 0;; container) exit 1;; image) exit 1;; build) touch "${SIGNAL_BUILD_MARKER:?}"; sleep 30 & child=$!; printf "%s\n" "$child" >"${SIGNAL_CHILD_PID:?}"; wait "$child";; *) exit 0;; esac' >"$signal_bin/docker"
+printf '%s\n' '#!/usr/bin/env bash' 'case "${1:-}" in info) exit 0;; container) exit 1;; image) exit 1;; build) sleep 30 & child=$!; printf "%s\n" "$child" >"${SIGNAL_CHILD_PID:?}"; touch "${SIGNAL_BUILD_MARKER:?}"; wait "$child";; *) exit 0;; esac' >"$signal_bin/docker"
 # shellcheck disable=SC2016
 printf '%s\n' '#!/usr/bin/env bash' 'case "${1:-}" in get) exit 0;; *) exit 0;; esac' >"$signal_bin/kind"
 chmod 700 "$signal_bin"/*

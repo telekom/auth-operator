@@ -2,6 +2,9 @@
 {{- if ne (empty $ca.certificate) (empty $ca.privateKey) }}
 {{- fail "webhookServer.certificateAuthority.certificate and webhookServer.certificateAuthority.privateKey must be set together" }}
 {{- end }}
+{{- if and $ca.additionalTrustedCertificates (empty $ca.certificate) }}
+{{- fail "webhookServer.certificateAuthority.additionalTrustedCertificates requires webhookServer.certificateAuthority.certificate" }}
+{{- end }}
 {{- /* The rotator keeps a CA with any key format, but signs the serving certificate only with a PKCS#1 key. */}}
 {{- if and $ca.privateKey (not (hasPrefix "-----BEGIN RSA PRIVATE KEY-----" (trim $ca.privateKey))) }}
 {{- fail "webhookServer.certificateAuthority.privateKey must be a PKCS#1 RSA key (-----BEGIN RSA PRIVATE KEY-----); the cert rotator cannot issue the serving certificate with other key formats" }}
@@ -16,6 +19,6 @@ metadata:
 {{- if $ca.certificate }}
 # The cert rotator keeps a valid CA from this Secret and only issues the serving certificate (tls.crt/tls.key).
 data:
-  ca.crt: {{ $ca.certificate | b64enc }}
+  ca.crt: {{ include "auth-operator.providedCABundle" . | b64enc }}
   ca.key: {{ $ca.privateKey | b64enc }}
 {{- end }}

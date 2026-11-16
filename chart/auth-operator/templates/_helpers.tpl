@@ -71,10 +71,28 @@ Image pull policy
 {{- end }}
 
 {{/*
+PEM CA bundle from webhookServer.certificateAuthority, written to ca.crt of the
+webhook certificate Secret. The signing CA comes first, because the cert rotator
+signs the serving certificate with the first certificate and keeps the rest of
+ca.crt unchanged. additionalTrustedCertificates follow it, and the rotator
+injects the whole bundle into the webhook configurations, so admission keeps
+trusting the old CA during a staged CA rotation.
+*/}}
+{{- define "auth-operator.providedCABundle" -}}
+{{- $ca := .Values.webhookServer.certificateAuthority | default dict -}}
+{{- if $ca.additionalTrustedCertificates -}}
+{{- printf "%s\n%s\n" (trim $ca.certificate) (trim $ca.additionalTrustedCertificates) -}}
+{{- else -}}
+{{- $ca.certificate -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Resolve the current webhook CA bundle during Helm upgrades.
 
 A CA provided in webhookServer.certificateAuthority is used directly, so the
-webhook configurations trust it from the first install on.
+webhook configurations trust it, and any additionalTrustedCertificates, from the
+first install on.
 
 The cert rotator owns webhook caBundle injection at runtime, but Helm upgrades
 render these webhook configurations again before waiting on the release. Reusing
@@ -88,7 +106,7 @@ removing the apiserver trust root before follow-up charts create auth CRs.
 {{- $bundle := "" -}}
 {{- $ca := $root.Values.webhookServer.certificateAuthority | default dict -}}
 {{- if $ca.certificate -}}
-{{- $bundle = $ca.certificate | b64enc -}}
+{{- $bundle = include "auth-operator.providedCABundle" $root | b64enc -}}
 {{- end -}}
 {{- if not $bundle -}}
 {{- $secretName := printf "%s-webhook-certs" (include "auth-operator.fullname" $root) -}}
