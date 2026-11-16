@@ -73,6 +73,9 @@ Image pull policy
 {{/*
 Resolve the current webhook CA bundle during Helm upgrades.
 
+A CA provided in webhookServer.certificateAuthority is used directly, so the
+webhook configurations trust it from the first install on.
+
 The cert rotator owns webhook caBundle injection at runtime, but Helm upgrades
 render these webhook configurations again before waiting on the release. Reusing
 the live Secret or existing webhook caBundle prevents an upgrade from briefly
@@ -83,10 +86,16 @@ removing the apiserver trust root before follow-up charts create auth CRs.
 {{- $name := .name -}}
 {{- $kind := .kind -}}
 {{- $bundle := "" -}}
+{{- $ca := $root.Values.webhookServer.certificateAuthority | default dict -}}
+{{- if $ca.certificate -}}
+{{- $bundle = $ca.certificate | b64enc -}}
+{{- end -}}
+{{- if not $bundle -}}
 {{- $secretName := printf "%s-webhook-certs" (include "auth-operator.fullname" $root) -}}
 {{- $secret := lookup "v1" "Secret" $root.Release.Namespace $secretName -}}
 {{- if and $secret $secret.data -}}
 {{- $bundle = (index $secret.data "ca.crt" | default "") -}}
+{{- end -}}
 {{- end -}}
 {{- if not $bundle -}}
 {{- $webhookConfig := lookup "admissionregistration.k8s.io/v1" $kind "" $name -}}
