@@ -186,10 +186,13 @@ spec:
 		}
 		return conn.Close()
 	}
+	// helmUpgrade forces server-side apply conflicts: the rotator injects a changed ca.crt into the caBundle
+	// fields before Helm applies the webhook configurations and then owns them (see the operator guide).
 	helmUpgrade := func(args ...string) {
 		GinkgoHelper()
 		out, err := utils.Run(utils.CommandContext(context.Background(), "helm", append([]string{
-			"upgrade", release, "chart/auth-operator", "-n", namespace, "--reuse-values", "--wait", "--timeout", "5m",
+			"upgrade", release, "chart/auth-operator", "-n", namespace, "--reuse-values", "--force-conflicts",
+			"--wait", "--timeout", "5m",
 		}, args...)...))
 		Expect(err).NotTo(HaveOccurred(), "%s", out)
 	}

@@ -496,10 +496,12 @@ CA that the API servers do not trust.
 
 The rotator writes `ca.crt`, `ca.key` and the `caBundle` fields with ordinary
 updates, not server-side apply, but the API server still records it as the
-field manager of every value it changes. Once it has generated or replaced a
-CA, for example in an installation that did not provide one before, a Helm 4
-upgrade with server-side apply that sets `certificateAuthority` conflicts with
-the rotator on these fields. Run
+field manager of every value it changes. It injects a changed `ca.crt` into the
+`caBundle` fields as soon as Helm has updated the Secret, usually before Helm
+applies the webhook configurations, and then owns these fields. A Helm 4
+upgrade with server-side apply that changes `certificateAuthority` afterwards,
+for example steps 3 and 4 of the staged rotation, or any change once the
+rotator has generated or replaced a CA, then conflicts with the rotator. Run
 `helm upgrade` with `--force-conflicts` in this case. Flux helm-controller
 forces these conflicts with server-side apply by default.
 
