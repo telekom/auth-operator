@@ -280,6 +280,12 @@ spec:
 		}()
 		DeferCleanup(func() { stop(); wg.Wait() })
 
+		By("Trusting ca2 while the rotator still signs with ca1")
+		helmUpgrade("--set-file", "webhookServer.certificateAuthority.additionalTrustedCertificates="+filepath.Join(dir, "ca2.crt"))
+		Expect(secretData("ca.crt")).To(Equal(strings.TrimSpace(ca1) + "\n" + strings.TrimSpace(ca2) + "\n"))
+		expectCABundles(strings.TrimSpace(ca1) + "\n" + strings.TrimSpace(ca2) + "\n")
+		Expect(signedBy(secretData("tls.crt"), ca1)).To(Succeed())
+
 		By("Switching to ca2 and keeping ca1 trusted")
 		helmUpgrade(
 			"--set-file", "webhookServer.certificateAuthority.certificate="+filepath.Join(dir, "ca2.crt"),

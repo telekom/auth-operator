@@ -145,9 +145,10 @@ issues the serving certificate. It replaces a CA that is not a self-signed CA
 with the DNS name `cert`, or that expires within 90 days. The private key must
 be a PKCS#1 RSA key (`BEGIN RSA PRIVATE KEY`); the chart rejects other key
 formats, because the rotator cannot sign the serving certificate with them.
-To rotate a provided CA without failing admission requests, switch to the new
-CA and set `additionalTrustedCertificates` to the old CA until every webhook
-replica serves the new certificate; see the
+To rotate a provided CA without failing admission requests, first add the new
+CA to `additionalTrustedCertificates`, then switch to the new CA and keep the
+old one in `additionalTrustedCertificates` until every webhook replica serves
+the new certificate; see the
 [operator guide](../../docs/operator-guide.md#providing-the-webhook-ca).
 
 ### Namespace Admission

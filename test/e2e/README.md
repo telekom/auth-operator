@@ -205,8 +205,9 @@ CA in `webhookServer.certificateAuthority` and two webhook replicas. The test
 checks that the rotator keeps the CA and issues the serving certificate with
 it, that every admission webhook's `caBundle` is the CA, and that both
 replicas serve a certificate from it; it then sends an admission and an
-`/authorize` request. Finally it rotates to the second CA with the first one
-in `additionalTrustedCertificates`, sends admission requests during the whole
+`/authorize` request. Finally it trusts the second CA through
+`additionalTrustedCertificates`, rotates to it with the first one in
+`additionalTrustedCertificates`, sends admission requests during the whole
 rotation and fails on any TLS error, and drops the first CA.
 
 ### Run All Tests (Recommended for CI)
