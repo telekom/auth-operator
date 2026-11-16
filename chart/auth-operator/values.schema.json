@@ -476,6 +476,12 @@
               "description": "PEM-encoded PKCS#1 RSA private key (-----BEGIN RSA PRIVATE KEY-----) for the CA certificate.",
               "pattern": "^(\\s*-----BEGIN RSA PRIVATE KEY-----|$)",
               "default": ""
+            },
+            "additionalTrustedCertificates": {
+              "type": "string",
+              "description": "PEM-encoded CA certificates the webhook configurations trust in addition to certificate, for example the previous CA during a staged CA rotation. Requires certificate.",
+              "pattern": "^(\\s*-----BEGIN CERTIFICATE-----|$)",
+              "default": ""
             }
           },
           "allOf": [
@@ -485,6 +491,10 @@
             },
             {
               "if":   { "properties": { "privateKey":  { "minLength": 1 } }, "required": ["privateKey"] },
+              "then": { "properties": { "certificate": { "minLength": 1 } }, "required": ["certificate"] }
+            },
+            {
+              "if":   { "properties": { "additionalTrustedCertificates": { "minLength": 1 } }, "required": ["additionalTrustedCertificates"] },
               "then": { "properties": { "certificate": { "minLength": 1 } }, "required": ["certificate"] }
             }
           ]

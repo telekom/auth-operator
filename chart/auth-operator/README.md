@@ -115,6 +115,7 @@ Image reference precedence: `digest` > `tag` > `Chart.AppVersion`
 | `webhookServer.authorizeAuth.tokenSecretKey` | Secret key containing the /authorize bearer token | `token` |
 | `webhookServer.certificateAuthority.certificate` | PEM CA certificate the cert rotator uses instead of a self-generated CA; set together with `privateKey` | `""` |
 | `webhookServer.certificateAuthority.privateKey` | PEM PKCS#1 RSA private key (`BEGIN RSA PRIVATE KEY`) of `certificateAuthority.certificate`; other key formats are rejected | `""` |
+| `webhookServer.certificateAuthority.additionalTrustedCertificates` | PEM CA certificates the webhook configurations trust in addition to `certificate`, for example the old CA during a staged CA rotation; requires `certificate` | `""` |
 | `webhookServer.resources.limits.cpu` | CPU limit | `150m` |
 | `webhookServer.resources.limits.memory` | Memory limit | `256Mi` |
 | `webhookServer.resources.requests.cpu` | CPU request | `50m` |
@@ -144,6 +145,10 @@ issues the serving certificate. It replaces a CA that is not a self-signed CA
 with the DNS name `cert`, or that expires within 90 days. The private key must
 be a PKCS#1 RSA key (`BEGIN RSA PRIVATE KEY`); the chart rejects other key
 formats, because the rotator cannot sign the serving certificate with them.
+To rotate a provided CA without failing admission requests, switch to the new
+CA and set `additionalTrustedCertificates` to the old CA until every webhook
+replica serves the new certificate; see the
+[operator guide](../../docs/operator-guide.md#providing-the-webhook-ca).
 
 ### Namespace Admission
 

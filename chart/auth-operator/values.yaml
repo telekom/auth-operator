@@ -242,6 +242,9 @@ webhookServer:
     # key ("-----BEGIN RSA PRIVATE KEY-----"); other key formats are rejected.
     certificate: ""
     privateKey: ""
+    # Optional PEM CA certificates the admission webhooks trust in addition to
+    # `certificate`, e.g. the previous CA during a staged CA rotation.
+    additionalTrustedCertificates: ""
 
 namespaceAdmission:
   # Install cluster-wide Namespace mutating/validating webhooks.

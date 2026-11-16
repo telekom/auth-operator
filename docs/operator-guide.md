@@ -432,36 +432,58 @@ it renders. Convert a PKCS#8 RSA key with
 Treat the private key like any other Secret: pass it from a Secret, for example
 with Flux `valuesFrom`, instead of committing it to a values file.
 
-To replace the CA without losing the bridge, rotate in stages. If the API
-servers trust only the old CA while the webhook already serves a certificate
-from the new one, `/authorize` calls fail TLS and fall through as `NoOpinion`
-until every API server trusts the new CA.
+To replace the CA without failing requests, rotate in stages. Two clients
+must trust the serving certificate: the API servers calling `/authorize`
+through their webhook kubeconfig, and the admission webhooks through the
+`caBundle` of their webhook configurations. Webhook replicas only load a new
+serving certificate after the kubelet has updated their mounted certificate
+Secret, which can take a minute or more, so both clients must trust the old
+and the new CA until every replica serves the new certificate. Otherwise
+`/authorize` calls fail TLS and fall through as `NoOpinion`, and admission
+requests fail TLS and are rejected, because the admission webhooks use
+`failurePolicy: Fail`.
 
-1. Trust both CAs: put the old and the new CA certificate into one PEM bundle
-   and use it in the webhook kubeconfig of every API server.
-2. Switch the chart values to the new CA. The rotator then issues a serving
-   certificate signed by the new CA.
-3. Once all webhook replicas serve the new certificate, remove the old CA from
-   the kubeconfig of every API server.
+1. Trust both CAs in the API servers: put the old and the new CA certificate
+   into one PEM bundle and use it in the webhook kubeconfig of every API
+   server.
+2. Switch the chart values to the new CA, and keep trusting the old one in the
+   admission webhooks:
+
+   ```yaml
+   webhookServer:
+     certificateAuthority:
+       certificate: |    # new CA
+         -----BEGIN CERTIFICATE-----
+         ...
+       privateKey: |     # key of the new CA
+         -----BEGIN RSA PRIVATE KEY-----
+         ...
+       additionalTrustedCertificates: |   # old CA
+         -----BEGIN CERTIFICATE-----
+         ...
+   ```
+
+   The chart writes both certificates, the new CA first, into `ca.crt` of the
+   webhook certificate Secret and into the `caBundle` of the webhook
+   configurations. The rotator signs a new serving certificate with the first
+   certificate, keeps the bundle and injects it into the webhook
+   configurations.
+3. Once all webhook replicas serve the new certificate, remove
+   `additionalTrustedCertificates` and the old CA from the kubeconfig of every
+   API server.
 
 An API server reads inline `certificate-authority-data` only at startup, so
 restart or re-bootstrap it after steps 1 and 3. A kubeconfig that references a
 file with `certificate-authority` is reread at runtime from Kubernetes 1.36 on
 (feature `ClientsAllowCARotation`, beta), within about five minutes.
 
-The staged rotation covers `/authorize` only. The admission webhooks trust the
-`caBundle` of their webhook configurations, which the chart and the rotator set
-to the current CA alone. Step 2 therefore replaces their trust with the new CA
-at once, while the webhook replicas only load the new serving certificate after
-the kubelet has updated their mounted certificate Secret, which can take a
-minute or more. Until every replica serves it, admission requests that reach a
-replica with the old certificate fail TLS and are rejected, because the
-webhooks use `failurePolicy: Fail`. This affects creating, updating and
-deleting BindDefinitions, RoleDefinitions, their restricted variants,
-RBACPolicies and WebhookAuthorizers, and, with `namespaceAdmission.enabled`,
-Namespaces. The rotator's own CA renewal has the same short window. Switch the
-CA in a maintenance window, and retry rejected requests once all replicas serve
-the new certificate.
+To move an installation from a self-generated CA to a provided one, use the
+same steps with the CA from `ca.crt` of the webhook certificate Secret as the
+old CA. The same overlap does not exist when the rotator renews a CA it
+generated itself, 90 days before it expires: it replaces `ca.crt` and the
+`caBundle` with the new CA at once, so admission requests can fail until all
+replicas serve the new certificate. Provide the CA and rotate it in stages to
+avoid this.
 
 Do not remove the values once API servers trust the CA: Helm then deletes
 `ca.crt` and `ca.key` from the Secret, and the rotator silently generates a new
@@ -866,6 +888,7 @@ webhookServer:
   certificateAuthority:     # Optional CA for the webhook serving certificate
     certificate: ""         # PEM CA certificate
     privateKey: ""          # PEM PKCS#1 RSA private key
+    additionalTrustedCertificates: ""  # PEM CAs also trusted, e.g. the old CA in a rotation
   resources:
     limits:
       cpu: 150m
@@ -1270,6 +1293,12 @@ the old certificate, until they reload or restart. The outage ends when the
 rollout in step 2 has finished. The webhooks use `failurePolicy: Fail`, so
 writes to auth-operator resources, and to Namespaces when namespace admission
 is enabled, can fail in both windows. Rotate in a maintenance window.
+
+With a CA provided in `webhookServer.certificateAuthority`, do not remove the
+Secret data: the rotator would replace the provided CA with a generated one.
+Rotate in stages instead, as described in
+[Providing the Webhook CA](#providing-the-webhook-ca), which avoids both
+windows.
 
 #### Suspected Key Compromise
 
