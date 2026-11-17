@@ -376,14 +376,36 @@ func catalog(entries []entry, withValues map[string][]string) string {
 	return b.String()
 }
 
-var (
-	// personalData matches log keys that can hold a user identity, group,
-	// namespace name, URL path or client address.
-	personalData = regexp.MustCompile(`(?i)user|groups$|namespace|addr|^path$|serviceaccount$|^saname$`)
-	// notPersonalData excludes counts, flags, listen addresses and
-	// configuration among them (userKey: the name of a ConfigMap data key).
-	notPersonalData = regexp.MustCompile(`Count$|^total|^is[A-Z]|^userKey$|(?i:tenant|selector|ownership|-bind-address$|^matchingnamespaces$)`)
-)
+// notPersonalKeys lists every logged key that holds no personal data: counts,
+// flags, configuration, kinds, platform resource names and RBAC object names
+// the platform defines. A logged key must be here or in the table under
+// "## Fields that can hold personal data", so a new key fails the test until
+// it is classified.
+var notPersonalKeys = strings.Fields(`
+	activeNamespaceCount allowProtectedLabelChanges allowed apiGroup apiGroupCount authorizer bdIndex
+	bindDefinition bindDefinitionConcurrency bindDefinitionCount bindDefinitionName
+	bindDefinitionNamespaceSelectorLabelGroups bindingKind blockingResourceCount burst bypassReason
+	cacheAge cacheSyncTimeout capiOperatorUpdateBypass certsDir clusterRoleBindingName clusterRoleName
+	clusterRoleRef clusterRoleRefCount clusterRoleRefs commit concurrency conflictsWith count crbCount
+	crd currentUID decision deletionTimestamp disableCertRotation duration emergencyNamespaceCrossTenant
+	emergencyNamespaceTenant enableHTTP2 enableLeaderElection endpoint evaluatedCount existingOwnerKind
+	existingOwnerUID externalCount externalSAs extraKey fieldManagers generatedCount generatedSACount
+	generatedSAs generation got gracefulShutdownTimeout group groupCount groupVersion gvk gvr
+	health-probe-bind-address index isAggregating isDeleting isServiceAccount itemCount kind label
+	labelCount latency legacyOwner logFormat matchedField matchedRule matchingNamespaces method
+	metrics-bind-address missingCount missingRoleRefCount missingRoles mode namespaceCount newOwner
+	nodeKey observedGeneration oldOwner operation ownerError ownerUID phase policy policyRef port
+	rateLimit rbCount rbIndex rbacPolicy rbacPolicyConcurrency removedLabel requestCount requeueAfter
+	requiredGVKs resource resourceType resourceVersion resourcesChecked resourcesSkipped
+	restrictedBindDefinitionConcurrency restrictedBindDefinitions restrictedRoleDefinitionConcurrency
+	restrictedRoleDefinitions result roleBindingCount roleBindingIndex roleBindingSpecCount roleBindings
+	roleDefinition roleDefinitionConcurrency roleDefinitionCount roleDefinitionName ruleCount rulesCount
+	samplingRate selectedPolicy selector selectorCount selectorIndex serverVersion skipUpdateLabelChecks
+	skippedCount status strictSANamespaceOwnership subjectCount subjects targetConfigMap targetRole
+	tdgMigration timeout totalBindDefinitions totalBound totalNamespaces trackerResyncInterval
+	trackerSyncInterval usage userKey verb verbosity version violationCount webhook webhookAuthorizer
+	webhookAuthorizerConcurrency
+`)
 
 // assertSameKeys fails unless the documented keys equal the code keys.
 func assertSameKeys(t *testing.T, heading string, documented []string, code map[string]bool) {
@@ -454,6 +476,7 @@ func TestLoggingReference(t *testing.T) {
 	checkLevels(t, doc, entries)
 	checkDecisions(t, doc, entries)
 	checkPersonalData(t, doc, codeKeys)
+	checkPersonalDataColumns(t, doc, entries, withValues)
 
 	// Nothing that names a credential is logged.
 	secret := regexp.MustCompile(`(?i)token|password|passphrase|secret|credential|bearer|private`)
@@ -601,15 +624,84 @@ func TestRejectionRowsCheckLevels(t *testing.T) {
 	}
 }
 
-// checkPersonalData compares the personal-data table exactly with the logged
-// keys that can hold an identity, group, namespace name, path or address.
+// checkPersonalData requires every logged key to be either in the
+// personal-data table or in notPersonalKeys, and neither list to name a key
+// that is not logged.
 func checkPersonalData(t *testing.T, doc string, codeKeys map[string]bool) {
 	t.Helper()
-	pii := map[string]bool{}
+	const heading = "## Fields that can hold personal data"
+	table := tableKeys(t, doc, heading)
 	for k := range codeKeys {
-		if personalData.MatchString(k) && !notPersonalData.MatchString(k) {
-			pii[k] = true
+		if !slices.Contains(table, k) && !slices.Contains(notPersonalKeys, k) {
+			t.Errorf("log key %q is neither under %q nor in notPersonalKeys (hack/logref/logref_test.go): classify it", k, heading)
 		}
 	}
-	assertSameKeys(t, "## Fields that can hold personal data", tableKeys(t, doc, "## Fields that can hold personal data"), pii)
+	for _, k := range table {
+		if !codeKeys[k] {
+			t.Errorf("%q under %q is not logged", k, heading)
+		}
+		if slices.Contains(notPersonalKeys, k) {
+			t.Errorf("%q is both under %q and in notPersonalKeys", k, heading)
+		}
+	}
+	for _, k := range notPersonalKeys {
+		if !codeKeys[k] {
+			t.Errorf("notPersonalKeys lists %q, which no log call uses: remove it", k)
+		}
+	}
+}
+
+// checkPersonalDataColumns requires every row of the personal-data table to
+// name a personal-data class and data subject of the platform logging
+// contract, and the least verbose level that logs the key.
+func checkPersonalDataColumns(t *testing.T, doc string, entries []entry, withValues map[string][]string) {
+	t.Helper()
+	const heading = "## Fields that can hold personal data"
+	section := doc[strings.Index(doc, heading):]
+	section = section[:strings.Index(section, "\n## ")]
+	rows := 0
+	for _, row := range strings.Split(section, "\n") {
+		cells := strings.Split(row, "|")
+		if !strings.HasPrefix(row, "| `") {
+			continue
+		}
+		rows++
+		if len(cells) != 7 {
+			t.Errorf("row %q under %q needs the columns Key, Class, Data subject, From level and Content", row, heading)
+			continue
+		}
+		key, class, subject, level := strings.Trim(strings.TrimSpace(cells[1]), "`"), strings.TrimSpace(cells[2]),
+			strings.TrimSpace(cells[3]), strings.Trim(strings.TrimSpace(cells[4]), "`")
+		if class != "`tenant-pii`" && class != "`customer-data`" {
+			t.Errorf("%q under %q: class %s is not `tenant-pii` or `customer-data`", key, heading, class)
+		}
+		if !slices.Contains([]string{"`operator`", "`tenant-user`", "`end-customer`"}, subject) {
+			t.Errorf("%q under %q: data subject %s is not `operator`, `tenant-user` or `end-customer`", key, heading, subject)
+		}
+		if want := leastVerboseLevel(key, entries, withValues); level != want {
+			t.Errorf("%q under %q: level is %s, but the least verbose level that logs it is %s", key, heading, level, want)
+		}
+	}
+	if rows == 0 {
+		t.Fatalf("%s: no rows under %q", docPath, heading)
+	}
+}
+
+// leastVerboseLevel returns the least verbose level of the lines that carry
+// key, as a call key or through WithValues in the file of the line.
+func leastVerboseLevel(key string, entries []entry, withValues map[string][]string) string {
+	best, bestRank := "", 1<<30
+	for _, e := range entries {
+		if !slices.Contains(e.keys, key) && !slices.Contains(withValues[e.file], key) {
+			continue
+		}
+		rank := -1 // error
+		if e.level != "error" {
+			rank, _ = strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(e.level, "V("), ")"))
+		}
+		if rank < bestRank {
+			best, bestRank = e.level, rank
+		}
+	}
+	return best
 }
