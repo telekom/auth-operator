@@ -238,13 +238,32 @@ webhookServer:
     protocol: TCP
   certificateAuthority:
     # PEM CA used by the cert rotator instead of a self-generated one.
-    # Must be a self-signed CA with DNS name "cert", valid > 90 days, with a PKCS#1 RSA
+    # Must be a self-signed CA with DNS name "cert", valid for longer than
+    # certificates.renewBefore (default 90 days), with a PKCS#1 RSA
     # key ("-----BEGIN RSA PRIVATE KEY-----"); other key formats are rejected.
+    # Its own validity is fixed by the certificate; certificates.caValidity
+    # does not change it.
     certificate: ""
     privateKey: ""
     # Optional PEM CA certificates the admission webhooks trust in addition to
     # `certificate`, e.g. the previous CA during a staged CA rotation.
     additionalTrustedCertificates: ""
+  # Lifetimes of the certificates the cert rotator generates, as Go durations
+  # (e.g. 8760h, 90m). Empty keeps the default shown in each comment. The
+  # webhook server refuses to start unless
+  # checkInterval < renewBefore < certValidity <= caValidity, so shortening
+  # certValidity below 90 days also needs a shorter renewBefore.
+  certificates:
+    # Lifetime of a CA the rotator generates (default 87600h, 10 years).
+    # Does not apply to a CA provided in certificateAuthority.
+    caValidity: ""
+    # Lifetime of the serving certificate (default 8760h, 1 year).
+    certValidity: ""
+    # Renew the CA and the serving certificate this long before they expire
+    # (default 2160h, 90 days).
+    renewBefore: ""
+    # How often the rotator checks the certificates (default 12h).
+    checkInterval: ""
 
 namespaceAdmission:
   # Install cluster-wide Namespace mutating/validating webhooks.

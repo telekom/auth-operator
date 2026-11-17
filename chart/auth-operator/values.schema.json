@@ -461,9 +461,20 @@
             }
           }
         },
+        "certificates": {
+          "type": "object",
+          "description": "Lifetimes of the certificates the cert rotator generates, as Go durations. Empty keeps the default. The webhook server refuses to start unless checkInterval < renewBefore < certValidity <= caValidity.",
+          "additionalProperties": false,
+          "properties": {
+            "caValidity": { "type": "string", "pattern": "^$|^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$", "default": "", "description": "Lifetime of a CA the rotator generates (default 87600h). Does not apply to a CA provided in certificateAuthority." },
+            "certValidity": { "type": "string", "pattern": "^$|^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$", "default": "", "description": "Lifetime of the serving certificate (default 8760h)." },
+            "renewBefore": { "type": "string", "pattern": "^$|^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$", "default": "", "description": "Renew the CA and the serving certificate this long before they expire (default 2160h)." },
+            "checkInterval": { "type": "string", "pattern": "^$|^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$", "default": "", "description": "How often the rotator checks the certificates (default 12h)." }
+          }
+        },
         "certificateAuthority": {
           "type": "object",
-          "description": "PEM CA used by the cert rotator instead of a self-generated one. Must be a self-signed CA with DNS name \"cert\", valid for more than 90 days; otherwise the rotator replaces it. The private key must be a PKCS#1 RSA key, otherwise the rotator cannot issue the serving certificate.",
+          "description": "PEM CA used by the cert rotator instead of a self-generated one. Must be a self-signed CA with DNS name \"cert\", valid for longer than certificates.renewBefore (default 90 days); otherwise the rotator replaces it. Its validity is its own; certificates.caValidity does not change it. The private key must be a PKCS#1 RSA key, otherwise the rotator cannot issue the serving certificate.",
           "additionalProperties": false,
           "properties": {
             "certificate": {

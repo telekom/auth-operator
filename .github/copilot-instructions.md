@@ -342,6 +342,10 @@ Do not pass raw logger instances across helper boundaries when `ctx` is availabl
 | `--cert-rotation-secret-name` | Secret name for the rotated certificate | `""` |
 | `--cert-rotation-mutating-webhook` | Mutating webhook names to patch with CA bundle | `[]` |
 | `--cert-rotation-validating-webhook` | Validating webhook names to patch with CA bundle | `[]` |
+| `--webhook-ca-validity` | Lifetime of a generated webhook CA; not a provided CA | `87600h0m0s` |
+| `--webhook-cert-validity` | Lifetime of the webhook serving certificate | `8760h0m0s` |
+| `--webhook-cert-renew-before` | Renew the CA and serving certificate this long before expiry | `2160h0m0s` |
+| `--webhook-cert-check-interval` | How often the cert rotator checks the certificates | `12h0m0s` |
 | `--tdg-migration` | Enable legacy namespace ownership migration mode | `false` |
 | `--capi-operator-update-bypass` | Allow capi-operator-manager to skip BindDefinition authorization for Namespace UPDATE requests; protected-label validation still runs | `false` |
 | `--strict-sa-namespace-ownership` | On Namespace CREATE, ServiceAccounts with BindDefinition namespace grants do not inherit hosting-namespace ownership; `false` restores the previous inheritance. Transitional, may be removed in a future release | `true` |

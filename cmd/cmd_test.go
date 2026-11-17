@@ -498,6 +498,11 @@ func TestFlagDefaults(t *testing.T) {
 		{"webhook", "disable-authorize-request-checks", "false"},
 		{"webhook", "webhook-tls-go-defaults", "false"},
 		{"webhook", "binddefinition-namespace-selector-label-group", "[t-caas.telekom.com]"},
+		// cert-controller's defaults, unchanged from before the flags existed.
+		{"webhook", "webhook-ca-validity", "87600h0m0s"},
+		{"webhook", "webhook-cert-validity", "8760h0m0s"},
+		{"webhook", "webhook-cert-renew-before", "2160h0m0s"},
+		{"webhook", "webhook-cert-check-interval", "12h0m0s"},
 	}
 
 	for _, tt := range tests {
@@ -520,6 +525,34 @@ func TestFlagDefaults(t *testing.T) {
 				t.Errorf("flag %q default = %q, want %q", tt.flag, pf.DefValue, tt.expected)
 			}
 		})
+	}
+}
+
+// TestWebhookCmdRejectsInvalidCertLifetimes checks that the webhook command
+// fails before creating the manager when the cert rotator lifetimes are
+// inconsistent.
+func TestWebhookCmdRejectsInvalidCertLifetimes(t *testing.T) {
+	flags := webhookCmd.Flags()
+	for name, value := range map[string]string{
+		"cert-rotation-secret-name": "auth-operator-webhook-certs",
+		"cert-rotation-dns-name":    "auth-operator-webhook-service.ns.svc",
+		"certs-dir":                 t.TempDir(),
+		// Below the default 90-day renew-before.
+		"webhook-cert-validity": "720h",
+	} {
+		def := flags.Lookup(name).DefValue
+		if err := flags.Set(name, value); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = flags.Set(name, def) })
+	}
+	oldNamespace := namespace
+	namespace = "ns"
+	t.Cleanup(func() { namespace = oldNamespace })
+
+	err := webhookCmd.RunE(webhookCmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "renew before 2160h0m0s must be less than certificate validity 720h0m0s") {
+		t.Fatalf("RunE() error = %v, want the cert rotation Validate error", err)
 	}
 }
 
