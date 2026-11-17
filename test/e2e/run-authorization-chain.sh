@@ -8,7 +8,7 @@ name="${KIND_CLUSTER:-auth-operator-chain-$$}"
 release=auth-operator-chain
 dir="$PWD/test/e2e/output/$name"
 image="${IMG:-auth-operator:e2e-test}"
-node_image="${KIND_NODE_IMAGE:-kindest/node:v1.36.4}"
+node_image="${KIND_NODE_IMAGE:-kindest/node:v1.37.0}"
 # PROVIDED_CA=true passes CAs generated beforehand to the chart and runs only
 # the provided-ca specs instead of the authorization chain specs.
 provided_ca="${PROVIDED_CA:-false}"
