@@ -22,6 +22,7 @@ of the auth-operator in production Kubernetes environments.
 - [Monitoring](#monitoring)
 - [Security Considerations](#security-considerations)
   - [Webhook Certificate Rotation](#webhook-certificate-rotation)
+  - [Client Features We Don't Enable](#client-features-we-dont-enable)
 - [Upgrades](#upgrades)
 - [Backup and Recovery](#backup-and-recovery)
 - [Understanding ScopeNamespaced](#understanding-scopenamespaced)
@@ -1504,6 +1505,41 @@ API server IP or provide an equivalent API-server `additionalRules` entry. Helm
 rendering fails without one of these API-server egress paths so the operator is
 not installed into a namespace where it can resolve DNS but cannot reach the
 Kubernetes API.
+
+### Client Features We Don't Enable
+
+The operator serves an authorization webhook (`/authorize`) and talks to the
+API server through client-go. The operator does not opt into the client-go
+features below and must not depend on them. The same applies to any other
+component that calls an authorization or token-authentication webhook.
+
+- **CBOR (`ClientsPreferCBOR`, `ClientsAllowCBOR`): never enable.** Before
+  Kubernetes 1.35, an API server with `ClientsPreferCBOR` enabled sent an
+  inappropriate `Content-Type` to authorization, token authentication,
+  ImagePolicy admission and audit webhooks
+  ([kubernetes#132960](https://github.com/kubernetes/kubernetes/pull/132960)).
+  The failure mode is a malformed authorization request, which lands on an
+  access-control decision. Both gates are alpha and off by default, and the
+  operator gains nothing from them that justifies that risk on any cluster
+  version.
+- **WatchList / API streaming (`WatchListClient`): do not force or rely on
+  it.** The gate changed state in almost every release from 1.30 to 1.35
+  (beta in 1.31 and reverted in the same release, server gate off again in
+  1.33). Kubernetes 1.34 removed streaming from `List()` on the REST, typed,
+  dynamic and metadata clients, so only informers stream, and 1.34 informers
+  silently ignored configured `Transformer` funcs (fixed in 1.35,
+  [kubernetes#135580](https://github.com/kubernetes/kubernetes/pull/135580)).
+  client-go 0.35 and later turn `WatchListClient` on by default for informers,
+  which fall back to a regular LIST when the server does not support
+  streaming. Leave that default alone, and treat streaming-list memory
+  savings as a property of the cluster version: server-side streaming
+  collection encoding (`StreamingCollectionEncodingToJSON`/`ToProtobuf`, 1.33)
+  is transparent to clients and needs no opt-in.
+
+client-go also reads gate overrides from `KUBE_FEATURE_<gate>` environment
+variables. Do not set `KUBE_FEATURE_ClientsPreferCBOR`,
+`KUBE_FEATURE_ClientsAllowCBOR` or `KUBE_FEATURE_WatchListClient` in the
+operator's environment.
 
 ---
 
