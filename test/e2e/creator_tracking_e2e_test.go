@@ -919,7 +919,9 @@ spec:
 			getUID := func(version, resource string) string {
 				path := fmt.Sprintf("/apis/admissionregistration.k8s.io/%s/%s/%s",
 					version, resource, creatorMigrationPolicyName)
-				output, err := creatorKubectl(ctx, "", "get", "--raw", path)
+				// Stdout only: from Kubernetes 1.37 the server attaches a deprecation
+				// warning to v1beta1 reads, and kubectl prints it to stderr.
+				output, err := creatorSensitiveKubectl(ctx, "read "+path, "get", "--raw", path)
 				ExpectWithOffset(1, err).NotTo(HaveOccurred())
 				object, err := creatorDecodeObject(output)
 				ExpectWithOffset(1, err).NotTo(HaveOccurred())
