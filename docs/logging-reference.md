@@ -199,29 +199,49 @@ run at `--verbosity=1` or higher.
 
 ## Fields that can hold personal data
 
-These keys can carry user identities, group memberships, namespace names or
-client IP addresses. Treat logs that contain them as personal data.
-`go test ./hack/logref` fails when a logged key that looks like one of these
-is missing here. Free-text values such as `reason`, `error` and `msg` can
-also quote a user or namespace.
+These keys can carry user identities, group memberships, namespace, object or
+node names, label values or client IP addresses. Treat logs that contain them
+as personal data. Each key has the personal-data class and the data subject of
+the platform logging contract; a key that can hold data of several subjects
+names the highest (`end-customer` > `tenant-user` > `operator`). *From level*
+is the least verbose level that logs the key, so the key is absent below it
+(`error` lines are always written). `go test ./hack/logref` fails when a logged
+key that looks like one of these is missing here, a row names a key that is not
+logged, a class or subject is not one of these values, or the level is wrong.
 
-| Key | Content |
-|-----|---------|
-| `user` | Requesting user name (authorization decisions, SAR logs, CRD validation webhook context) |
-| `username` | Requesting user name (namespace admission webhooks) |
-| `groups` | Requesting user's groups (capped at 10) |
-| `impersonatedUser` | ServiceAccount identity used for impersonated applies |
-| `serviceAccount` | ServiceAccount name |
-| `saName` | ServiceAccount name |
-| `namespace` | Namespace name, which can name a team or person |
-| `saNamespace` | ServiceAccount namespace |
-| `targetNamespace` | Target namespace name |
-| `bindingNamespace` | Namespace of a generated RoleBinding |
-| `explicitNamespace` | Namespace named explicitly in a BindDefinition |
-| `objectNamespace` | Namespace of the object that triggered a reconcile |
-| `activeNamespaceNames` | Namespace names a BindDefinition selects |
-| `path` | Non-resource URL path |
-| `remoteAddr` | Client IP address and port of `/authorize` callers (`V(2)`) |
+Free-text values such as `reason`, `detail`, `error` and `msg` can also quote a
+user, group or namespace: `tenant-pii`, `tenant-user`, from `error`. Keys that
+name auth-operator resources (`bindDefinition`, `roleDefinition`, `rbd`, `rrd`,
+`owner`, ...) or the RBAC objects generated from them hold platform
+configuration and are not listed.
+
+| Key | Class | Data subject | From level | Content |
+|-----|-------|--------------|------------|---------|
+| `user` | `tenant-pii` | `tenant-user` | `error` | Requesting user name, can be an e-mail address (authorization decisions, SAR logs, CRD validation webhook context) |
+| `username` | `tenant-pii` | `tenant-user` | `V(0)` | Requesting user name (namespace admission webhooks) |
+| `groups` | `tenant-pii` | `tenant-user` | `V(0)` | Requesting user's groups (capped at 10) |
+| `impersonatedUser` | `tenant-pii` | `tenant-user` | `V(2)` | ServiceAccount identity used for impersonated applies |
+| `serviceAccount` | `tenant-pii` | `tenant-user` | `error` | ServiceAccount name |
+| `saName` | `tenant-pii` | `tenant-user` | `V(3)` | ServiceAccount name |
+| `namespace` | `tenant-pii` | `tenant-user` | `error` | Namespace name, which can name a team or person |
+| `saNamespace` | `tenant-pii` | `tenant-user` | `error` | ServiceAccount namespace |
+| `targetNamespace` | `tenant-pii` | `tenant-user` | `error` | Target namespace name |
+| `bindingNamespace` | `tenant-pii` | `tenant-user` | `V(0)` | Namespace of a generated RoleBinding |
+| `explicitNamespace` | `tenant-pii` | `tenant-user` | `V(4)` | Namespace named explicitly in a BindDefinition |
+| `objectNamespace` | `tenant-pii` | `tenant-user` | `V(2)` | Namespace of the object that triggered a reconcile |
+| `activeNamespaceNames` | `tenant-pii` | `tenant-user` | `V(2)` | Namespace names a BindDefinition selects |
+| `name` | `tenant-pii` | `tenant-user` | `error` | Name of the object a line is about: a tenant's namespace or pod, an auth-operator resource, or a flag |
+| `objectName` | `tenant-pii` | `tenant-user` | `V(2)` | Name of the namespace that triggered a BindDefinition reconcile |
+| `node` | `tenant-pii` | `tenant-user` | `V(0)` | Node of the pod the pod deletion guard decided on |
+| `targetNode` | `tenant-pii` | `tenant-user` | `V(0)` | Node named in the pod deletion guard ConfigMap |
+| `value` | `tenant-pii` | `tenant-user` | `V(2)` | Namespace label value (namespace mutating webhook); flag value in the `V(3)` flag dump, redacted for credentials |
+| `existingValue` | `tenant-pii` | `tenant-user` | `V(1)` | Conflicting label value already on the target namespace |
+| `inheritedValue` | `tenant-pii` | `tenant-user` | `V(1)` | Label value a ServiceAccount's namespace would pass on |
+| `oldValue` | `tenant-pii` | `tenant-user` | `V(2)` | Namespace label value before a change |
+| `newValue` | `tenant-pii` | `tenant-user` | `V(2)` | Namespace label value after a change |
+| `removedValue` | `tenant-pii` | `tenant-user` | `V(1)` | Value of a removed namespace label |
+| `path` | `customer-data` | `tenant-user` | `V(0)` | Non-resource URL path a user requested |
+| `remoteAddr` | `customer-data` | `end-customer` | `V(2)` | Client IP address and port of `/authorize` callers: the API server, or any client that reaches the endpoint |
 
 ## Never logged
 

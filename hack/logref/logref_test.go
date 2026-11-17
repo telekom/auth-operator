@@ -378,8 +378,9 @@ func catalog(entries []entry, withValues map[string][]string) string {
 
 var (
 	// personalData matches log keys that can hold a user identity, group,
-	// namespace name, URL path or client address.
-	personalData = regexp.MustCompile(`(?i)user|groups$|namespace|addr|^path$|serviceaccount$|^saname$`)
+	// namespace name, object or node name, label value, URL path or client
+	// address.
+	personalData = regexp.MustCompile(`(?i)user|groups$|namespace|addr|^path$|serviceaccount$|^saname$|^name$|^objectname$|node$|value$`)
 	// notPersonalData excludes counts, flags, listen addresses and
 	// configuration among them (userKey: the name of a ConfigMap data key).
 	notPersonalData = regexp.MustCompile(`Count$|^total|^is[A-Z]|^userKey$|(?i:tenant|selector|ownership|-bind-address$|^matchingnamespaces$)`)
@@ -454,6 +455,7 @@ func TestLoggingReference(t *testing.T) {
 	checkLevels(t, doc, entries)
 	checkDecisions(t, doc, entries)
 	checkPersonalData(t, doc, codeKeys)
+	checkPersonalDataColumns(t, doc, entries, withValues)
 
 	// Nothing that names a credential is logged.
 	secret := regexp.MustCompile(`(?i)token|password|passphrase|secret|credential|bearer|private`)
@@ -612,4 +614,55 @@ func checkPersonalData(t *testing.T, doc string, codeKeys map[string]bool) {
 		}
 	}
 	assertSameKeys(t, "## Fields that can hold personal data", tableKeys(t, doc, "## Fields that can hold personal data"), pii)
+}
+
+// checkPersonalDataColumns requires every row of the personal-data table to
+// name a personal-data class and data subject of the platform logging
+// contract, and the least verbose level that logs the key.
+func checkPersonalDataColumns(t *testing.T, doc string, entries []entry, withValues map[string][]string) {
+	t.Helper()
+	const heading = "## Fields that can hold personal data"
+	section := doc[strings.Index(doc, heading):]
+	section = section[:strings.Index(section, "\n## ")]
+	rows := 0
+	for _, row := range strings.Split(section, "\n") {
+		cells := strings.Split(row, "|")
+		if !strings.HasPrefix(row, "| `") || len(cells) < 6 {
+			continue
+		}
+		rows++
+		key, class, subject, level := strings.Trim(strings.TrimSpace(cells[1]), "`"), strings.TrimSpace(cells[2]),
+			strings.TrimSpace(cells[3]), strings.Trim(strings.TrimSpace(cells[4]), "`")
+		if class != "`tenant-pii`" && class != "`customer-data`" {
+			t.Errorf("%q under %q: class %s is not `tenant-pii` or `customer-data`", key, heading, class)
+		}
+		if !slices.Contains([]string{"`operator`", "`tenant-user`", "`end-customer`"}, subject) {
+			t.Errorf("%q under %q: data subject %s is not `operator`, `tenant-user` or `end-customer`", key, heading, subject)
+		}
+		if want := leastVerboseLevel(key, entries, withValues); level != want {
+			t.Errorf("%q under %q: level is %s, but the least verbose level that logs it is %s", key, heading, level, want)
+		}
+	}
+	if rows == 0 {
+		t.Fatalf("%s: no rows under %q", docPath, heading)
+	}
+}
+
+// leastVerboseLevel returns the least verbose level of the lines that carry
+// key, as a call key or through WithValues in the file of the line.
+func leastVerboseLevel(key string, entries []entry, withValues map[string][]string) string {
+	best, bestRank := "", 1<<30
+	for _, e := range entries {
+		if !slices.Contains(e.keys, key) && !slices.Contains(withValues[e.file], key) {
+			continue
+		}
+		rank := -1 // error
+		if e.level != "error" {
+			rank, _ = strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(e.level, "V("), ")"))
+		}
+		if rank < bestRank {
+			best, bestRank = e.level, rank
+		}
+	}
+	return best
 }
