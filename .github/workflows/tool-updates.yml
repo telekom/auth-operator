@@ -247,3 +247,22 @@ jobs:
               --label "automation"
             echo "Created new issue"
           fi
+
+  close-issue:
+    name: Close Tool Update Issue
+    needs: check-updates
+    if: needs.check-updates.outputs.found == 'false'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Close issue when all tools are current
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ISSUE_TITLE="🔧 Tool Updates Available"
+          gh issue list --label "dependencies" --label "automation" --state open --search "$ISSUE_TITLE" --json number --jq '.[].number' |
+            while read -r issue; do
+              gh issue close "$issue" --reason completed --comment "All tracked tools are current; closing."
+            done
