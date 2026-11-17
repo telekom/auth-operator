@@ -160,8 +160,8 @@ github.com/stretchr/objx v0.5.3/go.mod h1:rDQraq+vQZU7Fde9LOZLr8Tax6zZvy4kuNKF+Q
 github.com/stretchr/testify v1.3.0/go.mod h1:M5WIy9Dh21IEIfnGCwXGc5bZfKNJtfHm1UVUgZn+9EI=
 github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWDWE=
 github.com/stretchr/testify v1.12.1/go.mod h1:MDEgiDPPsNp5cuIrHPPCyornHKgEVbtFUmoNlxoYthg=
-github.com/telekom/t-caas-go-library v0.1.5 h1:UP3hNZ09GMsUCEGtQ50Gqqm5CZaL6m1EK3XBsN+z908=
-github.com/telekom/t-caas-go-library v0.1.5/go.mod h1:NdF9B2T2aBHFUv1W9i5d+Dqe/kJIVZhmncqVJOQix0k=
+github.com/telekom/t-caas-go-library v0.1.7 h1:VTWJN3Esai4Jermpg6jbw8g8N8Kib8bTFvGTCu4w4ic=
+github.com/telekom/t-caas-go-library v0.1.7/go.mod h1:JO02at8JWGHIhvctss8/R/GjDdTBNKai5k9rojFRw+k=
 github.com/tidwall/gjson v1.19.0 h1:xwxm7n691Uf3u5OFjzngavjGTh55KX5q/9w9xHW88JU=
 github.com/tidwall/gjson v1.19.0/go.mod h1:V37/opeE/JbLUOfH0QTXiNez2l0RUjYUhpT4szFQAfc=
 github.com/tidwall/match v1.2.0 h1:0pt8FlkOwjN2fPt4bIl4BoNxb98gGHN2ObFEDkrfZnM=

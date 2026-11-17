@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add the webhook flags `--webhook-ca-validity`, `--webhook-cert-validity`,
+  `--webhook-cert-renew-before` and `--webhook-cert-check-interval`, and the
+  matching Helm values under `webhookServer.certificates`, to set the
+  lifetimes of the certificates the webhook cert rotator generates. Unset,
+  they keep cert-controller's defaults (CA 10 years, serving certificate
+  1 year, renewal 90 days before expiry, check every 12 hours). The webhook
+  server refuses to start unless check interval < renew before < certificate
+  validity <= CA validity. The CA validity does not apply to a CA provided in
+  `webhookServer.certificateAuthority` (#661).
 - Add the optional Helm values `webhookServer.certificateAuthority.certificate`
   and `webhookServer.certificateAuthority.privateKey`. The webhook cert rotator
   keeps the provided CA instead of generating one, so the CA can be part of the

@@ -116,6 +116,10 @@ Image reference precedence: `digest` > `tag` > `Chart.AppVersion`
 | `webhookServer.certificateAuthority.certificate` | PEM CA certificate the cert rotator uses instead of a self-generated CA; set together with `privateKey` | `""` |
 | `webhookServer.certificateAuthority.privateKey` | PEM PKCS#1 RSA private key (`BEGIN RSA PRIVATE KEY`) of `certificateAuthority.certificate`; other key formats are rejected | `""` |
 | `webhookServer.certificateAuthority.additionalTrustedCertificates` | PEM CA certificates the webhook configurations trust in addition to `certificate`, for example the old CA during a staged CA rotation; requires `certificate` | `""` |
+| `webhookServer.certificates.caValidity` | Lifetime of a CA the cert rotator generates, as a Go duration; empty keeps the default of `87600h` (10 years). Does not change the validity of a CA provided in `certificateAuthority` | `""` |
+| `webhookServer.certificates.certValidity` | Lifetime of the serving certificate, as a Go duration; empty keeps the default of `8760h` (1 year) | `""` |
+| `webhookServer.certificates.renewBefore` | Renew the CA and the serving certificate this long before they expire; empty keeps the default of `2160h` (90 days) | `""` |
+| `webhookServer.certificates.checkInterval` | How often the cert rotator checks the certificates; empty keeps the default of `12h` | `""` |
 | `webhookServer.resources.limits.cpu` | CPU limit | `150m` |
 | `webhookServer.resources.limits.memory` | Memory limit | `256Mi` |
 | `webhookServer.resources.requests.cpu` | CPU request | `50m` |
@@ -137,12 +141,22 @@ development installs that intentionally need unauthenticated callers can set
 `webhookServer.allowUnauthenticatedAuthorize=true` while migrating clients to a
 shared bearer token. Keep this opt-out disabled in production.
 
+`webhookServer.certificates` sets the lifetimes of the certificates the cert
+rotator generates. The webhook server refuses to start unless
+`checkInterval < renewBefore < certValidity <= caValidity` after defaults, so
+shortening `certValidity` below 90 days also needs a shorter `renewBefore`.
+See the
+[operator guide](../../docs/operator-guide.md#webhook-certificate-rotation).
+
 By default, the webhook cert rotator generates its own CA after installation.
 Set `webhookServer.certificateAuthority` when the CA must be known in advance,
 for example to put it into the API server authorization webhook kubeconfig
 before the cluster is bootstrapped. The rotator keeps the provided CA and only
 issues the serving certificate. It replaces a CA that is not a self-signed CA
-with the DNS name `cert`, or that expires within 90 days. The private key must
+with the DNS name `cert`, or that expires within
+`webhookServer.certificates.renewBefore` (default 90 days). The provided
+certificate fixes the CA's validity; `webhookServer.certificates.caValidity`
+only applies to a CA the rotator generates. The private key must
 be a PKCS#1 RSA key (`BEGIN RSA PRIVATE KEY`); the chart rejects other key
 formats, because the rotator cannot sign the serving certificate with them.
 To rotate a provided CA without failing admission requests, first add the new

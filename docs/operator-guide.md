@@ -420,7 +420,12 @@ The rotator only keeps a CA that meets all of these requirements, otherwise it
 silently replaces it with a self-generated CA that the API server does not trust:
 
 - self-signed CA certificate with the DNS name `cert`
-- valid for more than 90 days
+- valid for longer than `webhookServer.certificates.renewBefore` (default 90
+  days, see [Webhook Certificate Rotation](#webhook-certificate-rotation))
+
+The provided certificate fixes the CA's validity:
+`webhookServer.certificates.caValidity` only applies to a CA the rotator
+generates, not to a provided one.
 
 The private key must be an RSA key in PKCS#1 encoding (`BEGIN RSA PRIVATE KEY`).
 The rotator keeps a CA with any other key format, but cannot sign the serving
@@ -486,7 +491,7 @@ To move an installation from a self-generated CA to a provided one, use the
 same steps with `ca.crt` and `ca.key` of the webhook certificate Secret as the
 old CA and its key; step 2 sets them as `certificate` and `privateKey`. The
 same overlap does not exist when the rotator renews a CA it generated itself,
-90 days before it expires: it replaces `ca.crt` and the `caBundle` with the new
+`renewBefore` (default 90 days) before it expires: it replaces `ca.crt` and the `caBundle` with the new
 CA at once, so admission requests can fail until all replicas serve the new
 certificate. Provide the CA and rotate it in stages to avoid this.
 
@@ -580,6 +585,10 @@ must end.
 | `--cert-rotation-secret-name` | Secret name for the rotated certificate | `""` |
 | `--cert-rotation-mutating-webhook` | Mutating webhook names to patch with CA bundle | `[]` |
 | `--cert-rotation-validating-webhook` | Validating webhook names to patch with CA bundle | `[]` |
+| `--webhook-ca-validity` | Lifetime of a CA the cert rotator generates; does not change a provided CA (see [Webhook Certificate Rotation](#webhook-certificate-rotation)) | `87600h0m0s` |
+| `--webhook-cert-validity` | Lifetime of the serving certificate the cert rotator generates | `8760h0m0s` |
+| `--webhook-cert-renew-before` | Renew the CA and the serving certificate this long before they expire; startup fails unless check interval < renew before < cert validity <= CA validity | `2160h0m0s` |
+| `--webhook-cert-check-interval` | How often the cert rotator checks the certificates | `12h0m0s` |
 | `--tdg-migration` | Enable legacy namespace ownership migration mode | `false` |
 | `--binddefinition-namespace-selector-label-group` | DNS label key domain allowed in BindDefinition namespace admission selectors; repeat or comma-separate for multiple domains | `[t-caas.telekom.com]` |
 | `--authorize-rate-limit` | Per-subject sustained requests/second per pod for the authorize endpoint; `0` disables limiting, enabled rates must be finite and at most `1e9` | `0` |
@@ -898,6 +907,11 @@ webhookServer:
     certificate: ""         # PEM CA certificate
     privateKey: ""          # PEM PKCS#1 RSA private key
     additionalTrustedCertificates: ""  # PEM CAs also trusted, e.g. the old CA in a rotation
+  certificates:             # Rotator lifetimes as Go durations; empty keeps the default
+    caValidity: ""          # 87600h; generated CAs only, not a provided CA
+    certValidity: ""        # 8760h
+    renewBefore: ""         # 2160h
+    checkInterval: ""       # 12h
   resources:
     limits:
       cpu: 150m
@@ -1109,7 +1123,9 @@ replica. With `--disable-cert-rotation`, registration proceeds immediately using
 externally managed certificates; readiness still waits for the webhook server
 to start. Rotation requires an explicit `--certs-dir`, namespace, Secret name,
 DNS name and non-empty webhook configuration names when supplied; incomplete
-rotation configuration fails startup rather than waiting indefinitely.
+rotation configuration, or certificate lifetimes that violate
+`checkInterval < renewBefore < certValidity <= caValidity`, fail startup
+before the manager starts rather than waiting indefinitely.
 `TestPlatformCertificateLifecycle` runs the
 real webhook command against envtest to characterize bootstrap, serving/CA
 renewal, CA injection, readiness gating, disabled rotation, and non-leader
@@ -1174,14 +1190,47 @@ installation both use `auth-operator-webhook-certs`.
 | `tls.crt` / `tls.key` | Serving certificate for `<fullname>-webhook-service.<namespace>.svc` and its private key |
 
 The rotator runs on the elected webhook-server replica. It uses
-cert-controller's defaults:
+cert-controller's defaults unless you set the flags or chart values:
 
-| Setting | Value |
-|---------|-------|
-| CA validity | 10 years |
-| Serving certificate validity | 1 year |
-| Renewal | 90 days before expiry (CA and serving certificate) |
-| Check interval | 12 hours, and on every change to the Secret |
+| Setting | Default | Flag | Chart value |
+|---------|---------|------|-------------|
+| CA validity | 10 years (`87600h`) | `--webhook-ca-validity` | `webhookServer.certificates.caValidity` |
+| Serving certificate validity | 1 year (`8760h`) | `--webhook-cert-validity` | `webhookServer.certificates.certValidity` |
+| Renewal | 90 days (`2160h`) before expiry (CA and serving certificate) | `--webhook-cert-renew-before` | `webhookServer.certificates.renewBefore` |
+| Check interval | 12 hours (`12h`), and on every change to the Secret | `--webhook-cert-check-interval` | `webhookServer.certificates.checkInterval` |
+
+Values are Go durations, such as `720h` or `90m`; Go durations have no day
+unit. An empty chart value renders no flag, so the default applies. Each value
+must be at least one second, and the webhook server refuses to start unless
+`checkInterval < renewBefore < certValidity <= caValidity`. Shortening only
+the serving certificate validity below 90 days therefore also needs a shorter
+renewal window, for example:
+
+```yaml
+webhookServer:
+  certificates:
+    certValidity: 720h   # 30 days
+    renewBefore: 168h    # 7 days
+```
+
+New lifetimes apply to the next certificate the rotator generates. Existing
+certificates keep their validity until they are renewed; remove the Secret
+data as in [Planned Rotation](#planned-rotation) to apply them at once. Every
+renewal restarts the replica that wrote the Secret and changes `tls.crt` on
+all replicas, and a CA renewal changes `caBundle` (see
+[Planned Rotation](#planned-rotation) for the outage windows), so do not
+shorten the lifetimes further than needed.
+
+With a CA provided in `webhookServer.certificateAuthority` (see
+[Providing the Webhook CA](#providing-the-webhook-ca)), the provided
+certificate fixes the CA's validity; `caValidity` does not change it and only
+applies to a CA the rotator generates itself. `certValidity`, `renewBefore` and
+`checkInterval` apply to the serving certificate signed by the provided CA as
+usual. The webhook server still checks `certValidity <= caValidity` against
+the configured `caValidity`, not against the provided CA. The rotator
+replaces a provided CA that expires within `renewBefore` with a CA it
+generates, valid for `caValidity`, which the API servers do not trust; rotate
+the provided CA in stages before that.
 
 When it writes new certificates, the rotator injects `ca.crt` as `caBundle`
 into every webhook configuration passed with `--cert-rotation-*-webhook`: the

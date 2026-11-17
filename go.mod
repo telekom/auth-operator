@@ -26,7 +26,7 @@ require (
 	github.com/google/go-cmp v0.7.0
 	github.com/prometheus/client_golang v1.25.0
 	github.com/prometheus/client_model v0.6.3
-	github.com/telekom/t-caas-go-library v0.1.5
+	github.com/telekom/t-caas-go-library v0.1.7
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.47.0
 	go.opentelemetry.io/otel/sdk v1.47.0
