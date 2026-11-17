@@ -627,10 +627,14 @@ func checkPersonalDataColumns(t *testing.T, doc string, entries []entry, withVal
 	rows := 0
 	for _, row := range strings.Split(section, "\n") {
 		cells := strings.Split(row, "|")
-		if !strings.HasPrefix(row, "| `") || len(cells) < 6 {
+		if !strings.HasPrefix(row, "| `") {
 			continue
 		}
 		rows++
+		if len(cells) != 7 {
+			t.Errorf("row %q under %q needs the columns Key, Class, Data subject, From level and Content", row, heading)
+			continue
+		}
 		key, class, subject, level := strings.Trim(strings.TrimSpace(cells[1]), "`"), strings.TrimSpace(cells[2]),
 			strings.TrimSpace(cells[3]), strings.Trim(strings.TrimSpace(cells[4]), "`")
 		if class != "`tenant-pii`" && class != "`customer-data`" {
