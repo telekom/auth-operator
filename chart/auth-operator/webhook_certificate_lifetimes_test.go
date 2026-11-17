@@ -36,6 +36,11 @@ func TestWebhookCertificateLifetimes(t *testing.T) {
 				}
 			}
 
+			// Every spelling time.ParseDuration accepts must pass the schema.
+			for _, good := range []string{"720h", "1.5h", ".5h", "1.h", "+1h", "100ms", "1us", "1µs", "1μs", "1h2m3s"} {
+				helmTemplate(t, "--set-string", "webhookServer.certificates."+value+"="+good)
+			}
+
 			for _, bad := range []string{"30d", "-1h", "1"} {
 				cmd := exec.CommandContext(t.Context(), "helm", "template", "auth-operator", ".", // #nosec G204
 					"--set-string", "webhookServer.certificates."+value+"="+bad)
