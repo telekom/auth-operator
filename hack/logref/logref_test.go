@@ -376,15 +376,36 @@ func catalog(entries []entry, withValues map[string][]string) string {
 	return b.String()
 }
 
-var (
-	// personalData matches log keys that can hold a user identity, group,
-	// namespace name, object or node name, label value, URL path or client
-	// address.
-	personalData = regexp.MustCompile(`(?i)user|groups$|namespace|addr|^path$|serviceaccount$|^saname$|^name$|^objectname$|node$|value$`)
-	// notPersonalData excludes counts, flags, listen addresses and
-	// configuration among them (userKey: the name of a ConfigMap data key).
-	notPersonalData = regexp.MustCompile(`Count$|^total|^is[A-Z]|^userKey$|(?i:tenant|selector|ownership|-bind-address$|^matchingnamespaces$)`)
-)
+// notPersonalKeys lists every logged key that holds no personal data: counts,
+// flags, configuration, kinds, platform resource names and RBAC object names
+// the platform defines. A logged key must be here or in the table under
+// "## Fields that can hold personal data", so a new key fails the test until
+// it is classified.
+var notPersonalKeys = strings.Fields(`
+	activeNamespaceCount allowProtectedLabelChanges allowed apiGroup apiGroupCount authorizer bdIndex
+	bindDefinition bindDefinitionConcurrency bindDefinitionCount bindDefinitionName
+	bindDefinitionNamespaceSelectorLabelGroups bindingKind blockingResourceCount burst bypassReason
+	cacheAge cacheSyncTimeout capiOperatorUpdateBypass certsDir clusterRoleBindingName clusterRoleName
+	clusterRoleRef clusterRoleRefCount clusterRoleRefs commit concurrency conflictsWith count crbCount
+	crd currentUID decision deletionTimestamp disableCertRotation duration emergencyNamespaceCrossTenant
+	emergencyNamespaceTenant enableHTTP2 enableLeaderElection endpoint evaluatedCount existingOwnerKind
+	existingOwnerUID externalCount externalSAs extraKey fieldManagers generatedCount generatedSACount
+	generatedSAs generation got gracefulShutdownTimeout group groupCount groupVersion gvk gvr
+	health-probe-bind-address index isAggregating isDeleting isServiceAccount itemCount kind label
+	labelCount latency legacyOwner logFormat matchedField matchedRule matchingNamespaces method
+	metrics-bind-address missingCount missingRoleRefCount missingRoles mode namespaceCount newOwner
+	nodeKey observedGeneration oldOwner operation ownerError ownerUID phase policy policyRef port
+	rateLimit rbCount rbIndex rbacPolicy rbacPolicyConcurrency removedLabel requestCount requeueAfter
+	requiredGVKs resource resourceType resourceVersion resourcesChecked resourcesSkipped
+	restrictedBindDefinitionConcurrency restrictedBindDefinitions restrictedRoleDefinitionConcurrency
+	restrictedRoleDefinitions result roleBindingCount roleBindingIndex roleBindingSpecCount roleBindings
+	roleDefinition roleDefinitionConcurrency roleDefinitionCount roleDefinitionName ruleCount rulesCount
+	samplingRate selectedPolicy selector selectorCount selectorIndex serverVersion skipUpdateLabelChecks
+	skippedCount status strictSANamespaceOwnership subjectCount subjects targetConfigMap targetRole
+	tdgMigration timeout totalBindDefinitions totalBound totalNamespaces trackerResyncInterval
+	trackerSyncInterval usage userKey verb verbosity version violationCount webhook webhookAuthorizer
+	webhookAuthorizerConcurrency
+`)
 
 // assertSameKeys fails unless the documented keys equal the code keys.
 func assertSameKeys(t *testing.T, heading string, documented []string, code map[string]bool) {
@@ -603,17 +624,31 @@ func TestRejectionRowsCheckLevels(t *testing.T) {
 	}
 }
 
-// checkPersonalData compares the personal-data table exactly with the logged
-// keys that can hold an identity, group, namespace name, path or address.
+// checkPersonalData requires every logged key to be either in the
+// personal-data table or in notPersonalKeys, and neither list to name a key
+// that is not logged.
 func checkPersonalData(t *testing.T, doc string, codeKeys map[string]bool) {
 	t.Helper()
-	pii := map[string]bool{}
+	const heading = "## Fields that can hold personal data"
+	table := tableKeys(t, doc, heading)
 	for k := range codeKeys {
-		if personalData.MatchString(k) && !notPersonalData.MatchString(k) {
-			pii[k] = true
+		if !slices.Contains(table, k) && !slices.Contains(notPersonalKeys, k) {
+			t.Errorf("log key %q is neither under %q nor in notPersonalKeys (hack/logref/logref_test.go): classify it", k, heading)
 		}
 	}
-	assertSameKeys(t, "## Fields that can hold personal data", tableKeys(t, doc, "## Fields that can hold personal data"), pii)
+	for _, k := range table {
+		if !codeKeys[k] {
+			t.Errorf("%q under %q is not logged", k, heading)
+		}
+		if slices.Contains(notPersonalKeys, k) {
+			t.Errorf("%q is both under %q and in notPersonalKeys", k, heading)
+		}
+	}
+	for _, k := range notPersonalKeys {
+		if !codeKeys[k] {
+			t.Errorf("notPersonalKeys lists %q, which no log call uses: remove it", k)
+		}
+	}
 }
 
 // checkPersonalDataColumns requires every row of the personal-data table to
