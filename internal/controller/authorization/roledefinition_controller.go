@@ -560,26 +560,20 @@ func allowedVerbsForAPIResource(
 	resource metav1.APIResource,
 	apiGroupRestrictedVerbs []string,
 ) []string {
-	if isRestrictedAPIResource(roleDefinition, apiGroup, resource) ||
-		resource.Namespaced != roleDefinition.Spec.ScopeNamespaced {
+	if resource.Namespaced != roleDefinition.Spec.ScopeNamespaced {
 		return nil
 	}
 
 	verbs := make([]string, 0, len(resource.Verbs))
 	for _, verb := range resource.Verbs {
 		if policy.ContainsStringOrWildcard(roleDefinition.Spec.RestrictedVerbs, verb) ||
-			policy.ContainsStringOrWildcard(apiGroupRestrictedVerbs, verb) {
+			policy.ContainsStringOrWildcard(apiGroupRestrictedVerbs, verb) ||
+			isAPIResourceVerbRestricted(roleDefinition.Spec.RestrictedResources, apiGroup, resource.Name, verb, false) {
 			continue
 		}
 		verbs = append(verbs, verb)
 	}
 	return verbs
-}
-
-func isRestrictedAPIResource(roleDefinition *authorizationv1alpha1.RoleDefinition, apiGroup string, resource metav1.APIResource) bool {
-	return slices.ContainsFunc(roleDefinition.Spec.RestrictedResources, func(rule metav1.APIResource) bool {
-		return restrictedAPIResourceMatches(resource.Name, apiGroup, rule, false)
-	})
 }
 
 func addAPIResourceAccess(resourcesByAPIGroupAndName map[string]*apiResourceAccess, apiGroup, resourceName string, verbs []string) {

@@ -54,7 +54,11 @@ type RestrictedRoleDefinitionSpecApplyConfiguration struct {
 	// exists in a non-restricted version of the same group, it will still appear
 	// in the generated role.
 	RestrictedAPIs []RestrictedAPIGroupApplyConfiguration `json:"restrictedApis,omitempty"`
-	// RestrictedResources holds resources which will NOT be included in the generated role.
+	// RestrictedResources defines resource-level restrictions for the generated role.
+	// Empty or omitted Verbs excludes the entire matching resource; otherwise only
+	// the listed verbs are removed. A verb of "*" or "all" excludes all verbs.
+	// Matching entries are cumulative, including parent-resource restrictions on subresources.
+	// An empty Group or "*" matches all API groups.
 	RestrictedResources []v1.APIResource `json:"restrictedResources,omitempty"`
 	// RestrictedVerbs holds verbs which will NOT be included in the generated role.
 	//

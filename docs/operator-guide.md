@@ -1707,6 +1707,35 @@ spec:
     - patch
 ```
 
+### Resource-specific verb restrictions
+
+Both RoleDefinition and RestrictedRoleDefinition honor `verbs` in each
+`restrictedResources` entry. Omit `verbs` (or use an empty list) to exclude the
+entire resource, or specify verbs to remove only those permissions:
+
+```yaml
+restrictedResources:
+  - name: nodes
+    group: ""
+    verbs: [create, update, patch, delete, deletecollection]
+```
+
+For cluster-scoped discovery, this retains `get`, `list`, and `watch` on nodes
+while removing the listed writes. `"*"` or `"all"` in `verbs` excludes every verb.
+Overlapping entries combine their restrictions; global `restrictedVerbs` and
+`restrictedApis` restrictions still apply. Parent-resource restrictions also
+apply to subresources. Group matching is unchanged: an empty group means the
+core API group for RoleDefinition, but all groups for RestrictedRoleDefinition;
+use an explicit group or `"*"` where needed.
+
+**Upgrade note:** Earlier releases ignored per-resource `verbs` and excluded the
+entire resource. Existing entries with nonempty `verbs` other than `"*"` or
+`"all"` now retain unlisted
+permissions. Remove `verbs` from an entry if full exclusion is intended.
+Restricted-role policies continue to require full exclusion for
+`forbiddenResources`; verb-specific entries can satisfy the corresponding
+`forbiddenResourceVerbs` instead.
+
 ### Interaction with BindDefinition
 
 When used with a BindDefinition:

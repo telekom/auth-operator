@@ -565,25 +565,17 @@ func rrdFilterResource(
 	apiGroupRestrictedVerbs []string,
 	rulesByKey map[string]*rbacv1.PolicyRule,
 ) {
-	// Check restricted resources.
-	// An empty Group in the restriction matches all API groups.
-	resourceIsRestricted := slices.ContainsFunc(rrd.Spec.RestrictedResources, func(rule metav1.APIResource) bool {
-		return restrictedAPIResourceMatches(res.Name, groupVersion.Group, rule, true)
-	})
-	if resourceIsRestricted {
-		return
-	}
-
 	// Filter by namespace scope.
 	if res.Namespaced != rrd.Spec.ScopeNamespaced {
 		return
 	}
 
-	// Filter verbs: remove globally restricted verbs AND per-API-group restricted verbs.
+	// Combine global, API group and resource-level restrictions.
 	verbs := make([]string, 0, len(res.Verbs))
 	for _, verb := range res.Verbs {
 		if !policy.ContainsStringOrWildcard(rrd.Spec.RestrictedVerbs, verb) &&
-			!policy.ContainsStringOrWildcard(apiGroupRestrictedVerbs, verb) {
+			!policy.ContainsStringOrWildcard(apiGroupRestrictedVerbs, verb) &&
+			!isAPIResourceVerbRestricted(rrd.Spec.RestrictedResources, groupVersion.Group, res.Name, verb, true) {
 			verbs = append(verbs, verb)
 		}
 	}
@@ -606,12 +598,12 @@ func rrdFilterResource(
 	}
 }
 
-func restrictedAPIResourceMatches(resourceName, apiGroup string, rule metav1.APIResource, emptyGroupMatchesAll bool) bool {
-	groupMatches := policy.MatchesAPIGroup(rule.Group, apiGroup) || (emptyGroupMatchesAll && rule.Group == "")
-	if !groupMatches {
-		return false
-	}
-	return policy.MatchesResourceName(rule.Name, resourceName)
+func isAPIResourceVerbRestricted(restrictions []metav1.APIResource, apiGroup, resourceName, verb string, emptyGroupMatchesAll bool) bool {
+	return slices.ContainsFunc(restrictions, func(rule metav1.APIResource) bool {
+		groupMatches := policy.MatchesAPIGroup(rule.Group, apiGroup) || (emptyGroupMatchesAll && rule.Group == "")
+		return groupMatches && policy.MatchesResourceName(rule.Name, resourceName) &&
+			policy.ResourceRestrictionCoversVerb(rule.Verbs, verb)
+	})
 }
 
 // rrdCheckAPIRestriction checks whether a given group/version matches any entry
