@@ -27,12 +27,7 @@ spec:
       singularName: secret
       group: ""
       verbs:
-        - get
-        - list
-        - create
-        - update
-        - delete
-        - watch
+        - "*"
     - name: configmaps
       kind: ConfigMap
       namespaced: true
@@ -51,14 +46,14 @@ spec:
       singularName: ""
       group: ""
       verbs:
-        - create
+        - "*"
     - name: pods/attach
       kind: PodAttachOptions
       namespaced: true
       singularName: ""
       group: ""
       verbs:
-        - create
+        - "*"
   restrictedVerbs:
     - create
     - update
