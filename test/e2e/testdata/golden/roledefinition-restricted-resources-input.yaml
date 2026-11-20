@@ -20,33 +20,18 @@ spec:
       singularName: secret
       group: ""
       verbs:
-        - get
-        - list
-        - create
-        - update
-        - delete
-        - watch
+        - "*"
     - name: configmaps
       kind: ConfigMap
       namespaced: true
       singularName: configmap
       group: ""
       verbs:
-        - get
-        - list
-        - create
-        - update
-        - delete
-        - watch
+        - "*"
     - name: serviceaccounts
       kind: ServiceAccount
       namespaced: true
       singularName: serviceaccount
       group: ""
       verbs:
-        - get
-        - list
-        - create
-        - update
-        - delete
-        - watch
+        - "*"

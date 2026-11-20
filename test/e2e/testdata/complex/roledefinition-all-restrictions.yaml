@@ -1,6 +1,6 @@
 # Complex RoleDefinition: Tests ALL restriction types combined
 # - restrictedApis: excludes entire API groups
-# - restrictedResources: excludes specific resources
+# - restrictedResources: excludes specific resources using wildcard verbs
 # - restrictedVerbs: excludes specific verbs
 # Expected: ClusterRole with heavily filtered permissions
 apiVersion: authorization.t-caas.telekom.com/v1alpha1
@@ -43,60 +43,35 @@ spec:
       singularName: secret
       group: ""
       verbs:
-        - get
-        - list
-        - create
-        - update
-        - delete
-        - watch
+        - "*"
     - name: configmaps
       kind: ConfigMap
       namespaced: true
       singularName: configmap
       group: ""
       verbs:
-        - get
-        - list
-        - create
-        - update
-        - delete
-        - watch
+        - "*"
     - name: serviceaccounts
       kind: ServiceAccount
       namespaced: true
       singularName: serviceaccount
       group: ""
       verbs:
-        - get
-        - list
-        - create
-        - update
-        - delete
-        - watch
+        - "*"
     - name: endpoints
       kind: Endpoints
       namespaced: true
       singularName: endpoints
       group: ""
       verbs:
-        - get
-        - list
-        - create
-        - update
-        - delete
-        - watch
+        - "*"
     - name: persistentvolumeclaims
       kind: PersistentVolumeClaim
       namespaced: true
       singularName: persistentvolumeclaim
       group: ""
       verbs:
-        - get
-        - list
-        - create
-        - update
-        - delete
-        - watch
+        - "*"
     - name: events
       kind: Event
       namespaced: true
@@ -104,12 +79,7 @@ spec:
       group: ""
       version: v1
       verbs:
-        - get
-        - list
-        - create
-        - update
-        - delete
-        - watch
+        - "*"
   # Only allow read operations
   restrictedVerbs:
     - create
