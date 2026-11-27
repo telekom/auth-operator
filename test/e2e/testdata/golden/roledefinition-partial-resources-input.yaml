@@ -1,0 +1,16 @@
+# Partial parent restrictions retain reads and exclude matching proxy access.
+apiVersion: authorization.t-caas.telekom.com/v1alpha1
+kind: RoleDefinition
+metadata:
+  name: golden-partial-resources
+spec:
+  targetRole: ClusterRole
+  targetName: golden-partial-resources-role
+  scopeNamespaced: false
+  restrictedResources:
+    - name: nodes
+      kind: Node
+      namespaced: false
+      singularName: node
+      group: ""
+      verbs: [create, update, patch, delete, deletecollection]

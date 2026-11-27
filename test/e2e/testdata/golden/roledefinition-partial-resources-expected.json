@@ -1,0 +1,5 @@
+{
+  "nodes": ["get", "list", "watch"],
+  "nodes/metrics": ["get", "list", "watch"],
+  "nodes/status": ["get", "list", "watch"]
+}

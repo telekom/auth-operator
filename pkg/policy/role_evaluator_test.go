@@ -439,6 +439,12 @@ func TestEvaluateRoleDefinition_ResourceVerbRestrictions(t *testing.T) {
 			forbidWholeResource: true,
 		},
 		{
+			name:                "explicit current verbs cannot satisfy future-proof forbidden resource",
+			restrictions:        []metav1.APIResource{{Name: "nodes", Verbs: metav1.Verbs{"get", "list", "watch", "create", "update", "patch", "delete", "deletecollection"}}},
+			forbidWholeResource: true,
+			wantViolations:      1,
+		},
+		{
 			name:                "legacy all verbs satisfy forbidden resource",
 			restrictions:        []metav1.APIResource{{Name: "nodes", Verbs: metav1.Verbs{"all"}}},
 			forbidWholeResource: true,

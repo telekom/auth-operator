@@ -1710,31 +1710,67 @@ spec:
 ### Resource-specific verb restrictions
 
 Both RoleDefinition and RestrictedRoleDefinition honor `verbs` in each
-`restrictedResources` entry. Omit `verbs` (or use an empty list) to exclude the
-entire resource, or specify verbs to remove only those permissions:
+`restrictedResources` entry. The CRD schema requires this field: use `verbs: ["*"]`
+(or an empty list) to exclude the entire resource, or specify verbs to remove
+only those permissions:
 
 ```yaml
 restrictedResources:
   - name: nodes
+    kind: Node
+    namespaced: false
+    singularName: node
     group: ""
     verbs: [create, update, patch, delete, deletecollection]
+  - name: nodes/proxy
+    kind: NodeProxyOptions
+    namespaced: false
+    singularName: ""
+    group: ""
+    verbs: ["*"]
 ```
 
 For cluster-scoped discovery, this retains `get`, `list`, and `watch` on nodes
 while removing the listed writes. `"*"` or `"all"` in `verbs` excludes every verb.
 Overlapping entries combine their restrictions; global `restrictedVerbs` and
 `restrictedApis` restrictions still apply. Parent-resource restrictions also
-apply to subresources. Group matching is unchanged: an empty group means the
+apply to subresources, which retain every discovered verb the parent does not
+restrict, except for `exec`, `attach`, `portforward` and `proxy` subresources.
+Any matching resource restriction fully excludes these four subresources, even
+when the restriction lists only one verb or matches through a parent or wildcard.
+Group matching is unchanged: an empty group means the
 core API group for RoleDefinition, but all groups for RestrictedRoleDefinition;
 use an explicit group or `"*"` where needed.
 
 **Upgrade note:** Earlier releases ignored per-resource `verbs` and excluded the
 entire resource. Existing entries with nonempty `verbs` other than `"*"` or
 `"all"` now retain unlisted
-permissions. Remove `verbs` from an entry if full exclusion is intended.
-Restricted-role policies continue to require full exclusion for
-`forbiddenResources`; verb-specific entries can satisfy the corresponding
-`forbiddenResourceVerbs` instead.
+permissions. Before upgrading, replace explicit verb lists with `verbs: ["*"]`
+where full exclusion is intended.
+`get` on `nodes/proxy` is not read-only: it can allow command execution through
+the kubelet API. On older Kubernetes versions or with
+`AuthorizePodWebsocketUpgradeCreatePermission` disabled, `get` on `pods/exec`,
+`pods/attach` or `pods/portforward` can also establish a connection despite a
+restriction on `create`. Matching resource restrictions fully exclude these
+subresources; global verb restrictions alone do not trigger this behavior.
+Connect access from other RBAC grants remains possible. To retain access to a
+connect subresource, remove matching resource restrictions and use other
+restrictions or separate roles as appropriate.
+Similarly, `watch` exposes object contents even when `get` and `list` are
+restricted.
+
+Restricted-role policies require full exclusion for `forbiddenResources`;
+even a list of every currently discovered verb is not a full exclusion of
+future verbs. Existing RestrictedRoleDefinitions using explicit lists for a
+forbidden resource become `PolicyCompliant=False` and their owned RBAC is
+deleted on reconciliation. Replace those lists with `verbs: ["*"]` before
+upgrading. Verb-specific entries can satisfy `forbiddenResourceVerbs` instead.
+
+Admission rejects non-lowercase resource restriction verbs and warns about
+partial read restrictions. Warnings are conservative and do not
+replace checking the generated role and all additive RBAC grants. Existing
+objects are not re-admitted on upgrade, so these checks do not replace the
+pre-upgrade audit.
 
 ### Interaction with BindDefinition
 

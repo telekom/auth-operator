@@ -21,6 +21,24 @@ var _ = Describe("RoleDefinition Webhook", func() {
 
 	Context("When creating RoleDefinition under Validating Webhook", func() {
 
+		It("Should validate resource restriction verbs on create and update", func() {
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-resource-restriction-verbs"},
+				Spec: RoleDefinitionSpec{
+					TargetRole: DefinitionClusterRole, TargetName: "test-resource-restriction-verbs",
+					RestrictedResources: []metav1.APIResource{{
+						Name: "nodes", Kind: "Node", SingularName: "node", Verbs: metav1.Verbs{"Get"},
+					}},
+				},
+			}
+			Expect(k8sClient.Create(ctx, rd, client.DryRunAll)).To(MatchError(ContainSubstring("must be nonempty and lowercase")))
+			rd.Spec.RestrictedResources[0].Verbs = metav1.Verbs{"*"}
+			Expect(k8sClient.Create(ctx, rd)).To(Succeed())
+			DeferCleanup(k8sClient.Delete, ctx, rd)
+			rd.Spec.RestrictedResources[0].Verbs = metav1.Verbs{"GET"}
+			Expect(k8sClient.Update(ctx, rd, client.DryRunAll)).To(MatchError(ContainSubstring("must be nonempty and lowercase")))
+		})
+
 		It("Should admit a valid ClusterRole RoleDefinition", func() {
 			rd := &RoleDefinition{
 				ObjectMeta: metav1.ObjectMeta{

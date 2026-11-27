@@ -2,7 +2,10 @@ package authorization
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"os"
 	"slices"
 	"testing"
 	"time"
@@ -16,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/yaml"
 	rbacv1ac "k8s.io/client-go/applyconfigurations/rbac/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/events"
@@ -854,6 +858,8 @@ var _ = Describe("Resource-specific node restrictions", func() {
 			if reader {
 				rd.Spec.RestrictedResources = rd.Spec.RestrictedResources[1:]
 				rd.Spec.RestrictedVerbs = writes
+			} else {
+				rd.Spec.RestrictedResources = rd.Spec.RestrictedResources[:1]
 			}
 			Expect(k8sClient.Create(ctx, rd)).To(Succeed())
 			DeferCleanup(k8sClient.Delete, ctx, rd)
@@ -906,7 +912,6 @@ var _ = Describe("Resource-specific node restrictions", func() {
 			}, "10s", "100ms").Should(Succeed())
 		},
 		Entry("collaborator", "collaborator", false),
-		Entry("poweruser", "poweruser", false),
 		Entry("reader remains unchanged", "reader", true),
 	)
 
@@ -991,6 +996,7 @@ func TestResourceVerbRestrictions(t *testing.T) {
 		globalVerbs  []string
 		groupVerbs   []string
 		want         []string
+		wantProxy    []string
 	}{
 		{
 			name:         "node writes restricted but reads retained",
@@ -1032,6 +1038,7 @@ func TestResourceVerbRestrictions(t *testing.T) {
 			name:         "other API group does not restrict core nodes",
 			restrictions: []metav1.APIResource{{Name: "nodes", Group: "example.com", Verbs: writeVerbs}},
 			want:         allVerbs,
+			wantProxy:    []string{"create", "delete", "get", "patch", "update"},
 		},
 		{
 			name:         "global and API group restrictions remain effective",
@@ -1044,6 +1051,15 @@ func TestResourceVerbRestrictions(t *testing.T) {
 			name:        "unrestricted reader retains reads",
 			globalVerbs: writeVerbs,
 			want:        readVerbs,
+			wantProxy:   []string{"get"},
+		},
+		{
+			name: "node reads retained with explicit proxy exclusion",
+			restrictions: []metav1.APIResource{
+				{Name: "nodes", Verbs: writeVerbs},
+				{Name: "nodes/proxy", Verbs: metav1.Verbs{"*"}},
+			},
+			want: readVerbs,
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1059,10 +1075,17 @@ func TestResourceVerbRestrictions(t *testing.T) {
 					RestrictedVerbs:     tt.globalVerbs,
 				},
 			}
-			for _, name := range []string{"nodes", "nodes/proxy"} {
-				resource := metav1.APIResource{Name: name, Verbs: allVerbs}
+			for _, resourceCase := range []struct {
+				name       string
+				discovered metav1.Verbs
+				want       []string
+			}{
+				{name: "nodes", discovered: allVerbs, want: tt.want},
+				{name: "nodes/proxy", discovered: metav1.Verbs{"create", "delete", "get", "patch", "update"}, want: tt.wantProxy},
+			} {
+				resource := metav1.APIResource{Name: resourceCase.name, Verbs: resourceCase.discovered}
 				NewWithT(t).Expect(allowedVerbsForAPIResource(rd, "", resource, tt.groupVerbs)).
-					To(ConsistOf(tt.want), "RoleDefinition resource %s", name)
+					To(ConsistOf(resourceCase.want), "RoleDefinition resource %s", resourceCase.name)
 
 				rules := make(map[string]*rbacv1.PolicyRule)
 				rrdFilterResource(rrd, schema.GroupVersion{Version: "v1"}, resource, tt.groupVerbs, rules)
@@ -1070,8 +1093,119 @@ func TestResourceVerbRestrictions(t *testing.T) {
 				for _, rule := range rules {
 					verbs = append(verbs, rule.Verbs...)
 				}
-				NewWithT(t).Expect(verbs).To(ConsistOf(tt.want), "RestrictedRoleDefinition resource %s", name)
+				NewWithT(t).Expect(verbs).To(ConsistOf(resourceCase.want), "RestrictedRoleDefinition resource %s", resourceCase.name)
 			}
+		})
+	}
+}
+
+func TestConnectSubresourceRestrictions(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		restriction metav1.APIResource
+		resource    string
+		want        []string
+	}{
+		{name: "parent exec", restriction: metav1.APIResource{Name: "pods", Verbs: metav1.Verbs{"delete"}}, resource: "pods/exec"},
+		{name: "explicit attach", restriction: metav1.APIResource{Name: "pods/attach", Verbs: metav1.Verbs{"create"}}, resource: "pods/attach"},
+		{name: "wildcard portforward", restriction: metav1.APIResource{Name: "*", Group: "*", Verbs: metav1.Verbs{"delete"}}, resource: "pods/portforward"},
+		{name: "parent proxy", restriction: metav1.APIResource{Name: "nodes", Verbs: metav1.Verbs{"delete"}}, resource: "nodes/proxy"},
+		{name: "other subresource", restriction: metav1.APIResource{Name: "pods", Verbs: metav1.Verbs{"create"}}, resource: "pods/log", want: []string{"get"}},
+		{name: "unmatched parent", restriction: metav1.APIResource{Name: "nodes", Verbs: metav1.Verbs{"create"}}, resource: "pods/exec", want: []string{"get", "create"}},
+		{name: "unmatched group", restriction: metav1.APIResource{Name: "pods", Group: "example.com", Verbs: metav1.Verbs{"create"}}, resource: "pods/exec", want: []string{"get", "create"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			restrictions := []metav1.APIResource{tt.restriction}
+			resource := metav1.APIResource{Name: tt.resource, Verbs: metav1.Verbs{"get", "create"}}
+			rd := &authorizationv1alpha1.RoleDefinition{Spec: authorizationv1alpha1.RoleDefinitionSpec{RestrictedResources: restrictions}}
+			rrd := &authorizationv1alpha1.RestrictedRoleDefinition{Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{RestrictedResources: restrictions}}
+			NewWithT(t).Expect(allowedVerbsForAPIResource(rd, "", resource, nil)).To(ConsistOf(tt.want))
+			rules := make(map[string]*rbacv1.PolicyRule)
+			rrdFilterResource(rrd, schema.GroupVersion{Version: "v1"}, resource, nil, rules)
+			var verbs []string
+			for _, rule := range rules {
+				verbs = append(verbs, rule.Verbs...)
+			}
+			NewWithT(t).Expect(verbs).To(ConsistOf(tt.want))
+		})
+	}
+}
+
+func TestResourceRestrictionAPIGroupSemantics(t *testing.T) {
+	for _, group := range []string{"", "*", "apps"} {
+		t.Run(group, func(t *testing.T) {
+			restrictions := []metav1.APIResource{{Name: "deployments", Group: group, Verbs: metav1.Verbs{"delete"}}}
+			resource := metav1.APIResource{Name: "deployments", Namespaced: true, Verbs: metav1.Verbs{"get", "delete"}}
+			rd := &authorizationv1alpha1.RoleDefinition{
+				Spec: authorizationv1alpha1.RoleDefinitionSpec{ScopeNamespaced: true, RestrictedResources: restrictions},
+			}
+			want := []string{"get"}
+			if group == "" {
+				want = append(want, "delete")
+			}
+			NewWithT(t).Expect(allowedVerbsForAPIResource(rd, "apps", resource, nil)).To(ConsistOf(want))
+
+			rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+				Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{ScopeNamespaced: true, RestrictedResources: restrictions},
+			}
+			rules := make(map[string]*rbacv1.PolicyRule)
+			rrdFilterResource(rrd, schema.GroupVersion{Group: "apps", Version: "v1"}, resource, nil, rules)
+			var verbs []string
+			for _, rule := range rules {
+				verbs = append(verbs, rule.Verbs...)
+			}
+			NewWithT(t).Expect(verbs).To(ConsistOf("get"))
+		})
+	}
+}
+
+func TestRoleDefinitionSampleRestrictions(t *testing.T) {
+	sampleFile, err := os.Open("../../../config/samples/authorization_v1alpha1_roledefinition.yaml")
+	NewWithT(t).Expect(err).NotTo(HaveOccurred())
+	defer func() { NewWithT(t).Expect(sampleFile.Close()).To(Succeed()) }()
+	samples := make(map[string]*authorizationv1alpha1.RoleDefinition)
+	decoder := yaml.NewYAMLOrJSONDecoder(sampleFile, 4096)
+	for {
+		rd := &authorizationv1alpha1.RoleDefinition{}
+		err := decoder.Decode(rd)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		NewWithT(t).Expect(err).NotTo(HaveOccurred())
+		samples[rd.Name] = rd
+	}
+	for _, tt := range []struct {
+		sample, resource string
+		namespaced       bool
+		verbs, want      metav1.Verbs
+	}{
+		{
+			sample: "rd-tenant-operator", resource: "nodes",
+			verbs: metav1.Verbs{"create", "get", "list", "watch", "update", "patch", "delete", "deletecollection"},
+			want:  metav1.Verbs{"get", "list", "watch"},
+		},
+		{
+			sample: "rd-tenant-operator", resource: "nodes/proxy",
+			verbs: metav1.Verbs{"create", "get", "update", "patch", "delete"},
+		},
+		{
+			sample: "rd-namespace-developer", resource: "pods/exec", namespaced: true,
+			verbs: metav1.Verbs{"get", "create"},
+		},
+		{
+			sample: "rd-namespace-viewer", resource: "configmaps", namespaced: true,
+			verbs: metav1.Verbs{"get", "list", "watch"},
+		},
+		{
+			sample: "rd-shared-services-operator", resource: "secrets", namespaced: true,
+			verbs: metav1.Verbs{"create", "get", "list", "watch", "update", "patch", "delete", "deletecollection"},
+		},
+	} {
+		t.Run(tt.sample+"/"+tt.resource, func(t *testing.T) {
+			rd := samples[tt.sample]
+			NewWithT(t).Expect(rd).NotTo(BeNil())
+			resource := metav1.APIResource{Name: tt.resource, Namespaced: tt.namespaced, Verbs: tt.verbs}
+			NewWithT(t).Expect(allowedVerbsForAPIResource(rd, "", resource, nil)).To(ConsistOf(tt.want))
 		})
 	}
 }

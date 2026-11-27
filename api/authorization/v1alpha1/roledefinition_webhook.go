@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -109,6 +110,7 @@ func (v *RoleDefinitionValidator) ValidateCreate(ctx context.Context, obj *RoleD
 	}
 
 	warnings := ConstrainedImpersonationWarnings(obj.Spec.ConstrainedImpersonation, "spec.constrainedImpersonation")
+	warnings = append(warnings, resourceRestrictionWarnings(obj.Spec.RestrictedResources)...)
 
 	existingRD, err := v.findRoleDefinitionTargetConflict(ctx, obj)
 	if err != nil {
@@ -186,6 +188,7 @@ func (v *RoleDefinitionValidator) ValidateUpdate(ctx context.Context, oldObj, ne
 	}
 
 	warnings := ConstrainedImpersonationWarnings(newObj.Spec.ConstrainedImpersonation, "spec.constrainedImpersonation")
+	warnings = append(warnings, resourceRestrictionWarnings(newObj.Spec.RestrictedResources)...)
 
 	existingRD, err := v.findRoleDefinitionTargetConflict(ctx, newObj)
 	if err != nil {
@@ -281,8 +284,51 @@ func (v *RoleDefinitionValidator) ValidateDelete(ctx context.Context, obj *RoleD
 	return nil, nil
 }
 
+func validateResourceRestrictionVerbs(kind, name string, resources []metav1.APIResource) error {
+	var errs field.ErrorList
+	for i, resource := range resources {
+		for j, verb := range resource.Verbs {
+			if verb == "" || strings.ToLower(verb) != verb || strings.ContainsAny(verb, " \t\r\n") {
+				errs = append(errs, field.Invalid(
+					field.NewPath("spec", "restrictedResources").Index(i).Child("verbs").Index(j),
+					verb, "must be nonempty and lowercase without whitespace; custom verbs, '*' and 'all' are supported"))
+			}
+		}
+	}
+	if len(errs) > 0 {
+		return apierrors.NewInvalid(schema.GroupKind{Group: GroupVersion.Group, Kind: kind}, name, errs)
+	}
+	return nil
+}
+
+func resourceRestrictionWarnings(resources []metav1.APIResource) admission.Warnings {
+	var warnings admission.Warnings
+	var warnedRead bool
+	for i, resource := range resources {
+		if len(resource.Verbs) == 0 || slices.Contains(resource.Verbs, "*") || slices.Contains(resource.Verbs, "all") {
+			continue
+		}
+		readCount := 0
+		for _, verb := range []string{"get", "list", "watch"} {
+			if slices.Contains(resource.Verbs, verb) {
+				readCount++
+			}
+		}
+		if readCount > 0 && readCount < 3 && !warnedRead {
+			warnings = append(warnings, fmt.Sprintf(
+				"spec.restrictedResources[%d]: partial get/list/watch restriction may still expose object contents through remaining read verbs; use verbs: [\"*\"] for full exclusion", i))
+			warnedRead = true
+		}
+	}
+	return warnings
+}
+
 // validateRoleDefinitionSpec validates the RoleDefinition spec fields.
 func validateRoleDefinitionSpec(obj *RoleDefinition) error {
+	if err := validateResourceRestrictionVerbs("RoleDefinition", obj.Name, obj.Spec.RestrictedResources); err != nil {
+		return err
+	}
+
 	if err := validateRoleTargetFields(
 		schema.GroupKind{Group: GroupVersion.Group, Kind: "RoleDefinition"},
 		obj.Name,

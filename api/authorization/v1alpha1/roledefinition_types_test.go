@@ -5,13 +5,91 @@
 package v1alpha1
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	. "github.com/onsi/gomega"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
+
+func TestResourceRestrictionAdmission(t *testing.T) {
+	scheme := runtime.NewScheme()
+	NewWithT(t).Expect(AddToScheme(scheme)).To(Succeed())
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&RBACPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "restriction-policy"},
+	}).Build()
+	for _, tt := range []struct {
+		name     string
+		resource string
+		verbs    metav1.Verbs
+		wantErr  bool
+		wantRead bool
+	}{
+		{name: "uppercase", resource: "secrets", verbs: metav1.Verbs{"Get", "LIST"}, wantErr: true},
+		{name: "empty verb", resource: "secrets", verbs: metav1.Verbs{""}, wantErr: true},
+		{name: "whitespace", resource: "secrets", verbs: metav1.Verbs{"get "}, wantErr: true},
+		{name: "custom verb", resource: "widgets", verbs: metav1.Verbs{"use"}},
+		{name: "wildcard", resource: "pods", verbs: metav1.Verbs{"*"}},
+		{name: "legacy all", resource: "pods", verbs: metav1.Verbs{"all"}},
+		{name: "empty list", resource: "pods", verbs: metav1.Verbs{}},
+		{name: "partial read", resource: "configmaps", verbs: metav1.Verbs{"get", "list"}, wantRead: true},
+		{name: "all read verbs", resource: "configmaps", verbs: metav1.Verbs{"get", "list", "watch"}},
+		{name: "partial connect", resource: "pods/exec", verbs: metav1.Verbs{"create"}},
+		{name: "parent", resource: "nodes", verbs: metav1.Verbs{"update"}},
+		{name: "wildcard parent", resource: "*", verbs: metav1.Verbs{"get"}, wantRead: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			restrictions := []metav1.APIResource{{Name: tt.resource, Verbs: tt.verbs}}
+			rd := &RoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-restriction"},
+				Spec:       RoleDefinitionSpec{TargetRole: DefinitionClusterRole, TargetName: "test-restriction", RestrictedResources: restrictions},
+			}
+			rrd := &RestrictedRoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-restricted-restriction"},
+				Spec: RestrictedRoleDefinitionSpec{
+					TargetRole: DefinitionClusterRole, TargetName: "test-restricted-restriction",
+					PolicyRef: RBACPolicyReference{Name: "restriction-policy"}, RestrictedResources: restrictions,
+				},
+			}
+			rdValidator := &RoleDefinitionValidator{Client: c}
+			rrdValidator := &RestrictedRoleDefinitionValidator{Client: c}
+			oldRD := rd.DeepCopy()
+			oldRD.Spec.RestrictedResources = nil
+			oldRRD := rrd.DeepCopy()
+			oldRRD.Spec.RestrictedResources = nil
+			for _, check := range []func() (admission.Warnings, error){
+				func() (admission.Warnings, error) { return rdValidator.ValidateCreate(context.Background(), rd) },
+				func() (admission.Warnings, error) { return rdValidator.ValidateUpdate(context.Background(), oldRD, rd) },
+				func() (admission.Warnings, error) { return rrdValidator.ValidateCreate(context.Background(), rrd) },
+				func() (admission.Warnings, error) {
+					return rrdValidator.ValidateUpdate(context.Background(), oldRRD, rrd)
+				},
+			} {
+				warnings, err := check()
+				if tt.wantErr {
+					NewWithT(t).Expect(err).To(MatchError(ContainSubstring("spec.restrictedResources[0].verbs[0]")))
+					continue
+				}
+				NewWithT(t).Expect(err).NotTo(HaveOccurred())
+				message := strings.Join(warnings, "\n")
+				NewWithT(t).Expect(strings.Contains(message, "get/list/watch")).To(Equal(tt.wantRead))
+			}
+		})
+	}
+
+	t.Run("warnings remain bounded", func(t *testing.T) {
+		resources := make([]metav1.APIResource, 128)
+		for i := range resources {
+			resources[i] = metav1.APIResource{Name: "pods", Verbs: metav1.Verbs{"get"}}
+		}
+		NewWithT(t).Expect(resourceRestrictionWarnings(resources)).To(HaveLen(1))
+	})
+}
 
 func safeAggregateFromSelectorLabels() map[string]string {
 	return map[string]string{

@@ -100,8 +100,9 @@ type RoleDefinitionSpec struct {
 	RestrictedAPIs []RestrictedAPIGroup `json:"restrictedApis,omitempty"`
 
 	// RestrictedResources defines resource-level restrictions for the generated role.
-	// Empty or omitted Verbs excludes the entire matching resource; otherwise only
-	// the listed verbs are removed. A verb of "*" or "all" excludes all verbs.
+	// Verbs is required by the schema. An empty list, "*" or the legacy "all"
+	// excludes the entire matching resource; otherwise only the listed verbs are removed,
+	// except that matching exec, attach, portforward and proxy subresources are fully excluded.
 	// Matching entries are cumulative, including parent-resource restrictions on subresources.
 	// An empty Group matches the core API group; "*" matches all groups.
 	// +kubebuilder:validation:Optional

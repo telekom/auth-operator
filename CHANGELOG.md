@@ -55,6 +55,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **BREAKING:** RoleDefinition and RestrictedRoleDefinition now honor
+  `restrictedResources[].verbs` instead of excluding every matching resource
+  regardless of its verbs (#671). Existing explicit lists retain unlisted
+  permissions, including non-connect subresource permissions. As a safety
+  exception, any matching resource restriction fully excludes `exec`, `attach`,
+  `portforward` and `proxy` subresources, even for partial verb lists.
+
+  **Upgrade note:** audit resource restrictions before upgrading. Use
+  `verbs: ["*"]` where full exclusion is intended. Matching resource restrictions
+  can remove intended connect access; audit generated roles and other RBAC grants.
+  The schema requires `verbs`; do not omit it.
+  RestrictedRoleDefinitions using explicit verb lists to satisfy a policy's
+  `forbiddenResources` become noncompliant and have their owned RBAC deleted;
+  replace those lists with `["*"]` before upgrading. Admission now rejects
+  non-lowercase resource restriction verbs and warns about partial read
+  restrictions, but existing objects are not re-admitted on upgrade.
+
 - **BREAKING:** emergency namespace authorization (`use` on
   `escalationguards.breakglass.t-caas.telekom.com/platform-emergency`, #616)
   now admits only namespaces of the cluster's own tenant, set with

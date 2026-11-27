@@ -599,10 +599,12 @@ func rrdFilterResource(
 }
 
 func isAPIResourceVerbRestricted(restrictions []metav1.APIResource, apiGroup, resourceName, verb string, emptyGroupMatchesAll bool) bool {
+	_, subresource, hasSubresource := strings.Cut(resourceName, "/")
+	connect := hasSubresource && slices.Contains([]string{"exec", "attach", "portforward", "proxy"}, subresource)
 	return slices.ContainsFunc(restrictions, func(rule metav1.APIResource) bool {
 		groupMatches := policy.MatchesAPIGroup(rule.Group, apiGroup) || (emptyGroupMatchesAll && rule.Group == "")
 		return groupMatches && policy.MatchesResourceName(rule.Name, resourceName) &&
-			policy.ResourceRestrictionCoversVerb(rule.Verbs, verb)
+			(connect || policy.ResourceRestrictionCoversVerb(rule.Verbs, verb))
 	})
 }
 
