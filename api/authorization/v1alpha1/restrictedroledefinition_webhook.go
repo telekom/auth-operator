@@ -74,7 +74,8 @@ func (v *RestrictedRoleDefinitionValidator) ValidateCreate(ctx context.Context, 
 		return nil, err
 	}
 
-	return ConstrainedImpersonationWarnings(obj.Spec.ConstrainedImpersonation, "spec.constrainedImpersonation"), nil
+	warnings := ConstrainedImpersonationWarnings(obj.Spec.ConstrainedImpersonation, "spec.constrainedImpersonation")
+	return append(warnings, resourceRestrictionWarnings(obj.Spec.RestrictedResources)...), nil
 }
 
 // ValidateUpdate implements admission.Validator for RestrictedRoleDefinition.
@@ -85,6 +86,10 @@ func (v *RestrictedRoleDefinitionValidator) ValidateUpdate(ctx context.Context, 
 	logger := log.FromContext(ctx).WithName("restrictedroledefinition-webhook")
 	logger.V(1).Info("validating update", "name", newObj.Name)
 
+	if err := validateResourceRestrictionVerbs(RestrictedRoleDefinitionKind, newObj.Name, newObj.Spec.RestrictedResources); err != nil {
+		return nil, err
+	}
+
 	if newObj.Spec.TargetRole == DefinitionClusterRole {
 		if err := rejectProtectedRestrictedRoleLabels(newObj); err != nil {
 			return nil, err
@@ -92,7 +97,7 @@ func (v *RestrictedRoleDefinitionValidator) ValidateUpdate(ctx context.Context, 
 	}
 
 	if reflect.DeepEqual(oldObj.Spec, newObj.Spec) {
-		return nil, validateDefaultPolicyForMetadataUpdate(
+		return resourceRestrictionWarnings(newObj.Spec.RestrictedResources), validateDefaultPolicyForMetadataUpdate(
 			ctx,
 			v.defaultPolicyReader(),
 			schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedRoleDefinitionKind},
@@ -130,7 +135,7 @@ func (v *RestrictedRoleDefinitionValidator) ValidateUpdate(ctx context.Context, 
 	}
 
 	if equality.Semantic.DeepEqual(oldObj.Spec, newObj.Spec) {
-		return nil, validateDefaultPolicyForMetadataUpdate(
+		return resourceRestrictionWarnings(newObj.Spec.RestrictedResources), validateDefaultPolicyForMetadataUpdate(
 			ctx,
 			v.defaultPolicyReader(),
 			schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedRoleDefinitionKind},
@@ -163,7 +168,8 @@ func (v *RestrictedRoleDefinitionValidator) ValidateUpdate(ctx context.Context, 
 		return nil, err
 	}
 
-	return ConstrainedImpersonationWarnings(newObj.Spec.ConstrainedImpersonation, "spec.constrainedImpersonation"), nil
+	warnings := ConstrainedImpersonationWarnings(newObj.Spec.ConstrainedImpersonation, "spec.constrainedImpersonation")
+	return append(warnings, resourceRestrictionWarnings(newObj.Spec.RestrictedResources)...), nil
 }
 
 // ValidateDelete implements admission.Validator for RestrictedRoleDefinition.
@@ -189,6 +195,10 @@ func (v *RestrictedRoleDefinitionValidator) defaultPolicyReader() client.Reader 
 // validateRestrictedRoleDefinitionSpec validates the spec for duplicate targetName.
 func (v *RestrictedRoleDefinitionValidator) validateRestrictedRoleDefinitionSpec(ctx context.Context, obj *RestrictedRoleDefinition) error {
 	logger := log.FromContext(ctx).WithName("restrictedroledefinition-webhook")
+
+	if err := validateResourceRestrictionVerbs(RestrictedRoleDefinitionKind, obj.Name, obj.Spec.RestrictedResources); err != nil {
+		return err
+	}
 
 	if err := validateRoleTargetFields(
 		schema.GroupKind{Group: GroupVersion.Group, Kind: RestrictedRoleDefinitionKind},

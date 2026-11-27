@@ -55,6 +55,25 @@ var _ = Describe("RestrictedRoleDefinition Webhook", func() {
 
 	Context("When creating RestrictedRoleDefinition under Validating Webhook", func() {
 
+		It("Should validate resource restriction verbs on create and update", func() {
+			rrd := &RestrictedRoleDefinition{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-rrd-resource-restriction-verbs"},
+				Spec: RestrictedRoleDefinitionSpec{
+					PolicyRef:  RBACPolicyReference{Name: policy.Name},
+					TargetRole: DefinitionClusterRole, TargetName: "test-rrd-resource-restriction-verbs",
+					RestrictedResources: []metav1.APIResource{{
+						Name: "nodes", Kind: "Node", SingularName: "node", Verbs: metav1.Verbs{"Get"},
+					}},
+				},
+			}
+			Expect(k8sClient.Create(ctx, rrd, client.DryRunAll)).To(MatchError(ContainSubstring("must be nonempty and lowercase")))
+			rrd.Spec.RestrictedResources[0].Verbs = metav1.Verbs{"*"}
+			Expect(k8sClient.Create(ctx, rrd)).To(Succeed())
+			DeferCleanup(k8sClient.Delete, ctx, rrd)
+			rrd.Spec.RestrictedResources[0].Verbs = metav1.Verbs{"GET"}
+			Expect(k8sClient.Update(ctx, rrd, client.DryRunAll)).To(MatchError(ContainSubstring("must be nonempty and lowercase")))
+		})
+
 		It("Should admit a valid ClusterRole RestrictedRoleDefinition", func() {
 			rrd := &RestrictedRoleDefinition{
 				ObjectMeta: metav1.ObjectMeta{

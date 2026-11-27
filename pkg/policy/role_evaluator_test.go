@@ -420,6 +420,90 @@ func TestEvaluateRoleDefinition_ForbiddenResources_SubresourceAndWildcard(t *tes
 	})
 }
 
+func TestEvaluateRoleDefinition_ResourceVerbRestrictions(t *testing.T) {
+	for _, tt := range []struct {
+		name                string
+		restrictions        []metav1.APIResource
+		forbidWholeResource bool
+		wantViolations      int
+	}{
+		{
+			name:                "partial restriction cannot satisfy forbidden resource",
+			restrictions:        []metav1.APIResource{{Name: "nodes", Verbs: metav1.Verbs{"update"}}},
+			forbidWholeResource: true,
+			wantViolations:      1,
+		},
+		{
+			name:                "wildcard verbs satisfy forbidden resource",
+			restrictions:        []metav1.APIResource{{Name: "nodes", Verbs: metav1.Verbs{"*"}}},
+			forbidWholeResource: true,
+		},
+		{
+			name:                "explicit current verbs cannot satisfy future-proof forbidden resource",
+			restrictions:        []metav1.APIResource{{Name: "nodes", Verbs: metav1.Verbs{"get", "list", "watch", "create", "update", "patch", "delete", "deletecollection"}}},
+			forbidWholeResource: true,
+			wantViolations:      1,
+		},
+		{
+			name:                "legacy all verbs satisfy forbidden resource",
+			restrictions:        []metav1.APIResource{{Name: "nodes", Verbs: metav1.Verbs{"all"}}},
+			forbidWholeResource: true,
+		},
+		{
+			name:         "legacy all verbs satisfy forbidden resource verbs",
+			restrictions: []metav1.APIResource{{Name: "nodes", Verbs: metav1.Verbs{"all"}}},
+		},
+		{
+			name:           "partial restriction cannot cover other forbidden verbs",
+			restrictions:   []metav1.APIResource{{Name: "nodes", Verbs: metav1.Verbs{"update"}}},
+			wantViolations: 1,
+		},
+		{
+			name: "overlapping restrictions cover forbidden verbs",
+			restrictions: []metav1.APIResource{
+				{Name: "*", Group: "*", Verbs: metav1.Verbs{"update"}},
+				{Name: "nodes", Verbs: metav1.Verbs{"delete"}},
+			},
+		},
+		{
+			name:           "wrong group does not cover forbidden verbs",
+			restrictions:   []metav1.APIResource{{Name: "nodes", Group: "example.com", Verbs: metav1.Verbs{"*"}}},
+			wantViolations: 1,
+		},
+		{
+			name:           "subresource restriction does not cover parent",
+			restrictions:   []metav1.APIResource{{Name: "nodes/proxy", Verbs: metav1.Verbs{"*"}}},
+			wantViolations: 1,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			limits := &authorizationv1alpha1.RoleLimits{}
+			if tt.forbidWholeResource {
+				limits.ForbiddenResources = []string{"nodes"}
+			} else {
+				limits.ForbiddenResourceVerbs = []authorizationv1alpha1.ResourceVerbRule{
+					{Resource: "nodes", Verbs: []string{"update", "delete"}},
+				}
+			}
+			policy := &authorizationv1alpha1.RBACPolicy{
+				Spec: authorizationv1alpha1.RBACPolicySpec{RoleLimits: limits},
+			}
+			rrd := &authorizationv1alpha1.RestrictedRoleDefinition{
+				Spec: authorizationv1alpha1.RestrictedRoleDefinitionSpec{
+					TargetRole:          authorizationv1alpha1.DefinitionNamespacedRole,
+					TargetName:          "test-role",
+					TargetNamespace:     "default",
+					RestrictedResources: tt.restrictions,
+				},
+			}
+			violations := EvaluateRoleDefinition(policyWithDefaultRoleLimits(policy), rrd)
+			if len(violations) != tt.wantViolations {
+				t.Fatalf("expected %d violations, got %v", tt.wantViolations, violations)
+			}
+		})
+	}
+}
+
 func TestEvaluateRoleDefinition_ForbiddenResources_GroupBypass(t *testing.T) {
 	policy := &authorizationv1alpha1.RBACPolicy{
 		Spec: authorizationv1alpha1.RBACPolicySpec{

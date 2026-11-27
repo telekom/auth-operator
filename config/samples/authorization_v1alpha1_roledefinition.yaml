@@ -134,16 +134,26 @@ spec:
       kind: ClusterRoleBinding
       verbs:
         - "*"
-    # Cannot manage nodes
+    # Read-only node access; proxy access is excluded separately below
     - name: nodes
       singularName: node
       namespaced: false
       group: ""
       kind: Node
       verbs:
+        - create
         - update
         - patch
         - delete
+        - deletecollection
+    # Proxy GET requests can execute commands; this is not read-only access
+    - name: nodes/proxy
+      singularName: ""
+      namespaced: false
+      group: ""
+      kind: NodeProxyOptions
+      verbs:
+        - "*"
   restrictedVerbs:
     - deletecollection
 
@@ -204,7 +214,7 @@ spec:
       group: ""
       kind: PodExecOptions
       verbs:
-        - create
+        - "*"
   restrictedVerbs: []
 
 ---
@@ -251,8 +261,7 @@ spec:
       group: ""
       kind: ConfigMap
       verbs:
-        - get
-        - list
+        - "*"
   # Strictly read-only
   restrictedVerbs:
     - create
@@ -374,8 +383,7 @@ spec:
       group: ""
       kind: Secret
       verbs:
-        - create
-        - delete
+        - "*"
   restrictedVerbs:
     - deletecollection
 

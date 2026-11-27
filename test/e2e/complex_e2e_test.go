@@ -322,19 +322,29 @@ var _ = Describe("Complex Feature Combinations", Ordered, Label("complex"), func
 			Expect(err).NotTo(HaveOccurred())
 
 			rules := role["rules"].([]interface{})
-			// Verify secrets and configmaps are excluded
+			// Verify whole-resource restrictions and verb-specific restrictions together.
+			configMapDeleteCollection := false
 			for _, rule := range rules {
 				ruleMap := rule.(map[string]interface{})
 				if resources, ok := ruleMap["resources"].([]interface{}); ok {
 					for _, r := range resources {
 						resource := r.(string)
 						Expect(resource).NotTo(Equal("secrets"))
-						Expect(resource).NotTo(Equal("configmaps"))
 						Expect(resource).NotTo(Equal("pods/exec"))
 						Expect(resource).NotTo(Equal("pods/attach"))
+						if resource == "configmaps" {
+							verbs := ruleMap["verbs"].([]interface{})
+							for _, verb := range verbs {
+								Expect(verb).NotTo(BeElementOf("*", "get", "list", "watch", "create", "update", "patch", "delete"))
+								if verb == "deletecollection" {
+									configMapDeleteCollection = true
+								}
+							}
+						}
 					}
 				}
 			}
+			Expect(configMapDeleteCollection).To(BeTrue(), "unrestricted configmap deletecollection should remain")
 		})
 	})
 

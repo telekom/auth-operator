@@ -111,10 +111,6 @@ func evaluateRoleLimits(limits *authorizationv1alpha1.RoleLimits, rrd *authoriza
 
 	// Check forbidden resource+verb combinations.
 	for _, rule := range limits.ForbiddenResourceVerbs {
-		// Skip if the entire resource is already excluded in the matching API group.
-		if isResourceExcludedForGroup(rrd, rule.Resource, rule.APIGroup) {
-			continue
-		}
 		// Skip if the entire API group is already excluded.
 		if isAPIGroupExcluded(rrd, rule.APIGroup) {
 			continue
@@ -123,7 +119,8 @@ func evaluateRoleLimits(limits *authorizationv1alpha1.RoleLimits, rrd *authoriza
 		var uncovered []string
 		for _, verb := range rule.Verbs {
 			if !ContainsStringOrWildcard(rrd.Spec.RestrictedVerbs, verb) &&
-				!isAPIGroupVerbRestricted(rrd, rule.APIGroup, verb) {
+				!isAPIGroupVerbRestricted(rrd, rule.APIGroup, verb) &&
+				!isResourceVerbRestrictedForGroup(rrd, rule.Resource, rule.APIGroup, verb) {
 				uncovered = append(uncovered, verb)
 			}
 		}
@@ -160,24 +157,25 @@ func isAPIGroupFullyRestricted(rrd *authorizationv1alpha1.RestrictedRoleDefiniti
 
 // isResourceFullyRestricted returns true if the resource is listed in
 // RestrictedResources with an empty or "*" Group, meaning the resource is
-// restricted from all API groups. If a specific group is set, the resource
+// restricted from all API groups and verbs. If a specific group is set, the resource
 // would only be excluded from that group at runtime, allowing it through from
 // other groups.
 func isResourceFullyRestricted(rrd *authorizationv1alpha1.RestrictedRoleDefinition, res string) bool {
 	for _, rr := range rrd.Spec.RestrictedResources {
-		if MatchesResourceName(rr.Name, res) && APIGroupRestrictionCovers(rr.Group, "*") {
+		if MatchesResourceName(rr.Name, res) && APIGroupRestrictionCovers(rr.Group, "*") &&
+			ResourceRestrictionCoversVerb(rr.Verbs, "*") {
 			return true
 		}
 	}
 	return false
 }
 
-// isResourceExcludedForGroup returns true if the resource is listed in RestrictedResources
-// and either the restricted resource has no Group set (applies to all groups) or its Group
-// matches the given apiGroup.
-func isResourceExcludedForGroup(rrd *authorizationv1alpha1.RestrictedRoleDefinition, resource, apiGroup string) bool {
+// isResourceVerbRestrictedForGroup checks whether a resource restriction covers
+// the forbidden verb and API group, including full-resource exclusions.
+func isResourceVerbRestrictedForGroup(rrd *authorizationv1alpha1.RestrictedRoleDefinition, resource, apiGroup, verb string) bool {
 	for _, rr := range rrd.Spec.RestrictedResources {
-		if MatchesResourceName(rr.Name, resource) && APIGroupRestrictionCovers(rr.Group, apiGroup) {
+		if MatchesResourceName(rr.Name, resource) && APIGroupRestrictionCovers(rr.Group, apiGroup) &&
+			ResourceRestrictionCoversVerb(rr.Verbs, verb) {
 			return true
 		}
 	}

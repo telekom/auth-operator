@@ -99,8 +99,12 @@ type RoleDefinitionSpec struct {
 	// +kubebuilder:validation:MaxItems=64
 	RestrictedAPIs []RestrictedAPIGroup `json:"restrictedApis,omitempty"`
 
-	// RestrictedResources holds all resources which will *NOT* be reconciled into the "TargetRole".
-	// The RBAC operator discovers all API resources available and removes those listed here.
+	// RestrictedResources defines resource-level restrictions for the generated role.
+	// Verbs is required by the schema. An empty list, "*" or the legacy "all"
+	// excludes the entire matching resource; otherwise only the listed verbs are removed,
+	// except that matching exec, attach, portforward and proxy subresources are fully excluded.
+	// Matching entries are cumulative, including parent-resource restrictions on subresources.
+	// An empty Group matches the core API group; "*" matches all groups.
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=128
 	RestrictedResources []metav1.APIResource `json:"restrictedResources,omitempty"`

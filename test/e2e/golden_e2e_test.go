@@ -30,6 +30,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	rbacv1 "k8s.io/api/rbac/v1"
 
 	"github.com/telekom/auth-operator/test/utils"
 )
@@ -67,23 +68,22 @@ var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func(
 
 		By("Installing auth-operator via Helm")
 		// Build the docker image first
-		cmd = utils.CommandContext(context.Background(), "make", "docker-build", "IMG=auth-operator:e2e-test")
-		cmd.Dir = filepath.Join(testdataPath, "../..")
-		_, _ = utils.Run(cmd) // Ignore if already built
+		cmd = utils.CommandContext(context.Background(), "make", "docker-build", fmt.Sprintf("IMG=%s", projectImage))
+		_, err = utils.Run(cmd)
+		Expect(err).NotTo(HaveOccurred())
 
 		// Load image to kind
-		cmd = utils.CommandContext(context.Background(), "kind", "load", "docker-image", "auth-operator:e2e-test", "--name", kindClusterName)
-		_, _ = utils.Run(cmd)
+		Expect(utils.LoadImageToKindClusterWithName(projectImage)).To(Succeed())
 
 		// Install Helm chart
+		imageRepo, imageTag, hasTag := strings.Cut(projectImage, ":")
+		Expect(hasTag).To(BeTrue(), "E2E image must include a tag")
 		cmd = utils.CommandContext(context.Background(), "helm", "upgrade", "--install", goldenRelease, helmChartPath,
 			"-n", goldenNamespace,
-			"--set", "image.repository=auth-operator",
-			"--set", "image.tag=e2e-test",
-			"--set", "controller.imagePullPolicy=IfNotPresent",
-			"--set", "webhook.imagePullPolicy=IfNotPresent",
-			"--set", "controller.replicaCount=1",
-			"--set", "webhook.replicaCount=1",
+			"--set", fmt.Sprintf("image.repository=%s", imageRepo),
+			"--set", fmt.Sprintf("image.tag=%s", imageTag),
+			"--set", "controller.replicas=1",
+			"--set", "webhookServer.replicas=1",
 			"--wait",
 			"--timeout", "5m",
 		)
@@ -114,6 +114,7 @@ var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func(
 		clusterRoles := []string{
 			"golden-cluster-reader",
 			"golden-restricted-apis-role",
+			"golden-partial-resources-role",
 		}
 		clusterRoleBindings := []string{
 			"golden-bind-golden-cluster-reader-binding",
@@ -346,6 +347,43 @@ var _ = Describe("Golden File Comparison Tests", Ordered, Label("golden"), func(
 	})
 
 	Context("RoleDefinition with restricted resources", func() {
+		It("should retain partial parent-resource reads and exclude proxy access", func() {
+			cmd := utils.CommandContext(context.Background(), "kubectl", "apply", "-f",
+				filepath.Join(testdataPath, "golden/roledefinition-partial-resources-input.yaml"))
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(func() bool {
+				return checkGoldenRoleDefinitionCreated("golden-partial-resources", "")
+			}, reconcileTimeout, pollingInterval).Should(BeTrue())
+
+			expectedBytes, err := os.ReadFile(filepath.Join(testdataPath, "golden/roledefinition-partial-resources-expected.json"))
+			Expect(err).NotTo(HaveOccurred())
+			var expected map[string][]string
+			Expect(json.Unmarshal(expectedBytes, &expected)).To(Succeed())
+			cmd = utils.CommandContext(context.Background(), "kubectl", "get", "clusterrole", "golden-partial-resources-role", "-o", "json")
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			var role rbacv1.ClusterRole
+			Expect(json.Unmarshal(output, &role)).To(Succeed())
+			actual := make(map[string][]string)
+			for _, rule := range role.Rules {
+				if !slices.Contains(rule.APIGroups, "") {
+					continue
+				}
+				for _, resource := range rule.Resources {
+					Expect(resource).NotTo(Equal("nodes/proxy"))
+					if _, included := expected[resource]; included {
+						actual[resource] = append(actual[resource], rule.Verbs...)
+					}
+				}
+			}
+			for resource, verbs := range actual {
+				slices.Sort(verbs)
+				actual[resource] = slices.Compact(verbs)
+			}
+			Expect(actual).To(Equal(expected))
+		})
+
 		It("should exclude specific resources from generated Role", func() {
 			By("Applying RoleDefinition with restrictedResources")
 			inputPath := filepath.Join(testdataPath, "golden/roledefinition-restricted-resources-input.yaml")

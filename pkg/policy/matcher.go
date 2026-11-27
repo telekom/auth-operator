@@ -111,6 +111,11 @@ func ContainsStringOrWildcard(slice []string, value string) bool {
 	return false
 }
 
+// ResourceRestrictionCoversVerb treats the legacy "all" value as a full exclusion.
+func ResourceRestrictionCoversVerb(verbs []string, verb string) bool {
+	return len(verbs) == 0 || ContainsStringOrWildcard(verbs, "all") || ContainsStringOrWildcard(verbs, verb)
+}
+
 // MatchesAPIGroup checks whether a configured API group pattern matches an API group.
 func MatchesAPIGroup(pattern, apiGroup string) bool {
 	return MatchesWildcard(pattern, apiGroup)
